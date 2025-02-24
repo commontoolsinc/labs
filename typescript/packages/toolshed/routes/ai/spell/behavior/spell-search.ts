@@ -217,7 +217,7 @@ function searchBlobs(
     .map(({ rank, ...rest }) => rest);
 }
 
-function findCompatibleSpells(
+export function findCompatibleSpells(
   blob: Record<string, unknown>,
   spells: Record<string, Spell>,
 ): Array<{ key: string; name: string; description: string }> {

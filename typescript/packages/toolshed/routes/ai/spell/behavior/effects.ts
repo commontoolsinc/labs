@@ -82,7 +82,7 @@ export async function getAllMemories(
 export async function getMemory(
   key: string,
   replica: string,
-): Promise<unknown> {
+): Promise<any> {
   const res = await client.api.storage.memory.$post({
     json: {
       cmd: "/memory/query",
@@ -126,10 +126,11 @@ export async function getMemory(
   //     }
   //   }
   // }
-
+  //
+  //
   const memoryData = memory[replica]["of:" + key]["application/json"];
   const [, firstValue] = Object.entries(memoryData)[0];
-  return (firstValue as any)?.is?.value;
+  return (firstValue as any)?.is;
 }
 
 export async function getAllBlobs(

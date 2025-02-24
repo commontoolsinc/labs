@@ -334,7 +334,10 @@ export const RecastResponseSchema = z.object({
 });
 
 export const ReuseResponseSchema = z.object({
-  result: z.record(z.any()),
+  charm: z.record(z.any()),
+  schema: z.record(z.any()),
+  argument: z.record(z.any()),
+  compatibleSpells: z.array(z.string()),
 });
 
 export type RecastRequest = z.infer<typeof RecastRequestSchema>;
@@ -378,9 +381,44 @@ export const reuse: AppRouteHandler<ReuseRoute> = async (c) => {
     console.log("body", body);
     const charm = await getMemory(body.charmId, body.replica);
     console.log("charm", charm);
+    // 1st link, is.source['/']
+    const source = await getMemory(charm.source["/"], body.replica);
+    console.log("source", source);
+    // then is.value.argument an is.value.$TYPE
+    const argument = source.value.argument;
+    const type = source.value.$TYPE;
+    // use `spell-${$TYPE}` to getBlob of spell
+    const spellId = "spell-" + type;
+    console.log("spellId", spellId);
+    const spell = await getBlob(spellId);
+    console.log("spell", spell);
+    // spell.recipe.argumentSchema
+    const schema = spell.recipe.argumentSchema;
+    console.log("schema", schema);
+
+    const spells = await getAllBlobs({ prefix: "spell-", allWithData: true });
+    // find spells with identical schemas
+
+    const candidates = Object.entries(spells)
+      .filter(([id, spell]) => {
+        if (id === spellId) return false;
+        const spellSchema = spell.recipe.argumentSchema;
+        return (JSON.stringify(schema) === JSON.stringify(spellSchema));
+      })
+      .map(([id]) => id);
+
+    console.log("Compatible spells:", candidates);
+
+    const compatibleSpells = candidates.reduce((acc, id) => {
+      acc[id] = spells[id];
+      return acc;
+    }, {} as Record<string, any>);
 
     const response: ReuseResponse = {
-      result: charm,
+      charm,
+      schema,
+      argument,
+      compatibleSpells,
     };
 
     return c.json(response, HttpStatusCodes.OK);
