@@ -6,22 +6,13 @@ import { useMatch, useNavigate } from "react-router-dom";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { DialogDescription, DialogTitle } from "@radix-ui/react-dialog";
 import { DitheredCube } from "./DitherCube";
-import {
-  CommandContext,
-  CommandItem,
-  CommandMode,
-  commands,
-  getChildren,
-  getCommands,
-  getTitle,
-} from "./commands";
+import { CommandContext, CommandItem, CommandMode, getCommands } from "./commands";
 import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext";
 import { TranscribeInput } from "./TranscribeCommand";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext";
 
 function CommandProcessor({
   mode,
-  command,
   context,
   onComplete,
 }: {

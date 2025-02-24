@@ -1,4 +1,5 @@
 import { hc } from "hono/client";
+import { AppType } from "@/app.ts";
 import { Memory } from "@commontools/memory";
 
 const client = hc<AppType>("http://localhost:8000/");
@@ -30,10 +31,6 @@ function handleErrorResponse(data: any) {
 export async function getAllMemories(
   replica: string,
 ): Promise<Record<string, any>> {
-  if (!replica.startsWith("did:")) {
-    replica = `did:key:${replica}`;
-  }
-
   const res = await client.api.storage.memory.$post({
     json: {
       cmd: "/memory/query",
@@ -41,7 +38,7 @@ export async function getAllMemories(
       sub: replica,
       args: {
         select: {
-          _: {
+          _: { // <- any id
             "application/json": {
               "_": { // <- any cause
                 "is": {},

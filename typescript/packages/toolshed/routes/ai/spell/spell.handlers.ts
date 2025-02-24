@@ -337,7 +337,7 @@ export const ReuseResponseSchema = z.object({
   charm: z.record(z.any()),
   schema: z.record(z.any()),
   argument: z.record(z.any()),
-  compatibleSpells: z.array(z.string()),
+  compatibleSpells: z.record(z.any()),
 });
 
 export type RecastRequest = z.infer<typeof RecastRequestSchema>;
@@ -378,27 +378,31 @@ export const reuse: AppRouteHandler<ReuseRoute> = async (c) => {
   const startTime = performance.now();
 
   try {
-    console.log("body", body);
     const charm = await getMemory(body.charmId, body.replica);
-    console.log("charm", charm);
-    // 1st link, is.source['/']
+    logger.info(
+      { charmId: body.charmId, replica: body.replica },
+      "Retrieved charm",
+    );
+
     const source = await getMemory(charm.source["/"], body.replica);
-    console.log("source", source);
-    // then is.value.argument an is.value.$TYPE
+    logger.info({ sourceId: charm.source["/"] }, "Retrieved source charm");
+
     const argument = source.value.argument;
     const type = source.value.$TYPE;
-    // use `spell-${$TYPE}` to getBlob of spell
+    logger.debug({ type, argument }, "Extracted argument and type from source");
+
     const spellId = "spell-" + type;
-    console.log("spellId", spellId);
+    logger.info({ spellId }, "Looking up spell");
+
     const spell = await getBlob(spellId);
-    console.log("spell", spell);
-    // spell.recipe.argumentSchema
+    logger.info({ spellId }, "Retrieved spell");
+
     const schema = spell.recipe.argumentSchema;
-    console.log("schema", schema);
+    logger.debug({ schema }, "Extracted argument schema from spell");
 
     const spells = await getAllBlobs({ prefix: "spell-", allWithData: true });
-    // find spells with identical schemas
 
+    // find spells with identical schemas
     const candidates = Object.entries(spells)
       .filter(([id, spell]) => {
         if (id === spellId) return false;

@@ -1,10 +1,9 @@
 import "./commands.css";
 import { castNewRecipe, Charm, CharmManager, compileAndRunRecipe } from "@commontools/charm";
 import { NavigateFunction } from "react-router-dom";
-import { castSpell } from "@/search";
 import { charmId } from "@/utils/charms";
 import { NAME } from "@commontools/builder";
-import { Cell, getDocByEntityId, getRecipe } from "@commontools/runner";
+import { Cell, getDocByEntityId, getEntityId, getRecipe } from "@commontools/runner";
 import { iterateCharm } from "@/utils/charm-operations";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext";
 import { startCharmIndexing } from "@/utils/indexing";
@@ -23,6 +22,20 @@ export interface CommandItem {
   validate?: (input: string) => boolean;
   message?: string;
   predicate?: boolean; // Can be computed value instead of function
+}
+
+export interface Recipe {
+  argumentSchema: any; // Schema type from jsonschema
+  resultSchema: any; // Schema type from jsonschema
+  initial?: any;
+}
+
+export interface Spell {
+  recipe: Recipe;
+  spec: string;
+  recipeName?: string;
+  spellbookTitle?: string;
+  spellbookTags?: string[];
 }
 
 export function getTitle(
@@ -344,8 +357,10 @@ async function handleUseDataInSpell(deps: CommandContext) {
       }),
     });
 
+    deps.setLoading(false);
+
     const result = await response.json();
-    const compatibleSpells = result.compatibleSpells;
+    const compatibleSpells: Record<string, Spell> = result.compatibleSpells;
 
     const spells = Object.entries(compatibleSpells).map(([spellId, spell]) => ({
       id: spellId,
@@ -362,59 +377,28 @@ async function handleUseDataInSpell(deps: CommandContext) {
         handler: async (selectedSpell) => {
           console.log("Selected spell:", selectedSpell);
           if (!deps.focusedCharmId) {
-            console.error("No charm selected");
-            return;
+            throw new Error("No charm selected");
           }
 
           const charm = await deps.charmManager.get(deps.focusedCharmId);
           const sourceCell = charm?.getSourceCell();
-          const sourceId = sourceCell?.entityId?.["/"];
+          const sourceId = getEntityId(sourceCell)?.["/"];
           if (!sourceId) {
-            console.error("No source ID found");
-            return;
+            throw new Error("No source ID found");
           }
+          deps.setLoading(true);
           const newCharmId = await castSpellAsCharm(deps.charmManager, selectedSpell.id, sourceId);
           if (newCharmId) {
             deps.navigate(`/${deps.focusedReplicaId}/${charmId(newCharmId)}`);
           }
           deps.setOpen(false);
+          deps.setLoading(false);
         },
       },
       options: spells,
     });
-  } finally {
-    deps.setLoading(false);
-  }
-}
-
-async function handleUseSpellOnOtherData(deps: CommandContext) {
-  deps.setLoading(true);
-  try {
-    // Mock data - this would be replaced with actual fetch request
-    const mockCharms = [
-      { id: "charm1", name: "User Data", description: "Contains user information" },
-      { id: "charm2", name: "Product Catalog", description: "List of products" },
-      { id: "charm3", name: "Analytics", description: "Website analytics data" },
-    ];
-
-    deps.setMode({
-      type: "select",
-      command: {
-        id: "charm-data-select",
-        type: "select",
-        title: "Select Charm Data to Use",
-        handler: async (selectedCharm) => {
-          console.log("Selected charm:", selectedCharm);
-          // TODO: Implement actual data processing logic
-          deps.setOpen(false);
-        },
-      },
-      options: mockCharms.map((charm) => ({
-        id: charm.id,
-        title: `${charm.name} - ${charm.description}`,
-        value: charm,
-      })),
-    });
+  } catch (e) {
+    console.error("Error casting spell:", e);
   } finally {
     deps.setLoading(false);
   }
@@ -451,13 +435,6 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           predicate: !!deps.focusedCharmId,
           handler: () => handleUseDataInSpell(deps),
         },
-        // {
-        //   id: "use-spell-on-other-data",
-        //   type: "action",
-        //   title: "Use Current Spell on Other Data",
-        //   predicate: !!deps.focusedCharmId,
-        //   handler: () => handleUseSpellOnOtherData(deps),
-        // },
       ],
     },
     {
