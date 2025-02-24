@@ -472,7 +472,7 @@ export const transact = async <Space extends MemorySpace>(
   transaction: Transaction<Space>,
   authorization: Authorization,
 ) => {
-  const result = await Access.claim(transaction, authorization);
+  const result = await Access.authorize(transaction, authorization);
   if (result.ok) {
     return execute(session.store.transaction(commit), session, transaction);
   } else {
@@ -485,7 +485,7 @@ export const query = async <Space extends MemorySpace>(
   command: Query<Space>,
   authorization: Authorization,
 ): AsyncResult<Selection<Space>, QueryError | AuthorizationError> => {
-  const { ok: source, error } = await Access.claim(command, authorization);
+  const { ok: source, error } = await Access.authorize(command, authorization);
   if (error) {
     return { error };
   }

@@ -23,7 +23,10 @@ import {
   Invocation,
   InvocationURL,
   TransactionResult,
+  UCAN,
   Subscribe,
+  Authorization,
+  Call,
 } from "./interface.ts";
 import { refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
@@ -48,14 +51,14 @@ export const open = ({ as, session }: { as: DID; session: ProviderSession<Protoc
 export const create = ({ as }: { as: DID }) => new MemoryConsumerSession(as);
 
 class MemoryConsumerSession
-  extends TransformStream<ProviderCommand<Protocol>, ConsumerCommand<Protocol>>
+  extends TransformStream<ProviderCommand<Protocol>, UCAN<ConsumerCommand<Protocol>>>
   implements ConsumerSession<Protocol>, MemorySession
 {
-  controller: TransformStreamDefaultController<ConsumerCommand<Protocol>> | undefined;
+  controller: TransformStreamDefaultController<UCAN<ConsumerCommand<Protocol>>> | undefined;
   invocations: Map<InvocationURL<Reference<Invocation>>, Job<Abilities<Protocol>, Protocol>> =
     new Map();
   constructor(public as: DID) {
-    let controller: undefined | TransformStreamDefaultController<ConsumerCommand<Protocol>>;
+    let controller: undefined | TransformStreamDefaultController<UCAN<ConsumerCommand<Protocol>>>;
     super({
       start: (control) => {
         controller = control;
@@ -67,7 +70,7 @@ class MemoryConsumerSession
 
     this.controller = controller;
   }
-  send(command: ConsumerCommand<Protocol>) {
+  send(command: UCAN<ConsumerCommand<Protocol>>) {
     this.controller?.enqueue(command);
   }
   receive(command: ProviderCommand<Protocol>) {
@@ -82,19 +85,41 @@ class MemoryConsumerSession
     }
   }
 
-  execute<Space extends MemorySpace, Ability extends string>(
-    invocation: ConsumerInvocation<Space, Ability>,
-  ) {
-    const command = invocation.toJSON();
+  authorize<T extends { cmd: string; sub: DID; args: {} }>(
+    task: T,
+  ): UCAN<Invocation<T["cmd"], T["sub"], T["args"]>> {
+    const invocation = {
+      iss: this.as,
+      ...task,
+      prf: [],
+      iat: (Date.now() / 1000) | 0,
+    };
 
-    const id = `job:${refer(command)}` as InvocationURL<Reference<Invocation>>;
+    return {
+      invocation,
+      authorization: {
+        signature: new Uint8Array(),
+        access: { [refer(invocation).toString()]: {} },
+      },
+    };
+  }
+
+  execute<Space extends MemorySpace, Ability extends string>(
+    source: ConsumerInvocation<Space, Ability>,
+    authorization: Authorization<Invocation<Ability, Space>>,
+  ) {
+    const invocation = source.toJSON();
+
+    const id = `job:${refer(invocation)}` as InvocationURL<Reference<Invocation>>;
     const pending = this.invocations.get(id);
     if (!pending) {
       this.invocations.set(id, invocation as unknown as Job<Ability, Protocol>);
-      this.send(command as ConsumerCommand<Protocol>);
+      this.send({ invocation, authorization } as UCAN<ConsumerCommand<Protocol>>);
     } else {
-      invocation.return(pending.promise as any);
+      source.return(pending.promise as any);
     }
+
+    return source;
   }
 
   close() {
@@ -129,28 +154,26 @@ export type { QueryView };
 class MemorySpaceConsumerSession<Space extends MemorySpace> implements MemorySpaceSession<Space> {
   constructor(public space: Space, public session: MemoryConsumerSession) {}
   transact(source: Transaction["args"]) {
-    const invocation = new ConsumerInvocation({
+    const { invocation, authorization } = this.session.authorize({
       cmd: "/memory/transact",
-      iss: this.session.as,
       sub: this.space,
-      args: source,
+      args: source as Transaction["args"],
     });
 
-    this.session.execute(invocation);
-
-    return invocation;
+    return this.session.execute(new ConsumerInvocation(invocation), authorization);
   }
   query(source: Query["args"]): QueryView<Space> {
-    const invocation = new ConsumerInvocation<Space, "/memory/query">({
-      cmd: "/memory/query",
-      iss: this.session.as,
+    const { invocation, authorization } = this.session.authorize({
+      cmd: "/memory/query" as const,
       sub: this.space,
-      args: source,
+      args: source as Query["args"],
     });
 
-    this.session.execute(invocation);
+    const query = new ConsumerInvocation(invocation);
 
-    return QueryView.new(this.session, invocation);
+    this.session.execute(query, authorization);
+
+    return QueryView.create(this.session, query);
   }
 }
 
@@ -188,6 +211,9 @@ class ConsumerInvocation<Space extends MemorySpace, Ability extends string> {
   get iss() {
     return this.source.iss;
   }
+  get aud() {
+    return undefined;
+  }
   get sub() {
     return this.source.sub;
   }
@@ -197,20 +223,40 @@ class ConsumerInvocation<Space extends MemorySpace, Ability extends string> {
   get meta() {
     return this.source.meta;
   }
+  get prf() {
+    return this.source.prf;
+  }
+  get nonce(): Uint8Array | undefined {
+    return this.source.nonce;
+  }
+  get exp() {
+    return this.source.exp;
+  }
+  get iat() {
+    return this.source.iat;
+  }
+  get cause() {
+    return this.source.cause;
+  }
   toJSON(): ConsumerCommand<Protocol<Space>> {
-    const { cmd, iss, sub, args, meta } = this.source;
+    const { cmd, iss, sub, aud, args, meta, prf, nonce, iat, exp } = this.source;
     return {
       cmd,
       iss,
+      ...(aud ? { aud } : undefined),
       sub,
       args,
       ...(meta ? { meta } : undefined),
-    } as ConsumerCommand<Protocol<Space>>;
+      prf,
+      ...(nonce ? { nonce } : undefined),
+      ...(iat ? { iat } : null),
+      ...(exp ? { exp } : null),
+    } as Invocation as ConsumerCommand<Protocol<Space>>;
   }
 }
 
 class QueryView<Space extends MemorySpace> {
-  static new<Space extends MemorySpace>(
+  static create<Space extends MemorySpace>(
     session: MemoryConsumerSession,
     invocation: ConsumerInvocation<Space, "/memory/query">,
   ): QueryView<Space> {
@@ -300,6 +346,7 @@ class QuerySubscriptionInvocation<Space extends MemorySpace> extends ConsumerInv
       sub: query.invocation.sub,
       args: query.invocation.args,
       meta: query.invocation.meta,
+      prf: query.invocation.prf,
     });
 
     this.readable = new ReadableStream<Selection<Space>>({
@@ -321,6 +368,7 @@ class QuerySubscriptionInvocation<Space extends MemorySpace> extends ConsumerInv
       iss: this.iss,
       sub: this.sub,
       args: { source: `job:${refer(this.toJSON())}` as InvocationURL<Reference<Subscribe>> },
+      prf: [],
     });
 
     this.query.session.execute(invocation);
