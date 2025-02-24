@@ -373,33 +373,13 @@ const DataTab: React.FC<DataTabProps> = ({ charm }) => {
 
 // FIXME(jake): Eventually, we might move these tab views into their own components and use URL routes for deep linking.
 
-const validTabs: Tab[] = ["iterate", "code", "data"] as const;
-
 function CharmEditView() {
   const { charmId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
 
   // Set initial tab from hash (default to "code")
-  const initialTab = location.hash.slice(1) as Tab;
-  const [activeTab, setActiveTab] = useState<Tab>(
-    validTabs.includes(initialTab) ? initialTab : "iterate",
-  );
-
-  // Update active tab if the hash changes (e.g., via back/forward navigation)
-  useEffect(() => {
-    const hashTab = location.hash.slice(1);
-    if (validTabs.includes(hashTab as Tab) && hashTab !== activeTab) {
-      setActiveTab(hashTab as Tab);
-    }
-  }, [location.hash, activeTab]);
-
-  // Update URL hash when activeTab changes
-  useEffect(() => {
-    if (location.hash.slice(1) !== activeTab) {
-      navigate(`${location.pathname}#${activeTab}`, { replace: true });
-    }
-  }, [activeTab, location.pathname, location.hash, navigate]);
+  const activeTab = location.hash.slice(1) as Tab;
 
   const { currentFocus: charm, iframeRecipe } = useCharm(charmId);
 
@@ -416,26 +396,23 @@ function CharmEditView() {
       {/* Tab Navigation */}
       <div className="tabs mb-4 flex gap-2">
         <button
-          onClick={() => setActiveTab("iterate")}
-          className={`px-4 py-2 rounded ${
-            activeTab === "iterate" ? "bg-gray-200 font-bold" : "bg-gray-100"
-          }`}
+          onClick={() => navigate(`${location.pathname}#iterate`)}
+          className={`px-4 py-2 rounded ${activeTab === "iterate" ? "bg-gray-200 font-bold" : "bg-gray-100"
+            }`}
         >
           Iteration
         </button>
         <button
-          onClick={() => setActiveTab("code")}
-          className={`px-4 py-2 rounded ${
-            activeTab === "code" ? "bg-gray-200 font-bold" : "bg-gray-100"
-          }`}
+          onClick={() => navigate(`${location.pathname}#code`)}
+          className={`px-4 py-2 rounded ${activeTab === "code" ? "bg-gray-200 font-bold" : "bg-gray-100"
+            }`}
         >
           Edit Code
         </button>
         <button
-          onClick={() => setActiveTab("data")}
-          className={`px-4 py-2 rounded ${
-            activeTab === "data" ? "bg-gray-200 font-bold" : "bg-gray-100"
-          }`}
+          onClick={() => navigate(`${location.pathname}#data`)}
+          className={`px-4 py-2 rounded ${activeTab === "data" ? "bg-gray-200 font-bold" : "bg-gray-100"
+            }`}
         >
           View Data
         </button>
@@ -443,14 +420,13 @@ function CharmEditView() {
 
       {(() => {
         switch (activeTab) {
-          case "iterate":
-            return <IterationTab charm={charm} />;
           case "code":
             return <CodeTab charm={charm} iframeRecipe={iframeRecipe} />;
           case "data":
             return <DataTab charm={charm} />;
+          case "iterate":
           default:
-            return null;
+            return <IterationTab charm={charm} />;
         }
       })()}
     </div>
