@@ -55,10 +55,12 @@ Additionally, the PRF extension **is not** currently supported in Firefox and Sa
 
 Here are the triples (OS+browser+authenticator) we've tested this identity flow on. Additionally, [passkeys.dev](https://passkeys.dev) maintains another [Device Support] matrix.
 
-| OS           | Browser        | Authenticator | Status             | Notes |
-| ------------ | -------------- | ------------- | ------------------ | ----- |
-| Linux/Fedora | Firefox (135+) | Yubikey       | :white_check_mark: |       |
-| Linux/Fedora | Chrome         | Yubikey       | :white_check_mark: |       |
+| OS           | Browser        | Authenticator | Status             | Notes              |
+| ------------ | -------------- | ------------- | ------------------ | ------------------ |
+| MacOS        | Chrome         | iCloud        | :white_check_mark: |                    |
+| MacOS        | Chrome         | 1Password     | :x:                | PRF not supported. |
+| Linux/Fedora | Firefox (135+) | Yubikey       | :white_check_mark: |                    |
+| Linux/Fedora | Chrome         | Yubikey       | :white_check_mark: |                    |
 
 ### Algorithms
 
