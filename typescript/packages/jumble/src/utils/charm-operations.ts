@@ -5,17 +5,17 @@ import {
   getIframeRecipe,
   saveNewRecipeVersion,
 } from "@commontools/charm";
-import { EntityId } from "@commontools/runner";
+import { Cell, EntityId } from "@commontools/runner";
 
 import { charmId } from "@/utils/charms";
 import { fixRecipePrompt } from "@/utils/prompt-library/recipe-fix";
 
 export async function fixItCharm(
   charmManager: CharmManager,
-  charm: Charm,
+  charm: Cell<Charm>,
   error: Error,
   model = "google:gemini-2.0-pro",
-): Promise<string | null> {
+): Promise<string | undefined> {
   const iframeRecipe = getIframeRecipe(charm);
   if (!iframeRecipe?.iframe) {
     throw new Error("No iframe recipe found in charm");
@@ -32,16 +32,16 @@ export async function fixItCharm(
     throw new Error("Could not extract fixed code from LLM response");
   }
 
-  const newRecipe = await saveNewRecipeVersion(
+  const newCharm = await saveNewRecipeVersion(
     charmManager,
     charm,
     fixedCode,
     iframeRecipe.iframe.spec,
   );
-  const newRecipeId = charmId(newRecipe as EntityId);
+  const newCharmId = charmId(newCharm as EntityId);
 
-  console.log("new recipe", newRecipeId);
-  return newRecipeId;
+  console.log("new charm id", newCharmId);
+  return newCharmId;
 }
 
 export async function iterateCharm(

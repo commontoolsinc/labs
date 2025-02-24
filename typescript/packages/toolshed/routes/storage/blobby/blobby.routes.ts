@@ -118,3 +118,25 @@ export const listBlobs = createRoute({
     },
   },
 });
+
+export const deleteBlob = createRoute({
+  method: "delete",
+  path: "/api/storage/blobby/{key}",
+  tags,
+  request: {
+    params: z.object({
+      key: z.string(),
+    }),
+  },
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      z.object({
+        success: z.boolean(),
+      }),
+      "Successfully deleted blob",
+    ),
+    [HttpStatusCodes.NOT_FOUND]: {
+      description: "Blob not found",
+    },
+  },
+});

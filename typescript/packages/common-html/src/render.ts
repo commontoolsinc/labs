@@ -1,12 +1,11 @@
-import { isVNode, VNode, Props, Child } from "./jsx.js";
+import { isVNode, type Child, type Props, type VNode } from "./jsx.js";
 import {
   effect,
-  isSendable,
-  isReactive,
   useCancelGroup,
   type Cancel,
   type Cell,
   isCell,
+  isStream,
 } from "@commontools/runner";
 import { JSONSchema } from "@commontools/builder";
 import * as logger from "./logger.js";
@@ -31,6 +30,7 @@ const vdomSchema: JSONSchema = {
           { type: "array", items: { $ref: "#", asCell: true } },
         ],
       },
+      asCell: true,
     },
   },
 } as const;
@@ -50,7 +50,10 @@ export const renderImpl = (parent: HTMLElement, view: VNode): Cancel => {
   }
   parent.append(root);
   logger.debug("Rendered", root);
-  return cancel;
+  return () => {
+    root.remove();
+    cancel();
+  };
 };
 
 export default render;
@@ -75,95 +78,130 @@ const renderNode = (node: VNode): [HTMLElement | null, Cancel] => {
   return [element, cancel];
 };
 
-const bindChildren = (element: HTMLElement, children: Array<Child>): Cancel => {
-  const [cancel, addCancel] = useCancelGroup();
+const bindChildren = (
+  element: HTMLElement,
+  children: Array<Child> | Cell<Array<Child>>,
+): Cancel => {
+  // Mapping from stable key to its rendered node and cancel function.
+  let keyedChildren = new Map<string, { node: ChildNode; cancel: Cancel }>();
 
-  for (const child of children.flat()) {
-    if (typeof child === "string" || typeof child === "number" || typeof child === "boolean") {
-      // Bind static content
-      element.append(child.toString());
-    } else if (isVNode(child)) {
-      // Bind static VNode
-      const [childElement, cancel] = renderNode(child);
-      addCancel(cancel);
-      if (childElement) {
-        element.append(childElement);
-      }
-    } else if (isReactive(child)) {
-      // Bind dynamic content
-      const replacement = child;
-      // Anchor for reactive replacement
-      let anchor: ChildNode = document.createTextNode("");
-      let endAnchor: ChildNode | undefined = undefined;
-      element.append(anchor);
-      const replace = (replacement: any) => {
-        if (isReactive(replacement)) {
-          const cancel = effect(replacement, replace);
-          addCancel(cancel);
-        } else if (Array.isArray(replacement)) {
-          // TODO: Probably should move this up and instead only support the
-          // case where all the children are dynamic. That is, call bindChildren
-          // again from effect.
-
-          // For now a dumb version that replaces the whole list every time
-          while (endAnchor && anchor.nextSibling !== endAnchor) {
-            anchor.nextSibling?.remove();
-          }
-          if (!endAnchor) {
-            endAnchor = document.createTextNode("");
-            anchor.after(endAnchor);
-          }
-
-          // Swap out anchor for each item, so we can use the rest of the code
-          // as if it was a regular node.
-          const originalAnchor = anchor;
-          for (const item of replacement) {
-            const newAnchor = document.createTextNode("");
-            anchor.after(newAnchor);
-            anchor = newAnchor;
-            replace(item);
-          }
-          anchor = originalAnchor;
-        } else if (isVNode(replacement)) {
-          const [childElement, cancel] = renderNode(replacement);
-          addCancel(cancel);
-          if (childElement != null) {
-            anchor.replaceWith(childElement);
-            anchor = childElement;
-          } else {
-            logger.warn("Could not render view", replacement);
-          }
-        } else {
-          if (typeof replacement === "object") {
-            console.warn("unexpected object when value was expected", replacement);
-            replacement = JSON.stringify(replacement);
-          }
-          const text = document.createTextNode(`${replacement}`);
-          anchor.replaceWith(text);
-          anchor = text;
+  // Render a child that can be static or reactive. For reactive cells we update
+  // the already-rendered node (using replaceWith) so that we never add an extra
+  // container.
+  const renderChild = (child: Child, key: string): { node: ChildNode; cancel: Cancel } => {
+    let currentNode: ChildNode | null = null;
+    const cancel = effect(child, (childValue: any) => {
+      let newRendered: { node: ChildNode; cancel: Cancel };
+      if (isVNode(childValue)) {
+        const [childElement, childCancel] = renderNode(childValue);
+        newRendered = {
+          node: childElement ?? document.createTextNode(""),
+          cancel: childCancel,
+        };
+      } else {
+        if (childValue === null || childValue === undefined) {
+          childValue = "";
+        } else if (typeof childValue === "object") {
+          console.warn("unexpected object when value was expected", childValue);
+          childValue = JSON.stringify(childValue);
         }
-      };
-      replace(replacement);
+        newRendered = {
+          node: document.createTextNode(childValue.toString()),
+          cancel: () => {},
+        };
+      }
+
+      if (currentNode) {
+        // Replace the previous DOM node, if any
+        currentNode.replaceWith(newRendered.node);
+        // Update the mapping entry to capture any newly-rendered node.
+        keyedChildren.set(key, { ...keyedChildren.get(key)!, node: newRendered.node });
+      }
+
+      currentNode = newRendered.node;
+      return newRendered.cancel;
+    });
+
+    return { node: currentNode!, cancel };
+  };
+
+  // When the children array changes, diff its flattened values against what we previously rendered.
+  const updateChildren = (childrenArr: Array<Child | Array<Child>>) => {
+    const newChildren = childrenArr.flat();
+    const newKeyOrder: string[] = [];
+    const newMapping = new Map<string, { node: ChildNode; cancel: Cancel }>();
+    const occurrence = new Map<string, number>();
+
+    for (let i = 0; i < newChildren.length; i++) {
+      const child = newChildren[i];
+      const rawKey = JSON.stringify(child);
+      const count = occurrence.get(rawKey) ?? 0;
+      occurrence.set(rawKey, count + 1);
+      // Composite key ensures that two structurally identical children get unique keys.
+      const key = rawKey + "-" + count;
+      newKeyOrder.push(key);
+      if (keyedChildren.has(key)) {
+        // Reuse an existing rendered node.
+        newMapping.set(key, keyedChildren.get(key)!);
+        keyedChildren.delete(key);
+      } else {
+        // Render a new child.
+        newMapping.set(key, renderChild(child, key));
+      }
     }
-  }
-  return cancel;
+
+    // Remove any obsolete nodes.
+    for (const [_, { node, cancel }] of keyedChildren.entries()) {
+      cancel();
+      node.remove();
+    }
+
+    // Now update the parent element so that its children appear in newKeyOrder.
+    // We build an array of current DOM nodes to compare by index.
+    const domNodes = Array.from(element.childNodes);
+    for (let i = 0; i < newKeyOrder.length; i++) {
+      const key = newKeyOrder[i];
+      const desiredNode = newMapping.get(key)!.node;
+      // If there's no node at this position, or it’s different, insert desiredNode there.
+      if (domNodes[i] !== desiredNode) {
+        // Using domNodes[i] (which may be undefined) is equivalent to appending
+        // if there’s no node at that index.
+        element.insertBefore(desiredNode, domNodes[i] ?? null);
+      }
+    }
+
+    logger.debug("new element order", { newKeyOrder });
+
+    keyedChildren = newMapping;
+  };
+
+  // Set up a reactive effect so that changes to the children array are diffed and applied.
+  const cancelArrayEffect = effect(children, (childrenVal) => updateChildren(childrenVal));
+
+  // Return a cancel function that tears down the effect and cleans up any rendered nodes.
+  return () => {
+    cancelArrayEffect();
+    for (const { node, cancel } of keyedChildren.values()) {
+      cancel();
+      node.remove();
+    }
+  };
 };
 
 const bindProps = (element: HTMLElement, props: Props): Cancel => {
   const [cancel, addCancel] = useCancelGroup();
   for (const [propKey, propValue] of Object.entries(props)) {
-    if (isReactive(propValue) || isSendable(propValue)) {
-      const replacement = propValue;
+    if (isCell(propValue) || isStream(propValue)) {
       // If prop is an event, we need to add an event listener
       if (isEventProp(propKey)) {
-        if (!isSendable(replacement)) {
+        if (!isStream(propValue)) {
           throw new TypeError(`Event prop "${propKey}" does not have a send method`);
         }
         const key = cleanEventProp(propKey);
         if (key != null) {
           const cancel = listen(element, key, (event) => {
             const sanitizedEvent = sanitizeEvent(event);
-            replacement.send(sanitizedEvent);
+            propValue.send(sanitizedEvent);
           });
           addCancel(cancel);
         } else {
@@ -173,9 +211,10 @@ const bindProps = (element: HTMLElement, props: Props): Cancel => {
         // Properties starting with $ get passed in as raw values, useful for
         // e.g. passing a cell itself instead of its value.
         const key = propKey.slice(1);
-        setProp(element, key, replacement);
+        setProp(element, key, propValue);
       } else {
-        const cancel = effect(replacement, (replacement) => {
+        const cancel = effect(propValue, (replacement) => {
+          logger.debug("prop update", propKey, replacement);
           // Replacements are set as properties not attributes to avoid
           // string serialization of complex datatypes.
           setProp(element, propKey, replacement);

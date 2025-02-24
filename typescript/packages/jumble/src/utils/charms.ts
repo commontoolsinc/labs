@@ -1,14 +1,7 @@
 import { type Charm } from "@commontools/charm";
-import { EntityId } from "@commontools/runner";
+import { getEntityId } from "@commontools/runner";
 
-export function charmId(charm: Charm | EntityId) {
-  if ("cell" in charm) {
-    if (typeof charm.cell.entityId["/"] === "string") {
-      return charm.cell.entityId["/"];
-    } else {
-      return charm.cell.toJSON()["/"];
-    }
-  } else {
-    return charm.toJSON?.()?.["/"] ?? charm["/"];
-  }
+export function charmId(charm: Charm): string | undefined {
+  const id = getEntityId(charm);
+  return id ? id["/"] : undefined;
 }

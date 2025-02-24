@@ -1,4 +1,4 @@
-import { isAlias, isStreamAlias } from "@commontools/builder";
+import { isStreamAlias } from "@commontools/builder";
 import { getTopFrame, type JSONSchema } from "@commontools/builder";
 import { getDoc, isDoc, isDocLink, type DocImpl, type DocLink, type DeepKeyLookup } from "./doc.js";
 import {
@@ -6,10 +6,10 @@ import {
   createQueryResultProxy,
   getDocLinkOrValue,
 } from "./query-result-proxy.js";
-import { followAliases, followLinks } from "./utils.js";
+import { resolvePath, followLinks, prepareForSaving } from "./utils.js";
 import { queueEvent, subscribe, type ReactivityLog } from "./scheduler.js";
 import { type EntityId, getEntityId } from "./cell-map.js";
-import { type Cancel } from "./cancel.js";
+import { type Cancel, isCancel, useCancelGroup } from "./cancel.js";
 import { validateAndTransform } from "./schema.js";
 
 /**
@@ -65,16 +65,19 @@ export interface Cell<T> {
       | DocImpl<T extends Array<infer U> ? U : any>
       | DocLink,
   ): void;
-  sink(callback: (value: T) => void): () => void;
-  updates(callback: (value: T) => void): () => void;
+  equals(other: Cell<any>): boolean;
+  sink(callback: (value: T) => Cancel | undefined | void): Cancel;
+  updates(callback: (value: T) => Cancel | undefined | void): Cancel;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
   asSchema(schema: JSONSchema): Cell<T>;
+  withLog(log: ReactivityLog): Cell<T>;
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Path,
     log?: ReactivityLog,
   ): QueryResult<DeepKeyLookup<T, Path>>;
   getAsDocLink(): DocLink;
-  toJSON(): { "/": string } | undefined;
+  getSourceCell<T = any>(schema?: JSONSchema): Cell<T> | undefined;
+  toJSON(): { cell: { "/": string } | undefined; path: PropertyKey[] };
   value: T;
   docLink: DocLink;
   entityId: EntityId | undefined;
@@ -83,71 +86,52 @@ export interface Cell<T> {
   schema?: JSONSchema;
 }
 
+export interface Stream<T> {
+  send(event: T): void;
+  sink(callback: (event: T) => Cancel | undefined | void): Cancel;
+  updates(callback: (event: T) => Cancel | undefined | void): Cancel;
+  [isStreamMarker]: true;
+}
+
 export function createCell<T>(
   doc: DocImpl<any>,
   path: PropertyKey[] = [],
   log?: ReactivityLog,
   schema?: JSONSchema,
+  rootSchema: JSONSchema | undefined = schema,
 ): Cell<T> {
-  // Follow aliases, doc links, etc. in path, so that we end up on the right
-  // doc, meaning the one that contains the value we want to access without any
-  // redirects in between.
-  //
-  // If the path points to a redirect itself, we don't want to follow it: Other
-  // functions will do that. We just want to skip the interim ones.
-  //
-  // Let's look at a few examples:
-  //
-  // Doc: { link }, path: [] --> no change
-  // Doc: { link }, path: ["foo"] --> follow link, path: ["foo"]
-  // Doc: { foo: { link } }, path: ["foo"] --> no change
-  // Doc: { foo: { link } }, path: ["foo", "bar"] --> follow link, path: ["bar"]
-
-  let ref: DocLink = { cell: doc, path: [] };
-  const seen: DocLink[] = [];
-
-  let keys = [...path];
-  while (keys.length) {
-    // First follow all the aliases and links, _before_ accessing the key.
-    ref = followLinks(ref, seen, log);
-    doc = ref.cell;
-    path = [...ref.path, ...keys];
-
-    // Now access the key.
-    const key = keys.shift()!;
-    ref = { cell: doc, path: [...ref.path, key] };
-  }
-
-  // Follow aliases on the last key, but no other kinds of links.
-  if (isAlias(ref.cell.getAtPath(ref.path))) {
-    ref = followAliases(ref.cell.getAtPath(ref.path), ref.cell, log);
-    doc = ref.cell;
-    path = ref.path;
-  }
-
-  // Then follow the other links and see whether this is a stream alias.
-  ref = followLinks(ref, seen, log);
-  const isStream = isStreamAlias(ref.cell.getAtPath(ref.path));
-
-  if (isStream) return createStreamCell(ref.cell, ref.path);
-  else return createRegularCell(doc, path, log, schema);
+  // Resolve the path to check whether it's a stream. We're not logging this right now.
+  // The corner case where during it's lifetime this changes from non-stream to stream
+  // or vice versa will not be detected.
+  const ref = followLinks(resolvePath(doc, path));
+  if (isStreamAlias(ref.cell.getAtPath(ref.path)))
+    return createStreamCell(ref.cell, ref.path) as unknown as Cell<T>;
+  else return createRegularCell(doc, path, log, schema, rootSchema);
 }
 
-function createStreamCell<T>(doc: DocImpl<any>, path: PropertyKey[]): Cell<T> {
-  const listeners = new Set<(event: T) => void>();
+function createStreamCell<T>(doc: DocImpl<any>, path: PropertyKey[]): Stream<T> {
+  const listeners = new Set<(event: T) => Cancel | undefined>();
 
-  const self: Cell<T> = {
+  let cleanup: Cancel | undefined;
+
+  const self: Stream<T> = {
     // Implementing just the subset of Cell<T> that is needed for streams.
     send: (event: T) => {
       queueEvent({ cell: doc, path }, event);
-      listeners.forEach((callback) => callback(event));
+
+      cleanup?.();
+      const [cancel, addCancel] = useCancelGroup();
+      cleanup = cancel;
+
+      listeners.forEach((callback) => addCancel(callback(event)));
     },
-    sink: (callback: (value: T) => void): Cancel => {
+    sink: (callback: (value: T) => Cancel | undefined): Cancel => {
       listeners.add(callback);
       return () => listeners.delete(callback);
     },
-    updates: (callback: (value: T) => void): Cancel => self.sink(callback),
-  } as Cell<T>;
+    updates: (callback: (value: T) => Cancel | undefined): Cancel => self.sink(callback),
+    [isStreamMarker]: true,
+  } satisfies Stream<T>;
 
   return self;
 }
@@ -157,23 +141,38 @@ function createRegularCell<T>(
   path: PropertyKey[],
   log?: ReactivityLog,
   schema?: JSONSchema,
+  rootSchema?: JSONSchema,
 ): Cell<T> {
   const self: Cell<T> = {
-    get: () => validateAndTransform(doc, path, schema, log),
-    set: (newValue: T) => doc.setAtPath(path, newValue, log),
+    get: () => validateAndTransform(doc, path, schema, log, rootSchema),
+    set: (newValue: T) => {
+      // TODO: This doesn't respect aliases on write. Should it?
+      const ref = resolvePath(doc, path, log);
+      if (
+        prepareForSaving(ref.cell, newValue, ref.cell.getAtPath(ref.path), log, {
+          parent: getTopFrame()?.cause,
+          doc: ref.cell,
+          path: ref.path,
+        })
+      )
+        ref.cell.setAtPath(ref.path, newValue, log);
+    },
     send: (newValue: T) => self.set(newValue),
     update: (value: Partial<T>) => {
-      const previousValue = doc.getAtPath(path);
+      // TODO: This doesn't respect aliases on write. Should it?
+      const ref = resolvePath(doc, path, log);
+      const previousValue = ref.cell.getAtPath(ref.path);
       if (typeof previousValue !== "object" || previousValue === null)
         throw new Error("Can't update non-object value");
       const newValue = {
         ...previousValue,
         ...value,
       };
-      doc.setAtPath(path, newValue, log);
+      ref.cell.setAtPath(ref.path, newValue, log);
     },
     push: (value: any) => {
-      const array = doc.getAtPath(path) ?? [];
+      const ref = resolvePath(doc, path, log);
+      const array = ref.cell.getAtPath(ref.path) ?? [];
       if (!Array.isArray(array)) throw new Error("Can't push into non-array value");
 
       // Every element pushed to the array should be it's own doc or link to
@@ -199,12 +198,13 @@ function createRegularCell<T>(
         }
       }
 
-      doc.setAtPath(path, [...array, value], log);
+      ref.cell.setAtPath(ref.path, [...array, value], log);
     },
-    sink: (callback: (value: T) => void) =>
-      subscribeToReferencedDocs(doc, path, schema, callback, true),
-    updates: (callback: (value: T) => void) =>
-      subscribeToReferencedDocs(doc, path, schema, callback, false),
+    equals: (other: Cell<any>) => JSON.stringify(self) === JSON.stringify(other),
+    sink: (callback: (value: T) => Cancel | undefined) =>
+      subscribeToReferencedDocs(callback, true, doc, path, schema, rootSchema),
+    updates: (callback: (value: T) => Cancel | undefined) =>
+      subscribeToReferencedDocs(callback, false, doc, path, schema, rootSchema),
     key: <K extends keyof T>(key: K) => {
       const currentSchema =
         schema?.type === "object"
@@ -215,13 +215,21 @@ function createRegularCell<T>(
           : schema?.type === "array"
             ? schema.items
             : undefined;
-      return doc.asCell([...path, key], log, currentSchema) as Cell<T[K]>;
+      return createCell(doc, [...path, key], log, currentSchema, rootSchema) as Cell<T[K]>;
     },
-    asSchema: (newSchema: JSONSchema) => createCell(doc, path, log, newSchema),
+    asSchema: (newSchema: JSONSchema) => createCell(doc, path, log, newSchema, newSchema),
+    withLog: (newLog: ReactivityLog) => createCell(doc, path, newLog, schema, rootSchema),
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
     getAsDocLink: () => ({ cell: doc, path }) satisfies DocLink,
-    toJSON: () => doc.toJSON(),
+    getSourceCell: <T = any>(schema?: JSONSchema) =>
+      doc.sourceCell?.asCell([], log, schema) as Cell<T> | undefined,
+    toJSON: () =>
+      // TODO: Should this include the schema, as cells are defiined by doclink & schema?
+      ({ cell: doc.toJSON(), path }) satisfies {
+        cell: { "/": string } | undefined;
+        path: PropertyKey[];
+      },
     get value(): T {
       return self.get();
     },
@@ -242,27 +250,36 @@ function createRegularCell<T>(
 }
 
 function subscribeToReferencedDocs<T>(
+  callback: (value: T) => Cancel | undefined,
+  callCallbackOnFirstRun: boolean,
   doc: DocImpl<any>,
   path: PropertyKey[],
   schema: JSONSchema | undefined,
-  callback: (value: T) => void,
-  callCallbackOnFirstRun: boolean,
+  rootSchema: JSONSchema | undefined,
 ): Cancel {
-  const initialLog = { reads: [], writes: [] } satisfies ReactivityLog;
+  const initialLog = {
+    reads: [],
+    writes: [],
+  } satisfies ReactivityLog;
+  let cleanup: Cancel | undefined;
 
   // Get the value once to determine all the docs that need to be subscribed to.
-  const value = validateAndTransform(doc, path, schema, initialLog) as T;
+  const value = validateAndTransform(doc, path, schema, initialLog, rootSchema) as T;
+
+  // Call the callback once with initial value if requested.
+  if (callCallbackOnFirstRun) cleanup = callback(value);
 
   // Subscribe to the docs that are read (via logs), call callback on next change.
-  const cancel = subscribe(
-    (log) => callback(validateAndTransform(doc, path, schema, log) as T),
-    initialLog,
-  );
+  const cancel = subscribe((log) => {
+    if (isCancel(cleanup)) cleanup();
+    const newValue = validateAndTransform(doc, path, schema, log, rootSchema) as T;
+    cleanup = callback(newValue);
+  }, initialLog);
 
-  // Call the callback once with initial valueif requested.
-  if (callCallbackOnFirstRun) callback(value);
-
-  return cancel;
+  return () => {
+    cancel();
+    if (isCancel(cleanup)) cleanup();
+  };
 }
 
 /**
@@ -276,3 +293,9 @@ export function isCell(value: any): value is Cell<any> {
 }
 
 const isCellMarker = Symbol("isCell");
+
+export function isStream(value: any): value is Stream<any> {
+  return typeof value === "object" && value !== null && value[isStreamMarker] === true;
+}
+
+const isStreamMarker = Symbol("isStream");

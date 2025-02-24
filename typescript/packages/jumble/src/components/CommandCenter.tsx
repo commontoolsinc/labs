@@ -6,22 +6,13 @@ import { useMatch, useNavigate } from "react-router-dom";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { DialogDescription, DialogTitle } from "@radix-ui/react-dialog";
 import { DitheredCube } from "./DitherCube";
-import {
-  CommandContext,
-  CommandItem,
-  CommandMode,
-  commands,
-  getChildren,
-  getCommands,
-  getTitle,
-} from "./commands";
+import { CommandContext, CommandItem, CommandMode, getCommands } from "./commands";
 import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext";
 import { TranscribeInput } from "./TranscribeCommand";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext";
 
 function CommandProcessor({
   mode,
-  command,
   context,
   onComplete,
 }: {
@@ -67,10 +58,7 @@ function CommandProcessor({
       return (
         <>
           {mode.options.map((option) => (
-            <Command.Item
-              key={option.id}
-              onSelect={() => mode.command.handler?.(context, option.value)}
-            >
+            <Command.Item key={option.id} onSelect={() => mode.command.handler?.(option.value)}>
               {option.title}
             </Command.Item>
           ))}
@@ -317,10 +305,15 @@ export function CommandCenter() {
           value={search}
           onValueChange={setSearch}
           onKeyDown={(e) => {
+            // Only handle Enter for input mode, ignore for select mode
             if (mode.type === "input" && e.key === "Enter") {
               e.preventDefault();
               const command = mode.command;
               command.handler?.(search);
+            }
+            // For select mode, prevent the default Enter behavior
+            if (mode.type === "select" && e.key === "Enter") {
+              e.preventDefault();
             }
           }}
           style={{ flexGrow: 1 }}
@@ -373,8 +366,10 @@ export function CommandCenter() {
                             parent: cmd,
                           });
                         } else if (cmd.type === "action") {
-                          cmd.handler?.(context);
-                          if (!cmd.handler || cmd.handler.length === 0) {
+                          // Only close if the handler doesn't return a Promise
+                          // This allows async handlers that change mode to keep the palette open
+                          const result = cmd.handler?.(context);
+                          if (!cmd.handler || (!result && cmd.handler.length === 0)) {
                             setOpen(false);
                           }
                         } else {

@@ -1,8 +1,32 @@
-import { JSONSchema } from "@commontools/builder";
-import { type DocImpl, type DocLink } from "./doc.js";
-import { isCell } from "./cell.js";
+import { isAlias, JSONSchema } from "@commontools/builder";
+import { isDocLink, type DocImpl, type DocLink } from "./doc.js";
+import { isCell, createCell } from "./cell.js";
 import { type ReactivityLog } from "./scheduler.js";
-import { followLinks } from "./utils.js";
+import { resolvePath, followLinks } from "./utils.js";
+
+/**
+ * Schemas are mostly a subset of JSONSchema.
+ *
+ * One addition is `asCell`. When true, the `.get()` returns an instance of
+ * `Cell`, i.e. a reactive reference to the value underneath. Some implications
+ * this has:
+ *  - If `log` is passed, it will be passed on to new cells, and unless that
+ *    cell is read, no further reads are logged down this branch.
+ *  - The cell reflects as closely as possible the current value. So it doesn't
+ *    change when the underlying reference changes. This is useful to e.g. to
+ *    read the current value of "currently selected item" and keep that constant
+ *    even if in the future another item is selected. NOTE:
+ *    - For this to work, the underlying value should be a reference itself.
+ *      Otherwise the closest parent document is used, so that e.g. reading
+ *      current.name tracks changes on current.
+ *    - If the value is an alias, aliases are followed first and the cell is
+ *      based on the first non-alias value. This is because writes will follow
+ *      aliases as well.
+ *
+ *  Calling `effect` on returned cells within a higher-level `effect` works as
+ *  expected. Be sure to track the cancels, though. (Tracking cancels isn't
+ *  necessary when using the schedueler directly)
+ */
 
 export function resolveSchema(
   schema: JSONSchema | undefined,
@@ -47,6 +71,11 @@ export function validateAndTransform(
 ): any {
   if (seen.length > 100) debugger;
 
+  // Follow aliases, etc. to last element on path + just aliases on that last one
+  // When we generate cells below, we want them to be based of this value, as that
+  // is what a setter would change when they update a value or reference.
+  ({ cell: doc, path } = resolvePath(doc, path, log));
+
   const resolvedSchema = resolveSchema(schema, rootSchema, true);
 
   // If this should be a reference, return as a Cell of resolvedSchema
@@ -60,15 +89,44 @@ export function validateAndTransform(
     (schema!.asCell ||
       (Array.isArray(resolvedSchema?.anyOf) &&
         resolvedSchema.anyOf.every((option) => option.asCell)))
-  )
-    return doc.asCell(path, log, resolvedSchema);
+  ) {
+    // The reference should reflect the current _value_. So if it's a reference,
+    // read the reference and return a cell based on it.
+    //
+    // But references can be paths beyond the current doc, so we create a
+    // new reference based on the next doc in the chain and the remaining path.
+
+    // Start with -1 so that the first iteration is for the empty path, i.e.
+    // the top of the current doc is already a reference.
+    for (let i = -1; i < path.length; i++) {
+      const value = doc.getAtPath(path.slice(0, i + 1));
+      if (isAlias(value))
+        throw new Error("Unexpected alias in path, should have been handled by resolvePath");
+      if (isDocLink(value)) {
+        log?.reads.push({ cell: doc, path: path.slice(0, i + 1) });
+        return createCell(
+          value.cell,
+          [...value.path, ...path.slice(i + 1)],
+          log,
+          resolvedSchema,
+          rootSchema,
+        );
+      }
+    }
+
+    return createCell(doc, path, log, resolvedSchema, rootSchema);
+  }
 
   // If there is no schema, return as raw data via query result proxy
   if (!resolvedSchema) return doc.getAsQueryResult(path, log);
 
-  // Handle various types of references
-  ({ cell: doc, path } = followLinks({ cell: doc, path }, seen, log));
-  const value = doc.getAtPath(path);
+  // Now resolve further links until we get the actual value. Note that `doc`
+  // and `path` will still point to the parent, as in e.g. the `anyOf` case
+  // below we might still create a new Cell and it should point to the top of
+  // this set of links.
+  const ref = followLinks({ cell: doc, path }, [], log);
+  const value = ref.cell.getAtPath(ref.path);
+  log?.reads.push({ cell: ref.cell, path: ref.path });
 
   // TODO: The behavior when one of the options is very permissive (e.g. no type
   // or an object that allows any props) is not well defined.
@@ -85,8 +143,7 @@ export function validateAndTransform(
       const arrayOptions = options.filter((option) => option.type === "array");
       if (arrayOptions.length === 0) return undefined;
       if (arrayOptions.length === 1)
-        // slice: Don't include the current path in the seen array, avoiding triggering cycle detection
-        return validateAndTransform(doc, path, arrayOptions[0], log, rootSchema, seen.slice(0, -1));
+        return validateAndTransform(doc, path, arrayOptions[0], log, rootSchema, seen);
 
       // TODO: Handle more corner cases like empty anyOf, etc.
       const merged: JSONSchema[] = [];
@@ -102,7 +159,7 @@ export function validateAndTransform(
         { type: "array", items: { anyOf: merged } },
         log,
         rootSchema,
-        seen.slice(0, -1),
+        seen,
       );
     } else if (typeof value === "object" && value !== null) {
       let objectCandidates = options.filter((option) => option.type === "object");
@@ -129,18 +186,30 @@ export function validateAndTransform(
       // Run extraction for each union branch.
       const candidates = options
         .filter((option) => option.type === "object")
-        .map((option) => ({
-          schema: option,
-          result: validateAndTransform(doc, path, option, log, rootSchema, seen.slice(0, -1)),
-        }));
+        .map((option) => {
+          const extraLog = { reads: [], writes: [] } satisfies ReactivityLog;
+          return {
+            schema: option,
+            result: validateAndTransform(doc, path, option, extraLog, rootSchema, seen),
+            extraLog,
+          };
+        });
 
       if (candidates.length === 0) return undefined;
 
       // Merge all the object extractions
       let merged: Record<string, any> = {};
-      for (const { result } of candidates) {
-        if (isCell(result)) return result; // TODO: Complain if it's a mix of cells and non-cells?
-        if (typeof result === "object" && result !== null) merged = { ...merged, ...result };
+      const extraReads: DocLink[] = [];
+      for (const { result, extraLog } of candidates) {
+        if (isCell(result)) {
+          log?.reads.push(...extraLog.reads);
+          return result; // TODO: Complain if it's a mix of cells and non-cells?
+        } else if (typeof result === "object" && result !== null) {
+          merged = { ...merged, ...result };
+          extraReads.push(...extraLog.reads);
+        } else {
+          console.warn("validateAndTransform: unexpected non-object result", result);
+        }
       }
       return merged;
     } else {
@@ -148,7 +217,7 @@ export function validateAndTransform(
         .filter((option) => (option.type === "integer" ? "number" : option.type) === typeof value)
         .map((option) => ({
           schema: option,
-          result: validateAndTransform(doc, path, option, log, rootSchema, seen.slice(0, -1)),
+          result: validateAndTransform(doc, path, option, log, rootSchema, seen),
         }));
 
       if (candidates.length === 0) return undefined;
@@ -157,7 +226,7 @@ export function validateAndTransform(
       // If we get more than one candidate, see if there is one that matches anything, and if not return the first one
       const anyTypeOption = options.find((option) => option.type === undefined);
       if (anyTypeOption)
-        return validateAndTransform(doc, path, anyTypeOption, log, rootSchema, seen.slice(0, -1));
+        return validateAndTransform(doc, path, anyTypeOption, log, rootSchema, seen);
       else return candidates[0].result;
     }
   }
@@ -212,7 +281,7 @@ export function validateAndTransform(
       return [];
     }
     return value.map((_, i) =>
-      validateAndTransform(doc, [...path, i], resolvedSchema.items!, log, rootSchema),
+      validateAndTransform(doc, [...path, i], resolvedSchema.items!, log, rootSchema, seen),
     );
   }
 

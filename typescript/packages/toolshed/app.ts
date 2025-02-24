@@ -10,6 +10,8 @@ import discord from "@/routes/integrations/discord/discord.index.ts";
 import blobby from "@/routes/storage/blobby/blobby.index.ts";
 import memory from "@/routes/storage/memory/memory.index.ts";
 import frontendProxy from "@/routes/frontend-proxy/frontend-proxy.index.ts";
+import spellbook from "@/routes/spellbook/spellbook.index.ts";
+import whoami from "@/routes/whoami/whoami.index.ts";
 
 const app = createApp();
 
@@ -25,6 +27,8 @@ const routes = [
   discord,
   blobby,
   memory,
+  spellbook,
+  whoami,
   frontendProxy, // This is the frontend proxy for jumble in the CDN.
 ] as const;
 

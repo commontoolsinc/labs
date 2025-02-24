@@ -20,7 +20,7 @@ export class LocalStorageProvider extends BaseStorageProvider {
     window.addEventListener("storage", this.handleStorageEventFn);
   }
 
-  async send<T = any>(batch: { entityId: EntityId; value: StorageValue<T> }[]): Promise<void> {
+  async send<T = any>(batch: { entityId: EntityId; value: StorageValue<T> }[]) {
     for (const { entityId, value } of batch) {
       const key = this.getKey(entityId);
       const storeValue = JSON.stringify(value);
@@ -44,6 +44,8 @@ export class LocalStorageProvider extends BaseStorageProvider {
         }
       }
     }
+
+    return { ok: {} };
   }
 
   async sync(entityId: EntityId, expectedInStorage: boolean = false): Promise<void> {

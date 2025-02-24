@@ -73,6 +73,7 @@ export type DocImpl<T> = {
     path?: Path,
     log?: ReactivityLog,
     schema?: JSONSchema,
+    rootSchema?: JSONSchema,
   ): Cell<DeepKeyLookup<Q, Path>>;
 
   /**
@@ -245,7 +246,8 @@ export function getDoc<T>(value?: T, cause?: any): DocImpl<T> {
       path?: Path,
       log?: ReactivityLog,
       schema?: JSONSchema,
-    ) => createCell<Q>(self, path || [], log, schema),
+      rootSchema?: JSONSchema,
+    ) => createCell<Q>(self, path || [], log, schema, rootSchema),
     send: (newValue: T, log?: ReactivityLog) => self.setAtPath([], newValue, log),
     updates: (callback: (value: T, path: PropertyKey[]) => void) => {
       callbacks.add(callback);

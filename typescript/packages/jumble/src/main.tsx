@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from "react-router-dom";
 import "@/styles/index.css";
 import PhotoFlowIndex from "@/views/experiments/photoflow/Index.tsx";
 import PhotoSetView from "@/views/experiments/photoflow/PhotoSetView.tsx";
@@ -16,6 +16,9 @@ import { LanguageModelProvider } from "./contexts/LanguageModelContext";
 import { BackgroundTaskProvider } from "./contexts/BackgroundTaskContext";
 import { setupIframe } from "./iframe-ctx";
 import GenerateJSONView from "@/views/utility/GenerateJSONView";
+import SpellbookIndexView from "@/views/spellbook/SpellbookIndexView";
+import SpellbookDetailView from "@/views/spellbook/SpellbookDetailView";
+import SpellbookLaunchView from "./views/spellbook/SpellbookLaunchView";
 
 setupIframe();
 
@@ -42,8 +45,19 @@ createRoot(document.getElementById("root")!).render(
                 <Route path=":charmId/detail" element={<CharmDetailView />} />
               </Route>
 
-              {/* internal tools / experimental routes */}
+              {/* Spellbook routes */}
+              <Route path="/spellbook" element={<SpellbookIndexView />} />
+              <Route path="/spellbook/:spellId" element={<SpellbookDetailView />} />
+              <Route
+                path="/spellbook/launch/:spellId"
+                element={
+                  <CharmsManagerProvider>
+                    <SpellbookLaunchView />
+                  </CharmsManagerProvider>
+                }
+              />
 
+              {/* internal tools / experimental routes */}
               <Route path="/utility/jsongen" element={<GenerateJSONView />} />
 
               {/* Photoflow routes preserved */}

@@ -22,8 +22,6 @@ interface Session {
   store: URL;
   subscribers: Set<Subscriber>;
   spaces: Map<string, SpaceSession>;
-
-  memory: MemorySession;
 }
 
 export class Memory implements Session, MemorySession {

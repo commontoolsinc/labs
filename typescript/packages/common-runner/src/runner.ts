@@ -34,6 +34,7 @@ import { getModuleByRef } from "./module.js";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.js";
 import "./builtins/index.ts";
 import { addRecipe, getRecipe, getRecipeId } from "./recipe-map.js";
+import { isCell } from "./cell.js";
 
 export const cancels = new WeakMap<DocImpl<any>, Cancel>();
 
@@ -141,9 +142,13 @@ export function run<T, R = any>(
   // If the bindings are a cell or cell reference, convert them to an object
   // where each property is a cell reference.
   // TODO: If new keys are added after first load, this won't work.
-  if (isDoc(argument) || isDocLink(argument)) {
+  if (isDoc(argument) || isDocLink(argument) || isCell(argument)) {
     // If it's a cell, turn it into a cell reference
-    const ref = isDocLink(argument) ? argument : ({ cell: argument, path: [] } satisfies DocLink);
+    const ref = isDocLink(argument)
+      ? argument
+      : isCell(argument)
+        ? argument.getAsDocLink()
+        : ({ cell: argument, path: [] } satisfies DocLink);
 
     // Get value, but just to get the keys. Throw if it isn't an object.
     const value = ref.cell.getAsQueryResult(ref.path);
