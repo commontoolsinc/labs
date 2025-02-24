@@ -1,5 +1,5 @@
-import { AppType } from "@/app.ts";
 import { hc } from "hono/client";
+import { AppType } from "@/app.ts";
 import { Memory } from "@commontools/memory";
 
 const client = hc<AppType>("http://localhost:8000/");
@@ -38,9 +38,11 @@ export async function getAllMemories(
       sub: replica,
       args: {
         select: {
-          _: {
+          _: { // <- any id
             "application/json": {
-              is: {},
+              "_": { // <- any cause
+                "is": {},
+              },
             },
           },
         },
@@ -74,9 +76,60 @@ export async function getAllMemories(
   return memoryMap;
 }
 
-export async function getAllBlobs(
+export async function getMemory(
+  key: string,
+  replica: string,
+): Promise<any> {
+  const res = await client.api.storage.memory.$post({
+    json: {
+      cmd: "/memory/query",
+      iss: "did:web:common.tools",
+      sub: replica,
+      args: {
+        select: {
+          ["of:" + key]: {
+            "application/json": {
+              "_": { // <- any cause
+                "is": {},
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+  const data = await res.json();
+  if ("error" in data) {
+    throw handleErrorResponse(data);
+  }
+
+  // format
+  // {
+  //   ok: {
+  //     "did:key:replica": {
+  //       "of:charmId": {
+  //         "application/json": {
+  //           "causeId": {
+  //             "is": {
+  //               "value": {...}
+  //             }
+  //           }
+  //         }
+  //       }
+  //     }
+  //   }
+  // }
+  //
+  //
+  const memory = Array.isArray(data.ok) ? data.ok[0] : data.ok;
+  const memoryData = memory[replica]["of:" + key]["application/json"];
+  const [, firstValue] = Object.entries(memoryData)[0];
+  return (firstValue as any)?.is;
+}
+
+export async function getAllBlobs<T extends unknown>(
   options: BlobOptions = {},
-): Promise<string[] | { [id: string]: any }> {
+): Promise<string[] | { [id: string]: T }> {
   const query: Record<string, string> = {
     all: "true",
   };
@@ -89,19 +142,17 @@ export async function getAllBlobs(
   const res = await client.api.storage.blobby.$get({ query });
   const data = await res.json();
   if ("error" in data) {
-    handleErrorResponse(data);
-    return [];
+    throw handleErrorResponse(data);
   }
   return data.blobs || data;
 }
 
-export async function getBlob(key: string): Promise<unknown> {
+export async function getBlob<T extends unknown>(key: string): Promise<T> {
   const res = await client.api.storage.blobby[":key"].$get({ param: { key } });
   const data = (await res.json()) as any;
 
   if ("error" in data) {
-    handleErrorResponse(data);
-    return [];
+    throw handleErrorResponse(data);
   }
 
   return data;

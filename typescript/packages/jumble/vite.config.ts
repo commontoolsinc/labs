@@ -8,12 +8,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     proxy: {
-      "/api/ai/spell/fulfill": {
-        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ""),
-      },
-      "/api/ai/spell/search": {
+      "/api/ai/spell/": {
         target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),

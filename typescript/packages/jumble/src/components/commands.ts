@@ -1,10 +1,9 @@
 import "./commands.css";
 import { castNewRecipe, Charm, CharmManager, compileAndRunRecipe } from "@commontools/charm";
 import { NavigateFunction } from "react-router-dom";
-import { castSpell } from "@/search";
 import { charmId } from "@/utils/charms";
 import { NAME } from "@commontools/builder";
-import { Cell, getDocByEntityId, getRecipe } from "@commontools/runner";
+import { Cell, getDocByEntityId, getEntityId, getRecipe } from "@commontools/runner";
 import { iterateCharm } from "@/utils/charm-operations";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext";
 import { startCharmIndexing } from "@/utils/indexing";
@@ -23,6 +22,20 @@ export interface CommandItem {
   validate?: (input: string) => boolean;
   message?: string;
   predicate?: boolean; // Can be computed value instead of function
+}
+
+export interface Recipe {
+  argumentSchema: any; // Schema type from jsonschema
+  resultSchema: any; // Schema type from jsonschema
+  initial?: any;
+}
+
+export interface Spell {
+  recipe: Recipe;
+  spec: string;
+  recipeName?: string;
+  spellbookTitle?: string;
+  spellbookTags?: string[];
 }
 
 export function getTitle(
@@ -75,10 +88,12 @@ export interface SelectOption {
   value: any;
 }
 
-export const castSpellAsCharm = async (charmManager: CharmManager, result: any, blob: any) => {
-  const recipeKey = result?.key;
-
-  if (recipeKey && blob) {
+export const castSpellAsCharm = async (
+  charmManager: CharmManager,
+  recipeKey: string,
+  blobId: string,
+) => {
+  if (recipeKey && blobId) {
     console.log("Syncing...");
     const recipeId = recipeKey.replace("spell-", "");
     await charmManager.syncRecipeBlobby(recipeId);
@@ -87,10 +102,10 @@ export const castSpellAsCharm = async (charmManager: CharmManager, result: any, 
     if (!recipe) return;
 
     console.log("Syncing blob...");
-    const blobCell = getDocByEntityId({ "/": blob.key }, true)!.asCell(["argument"]);
-    await charmManager.sync(blobCell, true);
+    const cell = getDocByEntityId({ "/": blobId }, true)!.asCell(["argument"]);
+    await charmManager.sync(cell, true);
     console.log("Casting...");
-    const charm: Cell<Charm> = await charmManager.runPersistent(recipe, blobCell);
+    const charm: Cell<Charm> = await charmManager.runPersistent(recipe, cell);
     charmManager.add([charm]);
     return charm.entityId;
   }
@@ -146,69 +161,6 @@ async function handleSearchCharms(deps: CommandContext) {
     });
   } catch (error) {
     console.error("Search charms error:", error);
-  } finally {
-    deps.setLoading(false);
-  }
-}
-
-async function handleSpellcaster(deps: CommandContext, input: string | undefined) {
-  if (!input || !deps.focusedReplicaId) return;
-  deps.setLoading(true);
-  try {
-    const spells = await castSpell(deps.focusedReplicaId, input);
-    const compatibleSpells = spells.filter(
-      (spell: any) => spell.compatibleBlobs && spell.compatibleBlobs.length > 0,
-    );
-
-    deps.setMode({
-      type: "select",
-      command: {
-        id: "spell-select",
-        type: "select",
-        title: "Select Spell",
-        handler: async (spell: any) => {
-          if (spell.compatibleBlobs.length === 1) {
-            const entityId = await castSpellAsCharm(
-              deps.charmManager,
-              spell,
-              spell.compatibleBlobs[0],
-            );
-            if (entityId) {
-              deps.navigate(`/${deps.focusedReplicaId}/${charmId(entityId)}`);
-            }
-            deps.setOpen(false);
-          } else {
-            deps.setMode({
-              type: "select",
-              command: {
-                id: "blob-select",
-                type: "select",
-                title: "Select Blob",
-                handler: async (blob) => {
-                  const entityId = await castSpellAsCharm(deps.charmManager, spell, blob);
-                  if (entityId) {
-                    deps.navigate(`/${deps.focusedReplicaId}/${charmId(entityId)}`);
-                  }
-                  deps.setOpen(false);
-                },
-              },
-              options: spell.compatibleBlobs.map((blob: any, i: number) => ({
-                id: String(i),
-                title: `Blob ${i + 1}`,
-                value: blob,
-              })),
-            });
-          }
-        },
-      },
-      options: compatibleSpells.map((spell: any, i: number) => ({
-        id: String(i),
-        title: `${spell.description}#${spell.name.slice(-4)} (${spell.compatibleBlobs.length})`,
-        value: spell,
-      })),
-    });
-  } catch (error) {
-    console.error("Spellcaster error:", error);
   } finally {
     deps.setLoading(false);
   }
@@ -386,6 +338,72 @@ async function handleIndexCharms(deps: CommandContext) {
   });
   deps.setOpen(false);
 }
+
+async function handleUseDataInSpell(deps: CommandContext) {
+  deps.setLoading(true);
+  try {
+    if (!deps.focusedCharmId || !deps.focusedReplicaId) {
+      return;
+    }
+
+    const response = await fetch("/api/ai/spell/reuse", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        charmId: deps.focusedCharmId,
+        replica: deps.focusedReplicaId,
+      }),
+    });
+
+    deps.setLoading(false);
+
+    const result = await response.json();
+    const compatibleSpells: Record<string, Spell> = result.compatibleSpells;
+
+    const spells = Object.entries(compatibleSpells).map(([spellId, spell]) => ({
+      id: spellId,
+      title: `${spell.recipeName} (#${spellId.slice(-4)}) - ${spell.spec}`,
+      value: { ...spell, id: spellId },
+    }));
+
+    deps.setMode({
+      type: "select",
+      command: {
+        id: "spell-select",
+        type: "select",
+        title: "Select Spell to Use",
+        handler: async (selectedSpell) => {
+          console.log("Selected spell:", selectedSpell);
+          if (!deps.focusedCharmId) {
+            throw new Error("No charm selected");
+          }
+
+          const charm = await deps.charmManager.get(deps.focusedCharmId);
+          const sourceCell = charm?.getSourceCell();
+          const sourceId = getEntityId(sourceCell)?.["/"];
+          if (!sourceId) {
+            throw new Error("No source ID found");
+          }
+          deps.setLoading(true);
+          const newCharmId = await castSpellAsCharm(deps.charmManager, selectedSpell.id, sourceId);
+          if (newCharmId) {
+            deps.navigate(`/${deps.focusedReplicaId}/${charmId(newCharmId)}`);
+          }
+          deps.setOpen(false);
+          deps.setLoading(false);
+        },
+      },
+      options: spells,
+    });
+  } catch (e) {
+    console.error("Error casting spell:", e);
+  } finally {
+    deps.setLoading(false);
+  }
+}
+
 export function getCommands(deps: CommandContext): CommandItem[] {
   return [
     {
@@ -402,13 +420,22 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       group: "Navigation",
       handler: () => handleSearchCharms(deps),
     },
+    // Create a new Spellcaster menu that contains all spell-related commands
     {
-      id: "spellcaster",
-      type: "input",
+      id: "spellcaster-menu",
+      type: "menu",
       title: "Spellcaster",
       group: "Create",
       predicate: !!deps.focusedReplicaId,
-      handler: (input) => handleSpellcaster(deps, input),
+      children: [
+        {
+          id: "use-data-in-spell",
+          type: "action",
+          title: "Use Current Data in Spell",
+          predicate: !!deps.focusedCharmId,
+          handler: () => handleUseDataInSpell(deps),
+        },
+      ],
     },
     {
       id: "rename-charm",
