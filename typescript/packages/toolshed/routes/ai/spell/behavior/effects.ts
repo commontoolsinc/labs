@@ -44,7 +44,9 @@ export async function getAllMemories(
         select: {
           _: {
             "application/json": {
-              is: {},
+              "_": { // <- any cause
+                "is": {},
+              },
             },
           },
         },
@@ -91,7 +93,9 @@ export async function getMemory(
         select: {
           ["of:" + key]: {
             "application/json": {
-              is: {},
+              "_": { // <- any cause
+                "is": {},
+              },
             },
           },
         },
