@@ -100,12 +100,8 @@ export async function getMemory(
   });
   const data = await res.json();
   if ("error" in data) {
-    handleErrorResponse(data);
-    return null;
+    throw handleErrorResponse(data);
   }
-
-  console.log(key, data);
-  const memory = Array.isArray(data.ok) ? data.ok[0] : data.ok;
 
   // format
   // {
@@ -125,14 +121,15 @@ export async function getMemory(
   // }
   //
   //
+  const memory = Array.isArray(data.ok) ? data.ok[0] : data.ok;
   const memoryData = memory[replica]["of:" + key]["application/json"];
   const [, firstValue] = Object.entries(memoryData)[0];
   return (firstValue as any)?.is;
 }
 
-export async function getAllBlobs(
+export async function getAllBlobs<T extends unknown>(
   options: BlobOptions = {},
-): Promise<string[] | { [id: string]: any }> {
+): Promise<string[] | { [id: string]: T }> {
   const query: Record<string, string> = {
     all: "true",
   };
@@ -145,19 +142,17 @@ export async function getAllBlobs(
   const res = await client.api.storage.blobby.$get({ query });
   const data = await res.json();
   if ("error" in data) {
-    handleErrorResponse(data);
-    return [];
+    throw handleErrorResponse(data);
   }
   return data.blobs || data;
 }
 
-export async function getBlob(key: string): Promise<unknown> {
+export async function getBlob<T extends unknown>(key: string): Promise<T> {
   const res = await client.api.storage.blobby[":key"].$get({ param: { key } });
   const data = (await res.json()) as any;
 
   if ("error" in data) {
-    handleErrorResponse(data);
-    return [];
+    throw handleErrorResponse(data);
   }
 
   return data;

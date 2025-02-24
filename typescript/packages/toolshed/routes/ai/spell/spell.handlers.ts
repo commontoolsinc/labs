@@ -15,6 +15,7 @@ import type {
   SearchSchemaRoute,
   SpellSearchRoute,
 } from "./spell.routes.ts";
+import { Spell } from "./spell.ts";
 import { performSearch } from "./behavior/search.ts";
 import { Logger } from "@/lib/prefixed-logger.ts";
 import { processSchema } from "@/routes/ai/spell/fulfill.ts";
@@ -372,59 +373,71 @@ export const recast: AppRouteHandler<RecastRoute> = async (c) => {
   }
 };
 
+async function processReuse(
+  charmId: string,
+  replica: string,
+  logger: Logger,
+): Promise<ReuseResponse> {
+  const charm = await getMemory(charmId, replica);
+  logger.info(
+    { charmId, replica },
+    "Retrieved charm",
+  );
+
+  const source = await getMemory(charm.source["/"], replica);
+  logger.info({ sourceId: charm.source["/"] }, "Retrieved source charm");
+
+  const argument = source.value.argument;
+  const type = source.value.$TYPE;
+  logger.debug({ type, argument }, "Extracted argument and type from source");
+
+  const spellId = "spell-" + type;
+  logger.info({ spellId }, "Looking up spell");
+
+  const spell = await getBlob<Spell>(spellId);
+  logger.info({ spellId }, "Retrieved spell");
+
+  const schema = spell.recipe.argumentSchema;
+  logger.debug({ schema }, "Extracted argument schema from spell");
+
+  const spells = await getAllBlobs<Spell>({
+    prefix: "spell-",
+    allWithData: true,
+  });
+
+  if (Array.isArray(spells)) {
+    throw new Error("Unexpected response format");
+  }
+
+  // find spells with identical schemas
+  const candidates = Object.entries(spells)
+    .filter(([id, spell]) => {
+      if (id === spellId) return false;
+      const spellSchema = spell.recipe.argumentSchema;
+      return (JSON.stringify(schema) === JSON.stringify(spellSchema));
+    })
+    .map(([id]) => id);
+
+  const compatibleSpells = candidates.reduce((acc, id) => {
+    acc[id] = spells[id];
+    return acc;
+  }, {} as Record<string, any>);
+
+  return {
+    charm,
+    schema,
+    argument,
+    compatibleSpells,
+  };
+}
+
 export const reuse: AppRouteHandler<ReuseRoute> = async (c) => {
   const logger: Logger = c.get("logger");
   const body = (await c.req.json()) as ReuseRequest;
   const startTime = performance.now();
 
   try {
-    const charm = await getMemory(body.charmId, body.replica);
-    logger.info(
-      { charmId: body.charmId, replica: body.replica },
-      "Retrieved charm",
-    );
-
-    const source = await getMemory(charm.source["/"], body.replica);
-    logger.info({ sourceId: charm.source["/"] }, "Retrieved source charm");
-
-    const argument = source.value.argument;
-    const type = source.value.$TYPE;
-    logger.debug({ type, argument }, "Extracted argument and type from source");
-
-    const spellId = "spell-" + type;
-    logger.info({ spellId }, "Looking up spell");
-
-    const spell = await getBlob(spellId);
-    logger.info({ spellId }, "Retrieved spell");
-
-    const schema = spell.recipe.argumentSchema;
-    logger.debug({ schema }, "Extracted argument schema from spell");
-
-    const spells = await getAllBlobs({ prefix: "spell-", allWithData: true });
-
-    // find spells with identical schemas
-    const candidates = Object.entries(spells)
-      .filter(([id, spell]) => {
-        if (id === spellId) return false;
-        const spellSchema = spell.recipe.argumentSchema;
-        return (JSON.stringify(schema) === JSON.stringify(spellSchema));
-      })
-      .map(([id]) => id);
-
-    console.log("Compatible spells:", candidates);
-
-    const compatibleSpells = candidates.reduce((acc, id) => {
-      acc[id] = spells[id];
-      return acc;
-    }, {} as Record<string, any>);
-
-    const response: ReuseResponse = {
-      charm,
-      schema,
-      argument,
-      compatibleSpells,
-    };
-
+    const response = await processReuse(body.charmId, body.replica, logger);
     return c.json(response, HttpStatusCodes.OK);
   } catch (error) {
     logger.error({ error }, "Error processing reuse");
