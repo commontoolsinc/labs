@@ -75,10 +75,12 @@ export interface SelectOption {
   value: any;
 }
 
-export const castSpellAsCharm = async (charmManager: CharmManager, result: any, blob: any) => {
-  const recipeKey = result?.key;
-
-  if (recipeKey && blob) {
+export const castSpellAsCharm = async (
+  charmManager: CharmManager,
+  recipeKey: string,
+  blobId: string,
+) => {
+  if (recipeKey && blobId) {
     console.log("Syncing...");
     const recipeId = recipeKey.replace("spell-", "");
     await charmManager.syncRecipeBlobby(recipeId);
@@ -87,10 +89,10 @@ export const castSpellAsCharm = async (charmManager: CharmManager, result: any, 
     if (!recipe) return;
 
     console.log("Syncing blob...");
-    const blobCell = getDocByEntityId({ "/": blob.key }, true)!.asCell(["argument"]);
-    await charmManager.sync(blobCell, true);
+    const cell = getDocByEntityId({ "/": blobId }, true)!.asCell(["argument"]);
+    await charmManager.sync(cell, true);
     console.log("Casting...");
-    const charm: Cell<Charm> = await charmManager.runPersistent(recipe, blobCell);
+    const charm: Cell<Charm> = await charmManager.runPersistent(recipe, cell);
     charmManager.add([charm]);
     return charm.entityId;
   }
@@ -390,12 +392,29 @@ async function handleIndexCharms(deps: CommandContext) {
 async function handleUseDataInSpell(deps: CommandContext) {
   deps.setLoading(true);
   try {
-    // Mock data - this would be replaced with actual fetch request
-    const mockSpells = [
-      { id: "spell1", name: "Transform to Table", description: "Converts data into table format" },
-      { id: "spell2", name: "Generate Summary", description: "Creates a summary of the data" },
-      { id: "spell3", name: "Convert to Chart", description: "Visualizes data as a chart" },
-    ];
+    if (!deps.focusedCharmId || !deps.focusedReplicaId) {
+      return;
+    }
+
+    const response = await fetch("/api/ai/spell/reuse", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        charmId: deps.focusedCharmId,
+        replica: deps.focusedReplicaId,
+      }),
+    });
+
+    const result = await response.json();
+    const compatibleSpells = result.compatibleSpells;
+
+    const spells = Object.entries(compatibleSpells).map(([spellId, spell]) => ({
+      id: spellId,
+      title: `${spell.recipeName} (#${spellId.slice(-4)}) - ${spell.spec}`,
+      value: { ...spell, id: spellId },
+    }));
 
     deps.setMode({
       type: "select",
@@ -405,15 +424,19 @@ async function handleUseDataInSpell(deps: CommandContext) {
         title: "Select Spell to Use",
         handler: async (selectedSpell) => {
           console.log("Selected spell:", selectedSpell);
-          // TODO: Implement actual spell casting logic
+          if (!deps.focusedCharmId) {
+            console.error("No charm selected");
+            return;
+          }
+
+          const charm = await deps.charmManager.get(deps.focusedCharmId);
+          const sourceCell = charm?.getSourceCell();
+          debugger;
+          await castSpellAsCharm(deps.charmManager, selectedSpell.id, sourceCell?.entityId?.["/"]);
           deps.setOpen(false);
         },
       },
-      options: mockSpells.map((spell) => ({
-        id: spell.id,
-        title: `${spell.name} - ${spell.description}`,
-        value: spell,
-      })),
+      options: spells,
     });
   } finally {
     deps.setLoading(false);

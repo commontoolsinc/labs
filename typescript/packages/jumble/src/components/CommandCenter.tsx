@@ -67,10 +67,7 @@ function CommandProcessor({
       return (
         <>
           {mode.options.map((option) => (
-            <Command.Item
-              key={option.id}
-              onSelect={() => mode.command.handler?.(context, option.value)}
-            >
+            <Command.Item key={option.id} onSelect={() => mode.command.handler?.(option.value)}>
               {option.title}
             </Command.Item>
           ))}
