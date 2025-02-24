@@ -27,8 +27,6 @@ interface AuthenticationContextType {
 
 const AuthenticationContext = createContext<AuthenticationContextType>(null!);
 
-// (async) open a key store
-// (async) check to see key exists
 export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [keyStore, setKeyStore] = useState<KeyStore | void>(undefined);
   const [user, setUser] = useState<Identity | void>(undefined);
@@ -42,9 +40,7 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
       let root = await keyStore.get(ROOT_KEY);
       if (!ignore) {
         setKeyStore(keyStore);
-        if (root) {
-          setRoot(root);
-        }
+        setRoot(root);
       }
     }
     getKeyStoreAndRoot(); 
