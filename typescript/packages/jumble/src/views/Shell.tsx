@@ -7,6 +7,8 @@ import { MdOutlineStar } from "react-icons/md";
 
 import ShellHeader from "@/components/ShellHeader";
 import { CommandCenter } from "@/components/CommandCenter";
+import { useAuthentication } from "@/contexts/AuthenticationContext";
+import { AuthenticationView } from "@/views/AuthenticationView";
 
 
 export default function Shell() {
@@ -24,6 +26,14 @@ export default function Shell() {
   const onLaunchCommand = useCallback(() => {
     window.dispatchEvent(new CustomEvent("open-command-center"));
   }, []);
+  
+  const { user } = useAuthentication();
+
+  if (!user) {
+    return (
+      <AuthenticationView /> 
+    )
+  }
 
   return (
     <div className="shell h-full bg-gray-50 border-2 border-black">

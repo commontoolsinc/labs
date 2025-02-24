@@ -8,6 +8,7 @@ import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { NAME, TYPE } from "@commontools/builder";
 import { useNavigate } from "react-router-dom";
 import { saveSpell } from "@/services/spellbook";
+import { User } from "@/components/User";
 
 type ShellHeaderProps = {
   replicaName?: string;
@@ -91,6 +92,7 @@ export function ShellHeader({
         <NavPath replicaId={replicaName} charmId={charmId} />
       </div>
       <div className="header-end flex items-center gap-2">
+        <User />
         {charmId && (
           <>
             <NavLink
