@@ -69,7 +69,7 @@ export interface Cell<T> {
   sink(callback: (value: T) => Cancel | undefined | void): Cancel;
   updates(callback: (value: T) => Cancel | undefined | void): Cancel;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
-  asSchema(schema: JSONSchema): Cell<T>;
+  asSchema(schema?: JSONSchema): Cell<T>;
   withLog(log: ReactivityLog): Cell<T>;
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Path,
@@ -244,7 +244,7 @@ function createRegularCell<T>(
             : undefined;
       return createCell(doc, [...path, key], log, currentSchema, rootSchema) as Cell<T[K]>;
     },
-    asSchema: (newSchema: JSONSchema) => createCell(doc, path, log, newSchema, newSchema),
+    asSchema: (newSchema?: JSONSchema) => createCell(doc, path, log, newSchema, newSchema),
     withLog: (newLog: ReactivityLog) => createCell(doc, path, newLog, schema, rootSchema),
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),

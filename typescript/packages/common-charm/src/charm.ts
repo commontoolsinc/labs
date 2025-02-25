@@ -10,6 +10,7 @@ import {
   type Cell,
   getEntityId,
   isCell,
+  getRecipe,
 } from "@commontools/runner";
 import { type Storage } from "./storage.js";
 import { syncRecipeBlobby } from "./syncRecipe.js";
@@ -17,7 +18,6 @@ import { syncRecipeBlobby } from "./syncRecipe.js";
 export type Charm = {
   [NAME]?: string;
   [UI]?: any;
-  [TYPE]?: string;
   [key: string]: any;
 };
 
@@ -75,21 +75,54 @@ export class CharmManager {
     await idle();
   }
 
-  async get(id: string): Promise<Cell<Charm> | undefined> {
+  async get(id: string, runIt: boolean = true): Promise<Cell<Charm> | undefined> {
     await this.storage.syncCell(this.charmsDoc);
 
+    // Load the charm from storage.
     const idAsDocId = JSON.stringify({ "/": id });
-    const charm = this.charms
-      .get()
-      .find((charm) => JSON.stringify(getEntityId(charm)) === idAsDocId);
-    if (!charm) return undefined;
+    const resultDoc = await this.storage.syncCell(idAsDocId);
 
     // Make sure we have the recipe so we can run it!
-    await this.syncRecipe(charm);
+    const recipeId = await this.syncRecipe(resultDoc.asCell());
+    const recipe = getRecipe(recipeId);
 
-    // Make sure the charm is running. This is re-entrant and has no effect if
-    // the charm is already running.
-    return run(undefined, undefined, charm.getAsDocLink().cell).asCell([], undefined, charmSchema);
+    let resultSchema = recipe?.resultSchema;
+
+    // Unless there is a non-object schema, add UI and NAME properties if present
+    if (!resultSchema || resultSchema.type === "object") {
+      const { [UI]: hasUI, [NAME]: hasName } = resultDoc.get();
+      if (hasUI || hasName) {
+        // Copy the original schema, so we can modify properties without
+        // affecting other uses of the same spell.
+        resultSchema = {
+          ...resultSchema,
+          properties: {
+            ...resultSchema?.properties,
+          },
+        };
+        if (hasUI && !resultSchema.properties![UI])
+          resultSchema.properties![UI] = { type: "object" }; // TODO: vdom schema
+        if (hasName && !resultSchema.properties![NAME])
+          resultSchema.properties![NAME] = { type: "string" };
+      }
+    }
+
+    if (runIt) {
+      // Make sure the charm is running. This is re-entrant and has no effect if
+      // the charm is already running.
+      return run(undefined, undefined, resultDoc).asCell([], undefined, resultSchema);
+    } else {
+      return resultDoc.asCell([], undefined, resultSchema);
+    }
+  }
+
+  // Return Cell with argument content according to the schema of the charm.
+  getArgument<T = any>(charm: Cell<Charm | T>): T {
+    const source = charm.getSourceCell();
+    const recipeId = source?.get()?.[TYPE];
+    const recipe = getRecipe(recipeId);
+    const argumentSchema = recipe?.argumentSchema;
+    return source?.key("argument").asSchema(argumentSchema!) as T;
   }
 
   // note: removing a charm doesn't clean up the charm's cells
