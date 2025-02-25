@@ -32,6 +32,10 @@ export class PassKey {
     this.credentials = credentials;
   }
 
+  id() {
+    return this.credentials.id;
+  }
+
   // Generate a root key from a `PassKey`.
   // A root key identity is deterministically derived from a `PassKey`'s
   // PRF output, a 32-byte hash, which is used as ed25519 key material.
@@ -67,7 +71,7 @@ export class PassKey {
   // Different data is available within `PublicKeyCredentials` depending
   // on whether it was created or retrieved. We need the PRF assertion
   // only available on "get" requests, so we don't return a `PassKey` here.
-  static async create(name: string, displayName: string): Promise<PublicKeyCredential> {
+  static async create(name: string, displayName: string): Promise<PassKey> {
     const challenge = random(32);
     const userId = random(32);
     const user = {
@@ -107,7 +111,7 @@ export class PassKey {
       throw new Error("common-identity: prf extension not supported.");
     }
 
-    return result;
+    return new PassKey(result);
   }
 
   // Retrieve a `PassKey` from a Web Authn authenticator.
