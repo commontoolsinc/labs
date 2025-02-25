@@ -119,6 +119,7 @@
     }
   },
   "redirects": {
+    "https://deno.land/std/flags/mod.ts": "https://deno.land/std@0.224.0/flags/mod.ts",
     "https://deno.land/x/is_docker/mod.ts": "https://deno.land/x/is_docker@v2.0.0/mod.ts",
     "https://deno.land/x/oauth2_client/mod.ts": "https://deno.land/x/oauth2_client@v1.0.3/mod.ts"
   },
@@ -169,6 +170,9 @@
     "https://deno.land/std@0.216.0/path/windows/from_file_url.ts": "ced2d587b6dff18f963f269d745c4a599cf82b0c4007356bd957cb4cb52efc01",
     "https://deno.land/std@0.216.0/path/windows/join.ts": "e0b3356615c1a75c56ebb6a7311157911659e11fd533d80d724800126b761ac3",
     "https://deno.land/std@0.216.0/path/windows/normalize.ts": "78126170ab917f0ca355a9af9e65ad6bfa5be14d574c5fb09bb1920f52577780",
+    "https://deno.land/std@0.224.0/assert/assert_exists.ts": "43420cf7f956748ae6ed1230646567b3593cb7a36c5a5327269279c870c5ddfd",
+    "https://deno.land/std@0.224.0/assert/assertion_error.ts": "ba8752bd27ebc51f723702fac2f54d3e94447598f54264a6653d6413738a8917",
+    "https://deno.land/std@0.224.0/flags/mod.ts": "88553267f34519c8982212185339efdb2d2e62c159ec558f47eb50c8952a6be3",
     "https://deno.land/x/is_docker@v2.0.0/mod.ts": "4c8753346f4afbb6c251d7984a609aa84055559cf713fba828939a5d39c95cd0",
     "https://deno.land/x/is_wsl@v1.1.0/mod.ts": "30996b09376652df7a4d495320e918154906ab94325745c1399e13e658dca5da",
     "https://deno.land/x/nanoid@v3.0.0/async.ts": "654420a3b480b46393538c96a2690af1aa7cbe2fae5614054068c53f8d0679d4",
