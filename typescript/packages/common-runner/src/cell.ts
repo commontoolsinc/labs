@@ -73,18 +73,34 @@ export interface Cell<T> {
   equals(other: Cell<any>): boolean;
   sink(callback: (value: T) => Cancel | undefined | void): Cancel;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
-  asSchema<T = any, S extends JSONSchema | undefined = undefined>(
+  asSchema<T = never, S extends JSONSchema | undefined = JSONSchema>(
     schema?: S,
-  ): Cell<S extends JSONSchema ? Schema<S> : T>;
+  ): Cell<
+    T extends never
+      ? S extends JSONSchema
+        ? Schema<S> extends unknown
+          ? any
+          : Schema<S>
+        : any
+      : T
+  >;
   withLog(log: ReactivityLog): Cell<T>;
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Path,
     log?: ReactivityLog,
   ): QueryResult<DeepKeyLookup<T, Path>>;
   getAsDocLink(): DocLink;
-  getSourceCell<T = any, S extends JSONSchema | undefined = undefined>(
+  getSourceCell<T = never, S extends JSONSchema | undefined = JSONSchema>(
     schema?: S,
-  ): Cell<S extends JSONSchema ? Schema<S> : T> | undefined;
+  ): Cell<
+    T extends never
+      ? S extends JSONSchema
+        ? Schema<S> extends unknown
+          ? any
+          : Schema<S>
+        : any
+      : T
+  >;
   toJSON(): { cell: { "/": string } | undefined; path: PropertyKey[] };
   value: T;
   docLink: DocLink;
@@ -289,8 +305,7 @@ function createRegularCell<T>(
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
     getAsDocLink: () => ({ cell: doc, path }) satisfies DocLink,
-    getSourceCell: <T = any>(schema?: JSONSchema) =>
-      doc.sourceCell?.asCell([], log, schema) as Cell<T> | undefined,
+    getSourceCell: (schema?: JSONSchema) => doc.sourceCell?.asCell([], log, schema) as Cell<any>,
     toJSON: () =>
       // TODO(seefeld): Should this include the schema, as cells are defiined by doclink & schema?
       ({ cell: doc.toJSON(), path }) satisfies {
