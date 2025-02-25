@@ -24,6 +24,7 @@ interface IterationTabProps {
 
 const variantModels = [
   "anthropic:claude-3-5-sonnet-latest",
+  "anthropic:claude-3-7-sonnet-latest",
   "groq:llama-3.3-70b-versatile",
   "google:gemini-2.0-pro",
 ] as const;
@@ -34,7 +35,7 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
   const { charmManager } = useCharmManager();
 
   const [iterationInput, setIterationInput] = useState("");
-  const [selectedModel, setSelectedModel] = useState("anthropic:claude-3-5-sonnet-latest");
+  const [selectedModel, setSelectedModel] = useState("anthropic:claude-3-7-sonnet-latest");
   const [showVariants, setShowVariants] = useState(false);
   const [loading, setLoading] = useState(false);
   const [variants, setVariants] = useState<Cell<Charm>[]>([]);
@@ -198,6 +199,9 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
                 onChange={(e) => setSelectedModel(e.target.value)}
                 className="w-full p-2 border-2 border-black bg-white text-xs"
               >
+                <option value="anthropic:claude-3-7-sonnet-latest">
+                  Anthropic Claude 3.7 Sonnet ✨
+                </option>
                 <option value="anthropic:claude-3-5-sonnet-latest">
                   Anthropic Claude 3.5 Sonnet ✨
                 </option>
@@ -397,22 +401,25 @@ function CharmEditView() {
       <div className="tabs mb-4 flex gap-2">
         <button
           onClick={() => navigate(`${location.pathname}#iterate`)}
-          className={`px-4 py-2 rounded ${activeTab === "iterate" ? "bg-gray-200 font-bold" : "bg-gray-100"
-            }`}
+          className={`px-4 py-2 rounded ${
+            activeTab === "iterate" ? "bg-gray-200 font-bold" : "bg-gray-100"
+          }`}
         >
           Iteration
         </button>
         <button
           onClick={() => navigate(`${location.pathname}#code`)}
-          className={`px-4 py-2 rounded ${activeTab === "code" ? "bg-gray-200 font-bold" : "bg-gray-100"
-            }`}
+          className={`px-4 py-2 rounded ${
+            activeTab === "code" ? "bg-gray-200 font-bold" : "bg-gray-100"
+          }`}
         >
           Edit Code
         </button>
         <button
           onClick={() => navigate(`${location.pathname}#data`)}
-          className={`px-4 py-2 rounded ${activeTab === "data" ? "bg-gray-200 font-bold" : "bg-gray-100"
-            }`}
+          className={`px-4 py-2 rounded ${
+            activeTab === "data" ? "bg-gray-200 font-bold" : "bg-gray-100"
+          }`}
         >
           View Data
         </button>

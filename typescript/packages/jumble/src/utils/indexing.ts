@@ -49,7 +49,7 @@ async function indexCharm(
     const stringified = JSON.stringify(charm.asSchema({}).get());
 
     const response = await llm.sendRequest({
-      model: "anthropic:claude-3-5-sonnet-latest",
+      model: "anthropic:claude-3-7-sonnet-latest",
       messages: [
         {
           role: "user",
