@@ -13,6 +13,9 @@ const InputSchema = z
 
 const OutputSchema = z.object({
   exportedSuperCoolField: z.string(),
+  exportedAuth: z.object({
+    token: z.string(),
+  }),
 });
 
 const updateValue = handler<{ detail: { value: string } }, { value: string }>(
@@ -21,18 +24,18 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   },
 );
 
-export default recipe(InputSchema, OutputSchema, (state) => ({
-  [NAME]: state.superCoolField,
+export default recipe(InputSchema, OutputSchema, ({ superCoolField, auth }) => ({
+  [NAME]: superCoolField,
   [UI]: (
     <div>
       <common-input
-        value={state.superCoolField}
+        value={superCoolField}
         placeholder="List title"
-        oncommon-input={updateValue({ value: state.superCoolField })}
+        oncommon-input={updateValue({ value: superCoolField })}
       />
-      <common-google-oauth auth={state.auth} />
+      <common-google-oauth $auth={auth} />
     </div>
   ),
-  exportedSuperCoolField: state.superCoolField,
-  exportedAuth: state.auth,
+  exportedSuperCoolField: superCoolField,
+  exportedAuth: auth,
 }));
