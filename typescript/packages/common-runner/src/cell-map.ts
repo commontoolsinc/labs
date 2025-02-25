@@ -3,6 +3,7 @@ import { type DocImpl, type DocLink, getDoc, isDoc, isDocLink } from "./doc.js";
 import { getDocLinkOrThrow, isQueryResultForDereferencing } from "./query-result-proxy.js";
 import { isCell } from "./cell.js";
 import { refer } from "merkle-reference";
+import { type Space, DEFAULT_SPACE } from "./space.js";
 
 export type EntityId = {
   "/": string | Uint8Array;
@@ -96,25 +97,27 @@ export const getEntityId = (value: any): { "/": string } | undefined => {
   } else return JSON.parse(JSON.stringify(ref.cell.entityId));
 };
 
-export function getDocByEntityId<T = any>(
-  entityId: EntityId | string,
-  createIfNotFound = true,
-): DocImpl<T> | undefined {
-  const id = typeof entityId === "string" ? entityId : JSON.stringify(entityId);
-  let doc = entityIdToDocMap.get(id);
-  if (doc) return doc;
-  if (!createIfNotFound) return undefined;
+/**
+ * A map that holds weak references to its values per space.
+ */
+class SpaceAwareCleanableMap<T extends object> {
+  private maps = new Map<Space, CleanableMap<T>>();
 
-  doc = getDoc<T>();
-  if (typeof entityId === "string") entityId = JSON.parse(entityId) as EntityId;
-  doc.entityId = entityId;
-  setDocByEntityId(entityId, doc);
-  return doc;
+  set(space: Space, key: string, value: T) {
+    let map = this.maps.get(space);
+    if (!map) {
+      map = new CleanableMap<T>();
+      this.maps.set(space, map);
+    }
+    map.set(key, value);
+  }
+
+  get(space: Space, key: string): T | undefined {
+    return this.maps.get(space)?.get(key);
+  }
 }
 
-export const setDocByEntityId = (entityId: EntityId, cell: DocImpl<any>) => {
-  entityIdToDocMap.set(JSON.stringify(entityId), cell);
-};
+const entityIdToDocMap = new SpaceAwareCleanableMap<DocImpl<any>>();
 
 /**
  * A map that holds weak references to its values. Triggers a cleanup of the map
@@ -160,4 +163,33 @@ class CleanableMap<T extends object> {
   }
 }
 
-const entityIdToDocMap = new CleanableMap<DocImpl<any>>();
+/**
+ * Update getDocByEntityId to accept a space parameter
+ */
+export function getDocByEntityId<T = any>(
+  entityId: EntityId | string,
+  createIfNotFound = true,
+  space: Space = DEFAULT_SPACE,
+): DocImpl<T> | undefined {
+  const id = typeof entityId === "string" ? entityId : JSON.stringify(entityId);
+  let doc = entityIdToDocMap.get(space, id);
+  if (doc) return doc;
+  if (!createIfNotFound) return undefined;
+
+  doc = getDoc<T>();
+  if (typeof entityId === "string") entityId = JSON.parse(entityId) as EntityId;
+  doc.entityId = entityId;
+  setDocByEntityId(entityId, doc, space);
+  return doc;
+}
+
+/**
+ * Update setDocByEntityId to accept a space parameter
+ */
+export const setDocByEntityId = (
+  entityId: EntityId,
+  cell: DocImpl<any>,
+  space: Space = DEFAULT_SPACE,
+) => {
+  entityIdToDocMap.set(space, JSON.stringify(entityId), cell);
+};
