@@ -14,6 +14,10 @@ export default defineConfig({
       "bens-macbook-pro.saga-castor.ts.net",
     ],
     proxy: {
+      "/api/integrations": {
+        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
+        changeOrigin: true,
+      },
       "/api/ai/spell/": {
         target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
         changeOrigin: true,
