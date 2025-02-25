@@ -18,6 +18,7 @@ import { queueEvent, type ReactivityLog, subscribe } from "./scheduler.ts";
 import { type EntityId, getDocByEntityId, getEntityId } from "./cell-map.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import { validateAndTransform } from "./schema.ts";
+import { type Schema } from "./schema.ts";
 import { Space } from "./space.ts";
 
 /**
@@ -72,14 +73,16 @@ export interface Cell<T> {
   equals(other: Cell<any>): boolean;
   sink(callback: (value: T) => Cancel | undefined | void): Cancel;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
-  asSchema(schema?: JSONSchema): Cell<T>;
+  asSchema<S extends JSONSchema>(schema?: S): Cell<Schema<S>>;
   withLog(log: ReactivityLog): Cell<T>;
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Path,
     log?: ReactivityLog,
   ): QueryResult<DeepKeyLookup<T, Path>>;
   getAsDocLink(): DocLink;
-  getSourceCell<T = any>(schema?: JSONSchema): Cell<T> | undefined;
+  getSourceCell<S extends JSONSchema = JSONSchema>(
+    schema?: S,
+  ): Cell<Schema<S>> | undefined;
   toJSON(): { cell: { "/": string } | undefined; path: PropertyKey[] };
   value: T;
   docLink: DocLink;
@@ -95,34 +98,34 @@ export interface Stream<T> {
   [isStreamMarker]: true;
 }
 
-export function getCellFromEntityId<T>(
+export function getCellFromEntityId<T = any, S extends JSONSchema = JSONSchema>(
   space: Space,
   entityId: EntityId,
   path: PropertyKey[] = [],
-  schema?: JSONSchema,
+  schema?: S,
   log?: ReactivityLog,
-): Cell<T> {
+): Cell<S extends JSONSchema ? Schema<S> : T> {
   const doc = getDocByEntityId(space, entityId, true)!;
   return createCell(doc, path, log, schema);
 }
 
-export function getCellFromDocLink<T>(
+export function getCellFromDocLink<T = any, S extends JSONSchema = JSONSchema>(
   space: Space, // TODO(seefeld): Read from DocLink once it's defined there
   docLink: DocLink,
-  schema?: JSONSchema,
+  schema?: S,
   log?: ReactivityLog,
-): Cell<T> {
+): Cell<S extends JSONSchema ? Schema<S> : T> {
   const doc = isDoc(docLink.cell)
     ? docLink.cell
     : getDocByEntityId(space, getEntityId(docLink.cell)!, true)!;
   return createCell(doc, docLink.path, log, schema);
 }
 
-export function getImmutableCell<T>(
+export function getImmutableCell<T = any, S extends JSONSchema = JSONSchema>(
   data: T,
-  schema?: JSONSchema,
+  schema?: S,
   log?: ReactivityLog,
-): Cell<T> {
+): Cell<S extends JSONSchema ? Schema<S> : T> {
   const doc = getDoc<T>(data);
   doc.freeze();
   return createCell(doc, [], log, schema);

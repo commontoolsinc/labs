@@ -99,7 +99,7 @@ export type JSONValue =
   | { [key: string]: JSONValue };
 
 export type JSONSchema = {
-  type?:
+  readonly type?:
     | "object"
     | "array"
     | "string"
@@ -107,17 +107,17 @@ export type JSONSchema = {
     | "number"
     | "boolean"
     | "null";
-  properties?: { [key: string]: JSONSchema };
-  description?: string;
-  default?: JSONValue;
-  title?: string;
-  required?: string[];
-  enum?: string[];
-  items?: JSONSchema;
-  $ref?: string;
-  asCell?: boolean;
-  anyOf?: JSONSchema[];
-  additionalProperties?: JSONSchema | boolean;
+  readonly properties?: Readonly<Record<string, JSONSchema>>;
+  readonly description?: readonly string[];
+  readonly default?: Readonly<JSONValue>;
+  readonly title?: readonly string[];
+  readonly required?: readonly string[];
+  readonly enum?: readonly string[];
+  readonly items?: Readonly<JSONSchema>;
+  readonly $ref?: string;
+  readonly asCell?: boolean;
+  readonly anyOf?: readonly JSONSchema[];
+  readonly additionalProperties?: Readonly<JSONSchema> | boolean;
 };
 
 export type Alias = {
