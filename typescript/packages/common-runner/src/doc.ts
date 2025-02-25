@@ -157,6 +157,12 @@ export type DocImpl<T> = {
   value: T;
 
   /**
+   * The space this doc belongs to.
+   * Required when entityId is set.
+   */
+  space?: Space;
+
+  /**
    * Get current entity ID.
    *
    * @returns Entity ID.
@@ -225,17 +231,20 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends []
       : any
     : any;
 
-export function getDoc<T>(value?: T, cause?: any, space: Space = DEFAULT_SPACE): DocImpl<T> {
+export function getDoc<T>(value?: T, cause?: any, space?: Space): DocImpl<T> {
   const callbacks = new Set<(value: T, path: PropertyKey[]) => void>();
   let readOnly = false;
   let entityId: EntityId | undefined;
   let sourceCell: DocImpl<any> | undefined;
   let ephemeral = false;
+  let docSpace = space;
 
   // If cause is provided, generate ID and return pre-existing cell if any.
   if (cause) {
     entityId = generateEntityId(value, cause);
-    const existing = getDocByEntityId(entityId, false, space);
+    // Use DEFAULT_SPACE if no space provided when generating ID
+    docSpace = space ?? DEFAULT_SPACE;
+    const existing = getDocByEntityId(entityId, false, docSpace);
     if (existing) return existing;
   }
 
@@ -286,8 +295,11 @@ export function getDoc<T>(value?: T, cause?: any, space: Space = DEFAULT_SPACE):
     },
     isFrozen: () => readOnly,
     generateEntityId: (cause?: any): void => {
+      if (!self.space) {
+        self.space = DEFAULT_SPACE;
+      }
       entityId = generateEntityId(value, cause);
-      setDocByEntityId(entityId, self, space);
+      setDocByEntityId(entityId, self, self.space);
     },
     // This is the id and not the contents, because we .toJSON is called when
     // writing a structure to this that might contain a reference to this cell,
@@ -304,8 +316,11 @@ export function getDoc<T>(value?: T, cause?: any, space: Space = DEFAULT_SPACE):
     },
     set entityId(id: EntityId) {
       if (entityId) throw new Error("Entity ID already set");
+      if (!self.space) {
+        self.space = DEFAULT_SPACE;
+      }
       entityId = id;
-      setDocByEntityId(id, self, space);
+      setDocByEntityId(id, self, self.space);
     },
     get sourceCell(): DocImpl<any> | undefined {
       return sourceCell;
@@ -329,9 +344,22 @@ export function getDoc<T>(value?: T, cause?: any, space: Space = DEFAULT_SPACE):
     get copyTrap(): boolean {
       throw new Error("Copy trap: Don't copy cells, create references instead");
     },
+    get space(): Space | undefined {
+      return docSpace;
+    },
+    set space(newSpace: Space | undefined) {
+      if (entityId && !newSpace) {
+        throw new Error("Space cannot be undefined when entity ID is set");
+      }
+      docSpace = newSpace;
+    },
   };
 
-  if (entityId) setDocByEntityId(entityId, self, space);
+  if (entityId) {
+    self.space = docSpace ?? DEFAULT_SPACE;
+    setDocByEntityId(entityId, self, self.space);
+  }
+
   return self;
 }
 
