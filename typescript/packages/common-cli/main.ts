@@ -45,15 +45,15 @@ async function main(
 
   console.log("CHARM", gotCharm);
   console.log("ARGUMENT", argumentCell);
-  console.log("wat");
+  // console.log("wat");
 
-  const authCell = {
-    cell: { "/": "baedreig4hf6rzrifupimvceiy5gxvrzs7y3shrj3tbuei7tv6y3ctkpg7e" },
-    path: ["argument", "auth"],
-  };
+  // const authCell = {
+  //   cell: { "/": "baedreig4hf6rzrifupimvceiy5gxvrzs7y3shrj3tbuei7tv6y3ctkpg7e" },
+  //   path: ["argument", "auth"],
+  // };
 
-  const gotAuthCell = getCellFromDocLink(authCell);
-  console.log("GOT AUTH CELL", gotAuthCell);
+  // const gotAuthCell = getCellFromDocLink(authCell);
+  // console.log("GOT AUTH CELL", gotAuthCell);
 
   // gotAuthCell.get();
   // await storage.sync(authCell);
