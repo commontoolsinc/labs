@@ -1,4 +1,4 @@
-import { useCharmManager } from "@/contexts/CharmManagerContext";
+import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { Charm, getIframeRecipe, IFrameRecipe } from "@commontools/charm";
 import { Cell, effect } from "@commontools/runner";
 import React from "react";

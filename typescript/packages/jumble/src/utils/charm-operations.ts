@@ -7,8 +7,8 @@ import {
 } from "@commontools/charm";
 import { Cell, EntityId } from "@commontools/runner";
 
-import { charmId } from "@/utils/charms";
-import { fixRecipePrompt } from "@/utils/prompt-library/recipe-fix";
+import { charmId } from "@/utils/charms.ts";
+import { fixRecipePrompt } from "@/utils/prompt-library/recipe-fix.ts";
 
 export async function fixItCharm(
   charmManager: CharmManager,

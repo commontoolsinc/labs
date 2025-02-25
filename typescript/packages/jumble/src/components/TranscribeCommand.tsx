@@ -1,7 +1,7 @@
 import { useEffect } from "react";
-import { useAudioRecorder } from "@/hooks/use-audio-recorder";
-import { CommandContext, CommandItem } from "./commands";
-import { DitheredCube } from "./DitherCube";
+import { useAudioRecorder } from "@/hooks/use-audio-recorder.ts";
+import { CommandContext, CommandItem } from "./commands.ts";
+import { DitheredCube } from "./DitherCube.tsx";
 
 interface TranscribeInputProps {
   mode: { command: CommandItem; placeholder: string };

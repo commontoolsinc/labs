@@ -23,10 +23,10 @@ import {
   shareSpell,
   trackRun,
   deleteSpell,
-} from "@/services/spellbook";
-import { ActionButton } from "@/components/spellbook/ActionButton";
-import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
-import { SpellPreview } from "@/components/spellbook/SpellPreview";
+} from "@/services/spellbook.ts";
+import { ActionButton } from "@/components/spellbook/ActionButton.tsx";
+import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader.tsx";
+import { SpellPreview } from "@/components/spellbook/SpellPreview.tsx";
 
 export default function SpellbookDetailView() {
   const { spellId } = useParams<{ spellId: string }>();

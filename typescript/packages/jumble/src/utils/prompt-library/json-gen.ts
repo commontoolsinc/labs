@@ -1,7 +1,7 @@
 import JSON5 from "json5";
 
-import { hydratePrompt, parseTagFromResponse } from "@/utils/prompt-library/prompting";
-import { llm } from "@/utils/llm";
+import { hydratePrompt, parseTagFromResponse } from "@/utils/prompt-library/prompting.ts";
+import { llm } from "@/utils/llm.ts";
 
 const SYSTEM_PROMPT = `
 You are an expert JSON data generator AI. Your task is to design and generate a JSON blob that models and illustrates the data structure that would enable a product feature or idea described by a user.

@@ -1,4 +1,4 @@
-import { useAuthentication } from "@/contexts/AuthenticationContext";
+import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
 import { useCallback, useRef, useState } from "react";
 
 const BTN_STYLE=`bg-gray-50 border-2 p-2 w-full flex-1 cursor-pointer`;

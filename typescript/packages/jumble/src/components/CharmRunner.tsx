@@ -1,10 +1,10 @@
 import React, { useRef } from "react";
 import { render } from "@commontools/html";
-import { useCharmManager } from "@/contexts/CharmManagerContext";
+import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { useNavigate } from "react-router-dom";
-import { fixItCharm } from "@/utils/charm-operations";
+import { fixItCharm } from "@/utils/charm-operations.ts";
 import { LuX } from "react-icons/lu";
-import { DitheredCube } from "@/components/DitherCube";
+import { DitheredCube } from "@/components/DitherCube.tsx";
 
 interface CharmLoaderProps {
   charmImport: () => Promise<any>;

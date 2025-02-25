@@ -1,7 +1,7 @@
-import { hydratePrompt, parseTagFromResponse } from "@/utils/prompt-library/prompting";
-import { llm } from "@/utils/llm";
+import { hydratePrompt, parseTagFromResponse } from "@/utils/prompt-library/prompting.ts";
+import { llm } from "@/utils/llm.ts";
 import JSON5 from "json5";
-import { describeCharm } from "@/utils/prompt-library/charm-describe";
+import { describeCharm } from "@/utils/prompt-library/charm-describe.ts";
 const SYSTEM_PROMPT = `
 You are tasked with generating prompt suggestions to iterate on web app functionality in new and interesting directions.
 

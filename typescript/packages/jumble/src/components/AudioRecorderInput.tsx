@@ -1,5 +1,5 @@
 import React from 'react';
-import { CommonAudioRecording, useAudioRecorder } from '@/hooks/use-audio-recorder';
+import { CommonAudioRecording, useAudioRecorder } from '@/hooks/use-audio-recorder.ts';
 
 interface AudioRecorderProps {
   transcribe?: boolean;

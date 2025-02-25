@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDropzone } from "react-dropzone";
-import { savePhotoSet } from "@/utils/photoset";
+import { savePhotoSet } from "@/utils/photoset.ts";
 
 export default function NewPhotoSet() {
   const navigate = useNavigate();

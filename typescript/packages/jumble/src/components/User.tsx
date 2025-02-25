@@ -1,4 +1,4 @@
-import { useAuthentication } from "@/contexts/AuthenticationContext";
+import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
 import { useEffect, useState } from "react";
 
 export function User() {
