@@ -37,9 +37,10 @@ async function main(
   console.log(`${TOOLSHED_API_URL}/${replica}/${charmId}`);
 
   const gotCharm = await manager.get(charmId);
+  const argumentCell = manager.getArgument(gotCharm);
 
   console.log("CHARM", gotCharm);
-
+  console.log("ARGUMENT", argumentCell);
   console.log("wat");
 
   // const charms = await manager.getCharms();
