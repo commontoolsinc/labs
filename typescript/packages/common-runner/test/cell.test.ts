@@ -589,9 +589,14 @@ describe("asCell with schema", () => {
         id: { type: "number" },
         metadata: {
           type: "object",
+          properties: {
+            createdAt: { type: "string" },
+            type: { type: "string" },
+          },
           asCell: true,
         },
       },
+      required: ["id", "metadata"],
     } satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, initialSchema);
