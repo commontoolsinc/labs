@@ -7,6 +7,7 @@ import aiVoice from "@/routes/ai/voice/voice.index.ts";
 import aiWebReader from "@/routes/ai/webreader/webreader.index.ts";
 import aiSpell from "@/routes/ai/spell/spell.index.ts";
 import discord from "@/routes/integrations/discord/discord.index.ts";
+import googleOAuth from "@/routes/integrations/google-oauth/google-oauth.index.ts";
 import blobby from "@/routes/storage/blobby/blobby.index.ts";
 import memory from "@/routes/storage/memory/memory.index.ts";
 import frontendProxy from "@/routes/frontend-proxy/frontend-proxy.index.ts";
@@ -25,6 +26,7 @@ const routes = [
   aiWebReader,
   aiSpell,
   discord,
+  googleOAuth,
   blobby,
   memory,
   spellbook,
