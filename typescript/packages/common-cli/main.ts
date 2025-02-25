@@ -13,14 +13,6 @@ storage.setRemoteStorage(
 
 async function main() {
   const manager = new CharmManager(space ?? "common-cli");
-  const charms = await manager.getCharms();
-
-  charms.sink((charms) => {
-    console.log(
-      "charms:",
-      charms.map((c) => c.toJSON().cell["/"]),
-    );
-  });
 
   if (charmId) {
     const charm = await manager.get(charmId);
@@ -43,7 +35,20 @@ async function main() {
       const updater = charmWithSchema.get()?.updater;
       if (isStream(updater)) {
         console.log("running updater");
-        updater.send({ newValues: ["test"] });
+        const randomId = Math.random().toString(36).substring(2, 15);
+        updater.send({
+            emails: [{
+                id: randomId,
+                threadId: randomId,
+                labelIds: ["INBOX"],
+                snippet: "test",
+                subject: "test",
+                from: "test",
+                date: "test",
+                to: "test",
+                plainText: "test",
+            }],
+        });
       }
     } catch (error) {
       console.error("Error loading and compiling recipe:", error);
@@ -55,5 +60,3 @@ async function main() {
     console.log("Program running. Press Ctrl+C to exit.");
   });
 }
-
-main();
