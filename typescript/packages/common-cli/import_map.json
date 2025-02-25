@@ -10,6 +10,8 @@
     "@commontools/llm-client": "../llm-client/src/index.ts",
     "@commontools/html/": "../common-html/src/",
     "@commontools/html": "../common-html/src/index.ts",
+    "@commontools/memory/": "../common-memory/",
+    "@commontools/memory": "../common-memory/index.ts",
     "zod-to-json-schema": "npm:zod-to-json-schema",
     "zod": "npm:zod",
     "merkle-reference": "npm:merkle-reference",
