@@ -3,8 +3,7 @@ import { fromString, refer } from "./reference.ts";
 import { unclaimed } from "./fact.ts";
 import { from as toChanges, set } from "./changes.ts";
 import { create as createCommit, the as COMMIT_THE } from "./commit.ts";
-import * as Principal from "./principal.ts";
-import * as Access from "./access.ts";
+import { fromDID as parseDID } from "./principal.ts";
 import type {
   Result,
   MemorySpace,
@@ -31,9 +30,7 @@ import type {
   Claim,
   Query,
   SpaceSession,
-  Issuer,
-  Authorization,
-  AuthorizationError,
+  Principal,
 } from "./interface.ts";
 import * as Error from "./error.ts";
 export * from "./interface.ts";
@@ -128,12 +125,12 @@ export type Options = {
 };
 
 interface Session<Space extends MemorySpace> {
-  subject: Issuer<Space>;
+  subject: Space;
   store: Database;
 }
 
 class Space<Subject extends MemorySpace = MemorySpace> implements Session<Subject>, SpaceSession {
-  constructor(public subject: Issuer<Subject>, public store: Database) {}
+  constructor(public subject: Subject, public store: Database) {}
 
   transact(transaction: Transaction<Subject>) {
     return transact(this, transaction);
@@ -166,16 +163,18 @@ export type { Space as View };
  * location in first instance is URL itself but `:memory:` in the second, which
  * is what {@link Database} expects.
  */
-const readAddress = (url: URL): Result<{ subject: Issuer; address: URL | null }, SyntaxError> => {
+const readAddress = (
+  url: URL,
+): Result<{ subject: MemorySpace; address: URL | null }, SyntaxError> => {
   const { pathname } = url;
   const base = pathname.split("/").pop() as string;
   const did = base.endsWith(".sqlite") ? base.slice(0, -".sqlite".length) : base;
-  const { ok: subject, error } = Principal.fromDID(did);
+  const { ok: principal, error } = parseDID(did);
   if (error) {
     return { error };
   }
 
-  return { ok: { address: url.protocol === "file:" ? url : null, subject } };
+  return { ok: { address: url.protocol === "file:" ? url : null, subject: principal.did() } };
 };
 
 /**
@@ -194,7 +193,7 @@ export const connect = async <Subject extends MemorySpace>({
 
     const database = await new Database(address ?? ":memory:", { create: false });
     database.exec(PREPARE);
-    const session = new Space(subject as Issuer<Subject>, database);
+    const session = new Space(subject as Subject, database);
     return { ok: session };
   } catch (cause) {
     return { error: Error.connection(url, cause as SqliteError) };
@@ -212,7 +211,7 @@ export const open = async <Subject extends MemorySpace>({
     const { address, subject } = result.ok;
     const database = await new Database(address ?? ":memory:", { create: true });
     database.exec(PREPARE);
-    const session = new Space(subject as Issuer<Subject>, database);
+    const session = new Space(subject as Subject, database);
     return { ok: session };
   } catch (cause) {
     throw Error.connection(url, cause as SqliteError);
@@ -467,37 +466,23 @@ const execute = <
   }
 };
 
-export const transact = async <Space extends MemorySpace>(
+export const transact = <Space extends MemorySpace>(
   session: Session<Space>,
   transaction: Transaction<Space>,
-  authorization: Authorization,
-) => {
-  const result = await Access.authorize(transaction, authorization);
-  if (result.ok) {
-    return execute(session.store.transaction(commit), session, transaction);
-  } else {
-    return result;
-  }
-};
+) => execute(session.store.transaction(commit), session, transaction);
 
-export const query = async <Space extends MemorySpace>(
+export const query = <Space extends MemorySpace>(
   session: Session<Space>,
   command: Query<Space>,
-  authorization: Authorization,
-): AsyncResult<Selection<Space>, QueryError | AuthorizationError> => {
-  const { ok: source, error } = await Access.authorize(command, authorization);
-  if (error) {
-    return { error };
-  }
-
+): Result<Selection<Space>, QueryError> => {
   try {
     return {
       ok: {
-        [source.sub]: session.store.transaction(select)(session, source.args),
+        [command.sub]: session.store.transaction(select)(session, command.args),
       } as Selection<Space>,
     };
   } catch (error) {
-    return { error: Error.query(source.sub, source.args.select, error as SqliteError) };
+    return { error: Error.query(command.sub, command.args.select, error as SqliteError) };
   }
 };
 
