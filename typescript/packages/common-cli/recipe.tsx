@@ -6,7 +6,7 @@ const InputSchema = z
   .object({
     superCoolField: z.string(),
     auth: z.object({
-      token: z.string(),
+      token: z.string().default("default-token"),
     }),
   })
   .describe("Secret");
