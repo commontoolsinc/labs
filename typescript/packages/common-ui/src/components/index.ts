@@ -29,3 +29,4 @@ export * as style from "./style.js";
 export * as CommonAudioRecorder from "./common-audio-recorder.js";
 export * as CommonForm from "./common-form.js";
 export * as CommonTable from "./common-table.js";
+export * as CommonGoogleOauth from "./common-google-oauth.js";
