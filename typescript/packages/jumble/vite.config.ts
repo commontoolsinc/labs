@@ -7,11 +7,11 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    allowedHosts: ["localhost", "127.0.0.1", "bens-macbook-pro.saga-castor.ts.net"],
     proxy: {
       "/api/ai/spell/": {
         target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ""),
       },
       "/api/spellbook": {
         target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
