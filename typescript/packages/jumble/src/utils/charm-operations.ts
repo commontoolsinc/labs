@@ -1,8 +1,8 @@
 import {
-  iterate,
-  CharmManager,
   Charm,
+  CharmManager,
   getIframeRecipe,
+  iterate,
   saveNewRecipeVersion,
 } from "@commontools/charm";
 import { Cell, EntityId } from "@commontools/runner";
@@ -14,7 +14,7 @@ export async function fixItCharm(
   charmManager: CharmManager,
   charm: Cell<Charm>,
   error: Error,
-  model = "google:gemini-2.0-pro",
+  model = "anthropic:claude-3-7-sonnet-20250219-thinking",
 ): Promise<string | undefined> {
   const iframeRecipe = getIframeRecipe(charm);
   if (!iframeRecipe?.iframe) {

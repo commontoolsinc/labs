@@ -66,6 +66,10 @@ const addModel = ({
     modelName = name;
   }
 
+  if (name.includes("-thinking")) {
+    modelName = modelName.split("-thinking")[0];
+  }
+
   const model = providerOptions
     ? provider(modelName, providerOptions)
     : provider(modelName);
@@ -75,6 +79,9 @@ const addModel = ({
     capabilities,
     aliases,
   };
+  console.log("#############################");
+  console.log(config);
+  console.log("#############################");
 
   MODELS[name] = config;
   for (const alias of aliases) {
@@ -134,7 +141,7 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
 
   addModel({
     provider: anthropicProvider,
-    name: "anthropic:claude-3-7-sonnet-20250219",
+    name: "anthropic:claude-3-7-sonnet-20250219-thinking",
     aliases: [
       "anthropic:claude-3-7-sonnet-thinking-latest",
       "claude-3-7-sonnet-thinking",
