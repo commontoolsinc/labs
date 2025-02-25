@@ -108,9 +108,9 @@ export type JSONSchema = {
     | "boolean"
     | "null";
   readonly properties?: Readonly<Record<string, JSONSchema>>;
-  readonly description?: readonly string[];
+  readonly description?: string;
   readonly default?: Readonly<JSONValue>;
-  readonly title?: readonly string[];
+  readonly title?: string;
   readonly required?: readonly string[];
   readonly enum?: readonly string[];
   readonly items?: Readonly<JSONSchema>;
