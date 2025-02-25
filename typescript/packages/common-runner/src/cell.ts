@@ -73,16 +73,18 @@ export interface Cell<T> {
   equals(other: Cell<any>): boolean;
   sink(callback: (value: T) => Cancel | undefined | void): Cancel;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
-  asSchema<S extends JSONSchema>(schema?: S): Cell<Schema<S>>;
+  asSchema<T = any, S extends JSONSchema | undefined = undefined>(
+    schema?: S,
+  ): Cell<S extends JSONSchema ? Schema<S> : T>;
   withLog(log: ReactivityLog): Cell<T>;
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Path,
     log?: ReactivityLog,
   ): QueryResult<DeepKeyLookup<T, Path>>;
   getAsDocLink(): DocLink;
-  getSourceCell<S extends JSONSchema = JSONSchema>(
+  getSourceCell<T = any, S extends JSONSchema | undefined = undefined>(
     schema?: S,
-  ): Cell<Schema<S>> | undefined;
+  ): Cell<S extends JSONSchema ? Schema<S> : T> | undefined;
   toJSON(): { cell: { "/": string } | undefined; path: PropertyKey[] };
   value: T;
   docLink: DocLink;
@@ -98,7 +100,10 @@ export interface Stream<T> {
   [isStreamMarker]: true;
 }
 
-export function getCellFromEntityId<T = any, S extends JSONSchema = JSONSchema>(
+export function getCellFromEntityId<
+  T = any,
+  S extends JSONSchema | undefined = undefined,
+>(
   space: Space,
   entityId: EntityId,
   path: PropertyKey[] = [],
@@ -109,7 +114,10 @@ export function getCellFromEntityId<T = any, S extends JSONSchema = JSONSchema>(
   return createCell(doc, path, log, schema);
 }
 
-export function getCellFromDocLink<T = any, S extends JSONSchema = JSONSchema>(
+export function getCellFromDocLink<
+  T = any,
+  S extends JSONSchema | undefined = undefined,
+>(
   space: Space, // TODO(seefeld): Read from DocLink once it's defined there
   docLink: DocLink,
   schema?: S,
@@ -121,7 +129,10 @@ export function getCellFromDocLink<T = any, S extends JSONSchema = JSONSchema>(
   return createCell(doc, docLink.path, log, schema);
 }
 
-export function getImmutableCell<T = any, S extends JSONSchema = JSONSchema>(
+export function getImmutableCell<
+  T = any,
+  S extends JSONSchema | undefined = undefined,
+>(
   data: T,
   schema?: S,
   log?: ReactivityLog,
