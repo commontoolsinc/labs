@@ -2,13 +2,13 @@ import { useState, useEffect } from "react";
 import { NavLink } from "react-router-dom";
 import { LuPencil, LuShare2 } from "react-icons/lu";
 import ShapeLogo from "@/assets/ShapeLogo.svg";
-import { NavPath } from "@/components/NavPath";
-import { ShareDialog } from "@/components/spellbook/ShareDialog";
-import { useCharmManager } from "@/contexts/CharmManagerContext";
+import { NavPath } from "@/components/NavPath.tsx";
+import { ShareDialog } from "@/components/spellbook/ShareDialog.tsx";
+import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { NAME, TYPE } from "@commontools/builder";
 import { useNavigate } from "react-router-dom";
-import { saveSpell } from "@/services/spellbook";
-import { User } from "@/components/User";
+import { saveSpell } from "@/services/spellbook.ts";
+import { User } from "@/components/User.tsx";
 
 type ShellHeaderProps = {
   replicaName?: string;

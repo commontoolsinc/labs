@@ -1,8 +1,8 @@
 import { useParams } from "react-router-dom";
 
-import { CharmRenderer } from "@/components/CharmRunner";
-import { LoadingSpinner } from "@/components/Loader";
-import { useCharm } from "@/hooks/use-charm";
+import { CharmRenderer } from "@/components/CharmRunner.tsx";
+import { LoadingSpinner } from "@/components/Loader.tsx";
+import { useCharm } from "@/hooks/use-charm.ts";
 
 function CharmShowView() {
   const { charmId } = useParams();

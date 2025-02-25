@@ -1,5 +1,5 @@
-import { llm } from "@/utils/llm";
-import { hydratePrompt, parseTagFromResponse } from "@/utils/prompt-library/prompting";
+import { llm } from "@/utils/llm.ts";
+import { hydratePrompt, parseTagFromResponse } from "@/utils/prompt-library/prompting.ts";
 
 const SYSTEM_PROMPT = `
 You are tasked with generating a concise, one-sentence description of a web application based on its specification, code, and schema. Your goal is to capture the essence of what the app does in a clear and informative manner.

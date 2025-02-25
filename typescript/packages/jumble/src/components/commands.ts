@@ -1,13 +1,13 @@
 import "./commands.css";
 import { castNewRecipe, Charm, CharmManager, compileAndRunRecipe } from "@commontools/charm";
 import { NavigateFunction } from "react-router-dom";
-import { charmId } from "@/utils/charms";
+import { charmId } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
 import { Cell, getDocByEntityId, getEntityId, getRecipe } from "@commontools/runner";
-import { iterateCharm } from "@/utils/charm-operations";
-import { BackgroundJob } from "@/contexts/BackgroundTaskContext";
-import { startCharmIndexing } from "@/utils/indexing";
-import { generateJSON } from "@/utils/prompt-library/json-gen";
+import { iterateCharm } from "@/utils/charm-operations.ts";
+import { BackgroundJob } from "@/contexts/BackgroundTaskContext.tsx";
+import { startCharmIndexing } from "@/utils/indexing.ts";
+import { generateJSON } from "@/utils/prompt-library/json-gen.ts";
 
 export type CommandType = "action" | "input" | "confirm" | "select" | "menu" | "transcribe";
 

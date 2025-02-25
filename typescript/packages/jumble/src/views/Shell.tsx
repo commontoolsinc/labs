@@ -5,10 +5,10 @@ import { Outlet, useParams, useLocation } from "react-router-dom";
 import { animated } from "@react-spring/web";
 import { MdOutlineStar } from "react-icons/md";
 
-import ShellHeader from "@/components/ShellHeader";
-import { CommandCenter } from "@/components/CommandCenter";
-import { useAuthentication } from "@/contexts/AuthenticationContext";
-import { AuthenticationView } from "@/views/AuthenticationView";
+import ShellHeader from "@/components/ShellHeader.tsx";
+import { CommandCenter } from "@/components/CommandCenter.tsx";
+import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
+import { AuthenticationView } from "@/views/AuthenticationView.tsx";
 
 
 export default function Shell() {

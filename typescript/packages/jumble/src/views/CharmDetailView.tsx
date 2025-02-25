@@ -1,20 +1,20 @@
 import { saveNewRecipeVersion, IFrameRecipe, Charm, getIframeRecipe } from "@commontools/charm";
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
-import { useCharmManager } from "@/contexts/CharmManagerContext";
-import { LoadingSpinner } from "@/components/Loader";
-import { useCharm } from "@/hooks/use-charm";
+import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { LoadingSpinner } from "@/components/Loader.tsx";
+import { useCharm } from "@/hooks/use-charm.ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
-import { CharmRenderer } from "@/components/CharmRunner";
-import { iterateCharm } from "@/utils/charm-operations";
-import { charmId } from "@/utils/charms";
-import { DitheredCube } from "@/components/DitherCube";
-import { VariantTray } from "@/components/VariantTray";
+import { CharmRenderer } from "@/components/CharmRunner.tsx";
+import { iterateCharm } from "@/utils/charm-operations.ts";
+import { charmId } from "@/utils/charms.ts";
+import { DitheredCube } from "@/components/DitherCube.tsx";
+import { VariantTray } from "@/components/VariantTray.tsx";
 import {
   generateCharmSuggestions,
   type CharmSuggestion,
-} from "@/utils/prompt-library/charm-suggestions";
+} from "@/utils/prompt-library/charm-suggestions.ts";
 import { Cell } from "@commontools/runner";
 type Tab = "iterate" | "code" | "data";
 

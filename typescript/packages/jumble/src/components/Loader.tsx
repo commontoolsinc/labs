@@ -1,4 +1,4 @@
-import { DitheredCube } from "./DitherCube";
+import { DitheredCube } from "./DitherCube.tsx";
 export const LoadingSpinner = ({
   visible = true,
   height = 512,

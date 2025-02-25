@@ -1,6 +1,6 @@
 import { Charm } from "@commontools/charm";
-import { CharmRenderer } from "@/components/CharmRunner";
-import { charmId } from "@/utils/charms";
+import { CharmRenderer } from "@/components/CharmRunner.tsx";
+import { charmId } from "@/utils/charms.ts";
 import { useNavigate, useParams } from "react-router-dom";
 import { Cell } from "@commontools/runner";
 

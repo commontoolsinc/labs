@@ -1,4 +1,4 @@
-import { useWebComponent } from "@/hooks/use-web-component";
+import { useWebComponent } from "@/hooks/use-web-component.ts";
 import React from "react";
 
 export function WebComponent<P extends Record<string, any>>({
