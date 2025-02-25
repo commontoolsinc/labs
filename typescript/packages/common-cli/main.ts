@@ -4,6 +4,8 @@ import { getEntityId } from "@commontools/runner";
 import { fetchInboxEmails } from "./gmail.ts";
 import { parse } from "https://deno.land/std/flags/mod.ts";
 
+import { getCellFromDocLink } from "@commontools/runner";
+
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") || "https://toolshed.saga-castor.ts.net";
 
 async function main(
@@ -37,11 +39,29 @@ async function main(
   console.log(`${TOOLSHED_API_URL}/${replica}/${charmId}`);
 
   const gotCharm = await manager.get(charmId);
+
+  // This grabs the "input argument cell"
   const argumentCell = manager.getArgument(gotCharm);
 
   console.log("CHARM", gotCharm);
   console.log("ARGUMENT", argumentCell);
   console.log("wat");
+
+  const authCell = {
+    cell: { "/": "baedreig4hf6rzrifupimvceiy5gxvrzs7y3shrj3tbuei7tv6y3ctkpg7e" },
+    path: ["argument", "auth"],
+  };
+
+  const gotAuthCell = getCellFromDocLink(authCell);
+  console.log("GOT AUTH CELL", gotAuthCell);
+
+  // gotAuthCell.get();
+  // await storage.sync(authCell);
+
+  // gotAuthCell.set({ token: "ohai" });
+
+  // manager.getArgument(gotCharm)
+  // manager.getArgument(gotCharm).key("auth").get()
 
   // const charms = await manager.getCharms();
   // console.log(`found ${charms.length} charms`);
