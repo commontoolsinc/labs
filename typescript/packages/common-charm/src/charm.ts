@@ -35,6 +35,7 @@ export const charmSchema: JSONSchema = {
     [NAME]: { type: "string" },
     [UI]: { type: "object" },
   },
+  required: [UI, NAME],
 } as const;
 
 export const charmListSchema: JSONSchema = {
@@ -45,8 +46,10 @@ export const charmListSchema: JSONSchema = {
 export const processSchema: JSONSchema = {
   type: "object",
   properties: {
+    argument: { type: "object" },
     [TYPE]: { type: "string" },
   },
+  required: [TYPE],
 } as const;
 
 export class CharmManager {
@@ -88,10 +91,10 @@ export class CharmManager {
     await idle();
   }
 
-  async get(
+  async get<T = Charm>(
     id: string | Cell<Charm>,
     runIt: boolean = true,
-  ): Promise<Cell<Charm> | undefined> {
+  ): Promise<Cell<T> | undefined> {
     // Load the charm from storage.
     let charm: Cell<Charm> | undefined;
     if (isCell(id)) {
@@ -106,7 +109,7 @@ export class CharmManager {
     const recipeId = await this.syncRecipe(charm);
     const recipe = getRecipe(recipeId);
 
-    let resultSchema = recipe?.resultSchema;
+    let resultSchema: JSONSchema | undefined = recipe?.resultSchema;
 
     // Unless there is a non-object schema, add UI and NAME properties if present
     if (!resultSchema || resultSchema.type === "object") {
@@ -121,10 +124,10 @@ export class CharmManager {
           },
         };
         if (hasUI && !resultSchema.properties![UI]) {
-          resultSchema.properties![UI] = { type: "object" }; // TODO(seefeld): make this the vdom schema
+          (resultSchema.properties as any)[UI] = { type: "object" }; // TODO(seefeld): make this the vdom schema
         }
         if (hasName && !resultSchema.properties![NAME]) {
-          resultSchema.properties![NAME] = { type: "string" };
+          (resultSchema.properties as any)[NAME] = { type: "string" };
         }
       }
     }
@@ -138,7 +141,7 @@ export class CharmManager {
         resultSchema,
       );
     } else {
-      return charm.asSchema(resultSchema);
+      return charm.asSchema<T>(resultSchema);
     }
   }
 
@@ -156,7 +159,7 @@ export class CharmManager {
 
   // Return Cell with argument content according to the schema of the charm.
   getArgument<T = any>(charm: Cell<Charm | T>): T {
-    const source = charm.getSourceCell();
+    const source = charm.getSourceCell(processSchema);
     const recipeId = source?.get()?.[TYPE];
     const recipe = getRecipe(recipeId);
     const argumentSchema = recipe?.argumentSchema;
