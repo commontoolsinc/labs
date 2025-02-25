@@ -95,8 +95,7 @@ export interface Cell<T> {
 }
 
 type TypeOrSchema<T, S extends JSONSchema | undefined = JSONSchema> = T extends
-  never ? S extends JSONSchema ? Schema<S> extends unknown ? any
-    : Schema<S>
+  never ? S extends JSONSchema ? Schema<S>
   : any
   : T;
 
