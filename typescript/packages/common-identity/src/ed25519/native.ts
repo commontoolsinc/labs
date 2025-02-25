@@ -1,6 +1,7 @@
 import * as ed25519 from "@noble/ed25519";
 import { ED25519_ALG, bytesToDid, didToBytes } from "./utils.js";
 import { DID, Signer, Verifier } from "../interface.js";
+import { clone } from "../utils.js";
 
 // WebCrypto Key formats for Ed25519
 // Non-explicitly described in https://wicg.github.io/webcrypto-secure-curves/#ed25519
@@ -13,6 +14,11 @@ import { DID, Signer, Verifier } from "../interface.js";
 // | spki   |   X    |         |
 
 // Returns whether ed25519 is supported in Web Crypto API.
+// Tests both 1) key creation and 2) serialization.
+//
+// * Chrome currently requires Experimental Web Features flag enabled for ed25519 keys
+// * Firefox supports ed25519 keys, though cannot be serialized (stored in IndexedDB)
+//   until v136 https://bugzilla.mozilla.org/show_bug.cgi?id=1939993
 export const isNativeEd25519Supported = (() => {
   let isSupported: boolean | null = null;
   return async function isNativeEd25519Supported() {
@@ -21,7 +27,8 @@ export const isNativeEd25519Supported = (() => {
     }
     let dummyKey = new Uint8Array(32);
     try {
-      await window.crypto.subtle.importKey("raw", dummyKey, ED25519_ALG, false, ["verify"]);
+      let key = await window.crypto.subtle.importKey("raw", dummyKey, ED25519_ALG, false, ["verify"]);
+      await clone(key);
       isSupported = true;
     } catch (e) {
       isSupported = false;

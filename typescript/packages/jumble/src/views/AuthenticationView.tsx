@@ -19,7 +19,7 @@ export function AuthenticationView() {
 
   const authWithMnemonicInput = useCallback(async () => {
     if (passphraseInput.current == null) { return; }
-    let passphrase = passphraseInput.current.value;
+    let passphrase = (passphraseInput.current as HTMLInputElement).value;
     await passphraseAuthenticate(passphrase);
     setMnemonic("");
   }, [passphraseInput]);
