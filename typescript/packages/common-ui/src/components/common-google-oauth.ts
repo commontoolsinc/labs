@@ -4,7 +4,7 @@ import { baseStyles } from "./style.js";
 
 @customElement("common-google-oauth")
 export class CommonGoogleOauthElement extends LitElement {
-  @property({ type: Object }) auth;
+  @property({ type: Object }) auth: Record<string, unknown> = {};
 
   async handleClick() {
     const authCellId = JSON.stringify(this.auth, null, 2);
