@@ -69,7 +69,7 @@ export type Schema<T extends JSONSchema, Root extends JSONSchema = T> =
                                 : // Default for object with no properties and no additionalProperties specified
                                   Record<string, unknown>
                             : // Default case
-                              unknown;
+                              any;
 
 // Helper type to handle oneOf and anyOf
 type FromUnion<T extends readonly any[], Root extends JSONSchema> = T extends readonly [
