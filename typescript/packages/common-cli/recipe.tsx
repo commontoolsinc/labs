@@ -2,8 +2,6 @@ import { h } from "@commontools/html";
 import { derive, handler, NAME, recipe, UI } from "@commontools/builder";
 import { z } from "zod";
 
-// const gotAuthCell = getCellFromDocLink(authCell);
-
 const InputSchema = z
   .object({
     superCoolField: z.string(),
@@ -32,12 +30,7 @@ export default recipe(InputSchema, OutputSchema, (state) => ({
         placeholder="List title"
         oncommon-input={updateValue({ value: state.superCoolField })}
       />
-      {/* HOW DO I GET THE AUTH CELL ID HERE? */}
-      <pre>
-        {derive(state.auth, (auth) => {
-          return JSON.stringify(auth);
-        })}
-      </pre>
+      <common-google-oauth auth={state.auth} />
     </div>
   ),
   exportedSuperCoolField: state.superCoolField,
