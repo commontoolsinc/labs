@@ -1,16 +1,23 @@
 // Load .env file
-import { CharmManager, createStorage, compileRecipe } from "@commontools/charm";
+import { CharmManager, compileRecipe, createStorage } from "@commontools/charm";
 import { getEntityId } from "@commontools/runner";
 import { fetchInboxEmails } from "./gmail.ts";
 import { parse } from "https://deno.land/std/flags/mod.ts";
 
-async function main(recipeSrc: string, replica: string = "common-knowledge", cause?: string, jsonData?: any) {
+const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") || "https://toolshed.saga-castor.ts.net";
+
+async function main(
+  recipeSrc: string,
+  replica: string = "common-knowledge",
+  cause?: string,
+  jsonData?: any,
+) {
   console.log({ recipeSrc, replica, cause });
 
   const storage = createStorage({
     type: "remote",
     replica,
-    url: new URL("https://toolshed.saga-castor.ts.net/"),
+    url: new URL(TOOLSHED_API_URL),
   });
 
   const manager = new CharmManager(storage);
@@ -25,12 +32,16 @@ async function main(recipeSrc: string, replica: string = "common-knowledge", cau
   manager.add([charm]);
   console.log({ charm });
 
-  const charmId = getEntityId(charm)['/'];
+  const charmId = getEntityId(charm)["/"];
   console.log(`http://localhost:5173/${replica}/${charmId}`);
-  console.log(`https://toolshed.saga-castor.ts.net/${replica}/${charmId}`);
+  console.log(`${TOOLSHED_API_URL}/${replica}/${charmId}`);
 
-  console.log(charm.get());
-  
+  const gotCharm = await manager.get(charmId);
+
+  console.log("CHARM", gotCharm);
+
+  console.log("wat");
+
   // const charms = await manager.getCharms();
   // console.log(`found ${charms.length} charms`);
 
@@ -44,7 +55,7 @@ async function main(recipeSrc: string, replica: string = "common-knowledge", cau
 const flags = parse(Deno.args, {
   string: ["replica", "cause", "data"],
   default: {
-    replica: "common-knowledge"
+    replica: "common-knowledge",
   },
 });
 
