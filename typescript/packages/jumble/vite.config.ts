@@ -9,6 +9,10 @@ export default defineConfig({
   server: {
     allowedHosts: ["localhost", "127.0.0.1", "bens-macbook-pro.saga-castor.ts.net"],
     proxy: {
+      "/api/integrations": {
+        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
+        changeOrigin: true,
+      },
       "/api/ai/spell/": {
         target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
         changeOrigin: true,

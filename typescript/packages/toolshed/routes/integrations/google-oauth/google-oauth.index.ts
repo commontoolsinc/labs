@@ -3,7 +3,9 @@ import * as handlers from "./google-oauth.handlers.ts";
 import * as routes from "./google-oauth.routes.ts";
 import { cors } from "hono/cors";
 
-const router = createRouter().openapi(routes.login, handlers.login);
+const router = createRouter()
+  .openapi(routes.login, handlers.login)
+  .openapi(routes.callback, handlers.callback);
 
 router.use(
   "/api/integrations/google-oauth/*",
