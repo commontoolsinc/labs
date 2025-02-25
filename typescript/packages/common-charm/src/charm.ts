@@ -75,22 +75,26 @@ export class CharmManager {
     await idle();
   }
 
-  async get(id: string, runIt: boolean = true): Promise<Cell<Charm> | undefined> {
-    await this.storage.syncCell(this.charmsDoc);
-
+  async get(id: string | Cell<Charm>, runIt: boolean = true): Promise<Cell<Charm> | undefined> {
     // Load the charm from storage.
-    const idAsDocId = JSON.stringify({ "/": id });
-    const resultDoc = await this.storage.syncCell(idAsDocId);
+    let charm: Cell<Charm> | undefined;
+    if (isCell(id)) {
+      charm = id;
+    } else {
+      const idAsDocId = JSON.stringify({ "/": id });
+      const doc = await this.storage.syncCell(idAsDocId);
+      charm = doc.asCell();
+    }
 
     // Make sure we have the recipe so we can run it!
-    const recipeId = await this.syncRecipe(resultDoc.asCell());
+    const recipeId = await this.syncRecipe(charm);
     const recipe = getRecipe(recipeId);
 
     let resultSchema = recipe?.resultSchema;
 
     // Unless there is a non-object schema, add UI and NAME properties if present
     if (!resultSchema || resultSchema.type === "object") {
-      const { [UI]: hasUI, [NAME]: hasName } = resultDoc.get();
+      const { [UI]: hasUI, [NAME]: hasName } = charm.getAsDocLink().cell!.get();
       if (hasUI || hasName) {
         // Copy the original schema, so we can modify properties without
         // affecting other uses of the same spell.
@@ -110,9 +114,13 @@ export class CharmManager {
     if (runIt) {
       // Make sure the charm is running. This is re-entrant and has no effect if
       // the charm is already running.
-      return run(undefined, undefined, resultDoc).asCell([], undefined, resultSchema);
+      return run(undefined, undefined, charm.getAsDocLink().cell!).asCell(
+        [],
+        undefined,
+        resultSchema,
+      );
     } else {
-      return resultDoc.asCell([], undefined, resultSchema);
+      return charm.asSchema(resultSchema);
     }
   }
 
