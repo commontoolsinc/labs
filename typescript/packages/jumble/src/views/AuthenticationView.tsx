@@ -1,7 +1,5 @@
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
-import { useCallback, useRef, useState } from "react";
 import ShapeLogo from "@/assets/ShapeLogo.svg";
-import { useAuthentication } from "@/contexts/AuthenticationContext";
 import { useCallback, useEffect, useState } from "react";
 import {
   LuArrowLeft,
@@ -187,12 +185,9 @@ export function AuthenticationView() {
 
           // Store credentials before completing authentication
           if (!storedCredential) {
-            // Only store if we don't already have one
             const storedCred = createPasskeyCredential(passkey.id());
             saveCredential(storedCred);
             setStoredCredential(storedCred);
-            // Add a small delay to ensure the UI updates
-            await new Promise((resolve) => setTimeout(resolve, 100));
           }
 
           return passkey;
@@ -202,11 +197,9 @@ export function AuthenticationView() {
           await auth.passphraseAuthenticate(passphrase);
 
           if (!storedCredential) {
-            // Only store if we don't already have one
             const storedCred = createPassphraseCredential();
             saveCredential(storedCred);
             setStoredCredential(storedCred);
-            await new Promise((resolve) => setTimeout(resolve, 100));
           }
         });
       }
