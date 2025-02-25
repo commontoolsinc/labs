@@ -15,6 +15,7 @@ import { createRef, type EntityId, getDocByEntityId, setDocByEntityId } from "./
 import { type ReactivityLog } from "./scheduler.js";
 import { type Cancel } from "./cancel.js";
 import { arrayEqual } from "./utils.js";
+import { type Space, DEFAULT_SPACE } from "./space.js";
 
 /**
  * Lowest level cell implementation.
@@ -224,7 +225,7 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends []
       : any
     : any;
 
-export function getDoc<T>(value?: T, cause?: any): DocImpl<T> {
+export function getDoc<T>(value?: T, cause?: any, space: Space = DEFAULT_SPACE): DocImpl<T> {
   const callbacks = new Set<(value: T, path: PropertyKey[]) => void>();
   let readOnly = false;
   let entityId: EntityId | undefined;
@@ -234,7 +235,7 @@ export function getDoc<T>(value?: T, cause?: any): DocImpl<T> {
   // If cause is provided, generate ID and return pre-existing cell if any.
   if (cause) {
     entityId = generateEntityId(value, cause);
-    const existing = getDocByEntityId(entityId, false);
+    const existing = getDocByEntityId(entityId, false, space);
     if (existing) return existing;
   }
 
@@ -286,7 +287,7 @@ export function getDoc<T>(value?: T, cause?: any): DocImpl<T> {
     isFrozen: () => readOnly,
     generateEntityId: (cause?: any): void => {
       entityId = generateEntityId(value, cause);
-      setDocByEntityId(entityId, self);
+      setDocByEntityId(entityId, self, space);
     },
     // This is the id and not the contents, because we .toJSON is called when
     // writing a structure to this that might contain a reference to this cell,
@@ -304,7 +305,7 @@ export function getDoc<T>(value?: T, cause?: any): DocImpl<T> {
     set entityId(id: EntityId) {
       if (entityId) throw new Error("Entity ID already set");
       entityId = id;
-      setDocByEntityId(id, self);
+      setDocByEntityId(id, self, space);
     },
     get sourceCell(): DocImpl<any> | undefined {
       return sourceCell;
@@ -330,7 +331,7 @@ export function getDoc<T>(value?: T, cause?: any): DocImpl<T> {
     },
   };
 
-  if (entityId) setDocByEntityId(entityId, self);
+  if (entityId) setDocByEntityId(entityId, self, space);
   return self;
 }
 
