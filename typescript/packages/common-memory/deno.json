@@ -19,6 +19,7 @@
     "@hono/hono": "jsr:@hono/hono@^4.6.9",
     "@std/encoding": "jsr:@std/encoding@^1.0.5",
     "@std/path": "jsr:@std/path@^1.0.8",
-    "@commontools/identity": "../common-identity/src/index.ts"
+    "@commontools/identity": "../common-identity/src/index.ts",
+    "multiformats": "npm:multiformats@^13.3.2"
   }
 }

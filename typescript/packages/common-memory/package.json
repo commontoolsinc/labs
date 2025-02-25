@@ -11,6 +11,7 @@
     "./commit": "./commit.ts"
   },
   "dependencies": {
-    "merkle-reference": "^2.0.1"
+    "merkle-reference": "^2.0.1",
+    "multiformats": "^13.3.2"
   }
 }
