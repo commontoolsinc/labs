@@ -15,11 +15,12 @@ const ALGS: PublicKeyCredentialParameters[] = [
   { type: "public-key", alg: -8 }, // ed25519
   { type: "public-key", alg: -7 }, // es256
   { type: "public-key", alg: -257 }, // rs256
-]
+];
 
 export interface PassKeyGetOptions {
-  mediation?: "conditional",
-  userVerification?: "required" | "preferred" | "discouraged"
+  mediation?: "conditional";
+  userVerification?: "required" | "preferred" | "discouraged";
+  allowCredentials?: PublicKeyCredentialDescriptor[];
 }
 
 // A `PassKey` represents an authentication via a WebAuthn authenticator.
@@ -66,7 +67,7 @@ export class PassKey {
   // Different data is available within `PublicKeyCredentials` depending
   // on whether it was created or retrieved. We need the PRF assertion
   // only available on "get" requests, so we don't return a `PassKey` here.
-  static async create(name: string, displayName: string): Promise<void> {
+  static async create(name: string, displayName: string): Promise<PublicKeyCredential> {
     const challenge = random(32);
     const userId = random(32);
     const user = {
@@ -74,7 +75,7 @@ export class PassKey {
       name,
       displayName,
     };
-    
+
     let publicKey: PublicKeyCredentialCreationOptions = {
       challenge,
       rp: { id: RP_ID, name: RP },
@@ -93,10 +94,10 @@ export class PassKey {
         userVerification: "preferred", // default
       },
       pubKeyCredParams: ALGS,
-      extensions: { prf: { eval: { first: PRF_SALT }}},
+      extensions: { prf: { eval: { first: PRF_SALT } } },
       timeout: TIMEOUT,
     };
-        
+
     let result = (await navigator.credentials.create({ publicKey })) as PublicKeyCredential | null;
     if (!result) {
       throw new Error("common-identity: Could not create passkey");
@@ -105,23 +106,29 @@ export class PassKey {
     if (!extResults?.prf?.enabled) {
       throw new Error("common-identity: prf extension not supported.");
     }
+
+    return result;
   }
 
   // Retrieve a `PassKey` from a Web Authn authenticator.
   // In browsers, must be called via a user gesture.
-  static async get({ userVerification, mediation }: PassKeyGetOptions = {}): Promise<PassKey> {
+  static async get({
+    userVerification,
+    mediation,
+    allowCredentials = [],
+  }: PassKeyGetOptions = {}): Promise<PassKey> {
     // Select any credential available with the same `RP_ID`.
-    let credential = await navigator.credentials.get({
+    let credential = (await navigator.credentials.get({
       publicKey: {
-        allowCredentials: [],
+        allowCredentials,
         challenge: random(32),
         rpId: RP_ID,
         userVerification: userVerification ?? "preferred",
-        extensions: { prf: { eval: { first: PRF_SALT }}},
+        extensions: { prf: { eval: { first: PRF_SALT } } },
         timeout: TIMEOUT,
       },
       mediation,
-    }) as PublicKeyCredential | null;
+    })) as PublicKeyCredential | null;
 
     if (!credential) {
       throw new Error("common-identity: Could not create credentials.");
@@ -136,7 +143,7 @@ export class PassKey {
     }
     return new PassKey(credential);
   }
-  
+
   private getCredentials(): PublicKeyCredential {
     return this.credentials;
   }
