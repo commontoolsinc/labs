@@ -14,10 +14,18 @@ import {
   LuTrash2,
   LuCheck,
 } from "react-icons/lu";
+import {
+  type StoredCredential,
+  getStoredCredential,
+  saveCredential,
+  clearStoredCredential,
+  createPasskeyCredential,
+  createPassphraseCredential,
+  getPublicKeyCredentialDescriptor,
+} from "@/utils/credentials";
 
 const BTN_PRIMARY = `w-full px-4 py-2 bg-black text-white hover:bg-gray-800 disabled:opacity-50 flex items-center justify-center gap-2`;
 const LIST_ITEM = `w-full p-2 text-left text-sm border-2 border-black hover:-translate-y-[2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.5)] shadow-[1px_1px_0px_0px_rgba(0,0,0,0.3)] transition-all duration-100 ease-in-out cursor-pointer flex items-center gap-2`;
-const INPUT_STYLE = `w-full p-2 border rounded`;
 
 type AuthMethod = "passkey" | "passphrase";
 type AuthFlow = "register" | "login";
@@ -31,12 +39,7 @@ interface SuccessRegistrationProps {
   mnemonic?: string;
   onLogin: () => void;
   method: AuthMethod;
-}
-
-interface StoredCredential {
-  id: string;
-  type: "public-key" | "passphrase";
-  method: AuthMethod;
+  credentialId?: string;
 }
 
 function ErrorCallout({ error, onDismiss }: ErrorCalloutProps) {
@@ -49,7 +52,13 @@ function ErrorCallout({ error, onDismiss }: ErrorCalloutProps) {
     </div>
   );
 }
-function SuccessRegistration({ mnemonic, onLogin, method }: SuccessRegistrationProps) {
+
+function SuccessRegistration({
+  mnemonic,
+  onLogin,
+  method,
+  credentialId,
+}: SuccessRegistrationProps) {
   const [copied, setCopied] = useState(false);
 
   const copyToClipboard = () => {
@@ -62,29 +71,38 @@ function SuccessRegistration({ mnemonic, onLogin, method }: SuccessRegistrationP
 
   return (
     <div className="text-center">
-      {mnemonic && (
+      {method === "passkey" ? (
         <div className="mb-4">
-          <p className="mb-2">Your Secret Recovery Phrase:</p>
-          <div className="relative">
-            <textarea
-              readOnly
-              value={mnemonic}
-              rows={3}
-              className="w-full p-2 pr-10 border-2 border-black resize-none"
-            />
-            <button
-              onClick={copyToClipboard}
-              className={`absolute right-2 top-1/2 transform -translate-y-1/2 ${
-                copied ? "text-green-500" : ""
-              }`}
-            >
-              {copied ? <LuCheck className="w-5 h-5" /> : <LuCopy className="w-5 h-5" />}
-            </button>
-          </div>
-          <p className="text-sm text-gray-500 mt-2">
-            Please save this phrase securely. You'll need it to log in.
-          </p>
+          <p className="mb-2">Passkey successfully registered!</p>
+          {credentialId && (
+            <p className="text-sm text-gray-500 mt-2">Key ID: ...{credentialId.slice(-4)}</p>
+          )}
         </div>
+      ) : (
+        mnemonic && (
+          <div className="mb-4">
+            <p className="mb-2">Your Secret Recovery Phrase:</p>
+            <div className="relative">
+              <textarea
+                readOnly
+                value={mnemonic}
+                rows={3}
+                className="w-full p-2 pr-10 border-2 border-black resize-none"
+              />
+              <button
+                onClick={copyToClipboard}
+                className={`absolute right-2 top-1/2 transform -translate-y-1/2 ${
+                  copied ? "text-green-500" : ""
+                }`}
+              >
+                {copied ? <LuCheck className="w-5 h-5" /> : <LuCopy className="w-5 h-5" />}
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 mt-2">
+              Please save this phrase securely. You'll need it to log in.
+            </p>
+          </div>
+        )
       )}
       <button className={BTN_PRIMARY} onClick={onLogin}>
         <LuLock className="w-5 h-5" /> Continue to Login
@@ -99,11 +117,12 @@ export function AuthenticationView() {
   const [method, setMethod] = useState<AuthMethod | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mnemonic, setMnemonic] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [registrationSuccess, setRegistrationSuccess] = useState(false);
   const [availableMethods, setAvailableMethods] = useState<AuthMethod[]>([]);
-  const [storedCredential, setStoredCredential] = useState<StoredCredential | null>(() => {
-    const stored = localStorage.getItem("storedCredential");
-    return stored ? JSON.parse(stored) : null;
-  });
+  const [storedCredential, setStoredCredential] = useState<StoredCredential | null>(() =>
+    getStoredCredential(),
+  );
 
   useEffect(() => {
     const methods: AuthMethod[] = ["passphrase"]; // Passphrase always available
@@ -123,17 +142,20 @@ export function AuthenticationView() {
     }
   }, []);
 
-  async function handleAuth<T>(action: () => Promise<T>) {
+  const handleAuth = useCallback(async <T,>(action: () => Promise<T>) => {
     try {
       setError(null);
+      setIsProcessing(true);
       return await action();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Authentication failed");
       // Reset both flow and method to return to initial state
       setFlow(null);
       setMethod(null);
+    } finally {
+      setIsProcessing(false);
     }
-  }
+  }, []);
 
   const handleRegister = useCallback(
     async (selectedMethod: string) => {
@@ -142,22 +164,10 @@ export function AuthenticationView() {
           auth.passkeyRegister("Common Tools User", "commontoolsuser"),
         );
         if (!credential) throw new Error("Credential not found");
-
-        const storedCred: StoredCredential = {
-          id: credential.id,
-          type: "public-key",
-          method: "passkey",
-        };
-        localStorage.setItem("storedCredential", JSON.stringify(storedCred));
+        setMethod("passkey");
+        setRegistrationSuccess(true);
       } else {
         const mnemonic = await auth.passphraseRegister();
-        // Store passphrase credential info
-        const storedCred: StoredCredential = {
-          id: crypto.randomUUID(), // Generate a unique ID for the passphrase credential
-          type: "passphrase",
-          method: "passphrase",
-        };
-        localStorage.setItem("storedCredential", JSON.stringify(storedCred));
         setMnemonic(mnemonic);
       }
     },
@@ -167,17 +177,38 @@ export function AuthenticationView() {
   const handleLogin = useCallback(
     async (selectedMethod: string, passphrase?: string) => {
       if (selectedMethod === "passkey") {
-        if (storedCredential && storedCredential.type == "public-key") {
-          const credentialDescriptor: PublicKeyCredentialDescriptor = {
-            id: Uint8Array.from(atob(storedCredential.id), (c) => c.charCodeAt(0)),
-            type: storedCredential.type,
-          };
-          await handleAuth(() => auth.passkeyAuthenticate(credentialDescriptor));
-        } else {
-          await handleAuth(() => auth.passkeyAuthenticate());
-        }
+        const credentialDescriptor = getPublicKeyCredentialDescriptor(storedCredential);
+
+        await handleAuth(async () => {
+          setMethod("passkey");
+          setFlow("login");
+          debugger;
+          const passkey = await auth.passkeyAuthenticate(credentialDescriptor);
+
+          // Store credentials before completing authentication
+          if (!storedCredential) {
+            // Only store if we don't already have one
+            const storedCred = createPasskeyCredential(passkey.id());
+            saveCredential(storedCred);
+            setStoredCredential(storedCred);
+            // Add a small delay to ensure the UI updates
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+
+          return passkey;
+        });
       } else if (passphrase) {
-        await handleAuth(() => auth.passphraseAuthenticate(passphrase));
+        await handleAuth(async () => {
+          await auth.passphraseAuthenticate(passphrase);
+
+          if (!storedCredential) {
+            // Only store if we don't already have one
+            const storedCred = createPassphraseCredential();
+            saveCredential(storedCred);
+            setStoredCredential(storedCred);
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+        });
       }
     },
     [storedCredential, handleAuth, auth],
@@ -185,25 +216,23 @@ export function AuthenticationView() {
 
   const handleMethodSelect = useCallback(
     async (selectedMethod: AuthMethod) => {
-      debugger;
       setMethod(selectedMethod);
       if (flow === "register") {
         await handleRegister(selectedMethod);
-      } else {
-        await handleLogin(selectedMethod);
+      } else if (flow === "login") {
+        if (selectedMethod === "passkey") {
+          await handleLogin(selectedMethod); // This login already handles credential storage
+        }
+        // For passphrase, we'll wait for the form submission
       }
     },
-    [flow, setMethod, handleRegister, handleLogin],
+    [flow, handleRegister, handleLogin],
   );
-
-  const clearStoredCredential = useCallback(() => {
-    localStorage.removeItem("storedCredential");
-    setStoredCredential(null);
-  }, []);
 
   if (auth.user) {
     throw new Error("Already authenticated");
   }
+
   return (
     <div>
       <div className="flex justify-center mb-4">
@@ -212,13 +241,23 @@ export function AuthenticationView() {
       <div className="max-w-md mx-auto p-4 bg-white border-2">
         {error && <ErrorCallout error={error} onDismiss={() => setError(null)} />}
 
-        {mnemonic ? (
+        {isProcessing ? (
+          <div className="text-center py-4">
+            <p>Please follow the browser's prompts to continue...</p>
+          </div>
+        ) : mnemonic || registrationSuccess ? (
           <SuccessRegistration
-            mnemonic={mnemonic}
+            mnemonic={mnemonic || undefined}
             method={method!}
-            onLogin={() => {
-              setMnemonic(null);
-              setFlow("login");
+            credentialId={storedCredential?.id}
+            onLogin={async () => {
+              if (method === "passkey") {
+                await handleLogin("passkey");
+              } else {
+                setMnemonic(null);
+                setRegistrationSuccess(false);
+                setFlow("login");
+              }
             }}
           />
         ) : flow === null ? (
@@ -227,9 +266,13 @@ export function AuthenticationView() {
               <>
                 <button
                   className={BTN_PRIMARY}
-                  onClick={() => {
-                    setMethod(storedCredential.method);
-                    setFlow("login");
+                  onClick={async () => {
+                    if (storedCredential.method === "passkey") {
+                      await handleLogin("passkey");
+                    } else {
+                      setMethod(storedCredential.method);
+                      setFlow("login");
+                    }
                   }}
                 >
                   <LuKey className="w-5 h-5" />
@@ -243,7 +286,13 @@ export function AuthenticationView() {
                 <button className={LIST_ITEM} onClick={() => setFlow("register")}>
                   <LuKeyRound className="w-5 h-5" /> Register New Key
                 </button>
-                <button className={LIST_ITEM} onClick={clearStoredCredential}>
+                <button
+                  className={LIST_ITEM}
+                  onClick={() => {
+                    clearStoredCredential();
+                    setStoredCredential(null);
+                  }}
+                >
                   <LuTrash2 className="w-5 h-5" /> Clear Saved Credentials
                 </button>
               </>
@@ -262,7 +311,11 @@ export function AuthenticationView() {
           <div className="space-y-4">
             <h2 className="text-xl mb-4">{flow === "login" ? "Login with" : "Register with"}</h2>
             {availableMethods.map((m) => (
-              <button key={m} className={LIST_ITEM} onClick={() => handleMethodSelect(m)}>
+              <button
+                key={m}
+                className={LIST_ITEM}
+                onClick={async () => await handleMethodSelect(m)}
+              >
                 {m === "passkey" ? (
                   <>
                     <LuKey className="w-5 h-5" /> Use Passkey
@@ -281,7 +334,7 @@ export function AuthenticationView() {
         ) : method === "passphrase" ? (
           <div className="space-y-4">
             {flow === "register" ? (
-              <button className={BTN_PRIMARY} onClick={handleRegister}>
+              <button className={BTN_PRIMARY} onClick={() => handleRegister("passphrase")}>
                 <LuKeyRound className="w-5 h-5" /> Register with Passphrase
               </button>
             ) : (

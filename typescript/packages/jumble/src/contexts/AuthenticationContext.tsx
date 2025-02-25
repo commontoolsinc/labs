@@ -10,9 +10,9 @@ interface AuthenticationContextType {
   // The authenticated user/persona.
   user: Identity | void;
   // Call PassKey registration.
-  passkeyRegister: (name: string, displayName: string) => Promise<PublicKeyCredential>;
+  passkeyRegister: (name: string, displayName: string) => Promise<PassKey>;
   // Authenticate the user via passkey.
-  passkeyAuthenticate: (descriptor?: PublicKeyCredentialDescriptor) => Promise<void>;
+  passkeyAuthenticate: (descriptor?: PublicKeyCredentialDescriptor) => Promise<PassKey>;
   // Generate a passphrase for a new user
   passphraseRegister: () => Promise<string>;
   // Authenticate via passphrase.
@@ -89,13 +89,14 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
   const passkeyAuthenticate = useCallback(
     async (key?: PublicKeyCredentialDescriptor) => {
       if (!keyStore) {
-        return;
+        throw new Error("Key store not initialized");
       }
       // Pass the keyName to PassKey.get() if provided
       const passkey = await PassKey.get({ allowCredentials: key ? [key] : [] });
       const root = await passkey.createRootKey();
       await keyStore.set(ROOT_KEY, root);
       setRoot(root);
+      return passkey;
     },
     [keyStore],
   );
