@@ -8,7 +8,7 @@ export default function LLMTestView() {
   const [result, setResult] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const MODEL = "anthropic:claude-3-5-sonnet-latest";
+  const MODEL = "anthropic:claude-3-7-sonnet-latest";
 
   const handleSubmit = async () => {
     setLoading(true);

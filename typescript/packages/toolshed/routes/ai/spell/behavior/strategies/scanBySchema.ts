@@ -13,7 +13,7 @@ export async function generateSchema(
   const prefixedLogger = new PrefixedLogger(logger, "scanBySchema");
   prefixedLogger.info(`Generating schema for query: ${query}`);
   const schemaPrompt = {
-    model: "claude-3-5-sonnet",
+    model: "claude-3-7-sonnet",
     messages: [
       {
         role: "user" as const,

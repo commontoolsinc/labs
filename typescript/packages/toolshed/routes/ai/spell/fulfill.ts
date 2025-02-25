@@ -149,7 +149,7 @@ export async function processSchema(
   logger.info({ prompt }, "Sending request to LLM");
   const llmStartTime = performance.now();
   const llmResponse = await generateText({
-    model: "claude-3-5-sonnet",
+    model: "claude-3-7-sonnet",
     system: body.many
       ? "Return valid JSON array synthesized from real data from the database. Each object must match the schema exactly."
       : "Return a valid JSON object synthesized from real data from the database. Must match the schema exactly.",

@@ -61,7 +61,7 @@ Remember to consider the context of the code running inside an iframe and ensure
  * @param code - The code of the web application.
  * @param schema - The schema of the web application.
  * @param error - The error stacktrace that resulted from running the code.
- * @param model - The model to use to generate the description. (default: "anthropic:claude-3-5-sonnet-latest")
+ * @param model - The model to use to generate the description. (default: "anthropic:claude-3-7-sonnet-latest")
  * @returns The recipe.
  */
 export async function fixRecipePrompt(
@@ -69,7 +69,7 @@ export async function fixRecipePrompt(
   code: string,
   schema: string,
   error: string,
-  model: string = "google:gemini-2.0-pro",
+  model: string = "anthropic:claude-3-7-sonnet-latest",
 ) {
   const system = hydratePrompt(SYSTEM_PROMPT, {
     SPEC: spec,

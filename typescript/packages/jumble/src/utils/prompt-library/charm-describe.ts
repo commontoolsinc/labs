@@ -38,14 +38,14 @@ Provide your one-sentence description inside <description> tags.
  * @param spec - The specification/description of the web application.
  * @param code - The code of the web application.
  * @param schema - The schema of the web application.
- * @param model - The model to use to generate the description. (default: "anthropic:claude-3-5-sonnet-latest")
+ * @param model - The model to use to generate the description. (default: "anthropic:claude-3-7-sonnet-latest")
  * @returns The generated description.
  */
 export async function describeCharm(
   spec: string,
   code: string,
   schema: string,
-  model: string = "anthropic:claude-3-5-sonnet-latest",
+  model: string = "anthropic:claude-3-7-sonnet-latest",
 ) {
   const system = hydratePrompt(SYSTEM_PROMPT, { SPEC: spec, CODE: code, SCHEMA: schema });
   const prompt = `Describe the functionality of this app in a single sentence`;
