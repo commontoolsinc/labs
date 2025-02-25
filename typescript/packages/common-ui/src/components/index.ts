@@ -11,6 +11,7 @@ export * as CommonInputFile from "./common-input-file.js";
 export * as CommonMedia from "./common-media.js";
 export * as CommonRecord from "./common-record.js";
 export * as CommonScreen from "./common-screen.js";
+export * as CommonSecret from "./common-secret.js";
 export * as CommonVstack from "./common-vstack.js";
 export * as CommonUnibox from "./common-unibox.js";
 export * as CommonSuggestion from "./common-suggestion.js";
