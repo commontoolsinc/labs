@@ -48,7 +48,7 @@ export function resolveSchema(
   // references, but that's on purpose.
   if (schema.asCell && resolvedSchema?.asCell && filterAsCell) {
     resolvedSchema = { ...resolvedSchema };
-    delete resolvedSchema.asCell;
+    delete (resolvedSchema as any).asCell;
   }
 
   // Return no schema if all it said is that this was a reference or an
