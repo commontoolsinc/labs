@@ -125,8 +125,7 @@ export function AuthenticationView() {
   );
 
   useEffect(() => {
-    const methods: AuthMethod[] = ["passphrase"]; // Passphrase always available
-
+    const methods: AuthMethod[] = []; // Passphrase always available
     // Add passkey if available
     const isPasskeyAvailable =
       window.location.hostname !== "localhost" && window.PublicKeyCredential !== undefined;
@@ -134,6 +133,8 @@ export function AuthenticationView() {
     if (isPasskeyAvailable) {
       methods.push("passkey");
     }
+
+    methods.push("passphrase");
 
     setAvailableMethods(methods);
     // Only set default method if there's just one option
@@ -182,7 +183,6 @@ export function AuthenticationView() {
         await handleAuth(async () => {
           setMethod("passkey");
           setFlow("login");
-          debugger;
           const passkey = await auth.passkeyAuthenticate(credentialDescriptor);
 
           // Store credentials before completing authentication
