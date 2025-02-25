@@ -43,14 +43,14 @@ export const charmListSchema: JSONSchema = {
   items: { ...charmSchema, asCell: true },
 } as const;
 
-export const processSchema: JSONSchema = {
+export const processSchema = {
   type: "object",
   properties: {
     argument: { type: "object" },
     [TYPE]: { type: "string" },
   },
   required: [TYPE],
-} as const;
+} as const satisfies JSONSchema;
 
 export class CharmManager {
   private space: Space;
