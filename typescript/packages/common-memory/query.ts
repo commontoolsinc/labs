@@ -1,4 +1,4 @@
-import type { Principal, MemorySpace, Selector, Meta, Query } from "./interface.ts";
+import type { DID, MemorySpace, Selector, Meta, Query } from "./interface.ts";
 
 export const create = <Space extends MemorySpace>({
   issuer,
@@ -7,15 +7,22 @@ export const create = <Space extends MemorySpace>({
   since,
   meta,
 }: {
-  issuer: Principal;
+  issuer: DID;
   subject: Space;
   select: Selector;
   since?: number;
   meta?: Meta;
-}): Query<Space> => ({
-  cmd: "/memory/query",
-  iss: issuer,
-  sub: subject,
-  args: since != null ? { select, since } : { select },
-  ...(meta ? { meta } : undefined),
-});
+}): Query<Space> => {
+  const iat = (Date.now() / 1000) | 0;
+  const exp = iat + 60 * 60; // expires in an hour
+  return {
+    cmd: "/memory/query",
+    iss: issuer,
+    sub: subject,
+    args: since != null ? { select, since } : { select },
+    ...(meta ? { meta } : undefined),
+    prf: [],
+    iat,
+    exp,
+  };
+};

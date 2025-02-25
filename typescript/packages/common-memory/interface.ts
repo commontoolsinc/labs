@@ -2,40 +2,160 @@ import type { Reference } from "merkle-reference";
 
 export type { Reference };
 
+export interface Clock {
+  now(): UTCUnixTimestampInSeconds;
+}
+
 export type SubscriberCommand = {
   watch?: Query;
   unwatch?: Query;
 };
 
-export type Invocation<
-  Ability extends The = The,
-  Of extends Principal = Principal,
-  Command extends {} = {},
-> = {
-  cmd: Ability;
-  iss: Principal;
-  sub: Of;
-  args: Command;
-  meta?: Meta;
+/**
+ * Some principal identified via DID identifier.
+ */
+export interface Principal<ID extends DID = DID> {
+  did(): ID;
+}
+
+/**
+ * Principal capable of issuing an {@link Authorization}.
+ */
+export interface Authority extends Principal {
+  authorize<T extends JSONValue>(
+    access: Iterable<Reference<T> | T>,
+  ): AwaitResult<Authorization<T>, AuthorizationError>;
+}
+
+export interface Verifier<ID extends DID = DID> extends Principal<ID> {
+  verify(authorization: {
+    payload: Uint8Array;
+    signature: Uint8Array;
+  }): AwaitResult<Unit, AuthorizationError>;
+}
+
+export interface Signer<ID extends DID = DID> extends Principal<ID> {
+  sign<T>(payload: AsBytes<T>): AwaitResult<Signature<T>, Error>;
+
+  verifier: Verifier<ID>;
+}
+
+export interface AsBytes<T> extends Uint8Array {
+  valueOf(): this & AsBytes<T>;
+}
+
+export type AsString<T> = string & {
+  valueOf(): AsString<T>;
 };
 
+export interface Signature<Payload> extends Uint8Array {
+  valueOf(): this & Signature<Payload>;
+}
+
+export type UCAN<Command extends Invocation> = {
+  invocation: Command;
+  authorization: Authorization<Command>;
+};
+
+/**
+ * Proof of authorization for a given access.
+ */
+export interface Proof<Access extends JSONValue> {
+  [link: AsString<Reference<Access>>]: Unit;
+}
+
+/**
+ * Represents a verifiable authorization issued by specific {@link Authority}.
+ * It is slightly more abstract notion than signed payload.
+ */
+export type Authorization<T extends JSONValue = JSONValue> = {
+  signature: Signature<Proof<T>>;
+  access: Proof<T>;
+};
+
+export interface AuthorizationError extends Error {
+  name: "AuthorizationError";
+}
+
+export type Call<Ability extends The = The, Of extends DID = DID, Args extends {} = {}> = {
+  cmd: Ability;
+  sub: Of;
+  args: Command;
+  nonce?: Uint8Array;
+};
+
+export type Command<Ability extends The = The, Of extends DID = DID, In extends {} = {}> = {
+  cmd: Ability;
+  sub: Of;
+  args: In;
+  meta?: Meta;
+  nonce?: Uint8Array;
+};
+
+export type Invocation<Ability extends The = The, Of extends DID = DID, In extends {} = {}> = {
+  iss: DID;
+  aud?: DID;
+  cmd: Ability;
+  sub: Of;
+  args: In;
+  meta?: Meta;
+  nonce?: Uint8Array;
+  exp?: UTCUnixTimestampInSeconds;
+  iat?: UTCUnixTimestampInSeconds;
+  prf: Delegation[];
+  cause?: void;
+};
+
+/**
+ * In the future this will be a delegation chain, but for now we do not support
+ * delegation so it is empty chain implying issuer must be a subject.,
+ */
+export type Delegation = never;
+
+export type UTCUnixTimestampInSeconds = number;
+export type Seconds = number;
+
 export type Protocol<Space extends MemorySpace = MemorySpace> = {
-  this: Space;
-  memory: {
-    transact(source: {
-      changes: ChangesBuilder;
-    }): Task<Result<Commit<Space>, ConflictError | TransactionError | ConnectionError>>;
-    query: {
-      (query: { select: Selector; since?: number }): Task<Result<Selection<Space>, QueryError>>;
-      subscribe(source: Subscribe<Space>["args"]): Task<SubscribeResult, Transaction<Space>>;
-      unsubscribe(source: Unsubscribe<Space>["args"]): Task<SubscribeResult>;
+  [Subject in Space]: {
+    memory: {
+      transact(source: {
+        changes: Changes;
+      }): Task<
+        Result<
+          Commit<Space>,
+          AuthorizationError | ConflictError | TransactionError | ConnectionError
+        >
+      >;
+      query: {
+        (query: { select: Selector; since?: number }): Task<
+          Result<Selection<Space>, AuthorizationError | QueryError>
+        >;
+        subscribe(
+          source: Subscribe<Space>["args"],
+        ): Task<Result<Unit, SystemError | AuthorizationError>, Transaction<Space>>;
+        unsubscribe(
+          source: Unsubscribe<Space>["args"],
+        ): Task<Result<Unit, SystemError | AuthorizationError>>;
+      };
     };
   };
 };
 
-export type InferProtocol<Protocol> = UnionToIntersection<InferProtoMethods<Protocol>>;
-export type Abilities<Protocol> = keyof InferProtocol<Protocol>;
-export type InferProtoMethods<Protocol, Methods = Protocol, Prefix extends string = ""> = {
+export type Proto = {
+  [Subject: DID]: {
+    [Namespace: string]: {};
+  };
+};
+
+export type InferProtocol<Protocol extends Proto> = UnionToIntersection<
+  InferProtoMethods<Protocol>
+>;
+export type Abilities<Protocol extends Proto> = keyof InferProtocol<Protocol>;
+export type InferProtoMethods<
+  Protocol extends Proto,
+  Methods = Protocol[keyof Protocol],
+  Prefix extends string = "",
+> = {
   [Name in keyof Methods & string]: Methods[Name] extends (
     input: infer In extends {},
   ) => Task<infer Out extends {}, infer Effect>
@@ -63,7 +183,15 @@ export type Method<Protocol, Ability extends The, In extends {}, Out extends {},
   Out: Out;
   Effect: Effect;
   Method: (input: In) => Task<Out, Effect>;
-  ConsumerCommand: Invocation<Ability, InferOf<Protocol>, In>;
+  ConsumerCommand: {
+    cmd: Ability;
+    // sub: InferOf<Protocol> & MemorySpace;
+    sub: MemorySpace;
+    args: In;
+    meta?: Meta;
+    nonce?: Uint8Array;
+  };
+  ConsumerInvocation: Invocation<Ability, InferOf<Protocol>, In>;
   ProviderCommand: Receipt<Invocation<Ability, InferOf<Protocol>, In>, Out, Effect>;
   Invocation: InvocationView<Invocation<Ability, InferOf<Protocol>, In>, Out, Effect>;
   Pending: {
@@ -72,7 +200,11 @@ export type Method<Protocol, Ability extends The, In extends {}, Out extends {},
   };
 };
 
-export type InferOf<T> = T extends { this: infer U extends Principal } ? U : never;
+type PC = ProviderCommand<Protocol>;
+type CCI = ConsumerCommandInvocation<Protocol>;
+
+export type InferOf<T> = keyof T extends DID ? keyof T : never;
+
 /**
  * Utility type that takes union type `U` and produces intersection type of it's members.
  */
@@ -84,50 +216,73 @@ export type Provider<Protocol extends {}> = {
   perform(command: ProviderCommand<Protocol>): AwaitResult<Unit, SystemError>;
 };
 
-export interface ConsumerSession<Protocol extends {}>
-  extends TransformStream<ProviderCommand<Protocol>, ConsumerCommand<Protocol>> {}
+export interface ConsumerSession<Protocol extends Proto>
+  extends TransformStream<ProviderCommand<Protocol>, UCAN<ConsumerCommandInvocation<Protocol>>> {}
 
-export interface ProviderSession<Protocol extends {}>
-  extends TransformStream<ConsumerCommand<Protocol>, ProviderCommand<Protocol>> {
+export interface ProviderSession<Protocol extends Proto>
+  extends TransformStream<UCAN<ConsumerCommandInvocation<Protocol>>, ProviderCommand<Protocol>> {
   close(): CloseResult;
 }
 
-export type ProviderCommand<Protocol> = ProtocolMethod<Protocol> extends {
-  ProviderCommand: infer Command;
+export type ProviderCommand<Protocol extends Proto> = ProtocolMethod<Protocol> extends {
+  ProviderCommand: Receipt<infer Command, infer Result, infer Effect>;
 }
-  ? Command
+  ? Receipt<Command, Result, Effect>
   : never;
 
-export type ProtocolMethod<Protocol> = InferProtocol<Protocol>[Abilities<Protocol>];
+export type ProtocolMethod<Protocol extends Proto> = InferProtocol<Protocol>[Abilities<Protocol>];
 
-export type ConsumerCommand<Protocol> = ProtocolMethod<Protocol> extends {
-  ConsumerCommand: infer Command;
+export type ConsumerCommand<Protocol extends Proto> = ProtocolMethod<Protocol> extends {
+  ConsumerCommand: Command<infer Ability, infer Of, infer In>;
 }
-  ? Command
+  ? Command<Ability, Of, In>
   : never;
 
-export type ConsumerCommandFor<Ability, Protocol> = MethodFor<
+export type ConsumerCommandInvocation<
+  Protocol extends Proto,
+  Method = ProtocolMethod<Protocol>,
+> = Method extends {
+  ConsumerInvocation: Invocation;
+}
+  ? Method["ConsumerInvocation"]
+  : never;
+
+export type ConsumerCommandFor<Ability, Protocol extends Proto> = MethodFor<
   Ability,
   Protocol
 >["ConsumerCommand"] & { cmd: Ability };
 
-export type ConsumerInputFor<Ability, Protocol> = MethodFor<Ability, Protocol>["In"];
+export type ProviderCommandFor<Ability, Protocol extends Proto> = MethodFor<
+  Ability,
+  Protocol
+>["ProviderCommand"];
 
-export type ConsumerEffectFor<Ability, Protocol> = MethodFor<Ability, Protocol>["Effect"];
+export type ConsumerInvocationFor<Ability, Protocol extends Proto> = MethodFor<
+  Ability,
+  Protocol
+>["ConsumerInvocation"] & { cmd: Ability };
 
-export type ConsumerSpaceFor<Ability, Protocol> = MethodFor<Ability, Protocol>["Of"];
+export type ConsumerInputFor<Ability, Protocol extends Proto> = MethodFor<Ability, Protocol>["In"];
 
-export type MethodFor<Ability, Protocol, Case = ProtocolMethod<Protocol>> = Case extends Method<
-  Protocol,
-  Ability & The,
-  infer In,
-  infer Out,
-  infer Effect
->
+export type ConsumerEffectFor<Ability, Protocol extends Proto> = MethodFor<
+  Ability,
+  Protocol
+>["Effect"];
+
+export type ConsumerSpaceFor<Ability, Protocol extends Proto> = MethodFor<Ability, Protocol>["Of"];
+
+export type MethodFor<
+  Ability,
+  Protocol extends Proto,
+  Case = ProtocolMethod<Protocol>,
+> = Case extends Method<Protocol, Ability & The, infer In, infer Out, infer Effect>
   ? Method<Protocol, Ability & The, In, Out, Effect>
   : never;
 
-export type ConsumerResultFor<Ability, Protocol> = MethodFor<Ability, Protocol>["Out"];
+export type ConsumerResultFor<Ability, Protocol extends Proto> = MethodFor<
+  Ability,
+  Protocol
+>["Out"];
 
 export interface InvocationView<Source extends Invocation, Return extends {}, Effect>
   extends Invocation<Source["cmd"], Source["sub"], Source["args"]> {
@@ -394,7 +549,7 @@ export type ClaimFact = true;
 export type RetractFact = { is?: void };
 export type AssertFact<Is extends JSONValue = JSONValue> = { is: Is };
 
-export type ChangesBuilder<
+export type Changes<
   T extends The = The,
   Of extends Entity = Entity,
   Is extends JSONValue = JSONValue,
@@ -420,44 +575,40 @@ export type FactSelection<
 
 export type Meta = Record<string, string>;
 
-export type Principal = `did:${string}:${string}`;
+export type DID = `did:${string}:${string}`;
 
-export type Transaction<Space extends MemorySpace = MemorySpace> = {
-  iss: Principal;
-  sub: Space;
-  cmd: "/memory/transact";
-  args: { changes: ChangesBuilder };
-  meta?: Meta;
-};
+export type DIDKey = `did:key:${string}`;
+
+export type Transaction<Space extends MemorySpace = MemorySpace> = Invocation<
+  "/memory/transact",
+  Space,
+  { changes: Changes }
+>;
 
 export type TransactionResult<Space extends MemorySpace = MemorySpace> = AwaitResult<
   Commit<Space>,
-  ConflictError | TransactionError | ConnectionError
+  ConflictError | TransactionError | ConnectionError | AuthorizationError
 >;
 
-export type Query<Space extends MemorySpace = MemorySpace> = {
-  iss: Principal;
-  sub: Space;
-  cmd: "/memory/query";
-  meta?: Meta;
-  args: { select: Selector; since?: number };
-};
+export type Query<Space extends MemorySpace = MemorySpace> = Invocation<
+  "/memory/query",
+  Space,
+  { select: Selector; since?: number }
+>;
 
-export type Subscribe<Space extends MemorySpace = MemorySpace> = {
-  iss: Principal;
-  sub: Space;
-  cmd: "/memory/query/subscribe";
-  args: { select: Selector; since?: number };
-  meta?: Meta;
-};
+export type Subscribe<Space extends MemorySpace = MemorySpace> = Invocation<
+  "/memory/query/subscribe",
+  Space,
+  { select: Selector; since?: number }
+>;
 
-export type Unsubscribe<Space extends MemorySpace = MemorySpace> = {
-  iss: Principal;
-  sub: Space;
-  cmd: "/memory/query/unsubscribe";
-  args: { source: InvocationURL<Reference<Subscribe<Space>>> };
-  Meta?: Meta;
-};
+export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
+  "/memory/query/unsubscribe",
+  Space,
+  { source: InvocationURL<Reference<Subscribe<Space>>> }
+>;
+
+export type Operation = Transaction | Query | Subscribe | Unsubscribe;
 
 export type QueryResult<Space extends MemorySpace = MemorySpace> = AwaitResult<
   Selection<Space>,
@@ -469,7 +620,7 @@ export type CloseResult = AwaitResult<Unit, SystemError>;
 export type WatchResult = AwaitResult<Unit, QueryError | ConnectionError>;
 
 export type SubscriptionQuery = {
-  iss: Principal;
+  iss: DID;
   sub: MemorySpace;
   cmd: "/memory/query";
   args: {

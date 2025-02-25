@@ -6,10 +6,8 @@ import * as Commit from "../commit.ts";
 import * as Provider from "../provider.ts";
 import * as Consumer from "../consumer.ts";
 import { refer } from "merkle-reference";
+import { alice, bob, space } from "./principal.ts";
 
-const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
-const bob = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
-const space = bob;
 const doc = `of:${refer({ hello: "world" })}` as const;
 const the = "application/json";
 
@@ -46,7 +44,7 @@ const test = (
 const store = new URL(`memory://`);
 
 test("query empty memory", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space);
+  const memory = Consumer.open({ as: alice, session }).mount(space.did());
   const query = memory.query({
     select: {},
   });
@@ -54,15 +52,15 @@ test("query empty memory", store, async (session) => {
   const result = await query;
 
   assertEquals(result.ok?.selection, {
-    [space]: {},
+    [space.did()]: {},
   });
 
-  assertEquals(query.selection, { [space]: {} });
+  assertEquals(query.selection, { [space.did()]: {} });
 });
 
 test("create new memory", store, async (session) => {
   const consumer = Consumer.open({ as: alice, session });
-  const memory = consumer.mount(space);
+  const memory = consumer.mount(space.did());
 
   const v1 = Fact.assert({
     the: "application/json",
@@ -74,10 +72,10 @@ test("create new memory", store, async (session) => {
 
   assert(result.ok);
   const c1 = Commit.create({
-    space,
+    space: space.did(),
     transaction: Transaction.create({
-      issuer: alice,
-      subject: space,
+      issuer: alice.did(),
+      subject: space.did(),
       changes: Changes.from([v1]),
     }),
   });
@@ -91,18 +89,18 @@ test("create new memory", store, async (session) => {
   assertEquals(
     query?.selection,
     {
-      [space]: Changes.from([v1]),
+      [space.did()]: Changes.from([v1]),
     },
     "fact was added to the memory",
   );
 
-  const { ok: other } = await consumer.mount(alice).query({
+  const { ok: other } = await consumer.mount(alice.did()).query({
     select: { [doc]: { [the]: {} } },
   });
   assertEquals(
     other?.selection,
     {
-      [alice]: { [doc]: { [the]: {} } },
+      [alice.did()]: { [doc]: { [the]: {} } },
     },
     "fact is unclaimed in another memory space",
   );
@@ -110,7 +108,7 @@ test("create new memory", store, async (session) => {
 
 test("create memory fails if already exists", store, async (session) => {
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
-  const memory = Consumer.open({ as: alice, session }).mount(space);
+  const memory = Consumer.open({ as: alice, session }).mount(space.did());
 
   const create = await memory.transact({
     changes: Changes.from([v1]),
@@ -127,7 +125,7 @@ test("create memory fails if already exists", store, async (session) => {
   assert(conflict.error, "Create fail when already exists");
   assert(conflict.error.name === "ConflictError");
   assertEquals(conflict.error.conflict, {
-    space,
+    space: space.did(),
     the,
     of: doc,
     expected: null,
@@ -136,16 +134,16 @@ test("create memory fails if already exists", store, async (session) => {
 });
 
 test("list empty memory", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space);
+  const memory = Consumer.open({ as: alice, session }).mount(space.did());
   const result = await memory.query({
     select: { _: { [the]: {} } },
   });
 
-  assertEquals(result.ok?.selection, { [space]: {} }, "no facts exist");
+  assertEquals(result.ok?.selection, { [space.did()]: {} }, "no facts exist");
 });
 
 test("list single fact", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space);
+  const memory = Consumer.open({ as: alice, session }).mount(space.did());
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
   // First create a fact
   await memory.transact({
@@ -154,11 +152,11 @@ test("list single fact", store, async (session) => {
 
   const result = await memory.query({ select: { _: { [the]: {} } } });
 
-  assertEquals(result.ok?.selection, { [space]: Changes.from([v1]) }, "lists single fact");
+  assertEquals(result.ok?.selection, { [space.did()]: Changes.from([v1]) }, "lists single fact");
 });
 
 test("list multiple facts", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space);
+  const memory = Consumer.open({ as: alice, session }).mount(space.did());
   const doc2 = `of:${refer({ doc: 2 })}` as const;
 
   const facts = [
@@ -175,11 +173,15 @@ test("list multiple facts", store, async (session) => {
     select: { _: { [the]: {} } },
   });
 
-  assertEquals(result.ok?.selection, { [space]: Changes.from(facts) }, "lists multiple facts");
+  assertEquals(
+    result.ok?.selection,
+    { [space.did()]: Changes.from(facts) },
+    "lists multiple facts",
+  );
 });
 
 test("list excludes retracted facts", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space);
+  const memory = Consumer.open({ as: alice, session }).mount(space.did());
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
   // First create and then retract a fact
   await memory.transact({ changes: Changes.from([v1]) });
@@ -187,7 +189,7 @@ test("list excludes retracted facts", store, async (session) => {
   const q1 = await memory.query({
     select: { [doc]: { [the]: {} } },
   });
-  assertEquals(q1.ok?.selection, { [space]: Changes.from([v1]) });
+  assertEquals(q1.ok?.selection, { [space.did()]: Changes.from([v1]) });
 
   const v2 = Fact.retract(v1);
 
@@ -199,11 +201,15 @@ test("list excludes retracted facts", store, async (session) => {
     select: { [doc]: { [the]: { is: {} } } },
   });
 
-  assertEquals(q2.ok?.selection, { [space]: { [doc]: { [the]: {} } } }, "excludes retracted facts");
+  assertEquals(
+    q2.ok?.selection,
+    { [space.did()]: { [doc]: { [the]: {} } } },
+    "excludes retracted facts",
+  );
 });
 
 test("list different fact types", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space);
+  const memory = Consumer.open({ as: alice, session }).mount(space.did());
   const json = Fact.assert({ the, of: doc, is: { v: 1 } });
   const text = Fact.assert({ the: "text/plain", of: doc, is: "Hello" });
 
@@ -220,7 +226,7 @@ test("list different fact types", store, async (session) => {
 
   assertEquals(
     jsonResult.ok?.selection,
-    { [space]: Changes.from([json]) },
+    { [space.did()]: Changes.from([json]) },
 
     "lists json facts",
   );
@@ -228,7 +234,7 @@ test("list different fact types", store, async (session) => {
   assertEquals(
     textResult.ok?.selection,
     {
-      [space]: Changes.from([text]),
+      [space.did()]: Changes.from([text]),
     },
     "lists text facts",
   );
@@ -236,8 +242,8 @@ test("list different fact types", store, async (session) => {
 
 test("list facts from different memory spaces", store, async (session) => {
   const consumer = Consumer.open({ as: alice, session });
-  const aliceSpace = consumer.mount(alice);
-  const bobSpace = consumer.mount(bob);
+  const aliceSpace = consumer.mount(alice.did());
+  const bobSpace = consumer.mount(bob.did());
 
   const a = Fact.assert({ the, of: doc, is: { v: 1 } });
   const b = Fact.assert({ the, of: doc, is: { v: 2 } });
@@ -255,13 +261,17 @@ test("list facts from different memory spaces", store, async (session) => {
 
   const bobResult = await bobSpace.query({ select: { [doc]: {} } });
 
-  assertEquals(aliceResult.ok?.selection, { [alice]: Changes.from([a]) }, "lists alice's facts");
+  assertEquals(
+    aliceResult.ok?.selection,
+    { [alice.did()]: Changes.from([a]) },
+    "lists alice's facts",
+  );
 
-  assertEquals(bobResult.ok?.selection, { [bob]: Changes.from([b]) }, "lists bob's facts");
+  assertEquals(bobResult.ok?.selection, { [bob.did()]: Changes.from([b]) }, "lists bob's facts");
 });
 
 test("subscribe receives unclaimed state", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space);
+  const memory = Consumer.open({ as: alice, session }).mount(space.did());
 
   const { ok: query } = await memory.query({ select: { [doc]: { [the]: {} } } });
   assert(query);
@@ -269,7 +279,7 @@ test("subscribe receives unclaimed state", store, async (session) => {
   assertEquals(
     query.selection,
     {
-      [space]: {
+      [space.did()]: {
         [doc]: {
           [the]: {},
         },
@@ -284,19 +294,19 @@ test("subscribe receives unclaimed state", store, async (session) => {
   const c1 = await memory.transact({ changes: Changes.from([v1]) });
   assert(c1.ok);
 
-  assertEquals(query.selection, { [space]: Changes.from([v1]) });
+  assertEquals(query.selection, { [space.did()]: Changes.from([v1]) });
   assertEquals(query.facts, [v1], "changes were reflected");
 });
 
 test("subscribe receives unclaimed state", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space);
+  const memory = Consumer.open({ as: alice, session }).mount(space.did());
 
   const { ok: query } = await memory.query({ select: { [doc]: { [the]: {} } } });
   assert(query);
   assertEquals(
     query.selection,
     {
-      [space]: {
+      [space.did()]: {
         [doc]: {
           [the]: {},
         },
@@ -310,12 +320,12 @@ test("subscribe receives unclaimed state", store, async (session) => {
   const c1 = await memory.transact({ changes: Changes.from([v1]) });
   assert(c1.ok);
 
-  assertEquals(query.selection, { [space]: Changes.from([v1]) });
+  assertEquals(query.selection, { [space.did()]: Changes.from([v1]) });
   assertEquals(query.facts, [v1], "changes were reflected");
 });
 
 test("subscription receives retraction", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space);
+  const memory = Consumer.open({ as: alice, session }).mount(space.did());
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
 
   await memory.transact({ changes: Changes.from([v1]) });
@@ -337,7 +347,7 @@ test("subscription receives retraction", store, async (session) => {
 });
 
 test("cancel subscription", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space);
+  const memory = Consumer.open({ as: alice, session }).mount(space.did());
   const doc2 = `of:${refer({ doc: 2 })}` as const;
 
   const selector = { [doc]: { [the]: {} } };
@@ -348,8 +358,8 @@ test("cancel subscription", store, async (session) => {
   const v2 = Fact.assert({ the, of: doc2, is: { doc: 2 } });
 
   const t1 = Transaction.create({
-    issuer: alice,
-    subject: space,
+    issuer: alice.did(),
+    subject: space.did(),
     changes: Changes.from([v2]),
   });
 
@@ -360,7 +370,7 @@ test("cancel subscription", store, async (session) => {
   assertEquals(
     query.selection,
     {
-      [space]: {
+      [space.did()]: {
         [doc]: { [the]: {} },
       },
     },

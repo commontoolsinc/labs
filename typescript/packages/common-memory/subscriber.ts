@@ -5,7 +5,6 @@ import {
   ConsumerSession,
   Protocol,
 } from "./interface.ts";
-import { Subscriber } from "./provider.ts";
 import * as Socket from "./socket.ts";
 
 /**

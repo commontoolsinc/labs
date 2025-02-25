@@ -3,6 +3,7 @@ import { fromString, refer } from "./reference.ts";
 import { unclaimed } from "./fact.ts";
 import { from as toChanges, set } from "./changes.ts";
 import { create as createCommit, the as COMMIT_THE } from "./commit.ts";
+import { fromDID as parseDID } from "./principal.ts";
 import type {
   Result,
   MemorySpace,
@@ -29,6 +30,7 @@ import type {
   Claim,
   Query,
   SpaceSession,
+  Principal,
 } from "./interface.ts";
 import * as Error from "./error.ts";
 export * from "./interface.ts";
@@ -161,12 +163,18 @@ export type { Space as View };
  * location in first instance is URL itself but `:memory:` in the second, which
  * is what {@link Database} expects.
  */
-const readAddress = (url: URL) => {
+const readAddress = (
+  url: URL,
+): Result<{ subject: MemorySpace; address: URL | null }, SyntaxError> => {
   const { pathname } = url;
   const base = pathname.split("/").pop() as string;
-  const subject = base.endsWith(".sqlite") ? base.slice(0, -".sqlite".length) : base;
+  const did = base.endsWith(".sqlite") ? base.slice(0, -".sqlite".length) : base;
+  const { ok: principal, error } = parseDID(did);
+  if (error) {
+    return { error };
+  }
 
-  return { location: url.protocol === "file:" ? url : ":memory:", subject };
+  return { ok: { address: url.protocol === "file:" ? url : null, subject: principal.did() } };
 };
 
 /**
@@ -176,11 +184,16 @@ const readAddress = (url: URL) => {
 export const connect = async <Subject extends MemorySpace>({
   url,
 }: Options): AsyncResult<Space<Subject>, ToJSON<ConnectionError>> => {
-  const address = readAddress(url);
   try {
-    const database = await new Database(address.location, { create: false });
+    const result = readAddress(url);
+    if (result.error) {
+      throw result.error;
+    }
+    const { address, subject } = result.ok;
+
+    const database = await new Database(address ?? ":memory:", { create: false });
     database.exec(PREPARE);
-    const session = new Space(address.subject as Subject, database);
+    const session = new Space(subject as Subject, database);
     return { ok: session };
   } catch (cause) {
     return { error: Error.connection(url, cause as SqliteError) };
@@ -191,8 +204,12 @@ export const open = async <Subject extends MemorySpace>({
   url,
 }: Options): AsyncResult<Space<Subject>, ConnectionError> => {
   try {
-    const { location, subject } = readAddress(url);
-    const database = await new Database(location, { create: true });
+    const result = readAddress(url);
+    if (result.error) {
+      throw result.error;
+    }
+    const { address, subject } = result.ok;
+    const database = await new Database(address ?? ":memory:", { create: true });
     database.exec(PREPARE);
     const session = new Space(subject as Subject, database);
     return { ok: session };
@@ -456,16 +473,16 @@ export const transact = <Space extends MemorySpace>(
 
 export const query = <Space extends MemorySpace>(
   session: Session<Space>,
-  source: Query<Space>,
+  command: Query<Space>,
 ): Result<Selection<Space>, QueryError> => {
   try {
     return {
       ok: {
-        [source.sub]: session.store.transaction(select)(session, source.args),
+        [command.sub]: session.store.transaction(select)(session, command.args),
       } as Selection<Space>,
     };
   } catch (error) {
-    return { error: Error.query(source.sub, source.args.select, error as SqliteError) };
+    return { error: Error.query(command.sub, command.args.select, error as SqliteError) };
   }
 };
 

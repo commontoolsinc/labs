@@ -2,13 +2,7 @@ import { assert, assertEquals } from "@std/assert";
 import env from "@/env.ts";
 import app from "../../../app.ts";
 import { refer } from "merkle-reference";
-import {
-  ChangesBuilder,
-  CommitBuilder,
-  Consumer,
-  Fact,
-  TransactionBuilder,
-} from "@commontools/memory";
+import { Changes, CommitBuilder, Consumer, Fact, TransactionBuilder } from "@commontools/memory";
 import * as FS from "@std/fs";
 
 if (env.ENV !== "test") {
@@ -66,9 +60,7 @@ Deno.test("test consumer", async (t) => {
   try {
     const server = Deno.serve({ port: 9000 }, app.fetch);
 
-    const url = new URL(
-      `http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
-    );
+    const url = new URL(`http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`);
 
     const session = Consumer.connect({ address: url, as: alice });
     const memory = session.mount(alice);

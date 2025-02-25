@@ -22,7 +22,8 @@
     "jsr:@std/path@^1.0.8": "1.0.8",
     "npm:merkle-reference@*": "2.0.1",
     "npm:merkle-reference@^2.0.1": "2.0.1",
-    "npm:multiformats@^13.3.1": "13.3.1"
+    "npm:multiformats@^13.3.1": "13.3.1",
+    "npm:multiformats@^13.3.2": "13.3.2"
   },
   "jsr": {
     "@db/sqlite@0.12.0": {
@@ -105,11 +106,14 @@
       "integrity": "sha512-3ZFvCbK10ZO5ZLapSgtB79ut4S6+UDKrjSCAP1Q0T43yZ4CEJDrVjYB4dHg6TGTfqBnCaYyR09Zh4cKJpm+Mqg==",
       "dependencies": [
         "@noble/hashes",
-        "multiformats"
+        "multiformats@13.3.1"
       ]
     },
     "multiformats@13.3.1": {
       "integrity": "sha512-QxowxTNwJ3r5RMctoGA5p13w5RbRT2QDkoM+yFlqfLiioBp78nhDjnRLvmSBI9+KAqN4VdgOVWM9c0CHd86m3g=="
+    },
+    "multiformats@13.3.2": {
+      "integrity": "sha512-qbB0CQDt3QKfiAzZ5ZYjLFOs+zW43vA4uyM8g27PeEuXZybUOFyjrVdP93HPBHMoglibwfkdVwbzfUq8qGcH6g=="
     }
   },
   "workspace": {
@@ -120,11 +124,13 @@
       "jsr:@std/encoding@^1.0.5",
       "jsr:@std/fs@^1.0.10",
       "jsr:@std/path@^1.0.8",
-      "npm:merkle-reference@^2.0.1"
+      "npm:merkle-reference@^2.0.1",
+      "npm:multiformats@^13.3.2"
     ],
     "packageJson": {
       "dependencies": [
-        "npm:merkle-reference@^2.0.1"
+        "npm:merkle-reference@^2.0.1",
+        "npm:multiformats@^13.3.2"
       ]
     }
   }
