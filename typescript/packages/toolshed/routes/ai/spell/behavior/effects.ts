@@ -100,10 +100,10 @@ export async function getAllMemories(
   const memories = replicaData[replica];
 
   Object.entries(memories).forEach(([key, value]) => {
-    if (!key.startsWith('of:')) return;
+    if (!key.startsWith("of:")) return;
 
     const charmId = key.substring(3); // Remove 'of:' prefix
-    const appJson = (value as any)['application/json'];
+    const appJson = (value as any)["application/json"];
     if (!appJson) return;
 
     const [, firstMemory] = Object.entries(appJson)[0];
