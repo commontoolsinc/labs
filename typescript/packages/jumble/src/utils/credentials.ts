@@ -1,6 +1,11 @@
+export const AUTH_METHOD_PASSKEY = "passkey" as const;
+export const AUTH_METHOD_PASSPHRASE = "passphrase" as const;
+
+export type AuthMethod = typeof AUTH_METHOD_PASSKEY | typeof AUTH_METHOD_PASSPHRASE;
+
 export interface StoredCredential {
   id: string;
-  method: "passkey" | "passphrase";
+  method: AuthMethod;
 }
 
 export function getStoredCredential(): StoredCredential | null {

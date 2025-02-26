@@ -20,12 +20,14 @@ import {
   createPasskeyCredential,
   createPassphraseCredential,
   getPublicKeyCredentialDescriptor,
+  AuthMethod,
+  AUTH_METHOD_PASSKEY,
+  AUTH_METHOD_PASSPHRASE,
 } from "@/utils/credentials";
 
 const BTN_PRIMARY = `w-full px-4 py-2 bg-black text-white hover:bg-gray-800 disabled:opacity-50 flex items-center justify-center gap-2`;
 const LIST_ITEM = `w-full p-2 text-left text-sm border-2 border-black hover:-translate-y-[2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.5)] shadow-[1px_1px_0px_0px_rgba(0,0,0,0.3)] transition-all duration-100 ease-in-out cursor-pointer flex items-center gap-2`;
 
-type AuthMethod = "passkey" | "passphrase";
 type AuthFlow = "register" | "login";
 
 interface ErrorCalloutProps {
@@ -69,7 +71,7 @@ function SuccessRegistration({
 
   return (
     <div className="text-center">
-      {method === "passkey" ? (
+      {method === AUTH_METHOD_PASSKEY ? (
         <div className="mb-4">
           <p className="mb-2">Passkey successfully registered!</p>
           {credentialId && (
@@ -129,10 +131,10 @@ export function AuthenticationView() {
       window.location.hostname !== "localhost" && window.PublicKeyCredential !== undefined;
 
     if (isPasskeyAvailable) {
-      methods.push("passkey");
+      methods.push(AUTH_METHOD_PASSKEY);
     }
 
-    methods.push("passphrase");
+    methods.push(AUTH_METHOD_PASSPHRASE);
 
     setAvailableMethods(methods);
     // Only set default method if there's just one option
@@ -158,12 +160,12 @@ export function AuthenticationView() {
 
   const handleRegister = useCallback(
     async (selectedMethod: string) => {
-      if (selectedMethod === "passkey") {
+      if (selectedMethod === AUTH_METHOD_PASSKEY) {
         const credential = await handleAuth(() =>
           auth.passkeyRegister("Common Tools User", "commontoolsuser"),
         );
         if (!credential) throw new Error("Credential not found");
-        setMethod("passkey");
+        setMethod(AUTH_METHOD_PASSKEY);
         setRegistrationSuccess(true);
       } else {
         const mnemonic = await auth.passphraseRegister();
@@ -175,11 +177,11 @@ export function AuthenticationView() {
 
   const handleLogin = useCallback(
     async (selectedMethod: string, passphrase?: string) => {
-      if (selectedMethod === "passkey") {
+      if (selectedMethod === AUTH_METHOD_PASSKEY) {
         const credentialDescriptor = getPublicKeyCredentialDescriptor(storedCredential);
 
         await handleAuth(async () => {
-          setMethod("passkey");
+          setMethod(AUTH_METHOD_PASSKEY);
           setFlow("login");
           const passkey = await auth.passkeyAuthenticate(credentialDescriptor);
 
@@ -213,7 +215,7 @@ export function AuthenticationView() {
       if (flow === "register") {
         await handleRegister(selectedMethod);
       } else if (flow === "login") {
-        if (selectedMethod === "passkey") {
+        if (selectedMethod === AUTH_METHOD_PASSKEY) {
           await handleLogin(selectedMethod); // This login already handles credential storage
         }
         // For passphrase, we'll wait for the form submission
@@ -244,8 +246,8 @@ export function AuthenticationView() {
             method={method!}
             credentialId={storedCredential?.id}
             onLogin={async () => {
-              if (method === "passkey") {
-                await handleLogin("passkey");
+              if (method === AUTH_METHOD_PASSKEY) {
+                await handleLogin(AUTH_METHOD_PASSKEY);
               } else {
                 setMnemonic(null);
                 setRegistrationSuccess(false);
@@ -260,8 +262,8 @@ export function AuthenticationView() {
                 <button
                   className={BTN_PRIMARY}
                   onClick={async () => {
-                    if (storedCredential.method === "passkey") {
-                      await handleLogin("passkey");
+                    if (storedCredential.method === AUTH_METHOD_PASSKEY) {
+                      await handleLogin(AUTH_METHOD_PASSKEY);
                     } else {
                       setMethod(storedCredential.method);
                       setFlow("login");
@@ -269,7 +271,7 @@ export function AuthenticationView() {
                   }}
                 >
                   <LuKey className="w-5 h-5" />
-                  {storedCredential.method === "passkey"
+                  {storedCredential.method === AUTH_METHOD_PASSKEY
                     ? `Unlock with Key (${storedCredential.id.slice(-4)})`
                     : "Unlock with Passphrase"}
                 </button>
@@ -309,7 +311,7 @@ export function AuthenticationView() {
                 className={LIST_ITEM}
                 onClick={async () => await handleMethodSelect(m)}
               >
-                {m === "passkey" ? (
+                {m === AUTH_METHOD_PASSKEY ? (
                   <>
                     <LuKey className="w-5 h-5" /> Use Passkey
                   </>
@@ -324,10 +326,13 @@ export function AuthenticationView() {
               <LuArrowLeft className="w-5 h-5" /> Back
             </button>
           </div>
-        ) : method === "passphrase" ? (
+        ) : method === AUTH_METHOD_PASSPHRASE ? (
           <div className="space-y-4">
             {flow === "register" ? (
-              <button className={BTN_PRIMARY} onClick={() => handleRegister("passphrase")}>
+              <button
+                className={BTN_PRIMARY}
+                onClick={() => handleRegister(AUTH_METHOD_PASSPHRASE)}
+              >
                 <LuKeyRound className="w-5 h-5" /> Register with Passphrase
               </button>
             ) : (
@@ -335,12 +340,12 @@ export function AuthenticationView() {
                 onSubmit={(e) => {
                   e.preventDefault();
                   const form = e.target as HTMLFormElement;
-                  handleLogin(method, new FormData(form).get("passphrase") as string);
+                  handleLogin(method, new FormData(form).get(AUTH_METHOD_PASSPHRASE) as string);
                 }}
               >
                 <input
                   type="password"
-                  name="passphrase"
+                  name={AUTH_METHOD_PASSPHRASE}
                   className="w-full p-2 pr-10 border-2 border-black"
                   placeholder="Enter your passphrase"
                   autoComplete="current-password"
