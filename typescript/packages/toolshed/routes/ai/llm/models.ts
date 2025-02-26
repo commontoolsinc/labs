@@ -79,9 +79,6 @@ const addModel = ({
     capabilities,
     aliases,
   };
-  console.log("#############################");
-  console.log(config);
-  console.log("#############################");
 
   MODELS[name] = config;
   for (const alias of aliases) {
@@ -148,7 +145,7 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
     ],
     capabilities: {
       contextWindow: 200_000,
-      maxOutputTokens: 64000,
+      maxOutputTokens: 128000,
       images: true,
       prefill: true,
       systemPrompt: true,
