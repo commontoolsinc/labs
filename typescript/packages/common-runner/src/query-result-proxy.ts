@@ -1,13 +1,13 @@
 import { isAlias } from "@commontools/builder";
 import { getTopFrame, toOpaqueRef } from "@commontools/builder";
-import { getDoc, isDoc, isDocLink, makeOpaqueRef, type DocImpl, type DocLink } from "./doc.js";
-import { queueEvent, type ReactivityLog } from "./scheduler.js";
+import { getDoc, isDoc, isDocLink, makeOpaqueRef, type DocImpl, type DocLink } from "./doc.ts";
+import { queueEvent, type ReactivityLog } from "./scheduler.ts";
 import {
   followAliases,
   followCellReferences,
   normalizeToDocLinks,
   setNestedValue,
-} from "./utils.js";
+} from "./utils.ts";
 
 // Array.prototype's entries, and whether they modify the array
 enum ArrayMethodType {

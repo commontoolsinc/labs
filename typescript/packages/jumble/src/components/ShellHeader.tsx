@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import ShapeLogo from "@/assets/ShapeLogo.svg";
+import ShapeLogo from "@/assets/ShapeLogo.tsx";
 import { NavPath } from "@/components/NavPath.tsx";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { User } from "@/components/User.tsx";

@@ -9,11 +9,11 @@ import {
   unsafe_parentRecipe,
   UnsafeBinding,
 } from "@commontools/builder";
-import { type DocImpl, type DocLink, getDoc, isDoc, isDocLink } from "./doc.js";
-import { getDocLinkOrThrow, isQueryResultForDereferencing } from "./query-result-proxy.js";
-import { isCell } from "./cell.js";
-import { type ReactivityLog } from "./scheduler.js";
-import { createRef } from "./cell-map.js";
+import { type DocImpl, type DocLink, getDoc, isDoc, isDocLink } from "./doc.ts";
+import { getDocLinkOrThrow, isQueryResultForDereferencing } from "./query-result-proxy.ts";
+import { isCell } from "./cell.ts";
+import { type ReactivityLog } from "./scheduler.ts";
+import { createRef } from "./cell-map.ts";
 
 export function extractDefaultValues(schema: any): any {
   if (typeof schema !== "object" || schema === null) return undefined;

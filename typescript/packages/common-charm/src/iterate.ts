@@ -2,10 +2,10 @@ import { addRecipe, Cell, EntityId } from "@commontools/runner";
 import { LLMClient } from "@commontools/llm-client";
 import { createJsonSchema, JSONSchema } from "@commontools/builder";
 
-import { tsToExports } from "./localBuild.js";
-import { Charm, CharmManager } from "./charm.js";
-import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.js";
-import { buildPrompt } from "./iframe/prompt.js";
+import { tsToExports } from "./localBuild.ts";
+import { Charm, CharmManager } from "./charm.ts";
+import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
+import { buildPrompt } from "./iframe/prompt.ts";
 
 const llmUrl =
   typeof window !== "undefined"

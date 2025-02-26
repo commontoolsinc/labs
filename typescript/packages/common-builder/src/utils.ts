@@ -1,4 +1,4 @@
-import { createShadowRef } from "./opaque-ref.js";
+import { createShadowRef } from "./opaque-ref.ts";
 import {
   type Alias,
   canBeOpaqueRef,
@@ -17,8 +17,8 @@ import {
   type OpaqueRef,
   type Recipe,
   unsafe_originalRecipe,
-} from "./types.js";
-import { getTopFrame } from "./recipe.js";
+} from "./types.ts";
+import { getTopFrame } from "./recipe.ts";
 
 /**
  * Traverse a value, _not_ entering cells

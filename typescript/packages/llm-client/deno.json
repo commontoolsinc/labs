@@ -1,0 +1,4 @@
+{
+  "name": "@commontools/llm-client",
+  "exports": "./src/index.ts"
+}

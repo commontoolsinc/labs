@@ -1,5 +1,5 @@
 import { JSONSchema, TYPE } from "@commontools/builder";
-import { Charm, processSchema } from "../charm.js";
+import { Charm, processSchema } from "../charm.ts";
 import { Cell, getRecipe, getRecipeSrc } from "@commontools/runner";
 
 export type IFrameRecipe = {

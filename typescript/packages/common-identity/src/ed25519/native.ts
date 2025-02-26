@@ -1,7 +1,7 @@
 import * as ed25519 from "@noble/ed25519";
-import { ED25519_ALG, bytesToDid, didToBytes } from "./utils.js";
-import { DID, Signer, Verifier } from "../interface.js";
-import { clone } from "../utils.js";
+import { ED25519_ALG, bytesToDid, didToBytes } from "./utils.ts";
+import { DID, Signer, Verifier } from "../interface.ts";
+import { clone } from "../utils.ts";
 
 // WebCrypto Key formats for Ed25519
 // Non-explicitly described in https://wicg.github.io/webcrypto-secure-curves/#ed25519

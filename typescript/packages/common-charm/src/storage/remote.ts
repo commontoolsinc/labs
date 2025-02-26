@@ -1,6 +1,6 @@
 import type { EntityId, Cancel } from "@commontools/runner";
-import { log } from "../storage.js";
-import { type StorageProvider, type StorageValue } from "./base.js";
+import { log } from "../storage.ts";
+import { type StorageProvider, type StorageValue } from "./base.ts";
 import type { Entity, JSONValue, MemorySpace } from "@commontools/memory/interface";
 import * as Memory from "@commontools/memory/consumer";
 import { assert } from "@commontools/memory/fact";

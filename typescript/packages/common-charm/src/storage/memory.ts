@@ -1,6 +1,6 @@
 import type { EntityId } from "@commontools/runner";
-import { log } from "../storage.js";
-import { BaseStorageProvider, type StorageValue } from "./base.js";
+import { log } from "../storage.ts";
+import { BaseStorageProvider, type StorageValue } from "./base.ts";
 
 /**
  * In-memory storage provider. Just for testing.

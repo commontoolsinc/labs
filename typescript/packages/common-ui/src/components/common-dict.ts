@@ -18,7 +18,7 @@ export class CommonDictElement extends LitElement {
   `;
 
   @property({ type: Object })
-  records: Record<string, string> = {};
+  accessor records: Record<string, string> = {};
 
   override render() {
     const records = repeat(Object.entries(this.records), ([key, value]) => {

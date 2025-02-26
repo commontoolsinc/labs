@@ -10,13 +10,13 @@ import { CommonIframeSandboxElement as _, IPC } from "@commontools/iframe-sandbo
 // @event {CustomEvent} load - The iframe was successfully loaded.
 @customElement("common-iframe")
 export class CommonIframeElement extends LitElement {
-  @property({ type: String }) src = "";
+  @property({ type: String }) accessor src = "";
   // HACK: The UI framework already translates the top level cell into updated
   // properties, but we want to only have to deal with one type of listening, so
   // we'll add a an extra level of indirection with the "context" property.
-  @property({ type: Object }) context?: object;
+  @property({ type: Object }) accessor context?: object;
 
-  @state() private errorDetails: IPC.GuestError | null = null;
+  @state() accessor errorDetails: IPC.GuestError | null = null;
 
   static override styles = css`
     .error-modal {

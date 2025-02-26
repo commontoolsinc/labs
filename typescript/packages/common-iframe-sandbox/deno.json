@@ -1,0 +1,4 @@
+{
+  "name": "@commontools/iframe-sandbox",
+  "exports": "./src/index.ts"
+}

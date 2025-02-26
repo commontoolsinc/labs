@@ -1,4 +1,4 @@
-import * as logger from "./logger.js";
+import * as logger from "./logger.ts";
 
 export const isObject = (value: unknown): value is object => {
   return typeof value === "object" && value !== null;

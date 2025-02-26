@@ -1,6 +1,6 @@
 import { LitElement, css, html } from "lit";
-import { customElement } from "lit/decorators.js";
-import { base } from "../shared/styles.js";
+import { customElement } from "lit/decorators.ts";
+import { base } from "../shared/styles.ts";
 
 @customElement("os-sidebar-group")
 export class OsSidebarGroup extends LitElement {

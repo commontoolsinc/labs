@@ -1,10 +1,10 @@
 import { EditorView, Decoration } from "prosemirror-view";
-import * as plugin from "./prosemirror/suggestions-plugin.js";
-import { Rect, createRect } from "../../shared/position.js";
-import { clamp } from "../../shared/number.js";
-import { unknown, ValueMsg, FxDriver, Fx } from "../../shared/store.js";
-import * as completion from "./completion.js";
-import { executeCommand, replaceWithText } from "./prosemirror/utils.js";
+import * as plugin from "./prosemirror/suggestions-plugin.ts";
+import { Rect, createRect } from "../../shared/position.ts";
+import { clamp } from "../../shared/number.ts";
+import { unknown, ValueMsg, FxDriver, Fx } from "../../shared/store.ts";
+import * as completion from "./completion.ts";
+import { executeCommand, replaceWithText } from "./prosemirror/utils.ts";
 
 const freeze = Object.freeze;
 

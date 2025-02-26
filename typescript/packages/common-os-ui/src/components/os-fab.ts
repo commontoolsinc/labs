@@ -1,6 +1,6 @@
 import { LitElement, html, css } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
-import { base } from "../shared/styles.js";
+import { customElement, property, state } from "lit/decorators.ts";
+import { base } from "../shared/styles.ts";
 
 @customElement("os-fab")
 export class OsFab extends LitElement {

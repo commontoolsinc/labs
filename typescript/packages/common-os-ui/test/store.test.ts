@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { createStore, cursor, unknown } from "../src/shared/store.js";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { createStore, cursor, unknown } from "../src/shared/store.ts";
 
 describe("createStore", () => {
   type State = { count: number };

@@ -1,6 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { baseStyles } from "./style.ts";
 
 export type CommonInput = {
   id: string;
@@ -82,9 +82,9 @@ export class CommonInputElement extends LitElement {
     `,
   ];
 
-  @property({ type: String }) value = "";
-  @property({ type: String }) placeholder = "";
-  @property({ type: String }) appearance = "default";
+  @property({ type: String }) accessor value = "";
+  @property({ type: String }) accessor placeholder = "";
+  @property({ type: String }) accessor appearance = "default";
 
   override render() {
     const oninput = (event: Event) => {

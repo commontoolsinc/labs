@@ -1,6 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
-import { getDoc } from "../src/doc.js";
-import { type ReactivityLog } from "../src/scheduler.js";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { assertSpyCalls, spy } from "@std/testing/mock";
+import { getDoc } from "../src/doc.ts";
+import { type ReactivityLog } from "../src/scheduler.ts";
 import {
   type Action,
   addEventHandler,
@@ -11,7 +13,7 @@ import {
   run,
   schedule,
   unschedule,
-} from "../src/scheduler.js";
+} from "../src/scheduler.ts";
 
 describe("scheduler", () => {
   it("should run actions when cells change", async () => {
@@ -162,8 +164,11 @@ describe("scheduler", () => {
       c.asCell([], log).send(e.getAsQueryResult([], log) + b.getAsQueryResult([], log));
     };
 
-    const stopped = vi.fn();
-    onError(() => stopped());
+    const stopper = {
+      stop:()=>{},
+    };
+    const stopped = spy(stopper, "stop");
+    onError(() => stopper.stop());
 
     await run(adder1);
     await run(adder2);
@@ -172,7 +177,7 @@ describe("scheduler", () => {
     await idle();
 
     expect(maxRuns).toBeGreaterThan(0);
-    expect(stopped).toHaveBeenCalled();
+    assertSpyCalls(stopped, 1);
   });
 
   it("should not loop on r/w changes on its own output", async () => {
@@ -183,8 +188,11 @@ describe("scheduler", () => {
         .asCell([], log)
         .send(counter.getAsQueryResult([], log) + by.getAsQueryResult([], log));
 
-    const stopped = vi.fn();
-    onError(() => stopped());
+    const stopper = {
+      stop:()=>{},
+    };
+    const stopped = spy(stopper, "stop");
+    onError(() => stopper.stop());
 
     await run(inc);
     expect(counter.get()).toBe(1);
@@ -195,7 +203,7 @@ describe("scheduler", () => {
     await idle();
     expect(counter.get()).toBe(3);
 
-    expect(stopped).not.toHaveBeenCalled();
+    assertSpyCalls(stopped, 0);
   });
 
   it("should immediately run actions that have no dependencies", async () => {

@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
-import { DocLink, getDoc } from "../src/doc.js";
-import { isCell } from "../src/cell.js";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { DocLink, getDoc } from "../src/doc.ts";
+import { isCell } from "../src/cell.ts";
 import type { JSONSchema } from "@commontools/builder";
-import { idle } from "../src/scheduler.js";
-import { getSpace } from "../src/space.js";
+import { idle } from "../src/scheduler.ts";
+import { getSpace } from "../src/space.ts";
 
 describe("Schema Support", () => {
   describe("Examples", () => {

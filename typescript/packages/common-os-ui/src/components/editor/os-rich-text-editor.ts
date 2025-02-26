@@ -5,13 +5,13 @@ import { Schema, Node } from "prosemirror-model";
 import { history } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap } from "prosemirror-commands";
-import { customElement } from "lit/decorators.js";
-import { base } from "../../shared/styles.js";
-import { editorClassPlugin } from "./prosemirror/editor-class-plugin.js";
-import { verPlugin, updateVerState } from "./prosemirror/ver-plugin.js";
-import * as suggestions from "./suggestions.js";
-import * as completion from "./completion.js";
-import { createSelection, TextSelection } from "./selection.js";
+import { customElement } from "lit/decorators.ts";
+import { base } from "../../shared/styles.ts";
+import { editorClassPlugin } from "./prosemirror/editor-class-plugin.ts";
+import { verPlugin, updateVerState } from "./prosemirror/ver-plugin.ts";
+import * as suggestions from "./suggestions.ts";
+import * as completion from "./completion.ts";
+import { createSelection, TextSelection } from "./selection.ts";
 import {
   createStore,
   cursor,
@@ -21,12 +21,12 @@ import {
   Fx,
   Store,
   ValueMsg,
-} from "../../shared/store.js";
-import { createCancelGroup } from "../../shared/cancel.js";
+} from "../../shared/store.ts";
+import { createCancelGroup } from "../../shared/cancel.ts";
 import { TemplateResult } from "lit";
-import { classes, on } from "../../shared/dom.js";
-import { ClickCompletion } from "../os-floating-completions.js";
-import { Suggestion } from "./prosemirror/suggestions-plugin.js";
+import { classes, on } from "../../shared/dom.ts";
+import { ClickCompletion } from "../os-floating-completions.ts";
+import { Suggestion } from "./prosemirror/suggestions-plugin.ts";
 
 const freeze = Object.freeze;
 

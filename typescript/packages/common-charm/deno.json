@@ -1,0 +1,4 @@
+{
+  "name": "@commontools/charm",
+  "exports": "./src/index.ts"
+}

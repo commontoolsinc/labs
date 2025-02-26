@@ -8,11 +8,11 @@ import type {
   Opaque,
   OpaqueRef,
   toJSON,
-} from "./types.js";
-import { isModule } from "./types.js";
-import { opaqueRef } from "./opaque-ref.js";
-import { connectInputAndOutputs, moduleToJSON, traverseValue } from "./utils.js";
-import { getTopFrame } from "./recipe.js";
+} from "./types.ts";
+import { isModule } from "./types.ts";
+import { opaqueRef } from "./opaque-ref.ts";
+import { connectInputAndOutputs, moduleToJSON, traverseValue } from "./utils.ts";
+import { getTopFrame } from "./recipe.ts";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 

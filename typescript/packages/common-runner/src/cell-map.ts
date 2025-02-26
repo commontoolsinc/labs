@@ -1,9 +1,9 @@
 import { isOpaqueRef } from "@commontools/builder";
-import { type DocImpl, type DocLink, getDoc, isDoc, isDocLink } from "./doc.js";
-import { getDocLinkOrThrow, isQueryResultForDereferencing } from "./query-result-proxy.js";
-import { isCell } from "./cell.js";
+import { type DocImpl, type DocLink, getDoc, isDoc, isDocLink } from "./doc.ts";
+import { getDocLinkOrThrow, isQueryResultForDereferencing } from "./query-result-proxy.ts";
+import { isCell } from "./cell.ts";
 import { refer } from "merkle-reference";
-import { type Space } from "./space.js";
+import { type Space } from "./space.ts";
 
 export type EntityId = {
   "/": string | Uint8Array;

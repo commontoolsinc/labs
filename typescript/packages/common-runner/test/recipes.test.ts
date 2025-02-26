@@ -1,11 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
 import { byRef, handler, JSONSchema, lift, recipe } from "@commontools/builder";
-import { run } from "../src/runner.js";
-import { addModuleByRef } from "../src/module.js";
-import { getDoc } from "../src/doc.js";
-import { idle } from "../src/scheduler.js";
-import { type Cell } from "../src/cell.js";
-import { getSpace } from "../src/space.js";
+import { run } from "../src/runner.ts";
+import { addModuleByRef } from "../src/module.ts";
+import { getDoc } from "../src/doc.ts";
+import { idle } from "../src/scheduler.ts";
+import { type Cell } from "../src/cell.ts";
+import { getSpace } from "../src/space.ts";
 
 describe("Recipe Runner", () => {
   it("should run a simple recipe", async () => {

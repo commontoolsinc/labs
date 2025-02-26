@@ -1,5 +1,5 @@
 import type { EntityId, Cancel } from "@commontools/runner";
-import { log } from "../storage.js";
+import { log } from "../storage.ts";
 
 export interface StorageValue<T = any> {
   value: T;
@@ -87,7 +87,7 @@ export abstract class BaseStorageProvider implements StorageProvider {
   }
 
   protected notifySubscribers(key: string, value: StorageValue): void {
-    log("notify subscribers", key, JSON.stringify(value));
+    log(() => [`notify subscribers ${key} ${JSON.stringify(value)}`]);
     const listeners = this.subscribers.get(key);
     if (this.waitingForSync.has(key) && listeners && listeners.size > 0)
       throw new Error("Subscribers are expected to only start after first sync.");
@@ -98,7 +98,7 @@ export abstract class BaseStorageProvider implements StorageProvider {
   protected waitForSync(key: string): Promise<void> {
     if (!this.waitingForSync.has(key))
       this.waitingForSync.set(key, new Promise((r) => this.waitingForSyncResolvers.set(key, r)));
-    log("waiting for sync", key, [...this.waitingForSync.keys()]);
+    log(() => [`waiting for sync ${key} ${[...this.waitingForSync.keys()]}`]);
     return this.waitingForSync.get(key)!;
   }
 

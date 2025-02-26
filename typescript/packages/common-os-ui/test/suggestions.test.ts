@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { createRect } from "../src/shared/position.js";
-import * as suggestions from "../src/components/editor/suggestions.js";
-import * as suggestionsPlugin from "../src/components/editor/prosemirror/suggestions-plugin.js";
-import * as completion from "../src/components/editor/completion.js";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { createRect } from "../src/shared/position.ts";
+import * as suggestions from "../src/components/editor/suggestions.ts";
+import * as suggestionsPlugin from "../src/components/editor/prosemirror/suggestions-plugin.ts";
+import * as completion from "../src/components/editor/completion.ts";
 
 describe("suggestions.update", () => {
   it("should handle activeUpdateMsg", () => {

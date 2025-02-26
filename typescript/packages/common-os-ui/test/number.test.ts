@@ -1,5 +1,6 @@
-import { clamp } from "../src/shared/number.js";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { clamp } from "../src/shared/number.ts";
 
 describe("clamp", () => {
   it("should clamp a number within the given range", () => {

@@ -1,10 +1,10 @@
 import { LitElement, html, css, PropertyValues } from "lit";
-import { customElement, property } from "lit/decorators.js";
-import { base } from "../shared/styles.js";
-import { createRect, Rect, positionMenu } from "../shared/position.js";
-import * as completion from "./editor/completion.js";
-import { classMap } from "lit/directives/class-map.js";
-import { clamp } from "../shared/number.js";
+import { customElement, property } from "lit/decorators.ts";
+import { base } from "../shared/styles.ts";
+import { createRect, Rect, positionMenu } from "../shared/position.ts";
+import * as completion from "./editor/completion.ts";
+import { classMap } from "lit/directives/class-map.ts";
+import { clamp } from "../shared/number.ts";
 
 /** Completion clicked */
 export class ClickCompletion extends Event {

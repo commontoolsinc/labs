@@ -1,6 +1,6 @@
-import { Ed25519Signer, Ed25519Verifier } from "./ed25519/index.js";
-import { DID, KeyPairRaw, Signer, Verifier } from "./interface.js";
-import { hash } from "./utils.js";
+import { Ed25519Signer, Ed25519Verifier } from "./ed25519/index.ts";
+import { DID, KeyPairRaw, Signer, Verifier } from "./interface.ts";
+import { hash } from "./utils.ts";
 
 const textEncoder = new TextEncoder();
 

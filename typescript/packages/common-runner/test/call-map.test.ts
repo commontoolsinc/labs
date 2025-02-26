@@ -1,8 +1,9 @@
-import { describe, it, expect } from "vitest";
-import { createRef, type EntityId, getDocByEntityId, getEntityId } from "../src/cell-map.js";
-import { getDoc } from "../src/doc.js";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { createRef, type EntityId, getDocByEntityId, getEntityId } from "../src/cell-map.ts";
+import { getDoc } from "../src/doc.ts";
 import { refer } from "merkle-reference";
-import { getSpace } from "../src/space.js";
+import { getSpace } from "../src/space.ts";
 
 describe("refer", () => {
   it("should create a reference that is equal to another reference with the same source", () => {

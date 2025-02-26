@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
 import {
   compactifyPaths,
   extractDefaultValues,
@@ -9,9 +10,9 @@ import {
   sendValueToBinding,
   setNestedValue,
   unwrapOneLevelAndBindtoCell,
-} from "../src/utils.js";
-import { DocLink, getDoc, isDocLink } from "../src/doc.js";
-import { type ReactivityLog } from "../src/scheduler.js";
+} from "../src/utils.ts";
+import { DocLink, getDoc, isDocLink } from "../src/doc.ts";
+import { type ReactivityLog } from "../src/scheduler.ts";
 
 describe("extractDefaultValues", () => {
   it("should extract default values from a schema", () => {

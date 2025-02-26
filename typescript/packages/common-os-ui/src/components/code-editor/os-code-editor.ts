@@ -1,5 +1,5 @@
 import { css, html, render, ReactiveElement, PropertyValues } from "lit";
-import { customElement, property } from "lit/decorators.js";
+import { customElement, property } from "lit/decorators.ts";
 import { basicSetup, EditorView } from "codemirror";
 import { EditorState, Compartment, Extension } from "@codemirror/state";
 import { LanguageSupport } from "@codemirror/language";
@@ -9,8 +9,8 @@ import { css as createCss } from "@codemirror/lang-css";
 import { html as creatHtml } from "@codemirror/lang-html";
 import { json as createJson } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { replaceSourceIfNeeded } from "./codemirror/utils.js";
-import { createCancelGroup } from "../../shared/cancel.js";
+import { replaceSourceIfNeeded } from "./codemirror/utils.ts";
+import { createCancelGroup } from "../../shared/cancel.ts";
 
 const freeze = Object.freeze;
 

@@ -69,6 +69,8 @@ class MemoryConsumerSession
         controller = control;
       },
       transform: (command) => this.receive(command as ProviderCommand<Protocol>),
+      // @ts-ignore: "Object literal may only specify known properties, and
+      // 'cancel' does not exist in type 'Transformer<..>'"
       cancel: () => this.cancel(),
       flush: () => this.close(),
     });

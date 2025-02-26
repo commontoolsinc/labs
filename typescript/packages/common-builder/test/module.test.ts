@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
 import {
   type Frame,
   isModule,
@@ -6,11 +7,11 @@ import {
   type JSONSchema,
   type Module,
   type OpaqueRef,
-} from "../src/types.js";
-import { handler, lift } from "../src/module.js";
-import { opaqueRef } from "../src/opaque-ref.js";
-import { pushFrame } from "../src/recipe.js";
-import { popFrame } from "../src/recipe.js";
+} from "../src/types.ts";
+import { handler, lift } from "../src/module.ts";
+import { opaqueRef } from "../src/opaque-ref.ts";
+import { pushFrame } from "../src/recipe.ts";
+import { popFrame } from "../src/recipe.ts";
 import { z } from "zod";
 
 type MouseEvent = {

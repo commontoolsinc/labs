@@ -1,4 +1,4 @@
-import { isVNode, type Child, type Props, type VNode } from "./jsx.js";
+import { isVNode, type Child, type Props, type VNode } from "./jsx.ts";
 import {
   effect,
   useCancelGroup,
@@ -8,7 +8,7 @@ import {
   isStream,
 } from "@commontools/runner";
 import { JSONSchema } from "@commontools/builder";
-import * as logger from "./logger.js";
+import * as logger from "./logger.ts";
 
 const vdomSchema: JSONSchema = {
   type: "object",

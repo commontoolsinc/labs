@@ -12,8 +12,8 @@ import {
   isCell,
   getRecipe,
 } from "@commontools/runner";
-import { storage } from "./storage.js";
-import { syncRecipeBlobby } from "./syncRecipe.js";
+import { storage } from "./storage.ts";
+import { syncRecipeBlobby } from "./syncRecipe.ts";
 import { getSpace, Space } from "@commontools/runner";
 
 export type Charm = {

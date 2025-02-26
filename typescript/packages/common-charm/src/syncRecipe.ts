@@ -6,7 +6,7 @@ import {
   getRecipeSpec,
   getRecipeName,
 } from "@commontools/runner";
-import { buildRecipe } from "./localBuild.js";
+import { buildRecipe } from "./localBuild.ts";
 
 // FIXME(jake): This needs to be settable by environment variable...
 // If this is hardcoded, then it is not possible to develop spellbook locally.

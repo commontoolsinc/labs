@@ -3,7 +3,7 @@
 /// <reference types="npm:@types/node" />
 
 import { createRouter } from "@/lib/create-app.ts";
-import { cors } from "hono/cors";
+import { cors } from "@hono/hono/cors";
 import * as handlers from "./spell.handlers.ts";
 import * as routes from "./spell.routes.ts";
 

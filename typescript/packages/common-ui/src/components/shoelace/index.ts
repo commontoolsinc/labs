@@ -1,5 +1,5 @@
-export * from "./components.js";
-import theme from "./theme/light.styles.js";
+export * from "./components.ts";
+import theme from "./theme/light.styles.ts";
 import { registerIconLibrary } from "@shoelace-style/shoelace";
 
 /**

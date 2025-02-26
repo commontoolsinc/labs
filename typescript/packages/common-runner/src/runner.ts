@@ -16,8 +16,8 @@ import {
   unsafe_originalRecipe,
   type UnsafeBinding,
 } from "@commontools/builder";
-import { type DocImpl, type DocLink, getDoc, isDoc, isDocLink } from "./doc.js";
-import { Action, addEventHandler, schedule, type ReactivityLog } from "./scheduler.js";
+import { type DocImpl, type DocLink, getDoc, isDoc, isDocLink } from "./doc.ts";
+import { Action, addEventHandler, schedule, type ReactivityLog } from "./scheduler.ts";
 import {
   containsOpaqueRef,
   deepCopy,
@@ -29,14 +29,14 @@ import {
   staticDataToNestedCells,
   unsafe_noteParentOnRecipes,
   unwrapOneLevelAndBindtoCell,
-} from "./utils.js";
-import { getModuleByRef } from "./module.js";
-import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.js";
+} from "./utils.ts";
+import { getModuleByRef } from "./module.ts";
+import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
-import { addRecipe, getRecipe, getRecipeId } from "./recipe-map.js";
-import { isCell } from "./cell.js";
-import { isQueryResultForDereferencing } from "./query-result-proxy.js";
-import { getDocLinkOrThrow } from "./query-result-proxy.js";
+import { addRecipe, getRecipe, getRecipeId } from "./recipe-map.ts";
+import { isCell } from "./cell.ts";
+import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
+import { getDocLinkOrThrow } from "./query-result-proxy.ts";
 
 export const cancels = new WeakMap<DocImpl<any>, Cancel>();
 

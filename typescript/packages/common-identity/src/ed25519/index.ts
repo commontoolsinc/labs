@@ -1,6 +1,6 @@
-import { KeyPairRaw, isInsecureCryptoKeyPair, isCryptoKeyPair, Signer, Verifier, DID } from "../interface.js";
-import { NativeEd25519Signer, NativeEd25519Verifier, isNativeEd25519Supported } from "./native.js";
-import { NobleEd25519Signer, NobleEd25519Verifier } from "./noble.js";
+import { KeyPairRaw, isInsecureCryptoKeyPair, isCryptoKeyPair, Signer, Verifier, DID } from "../interface.ts";
+import { NativeEd25519Signer, NativeEd25519Verifier, isNativeEd25519Supported } from "./native.ts";
+import { NobleEd25519Signer, NobleEd25519Verifier } from "./noble.ts";
 import * as bip39 from "@scure/bip39"
 import { wordlist } from "@scure/bip39/wordlists/english"
 

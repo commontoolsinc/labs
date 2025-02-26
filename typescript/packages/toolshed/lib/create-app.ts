@@ -1,5 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
-import { Context } from "hono";
+import { Context } from "@hono/hono";
 import { notFound, serveEmojiFavicon } from "stoker/middlewares";
 import { defaultHook } from "stoker/openapi";
 import { pinoLogger } from "@/middlewares/pino-logger.ts";

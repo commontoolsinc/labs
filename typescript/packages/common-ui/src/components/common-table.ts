@@ -1,12 +1,12 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { baseStyles } from "./style.ts";
 import { ZodObject } from "zod";
 
 @customElement("common-card")
 export class CommonCardElement extends LitElement {
-  @property({ type: Object }) schema: ZodObject<any> | null = null;
-  @property({ type: Object }) item: any = null;
+  @property({ type: Object }) accessor schema: ZodObject<any> | null = null;
+  @property({ type: Object }) accessor item: any = null;
 
   static override styles = [
     baseStyles,
@@ -144,14 +144,14 @@ export class CommonCardElement extends LitElement {
 
 @customElement("common-table")
 export class CommonTableElement extends LitElement {
-  @property({ type: Object }) schema: ZodObject<any> | null = null;
-  @property({ type: Array }) data: any[] = [];
-  @property({ type: Boolean }) edit = false;
-  @property({ type: Boolean }) delete = false;
-  @property({ type: Boolean }) preview = false;
-  @property({ type: Boolean }) download = false;
-  @property({ type: Boolean }) copy = false;
-  @state() selectedItem: any = null;
+  @property({ type: Object }) accessor schema: ZodObject<any> | null = null;
+  @property({ type: Array }) accessor data: any[] = [];
+  @property({ type: Boolean }) accessor edit = false;
+  @property({ type: Boolean }) accessor delete = false;
+  @property({ type: Boolean }) accessor preview = false;
+  @property({ type: Boolean }) accessor download = false;
+  @property({ type: Boolean }) accessor copy = false;
+  @state() accessor selectedItem: any = null;
 
   static override styles = [
     baseStyles,
