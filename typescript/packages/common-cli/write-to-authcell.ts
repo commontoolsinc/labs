@@ -20,7 +20,8 @@ async function main(
     url: new URL(TOOLSHED_API_URL),
   });
 
-  const cellId = { "/": "baedreie2kfcbfdrqqzmhyhr5dv7flc5gh54yxyytqizubeg3tl2v5y6ve4" };
+  const cellId = { "/": "baedreiajxdvqjxmgpfzjix4h6vd4pl77unvet2k3acfvhb6ottafl7gpua" };
+
   await storage.syncCell(cellId, true);
   const authCellEntity = {
     cell: cellId,
@@ -28,10 +29,9 @@ async function main(
   };
 
   const authCell = getCellFromDocLink(authCellEntity);
-  console.log("AUTH CELL", authCell.get());
-
-  authCell.set({ token: "wat" });
+  // authCell.set({ token: "wat" });
   await storage.synced();
+
   console.log("AUTH CELL AFTER SET", authCell.get());
 
   console.log("AUTH CELL", authCell);
