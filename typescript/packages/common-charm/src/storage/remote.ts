@@ -169,7 +169,7 @@ export class RemoteStorageProvider implements StorageProvider {
 
       // If desired state is same as current state this is redundant and we skip
       if (cause && JSON.stringify(cause.is) === content) {
-        log("RemoteStorageProvider.send: no change detected for", of);
+        log(() => ["RemoteStorageProvider.send: no change detected for", of]);
         continue;
       }
 

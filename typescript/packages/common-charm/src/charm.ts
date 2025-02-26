@@ -61,7 +61,7 @@ export class CharmManager {
   }
 
   async synced(): Promise<void> {
-    return await this.storage.synced();
+    return await storage.synced();
   }
 
   getCharms(): Cell<Cell<Charm>[]> {

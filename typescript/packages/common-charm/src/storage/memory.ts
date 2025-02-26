@@ -33,7 +33,7 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
       const key = JSON.stringify(entityId);
       const valueString = JSON.stringify(value);
       if (this.lastValues.get(key) !== valueString) {
-        log("send in memory", key, valueString);
+        log(() => ["send in memory", key, valueString]);
         this.lastValues.set(key, valueString);
         inMemoryStorage.set(key, value);
         inMemoryStorageSubscribers.forEach((listener) => listener(key, value));
@@ -45,7 +45,7 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
 
   async sync(entityId: EntityId, expectedInStorage: boolean = false): Promise<void> {
     const key = JSON.stringify(entityId);
-    log("sync in memory", key, this.lastValues.get(key));
+    log(() => ["sync in memory", key, this.lastValues.get(key)]);
     if (inMemoryStorage.has(key))
       this.lastValues.set(key, JSON.stringify(inMemoryStorage.get(key)!));
     else if (expectedInStorage)
@@ -55,7 +55,7 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
 
   get<T>(entityId: EntityId): StorageValue<T> | undefined {
     const key = JSON.stringify(entityId);
-    log("get in memory", key, this.lastValues.get(key));
+    log(() => ["get in memory", key, this.lastValues.get(key)]);
     return this.lastValues.has(key)
       ? (JSON.parse(this.lastValues.get(key)!) as StorageValue)
       : undefined;
