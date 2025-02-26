@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 export function User() {
   const { user, clearAuthentication } = useAuthentication();
   const [did, setDid] = useState<string | undefined>(undefined);
-  
+
   useEffect(() => {
     let ignore = false;
     function setDidInner() {
@@ -20,7 +20,7 @@ export function User() {
     return () => {
       setDid(undefined);
       ignore = true;
-    }
+    };
   }, [user]);
 
   let h = "0";
@@ -33,7 +33,7 @@ export function User() {
     // we use the first two added for hue.
     h = `${did.charCodeAt(index) + did.charCodeAt(index + 1)}`;
     // Then the final character for saturation, map ASCII codes 49-122 to saturation 50%-100%
-    s = `${(50 + (((did.charCodeAt(index + 2) - 49) / 73) * 50))}%`;
+    s = `${50 + ((did.charCodeAt(index + 2) - 49) / 73) * 50}%`;
   }
 
   const styles = {
@@ -44,9 +44,12 @@ export function User() {
   return (
     <div
       onClick={clearAuthentication}
-      title={did ?? "undefined"}
       style={styles}
-      className="relative flex max-w-xs items-center rounded-full bg-gray-800 text-sm focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-gray-800 focus:outline-hidden">
+      className="relative group flex max-w-xs items-center rounded-full bg-gray-800 text-sm focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-gray-800 focus:outline-hidden cursor-pointer"
+    >
+      <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
+        Click to log out
+      </div>
     </div>
   );
 }

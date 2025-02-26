@@ -1,19 +1,22 @@
 import { CharmManager } from "@commontools/charm";
 import { useEffect, useState } from "react";
 
-export function useSyncedStatus(charmManager: CharmManager, intervalMs = 3000) {
+export function useSyncedStatus(charmManager: CharmManager, intervalMs = 5000) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
-
   useEffect(() => {
     let isMounted = true;
+    let isCheckingSync = false;
 
     const checkSyncStatus = async () => {
-      if (!isMounted) return;
+      if (!isMounted || isCheckingSync) return;
 
+      isCheckingSync = true;
       setIsSyncing(true);
+
       try {
         await charmManager.synced();
+
         if (isMounted) {
           setLastSyncTime(new Date());
         }
@@ -23,6 +26,7 @@ export function useSyncedStatus(charmManager: CharmManager, intervalMs = 3000) {
         if (isMounted) {
           setIsSyncing(false);
         }
+        isCheckingSync = false;
       }
     };
 

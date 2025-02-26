@@ -93,7 +93,7 @@ export default function CharmList() {
   const { replicaName } = useParams<{ replicaName: string }>();
   const { charmManager } = useCharmManager();
   const [charms] = useCell(charmManager.getCharms());
-  const { isSyncing, lastSyncTime } = useSyncedStatus(charmManager);
+  const { isSyncing } = useSyncedStatus(charmManager);
 
   if (!isSyncing && (!charms || charms.length === 0)) {
     return (

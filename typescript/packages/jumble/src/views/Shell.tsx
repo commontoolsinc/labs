@@ -1,6 +1,6 @@
 import "@commontools/ui";
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Outlet, useParams, useLocation } from "react-router-dom";
 import { animated } from "@react-spring/web";
 import { MdOutlineStar } from "react-icons/md";
@@ -9,7 +9,8 @@ import ShellHeader from "@/components/ShellHeader.tsx";
 import { CommandCenter } from "@/components/CommandCenter.tsx";
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
 import { AuthenticationView } from "@/views/AuthenticationView.tsx";
-
+import { useCharmManager } from "@/contexts/CharmManagerContext";
+import { useSyncedStatus } from "@/hooks/use-synced-status";
 
 export default function Shell() {
   const { charmId, replicaName } = useParams();
@@ -26,13 +27,11 @@ export default function Shell() {
   const onLaunchCommand = useCallback(() => {
     window.dispatchEvent(new CustomEvent("open-command-center"));
   }, []);
-  
+
   const { user } = useAuthentication();
 
   if (!user) {
-    return (
-      <AuthenticationView /> 
-    )
+    return <AuthenticationView />;
   }
 
   return (
