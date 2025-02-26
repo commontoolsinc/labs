@@ -46,8 +46,11 @@ const DitheringShader = {
       float threshold = bayerMatrix[index];
 
       if (grey > 0.01) { // You might need to adjust this threshold
-        float final = grey > threshold ? 0.588 : 1.0;
-        gl_FragColor = vec4(vec3(final), 1.0);
+        if (grey > threshold) {
+          gl_FragColor = vec4(vec3(0.588), 1.0);
+        } else {
+          gl_FragColor = vec4(vec3(1.0), 0.0);
+        }
       } else {
         gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
       }
@@ -370,7 +373,7 @@ export const DitheredCube = ({
         <directionalLight position={[2, 2, 1]} intensity={0.5} />
         <directionalLight position={[-2, -2, 1]} intensity={2} />
         <MorphingMesh animate={animate} animationSpeed={animationSpeed} />
-        <OrbitControls enableZoom={true} />
+        <OrbitControls enableZoom={false} />
         <Effects>
           <ditheringPass />
         </Effects>

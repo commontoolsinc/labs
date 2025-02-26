@@ -276,9 +276,20 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
       {/* Main Content Area */}
       <div className="flex-1 h-full overflow-y-auto p-4 relative">
         {loading && (
-          <div className="absolute inset-0 bg-white/80 flex flex-col items-center justify-center">
+          <div
+            className="absolute inset-0 backdrop-blur-sm bg-white/60 flex flex-col items-center justify-center z-10 transition-opacity duration-300 ease-in-out"
+            style={{
+              opacity: loading ? 1 : 0,
+            }}
+          >
             <div className="text-lg font-bold">thinking</div>
-            <LoadingSpinner height={1024} width={1024} visible={true} cameraZoom={400} />
+            <LoadingSpinner
+              blendMode="exclusion"
+              height={1024}
+              width={1024}
+              visible={true}
+              cameraZoom={128}
+            />
           </div>
         )}
 
