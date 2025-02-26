@@ -2,7 +2,7 @@ import { useCell } from "@/hooks/use-cell";
 import { NavLink } from "react-router-dom";
 import { NAME, UI } from "@commontools/builder";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
-import { Charm, CharmManager } from "@commontools/charm";
+import { Charm } from "@commontools/charm";
 import { charmId } from "@/utils/charms.ts";
 import { useEffect, useRef, useState } from "react";
 import { Card } from "@/components/Card.tsx";
