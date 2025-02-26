@@ -142,7 +142,14 @@ class StorageImpl implements Storage {
     this.cancel = cancel;
     this.addCancel = addCancel;
 
-    if (location?.href) this.setRemoteStorage(new URL(location.href));
+    // Check if we're in a browser environment before accessing location
+    if (
+      typeof globalThis !== "undefined" &&
+      typeof globalThis.location !== "undefined" &&
+      globalThis.location?.href
+    ) {
+      this.setRemoteStorage(new URL(globalThis.location.href));
+    }
   }
 
   // Map from space to storage provider. TODO: Push spaces to storage providers.
