@@ -165,6 +165,11 @@ class StorageImpl implements Storage {
   }
 
   synced(): Promise<void> {
+    // If there's no batch processing and no pending batch, resolve immediately
+    if (!this.currentBatchProcessing && this.currentBatch.length === 0) {
+      return Promise.resolve();
+    }
+
     return this.currentBatchPromise;
   }
 
