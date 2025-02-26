@@ -175,6 +175,7 @@ export function getDocByEntityId<T = any>(
   doc = getDoc<T>();
   if (typeof entityId === "string") entityId = JSON.parse(entityId) as EntityId;
   doc.entityId = entityId;
+  doc.space = space;
   setDocByEntityId(space, entityId, doc);
   return doc;
 }

@@ -533,6 +533,7 @@ export function normalizeToDocLinks(
         } else {
           value[i] = { cell: getDoc(value[i]), path: [] } satisfies DocLink;
           value[i].cell.entityId = itemId;
+          value[i].cell.space = parentDoc.space;
           value[i].cell.sourceCell = parentDoc;
 
           preceedingItemId = itemId;

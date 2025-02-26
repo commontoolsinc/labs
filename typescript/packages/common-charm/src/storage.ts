@@ -318,10 +318,13 @@ class StorageImpl implements Storage {
       if (isDocLink(value)) {
         // Generate a causal ID for the cell if it doesn't have one yet
         if (!value.cell.entityId) {
-          value.cell.generateEntityId({
-            cell: cell.entityId?.toJSON ? cell.entityId.toJSON() : cell.entityId,
-            path,
-          });
+          value.cell.generateEntityId(
+            {
+              cell: cell.entityId?.toJSON ? cell.entityId.toJSON() : cell.entityId,
+              path,
+            },
+            cell.space!,
+          );
         }
         dependencies.add(this._ensureIsSynced(value.cell));
         return { ...value, cell: value.cell.toJSON() /* = the id */ };
@@ -396,9 +399,9 @@ class StorageImpl implements Storage {
           // If the cell is not yet loaded, load it. As it's referenced in
           // something that came from storage, the id is known in storage and so
           // we have to wait for it to load. Hence true as second parameter.
-          const cell = this._ensureIsSynced(value.cell, true);
-          dependencies.add(cell);
-          return { ...value, cell };
+          const dependency = this._ensureIsSyncedById(cell.space!, value.cell, true);
+          dependencies.add(dependency);
+          return { ...value, cell: dependency };
         } else {
           console.warn("unexpected cell reference", value);
           return value;
