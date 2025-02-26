@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { TYPE } from "@commontools/builder";
 import { saveSpell } from "@/services/spellbook.ts";
+import { createPath } from "@/routes.ts";
 
 export function usePublish() {
   const { charmManager } = useCharmManager();
@@ -50,7 +51,7 @@ export function usePublish() {
         } catch (err) {
           console.error("Failed to copy to clipboard:", err);
         }
-        navigate(`/spellbook/${spellId}`);
+        navigate(createPath('spellbookDetail', { spellId }));
       } else {
         throw new Error("Failed to publish");
       }

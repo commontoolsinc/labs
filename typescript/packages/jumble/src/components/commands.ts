@@ -8,6 +8,7 @@ import { iterateCharm } from "@/utils/charm-operations.ts";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext.tsx";
 import { startCharmIndexing } from "@/utils/indexing.ts";
 import { generateJSON } from "@/utils/prompt-library/json-gen.ts";
+import { createPath, createPathWithHash, ROUTES } from "@/routes";
 
 export type CommandType = "action" | "input" | "confirm" | "select" | "menu" | "transcribe" | 'placeholder';
 
@@ -121,7 +122,7 @@ async function handleNewCharm(deps: CommandContext, input: string | undefined) {
     const dummyData = await generateJSON(input);
     const id = await castNewRecipe(deps.charmManager, dummyData, input);
     if (id) {
-      deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
+      deps.navigate(createPath('charmShow', { charmId: charmId(id), replicaName: deps.focusedReplicaId }));
     }
   } finally {
     deps.setLoading(false);
@@ -151,8 +152,9 @@ async function handleSearchCharms(deps: CommandContext) {
         title: "Select Charm",
         handler: async (id) => {
           console.log("Select handler called with:", id);
-          console.log("Navigating to:", `/${deps.focusedReplicaId}/${charmId(id)}`);
-          deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
+          const path = createPath('charmDetail', { charmId: charmId(id), replicaName: deps.focusedReplicaId });
+          console.log("Navigating to:", path);
+          deps.navigate(path);
           deps.setOpen(false);
         },
       },
@@ -198,7 +200,7 @@ async function handleRenameCharm(deps: CommandContext, input: string | undefined
 async function handleDeleteCharm(deps: CommandContext) {
   if (!deps.focusedCharmId) return;
   const result = await deps.charmManager.remove(deps.focusedCharmId);
-  if (result) deps.navigate("/");
+  if (result) deps.navigate(ROUTES.root);
   else deps.setOpen(false);
 }
 
@@ -258,7 +260,7 @@ async function handleImportJSON(deps: CommandContext) {
 
     const id = await castNewRecipe(deps.charmManager, data, title);
     if (id) {
-      deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
+      deps.navigate(createPath('charmShow', { charmId: charmId(id), replicaName: deps.focusedReplicaId }));
     }
   } finally {
     deps.setLoading(false);
@@ -284,7 +286,7 @@ async function handleLoadRecipe(deps: CommandContext) {
     const src = await file.text();
     const id = await compileAndRunRecipe(deps.charmManager, src, "imported", {});
     if (id) {
-      deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
+      deps.navigate(createPath('charmShow', { charmId: charmId(id), replicaName: deps.focusedReplicaId }));
     }
   } finally {
     deps.setLoading(false);
@@ -388,7 +390,7 @@ async function handleUseDataInSpell(deps: CommandContext) {
           deps.setLoading(true);
           const newCharmId = await castSpellAsCharm(deps.charmManager, selectedSpell.id, sourceId);
           if (newCharmId) {
-            deps.navigate(`/${deps.focusedReplicaId}/${charmId(newCharmId)}`);
+            deps.navigate(createPath('charmShow', { charmId: charmId(id), replicaName: deps.focusedReplicaId }));
           }
           deps.setOpen(false);
           deps.setLoading(false);
@@ -456,7 +458,7 @@ async function handleUseSpellOnOtherData(deps: CommandContext) {
           deps.setLoading(true);
           const newCharmId = await castSpellAsCharm(deps.charmManager, spellId, selectedCell.id);
           if (newCharmId) {
-            deps.navigate(`/${deps.focusedReplicaId}/${charmId(newCharmId)}`);
+            deps.navigate(createPath('charmShow', { charmId: charmId(id), replicaName: deps.focusedReplicaId }));
           }
           deps.setOpen(false);
           deps.setLoading(false);
@@ -548,7 +550,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           deps.setOpen(false);
           return;
         }
-        deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}/detail`);
+        deps.navigate(createPath('charmDetail', { charmId: deps.focusedCharmId, replicaName: deps.focusedReplicaId }))
         deps.setOpen(false);
       },
     },
@@ -563,7 +565,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           deps.setOpen(false);
           return;
         }
-        deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}/detail#code`);
+        deps.navigate(createPathWithHash('charmDetail', { charmId: deps.focusedCharmId, replicaName: deps.focusedReplicaId }, 'code'))
         deps.setOpen(false);
       },
     },
@@ -578,7 +580,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           deps.setOpen(false);
           return;
         }
-        deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}/detail#data`);
+        deps.navigate(createPathWithHash('charmDetail', { charmId: deps.focusedCharmId, replicaName: deps.focusedReplicaId }, 'data'))
         deps.setOpen(false);
       },
     },
@@ -593,7 +595,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           deps.setOpen(false);
           return;
         }
-        deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}`);
+        deps.navigate(createPath('charmShow', { charmId: deps.focusedCharmId, replicaName: deps.focusedReplicaId }))
         deps.setOpen(false);
       },
     },
@@ -615,7 +617,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       predicate: !!deps.focusedReplicaId,
       handler: () => {
         if (deps.focusedReplicaId) {
-          deps.navigate(`/${deps.focusedReplicaId}`);
+          deps.navigate(createPath('replicaRoot', { replicaName: deps.focusedReplicaId }))
         }
         deps.setOpen(false);
       },

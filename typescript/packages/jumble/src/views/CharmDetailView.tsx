@@ -22,6 +22,7 @@ import {
   type CharmSuggestion,
 } from "@/utils/prompt-library/charm-suggestions.ts";
 import { Cell } from "@commontools/runner";
+import { createPath, createPathWithHash } from "@/routes";
 
 type Tab = "iterate" | "code" | "data";
 
@@ -266,7 +267,7 @@ const Variants = () => {
     handleCancelVariants,
   } = useIterationContext();
 
-  const { charmId: paramCharmId } = useParams();
+  const { charmId: paramCharmId, replicaName } = useParams();
   const { currentFocus: charm } = useCharm(paramCharmId);
   const navigate = useNavigate();
 
@@ -296,11 +297,11 @@ const Variants = () => {
                     const variantId = charmId(selectedVariant);
                     if (variantId) {
                       // Navigate to the main view (without /detail) to close the drawer
-                      navigate(`/charms/${variantId}`);
+                      navigate(createPath('charmShow', { charmId: variantId, replicaName }));
                     }
                   } else {
                     // If it's the original charm, just close the drawer by navigating to the main view
-                    navigate(`/charms/${paramCharmId}`);
+                    navigate(createPath('charmShow', { charmId: paramCharmId, replicaName }));
                   }
                 }
               }}
@@ -721,7 +722,7 @@ function CharmDetailView() {
           selectedModel,
         );
         if (newPath) {
-          navigate(`${newPath}/detail#iterate`);
+          navigate(createPathWithHash('charmDetail', { charmId: paramCharmId, replicaName }, 'iterate'));
         }
       } catch (error) {
         console.error("Iteration error:", error);
@@ -729,7 +730,7 @@ function CharmDetailView() {
         setLoading(false);
       }
     }
-  }, [showVariants, iterationInput, selectedModel, charmManager, charm, replicaName, navigate]);
+  }, [showVariants, paramCharmId, iterationInput, selectedModel, charmManager, charm, replicaName, navigate]);
 
   const handleCancelVariants = useCallback(() => {
     setVariants([]);
