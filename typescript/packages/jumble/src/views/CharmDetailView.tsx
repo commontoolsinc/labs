@@ -271,7 +271,7 @@ const Variants = () => {
   } = useIterationContext();
 
   const { charmId: paramCharmId } = useParams();
-  const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
+  const { currentFocus: charm } = useCharm(paramCharmId);
 
   if (variants.length === 0 && expectedVariantCount === 0) return null;
 
@@ -536,11 +536,11 @@ const DataTab = () => {
 
   return (
     <div className="h-full overflow-auto p-4">
-      {charm.sourceCell && (
+      {charm.getSourceCell && (
         <div className="mb-4">
           <h3 className="text-md font-semibold mb-1">Argument</h3>
           <pre className="bg-gray-50 p-2 rounded text-sm overflow-auto max-h-36 border border-gray-200">
-            {JSON.stringify(charm.sourceCell.get().argument, null, 2)}
+            {JSON.stringify(charm.getSourceCell()?.get()?.argument, null, 2)}
           </pre>
         </div>
       )}
@@ -555,7 +555,11 @@ const DataTab = () => {
 };
 
 // Bottom Sheet Component
-const BottomSheet = ({ children }) => {
+const BottomSheet = ({
+  children,
+}: {
+  children: (activeTab: Tab, isResizing: boolean) => React.ReactNode;
+}) => {
   const { sheetHeight, isResizing, handleResizeStart, handleTouchResizeStart } = useBottomSheet();
   const { activeTab, handleTabChange } = useTabNavigation();
 
@@ -610,7 +614,7 @@ const BottomSheet = ({ children }) => {
 // Main CharmDetailView Component
 function CharmDetailView() {
   const { charmId: paramCharmId, replicaName } = useParams();
-  const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
+  const { currentFocus: charm } = useCharm(paramCharmId);
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
 

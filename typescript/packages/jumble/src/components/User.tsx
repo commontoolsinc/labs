@@ -11,7 +11,7 @@ export function User() {
       if (!user) {
         return;
       }
-      let did = user.verifier().did();
+      const did = user.verifier().did();
       if (!ignore) {
         setDid(did);
       }
@@ -25,10 +25,10 @@ export function User() {
 
   let h = "0";
   let s = "50%";
-  let l = "50%";
+  const l = "50%";
 
   if (did) {
-    let index = did.length - 4;
+    const index = did.length - 4;
     // DID string is `did:key:z{REST}`. Taking the last 3 characters,
     // we use the first two added for hue.
     h = `${did.charCodeAt(index) + did.charCodeAt(index + 1)}`;
