@@ -637,7 +637,7 @@ function CharmDetailView() {
   // Iteration state
   const [iterationInput, setIterationInput] = useState("");
   const [selectedModel, setSelectedModel] = useState("anthropic:claude-3-7-sonnet-latest");
-  const [showVariants, setShowVariants] = useState(false);
+  const [showVariants, setShowVariants] = useState(true);
   const [loading, setLoading] = useState(false);
   const [variants, setVariants] = useState<Cell<Charm>[]>([]);
   const [selectedVariant, setSelectedVariant] = useState<Cell<Charm> | null>(null);
