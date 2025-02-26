@@ -16,7 +16,6 @@ export const useCharm = (charmId: string | undefined) => {
           await charmManager.syncRecipe(charm);
           const ir = getIframeRecipe(charm);
           setIframeRecipe(ir?.iframe ?? null);
-          console.log({ iframeRecipe: ir });
         }
         setCurrentFocus(charm);
       }

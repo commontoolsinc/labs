@@ -9,7 +9,7 @@ import { BackgroundJob } from "@/contexts/BackgroundTaskContext";
 import { startCharmIndexing } from "@/utils/indexing";
 import { generateJSON } from "@/utils/prompt-library/json-gen";
 
-export type CommandType = "action" | "input" | "confirm" | "select" | "menu" | "transcribe";
+export type CommandType = "action" | "input" | "confirm" | "select" | "menu" | "transcribe" | 'placeholder';
 
 export interface CommandItem {
   id: string;
@@ -80,7 +80,7 @@ export type CommandMode =
   | { type: "confirm"; command: CommandItem; message: string }
   | { type: "select"; command: CommandItem; options: SelectOption[] }
   | { type: "transcribe"; command: CommandItem; placeholder: string }
-  | { type: "loading" };
+  | { type: "loading" }
 
 export interface SelectOption {
   id: string;
@@ -736,7 +736,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
                     id: `msg-${job.id}-${i}`,
                     type: "action",
                     title: msg,
-                    handler: () => {},
+                    handler: () => { },
                   }),
                 ),
               },

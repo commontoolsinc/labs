@@ -373,6 +373,7 @@ export function CommandCenter() {
                             setOpen(false);
                           }
                         } else {
+                          // TODO(bf): need to refactor types
                           setMode({ type: cmd.type, command: cmd });
                         }
                       }}

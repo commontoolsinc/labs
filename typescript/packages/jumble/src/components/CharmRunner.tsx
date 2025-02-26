@@ -30,6 +30,8 @@ function useCharmLoader({
   const mountingKey = useRef(0);
   const { charmManager } = useCharmManager();
 
+  const onCharmReadyCallback = React.useCallback(onCharmReady, [onCharmReady]);
+
   const loadCharm = React.useCallback(async () => {
     const currentMountKey = ++mountingKey.current;
     setIsLoading(true);
@@ -52,7 +54,7 @@ function useCharmLoader({
 
       if (currentMountKey !== mountingKey.current) return;
 
-      onCharmReady(charm);
+      onCharmReadyCallback(charm);
     } catch (err) {
       if (currentMountKey === mountingKey.current) {
         setError(err as Error);
@@ -62,7 +64,7 @@ function useCharmLoader({
         setIsLoading(false);
       }
     }
-  }, [charmImport, argument, onCharmReady, charmManager]);
+  }, [charmImport, argument, onCharmReadyCallback, charmManager]);
 
   React.useEffect(() => {
     if (autoLoad) {
@@ -76,28 +78,28 @@ function useCharmLoader({
   return { error, isLoading };
 }
 
-export function CharmRenderer({ charm, className = "" }: CharmRendererProps) {
+function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [runtimeError, setRuntimeError] = React.useState<Error | null>(null);
   const [isFixing, setIsFixing] = React.useState(false);
   const { charmManager, currentReplica } = useCharmManager();
   const navigate = useNavigate();
 
-  const handleFixIt = async () => {
+  const handleFixIt = React.useCallback(async () => {
     if (!runtimeError || isFixing) return;
     setIsFixing(true);
     try {
       const newPath = await fixItCharm(charmManager, charm, runtimeError);
       if (newPath) {
-        setRuntimeError(null); // clear the error
-        navigate(`/${currentReplica}/${newPath}`); // navigate to the new charm
+        setRuntimeError(null);
+        navigate(`/${currentReplica}/${newPath}`);
       }
     } catch (error) {
       console.error("Fix it error:", error);
     } finally {
       setIsFixing(false);
     }
-  };
+  }, [runtimeError, isFixing, charmManager, charm, currentReplica, navigate]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -119,7 +121,7 @@ export function CharmRenderer({ charm, className = "" }: CharmRendererProps) {
         container.innerHTML = "";
       }
     };
-  }, [charm]);
+  }, [charm.key]);
 
   return (
     <>
@@ -158,7 +160,9 @@ export function CharmRenderer({ charm, className = "" }: CharmRendererProps) {
   );
 }
 
-export function CharmRunner(props: CharmLoaderProps & Omit<CharmRendererProps, "charm">) {
+export const CharmRenderer = React.memo(RawCharmRenderer);
+
+function RawCharmRunner(props: CharmLoaderProps & Omit<CharmRendererProps, "charm">) {
   const [charm, setCharm] = React.useState<any>(null);
   const { error, isLoading } = useCharmLoader({
     ...props,
@@ -173,3 +177,5 @@ export function CharmRunner(props: CharmLoaderProps & Omit<CharmRendererProps, "
     </>
   );
 }
+
+export const CharmRunner = React.memo(RawCharmRunner);

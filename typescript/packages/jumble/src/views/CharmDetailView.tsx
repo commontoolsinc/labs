@@ -4,7 +4,6 @@ import React, {
   useState,
   useCallback,
   useRef,
-  memo,
   createContext,
   useContext,
 } from "react";
@@ -32,9 +31,6 @@ const variantModels = [
   "groq:llama-3.3-70b-versatile",
   "google:gemini-2.0-pro",
 ] as const;
-
-// Memoized CharmRenderer to prevent unnecessary re-renders
-const MemoizedCharmRenderer = memo(CharmRenderer);
 
 // =================== Context for Shared State ===================
 interface IterationContextType {
@@ -319,9 +315,8 @@ const Variants = () => {
         {charm && (
           <div
             onClick={() => setSelectedVariant(charm)}
-            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${
-              selectedVariant === charm ? "border-blue-500" : "border-black"
-            }`}
+            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${selectedVariant === charm ? "border-blue-500" : "border-black"
+              }`}
           >
             <div className="h-full flex flex-col overflow-hidden">
               <div className="bg-gray-100 text-xs font-bold p-1 border-b border-gray-300">
@@ -351,9 +346,8 @@ const Variants = () => {
           <div
             key={idx}
             onClick={() => setSelectedVariant(variant)}
-            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${
-              selectedVariant === variant ? "border-blue-500" : "border-black"
-            }`}
+            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${selectedVariant === variant ? "border-blue-500" : "border-black"
+              }`}
           >
             <div className="h-full flex flex-col overflow-hidden">
               <div className="bg-gray-100 text-xs font-bold p-1 border-b border-gray-300">
@@ -627,25 +621,22 @@ const BottomSheet = ({
       <div className="tabs flex gap-0 border-b border-gray-200">
         <button
           onClick={() => handleTabChange("iterate")}
-          className={`px-4 py-2 flex-1 text-center ${
-            activeTab === "iterate" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
-          }`}
+          className={`px-4 py-2 flex-1 text-center ${activeTab === "iterate" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
+            }`}
         >
           Iteration
         </button>
         <button
           onClick={() => handleTabChange("code")}
-          className={`px-4 py-2 flex-1 text-center ${
-            activeTab === "code" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
-          }`}
+          className={`px-4 py-2 flex-1 text-center ${activeTab === "code" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
+            }`}
         >
           Edit Code
         </button>
         <button
           onClick={() => handleTabChange("data")}
-          className={`px-4 py-2 flex-1 text-center ${
-            activeTab === "data" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
-          }`}
+          className={`px-4 py-2 flex-1 text-center ${activeTab === "data" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
+            }`}
         >
           View Data
         </button>
@@ -792,7 +783,7 @@ function CharmDetailView() {
             </div>
           )}
 
-          <MemoizedCharmRenderer
+          <CharmRenderer
             key="main"
             className="w-full h-full"
             charm={selectedVariant || charm}

@@ -8,6 +8,10 @@ function CharmShowView() {
   const { charmId } = useParams();
   const { currentFocus: charm } = useCharm(charmId);
 
+  function test() {
+
+  }
+
   if (!charm) {
     return (
       <div className="max-w-xl mx-auto">
@@ -17,7 +21,7 @@ function CharmShowView() {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="h-full overflow-y-auto" onClick={test}>
       {charm && <CharmRenderer className="w-full h-full" charm={charm} />}
     </div>
   );
