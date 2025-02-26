@@ -19,6 +19,7 @@ import { StorageProvider, StorageValue } from "./storage/base.js";
 import { RemoteStorageProvider } from "./storage/remote.js";
 import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
 import { Space } from "@commontools/runner/src/space.js";
+import { InMemoryStorageProvider } from "./storage/memory.js";
 
 export function log(fn: () => any[]) {
   debug(() => {
@@ -225,14 +226,24 @@ class StorageImpl implements Storage {
     let provider = this.storageProviders.get(space);
 
     if (!provider) {
-      if (!this.remoteStorageUrl) throw new Error("No remote storage URL set");
+      const type = (import.meta as any).env?.VITE_STORAGE_TYPE ?? "remote";
 
-      provider = new RemoteStorageProvider({
-        address: new URL("/api/storage/memory", this.remoteStorageUrl!),
-        space: space.uri as `did:${string}:${string}`,
-      });
+      if (type === "remote") {
+        if (!this.remoteStorageUrl) throw new Error("No remote storage URL set");
 
-      this.storageProviders.set(space, provider);
+        provider = new RemoteStorageProvider({
+          address: new URL("/api/storage/memory", this.remoteStorageUrl!),
+          space: space.uri as `did:${string}:${string}`,
+        });
+
+        this.storageProviders.set(space, provider);
+      } else if (type === "memory") {
+        // Each instance is independent, so we don't need to tell it the space URI
+        provider = new InMemoryStorageProvider();
+        this.storageProviders.set(space, provider);
+      } else {
+        throw new Error(`Unknown storage type: ${type}`);
+      }
     }
     return provider;
   }
