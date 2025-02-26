@@ -106,7 +106,7 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
     // mnemonic so that the UI can present guidance on handling
     // the private key. The root will be derived from the mnemonic
     // on authentication.
-    const [_, mnemonic] = await Identity.generateMnemonic();
+    const [, mnemonic] = await Identity.generateMnemonic();
     return mnemonic;
   }, []);
 

@@ -1,6 +1,5 @@
 export interface StoredCredential {
   id: string;
-  type: "public-key" | "passphrase";
   method: "passkey" | "passphrase";
 }
 
@@ -20,7 +19,6 @@ export function clearStoredCredential(): void {
 export function createPasskeyCredential(id: string): StoredCredential {
   return {
     id,
-    type: "public-key",
     method: "passkey",
   };
 }
@@ -28,7 +26,6 @@ export function createPasskeyCredential(id: string): StoredCredential {
 export function createPassphraseCredential(): StoredCredential {
   return {
     id: crypto.randomUUID(),
-    type: "passphrase",
     method: "passphrase",
   };
 }
@@ -36,7 +33,7 @@ export function createPassphraseCredential(): StoredCredential {
 export function getPublicKeyCredentialDescriptor(
   storedCredential: StoredCredential | null,
 ): PublicKeyCredentialDescriptor | undefined {
-  if (storedCredential?.type === "public-key") {
+  if (storedCredential?.method === "passkey") {
     return {
       id: Uint8Array.from(atob(storedCredential.id), (c) => c.charCodeAt(0)),
       type: "public-key" as PublicKeyCredentialType,

@@ -269,7 +269,7 @@ export function AuthenticationView() {
                   }}
                 >
                   <LuKey className="w-5 h-5" />
-                  {storedCredential.type === "public-key"
+                  {storedCredential.method === "passkey"
                     ? `Unlock with Key (${storedCredential.id.slice(-4)})`
                     : "Unlock with Passphrase"}
                 </button>
