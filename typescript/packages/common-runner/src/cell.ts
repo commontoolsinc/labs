@@ -35,10 +35,6 @@ import { Space } from "./space.js";
  * @param {function} callback - The callback to be called when the cell changes.
  * @returns {function} - A function to Cleanup the callback.
  *
- * @method updates Adds a callback that is called on cell changes.
- * @param {function} callback - The callback to be called when the cell changes.
- * @returns {function} - A function to Cleanup the callback.
- *
  * @method getAsProxy Returns a value proxy for the cell.
  * @param {Path} path - The path to follow.
  * @returns {QueryResult<DeepKeyLookup<T, Path>>}
