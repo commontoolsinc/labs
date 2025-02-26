@@ -3,7 +3,7 @@ import { type DocImpl, type DocLink, getDoc, isDoc, isDocLink } from "./doc.js";
 import { getDocLinkOrThrow, isQueryResultForDereferencing } from "./query-result-proxy.js";
 import { isCell } from "./cell.js";
 import { refer } from "merkle-reference";
-import { type Space, DEFAULT_SPACE } from "./space.js";
+import { type Space } from "./space.js";
 
 export type EntityId = {
   "/": string | Uint8Array;
@@ -92,7 +92,6 @@ export const getEntityId = (value: any): { "/": string } | undefined => {
   if (!ref?.cell.entityId) return undefined;
 
   if (ref.path.length > 0) {
-    console.warn("getEntityId: path support experimental", ref.path);
     return JSON.parse(JSON.stringify(createRef({ path: ref.path }, ref.cell.entityId)));
   } else return JSON.parse(JSON.stringify(ref.cell.entityId));
 };
@@ -167,9 +166,9 @@ class CleanableMap<T extends object> {
  * Update getDocByEntityId to accept a space parameter
  */
 export function getDocByEntityId<T = any>(
+  space: Space,
   entityId: EntityId | string,
   createIfNotFound = true,
-  space: Space = DEFAULT_SPACE,
 ): DocImpl<T> | undefined {
   const id = typeof entityId === "string" ? entityId : JSON.stringify(entityId);
   let doc = entityIdToDocMap.get(space, id);
@@ -179,17 +178,13 @@ export function getDocByEntityId<T = any>(
   doc = getDoc<T>();
   if (typeof entityId === "string") entityId = JSON.parse(entityId) as EntityId;
   doc.entityId = entityId;
-  setDocByEntityId(entityId, doc, space);
+  setDocByEntityId(space, entityId, doc);
   return doc;
 }
 
 /**
  * Update setDocByEntityId to accept a space parameter
  */
-export const setDocByEntityId = (
-  entityId: EntityId,
-  cell: DocImpl<any>,
-  space: Space = DEFAULT_SPACE,
-) => {
+export const setDocByEntityId = (space: Space, entityId: EntityId, cell: DocImpl<any>) => {
   entityIdToDocMap.set(space, JSON.stringify(entityId), cell);
 };

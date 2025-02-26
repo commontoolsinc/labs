@@ -3,7 +3,7 @@ import { castNewRecipe, Charm, CharmManager, compileAndRunRecipe } from "@common
 import { NavigateFunction } from "react-router-dom";
 import { charmId } from "@/utils/charms";
 import { NAME } from "@commontools/builder";
-import { Cell, getDocByEntityId, getEntityId, getRecipe } from "@commontools/runner";
+import { Cell, getEntityId, getRecipe } from "@commontools/runner";
 import { iterateCharm } from "@/utils/charm-operations";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext";
 import { startCharmIndexing } from "@/utils/indexing";
@@ -102,8 +102,7 @@ export const castSpellAsCharm = async (
     if (!recipe) return;
 
     console.log("Syncing blob...");
-    const cell = getDocByEntityId({ "/": blobId }, true)!.asCell(["argument"]);
-    await charmManager.sync(cell, true);
+    const cell = await charmManager.getCellById(blobId, ["argument"]);
     console.log("Casting...");
     const charm: Cell<Charm> = await charmManager.runPersistent(recipe, cell);
     charmManager.add([charm]);

@@ -5,6 +5,7 @@ import { addModuleByRef } from "../src/module.js";
 import { getDoc } from "../src/doc.js";
 import { idle } from "../src/scheduler.js";
 import { type Cell } from "../src/cell.js";
+import { getSpace } from "../src/space.js";
 
 describe("Recipe Runner", () => {
   it("should run a simple recipe", async () => {
@@ -13,7 +14,11 @@ describe("Recipe Runner", () => {
       return { result: doubled };
     });
 
-    const result = run(simpleRecipe, { value: 5 });
+    const result = run(
+      simpleRecipe,
+      { value: 5 },
+      getDoc(undefined, "should run a simple recipe", getSpace("test")),
+    );
 
     await idle();
 
@@ -36,7 +41,11 @@ describe("Recipe Runner", () => {
       return { result };
     });
 
-    const result = run(outerRecipe, { value: 4 });
+    const result = run(
+      outerRecipe,
+      { value: 4 },
+      getDoc(undefined, "should handle nested recipes", getSpace("test")),
+    );
 
     await idle();
 
@@ -54,13 +63,21 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result1 = run(recipeWithDefaults, {});
+    const result1 = run(
+      recipeWithDefaults,
+      {},
+      getDoc(undefined, "should handle recipes with defaults", getSpace("test")),
+    );
 
     await idle();
 
     expect(result1.getAsQueryResult()).toMatchObject({ sum: 15 });
 
-    const result2 = run(recipeWithDefaults, { a: 20 });
+    const result2 = run(
+      recipeWithDefaults,
+      { a: 20 },
+      getDoc(undefined, "should handle recipes with defaults (2)", getSpace("test")),
+    );
 
     await idle();
 
@@ -79,9 +96,13 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result = run(multipliedArray, {
-      values: [{ x: 1 }, { x: 2 }, { x: 3 }],
-    });
+    const result = run(
+      multipliedArray,
+      {
+        values: [{ x: 1 }, { x: 2 }, { x: 3 }],
+      },
+      getDoc(undefined, "should handle recipes with map nodes", getSpace("test")),
+    );
 
     await idle();
 
@@ -101,10 +122,14 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result = run(doubleArray, {
-      values: [1, 2, 3],
-      factor: 3,
-    });
+    const result = run(
+      doubleArray,
+      {
+        values: [1, 2, 3],
+        factor: 3,
+      },
+      getDoc(undefined, "should handle recipes with map nodes with closures", getSpace("test")),
+    );
 
     await idle();
 
@@ -124,7 +149,11 @@ describe("Recipe Runner", () => {
       return { counter, stream: incHandler({ counter }) };
     });
 
-    const result = run(incRecipe, { counter: { value: 0 } });
+    const result = run(
+      incRecipe,
+      { counter: { value: 0 } },
+      getDoc(undefined, "should execute handlers", getSpace("test")),
+    );
 
     await idle();
 
@@ -150,7 +179,11 @@ describe("Recipe Runner", () => {
       return { counter, stream: incHandler.bind({ counter }) };
     });
 
-    const result = run(incRecipe, { counter: { value: 0 } });
+    const result = run(
+      incRecipe,
+      { counter: { value: 0 } },
+      getDoc(undefined, "should execute handlers that use bind and this", getSpace("test")),
+    );
 
     await idle();
 
@@ -173,7 +206,15 @@ describe("Recipe Runner", () => {
       return { counter, stream: incHandler.bind({ counter }) };
     });
 
-    const result = run(incRecipe, { counter: { value: 0 } });
+    const result = run(
+      incRecipe,
+      { counter: { value: 0 } },
+      getDoc(
+        undefined,
+        "should execute handlers that use bind and this (no types)",
+        getSpace("test"),
+      ),
+    );
 
     await idle();
 
@@ -216,7 +257,11 @@ describe("Recipe Runner", () => {
       return { stream };
     });
 
-    const result = run(incRecipe, { counter, nested });
+    const result = run(
+      incRecipe,
+      { counter, nested },
+      getDoc(undefined, "should execute recipes returned by handlers", getSpace("test")),
+    );
 
     await idle();
 
@@ -269,7 +314,11 @@ describe("Recipe Runner", () => {
       };
     });
 
-    const result = run(multiplyRecipe, { x, y });
+    const result = run(
+      multiplyRecipe,
+      { x, y },
+      getDoc(undefined, "should handle recipes returned by lifted functions", getSpace("test")),
+    );
 
     await idle();
 
@@ -312,7 +361,11 @@ describe("Recipe Runner", () => {
       return { result: doubled };
     });
 
-    const result = run(simpleRecipe, { value: 5 });
+    const result = run(
+      simpleRecipe,
+      { value: 5 },
+      getDoc(undefined, "should support referenced modules", getSpace("test")),
+    );
 
     await idle();
 
@@ -346,10 +399,14 @@ describe("Recipe Runner", () => {
     });
 
     const settingsCell = getDoc({ value: 5 });
-    const result = run(multiplyRecipe, {
-      settings: settingsCell,
-      multiplier: 3,
-    });
+    const result = run(
+      multiplyRecipe,
+      {
+        settings: settingsCell,
+        multiplier: 3,
+      },
+      getDoc(undefined, "should handle schema with cell references", getSpace("test")),
+    );
 
     await idle();
 
@@ -397,7 +454,11 @@ describe("Recipe Runner", () => {
 
     const item1 = getDoc({ value: 1 });
     const item2 = getDoc({ value: 2 });
-    const result = run(sumRecipe, { data: { items: [item1, item2] } });
+    const result = run(
+      sumRecipe,
+      { data: { items: [item1, item2] } },
+      getDoc(undefined, "should handle nested cell references in schema", getSpace("test")),
+    );
 
     await idle();
 
@@ -433,12 +494,16 @@ describe("Recipe Runner", () => {
 
     const value1 = getDoc(5);
     const value2 = getDoc(7);
-    const result = run(dynamicRecipe, {
-      context: {
-        first: value1,
-        second: value2,
+    const result = run(
+      dynamicRecipe,
+      {
+        context: {
+          first: value1,
+          second: value2,
+        },
       },
-    });
+      getDoc(undefined, "should handle dynamic cell references with schema", getSpace("test")),
+    );
 
     await idle();
 
@@ -467,7 +532,11 @@ describe("Recipe Runner", () => {
       return { counter, stream: incHandler({ counter }) };
     });
 
-    const result = run(incRecipe, { counter: 0 });
+    const result = run(
+      incRecipe,
+      { counter: 0 },
+      getDoc(undefined, "should execute handlers with schemas", getSpace("test")),
+    );
 
     await idle();
 

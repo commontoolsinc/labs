@@ -7,8 +7,9 @@ export function ifElse(
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: DocImpl<any>[],
+  parentDoc: DocImpl<any>,
 ): Action {
-  const result = getDoc<any>(undefined);
+  const result = getDoc<any>(undefined, { ifElse: cause }, parentDoc.space);
   result.generateEntityId({ ifElse: cause });
   sendResult(result);
 

@@ -20,8 +20,3 @@ export function getSpace(uri: string): Space {
   }
   return space;
 }
-
-/**
- * Default space used when no space is specified
- */
-export const DEFAULT_SPACE = getSpace("");

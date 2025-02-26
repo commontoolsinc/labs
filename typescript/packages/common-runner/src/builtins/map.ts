@@ -35,15 +35,18 @@ export function map(
   sendResult: (result: any) => void,
   addCancel: AddCancel,
   cause: any,
-  parentCell: DocImpl<any>,
+  parentDoc: DocImpl<any>,
 ): Action {
-  const result = getDoc<any[]>([]);
-  result.generateEntityId({
-    map: parentCell.entityId,
-    op: inputsCell.getAsQueryResult([])?.op,
-    cause,
-  });
-  result.sourceCell = parentCell;
+  const result = getDoc<any[]>(
+    [],
+    {
+      map: parentDoc.entityId,
+      op: inputsCell.getAsQueryResult([])?.op,
+      cause,
+    },
+    parentDoc.space,
+  );
+  result.sourceCell = parentDoc;
 
   sendResult({ cell: result, path: [] });
 
@@ -74,7 +77,7 @@ export function map(
 
     // Add values that have been appended
     for (let index = result.get().length; index < list.length; index++) {
-      const resultCell = getDoc(undefined, { result, index });
+      const resultCell = getDoc(undefined, { result, index }, parentDoc.space);
       run(
         op,
         {
@@ -84,7 +87,7 @@ export function map(
         },
         resultCell,
       );
-      resultCell.sourceCell!.sourceCell = parentCell;
+      resultCell.sourceCell!.sourceCell = parentDoc;
 
       // TODO: Have `run` return cancel, once we make resultCell required
       addCancel(cancels.get(resultCell));
