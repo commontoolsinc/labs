@@ -241,8 +241,9 @@ export interface SubscriptionController {
 
 /**
  * Unique identifier for the memory space.
+ * TODO(bf): temporarily allow arbitrary string, remove when all spaces have DIDs
  */
-export type MemorySpace = `did:${string}:${string}`;
+export type MemorySpace = string | `did:${string}:${string}`;
 
 /**
  * Unique identifier for the mutable entity.
@@ -420,7 +421,8 @@ export type FactSelection<
 
 export type Meta = Record<string, string>;
 
-export type Principal = `did:${string}:${string}`;
+// TODO(bf): temporarily allow arbitrary string, remove when all spaces have DIDs
+export type Principal = string | `did:${string}:${string}`;
 
 export type Transaction<Space extends MemorySpace = MemorySpace> = {
   iss: Principal;
