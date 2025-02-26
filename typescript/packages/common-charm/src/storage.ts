@@ -21,24 +21,26 @@ import { InMemoryStorageProvider } from "./storage/memory.js";
 import { RemoteStorageProvider, type MemorySpace } from "./storage/remote.js";
 import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
 
-export function log(...args: any[]) {
-  // Get absolute time in milliseconds since Unix epoch
-  const absoluteMs = (performance.timeOrigin % 3600000) + (performance.now() % 1000);
+export function log(fn: () => any[]) {
+  debug(() => {
+    // Get absolute time in milliseconds since Unix epoch
+    const absoluteMs = (performance.timeOrigin % 3600000) + (performance.now() % 1000);
 
-  // Extract components
-  const totalSeconds = Math.floor(absoluteMs / 1000);
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-    .toString()
-    .padStart(2, "0");
-  const seconds = (totalSeconds % 60).toString().padStart(2, "0");
-  const millis = Math.floor(absoluteMs % 1000)
-    .toString()
-    .padStart(3, "0");
-  const nanos = Math.floor((absoluteMs % 1) * 1000000)
-    .toString()
-    .padStart(6, "0");
+    // Extract components
+    const totalSeconds = Math.floor(absoluteMs / 1000);
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+      .toString()
+      .padStart(2, "0");
+    const seconds = (totalSeconds % 60).toString().padStart(2, "0");
+    const millis = Math.floor(absoluteMs % 1000)
+      .toString()
+      .padStart(3, "0");
+    const nanos = Math.floor((absoluteMs % 1) * 1000000)
+      .toString()
+      .padStart(6, "0");
 
-  debug(`${minutes}:${seconds}:${millis}:${nanos}`, ...args);
+    return [`${minutes}:${seconds}:${millis}:${nanos}`, ...fn()];
+  });
 }
 
 export interface Storage {
@@ -291,19 +293,24 @@ class StorageImpl implements Storage {
 
       this._addToBatch([{ cell, type: "storage" }]);
 
-      log(
+      log(() => [
         "prep for storage",
         JSON.stringify(cell.entityId),
         value,
         [...dependencies].map((c) => JSON.stringify(c.entityId)),
-      );
+      ]);
     }
   }
 
   // Prepares value for cells, and updates dependencies, triggering cell loads
   // if necessary. Updates this.readValues and this.readDependentCells.
   private _batchForCell(cell: DocImpl<any>, value: any, source?: EntityId): void {
-    log("prep for cell", JSON.stringify(cell.entityId), value, JSON.stringify(source ?? null));
+    log(() => [
+      "prep for cell",
+      JSON.stringify(cell.entityId),
+      value,
+      JSON.stringify(source ?? null),
+    ]);
 
     const dependencies = new Set<DocImpl<any>>();
 
@@ -375,10 +382,10 @@ class StorageImpl implements Storage {
     const loading = new Set<DocImpl<any>>();
     const loadedCells = new Set<DocImpl<any>>();
 
-    log(
+    log(() => [
       "processing batch",
       this.currentBatch.map(({ cell, type }) => `${JSON.stringify(cell.entityId)}:${type}`),
-    );
+    ]);
 
     do {
       // Load everything in loading
@@ -419,11 +426,11 @@ class StorageImpl implements Storage {
             type === "cell"
               ? this.readDependentCells.get(cell)
               : this.writeDependentCells.get(cell);
-          log(
+          log(() => [
             "dependent cells",
             JSON.stringify(cell.entityId),
             [...dependentCells!].map((c) => JSON.stringify(c.entityId)),
-          );
+          ]);
           if (dependentCells)
             Array.from(dependentCells)
               .filter(
@@ -432,18 +439,15 @@ class StorageImpl implements Storage {
               .forEach((dependent) => loading.add(dependent));
         }
       }
-      log(
-        "loading",
-        [...loading].map((c) => JSON.stringify(c.entityId)),
-      );
-      log(
+      log(() => ["loading", [...loading].map((c) => JSON.stringify(c.entityId))]);
+      log(() => [
         "cellIsLoading",
         [...this.cellIsLoading.keys()].map((c) => JSON.stringify(c.entityId)),
-      );
-      log(
+      ]);
+      log(() => [
         "currentBatch",
         this.currentBatch.map(({ cell, type }) => `${JSON.stringify(cell.entityId)}:${type}`),
-      );
+      ]);
     } while (loading.size > 0);
 
     // Convert batch jobs to operations:
@@ -471,7 +475,7 @@ class StorageImpl implements Storage {
       if (!storageJobs.has(cell)) {
         if (source) cell.sourceCell = this.cellsById.get(JSON.stringify(source))!;
 
-        log("send to cell", JSON.stringify(cell.entityId), JSON.stringify(value));
+        log(() => ["send to cell", JSON.stringify(cell.entityId), JSON.stringify(value)]);
         cell.send(value);
       }
     });
@@ -551,12 +555,12 @@ class StorageImpl implements Storage {
   }
 
   private _subscribeToChanges(cell: DocImpl<any>): void {
-    log("subscribe to changes", JSON.stringify(cell.entityId));
+    log(() => ["subscribe to changes", JSON.stringify(cell.entityId)]);
 
     // Subscribe to cell changes, send updates to storage
     this.addCancel(
       cell.updates((value) => {
-        log("got from cell", JSON.stringify(cell.entityId), JSON.stringify(value));
+        log(() => ["got from cell", JSON.stringify(cell.entityId), JSON.stringify(value)]);
         return this._batchForStorage(cell);
       }),
     );
