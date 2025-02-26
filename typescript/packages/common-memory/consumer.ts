@@ -24,11 +24,13 @@ import {
   InvocationURL,
   TransactionResult,
   Subscribe,
+  Selector,
 } from "./interface.ts";
 import { refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
 import * as Changes from "./changes.ts";
 import * as Fact from "./fact.ts";
+import * as Subscription from "./subscription.ts";
 
 export * from "./interface.ts";
 export { Changes as ChangesBuilder };
@@ -54,6 +56,9 @@ class MemoryConsumerSession
   controller: TransformStreamDefaultController<ConsumerCommand<Protocol>> | undefined;
   invocations: Map<InvocationURL<Reference<Invocation>>, Job<Abilities<Protocol>, Protocol>> =
     new Map();
+
+  subscribers: Map<InvocationURL<Reference<Invocation>>, QuerySubscriptionInvocation<MemorySpace>> =
+    new Map();
   constructor(public as: Principal) {
     let controller: undefined | TransformStreamDefaultController<ConsumerCommand<Protocol>>;
     super({
@@ -77,8 +82,15 @@ class MemoryConsumerSession
       this.invocations.delete(id);
       invocation?.return(command.is);
     } else if (command.the === "task/effect") {
-      const invocation = this.invocations.get(id);
-      invocation?.perform(command.is);
+      debugger;
+      for (const [, subscriber] of this.subscribers) {
+        const channels = new Set(
+          Subscription.channels(subscriber.query.space, subscriber.selector),
+        );
+        if (Subscription.match(command.is, channels)) {
+          return subscriber.perform(command.is);
+        }
+      }
     }
   }
 
@@ -86,11 +98,15 @@ class MemoryConsumerSession
     invocation: ConsumerInvocation<Space, Ability>,
   ) {
     const command = invocation.toJSON();
-
     const id = `job:${refer(command)}` as InvocationURL<Reference<Invocation>>;
-    const pending = this.invocations.get(id);
+
+    // TODO: Don't do this hack
+    const invocations =
+      invocation instanceof QuerySubscriptionInvocation ? this.subscribers : this.invocations;
+
+    const pending = invocations.get(id);
     if (!pending) {
-      this.invocations.set(id, invocation as unknown as Job<Ability, Protocol>);
+      invocations.set(id, invocation as unknown as Job<Ability, Protocol>);
       this.send(command as ConsumerCommand<Protocol>);
     } else {
       invocation.return(pending.promise as any);
@@ -308,6 +324,10 @@ class QuerySubscriptionInvocation<Space extends MemorySpace> extends ConsumerInv
     });
 
     this.selection = query.selection;
+  }
+  get selector() {
+    // TODO: Fix type inference
+    return (this.args as { select: Selector }).select;
   }
 
   open(controller: ReadableStreamDefaultController<Selection<Space>>) {

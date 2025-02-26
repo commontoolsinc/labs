@@ -1,3 +1,4 @@
+import { copySync } from "@std/fs/copy";
 import * as Provider from "./provider.ts";
 import * as Socket from "./socket.ts";
 import * as Path from "jsr:@std/path";
@@ -23,8 +24,10 @@ from ${STORE}`);
     if (request.headers.get("upgrade") === "websocket") {
       const { socket, response } = Deno.upgradeWebSocket(request);
       const consumer = Socket.from(socket);
+      console.log("accept ws connection");
       const session = provider.session();
       consumer.readable.pipeThrough(session).pipeTo(consumer.writable);
+      console.log("start consumer session");
       return response;
     } else {
       return provider.fetch(request);
