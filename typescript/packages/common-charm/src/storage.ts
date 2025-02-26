@@ -235,15 +235,12 @@ class StorageImpl implements Storage {
           address: new URL("/api/storage/memory", this.remoteStorageUrl!),
           space: space.uri as `did:${string}:${string}`,
         });
-
-        this.storageProviders.set(space, provider);
       } else if (type === "memory") {
-        // Each instance is independent, so we don't need to tell it the space URI
-        provider = new InMemoryStorageProvider();
-        this.storageProviders.set(space, provider);
+        provider = new InMemoryStorageProvider(space.uri);
       } else {
         throw new Error(`Unknown storage type: ${type}`);
       }
+      this.storageProviders.set(space, provider);
     }
     return provider;
   }
