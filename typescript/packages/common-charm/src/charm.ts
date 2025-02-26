@@ -14,8 +14,7 @@ import {
 } from "@commontools/runner";
 import { storage } from "./storage.js";
 import { syncRecipeBlobby } from "./syncRecipe.js";
-import { getSpace } from "@commontools/runner/src/space.js";
-import { Space } from "@commontools/runner/src/space.js";
+import { getSpace, Space } from "@commontools/runner";
 
 export type Charm = {
   [NAME]?: string;
@@ -42,8 +41,6 @@ export const processSchema: JSONSchema = {
     [TYPE]: { type: "string" },
   },
 } as const;
-
-export type StorageType = "remote" | "memory" | "local";
 
 export class CharmManager {
   private space: Space;
