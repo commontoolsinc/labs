@@ -3,7 +3,13 @@ import type { LoginRoute, CallbackRoute } from "./google-oauth.routes.ts";
 import { OAuth2Client } from "jsr:@cmd-johnson/oauth2-client@^2.0.0";
 import env from "@/env.ts";
 import { CharmManager, compileRecipe, createStorage } from "@commontools/charm";
-import { getEntityId, idle } from "@commontools/runner";
+import {
+  getEntityId,
+  idle,
+  getCellFromDocLink,
+  type DocImpl,
+  type DocLink,
+} from "@commontools/runner";
 
 // Create OAuth client with credentials from environment variables
 const createOAuthClient = (redirectUri: string) => {
@@ -123,10 +129,10 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
       });
     }
 
-    // Decode the base64-encoded state parameter
+    // Decode and parse the base64-encoded doclink
     let decodedState: string;
     try {
-      decodedState = atob(state);
+      decodedState = JSON.parse(atob(state));
       logger.info({ decodedState }, "Decoded state parameter");
       console.log("Decoded state:", decodedState);
     } catch (error) {
@@ -183,10 +189,8 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
       "Received OAuth tokens",
     );
 
-    // In a real implementation, you would store these tokens securely
-    // associated with the user or the authCellId
-
-    await persistEncryptedAccessTokens(tokens);
+    // Encrypts tokens using the server key, and saves the values to the auth cell
+    await persistEncryptedAccessTokens(tokens, decodedState);
 
     // Fetch user info to demonstrate token usage
     const userInfo = await fetchUserInfo(tokens.accessToken);
@@ -229,24 +233,36 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
   }
 };
 
-async function persistEncryptedAccessTokens(tokens: OAuth2Tokens) {
+interface OAuth2Tokens {
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt: number;
+}
+
+async function persistEncryptedAccessTokens(tokens: OAuth2Tokens, authCellDocLink: DocLink) {
   const storage = createStorage({
     type: "remote",
-    replica: "not-so-secret",
+    replica: "uh2",
+    // replica: "not-so-secret",
     url: env.MEMORY_URL,
   });
 
-  const cellId = { "/": "baedreie2kfcbfdrqqzmhyhr5dv7flc5gh54yxyytqizubeg3tl2v5y6ve4" };
-  await storage.syncCell(cellId, true);
-  const authCellEntity = {
-    cell: cellId,
-    path: ["argument", "auth"],
-  };
+  // Load the auth cell
+  await storage.syncCell(authCellDocLink.cell, true);
+  const authCell = getCellFromDocLink(authCellDocLink);
 
-  const authCell = getCellFromDocLink(authCellEntity);
-  console.log("AUTH CELL", authCell.get());
+  // FIXME(jake): This is where we'll add encryption using the server key.
 
-  authCell.set({ token: "wat" });
+  // Set the new tokens to the auth cell
+  authCell.set({
+    token: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    expiresAt: tokens.expiresAt,
+  });
+
+  // NOTE(jake): is this necessary here? I ran into issues when calling from debugger
+  // but are we fine here without it?
+  // Ensure the cell is synced
   await storage.synced();
 }
 
