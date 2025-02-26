@@ -1,8 +1,8 @@
-import { useCell } from "@/hooks/use-cell";
+import { useCell } from "@/hooks/use-cell.ts";
 import { NavLink } from "react-router-dom";
 import { NAME, UI } from "@commontools/builder";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
-import { Charm, CharmManager } from "@commontools/charm";
+import { Charm } from "@commontools/charm";
 import { charmId } from "@/utils/charms.ts";
 import { useEffect, useRef, useState } from "react";
 import { Card } from "@/components/Card.tsx";
@@ -11,7 +11,7 @@ import { render } from "@commontools/html";
 import { Cell } from "@commontools/runner";
 import ShapeLogo from "@/assets/ShapeLogo.svg";
 import { MdOutlineStar } from "react-icons/md";
-import { useSyncedStatus } from "@/hooks/use-synced-status";
+import { useSyncedStatus } from "@/hooks/use-synced-status.ts";
 
 export interface CommonDataEvent extends CustomEvent {
   detail: {
