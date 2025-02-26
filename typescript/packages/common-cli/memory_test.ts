@@ -1,6 +1,6 @@
 import { CharmManager, createStorage } from "@commontools/charm";
 import { RemoteStorageProvider } from "../common-charm/src/storage/remote.ts"
-import { StorageValue } from "../common-charm/src/storage/base.ts";
+import { StorageProvider, StorageValue } from "../common-charm/src/storage/base.ts";
 import { EntityId } from "../common-runner/src/cell-map.ts";
 
 // some config stuff, hardcoded, ofcourse
@@ -35,7 +35,7 @@ function entity_id(i: number): EntityId {
 }
 
 async function main() {
-  const storageProvider = new RemoteStorageProvider({
+  const storageProvider: StorageProvider = new RemoteStorageProvider({
     address: new URL("/api/storage/memory", BASE_URL),
     space: replica as MemorySpace,
   });
