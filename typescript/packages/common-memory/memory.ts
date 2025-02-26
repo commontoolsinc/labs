@@ -82,15 +82,19 @@ export const unsubscribe = (session: Session, subscriber: Subscriber) => {
 };
 
 export const query = async (session: Session, query: Query) => {
+  console.log(">> query memory");
   const { ok: space, error } = await mount(session, query.sub);
   if (error) {
     return { error };
   }
 
-  return space.query(query);
+  const result = space.query(query);
+  console.log("<< query memory");
+  return result;
 };
 
 export const transact = async (session: Session, transaction: Transaction) => {
+  console.log(">> transact memory");
   const { ok: space, error } = await mount(session, transaction.sub);
   if (error) {
     return { error };
@@ -98,16 +102,22 @@ export const transact = async (session: Session, transaction: Transaction) => {
 
   const result = space.transact(transaction);
 
+  console.log("<< commit transaction");
+
   if (result.error) {
     return result;
   } else {
+    console.log("notify subscribers");
     // Notify all the relevant subscribers.
     const promises = [];
     for (const subscriber of session.subscribers) {
       promises.push(subscriber.transact(transaction));
     }
+    console.log("wait for until all subscribers are notified");
     await Promise.all(promises);
   }
+
+  console.log("<< transact memory");
 
   return result;
 };
