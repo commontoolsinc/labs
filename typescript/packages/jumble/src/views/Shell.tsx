@@ -35,7 +35,7 @@ export default function Shell() {
   }
 
   return (
-    <div className="shell h-full bg-gray-50 border-2 border-black">
+    <div className="flex flex-col shell h-full bg-gray-50 border-2 border-black">
       <ShellHeader
         replicaName={replicaName}
         charmId={charmId}

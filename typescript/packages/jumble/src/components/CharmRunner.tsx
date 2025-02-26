@@ -153,7 +153,7 @@ export function CharmRenderer({ charm, className = "" }: CharmRendererProps) {
           </div>
         </div>
       ) : null}
-      <div className={className} ref={containerRef}></div>
+      <div className={className + " overflow-clip"} ref={containerRef}></div>
     </>
   );
 }
