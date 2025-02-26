@@ -50,6 +50,13 @@ export function map(
 
   sendResult({ cell: result, path: [] });
 
+  // Tracks up to where in the source array we've handled entries. Right now we
+  // start at zero, even though in principle the result doc above could have
+  // been pre-initalized from storage, so that we `run` each recipe. Once that
+  // is automated on rehyrdation, we can change this to measure the difference
+  // between the source list and the result list.
+  let initializedUpTo = 0;
+
   return (log: ReactivityLog) => {
     let { list, op } = inputsCell.getAsQueryResult([], log);
 
@@ -76,29 +83,33 @@ export function map(
     op = opRef.cell.getAtPath(opRef.path);
 
     // Add values that have been appended
-    for (let index = result.get().length; index < list.length; index++) {
-      const resultCell = getDoc(undefined, { result, index }, parentDoc.space);
+    while (initializedUpTo < list.length) {
+      const resultCell = getDoc(undefined, { result, index: initializedUpTo }, parentDoc.space);
       run(
         op,
         {
-          element: { cell: listRef.cell, path: [...listRef.path, index] },
-          index,
+          element: { cell: listRef.cell, path: [...listRef.path, initializedUpTo] },
+          index: initializedUpTo,
           array: list,
         },
         resultCell,
       );
+      console.log("map", initializedUpTo, resultCell);
       resultCell.sourceCell!.sourceCell = parentDoc;
 
       // TODO: Have `run` return cancel, once we make resultCell required
       addCancel(cancels.get(resultCell));
 
       // Send the result value to the result cell
-      result.setAtPath([index], { cell: resultCell, path: [] }, log);
+      result.setAtPath([initializedUpTo], { cell: resultCell, path: [] }, log);
+
+      initializedUpTo++;
     }
 
     // Shorten the result if the list got shorter
     if (result.get().length > list.length) {
       result.setAtPath(["length"], list.length, log);
+      initializedUpTo = list.length;
     }
 
     // NOTE: We leave prior results in the list for now, so they reuse prior
