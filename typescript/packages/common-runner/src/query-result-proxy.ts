@@ -197,7 +197,7 @@ export function createQueryResultProxy<T>(
                 };
                 normalizeToDocLinks(valueCell, result, undefined, log, cause);
 
-                const resultCell = getDoc<any[]>(undefined, cause);
+                const resultCell = getDoc<any[]>(undefined, cause, valueCell.space);
                 resultCell.send(result);
 
                 result = resultCell.getAsQueryResult([], log);
@@ -236,13 +236,17 @@ export function createQueryResultProxy<T>(
       // When setting a value in an array, make sure it's a cell reference.
       if (Array.isArray(target) && !isDocLink(value)) {
         const ref = {
-          cell: getDoc(undefined, {
-            list: { cell: valueCell.entityId, path: valuePath },
-            previous:
-              Number(prop) > 0
-                ? (target[Number(prop) - 1].cell?.entityId ?? Number(prop) - 1)
-                : null,
-          }),
+          cell: getDoc(
+            undefined,
+            {
+              list: { cell: valueCell.entityId, path: valuePath },
+              previous:
+                Number(prop) > 0
+                  ? (target[Number(prop) - 1].cell?.entityId ?? Number(prop) - 1)
+                  : null,
+            },
+            valueCell.space,
+          ),
           path: [],
         };
         ref.cell.send(value);

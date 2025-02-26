@@ -15,7 +15,7 @@ import { createRef, type EntityId, getDocByEntityId, setDocByEntityId } from "./
 import { type ReactivityLog } from "./scheduler.js";
 import { type Cancel } from "./cancel.js";
 import { arrayEqual } from "./utils.js";
-import { type Space, DEFAULT_SPACE } from "./space.js";
+import { type Space } from "./space.js";
 
 /**
  * Lowest level cell implementation.
@@ -136,7 +136,7 @@ export type DocImpl<T> = {
    *
    * @param cause - Causal event that preceeds entity generation.
    */
-  generateEntityId(cause?: any): void;
+  generateEntityId(cause?: any, space?: Space): void;
 
   /**
    * Convert the entity ID to a JSON pointer.
@@ -240,13 +240,13 @@ export function getDoc<T>(value?: T, cause?: any, space?: Space): DocImpl<T> {
   let docSpace = space;
 
   // If cause is provided, generate ID and return pre-existing cell if any.
-  if (cause) {
+  if (cause && space) {
     entityId = generateEntityId(value, cause);
-    // Use DEFAULT_SPACE if no space provided when generating ID
-    docSpace = space ?? DEFAULT_SPACE;
-    const existing = getDocByEntityId(entityId, false, docSpace);
+    const existing = getDocByEntityId(space, entityId, false);
     if (existing) return existing;
   }
+
+  if (cause && !space) throw new Error("Space is required when cause is provided");
 
   const self: DocImpl<T> = {
     get: () => value as T,
@@ -294,12 +294,11 @@ export function getDoc<T>(value?: T, cause?: any, space?: Space): DocImpl<T> {
       proxied, e.g. for aliases. TODO: Consider changing proxy here. */
     },
     isFrozen: () => readOnly,
-    generateEntityId: (cause?: any): void => {
-      if (!self.space) {
-        self.space = DEFAULT_SPACE;
-      }
+    generateEntityId: (cause?: any, space?: Space): void => {
+      if (space) docSpace = space;
+      if (!docSpace) throw new Error("Space is required when generating entity ID");
       entityId = generateEntityId(value, cause);
-      setDocByEntityId(entityId, self, self.space);
+      setDocByEntityId(docSpace, entityId, self);
     },
     // This is the id and not the contents, because we .toJSON is called when
     // writing a structure to this that might contain a reference to this cell,
@@ -316,11 +315,16 @@ export function getDoc<T>(value?: T, cause?: any, space?: Space): DocImpl<T> {
     },
     set entityId(id: EntityId) {
       if (entityId) throw new Error("Entity ID already set");
-      if (!self.space) {
-        self.space = DEFAULT_SPACE;
-      }
       entityId = id;
-      setDocByEntityId(id, self, self.space);
+      if (docSpace) setDocByEntityId(docSpace, id, self);
+    },
+    get space(): Space | undefined {
+      return docSpace;
+    },
+    set space(newSpace: Space) {
+      if (docSpace) throw new Error("Space already set");
+      docSpace = newSpace;
+      if (entityId) setDocByEntityId(docSpace, entityId, self);
     },
     get sourceCell(): DocImpl<any> | undefined {
       return sourceCell;
@@ -344,20 +348,10 @@ export function getDoc<T>(value?: T, cause?: any, space?: Space): DocImpl<T> {
     get copyTrap(): boolean {
       throw new Error("Copy trap: Don't copy cells, create references instead");
     },
-    get space(): Space | undefined {
-      return docSpace;
-    },
-    set space(newSpace: Space | undefined) {
-      if (entityId && !newSpace) {
-        throw new Error("Space cannot be undefined when entity ID is set");
-      }
-      docSpace = newSpace;
-    },
   };
 
-  if (entityId) {
-    self.space = docSpace ?? DEFAULT_SPACE;
-    setDocByEntityId(entityId, self, self.space);
+  if (entityId && docSpace) {
+    setDocByEntityId(docSpace, entityId, self);
   }
 
   return self;

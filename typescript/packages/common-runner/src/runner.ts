@@ -55,19 +55,19 @@ export const cancels = new WeakMap<DocImpl<any>, Cancel>();
  * @returns The result cell.
  */
 export function run<T, R>(
-  recipeFactory?: NodeFactory<T, R>,
-  argument?: T,
-  resultCell?: DocImpl<R>,
+  recipeFactory: NodeFactory<T, R>,
+  argument: T,
+  resultCell: DocImpl<R>,
 ): DocImpl<R>;
 export function run<T, R = any>(
-  recipe?: Recipe | Module,
-  argument?: T,
-  resultCell?: DocImpl<R>,
+  recipe: Recipe | Module,
+  argument: T,
+  resultCell: DocImpl<R>,
 ): DocImpl<R>;
 export function run<T, R = any>(
-  recipeOrModule?: Recipe | Module,
-  argument?: T,
-  resultCell: DocImpl<R> = getDoc<R>(),
+  recipeOrModule: Recipe | Module,
+  argument: T,
+  resultCell: DocImpl<R>,
 ): DocImpl<R> {
   if (cancels.has(resultCell)) {
     // If it's already running and no new recipe or argument are given,
@@ -105,8 +105,9 @@ export function run<T, R = any>(
 
   if (!recipeOrModule && processCell.get()?.[TYPE]) {
     recipeId = processCell.get()[TYPE];
-    recipeOrModule = getRecipe(recipeId);
-    if (!recipeOrModule) throw new Error(`Unknown recipe: ${recipeId}`);
+    const recipe = getRecipe(recipeId);
+    if (!recipe) throw new Error(`Unknown recipe: ${recipeId}`);
+    recipeOrModule = recipe;
   } else if (!recipeOrModule) {
     console.warn("No recipe provided and no recipe found in process cell. Not running.");
     return resultCell;
@@ -172,8 +173,8 @@ export function run<T, R = any>(
   // though that we support the recipe to change over time, and such a change
   // might change this condition and we'd need distinct ideas for different
   // instances of this recipe again.
-  if (!resultCell.entityId) resultCell.generateEntityId();
-  if (!processCell.entityId) processCell.generateEntityId(resultCell.entityId);
+  if (!processCell.entityId && resultCell.entityId)
+    processCell.generateEntityId({ cell: resultCell, path: [] }, resultCell.space);
 
   const internal = processCell.get()?.internal ?? (recipe.initial as { internal: any })?.internal;
 
@@ -204,7 +205,8 @@ export function run<T, R = any>(
     // they don't have any yet.
     [node.inputs, node.outputs].forEach((bindings) =>
       findAllAliasedCells(bindings, processCell).forEach(({ cell, path }) => {
-        if (!cell.entityId) cell.generateEntityId({ cell: processCell, path });
+        if (!cell.entityId && processCell.entityId)
+          cell.generateEntityId({ cell: processCell, path }, processCell.space);
       }),
     );
     instantiateNode(node.module, node.inputs, node.outputs, processCell, addCancel, recipe);
@@ -345,7 +347,7 @@ function instantiateJavaScriptNode(
         }
       }
 
-      const inputsCell = getDoc(eventInputs, cause);
+      const inputsCell = getDoc(eventInputs, cause, processCell.space);
       inputsCell.ephemeral = true;
       inputsCell.freeze(); // Freezes the bindings, not aliased cells.
 
@@ -363,7 +365,11 @@ function instantiateJavaScriptNode(
       if (containsOpaqueRef(result)) {
         const resultRecipe = recipeFromFrame("event handler result", undefined, () => result);
 
-        const resultCell = run(resultRecipe);
+        const resultCell = run(
+          resultRecipe,
+          undefined,
+          getDoc(undefined, { resultFor: cause }, processCell.space),
+        );
         addCancel(cancels.get(resultCell));
       }
 
@@ -394,7 +400,16 @@ function instantiateJavaScriptNode(
       if (containsOpaqueRef(result)) {
         const resultRecipe = recipeFromFrame("action result", undefined, () => result);
 
-        resultCell = run(resultRecipe, undefined, resultCell);
+        resultCell = run(
+          resultRecipe,
+          undefined,
+          resultCell ??
+            getDoc(
+              undefined,
+              { resultFor: { inputs, outputs, fn: fn.toString() } },
+              processCell.space,
+            ),
+        );
         addCancel(cancels.get(resultCell));
 
         sendValueToBinding(processCell, outputs, { cell: resultCell, path: [] }, log);
@@ -477,12 +492,16 @@ function instantiateRecipeNode(
   if (!isRecipe(module.implementation)) throw new Error(`Invalid recipe`);
   const recipe = unwrapOneLevelAndBindtoCell(module.implementation, processCell);
   const inputs = unwrapOneLevelAndBindtoCell(inputBindings, processCell);
-  const resultCell = getDoc(undefined, {
-    recipe: module.implementation,
-    parent: processCell,
-    inputBindings,
-    outputBindings,
-  });
+  const resultCell = getDoc(
+    undefined,
+    {
+      recipe: module.implementation,
+      parent: processCell,
+      inputBindings,
+      outputBindings,
+    },
+    processCell.space,
+  );
   run(recipe, inputs, resultCell);
   sendValueToBinding(processCell, outputBindings, {
     cell: resultCell,

@@ -143,7 +143,7 @@ export class RemoteStorageProvider implements StorageProvider {
    * Subscriber used by the .sync. We use the same one so we'll have at most one
    * per `.sync` per query.
    */
-  static sync(value: JSONValue | undefined) {}
+  static sync(_value: JSONValue | undefined) {}
 
   get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
     const of = RemoteStorageProvider.toEntity(entityId);
