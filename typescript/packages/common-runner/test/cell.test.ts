@@ -45,16 +45,16 @@ describe("Cell", () => {
     expect(c.get()).toEqual({ a: { b: { c: 100 } } });
   });
 
-  it("should sink changes", () => {
+  it("should call updates callback when value changes", () => {
     const c = getDoc(0);
     const values: number[] = [];
-    const unsink = c.sink((value) => values.push(value));
+    const unsink = c.updates((value) => values.push(value));
     c.send(1);
     c.send(2);
     c.send(3);
     unsink();
     c.send(4);
-    expect(values).toEqual([0, 1, 2, 3]);
+    expect(values).toEqual([1, 2, 3]);
   });
 });
 
