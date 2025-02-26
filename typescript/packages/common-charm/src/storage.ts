@@ -468,7 +468,7 @@ class StorageImpl implements Storage {
 
     // Storage jobs override cell jobs. Write remaining cell jobs to cell.
     cellJobs.forEach(({ value, source }, cell) => {
-      if (!storageJobs.has(cell)) {
+      if (!storageJobs.has(cell) && !cell.isFrozen()) {
         if (source) cell.sourceCell = this.cellsById.get(JSON.stringify(source))!;
 
         log("send to cell", JSON.stringify(cell.entityId), JSON.stringify(value));
