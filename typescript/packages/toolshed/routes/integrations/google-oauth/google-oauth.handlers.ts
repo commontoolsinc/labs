@@ -2,6 +2,8 @@ import type { AppRouteHandler } from "@/lib/types.ts";
 import type { LoginRoute, CallbackRoute } from "./google-oauth.routes.ts";
 import { OAuth2Client } from "jsr:@cmd-johnson/oauth2-client@^2.0.0";
 import env from "@/env.ts";
+import { CharmManager, compileRecipe, createStorage } from "@commontools/charm";
+import { getEntityId, idle } from "@commontools/runner";
 
 // Create OAuth client with credentials from environment variables
 const createOAuthClient = (redirectUri: string) => {
@@ -184,6 +186,8 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
     // In a real implementation, you would store these tokens securely
     // associated with the user or the authCellId
 
+    await persistEncryptedAccessTokens(tokens);
+
     // Fetch user info to demonstrate token usage
     const userInfo = await fetchUserInfo(tokens.accessToken);
 
@@ -224,6 +228,27 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
     });
   }
 };
+
+async function persistEncryptedAccessTokens(tokens: OAuth2Tokens) {
+  const storage = createStorage({
+    type: "remote",
+    replica: "not-so-secret",
+    url: env.MEMORY_URL,
+  });
+
+  const cellId = { "/": "baedreie2kfcbfdrqqzmhyhr5dv7flc5gh54yxyytqizubeg3tl2v5y6ve4" };
+  await storage.syncCell(cellId, true);
+  const authCellEntity = {
+    cell: cellId,
+    path: ["argument", "auth"],
+  };
+
+  const authCell = getCellFromDocLink(authCellEntity);
+  console.log("AUTH CELL", authCell.get());
+
+  authCell.set({ token: "wat" });
+  await storage.synced();
+}
 
 // Helper function to generate HTML for the callback page
 function generateCallbackHtml(result: Record<string, unknown>): string {

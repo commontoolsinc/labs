@@ -30,7 +30,8 @@ async function main(
   const authCell = getCellFromDocLink(authCellEntity);
   console.log("AUTH CELL", authCell.get());
 
-  authCell.set({ token: "ohai" });
+  authCell.set({ token: "wat" });
+  await storage.synced();
   console.log("AUTH CELL AFTER SET", authCell.get());
 
   console.log("AUTH CELL", authCell);

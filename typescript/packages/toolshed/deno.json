@@ -25,6 +25,15 @@
   "imports": {
     "@/": "./",
     "@commontools/memory": "../common-memory/lib.ts",
+    "@commontools/memory/interface": "../common-memory/interface.ts",
+    "@commontools/memory/changes": "../common-memory/changes.ts",
+    "@commontools/memory/consumer": "../common-memory/consumer.ts",
+    "@commontools/memory/fact": "../common-memory/fact.ts",
+    "@commontools/charm": "../common-charm/src/index.ts",
+    "@commontools/runner": "../common-runner/src/index.ts",
+    "@commontools/builder": "../common-builder/src/index.ts",
+    "@commontools/html": "../common-html/src/index.ts",
+    "@commontools/llm-client": "../llm-client/src/index.ts",
     "@ai-sdk/amazon-bedrock": "npm:@ai-sdk/amazon-bedrock@^1.1.6",
     "@ai-sdk/anthropic": "npm:@ai-sdk/anthropic@^1.1.6",
     "@ai-sdk/cerebras": "npm:@ai-sdk/cerebras@^0.1.8",
@@ -61,7 +70,9 @@
     "pino-pretty": "npm:pino-pretty@^13.0.0",
     "redis": "npm:redis@^4.7.0",
     "stoker": "npm:stoker@^1.4.2",
+    "typescript": "npm:typescript@^5.7.3",
     "zod": "npm:zod@^3.24.1",
-    "mistreevous": "npm:mistreevous@4.2.0"
+    "mistreevous": "npm:mistreevous@4.2.0",
+    "zod-to-json-schema": "npm:zod-to-json-schema@^3.24.3"
   }
 }
