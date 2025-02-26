@@ -1,16 +1,12 @@
 // Load .env file
-import { SpaceManager, createStorage } from "@commontools/charm";
+import { SpaceManager, storage } from "@commontools/charm";
 import { fetchInboxEmails } from "./gmail.ts";
 
 const replica = "anotherjesse-test5";
 const charmId = "baedreihwuw4dbkvcel76siqztlxvloddfahgu535yupgxvkh5ml3wtqgqu";
 async function main() {
-  const storage = createStorage({
-    type: "remote",
-    replica,
-    url: new URL("https://toolshed.saga-castor.ts.net/"),
-  });
-  const manager = new SpaceManager(storage);
+  storage.setRemoteStorage(new URL("https://toolshed.saga-castor.ts.net/"));
+  const manager = new SpaceManager(replica);
   const charms = await manager.getCharms();
 
   await new Promise((resolve) => {
