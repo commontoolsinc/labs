@@ -39,10 +39,13 @@ export class PassKey {
   // Generate a root key from a `PassKey`.
   // A root key identity is deterministically derived from a `PassKey`'s
   // PRF output, a 32-byte hash, which is used as ed25519 key material.
+  // Note: Root keys can only be created from PassKeys obtained via PassKey.get()
   async createRootKey(): Promise<Identity> {
     let seed = this.prf();
     if (!seed) {
-      throw new Error("common-identity: No prf found from PassKey");
+      throw new Error(
+        "common-identity: No PRF found. This PassKey appears to have just been created - root keys can only be generated from PassKeys obtained via PassKey.get()",
+      );
     }
 
     return await Identity.fromRaw(seed);
