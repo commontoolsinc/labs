@@ -162,9 +162,6 @@ class CleanableMap<T extends object> {
   }
 }
 
-/**
- * Update getDocByEntityId to accept a space parameter
- */
 export function getDocByEntityId<T = any>(
   space: Space,
   entityId: EntityId | string,
@@ -182,9 +179,6 @@ export function getDocByEntityId<T = any>(
   return doc;
 }
 
-/**
- * Update setDocByEntityId to accept a space parameter
- */
 export const setDocByEntityId = (space: Space, entityId: EntityId, cell: DocImpl<any>) => {
   entityIdToDocMap.set(space, JSON.stringify(entityId), cell);
 };
