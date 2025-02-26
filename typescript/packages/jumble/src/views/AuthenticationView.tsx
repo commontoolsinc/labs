@@ -125,7 +125,7 @@ export function AuthenticationView() {
   );
 
   useEffect(() => {
-    const methods: AuthMethod[] = []; // Passphrase always available
+    const methods: AuthMethod[] = [];
     // Add passkey if available
     const isPasskeyAvailable =
       window.location.hostname !== "localhost" && window.PublicKeyCredential !== undefined;
@@ -134,6 +134,7 @@ export function AuthenticationView() {
       methods.push(AUTH_METHOD_PASSKEY);
     }
 
+    // Passphrase always available, but second in list
     methods.push(AUTH_METHOD_PASSPHRASE);
 
     setAvailableMethods(methods);

@@ -91,7 +91,7 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
       if (!keyStore) {
         throw new Error("Key store not initialized");
       }
-      // Pass the keyName to PassKey.get() if provided
+      // if we can, we prompt directly for the passed credential
       const passkey = await PassKey.get({ allowCredentials: key ? [key] : [] });
       const root = await passkey.createRootKey();
       await keyStore.set(ROOT_KEY, root);
@@ -113,7 +113,7 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
   const passphraseAuthenticate = useCallback(
     async (mnemonic: string) => {
       if (!keyStore) {
-        return;
+        throw new Error("Key store not initialized");
       }
       const root = await Identity.fromMnemonic(mnemonic);
       await keyStore.set(ROOT_KEY, root);
