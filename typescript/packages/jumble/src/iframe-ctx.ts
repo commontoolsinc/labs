@@ -1,6 +1,6 @@
 import { setIframeContextHandler } from "@commontools/iframe-sandbox";
-import { Action, ReactivityLog, addAction, removeAction } from "@commontools/runner";
-import { llm } from "@/utils/llm.ts";
+import { Action, ReactivityLog, addAction, isCell, removeAction } from "@commontools/runner";
+import { llm } from "@/utils/llm";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 // This is to prepare Proxy objects to be serialized
@@ -14,16 +14,20 @@ const serializeProxyObjects = (proxy: any) => {
 export const setupIframe = () =>
   setIframeContextHandler({
     read(context: any, key: string): any {
-      const data = context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
+      const data = isCell(context) ? context.key(key).get() : context?.[key];
       const serialized = serializeProxyObjects(data);
       return serialized;
     },
     write(context: any, key: string, value: any) {
-      context.getAsQueryResult()[key] = value;
+      if (isCell(context)) {
+        context.key(key).set(value);
+      } else {
+        context[key] = value;
+      }
     },
     subscribe(context: any, key: string, callback: (key: string, value: any) => void): any {
       const action: Action = (log: ReactivityLog) => {
-        const data = context.getAsQueryResult([key], log);
+        const data = isCell(context) ? context.withLog(log).key(key).get() : context?.[key];
         const serialized = serializeProxyObjects(data);
         callback(key, serialized);
       };
