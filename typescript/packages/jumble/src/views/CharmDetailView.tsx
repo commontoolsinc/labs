@@ -272,6 +272,7 @@ const Variants = () => {
 
   const { charmId: paramCharmId } = useParams();
   const { currentFocus: charm } = useCharm(paramCharmId);
+  const navigate = useNavigate();
 
   if (variants.length === 0 && expectedVariantCount === 0) return null;
 
@@ -281,9 +282,38 @@ const Variants = () => {
         <h3 className="text-sm font-bold">
           Variants ({variants.length} of {expectedVariantCount})
         </h3>
-        <button onClick={handleCancelVariants} className="text-xs text-gray-600 hover:text-black">
-          Clear
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleCancelVariants}
+            className="px-3 py-1 text-sm text-gray-600 hover:text-black border border-gray-300"
+          >
+            Clear
+          </button>
+
+          {selectedVariant && (
+            <button
+              onClick={() => {
+                // If we have a selected variant, make it the main view
+                if (selectedVariant) {
+                  // Navigate to the selected variant if it's not the original
+                  if (selectedVariant !== charm) {
+                    const variantId = charmId(selectedVariant);
+                    if (variantId) {
+                      // Navigate to the main view (without /detail) to close the drawer
+                      navigate(`/charms/${variantId}`);
+                    }
+                  } else {
+                    // If it's the original charm, just close the drawer by navigating to the main view
+                    navigate(`/charms/${paramCharmId}`);
+                  }
+                }
+              }}
+              className="px-3 py-1 text-sm bg-black text-white hover:bg-gray-800"
+            >
+              Select
+            </button>
+          )}
+        </div>
       </div>
       <div className="variants-scroll flex gap-4 overflow-x-auto pb-4">
         {charm && (
