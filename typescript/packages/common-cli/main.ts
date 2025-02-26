@@ -1,5 +1,6 @@
 // Load .env file
-import { SpaceManager, storage } from "@commontools/charm";
+import { SpaceManager } from "../common-charm/src/space-manager.js";
+import { storage } from "../common-charm/src/storage.js";
 import { fetchInboxEmails } from "./gmail.ts";
 
 const replica = "anotherjesse-test5";

@@ -3,7 +3,7 @@ import { LLMClient } from "@commontools/llm-client";
 import { createJsonSchema, JSONSchema } from "@commontools/builder";
 
 import { tsToExports } from "./localBuild.js";
-import { Charm, SpaceManager } from "./charm.js";
+import { Charm, SpaceManager } from "./space-manager.js";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.js";
 import { buildPrompt } from "./iframe/prompt.js";
 
