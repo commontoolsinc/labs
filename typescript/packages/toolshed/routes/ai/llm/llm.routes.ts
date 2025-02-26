@@ -19,7 +19,7 @@ export const LLMRequestSchema = z.object({
     example: "claude-3-7-sonnet",
   }),
   task: z.string().optional(),
-  max_tokens: z.number().default(8000),
+  max_tokens: z.number().optional(),
   stop_token: z.string().optional(),
   max_completion_tokens: z.number().optional(),
   stream: z.boolean().default(false),

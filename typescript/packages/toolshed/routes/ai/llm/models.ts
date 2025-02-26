@@ -145,7 +145,7 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
     ],
     capabilities: {
       contextWindow: 200_000,
-      maxOutputTokens: 128000,
+      maxOutputTokens: 64000,
       images: true,
       prefill: true,
       systemPrompt: true,

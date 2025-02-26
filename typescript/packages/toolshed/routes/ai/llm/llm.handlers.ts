@@ -5,7 +5,7 @@ import { ALIAS_NAMES, ModelList, MODELS, TASK_MODELS } from "./models.ts";
 import * as cache from "./cache.ts";
 import type { Context } from "hono";
 import { generateText as generateTextCore } from "./generateText.ts";
-
+import { findModel } from "./models.ts";
 /**
  * Handler for GET /models endpoint
  * Returns filtered list of available LLM models based on search criteria
@@ -24,9 +24,8 @@ export const getModels: AppRouteHandler<GetModelsRoute> = (c) => {
         const capabilitiesMatch = !capabilities ||
           capabilities.every(
             (cap) =>
-              modelConfig.capabilities[
-                cap as keyof typeof modelConfig.capabilities
-              ],
+              modelConfig
+                .capabilities[cap as keyof typeof modelConfig.capabilities],
           );
         const taskMatches = !task ||
           TASK_MODELS[task as keyof typeof TASK_MODELS] === name;
@@ -57,6 +56,13 @@ export const getModels: AppRouteHandler<GetModelsRoute> = (c) => {
 export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   const payload = await c.req.json();
 
+  const modelString = payload.model;
+  const model = modelString ? findModel(modelString) : null;
+  const modelDefaultMaxTokens = model?.capabilities.maxOutputTokens || 8000;
+  if (!model) {
+    return c.json({ error: "Invalid model" }, HttpStatusCodes.BAD_REQUEST);
+  }
+
   try {
     // Check cache for existing response
     const cacheKey = await cache.hashKey(JSON.stringify(payload));
@@ -70,6 +76,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
     const result = await generateTextCore({
       ...payload,
       abortSignal: c.req.raw.signal,
+      max_tokens: payload.max_tokens || modelDefaultMaxTokens,
     });
 
     if (!payload.stream) {

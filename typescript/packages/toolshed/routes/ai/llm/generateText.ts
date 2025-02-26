@@ -11,6 +11,7 @@ export interface GenerateTextParams {
   stream?: boolean;
   stop_token?: string;
   abortSignal?: AbortSignal;
+  max_tokens?: number;
 }
 
 export interface GenerateTextResult {
@@ -53,12 +54,12 @@ export async function generateText(
     stopSequences: params.stop_token ? [params.stop_token] : undefined,
     abortSignal: params.abortSignal,
     experimental_telemetry: { isEnabled: true },
+    maxTokens: params.max_tokens,
   };
 
   // Handle models that don't support system prompts
   if (
-    !modelConfig.capabilities.systemPrompt &&
-    params.system &&
+    !modelConfig.capabilities.systemPrompt && params.system &&
     messages.length > 0
   ) {
     messages[0].content = `${params.system}\n\n${messages[0].content}`;
