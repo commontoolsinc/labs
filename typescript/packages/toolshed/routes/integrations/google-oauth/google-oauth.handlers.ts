@@ -235,35 +235,59 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
 
 interface OAuth2Tokens {
   accessToken: string;
-  refreshToken?: string;
-  expiresAt: number;
+  refreshToken: string;
+  expiresIn: number;
+  tokenType: string;
+  scope: string;
 }
 
-async function persistEncryptedAccessTokens(tokens: OAuth2Tokens, authCellDocLink: DocLink) {
-  const storage = createStorage({
-    type: "remote",
-    replica: "uh2",
-    // replica: "not-so-secret",
-    url: env.MEMORY_URL,
-  });
+async function persistEncryptedAccessTokens(tokens: OAuth2Tokens, authCellDocLink: string) {
+  try {
+    console.log("Persisting tokens for auth cell:", authCellDocLink);
 
-  // Load the auth cell
-  await storage.syncCell(authCellDocLink.cell, true);
-  const authCell = getCellFromDocLink(authCellDocLink);
+    // Parse the JSON string to get the DocLink object
+    const docLink = JSON.parse(authCellDocLink);
+    console.log("Parsed docLink:", docLink);
 
-  // FIXME(jake): This is where we'll add encryption using the server key.
+    const storage = createStorage({
+      type: "remote",
+      replica: "uh2",
+      // replica: "not-so-secret",
+      // url: env.MEMORY_URL,
+      url: new URL("http://localhost:8000"),
+    });
 
-  // Set the new tokens to the auth cell
-  authCell.set({
-    token: tokens.accessToken,
-    refreshToken: tokens.refreshToken,
-    expiresAt: tokens.expiresAt,
-  });
+    // Load the auth cell
+    await storage.syncCell(docLink.cell, true);
+    const authCell = getCellFromDocLink(docLink);
+    console.log("Auth cell retrieved:", authCell ? "success" : "failed");
 
-  // NOTE(jake): is this necessary here? I ran into issues when calling from debugger
-  // but are we fine here without it?
-  // Ensure the cell is synced
-  await storage.synced();
+    // FIXME(jake): This is where we'll add encryption using the server key.
+    console.log("#######");
+    console.log(tokens);
+    console.log("#######");
+    // Set the new tokens to the auth cell
+    authCell.set({
+      token: tokens.accessToken,
+      tokenType: tokens.tokenType,
+      scope: tokens.scope,
+      expiresIn: tokens.expiresIn,
+      refreshToken: tokens.refreshToken,
+      expiresAt: Date.now() + tokens.expiresIn * 1000,
+    });
+    console.log("Tokens set to auth cell");
+
+    // NOTE(jake): is this necessary here? I ran into issues when calling from debugger
+    // but are we fine here without it?
+    // Ensure the cell is synced
+    await storage.synced();
+    console.log("Storage synced");
+
+    return true;
+  } catch (error) {
+    console.error("Error persisting tokens:", error);
+    throw error;
+  }
 }
 
 // Helper function to generate HTML for the callback page
