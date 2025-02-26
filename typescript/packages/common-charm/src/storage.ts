@@ -468,6 +468,8 @@ class StorageImpl implements Storage {
 
     // Storage jobs override cell jobs. Write remaining cell jobs to cell.
     cellJobs.forEach(({ value, source }, cell) => {
+      // TODO(seefeld): For frozen cells, show a warning if content is different.
+      // But also, we should serialize the fact that it is frozen to begin with...
       if (!storageJobs.has(cell) && !cell.isFrozen()) {
         if (source) cell.sourceCell = this.cellsById.get(JSON.stringify(source))!;
 
