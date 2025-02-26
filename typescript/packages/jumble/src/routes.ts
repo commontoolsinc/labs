@@ -1,4 +1,4 @@
-import { generatePath, matchPath, useParams } from 'react-router-dom';
+import { generatePath, matchPath } from 'react-router-dom';
 
 // Define route patterns using React Router syntax
 export const ROUTES = {
@@ -59,11 +59,10 @@ export function createPathWithQuery<T extends keyof typeof ROUTES>(
 export function createPathWithHash<T extends keyof typeof ROUTES>(
   route: T,
   params?: RouteParamsMap[T],
-  hash?: Record<string, string>
+  hash?: string
 ) {
   const path = createPath(route, params);
   if (!hash) return path;
 
-  const hashParams = new URLSearchParams(hash);
-  return `${path}#${hashParams.toString()}`;
+  return `${path}#${hash}`;
 }

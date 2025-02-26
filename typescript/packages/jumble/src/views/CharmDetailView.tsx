@@ -22,7 +22,7 @@ import {
   type CharmSuggestion,
 } from "@/utils/prompt-library/charm-suggestions.ts";
 import { Cell } from "@commontools/runner";
-import { createPath, createPathWithHash } from "@/routes";
+import { createPath, createPathWithHash } from "@/routes.ts";
 
 type Tab = "iterate" | "code" | "data";
 
@@ -268,6 +268,11 @@ const Variants = () => {
   } = useIterationContext();
 
   const { charmId: paramCharmId, replicaName } = useParams();
+
+  if (!paramCharmId || !replicaName) {
+    throw new Error('Missing charmId or replicaName');
+  }
+
   const { currentFocus: charm } = useCharm(paramCharmId);
   const navigate = useNavigate();
 
@@ -652,6 +657,11 @@ const BottomSheet = ({
 // Main CharmDetailView Component
 function CharmDetailView() {
   const { charmId: paramCharmId, replicaName } = useParams();
+
+  if (!paramCharmId || !replicaName) {
+    throw new Error("Missing navigation params");
+  }
+
   const { currentFocus: charm } = useCharm(paramCharmId);
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
