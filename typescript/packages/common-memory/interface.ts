@@ -423,10 +423,18 @@ export type Meta = Record<string, string>;
 export type Principal = `did:${string}:${string}`;
 
 export type Transaction<Space extends MemorySpace = MemorySpace> = {
+  /** issuer - the principal (identity) that issued this transaction */
   iss: Principal;
+
+  /** subject - the memory space this transaction will modify */
   sub: Space;
+
+  /** command type, indicates this is a transaction operation */
   cmd: "/memory/transact";
+
   args: { changes: ChangesBuilder };
+
+  /** optional metadata associated with this transaction */
   meta?: Meta;
 };
 

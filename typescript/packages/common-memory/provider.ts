@@ -55,7 +55,7 @@ interface Session {
   memory: MemorySession;
 }
 
-class MemoryProvider implements Provider {
+class MemoryProvider implements Provider, Session {
   sessions: Set<ProviderSession<Protocol>> = new Set();
   constructor(public memory: MemorySession) {}
   subscribe(subscriber: Subscriber) {
@@ -63,13 +63,13 @@ class MemoryProvider implements Provider {
   }
 
   transact(source: Transaction) {
-    return transact(this, source);
+    return transact(this as Session, source);
   }
   query(source: Query) {
-    return query(this, source);
+    return query(this as Session, source);
   }
   fetch(request: Request) {
-    return fetch(this, request);
+    return fetch(this as Session, request);
   }
   session(): ProviderSession<Protocol> {
     const session = new MemoryProviderSession(this.memory, this.sessions);
@@ -108,10 +108,10 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
         await this.invoke(command);
       },
       abort: async () => {
-        await this.close();
+        this.close();
       },
       close: async () => {
-        await this.close();
+        this.close();
       },
     });
   }
@@ -211,9 +211,9 @@ export const close = ({ memory }: Session) => memory.close();
 
 export const fetch = async (session: Session, request: Request) => {
   if (request.method === "PATCH") {
-    return await patch(session, request);
+    return patch(session, request);
   } else if (request.method === "POST") {
-    return await post(session, request);
+    return post(session, request);
   } else {
     return new Response(null, { status: 501 });
   }
@@ -221,7 +221,7 @@ export const fetch = async (session: Session, request: Request) => {
 
 export const patch = async (session: Session, request: Request) => {
   try {
-    const transaction = (await request.json()) as Transaction;
+    const transaction: Transaction = await request.json();
     const result = await session.memory.transact(transaction);
     const body = JSON.stringify(result);
     const status = result.ok ? 200 : result.error.name === "ConflictError" ? 409 : 503;
