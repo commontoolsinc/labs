@@ -346,7 +346,6 @@ function instantiateJavaScriptNode(
       }
 
       const inputsCell = getDoc(eventInputs, cause);
-      inputsCell.ephemeral = true;
       inputsCell.freeze(); // Freezes the bindings, not aliased cells.
 
       const frame = pushFrameFromCause(cause, {
@@ -375,7 +374,6 @@ function instantiateJavaScriptNode(
     // Schedule the action to run when the inputs change
 
     const inputsCell = getDoc(inputs);
-    inputsCell.ephemeral = true;
     inputsCell.freeze(); // Freezes the bindings, not aliased cells.
 
     let resultCell: DocImpl<any> | undefined;
