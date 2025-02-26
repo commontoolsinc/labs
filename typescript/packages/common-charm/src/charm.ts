@@ -56,6 +56,10 @@ export class CharmManager {
     return this.storage.getReplica();
   }
 
+  async synced(): Promise<void> {
+    return await this.storage.synced();
+  }
+
   getCharms(): Cell<Cell<Charm>[]> {
     // Start syncing if not already syncing. Will trigger a change to the list
     // once loaded.

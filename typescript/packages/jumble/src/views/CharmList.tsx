@@ -2,13 +2,16 @@ import { useCell } from "@/hooks/use-cell";
 import { NavLink } from "react-router-dom";
 import { NAME, UI } from "@commontools/builder";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
-import { Charm } from "@commontools/charm";
+import { Charm, CharmManager } from "@commontools/charm";
 import { charmId } from "@/utils/charms.ts";
 import { useEffect, useRef, useState } from "react";
 import { Card } from "@/components/Card.tsx";
 import { useParams } from "react-router-dom";
 import { render } from "@commontools/html";
 import { Cell } from "@commontools/runner";
+import ShapeLogo from "@/assets/ShapeLogo.svg";
+import { MdOutlineStar } from "react-icons/md";
+import { useSyncedStatus } from "@/hooks/use-synced-status";
 
 export interface CommonDataEvent extends CustomEvent {
   detail: {
@@ -90,6 +93,35 @@ export default function CharmList() {
   const { replicaName } = useParams<{ replicaName: string }>();
   const { charmManager } = useCharmManager();
   const [charms] = useCell(charmManager.getCharms());
+  const { isSyncing, lastSyncTime } = useSyncedStatus(charmManager);
+
+  if (!isSyncing && (!charms || charms.length === 0)) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[70vh] text-center p-8">
+        <div className="mb-6">
+          <ShapeLogo />
+        </div>
+        <h2 className="text-2xl font-semibold text-gray-800 mb-4">No charms here!</h2>
+        <p className="text-gray-600 mb-6 max-w-md">
+          Create your first charm by opening the command palette with{" "}
+          <kbd className="px-2 py-1 bg-gray-100 border border-gray-300 rounded text-sm font-mono">
+            {navigator.platform.indexOf("Mac") === 0 ? "⌘K" : "Ctrl+K"}
+          </kbd>{" "}
+          or by clicking the{" "}
+          <span
+            className="
+              inline-flex items-center justify-center w-8 h-8 z-50
+              border-2 border-grey shadow-[2px_2px_0px_0px_rgba(0,0,0,0.25)]
+              bg-white
+            "
+          >
+            <MdOutlineStar fill="grey" size={16} />
+          </span>{" "}
+          button.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-8">
