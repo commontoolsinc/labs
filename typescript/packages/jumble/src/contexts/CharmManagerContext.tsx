@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useMemo } from "react";
-import { CharmManager, createStorage } from "@commontools/charm";
+import { CharmManager } from "@commontools/charm";
 import { useParams } from "react-router-dom";
 
 export type CharmManagerContextType = {
@@ -29,16 +29,7 @@ export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = ({
   }
 
   const charmManager = useMemo(() => {
-    const storageType = (import.meta as any).env.VITE_STORAGE_TYPE ?? "remote";
-    const storage =
-      storageType === "remote"
-        ? createStorage({
-            type: "remote",
-            replica: effectiveReplica,
-            url: new URL(location.href),
-          })
-        : createStorage({ type: storageType as "memory" | "local" });
-    return new CharmManager(storage);
+    return new CharmManager(effectiveReplica);
   }, [effectiveReplica]);
 
   return (

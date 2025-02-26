@@ -12,8 +12,9 @@ import {
   isCell,
   getRecipe,
 } from "@commontools/runner";
-import { type Storage } from "./storage.js";
+import { storage } from "./storage.js";
 import { syncRecipeBlobby } from "./syncRecipe.js";
+import { getSpace, Space } from "@commontools/runner";
 
 export type Charm = {
   [NAME]?: string;
@@ -41,34 +42,34 @@ export const processSchema: JSONSchema = {
   },
 } as const;
 
-export type StorageType = "remote" | "memory" | "local";
-
 export class CharmManager {
+  private space: Space;
   private charmsDoc: DocImpl<DocLink[]>;
   private charms: Cell<Cell<Charm>[]>;
 
-  constructor(private storage: Storage) {
-    this.charmsDoc = getDoc<DocLink[]>([], "charms");
+  constructor(private spaceId: string) {
+    this.space = getSpace(this.spaceId);
+    this.charmsDoc = getDoc<DocLink[]>([], "charms", this.space);
     this.charms = this.charmsDoc.asCell([], undefined, charmListSchema);
   }
 
   getReplica(): string | undefined {
-    return this.storage.getReplica();
+    return this.space.uri;
   }
 
   async synced(): Promise<void> {
-    return await this.storage.synced();
+    return await storage.synced();
   }
 
   getCharms(): Cell<Cell<Charm>[]> {
     // Start syncing if not already syncing. Will trigger a change to the list
     // once loaded.
-    this.storage.syncCell(this.charmsDoc);
+    storage.syncCell(this.charmsDoc);
     return this.charms;
   }
 
   async add(newCharms: Cell<Charm>[]) {
-    await this.storage.syncCell(this.charmsDoc);
+    await storage.syncCell(this.charmsDoc);
     await idle();
 
     newCharms.forEach((charm) => {
@@ -86,7 +87,7 @@ export class CharmManager {
       charm = id;
     } else {
       const idAsDocId = JSON.stringify({ "/": id });
-      const doc = await this.storage.syncCell(idAsDocId);
+      const doc = await storage.syncCellById(this.space, idAsDocId);
       charm = doc.asCell();
     }
 
@@ -128,6 +129,14 @@ export class CharmManager {
     }
   }
 
+  async getCellById<T>(
+    id: EntityId | string,
+    path: string[] = [],
+    schema?: JSONSchema,
+  ): Promise<Cell<T>> {
+    return (await storage.syncCellById(this.space, id)).asCell(path, undefined, schema);
+  }
+
   // Return Cell with argument content according to the schema of the charm.
   getArgument<T = any>(charm: Cell<Charm | T>): T {
     const source = charm.getSourceCell();
@@ -139,7 +148,7 @@ export class CharmManager {
 
   // note: removing a charm doesn't clean up the charm's cells
   async remove(idOrCharm: string | EntityId | Cell<Charm>) {
-    await this.storage.syncCell(this.charmsDoc);
+    await storage.syncCell(this.charmsDoc);
     // bf: horrible code, this indicates inconsistent data structures somewhere
     const id = getEntityId(idOrCharm);
     if (!id) return false;
@@ -197,16 +206,16 @@ export class CharmManager {
       }
     }*/
 
-    const promises: any[] = [];
-    const syncAllMentionedCells = async (value: any) => {
-      if (isCell(value)) promises.push(this.storage.syncCell(value.getAsDocLink().cell));
+    const syncAllMentionedCells = (value: any, promises: any[] = []) => {
+      if (isCell(value)) promises.push(storage.syncCell(value.getAsDocLink().cell));
       else if (typeof value === "object" && value !== null)
-        for (const key in value) promises.push(syncAllMentionedCells(value[key]));
+        for (const key in value) promises.push(syncAllMentionedCells(value[key], promises));
+      return promises;
     };
 
     await syncAllMentionedCells(inputs);
 
-    const doc = await this.storage.syncCell(createRef({ recipe, inputs }, cause));
+    const doc = await storage.syncCellById(this.space, createRef({ recipe, inputs }, cause));
     const resultDoc = run(recipe, inputs, doc);
 
     // FIXME(ja): should we add / sync explicitly here?
@@ -216,7 +225,7 @@ export class CharmManager {
   }
 
   // FIXME(JA): this really really really needs to be revisited
-  async syncRecipe(charm: Cell<Charm>): Promise<string> {
+  syncRecipe(charm: Cell<Charm>): Promise<string> {
     const recipeId = charm.getSourceCell()?.get()?.[TYPE];
 
     return Promise.all([this.syncRecipeCells(recipeId), this.syncRecipeBlobby(recipeId)]).then(
@@ -226,7 +235,7 @@ export class CharmManager {
 
   async syncRecipeCells(recipeId: string) {
     // NOTE(ja): I don't think this actually syncs the recipe
-    if (recipeId) await this.storage.syncCell({ "/": recipeId });
+    if (recipeId) await storage.syncCellById(this.space, { "/": recipeId });
   }
 
   // FIXME(ja): blobby seems to be using toString not toJSON
@@ -234,7 +243,7 @@ export class CharmManager {
     await syncRecipeBlobby(recipeId);
   }
 
-  async sync(entity: string | EntityId | Cell<any>, waitForStorage: boolean = false) {
-    await this.storage.syncCell(entity, waitForStorage);
+  async sync(entity: Cell<any>, waitForStorage: boolean = false) {
+    await storage.syncCell(entity, waitForStorage);
   }
 }

@@ -32,3 +32,4 @@ export {
   getRecipeSrc,
 } from "./recipe-map.js";
 export { type AddCancel, type Cancel, useCancelGroup, noOp } from "./cancel.js";
+export { getSpace, type Space } from "./space.js";

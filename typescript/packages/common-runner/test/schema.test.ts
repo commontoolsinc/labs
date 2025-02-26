@@ -3,6 +3,7 @@ import { DocLink, getDoc } from "../src/doc.js";
 import { isCell } from "../src/cell.js";
 import type { JSONSchema } from "@commontools/builder";
 import { idle } from "../src/scheduler.js";
+import { getSpace } from "../src/space.js";
 
 describe("Schema Support", () => {
   describe("Examples", () => {
@@ -67,11 +68,9 @@ describe("Schema Support", () => {
       const currentByKeyValues: any[] = [];
       const currentByGetValues: any[] = [];
 
-      console.log("root sink");
       // Nested traversal of data
       c.sink((value) => {
         rootValues.push(value.value);
-        console.log("root inner sink", value.current);
         const cancel = value.current.sink((value: { label: string }) => {
           currentValues.push(value.label);
         });
@@ -81,15 +80,12 @@ describe("Schema Support", () => {
         };
       });
 
-      console.log("current key sink");
       // Querying for a value tied to the currently selected sub-document
       c.key("current")
         .key("label")
         .sink((value: string) => {
           currentByKeyValues.push(value);
         });
-
-      console.log("current value sink");
 
       // .get() the currently selected cell. This should not change when
       // the currently selected cell changes!
@@ -144,15 +140,16 @@ describe("Schema Support", () => {
       } as const;
 
       // Construct an alias that also has a path to the actual data
-      const initialDoc = getDoc({ foo: { label: "first" } }, "initial");
+      const initialDoc = getDoc({ foo: { label: "first" } }, "initial", getSpace("test"));
       const initial = initialDoc.asCell();
-      const linkDoc = getDoc(initial.getAsDocLink(), "link");
+      const linkDoc = getDoc(initial.getAsDocLink(), "link", getSpace("test"));
       const doc = getDoc(
         {
           value: "root",
           current: { $alias: { cell: linkDoc, path: ["foo"] } },
         },
         "root",
+        getSpace("test"),
       );
       const root = doc.asCell([], undefined, schema);
 

@@ -23,23 +23,31 @@ export function streamData(
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: DocImpl<any>[],
-  parentCell: DocImpl<any>,
+  parentDoc: DocImpl<any>,
 ): Action {
-  const pending = getDoc(false, { streamData: { pending: cause } });
-  const result = getDoc<any | undefined>(undefined, {
-    streamData: { result: cause },
-  });
-  const error = getDoc<any | undefined>(undefined, {
-    streamData: { error: cause },
-  });
+  const pending = getDoc(false, { streamData: { pending: cause } }, parentDoc.space);
+  const result = getDoc<any | undefined>(
+    undefined,
+    {
+      streamData: { result: cause },
+    },
+    parentDoc.space,
+  );
+  const error = getDoc<any | undefined>(
+    undefined,
+    {
+      streamData: { error: cause },
+    },
+    parentDoc.space,
+  );
 
   pending.ephemeral = true;
   result.ephemeral = true;
   error.ephemeral = true;
 
-  pending.sourceCell = parentCell;
-  result.sourceCell = parentCell;
-  error.sourceCell = parentCell;
+  pending.sourceCell = parentDoc;
+  result.sourceCell = parentDoc;
+  error.sourceCell = parentDoc;
 
   // Since we'll only write into the cells above, we only have to call this once
   // here, instead of in the action.
@@ -124,7 +132,7 @@ export function streamData(
               data: JSON.parse(data),
             };
 
-            normalizeToDocLinks(parentCell, parsedData, undefined, log, {
+            normalizeToDocLinks(parentDoc, parsedData, undefined, log, {
               streamData: { url },
               cause,
             });
