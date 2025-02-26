@@ -298,10 +298,18 @@ const Variants = () => {
                 Original
               </div>
               <div
-                className="flex-grow overflow-clip relative"
-                style={{ transform: "scale(0.3)", transformOrigin: "top left" }}
+                className="flex-grow overflow-hidden relative"
+                style={{ width: "100%", height: "100%" }}
               >
-                <div className="absolute inset-0 w-[500%] h-[500%] pointer-events-none">
+                <div
+                  className="absolute inset-0 pointer-events-none"
+                  style={{
+                    transform: "scale(0.3)",
+                    transformOrigin: "top left",
+                    width: "333%",
+                    height: "333%",
+                  }}
+                >
                   <CharmRenderer className="w-full h-full" charm={charm} />
                 </div>
               </div>
@@ -323,9 +331,17 @@ const Variants = () => {
               </div>
               <div
                 className="flex-grow overflow-hidden relative"
-                style={{ transform: "scale(0.3)", transformOrigin: "top left" }}
+                style={{ width: "100%", height: "100%" }}
               >
-                <div className="absolute inset-0 w-[333%] h-[333%] pointer-events-none">
+                <div
+                  className="absolute inset-0 pointer-events-none"
+                  style={{
+                    transform: "scale(0.3)",
+                    transformOrigin: "top left",
+                    width: "333%",
+                    height: "333%",
+                  }}
+                >
                   <CharmRenderer className="w-full h-full" charm={variant} />
                 </div>
               </div>
