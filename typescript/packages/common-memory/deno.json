@@ -1,4 +1,5 @@
 {
+  "nodeModulesDir": "none",
   "tasks": {
     "start": "deno run --allow-read --allow-write --allow-net --allow-ffi --allow-env deno.ts",
     "test": "deno test --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check"
