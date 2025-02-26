@@ -1,6 +1,6 @@
 import React, { useRef } from "react";
 import { render } from "@commontools/html";
-import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { useSpaceManager } from "@/contexts/SpaceManagerContext";
 import { useNavigate } from "react-router-dom";
 import { fixItCharm } from "@/utils/charm-operations.ts";
 import { LuX } from "react-icons/lu";
@@ -29,7 +29,7 @@ function useCharmLoader({
   const [error, setError] = React.useState<Error | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
   const mountingKey = useRef(0);
-  const { charmManager } = useCharmManager();
+  const { spaceManager: charmManager } = useSpaceManager();
 
   const onCharmReadyCallback = React.useCallback(onCharmReady, [onCharmReady]);
 
@@ -83,7 +83,7 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [runtimeError, setRuntimeError] = React.useState<Error | null>(null);
   const [isFixing, setIsFixing] = React.useState(false);
-  const { charmManager, currentReplica } = useCharmManager();
+  const { spaceManager: charmManager, currentSpaceURI: currentReplica } = useSpaceManager();
   const navigate = useNavigate();
 
   const handleFixIt = React.useCallback(async () => {

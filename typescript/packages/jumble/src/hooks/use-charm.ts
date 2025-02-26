@@ -1,10 +1,10 @@
-import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { useSpaceManager } from "@/contexts/SpaceManagerContext";
 import { Charm, getIframeRecipe, IFrameRecipe } from "@commontools/charm";
 import { Cell, effect } from "@commontools/runner";
 import React from "react";
 
 export const useCharm = (charmId: string | undefined) => {
-  const { charmManager } = useCharmManager();
+  const { spaceManager: charmManager } = useSpaceManager();
   const [currentFocus, setCurrentFocus] = React.useState<Cell<Charm> | null>(null);
   const [iframeRecipe, setIframeRecipe] = React.useState<IFrameRecipe | null>(null);
 

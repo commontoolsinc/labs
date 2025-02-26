@@ -1,5 +1,5 @@
 // Load .env file
-import { CharmManager, createStorage } from "@commontools/charm";
+import { SpaceManager, createStorage } from "@commontools/charm";
 import { fetchInboxEmails } from "./gmail.ts";
 
 const replica = "anotherjesse-test5";
@@ -10,7 +10,7 @@ async function main() {
     replica,
     url: new URL("https://toolshed.saga-castor.ts.net/"),
   });
-  const manager = new CharmManager(storage);
+  const manager = new SpaceManager(storage);
   const charms = await manager.getCharms();
 
   await new Promise((resolve) => {

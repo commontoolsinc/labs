@@ -3,7 +3,7 @@ import { LLMClient } from "@commontools/llm-client";
 import { createJsonSchema, JSONSchema } from "@commontools/builder";
 
 import { tsToExports } from "./localBuild.js";
-import { Charm, CharmManager } from "./charm.js";
+import { Charm, SpaceManager } from "./charm.js";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.js";
 import { buildPrompt } from "./iframe/prompt.js";
 
@@ -41,7 +41,7 @@ const genSrc = async ({
 };
 
 export async function iterate(
-  charmManager: CharmManager,
+  charmManager: SpaceManager,
   charm: Cell<Charm> | null,
   value: string,
   shiftKey: boolean,
@@ -72,7 +72,7 @@ export async function iterate(
 }
 
 export const saveNewRecipeVersion = async (
-  charmManager: CharmManager,
+  charmManager: SpaceManager,
   charm: Cell<Charm>,
   newIFrameSrc: string,
   newSpec: string,
@@ -102,7 +102,7 @@ export const saveNewRecipeVersion = async (
 };
 
 export async function castNewRecipe(
-  charmManager: CharmManager,
+  charmManager: SpaceManager,
   data: any,
   newSpec: string,
 ): Promise<EntityId | undefined> {
@@ -140,7 +140,7 @@ export async function compileRecipe(recipeSrc: string, spec: string, parents?: s
 }
 
 export async function compileAndRunRecipe(
-  charmManager: CharmManager,
+  charmManager: SpaceManager,
   recipeSrc: string,
   spec: string,
   runOptions: any,
@@ -150,7 +150,7 @@ export async function compileAndRunRecipe(
   if (!recipe) {
     return;
   }
-  
+
   const newCharm = await charmManager.runPersistent(recipe, runOptions);
   charmManager.add([newCharm]);
   await charmManager.syncRecipe(newCharm);

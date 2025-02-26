@@ -42,18 +42,18 @@ export const processSchema: JSONSchema = {
   },
 } as const;
 
-export class CharmManager {
+export class SpaceManager {
   private space: Space;
   private charmsDoc: DocImpl<DocLink[]>;
   private charms: Cell<Cell<Charm>[]>;
 
-  constructor(private spaceId: string) {
-    this.space = getSpace(this.spaceId);
+  constructor(private spaceURI: string) {
+    this.space = getSpace(this.spaceURI);
     this.charmsDoc = getDoc<DocLink[]>([], "charms", this.space);
     this.charms = this.charmsDoc.asCell([], undefined, charmListSchema);
   }
 
-  getReplica(): string | undefined {
+  getSpaceURI(): string | undefined {
     return this.space.uri;
   }
 

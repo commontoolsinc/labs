@@ -1,6 +1,6 @@
 import {
   Charm,
-  CharmManager,
+  SpaceManager,
   getIframeRecipe,
   iterate,
   saveNewRecipeVersion,
@@ -12,7 +12,7 @@ import { fixRecipePrompt } from "@/utils/prompt-library/recipe-fix.ts";
 import { createPath } from "@/routes.ts";
 
 export async function fixItCharm(
-  charmManager: CharmManager,
+  spaceManager: SpaceManager,
   charm: Cell<Charm>,
   error: Error,
   model = "anthropic:claude-3-7-sonnet-20250219-thinking",
@@ -34,7 +34,7 @@ export async function fixItCharm(
   }
 
   const newCharm = await saveNewRecipeVersion(
-    charmManager,
+    spaceManager,
     charm,
     fixedCode,
     iframeRecipe.iframe.spec,
@@ -46,7 +46,7 @@ export async function fixItCharm(
 }
 
 export async function iterateCharm(
-  charmManager: CharmManager,
+  spaceManager: SpaceManager,
   focusedCharmId: string,
   focusedReplicaId: string,
   input: string,
@@ -61,9 +61,9 @@ export async function iterateCharm(
     console.log("Input", input);
     console.log("Variants", variants);
     console.log("Preferred Model", preferredModel);
-    const charm = await charmManager.get(focusedCharmId);
+    const charm = await spaceManager.get(focusedCharmId);
     console.log("CHARM", charm);
-    const newCharmId = await iterate(charmManager, charm ?? null, input, false, preferredModel);
+    const newCharmId = await iterate(spaceManager, charm ?? null, input, false, preferredModel);
     if (!newCharmId) {
       throw new Error("No new charm ID found after iterate()");
     }
@@ -73,7 +73,7 @@ export async function iterateCharm(
     if (!id) {
       throw new Error("Invalid charm ID");
     }
-    return createPath('charmShow', { charmId: id, replicaName: focusedReplicaId })
+    return createPath("charmShow", { charmId: id, replicaName: focusedReplicaId });
   } catch (error) {
     console.groupEnd();
     console.error("Edit recipe error:", error);

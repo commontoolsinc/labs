@@ -1,4 +1,4 @@
-export { CharmManager, type Charm } from "./charm.js";
+export { SpaceManager, type Charm } from "./charm.js";
 export { saveRecipe } from "./syncRecipe.js";
 export { buildRecipe, tsToExports } from "./localBuild.js";
 export {

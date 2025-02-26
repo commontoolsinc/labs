@@ -1,4 +1,4 @@
-import { CharmManager } from "@commontools/charm";
+import { SpaceManager } from "@commontools/charm";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext.tsx";
 import { charmId } from "./charms.ts";
 import { llm } from "./llm.ts";
@@ -71,14 +71,14 @@ async function indexCharm(
 }
 
 export async function startCharmIndexing(
-  charmManager: CharmManager,
+  spaceManager: SpaceManager,
   context: IndexingContext,
 ): Promise<void> {
   const jobId = context.startJob("Indexing Charms");
   context.addJobMessage(jobId, "Starting charm indexing...");
 
   try {
-    const charms = charmManager.getCharms().get();
+    const charms = spaceManager.getCharms().get();
     const total = charms.length;
 
     if (total === 0) {
@@ -102,7 +102,7 @@ export async function startCharmIndexing(
       }
 
       await Promise.all(
-        batch.map((charm) => indexCharm(charm, jobId, context, charmManager.getReplica()!)),
+        batch.map((charm) => indexCharm(charm, jobId, context, spaceManager.getSpaceURI()!)),
       );
 
       completed += batch.length;

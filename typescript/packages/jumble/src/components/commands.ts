@@ -1,5 +1,5 @@
 import "./commands.css";
-import { castNewRecipe, Charm, CharmManager, compileAndRunRecipe } from "@commontools/charm";
+import { castNewRecipe, Charm, SpaceManager, compileAndRunRecipe } from "@commontools/charm";
 import { NavigateFunction } from "react-router-dom";
 import { charmId } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
@@ -10,7 +10,14 @@ import { startCharmIndexing } from "@/utils/indexing.ts";
 import { generateJSON } from "@/utils/prompt-library/json-gen.ts";
 import { createPath, createPathWithHash, ROUTES } from "@/routes.ts";
 
-export type CommandType = "action" | "input" | "confirm" | "select" | "menu" | "transcribe" | 'placeholder';
+export type CommandType =
+  | "action"
+  | "input"
+  | "confirm"
+  | "select"
+  | "menu"
+  | "transcribe"
+  | "placeholder";
 
 export interface CommandItem {
   id: string;
@@ -55,7 +62,7 @@ export function getChildren(
 }
 
 export interface CommandContext {
-  charmManager: CharmManager;
+  spaceManager: SpaceManager;
   navigate: NavigateFunction;
   focusedCharmId: string | null;
   focusedReplicaId: string | null;
@@ -81,7 +88,7 @@ export type CommandMode =
   | { type: "confirm"; command: CommandItem; message: string }
   | { type: "select"; command: CommandItem; options: SelectOption[] }
   | { type: "transcribe"; command: CommandItem; placeholder: string }
-  | { type: "loading" }
+  | { type: "loading" };
 
 export interface SelectOption {
   id: string;
@@ -90,23 +97,23 @@ export interface SelectOption {
 }
 
 export const castSpellAsCharm = async (
-  charmManager: CharmManager,
+  spaceManager: SpaceManager,
   recipeKey: string,
   blobId: string,
 ) => {
   if (recipeKey && blobId) {
     console.log("Syncing...");
     const recipeId = recipeKey.replace("spell-", "");
-    await charmManager.syncRecipeBlobby(recipeId);
+    await spaceManager.syncRecipeBlobby(recipeId);
 
     const recipe = getRecipe(recipeId);
     if (!recipe) return;
 
     console.log("Syncing blob...");
-    const cell = await charmManager.getCellById({ '/': blobId }, ["argument"]);
+    const cell = await spaceManager.getCellById(blobId, ["argument"]);
     console.log("Casting...");
-    const charm: Cell<Charm> = await charmManager.runPersistent(recipe, cell);
-    charmManager.add([charm]);
+    const charm: Cell<Charm> = await spaceManager.runPersistent(recipe, cell);
+    spaceManager.add([charm]);
     return charm.entityId;
   }
   console.log("Failed to cast");
@@ -120,7 +127,7 @@ async function handleNewCharm(deps: CommandContext, input: string | undefined) {
   try {
     // Generate JSON blob with an LLM
     const dummyData = await generateJSON(input);
-    const newCharm = await castNewRecipe(deps.charmManager, dummyData, input);
+    const newCharm = await castNewRecipe(deps.spaceManager, dummyData, input);
     if (!newCharm) {
       throw new Error("Failed to cast charm");
     }
@@ -128,7 +135,7 @@ async function handleNewCharm(deps: CommandContext, input: string | undefined) {
     if (!id || !deps.focusedReplicaId) {
       throw new Error("Missing charm ID or replica name");
     }
-    deps.navigate(createPath('charmShow', { charmId: id, replicaName: deps.focusedReplicaId }));
+    deps.navigate(createPath("charmShow", { charmId: id, replicaName: deps.focusedReplicaId }));
   } finally {
     deps.setLoading(false);
     deps.setOpen(false);
@@ -138,8 +145,8 @@ async function handleNewCharm(deps: CommandContext, input: string | undefined) {
 async function handleSearchCharms(deps: CommandContext) {
   deps.setLoading(true);
   try {
-    const charms = deps.charmManager.getCharms();
-    await deps.charmManager.sync(charms);
+    const charms = deps.spaceManager.getCharms();
+    await deps.spaceManager.sync(charms);
     const results = charms.get().map((charm) => {
       const data = charm.get();
       const title = data?.[NAME] ?? "Untitled";
@@ -160,7 +167,10 @@ async function handleSearchCharms(deps: CommandContext) {
           if (!id || !deps.focusedReplicaId) {
             throw new Error("Missing charm ID or replica name");
           }
-          const path = createPath('charmDetail', { charmId: id, replicaName: deps.focusedReplicaId });
+          const path = createPath("charmDetail", {
+            charmId: id,
+            replicaName: deps.focusedReplicaId,
+          });
           deps.navigate(path);
           deps.setOpen(false);
         },
@@ -178,7 +188,7 @@ async function handleEditRecipe(deps: CommandContext, input: string | undefined)
   if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
   deps.setLoading(true);
   const newCharmPath = await iterateCharm(
-    deps.charmManager,
+    deps.spaceManager,
     deps.focusedCharmId,
     deps.focusedReplicaId,
     input,
@@ -196,7 +206,7 @@ async function handleRenameCharm(deps: CommandContext, input: string | undefined
   if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
   deps.setLoading(true);
 
-  const charm = await deps.charmManager.get(deps.focusedCharmId);
+  const charm = await deps.spaceManager.get(deps.focusedCharmId);
   if (!charm) return;
   charm.key(NAME).set(input);
 
@@ -206,7 +216,7 @@ async function handleRenameCharm(deps: CommandContext, input: string | undefined
 
 async function handleDeleteCharm(deps: CommandContext) {
   if (!deps.focusedCharmId) return;
-  const result = await deps.charmManager.remove(deps.focusedCharmId);
+  const result = await deps.spaceManager.remove(deps.focusedCharmId);
   if (result) deps.navigate(ROUTES.root);
   else deps.setOpen(false);
 }
@@ -265,14 +275,14 @@ async function handleImportJSON(deps: CommandContext) {
     const title = prompt("Enter a title for your imported recipe:");
     if (!title) return;
 
-    const newCharm = await castNewRecipe(deps.charmManager, data, title);
+    const newCharm = await castNewRecipe(deps.spaceManager, data, title);
     if (!newCharm) throw new Error("Failed to create new charm");
 
     const id = charmId(newCharm);
     if (!id || !deps.focusedReplicaId) throw new Error("Missing charm ID or replica name");
 
     if (id) {
-      deps.navigate(createPath('charmShow', { charmId: id, replicaName: deps.focusedReplicaId }));
+      deps.navigate(createPath("charmShow", { charmId: id, replicaName: deps.focusedReplicaId }));
     }
   } finally {
     deps.setLoading(false);
@@ -296,7 +306,7 @@ async function handleLoadRecipe(deps: CommandContext) {
     });
 
     const src = await file.text();
-    const newCharm = await compileAndRunRecipe(deps.charmManager, src, "imported", {});
+    const newCharm = await compileAndRunRecipe(deps.spaceManager, src, "imported", {});
     if (!newCharm) {
       throw new Error("Failed to cast charm");
     }
@@ -305,7 +315,7 @@ async function handleLoadRecipe(deps: CommandContext) {
       throw new Error("Missing charm ID or replica name");
     }
     if (id) {
-      deps.navigate(createPath('charmShow', { charmId: id, replicaName: deps.focusedReplicaId }));
+      deps.navigate(createPath("charmShow", { charmId: id, replicaName: deps.focusedReplicaId }));
     }
   } finally {
     deps.setLoading(false);
@@ -357,11 +367,11 @@ function navigateToCharm(charm: Charm | EntityId, deps: CommandContext) {
     throw new Error("Missing charm ID or replica name");
   }
 
-  deps.navigate(createPath('charmShow', { charmId: id, replicaName: deps.focusedReplicaId }));
+  deps.navigate(createPath("charmShow", { charmId: id, replicaName: deps.focusedReplicaId }));
 }
 
 async function handleIndexCharms(deps: CommandContext) {
-  startCharmIndexing(deps.charmManager, {
+  startCharmIndexing(deps.spaceManager, {
     startJob: deps.startJob,
     stopJob: deps.stopJob,
     addJobMessage: deps.addJobMessage,
@@ -412,7 +422,7 @@ async function handleUseDataInSpell(deps: CommandContext) {
             throw new Error("No charm selected");
           }
 
-          const charm = await deps.charmManager.get(deps.focusedCharmId);
+          const charm = await deps.spaceManager.get(deps.focusedCharmId);
           const sourceCell = charm?.getSourceCell();
 
           const sourceId = getEntityId(sourceCell)?.["/"];
@@ -420,7 +430,7 @@ async function handleUseDataInSpell(deps: CommandContext) {
             throw new Error("No source ID found");
           }
           deps.setLoading(true);
-          const newCharm = await castSpellAsCharm(deps.charmManager, selectedSpell.id, sourceId);
+          const newCharm = await castSpellAsCharm(deps.spaceManager, selectedSpell.id, sourceId);
 
           if (!newCharm) {
             throw new Error("No source cell found");
@@ -490,10 +500,10 @@ async function handleUseSpellOnOtherData(deps: CommandContext) {
           }
 
           deps.setLoading(true);
-          const newCharm = await castSpellAsCharm(deps.charmManager, spellId, selectedCell.id);
+          const newCharm = await castSpellAsCharm(deps.spaceManager, spellId, selectedCell.id);
           if (!newCharm) throw new Error("Failed to cast spell");
 
-          navigateToCharm(newCharm, deps)
+          navigateToCharm(newCharm, deps);
           deps.setOpen(false);
           deps.setLoading(false);
         },
@@ -584,7 +594,12 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           deps.setOpen(false);
           return;
         }
-        deps.navigate(createPath('charmDetail', { charmId: deps.focusedCharmId, replicaName: deps.focusedReplicaId }))
+        deps.navigate(
+          createPath("charmDetail", {
+            charmId: deps.focusedCharmId,
+            replicaName: deps.focusedReplicaId,
+          }),
+        );
         deps.setOpen(false);
       },
     },
@@ -599,7 +614,13 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           deps.setOpen(false);
           return;
         }
-        deps.navigate(createPathWithHash('charmDetail', { charmId: deps.focusedCharmId, replicaName: deps.focusedReplicaId }, 'code'))
+        deps.navigate(
+          createPathWithHash(
+            "charmDetail",
+            { charmId: deps.focusedCharmId, replicaName: deps.focusedReplicaId },
+            "code",
+          ),
+        );
         deps.setOpen(false);
       },
     },
@@ -614,7 +635,13 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           deps.setOpen(false);
           return;
         }
-        deps.navigate(createPathWithHash('charmDetail', { charmId: deps.focusedCharmId, replicaName: deps.focusedReplicaId }, 'data'))
+        deps.navigate(
+          createPathWithHash(
+            "charmDetail",
+            { charmId: deps.focusedCharmId, replicaName: deps.focusedReplicaId },
+            "data",
+          ),
+        );
         deps.setOpen(false);
       },
     },
@@ -629,7 +656,12 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           deps.setOpen(false);
           return;
         }
-        deps.navigate(createPath('charmShow', { charmId: deps.focusedCharmId, replicaName: deps.focusedReplicaId }))
+        deps.navigate(
+          createPath("charmShow", {
+            charmId: deps.focusedCharmId,
+            replicaName: deps.focusedReplicaId,
+          }),
+        );
         deps.setOpen(false);
       },
     },
@@ -651,7 +683,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       predicate: !!deps.focusedReplicaId,
       handler: () => {
         if (deps.focusedReplicaId) {
-          deps.navigate(createPath('replicaRoot', { replicaName: deps.focusedReplicaId }))
+          deps.navigate(createPath("replicaRoot", { replicaName: deps.focusedReplicaId }));
         }
         deps.setOpen(false);
       },
@@ -772,7 +804,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
                     id: `msg-${job.id}-${i}`,
                     type: "action",
                     title: msg,
-                    handler: () => { },
+                    handler: () => {},
                   }),
                 ),
               },

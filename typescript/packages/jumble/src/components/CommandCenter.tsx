@@ -1,7 +1,7 @@
 import { Command } from "cmdk";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import "./commands.css";
-import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { useSpaceManager } from "@/contexts/SpaceManagerContext.tsx";
 import { useMatch, useNavigate } from "react-router-dom";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { DialogDescription, DialogTitle } from "@radix-ui/react-dialog";
@@ -79,7 +79,7 @@ export function CommandCenter() {
   const { modelId, setPreferredModel } = usePreferredLanguageModel();
   const { stopJob, startJob, addJobMessage, listJobs, updateJobProgress } = useBackgroundTasks();
 
-  const { charmManager } = useCharmManager();
+  const { spaceManager: charmManager } = useSpaceManager();
   const navigate = useNavigate();
   // TODO(bf): matchesRoute?
   const match = useMatch("/:replicaName/:charmId?/*");
@@ -89,7 +89,7 @@ export function CommandCenter() {
   const allCommands = useMemo(
     () =>
       getCommands({
-        charmManager,
+        spaceManager: charmManager,
         navigate,
         focusedCharmId,
         focusedReplicaId,
@@ -220,7 +220,7 @@ export function CommandCenter() {
   }, [focusedCharmId, allCommands]);
 
   const context: CommandContext = {
-    charmManager,
+    spaceManager: charmManager,
     navigate,
     focusedCharmId,
     focusedReplicaId,
@@ -266,7 +266,7 @@ export function CommandCenter() {
     const commands =
       commandPathIds.length === 0
         ? allCommands
-        : (getCommandById(commandPathIds[commandPathIds.length - 1])?.children ?? []);
+        : getCommandById(commandPathIds[commandPathIds.length - 1])?.children ?? [];
 
     return commands.filter((cmd) => cmd.predicate !== false); // Show command unless predicate is explicitly false
   };
@@ -299,8 +299,8 @@ export function CommandCenter() {
             mode.type === "confirm"
               ? mode.message || "Are you sure?"
               : mode.type === "input"
-                ? mode.placeholder
-                : "What would you like to do?"
+              ? mode.placeholder
+              : "What would you like to do?"
           }
           readOnly={mode.type === "confirm"}
           value={search}

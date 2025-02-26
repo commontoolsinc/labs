@@ -1,7 +1,7 @@
 import { useCell } from "@/hooks/use-cell.ts";
 import { NavLink } from "react-router-dom";
 import { NAME, UI } from "@commontools/builder";
-import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { useSpaceManager } from "@/contexts/SpaceManagerContext";
 import { Charm } from "@commontools/charm";
 import { charmId } from "@/utils/charms.ts";
 import { useEffect, useRef, useState } from "react";
@@ -22,7 +22,7 @@ function CharmPreview({ charm, replicaName }: { charm: Cell<Charm>; replicaName:
   const previewRef = useRef<HTMLDivElement | null>(null);
   const [isIntersecting, setIsIntersecting] = useState(false);
 
-  const { charmManager } = useCharmManager();
+  const { spaceManager: charmManager } = useSpaceManager();
 
   useEffect(() => {
     if (!previewRef.current) return;
@@ -91,7 +91,7 @@ function CharmPreview({ charm, replicaName }: { charm: Cell<Charm>; replicaName:
 
 export default function CharmList() {
   const { replicaName } = useParams<{ replicaName: string }>();
-  const { charmManager } = useCharmManager();
+  const { spaceManager: charmManager } = useSpaceManager();
   const [charms] = useCell(charmManager.getCharms());
   const { isSyncing } = useSyncedStatus(charmManager);
 

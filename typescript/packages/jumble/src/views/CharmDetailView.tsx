@@ -8,7 +8,7 @@ import React, {
   useContext,
 } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
-import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { useSpaceManager } from "@/contexts/SpaceManagerContext";
 import { LoadingSpinner } from "@/components/Loader.tsx";
 import { useCharm } from "@/hooks/use-charm.ts";
 import CodeMirror from "@uiw/react-codemirror";
@@ -230,7 +230,7 @@ function useSuggestions(charm: Cell<Charm> | null) {
 
 // Hook for code editing
 function useCodeEditor(charm: Cell<Charm> | null, iframeRecipe: IFrameRecipe | null) {
-  const { charmManager } = useCharmManager();
+  const { spaceManager: charmManager } = useSpaceManager();
   const [workingSrc, setWorkingSrc] = useState<string | undefined>(undefined);
 
   useEffect(() => {
@@ -663,7 +663,7 @@ function CharmDetailView() {
   }
 
   const { currentFocus: charm } = useCharm(paramCharmId);
-  const { charmManager } = useCharmManager();
+  const { spaceManager: charmManager } = useSpaceManager();
   const navigate = useNavigate();
 
   // Iteration state

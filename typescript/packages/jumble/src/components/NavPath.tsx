@@ -1,4 +1,4 @@
-import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { useSpaceManager } from "@/contexts/SpaceManagerContext";
 import { NAME } from "@commontools/builder";
 import React, { useEffect } from "react";
 import { NavLink } from "react-router-dom";
@@ -9,7 +9,7 @@ type NavPathProps = {
 };
 
 export function NavPath({ replicaId, charmId }: NavPathProps) {
-  const { charmManager } = useCharmManager();
+  const { spaceManager: charmManager } = useSpaceManager();
 
   const [charmName, setCharmName] = React.useState<string | null>(null);
 

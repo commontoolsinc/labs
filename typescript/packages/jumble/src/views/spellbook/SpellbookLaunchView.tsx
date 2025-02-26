@@ -1,13 +1,13 @@
 import { useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { useSpaceManager } from "@/contexts/SpaceManagerContext";
 import { getRecipe } from "@commontools/runner";
 import { createPath } from "@/routes.ts";
 
 export default function SpellbookLaunchView() {
   const { spellId } = useParams<{ spellId: string }>();
   const navigate = useNavigate();
-  const { charmManager, currentReplica } = useCharmManager();
+  const { spaceManager: charmManager, currentSpaceURI: currentReplica } = useSpaceManager();
 
   useEffect(() => {
     const launchSpell = async () => {

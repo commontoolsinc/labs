@@ -1,7 +1,7 @@
-import { CharmManager } from "@commontools/charm";
+import { SpaceManager } from "@commontools/charm";
 import { useEffect, useState } from "react";
 
-export function useSyncedStatus(charmManager: CharmManager, intervalMs = 5000) {
+export function useSyncedStatus(spaceManager: SpaceManager, intervalMs = 5000) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   useEffect(() => {
@@ -15,7 +15,7 @@ export function useSyncedStatus(charmManager: CharmManager, intervalMs = 5000) {
       setIsSyncing(true);
 
       try {
-        await charmManager.synced();
+        await spaceManager.synced();
 
         if (isMounted) {
           setLastSyncTime(new Date());
@@ -40,7 +40,7 @@ export function useSyncedStatus(charmManager: CharmManager, intervalMs = 5000) {
       isMounted = false;
       clearInterval(intervalId);
     };
-  }, [charmManager, intervalMs]);
+  }, [spaceManager, intervalMs]);
 
   return { isSyncing, lastSyncTime };
 }
