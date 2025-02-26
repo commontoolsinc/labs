@@ -6,6 +6,30 @@ export interface StorageValue<T = any> {
   source?: EntityId;
 }
 
+/**
+ * Metrics for storage operations
+ */
+export interface StorageMetrics {
+  /** Number of send operations performed */
+  sendCount: number;
+  /** Number of sync operations performed */
+  syncCount: number;
+  /** Number of get operations performed */
+  getCount: number;
+  /** Number of sink subscriptions created */
+  sinkCount: number;
+  /** Number of currently active sink subscriptions */
+  activeSinkCount: number;
+  /** Average time for send operations in ms */
+  avgSendTime: number;
+  /** Average time for sync operations in ms */
+  avgSyncTime: number;
+  /** Last error message if any */
+  lastError?: string;
+  /** Timestamp when metrics were last reset */
+  resetTime: number;
+}
+
 export interface StorageProvider {
   /**
    * Send a value to storage.
@@ -57,12 +81,36 @@ export interface StorageProvider {
    * @returns The storage provider's replica.
    */
   getReplica(): string | undefined;
+
+  /**
+   * Get metrics about storage operations.
+   * 
+   * @returns Metrics object with operation counts and timing information
+   */
+  getMetrics(): StorageMetrics;
+
+  /**
+   * Reset metrics counters.
+   */
+  resetMetrics(): void;
 }
 
 export abstract class BaseStorageProvider implements StorageProvider {
   protected subscribers = new Map<string, Set<(value: StorageValue) => void>>();
   protected waitingForSync = new Map<string, Promise<void>>();
   protected waitingForSyncResolvers = new Map<string, () => void>();
+
+  // Metrics tracking
+  protected metrics: StorageMetrics = {
+    sendCount: 0,
+    syncCount: 0,
+    getCount: 0,
+    sinkCount: 0,
+    activeSinkCount: 0,
+    avgSendTime: 0,
+    avgSyncTime: 0,
+    resetTime: Date.now(),
+  };
 
   abstract send<T = any>(
     batch: { entityId: EntityId; value: StorageValue<T> }[],
@@ -80,9 +128,16 @@ export abstract class BaseStorageProvider implements StorageProvider {
     const listeners = this.subscribers.get(key)!;
     listeners.add(callback);
 
+    // Update metrics
+    this.metrics.sinkCount++;
+    this.metrics.activeSinkCount++;
+
     return () => {
       listeners.delete(callback);
       if (listeners.size === 0) this.subscribers.delete(key);
+      
+      // Update metrics
+      this.metrics.activeSinkCount--;
     };
   }
 
@@ -113,4 +168,41 @@ export abstract class BaseStorageProvider implements StorageProvider {
   abstract destroy(): Promise<void>;
 
   abstract getReplica(): string | undefined;
+
+  /**
+   * Get metrics about storage operations.
+   */
+  getMetrics(): StorageMetrics {
+    return { ...this.metrics };
+  }
+
+  /**
+   * Reset metrics counters.
+   */
+  resetMetrics(): void {
+    this.metrics = {
+      sendCount: 0,
+      syncCount: 0,
+      getCount: 0,
+      sinkCount: 0,
+      activeSinkCount: this.metrics.activeSinkCount, // Keep current active count
+      avgSendTime: 0,
+      avgSyncTime: 0,
+      resetTime: Date.now(),
+    };
+  }
+
+  /**
+   * Update metrics for a timed operation
+   */
+  protected updateTimedMetric(metric: 'avgSendTime' | 'avgSyncTime', time: number): void {
+    const count = metric === 'avgSendTime' ? this.metrics.sendCount : this.metrics.syncCount;
+    
+    if (count <= 1) {
+      this.metrics[metric] = time;
+    } else {
+      // Compute running average
+      this.metrics[metric] = (this.metrics[metric] * (count - 1) + time) / count;
+    }
+  }
 }

@@ -21,51 +21,79 @@ export class LocalStorageProvider extends BaseStorageProvider {
   }
 
   async send<T = any>(batch: { entityId: EntityId; value: StorageValue<T> }[]) {
-    for (const { entityId, value } of batch) {
-      const key = this.getKey(entityId);
-      const storeValue = JSON.stringify(value);
-      if (this.lastValues.get(key) !== storeValue) {
-        if ((localStorage.getItem(key) ?? undefined) !== this.lastValues.get(key)) {
-          log(
-            "localstorage changed, aborting update",
-            key,
-            localStorage.getItem(key),
-            this.lastValues.get(key) ?? null,
-            storeValue,
-          );
-          // Storage changed while we were processing, and we assume LWW, so
-          // we'll skip the update. The storage change will trigger an event, so
-          // we'll get the other state soon.
-          continue;
-        } else {
-          localStorage.setItem(key, storeValue);
-          this.lastValues.set(key, storeValue);
-          log("send localstorage", key, storeValue.length, storeValue);
+    // Track metrics
+    this.metrics.sendCount++;
+    const startTime = performance.now();
+    
+    try {
+      for (const { entityId, value } of batch) {
+        const key = this.getKey(entityId);
+        const storeValue = JSON.stringify(value);
+        if (this.lastValues.get(key) !== storeValue) {
+          if ((localStorage.getItem(key) ?? undefined) !== this.lastValues.get(key)) {
+            log(
+              "localstorage changed, aborting update",
+              key,
+              localStorage.getItem(key),
+              this.lastValues.get(key) ?? null,
+              storeValue,
+            );
+            // Storage changed while we were processing, and we assume LWW, so
+            // we'll skip the update. The storage change will trigger an event, so
+            // we'll get the other state soon.
+            continue;
+          } else {
+            localStorage.setItem(key, storeValue);
+            this.lastValues.set(key, storeValue);
+            log("send localstorage", key, storeValue.length, storeValue);
+          }
         }
       }
-    }
 
-    return { ok: {} };
+      // Update metrics
+      this.updateTimedMetric('avgSendTime', performance.now() - startTime);
+      return { ok: {} };
+    } catch (error) {
+      // Track error in metrics
+      this.metrics.lastError = error instanceof Error ? error.message : String(error);
+      return { error: error instanceof Error ? error : new Error(String(error)) };
+    }
   }
 
   async sync(entityId: EntityId, expectedInStorage: boolean = false): Promise<void> {
-    const key = this.getKey(entityId);
-    const value = localStorage.getItem(key);
-    log("sync localstorage", key, value);
-    if (value === null)
-      if (expectedInStorage) {
-        // Timeout of 1 second to allow for the value to be set by another tab.
-        // This is more than enough, since the race condition we're looking for
-        // is just that a batch is written by the other tab, and we encounter a
-        // dependency in the beginning of the batch before the whole batch is
-        // written.
-        setTimeout(() => this.resolveWaitingForSync(this.entityIdStrFromKey(key)), 1000);
-        return this.waitForSync(this.entityIdStrFromKey(key));
-      } else this.lastValues.delete(key);
-    else this.lastValues.set(key, value);
+    // Track metrics
+    this.metrics.syncCount++;
+    const startTime = performance.now();
+    
+    try {
+      const key = this.getKey(entityId);
+      const value = localStorage.getItem(key);
+      log("sync localstorage", key, value);
+      if (value === null)
+        if (expectedInStorage) {
+          // Timeout of 1 second to allow for the value to be set by another tab.
+          // This is more than enough, since the race condition we're looking for
+          // is just that a batch is written by the other tab, and we encounter a
+          // dependency in the beginning of the batch before the whole batch is
+          // written.
+          setTimeout(() => this.resolveWaitingForSync(this.entityIdStrFromKey(key)), 1000);
+          return this.waitForSync(this.entityIdStrFromKey(key));
+        } else this.lastValues.delete(key);
+      else this.lastValues.set(key, value);
+      
+      // Update metrics
+      this.updateTimedMetric('avgSyncTime', performance.now() - startTime);
+    } catch (error) {
+      // Track error in metrics
+      this.metrics.lastError = error instanceof Error ? error.message : String(error);
+      throw error;
+    }
   }
 
   get<T>(entityId: EntityId): StorageValue<T> | undefined {
+    // Track metrics
+    this.metrics.getCount++;
+    
     const key = this.getKey(entityId);
     const value = this.lastValues.get(key);
     log("get localstorage", key, value);
@@ -93,26 +121,15 @@ export class LocalStorageProvider extends BaseStorageProvider {
   }
 
   private handleStorageEvent = (event: StorageEvent) => {
-    if (event.key?.startsWith(this.prefix)) {
-      // Read the latest value from store instead of using event.newValue, since
-      // event might have been queued for a while and the value might have
-      // changed.
-      const newValue = localStorage.getItem(event.key);
-      if (this.lastValues.get(event.key) !== newValue) {
-        log(
-          "storage event",
-          event.key,
-          newValue?.length,
-          this.lastValues.get(event.key)?.length,
-          "new:",
-          newValue,
-          "old:",
-          this.lastValues.get(event.key),
-        );
-        if (newValue === null) this.lastValues.delete(event.key);
-        else this.lastValues.set(event.key, newValue);
-        const result = newValue !== null ? JSON.parse(newValue) : {};
-        this.notifySubscribers(this.entityIdStrFromKey(event.key), result);
+    if (event.key && event.key.startsWith("cell:")) {
+      const key = event.key;
+      const value = event.newValue;
+      log("storage event", key, value);
+      if (value === null) {
+        this.lastValues.delete(key);
+      } else {
+        this.lastValues.set(key, value);
+        this.notifySubscribers(this.entityIdStrFromKey(key), JSON.parse(value));
       }
     }
   };

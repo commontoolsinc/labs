@@ -15,7 +15,7 @@ import {
   isCell,
 } from "@commontools/runner";
 import { isStatic, markAsStatic } from "@commontools/builder";
-import { StorageProvider, StorageValue } from "./storage/base.js";
+import { StorageProvider, StorageValue, StorageMetrics } from "./storage/base.js";
 import { LocalStorageProvider } from "./storage/localstorage.js";
 import { InMemoryStorageProvider } from "./storage/memory.js";
 import { RemoteStorageProvider, type MemorySpace } from "./storage/remote.js";
@@ -78,6 +78,71 @@ export interface Storage {
    * @returns The replica name.
    */
   getReplica(): string | undefined;
+
+  /**
+   * Get debug information about the storage layer.
+   * This provides statistics and information about the current state of the storage,
+   * including cells being tracked, pending operations, and connection status.
+   * 
+   * @returns Debug information object
+   */
+  getDebugInfo(): StorageDebugInfo;
+}
+
+/**
+ * Debug information about the storage layer
+ */
+export interface StorageDebugInfo {
+  /** Type of storage provider being used */
+  providerType: string;
+  /** Replica name if available */
+  replica?: string;
+  /** Connection status for remote providers */
+  connectionStatus?: {
+    connected: boolean;
+    connectionCount: number;
+    queueSize: number;
+  };
+  /** Statistics about cells */
+  cells: {
+    /** Total number of cells known to storage */
+    total: number;
+    /** Number of cells currently loading */
+    loading: number;
+    /** Number of cells with active subscriptions */
+    subscribed: number;
+    /** List of cells with their status */
+    list: Array<{
+      id: string;
+      loading: boolean;
+      hasDependencies: boolean;
+      dependenciesCount: number;
+      type: 'read' | 'write' | 'both' | 'none';
+      lastUpdated?: number;
+      subscribed: boolean;
+    }>;
+  };
+  /** Information about the current batch */
+  batch: {
+    /** Whether a batch is currently processing */
+    processing: boolean;
+    /** Number of jobs in the current batch */
+    size: number;
+    /** Types of jobs in the current batch */
+    types: {
+      sync: number;
+      cell: number;
+      storage: number;
+    };
+    /** Time the last batch was processed */
+    lastBatchTime: number;
+    /** Current debounce count */
+    debounceCount: number;
+  };
+  /** Provider metrics for operations */
+  metrics: StorageMetrics;
+  /** Timestamp when this debug info was generated */
+  timestamp: number;
 }
 
 type Job = {
@@ -154,6 +219,12 @@ class StorageImpl implements Storage {
   private cancel: Cancel;
   private addCancel: AddCancel;
 
+  // Add these properties to track cell update times
+  private cellLastUpdated = new Map<string, number>();
+  
+  // Set to track subscribed documents
+  private subscribedDocs = new Set<string>();
+
   syncCell<T>(
     subject: DocImpl<T> | EntityId | string | Cell<any>,
     expectedInStorage: boolean = false,
@@ -177,6 +248,7 @@ class StorageImpl implements Storage {
     await this.storageProvider.destroy();
     this.cellsById.clear();
     this.cellIsLoading.clear();
+    this.subscribedDocs.clear();
     this.cancel();
   }
 
@@ -288,6 +360,9 @@ class StorageImpl implements Storage {
     if (JSON.stringify(value) !== JSON.stringify(this.writeValues.get(cell))) {
       this.writeDependentCells.set(cell, dependencies);
       this.writeValues.set(cell, value);
+      
+      // Track update time
+      this.cellLastUpdated.set(JSON.stringify(cell.entityId), Date.now());
 
       this._addToBatch([{ cell, type: "storage" }]);
 
@@ -352,6 +427,9 @@ class StorageImpl implements Storage {
     if (JSON.stringify(newValue) !== JSON.stringify(this.readValues.get(cell))) {
       this.readDependentCells.set(cell, dependencies);
       this.readValues.set(cell, newValue);
+      
+      // Track update time
+      this.cellLastUpdated.set(JSON.stringify(cell.entityId), Date.now());
 
       this._addToBatch([{ cell, type: "cell" }]);
     }
@@ -551,7 +629,17 @@ class StorageImpl implements Storage {
   }
 
   private _subscribeToChanges(cell: DocImpl<any>): void {
-    log("subscribe to changes", JSON.stringify(cell.entityId));
+    const entityStr = JSON.stringify(cell.entityId);
+    
+    // Check if we've already subscribed to this document
+    if (this.subscribedDocs.has(entityStr)) {
+      return; // Already subscribed, skip
+    }
+    
+    // Mark as subscribed
+    this.subscribedDocs.add(entityStr);
+
+    log("subscribe to changes", entityStr);
 
     // Subscribe to cell changes, send updates to storage
     this.addCancel(
@@ -588,6 +676,90 @@ class StorageImpl implements Storage {
 
   getReplica(): string | undefined {
     return this.storageProvider.getReplica();
+  }
+
+  // Implement the getDebugInfo method
+  getDebugInfo(): StorageDebugInfo {
+    // Determine provider type
+    let providerType = "unknown";
+    if (this.storageProvider instanceof LocalStorageProvider) {
+      providerType = "localStorage";
+    } else if (this.storageProvider instanceof InMemoryStorageProvider) {
+      providerType = "memory";
+    } else if (this.storageProvider instanceof RemoteStorageProvider) {
+      providerType = "remote";
+    }
+
+    // Get connection status for remote provider
+    let connectionStatus = undefined;
+    if (this.storageProvider instanceof RemoteStorageProvider) {
+      connectionStatus = {
+        connected: this.storageProvider.connection !== null && 
+                  this.storageProvider.connection.readyState === WebSocket.OPEN,
+        connectionCount: this.storageProvider.connectionCount,
+        queueSize: this.storageProvider.queue.size,
+      };
+    }
+
+    // Build cell information
+    const cellsList = Array.from(this.cellsById.entries()).map(([id, cell]) => {
+      const isLoading = this.cellIsLoading.has(cell);
+      const hasReadDeps = this.readDependentCells.has(cell);
+      const hasWriteDeps = this.writeDependentCells.has(cell);
+      const isSubscribed = this.subscribedDocs.has(id);
+      
+      let type: 'read' | 'write' | 'both' | 'none' = 'none';
+      if (hasReadDeps && hasWriteDeps) type = 'both';
+      else if (hasReadDeps) type = 'read';
+      else if (hasWriteDeps) type = 'write';
+      
+      return {
+        id,
+        loading: isLoading,
+        hasDependencies: hasReadDeps || hasWriteDeps,
+        dependenciesCount: 
+          (hasReadDeps ? this.readDependentCells.get(cell)!.size : 0) + 
+          (hasWriteDeps ? this.writeDependentCells.get(cell)!.size : 0),
+        type,
+        lastUpdated: this.cellLastUpdated.get(id),
+        subscribed: isSubscribed,
+      };
+    });
+
+    // Count batch job types
+    const batchTypes = {
+      sync: 0,
+      cell: 0,
+      storage: 0,
+    };
+    
+    for (const job of this.currentBatch) {
+      batchTypes[job.type]++;
+    }
+
+    // Get provider metrics
+    const providerMetrics = this.storageProvider.getMetrics();
+
+    return {
+      providerType,
+      replica: this.storageProvider.getReplica(),
+      connectionStatus,
+      cells: {
+        total: this.cellsById.size,
+        loading: this.cellIsLoading.size,
+        subscribed: this.subscribedDocs.size,
+        list: cellsList,
+      },
+      batch: {
+        processing: this.currentBatchProcessing,
+        size: this.currentBatch.length,
+        types: batchTypes,
+        lastBatchTime: this.lastBatchTime,
+        debounceCount: this.lastBatchDebounceCount,
+      },
+      metrics: providerMetrics,
+      timestamp: Date.now(),
+    };
   }
 }
 

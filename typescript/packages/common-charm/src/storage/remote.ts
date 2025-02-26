@@ -1,6 +1,6 @@
 import type { EntityId, Cancel } from "@commontools/runner";
 import { log } from "../storage.js";
-import { type StorageProvider, type StorageValue } from "./base.js";
+import { type StorageProvider, type StorageValue, type StorageMetrics } from "./base.js";
 import type { Entity, JSONValue, MemorySpace } from "@commontools/memory/interface";
 import * as Memory from "@commontools/memory/consumer";
 import { assert } from "@commontools/memory/fact";
@@ -53,6 +53,18 @@ export class RemoteStorageProvider implements StorageProvider {
   reader: ReadableStreamDefaultReader<Memory.ConsumerCommand<Memory.Protocol>>;
 
   connectionCount = 0;
+
+  // Metrics tracking
+  private metrics: StorageMetrics = {
+    sendCount: 0,
+    syncCount: 0,
+    getCount: 0,
+    sinkCount: 0,
+    activeSinkCount: 0,
+    avgSendTime: 0,
+    avgSyncTime: 0,
+    resetTime: Date.now(),
+  };
 
   constructor({
     address,
@@ -109,6 +121,10 @@ export class RemoteStorageProvider implements StorageProvider {
   }
 
   sink<T = any>(entityId: EntityId, callback: (value: StorageValue<T>) => void): Cancel {
+    // Track metrics
+    this.metrics.sinkCount++;
+    this.metrics.activeSinkCount++;
+    
     const { the } = this;
     const of = RemoteStorageProvider.toEntity(entityId);
     const local = this.mount(this.workspace);
@@ -121,21 +137,39 @@ export class RemoteStorageProvider implements StorageProvider {
       local.remote.set(of, query);
     }
 
-    return query.subscribe(subscriber);
+    const cancel = query.subscribe(subscriber);
+    return () => {
+      cancel();
+      this.metrics.activeSinkCount--;
+    };
   }
+  
   async sync(entityId: EntityId): Promise<void> {
-    const { the } = this;
-    // Just wait to have a local revision.
-    const of = RemoteStorageProvider.toEntity(entityId);
-    const local = this.mount(this.workspace);
-    let query = local.remote.get(of);
-    if (query) {
-      query.subscribe(RemoteStorageProvider.sync);
-    } else {
-      const query = local.memory.query({ select: { [of]: { [the]: {} } } });
-      local.remote.set(of, new Query(query, new Set([RemoteStorageProvider.sync])));
+    // Track metrics
+    this.metrics.syncCount++;
+    const startTime = performance.now();
+    
+    try {
+      const { the } = this;
+      // Just wait to have a local revision.
+      const of = RemoteStorageProvider.toEntity(entityId);
+      const local = this.mount(this.workspace);
+      let query = local.remote.get(of);
+      if (query) {
+        query.subscribe(RemoteStorageProvider.sync);
+      } else {
+        const query = local.memory.query({ select: { [of]: { [the]: {} } } });
+        local.remote.set(of, new Query(query, new Set([RemoteStorageProvider.sync])));
 
-      await query.promise;
+        await query.promise;
+      }
+      
+      // Update metrics
+      this.updateTimedMetric('avgSyncTime', performance.now() - startTime);
+    } catch (error) {
+      // Track error in metrics
+      this.metrics.lastError = error instanceof Error ? error.message : String(error);
+      throw error;
     }
   }
 
@@ -146,76 +180,97 @@ export class RemoteStorageProvider implements StorageProvider {
   static sync(value: JSONValue | undefined) {}
 
   get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
+    // Track metrics
+    this.metrics.getCount++;
+    
     const of = RemoteStorageProvider.toEntity(entityId);
     const local = this.mount(this.workspace);
     const query = local.remote.get(of);
 
     return query?.value as StorageValue<T> | undefined;
   }
+  
   async send<T = any>(
     changes: { entityId: EntityId; value: StorageValue<T> }[],
   ): Promise<Awaited<Memory.TransactionResult>> {
-    const { the } = this;
-    const { local, remote, memory } = this.mount(this.workspace);
-    const facts = [];
+    // Track metrics
+    this.metrics.sendCount++;
+    const startTime = performance.now();
+    
+    try {
+      const { the } = this;
+      const { local, remote, memory } = this.mount(this.workspace);
+      const facts = [];
 
-    for (const { entityId, value } of changes) {
-      const of = RemoteStorageProvider.toEntity(entityId);
-      const content = JSON.stringify(value);
-      // Cause is last fact for the the given `{ the, of }` pair. If we have a
-      // a local fact we use that as it may be ahead, otherwise we use a remote
-      // fact.
-      const cause = local.get(of) ?? remote.get(of)?.fact;
+      for (const { entityId, value } of changes) {
+        const of = RemoteStorageProvider.toEntity(entityId);
+        const content = JSON.stringify(value);
+        // Cause is last fact for the the given `{ the, of }` pair. If we have a
+        // a local fact we use that as it may be ahead, otherwise we use a remote
+        // fact.
+        const cause = local.get(of) ?? remote.get(of)?.fact;
 
-      // If desired state is same as current state this is redundant and we skip
-      if (cause && JSON.stringify(cause.is) === content) {
-        log("RemoteStorageProvider.send: no change detected for", of);
-        continue;
+        // If desired state is same as current state this is redundant and we skip
+        if (cause && JSON.stringify(cause.is) === content) {
+          log("RemoteStorageProvider.send: no change detected for", of);
+          continue;
+        }
+
+        const fact = assert({
+          the,
+          of,
+          // ⚠️ We do JSON roundtrips to strip of the undefined values that
+          // cause problems with serialization.
+          is: JSON.parse(content) as unknown as JSONValue,
+          cause,
+        });
+
+        local.set(of, fact);
+        facts.push(fact);
       }
 
-      const fact = assert({
-        the,
-        of,
-        // ⚠️ We do JSON roundtrips to strip of the undefined values that
-        // cause problems with serialization.
-        is: JSON.parse(content) as unknown as JSONValue,
-        cause,
-      });
+      const result = await memory.transact({ changes: Changes.from(facts) });
 
-      local.set(of, fact);
-      facts.push(fact);
-    }
-
-    const result = await memory.transact({ changes: Changes.from(facts) });
-
-    // Once we have a result of the transaction we clear out local facts we
-    // created, we need to do this otherwise subsequent transactions will
-    // continue assuming local state even though we may get some remote changes
-    // since.
-    for (const fact of facts) {
-      // If transaction was rejected we simply discard the local fact for the
-      // underlying entity even if current local fact has changed. That is
-      // because new fact would have been based on the one that got rejected
-      // and therefore will also be rejected later. If transaction succeeds we
-      // still remove a local fact as long as it has not changed from the one
-      // in our transaction. If it has changed we have another stacked change
-      // and we need to keep it until transactions results catch up.
-      // ⚠️ Please note that there may have being other transactions based on
-      // this one that change other entities, but that those will also will get
-      // rejected and when they will deal with clearing up contingent entities.
-      //
-      // ⚠️ It is worth calling out that in theory our `remote` may not have
-      // caught up yet and removing local fact could cause a backslide until
-      // remote catches up. In practice however memory provider sends subscribed
-      // query updates ahead of transaction result on the same socket connection
-      // so by this time `remote` should be up to date, which is why we choose
-      // to avoid added complexity that would require handling described scenario.
-      if (result.error || local.get(fact.of) === fact) {
-        local.delete(fact.of);
+      // Once we have a result of the transaction we clear out local facts we
+      // created, we need to do this otherwise subsequent transactions will
+      // continue assuming local state even though we may get some remote changes
+      // since.
+      for (const fact of facts) {
+        // If transaction was rejected we simply discard the local fact for the
+        // underlying entity even if current local fact has changed. That is
+        // because new fact would have been based on the one that got rejected
+        // and therefore will also be rejected later. If transaction succeeds we
+        // still remove a local fact as long as it has not changed from the one
+        // in our transaction. If it has changed we have another stacked change
+        // and we need to keep it until transactions results catch up.
+        // ⚠️ Please note that there may have being other transactions based on
+        // this one that change other entities, but that those will also will get
+        // rejected and when they will deal with clearing up contingent entities.
+        //
+        // ⚠️ It is worth calling out that in theory our `remote` may not have
+        // caught up yet and removing local fact could cause a backslide until
+        // remote catches up. In practice however memory provider sends subscribed
+        // query updates ahead of transaction result on the same socket connection
+        // so by this time `remote` should be up to date, which is why we choose
+        // to avoid added complexity that would require handling described scenario.
+        if (result.error || local.get(fact.of) === fact) {
+          local.delete(fact.of);
+        }
       }
-    }
 
-    return result;
+      // Update metrics
+      this.updateTimedMetric('avgSendTime', performance.now() - startTime);
+      
+      if (result.error) {
+        this.metrics.lastError = result.error.message;
+      }
+      
+      return result;
+    } catch (error) {
+      // Track error in metrics
+      this.metrics.lastError = error instanceof Error ? error.message : String(error);
+      throw error;
+    }
   }
 
   receive(data: string) {
@@ -301,6 +356,8 @@ export class RemoteStorageProvider implements StorageProvider {
     // If connection is `null` provider was closed and we do nothing on
     // disconnect.
     if (this.connection === socket) {
+      // Track error in metrics
+      this.metrics.lastError = "WebSocket disconnected";
       this.connect();
     }
   }
@@ -367,6 +424,43 @@ export class RemoteStorageProvider implements StorageProvider {
 
   getReplica(): string {
     return this.workspace;
+  }
+  
+  /**
+   * Get metrics about storage operations.
+   */
+  getMetrics(): StorageMetrics {
+    return { ...this.metrics };
+  }
+
+  /**
+   * Reset metrics counters.
+   */
+  resetMetrics(): void {
+    this.metrics = {
+      sendCount: 0,
+      syncCount: 0,
+      getCount: 0,
+      sinkCount: 0,
+      activeSinkCount: this.metrics.activeSinkCount, // Keep current active count
+      avgSendTime: 0,
+      avgSyncTime: 0,
+      resetTime: Date.now(),
+    };
+  }
+
+  /**
+   * Update metrics for a timed operation
+   */
+  protected updateTimedMetric(metric: 'avgSendTime' | 'avgSyncTime', time: number): void {
+    const count = metric === 'avgSendTime' ? this.metrics.sendCount : this.metrics.syncCount;
+    
+    if (count <= 1) {
+      this.metrics[metric] = time;
+    } else {
+      // Compute running average
+      this.metrics[metric] = (this.metrics[metric] * (count - 1) + time) / count;
+    }
   }
 }
 

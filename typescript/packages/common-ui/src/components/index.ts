@@ -5,6 +5,7 @@ export * as CommonDict from "./common-dict.js";
 export * as CommonHstack from "./common-hstack.js";
 export * as CommonIframe from "./common-iframe.js";
 export * as CommonImg from "./common-img.js";
+export * as CommonDoc from "./common-doc.js";
 export * as CommonInput from "./common-input.js";
 export * as CommonTextarea from "./common-textarea.js";
 export * as CommonInputFile from "./common-input-file.js";
