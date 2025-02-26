@@ -611,6 +611,7 @@ export function containsOpaqueRef(value: any): boolean {
 }
 
 export function deepCopy(value: any): any {
+  if (isQueryResultForDereferencing(value)) return deepCopy(getDocLinkOrThrow(value));
   if (isDoc(value) || isCell(value)) return value;
   if (typeof value === "object" && value !== null) {
     return Array.isArray(value)
