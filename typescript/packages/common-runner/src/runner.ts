@@ -60,12 +60,12 @@ export function run<T, R>(
   resultCell: DocImpl<R>,
 ): DocImpl<R>;
 export function run<T, R = any>(
-  recipe: Recipe | Module,
+  recipe: Recipe | Module | undefined,
   argument: T,
   resultCell: DocImpl<R>,
 ): DocImpl<R>;
 export function run<T, R = any>(
-  recipeOrModule: Recipe | Module,
+  recipeOrModule: Recipe | Module | undefined,
   argument: T,
   resultCell: DocImpl<R>,
 ): DocImpl<R> {
@@ -105,9 +105,8 @@ export function run<T, R = any>(
 
   if (!recipeOrModule && processCell.get()?.[TYPE]) {
     recipeId = processCell.get()[TYPE];
-    const recipe = getRecipe(recipeId);
-    if (!recipe) throw new Error(`Unknown recipe: ${recipeId}`);
-    recipeOrModule = recipe;
+    recipeOrModule = getRecipe(recipeId);
+    if (!recipeOrModule) throw new Error(`Unknown recipe: ${recipeId}`);
   } else if (!recipeOrModule) {
     console.warn("No recipe provided and no recipe found in process cell. Not running.");
     return resultCell;
