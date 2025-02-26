@@ -9,7 +9,7 @@ async function generateKeywords(
 ): Promise<string[]> {
   logger.info(`Generating keywords for query: ${query}`);
   const keywordPrompt = {
-    model: "claude-3-5-sonnet",
+    model: "claude-3-7-sonnet",
     messages: [
       {
         role: "user",

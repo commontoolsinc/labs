@@ -42,7 +42,7 @@ export const setupIframe = () =>
       console.log("onLLMRequest", payload);
       const jsonPayload = JSON.parse(payload);
       if (!jsonPayload.model) {
-        jsonPayload.model = ["groq:llama-3.3-70b-versatile", "anthropic:claude-3-5-sonnet-latest"];
+        jsonPayload.model = ["groq:llama-3.3-70b-versatile", "anthropic:claude-3-7-sonnet-latest"];
       }
 
       const res = await llm.sendRequest(jsonPayload);

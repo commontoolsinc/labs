@@ -2,7 +2,7 @@ import { useState } from "react";
 import BlobCanvas from "@/components/BlobCanvas.tsx";
 import { useAllBlobs } from "@/utils/api.ts";
 import { useNavigate } from "react-router-dom";
-import { savePhotoSet } from "@/utils/photoset";
+import { savePhotoSet } from "@/utils/photoset.ts";
 
 export default function Home() {
   const { blobs } = useAllBlobs();

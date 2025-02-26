@@ -10,9 +10,9 @@ interface AuthenticationContextType {
   // The authenticated user/persona.
   user: Identity | void;
   // Call PassKey registration.
-  passkeyRegister: (name: string, displayName: string) => Promise<void>;
+  passkeyRegister: (name: string, displayName: string) => Promise<PassKey>;
   // Authenticate the user via passkey.
-  passkeyAuthenticate: () => Promise<void>;
+  passkeyAuthenticate: (descriptor?: PublicKeyCredentialDescriptor) => Promise<PassKey>;
   // Generate a passphrase for a new user
   passphraseRegister: () => Promise<string>;
   // Authenticate via passphrase.
@@ -21,14 +21,12 @@ interface AuthenticationContextType {
   clearAuthentication: () => Promise<void>;
   // Internal: Root key.
   root: Identity | void;
-  // Internal: Persistent storage for keys. 
+  // Internal: Persistent storage for keys.
   keyStore: KeyStore | void;
 }
 
 const AuthenticationContext = createContext<AuthenticationContextType>(null!);
 
-// (async) open a key store
-// (async) check to see key exists
 export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [keyStore, setKeyStore] = useState<KeyStore | void>(undefined);
   const [user, setUser] = useState<Identity | void>(undefined);
@@ -38,21 +36,19 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
   useEffect(() => {
     let ignore = false;
     async function getKeyStoreAndRoot() {
-      let keyStore = await KeyStore.open();
-      let root = await keyStore.get(ROOT_KEY);
+      const keyStore = await KeyStore.open();
+      const root = await keyStore.get(ROOT_KEY);
       if (!ignore) {
         setKeyStore(keyStore);
-        if (root) {
-          setRoot(root);
-        }
+        setRoot(root);
       }
     }
-    getKeyStoreAndRoot(); 
+    getKeyStoreAndRoot();
     return () => {
       ignore = true;
       setKeyStore(undefined);
       setRoot(undefined);
-    }
+    };
   }, []);
 
   // When root changes, update `user` to the default persona
@@ -63,7 +59,7 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
       if (!root) {
         return;
       }
-      let user = await root.derive(DEFAULT_PERSONA);
+      const user = await root.derive(DEFAULT_PERSONA);
       if (!ignore) {
         setUser(user);
       }
@@ -72,7 +68,7 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
     return () => {
       ignore = true;
       setUser(undefined);
-    }
+    };
   }, [root]);
 
   // This calls out to WebAuthn to register a user. The state of whether
@@ -81,44 +77,51 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
   //
   // Must be called within a user gesture.
   const passkeyRegister = useCallback(async (name: string, displayName: string) => {
-    return PassKey.create(name, displayName);
+    const credential = await PassKey.create(name, displayName);
+    return credential;
   }, []);
-
 
   // This should be called when a passkey (possibly) exists for the user already,
   // and no root key has yet been stored (e.g. first login). Subsequent page loads
   // should load key from storage and not require this callback.
   //
   // Must be called within a user gesture.
-  const passkeyAuthenticate = useCallback(async () => {
-    if (!keyStore) {
-      return;
-    }
-    let passkey = await PassKey.get();
-    let root = await passkey.createRootKey();
-    await keyStore.set(ROOT_KEY, root);
-    setRoot(root);
-  }, [keyStore]);
- 
+  const passkeyAuthenticate = useCallback(
+    async (key?: PublicKeyCredentialDescriptor) => {
+      if (!keyStore) {
+        throw new Error("Key store not initialized");
+      }
+      // if we can, we prompt directly for the passed credential
+      const passkey = await PassKey.get({ allowCredentials: key ? [key] : [] });
+      const root = await passkey.createRootKey();
+      await keyStore.set(ROOT_KEY, root);
+      setRoot(root);
+      return passkey;
+    },
+    [keyStore],
+  );
 
   const passphraseRegister = useCallback(async () => {
     // Don't store the root identity here. Return only the
     // mnemonic so that the UI can present guidance on handling
     // the private key. The root will be derived from the mnemonic
     // on authentication.
-    let [_, mnemonic] = await Identity.generateMnemonic();
+    const [, mnemonic] = await Identity.generateMnemonic();
     return mnemonic;
   }, []);
 
-  const passphraseAuthenticate = useCallback(async (mnemonic: string) => {
-    if (!keyStore) {
-      return;
-    }
-    let root = await Identity.fromMnemonic(mnemonic);
-    await keyStore.set(ROOT_KEY, root);
-    setRoot(root);
-  }, [keyStore]);
-  
+  const passphraseAuthenticate = useCallback(
+    async (mnemonic: string) => {
+      if (!keyStore) {
+        throw new Error("Key store not initialized");
+      }
+      const root = await Identity.fromMnemonic(mnemonic);
+      await keyStore.set(ROOT_KEY, root);
+      setRoot(root);
+    },
+    [keyStore],
+  );
+
   const clearAuthentication = useCallback(async () => {
     if (!keyStore) {
       return;
@@ -129,16 +132,18 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
   }, [keyStore]);
 
   return (
-    <AuthenticationContext.Provider value={{
-      user,
-      passkeyAuthenticate,
-      passkeyRegister,
-      passphraseAuthenticate,
-      passphraseRegister,
-      clearAuthentication,
-      root,
-      keyStore,
-    }}>
+    <AuthenticationContext.Provider
+      value={{
+        user,
+        passkeyAuthenticate,
+        passkeyRegister,
+        passphraseAuthenticate,
+        passphraseRegister,
+        clearAuthentication,
+        root,
+        keyStore,
+      }}
+    >
       {children}
     </AuthenticationContext.Provider>
   );

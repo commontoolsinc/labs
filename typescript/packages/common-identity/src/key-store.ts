@@ -1,24 +1,22 @@
 import { Identity } from "./identity.js";
 import { once } from "./utils.js";
 
-const DB_NAME = "common-key-store";
+const DEFAULT_DB_NAME = "common-key-store";
 const DEFAULT_STORE_NAME = "key-store";
 const DB_VERSION = 1;
 
 // An abstraction around storing key materials in IndexedDb.
 export class KeyStore {
-  static DEFAULT_STORE_NAME = DEFAULT_STORE_NAME;
+  static DEFAULT_DB_NAME = DEFAULT_DB_NAME;
   private db: DB;
-  private storeName: string;
 
-  constructor(db: DB, storeName: string) {
+  constructor(db: DB) {
     this.db = db;
-    this.storeName = storeName;
   }
 
   // Get the `name` keypair.
   async get(name: string): Promise<Identity | undefined> {
-    let result = await this.db.get(this.storeName, name);
+    let result = await this.db.get(name);
     if (result) {
       return Identity.deserialize(result);
     }
@@ -27,25 +25,25 @@ export class KeyStore {
   
   // Set the `name` keypair with `value`.
   async set(name: string, value: Identity): Promise<undefined> {
-    await this.db.set(this.storeName, name, value.serialize());
+    await this.db.set(name, value.serialize());
   }
 
   // Clear the key store's table.
   async clear(): Promise<any> {
-    return await this.db.clear(this.storeName);
+    return this.db.clear();
   }
 
   // Opens a new instance of `KeyStore`.
-  // If no `name` provided, `KeyStore.DEFAULT_STORE_NAME` is used. 
-  static async open(name = KeyStore.DEFAULT_STORE_NAME): Promise<KeyStore> {
-    let db = await DB.open(DB_NAME, DB_VERSION, (e: IDBVersionChangeEvent) => {
+  // If no `name` provided, `KeyStore.DEFAULT_DB_NAME` is used. 
+  static async open(name = KeyStore.DEFAULT_DB_NAME): Promise<KeyStore> {
+    let db = await DB.open(name, DB_VERSION, (e: IDBVersionChangeEvent) => {
       const { newVersion, oldVersion: _ } = e;
       if (newVersion !== DB_VERSION) { throw new Error("common-identity: Invalid DB version."); }
       if (!e.target) { throw new Error("common-identity: No target on change event."); }
       let db: IDBDatabase = (e.target as IDBRequest).result; 
-      db.createObjectStore(name);
+      db.createObjectStore(DEFAULT_STORE_NAME);
     });
-    return new KeyStore(db, name);
+    return new KeyStore(db);
   }
 
 }
@@ -56,18 +54,18 @@ class DB {
     this.db = db;
   }
 
-  async get(storeName: string, key: string) {
-    let store = this.getStore(storeName, "readonly");
-    return await asyncWrap(store.get(key));
+  async get(key: string) {
+    let store = this.getStore(DEFAULT_STORE_NAME, "readonly");
+    return asyncWrap(store.get(key));
   }
   
-  async set(storeName: string, key: string, value: any) {
-    let store = this.getStore(storeName, "readwrite");
-    return await asyncWrap(store.put(value, key));
+  async set(key: string, value: any) {
+    let store = this.getStore(DEFAULT_STORE_NAME, "readwrite");
+    return asyncWrap(store.put(value, key));
   }
   
-  async clear(storeName: string) {
-    let store = this.getStore(storeName, "readwrite");
+  async clear() {
+    let store = this.getStore(DEFAULT_STORE_NAME, "readwrite");
     return await asyncWrap(store.clear());
   }
 
@@ -77,7 +75,7 @@ class DB {
     return new DB(await asyncWrap(req));
   }
   
-  private getStore(storeName: string,mode: "readonly" | "readwrite"): IDBObjectStore {
+  private getStore(storeName: string, mode: "readonly" | "readwrite"): IDBObjectStore {
     let tx = this.db.transaction(storeName, mode);
     return tx.objectStore(storeName);
   }

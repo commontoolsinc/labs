@@ -123,13 +123,7 @@ export async function castNewRecipe(
   return compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, data);
 }
 
-export async function compileAndRunRecipe(
-  charmManager: CharmManager,
-  recipeSrc: string,
-  spec: string,
-  runOptions: any,
-  parents?: string[],
-): Promise<EntityId | undefined> {
+export async function compileRecipe(recipeSrc: string, spec: string, parents?: string[]) {
   const { exports, errors } = await tsToExports(recipeSrc);
   if (errors) {
     console.error("Compilation errors in recipe:", errors);
@@ -142,6 +136,21 @@ export async function compileAndRunRecipe(
   }
   const parentsIds = parents?.map((id) => id.toString());
   addRecipe(recipe, recipeSrc, spec, parentsIds);
+  return recipe;
+}
+
+export async function compileAndRunRecipe(
+  charmManager: CharmManager,
+  recipeSrc: string,
+  spec: string,
+  runOptions: any,
+  parents?: string[],
+): Promise<EntityId | undefined> {
+  const recipe = await compileRecipe(recipeSrc, spec, parents);
+  if (!recipe) {
+    return;
+  }
+  
   const newCharm = await charmManager.runPersistent(recipe, runOptions);
   charmManager.add([newCharm]);
   await charmManager.syncRecipe(newCharm);

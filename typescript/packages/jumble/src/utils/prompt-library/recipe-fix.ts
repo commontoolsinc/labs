@@ -1,6 +1,6 @@
-import { llm } from "@/utils/llm";
-import { hydratePrompt, parseTagFromResponse } from "@/utils/prompt-library/prompting";
-import { recipeGuidePrompt } from "@/utils/prompt-library/recipe-guide";
+import { llm } from "@/utils/llm.ts";
+import { hydratePrompt, parseTagFromResponse } from "@/utils/prompt-library/prompting.ts";
+import { recipeGuidePrompt } from "@/utils/prompt-library/recipe-guide.ts";
 
 const SYSTEM_PROMPT = `
 You are a code debugging and fixing assistant. Your task is to analyze buggy code that has caused errors and crashes, and then generate fixed code based on the original specifications. The code runs inside an iframe, and errors bubble up from there.
@@ -61,7 +61,7 @@ Remember to consider the context of the code running inside an iframe and ensure
  * @param code - The code of the web application.
  * @param schema - The schema of the web application.
  * @param error - The error stacktrace that resulted from running the code.
- * @param model - The model to use to generate the description. (default: "anthropic:claude-3-5-sonnet-latest")
+ * @param model - The model to use to generate the description. (default: "anthropic:claude-3-7-sonnet-latest")
  * @returns The recipe.
  */
 export async function fixRecipePrompt(
@@ -69,7 +69,7 @@ export async function fixRecipePrompt(
   code: string,
   schema: string,
   error: string,
-  model: string = "google:gemini-2.0-pro",
+  model: string = "anthropic:claude-3-7-sonnet-latest",
 ) {
   const system = hydratePrompt(SYSTEM_PROMPT, {
     SPEC: spec,

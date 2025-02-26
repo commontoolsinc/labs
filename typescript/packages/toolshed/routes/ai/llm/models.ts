@@ -24,10 +24,7 @@ type ModelConfig = {
   aliases: string[];
 };
 
-export type ModelList = Record<
-  string,
-  ModelConfig
->;
+export type ModelList = Record<string, ModelConfig>;
 
 export const MODELS: ModelList = {};
 export const ALIAS_NAMES: string[] = [];
@@ -69,15 +66,22 @@ const addModel = ({
     modelName = name;
   }
 
+  if (name.includes("-thinking")) {
+    modelName = modelName.split("-thinking")[0];
+  }
+
   const model = providerOptions
     ? provider(modelName, providerOptions)
     : provider(modelName);
 
   const config: ModelConfig = {
-    model: (model as unknown) as string,
+    model: model as unknown as string,
     capabilities,
     aliases,
   };
+  console.log("#############################");
+  console.log(config);
+  console.log("#############################");
 
   MODELS[name] = config;
   for (const alias of aliases) {
@@ -118,6 +122,43 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
+    },
+  });
+  addModel({
+    provider: anthropicProvider,
+    name: "anthropic:claude-3-7-sonnet-20250219",
+    aliases: ["anthropic:claude-3-7-sonnet-latest", "claude-3-7-sonnet"],
+    capabilities: {
+      contextWindow: 200_000,
+      maxOutputTokens: 64000,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
+
+  addModel({
+    provider: anthropicProvider,
+    name: "anthropic:claude-3-7-sonnet-20250219-thinking",
+    aliases: [
+      "anthropic:claude-3-7-sonnet-thinking-latest",
+      "claude-3-7-sonnet-thinking",
+    ],
+    capabilities: {
+      contextWindow: 200_000,
+      maxOutputTokens: 64000,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+    },
+    providerOptions: {
+      anthropic: {
+        thinking: { type: "enabled", budgetTokens: 64000 },
+      },
     },
   });
 

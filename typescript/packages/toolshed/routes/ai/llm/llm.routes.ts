@@ -16,7 +16,7 @@ export const LLMRequestSchema = z.object({
   messages: z.array(MessageSchema),
   system: z.string().optional(),
   model: z.string().optional().openapi({
-    example: "claude-3-5-sonnet",
+    example: "claude-3-7-sonnet",
   }),
   task: z.string().optional(),
   max_tokens: z.number().default(8000),

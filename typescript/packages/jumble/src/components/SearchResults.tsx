@@ -1,5 +1,5 @@
-import { WebComponent } from "@/components/WebComponent";
-import { SpellSearchResult } from "@/search";
+import { WebComponent } from "@/components/WebComponent.tsx";
+import { SpellSearchResult } from "@/search.ts";
 import { useCallback } from "react";
 
 interface SearchResultsProps {

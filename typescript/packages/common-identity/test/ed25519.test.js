@@ -43,7 +43,7 @@ describe("ed25519 impl", () => {
   it("derives DID key", async (Signer) => {
     let signer = await Signer.fromRaw(TEST_PRIVATE_KEY);
     let verifier = signer.verifier();
-    let did = await verifier.did();
+    let did = verifier.did();
     assert(did === TEST_DID);
   });
 
@@ -57,7 +57,7 @@ describe("ed25519 impl", () => {
 
     for (let fixture of fixtures) {
       let verifier = await Verifier.fromDid(fixture);
-      assert(await verifier.did() === fixture);
+      assert(verifier.did() === fixture);
     }
   });
 

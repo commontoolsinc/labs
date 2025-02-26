@@ -331,7 +331,8 @@ const CharmDataSchema = z.object({
 });
 
 export const RecastResponseSchema = z.object({
-  result: z.record(z.any()),
+  spellId: z.string(),
+  cells: z.record(z.any()),
 });
 
 export const ReuseResponseSchema = z.object({
@@ -352,16 +353,7 @@ export const recast: AppRouteHandler<RecastRoute> = async (c) => {
   const startTime = performance.now();
 
   try {
-    console.log("body", body);
-    const memories = await getAllMemories(body.replica);
-    console.log("memories", memories);
-    const charm = await getMemory(body.charmId, body.replica);
-    console.log("charm", charm);
-
-    const response: RecastResponse = {
-      result: {},
-    };
-
+    const response = await processRecast(body.charmId, body.replica, logger);
     return c.json(response, HttpStatusCodes.OK);
   } catch (error) {
     logger.error({ error }, "Error processing recast");
@@ -428,6 +420,65 @@ async function processReuse(
     schema,
     argument,
     compatibleSpells,
+  };
+}
+
+async function processRecast(
+  charmId: string,
+  replica: string,
+  logger: Logger,
+): Promise<RecastResponse> {
+  const charm = await getMemory(charmId, replica);
+  logger.info(
+    { charmId, replica },
+    "Retrieved charm",
+  );
+
+  const source = await getMemory(charm.source["/"], replica);
+  logger.info({ sourceId: charm.source["/"] }, "Retrieved source charm");
+
+  const argument = source.value.argument;
+  const type = source.value.$TYPE;
+  logger.debug({ type, argument }, "Extracted argument and type from source");
+
+  const spellId = "spell-" + type;
+  logger.info({ spellId }, "Looking up spell");
+
+  const spell = await getBlob<Spell>(spellId);
+  logger.info({ spellId }, "Retrieved spell");
+
+  const schema = spell.recipe.argumentSchema;
+  logger.debug({ schema }, "Extracted argument schema from spell");
+
+  const cells = await getAllMemories(replica);
+  // First get all charms that have a $TYPE and their IDs
+  const typedCharms = Object.entries(cells)
+    .filter(([_, cell]) => cell?.value?.$TYPE)
+    .map(([id, cell]) => ({ id, cell }));
+
+  // Then filter to matching schemas and build record
+  const matchingCharms = await typedCharms.reduce(
+    async (accPromise, { id, cell }) => {
+      const acc = await accPromise;
+      const charmSpellId = "spell-" + cell.value.$TYPE;
+      try {
+        const charmSpell = await getBlob<Spell>(charmSpellId);
+        const charmSchema = charmSpell.recipe.argumentSchema;
+        if (JSON.stringify(schema) === JSON.stringify(charmSchema)) {
+          acc[id] = cell.value;
+        }
+      } catch (e) {
+        logger.error({ error: e, charmSpellId }, "Error loading spell");
+        // Skip charms where we can't load the spell
+      }
+      return acc;
+    },
+    Promise.resolve({} as Record<string, any>),
+  );
+
+  return {
+    spellId: spellId.replace("spell-", ""),
+    cells: matchingCharms,
   };
 }
 

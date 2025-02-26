@@ -1,13 +1,13 @@
 import "./commands.css";
 import { castNewRecipe, Charm, CharmManager, compileAndRunRecipe } from "@commontools/charm";
 import { NavigateFunction } from "react-router-dom";
-import { charmId } from "@/utils/charms";
+import { charmId } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
 import { Cell, getDocByEntityId, getEntityId, getRecipe } from "@commontools/runner";
-import { iterateCharm } from "@/utils/charm-operations";
-import { BackgroundJob } from "@/contexts/BackgroundTaskContext";
-import { startCharmIndexing } from "@/utils/indexing";
-import { generateJSON } from "@/utils/prompt-library/json-gen";
+import { iterateCharm } from "@/utils/charm-operations.ts";
+import { BackgroundJob } from "@/contexts/BackgroundTaskContext.tsx";
+import { startCharmIndexing } from "@/utils/indexing.ts";
+import { generateJSON } from "@/utils/prompt-library/json-gen.ts";
 
 export type CommandType = "action" | "input" | "confirm" | "select" | "menu" | "transcribe";
 
@@ -404,6 +404,74 @@ async function handleUseDataInSpell(deps: CommandContext) {
   }
 }
 
+async function handleUseSpellOnOtherData(deps: CommandContext) {
+  deps.setLoading(true);
+  try {
+    if (!deps.focusedCharmId || !deps.focusedReplicaId) {
+      return;
+    }
+
+    const response = await fetch("/api/ai/spell/recast", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        charmId: deps.focusedCharmId,
+        replica: deps.focusedReplicaId,
+      }),
+    });
+
+    // {
+    //   spell: {...},
+    //   cells: {
+    //     'id': { argument: { test: 1 } , ...},
+    //     'id2': {...}
+    //   }
+    // }
+
+    deps.setLoading(false);
+
+    const result = await response.json();
+    const spellId: string = result.spellId;
+    const cells: Record<string, { argument: any }> = result.cells;
+
+    const charms = Object.entries(cells).map(([id, cell]) => ({
+      id,
+      title: `${JSON.stringify(cell.argument).slice(0, 30)}... (#${id.slice(-4)})`,
+      value: { id, cell },
+    }));
+
+    deps.setMode({
+      type: "select",
+      command: {
+        id: "charm-select",
+        type: "select",
+        title: "Select Cell to Use Spell On",
+        handler: async (selectedCell) => {
+          console.log("Selected cell:", selectedCell);
+          if (!selectedCell.id) {
+            throw new Error("No cell selected");
+          }
+
+          deps.setLoading(true);
+          const newCharmId = await castSpellAsCharm(deps.charmManager, spellId, selectedCell.id);
+          if (newCharmId) {
+            deps.navigate(`/${deps.focusedReplicaId}/${charmId(newCharmId)}`);
+          }
+          deps.setOpen(false);
+          deps.setLoading(false);
+        },
+      },
+      options: charms,
+    });
+  } catch (e) {
+    console.error("Error casting spell:", e);
+  } finally {
+    deps.setLoading(false);
+  }
+}
+
 export function getCommands(deps: CommandContext): CommandItem[] {
   return [
     {
@@ -431,9 +499,16 @@ export function getCommands(deps: CommandContext): CommandItem[] {
         {
           id: "use-data-in-spell",
           type: "action",
-          title: "Use Current Data in Spell",
+          title: "Use Data with...",
           predicate: !!deps.focusedCharmId,
           handler: () => handleUseDataInSpell(deps),
+        },
+        {
+          id: "use-spell-on-other-data",
+          type: "action",
+          title: "Re-cast Spell with...",
+          predicate: !!deps.focusedCharmId,
+          handler: () => handleUseSpellOnOtherData(deps),
         },
       ],
     },

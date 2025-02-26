@@ -2,13 +2,14 @@ import { useState, useEffect } from "react";
 import { NavLink } from "react-router-dom";
 import { LuPencil, LuShare2 } from "react-icons/lu";
 import ShapeLogo from "@/assets/ShapeLogo.svg";
-import { NavPath } from "@/components/NavPath";
-import { ShareDialog } from "@/components/spellbook/ShareDialog";
-import { useCharmManager } from "@/contexts/CharmManagerContext";
+import { NavPath } from "@/components/NavPath.tsx";
+import { ShareDialog } from "@/components/spellbook/ShareDialog.tsx";
+import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { NAME, TYPE } from "@commontools/builder";
 import { useNavigate } from "react-router-dom";
-import { saveSpell } from "@/services/spellbook";
-import { User } from "@/components/User";
+import { saveSpell } from "@/services/spellbook.ts";
+import { User } from "@/components/User.tsx";
+import { useSyncedStatus } from "@/hooks/use-synced-status";
 
 type ShellHeaderProps = {
   replicaName?: string;
@@ -27,6 +28,7 @@ export function ShellHeader({
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const [charmName, setCharmName] = useState<string | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
+  const { isSyncing, lastSyncTime } = useSyncedStatus(charmManager);
   const navigate = useNavigate();
   useEffect(() => {
     let mounted = true;
@@ -79,7 +81,6 @@ export function ShellHeader({
       setIsShareDialogOpen(false);
     }
   };
-
   return (
     <header className="flex bg-gray-50 items-center justify-between border-b-2 p-2">
       <div className="header-start flex items-center gap-2">
@@ -92,6 +93,22 @@ export function ShellHeader({
         <NavPath replicaId={replicaName} charmId={charmId} />
       </div>
       <div className="header-end flex items-center gap-2">
+        <div className="relative group">
+          <div
+            className={`w-3 h-3 rounded-full ${
+              isSyncing ? "bg-yellow-400 animate-pulse" : "bg-green-500 "
+            }`}
+          />
+          <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
+            {isSyncing
+              ? lastSyncTime
+                ? `Pending since ${new Date(lastSyncTime).toLocaleTimeString()})`
+                : "Pending..."
+              : lastSyncTime
+                ? `Connected`
+                : "Connected"}
+          </div>
+        </div>
         <User />
         {charmId && (
           <>

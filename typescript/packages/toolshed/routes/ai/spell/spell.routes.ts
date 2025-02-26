@@ -24,7 +24,7 @@ const ErrorResponseSchema = z.object({
 });
 
 export const fulfill = createRoute({
-  path: "/ai/spell/fulfill",
+  path: "/api/ai/spell/fulfill",
   method: "post",
   tags,
   request: {
@@ -51,7 +51,7 @@ export const fulfill = createRoute({
 export type ProcessSchemaRoute = typeof fulfill;
 
 export const search = createRoute({
-  path: "/ai/spell/smart-search",
+  path: "/api/ai/spell/smart-search",
   method: "post",
   tags,
   request: {
@@ -105,7 +105,7 @@ export const caster = createRoute({
 export type CasterSchemaRoute = typeof caster;
 
 export const spellSearch = createRoute({
-  path: "/ai/spell/search",
+  path: "/api/ai/spell/search",
   method: "post",
   tags,
   request: {
@@ -132,7 +132,7 @@ export const spellSearch = createRoute({
 export type SpellSearchRoute = typeof spellSearch;
 
 export const recast = createRoute({
-  path: "/ai/spell/recast",
+  path: "/api/ai/spell/recast",
   method: "post",
   tags,
   request: {
@@ -157,7 +157,7 @@ export const recast = createRoute({
 });
 
 export const reuse = createRoute({
-  path: "/ai/spell/reuse",
+  path: "/api/ai/spell/reuse",
   method: "post",
   tags,
   request: {

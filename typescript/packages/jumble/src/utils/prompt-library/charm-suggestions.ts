@@ -1,7 +1,7 @@
-import { hydratePrompt, parseTagFromResponse } from "@/utils/prompt-library/prompting";
-import { llm } from "@/utils/llm";
+import { hydratePrompt, parseTagFromResponse } from "@/utils/prompt-library/prompting.ts";
+import { llm } from "@/utils/llm.ts";
 import JSON5 from "json5";
-import { describeCharm } from "@/utils/prompt-library/charm-describe";
+import { describeCharm } from "@/utils/prompt-library/charm-describe.ts";
 const SYSTEM_PROMPT = `
 You are tasked with generating prompt suggestions to iterate on web app functionality in new and interesting directions.
 
@@ -74,7 +74,7 @@ export interface CharmSuggestion {
  * @param code - The code of the web app.
  * @param schema - The schema of the web app.
  * @param count - The number of charm suggestions to generate. (default: 3)
- * @param model - The model to use to generate the charm suggestions. (default: "anthropic:claude-3-5-sonnet-latest")
+ * @param model - The model to use to generate the charm suggestions. (default: "anthropic:claude-3-7-sonnet-latest")
  * @returns The generated charm suggestions.
  */
 export async function generateCharmSuggestions(
@@ -82,7 +82,7 @@ export async function generateCharmSuggestions(
   code: string,
   schema: string,
   count: number = 3,
-  model: string = "anthropic:claude-3-5-sonnet-latest",
+  model: string = "anthropic:claude-3-7-sonnet-latest",
 ): Promise<CharmSuggestion[]> {
   // FIXME(jake): Currently in jumble, whenever we iterate, we are overwriting
   // the entire spec, so we lose context of the original spec.

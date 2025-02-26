@@ -8,7 +8,7 @@ import {
 } from "./query-result-proxy.js";
 import { resolvePath, followLinks, prepareForSaving } from "./utils.js";
 import { queueEvent, subscribe, type ReactivityLog } from "./scheduler.js";
-import { type EntityId, getEntityId } from "./cell-map.js";
+import { type EntityId, getDocByEntityId, getEntityId } from "./cell-map.js";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.js";
 import { validateAndTransform } from "./schema.js";
 
@@ -69,7 +69,7 @@ export interface Cell<T> {
   sink(callback: (value: T) => Cancel | undefined | void): Cancel;
   updates(callback: (value: T) => Cancel | undefined | void): Cancel;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
-  asSchema(schema: JSONSchema): Cell<T>;
+  asSchema(schema?: JSONSchema): Cell<T>;
   withLog(log: ReactivityLog): Cell<T>;
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Path,
@@ -91,6 +91,33 @@ export interface Stream<T> {
   sink(callback: (event: T) => Cancel | undefined | void): Cancel;
   updates(callback: (event: T) => Cancel | undefined | void): Cancel;
   [isStreamMarker]: true;
+}
+
+export function getCellFromEntityId<T>(
+  entityId: EntityId,
+  path: PropertyKey[] = [],
+  schema?: JSONSchema,
+  log?: ReactivityLog,
+): Cell<T> {
+  const doc = getDocByEntityId(entityId, true)!;
+  return createCell(doc, path, log, schema);
+}
+
+export function getCellFromDocLink<T>(
+  docLink: DocLink,
+  schema?: JSONSchema,
+  log?: ReactivityLog,
+): Cell<T> {
+  const doc = isDoc(docLink.cell)
+    ? docLink.cell
+    : getDocByEntityId(getEntityId(docLink.cell)!, true)!;
+  return createCell(doc, docLink.path, log, schema);
+}
+
+export function getImmutableCell<T>(data: T, schema?: JSONSchema, log?: ReactivityLog): Cell<T> {
+  const doc = getDoc<T>(data);
+  doc.freeze();
+  return createCell(doc, [], log, schema);
 }
 
 export function createCell<T>(
@@ -217,7 +244,7 @@ function createRegularCell<T>(
             : undefined;
       return createCell(doc, [...path, key], log, currentSchema, rootSchema) as Cell<T[K]>;
     },
-    asSchema: (newSchema: JSONSchema) => createCell(doc, path, log, newSchema, newSchema),
+    asSchema: (newSchema?: JSONSchema) => createCell(doc, path, log, newSchema, newSchema),
     withLog: (newLog: ReactivityLog) => createCell(doc, path, newLog, schema, rootSchema),
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),

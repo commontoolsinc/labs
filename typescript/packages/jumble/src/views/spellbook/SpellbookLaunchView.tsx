@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useCharmManager } from "@/contexts/CharmManagerContext";
+import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { getRecipe } from "@commontools/runner";
 
 export default function SpellbookLaunchView() {

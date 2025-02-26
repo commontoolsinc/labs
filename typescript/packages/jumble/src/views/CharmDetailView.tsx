@@ -1,20 +1,20 @@
 import { saveNewRecipeVersion, IFrameRecipe, Charm, getIframeRecipe } from "@commontools/charm";
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
-import { useCharmManager } from "@/contexts/CharmManagerContext";
-import { LoadingSpinner } from "@/components/Loader";
-import { useCharm } from "@/hooks/use-charm";
+import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { LoadingSpinner } from "@/components/Loader.tsx";
+import { useCharm } from "@/hooks/use-charm.ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
-import { CharmRenderer } from "@/components/CharmRunner";
-import { iterateCharm } from "@/utils/charm-operations";
-import { charmId } from "@/utils/charms";
-import { DitheredCube } from "@/components/DitherCube";
-import { VariantTray } from "@/components/VariantTray";
+import { CharmRenderer } from "@/components/CharmRunner.tsx";
+import { iterateCharm } from "@/utils/charm-operations.ts";
+import { charmId } from "@/utils/charms.ts";
+import { DitheredCube } from "@/components/DitherCube.tsx";
+import { VariantTray } from "@/components/VariantTray.tsx";
 import {
   generateCharmSuggestions,
   type CharmSuggestion,
-} from "@/utils/prompt-library/charm-suggestions";
+} from "@/utils/prompt-library/charm-suggestions.ts";
 import { Cell } from "@commontools/runner";
 type Tab = "iterate" | "code" | "data";
 
@@ -24,6 +24,7 @@ interface IterationTabProps {
 
 const variantModels = [
   "anthropic:claude-3-5-sonnet-latest",
+  "anthropic:claude-3-7-sonnet-latest",
   "groq:llama-3.3-70b-versatile",
   "google:gemini-2.0-pro",
 ] as const;
@@ -34,7 +35,7 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
   const { charmManager } = useCharmManager();
 
   const [iterationInput, setIterationInput] = useState("");
-  const [selectedModel, setSelectedModel] = useState("anthropic:claude-3-5-sonnet-latest");
+  const [selectedModel, setSelectedModel] = useState("anthropic:claude-3-7-sonnet-latest");
   const [showVariants, setShowVariants] = useState(false);
   const [loading, setLoading] = useState(false);
   const [variants, setVariants] = useState<Cell<Charm>[]>([]);
@@ -198,6 +199,9 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
                 onChange={(e) => setSelectedModel(e.target.value)}
                 className="w-full p-2 border-2 border-black bg-white text-xs"
               >
+                <option value="anthropic:claude-3-7-sonnet-latest">
+                  Anthropic Claude 3.7 Sonnet ✨
+                </option>
                 <option value="anthropic:claude-3-5-sonnet-latest">
                   Anthropic Claude 3.5 Sonnet ✨
                 </option>
@@ -272,9 +276,20 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
       {/* Main Content Area */}
       <div className="flex-1 h-full overflow-y-auto p-4 relative">
         {loading && (
-          <div className="absolute inset-0 bg-white/80 flex flex-col items-center justify-center">
+          <div
+            className="absolute inset-0 backdrop-blur-sm bg-white/60 flex flex-col items-center justify-center z-10 transition-opacity duration-300 ease-in-out"
+            style={{
+              opacity: loading ? 1 : 0,
+            }}
+          >
             <div className="text-lg font-bold">thinking</div>
-            <LoadingSpinner height={1024} width={1024} visible={true} cameraZoom={400} />
+            <LoadingSpinner
+              blendMode="exclusion"
+              height={1024}
+              width={1024}
+              visible={true}
+              cameraZoom={128}
+            />
           </div>
         )}
 
@@ -373,33 +388,13 @@ const DataTab: React.FC<DataTabProps> = ({ charm }) => {
 
 // FIXME(jake): Eventually, we might move these tab views into their own components and use URL routes for deep linking.
 
-const validTabs: Tab[] = ["iterate", "code", "data"] as const;
-
 function CharmEditView() {
   const { charmId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
 
   // Set initial tab from hash (default to "code")
-  const initialTab = location.hash.slice(1) as Tab;
-  const [activeTab, setActiveTab] = useState<Tab>(
-    validTabs.includes(initialTab) ? initialTab : "iterate",
-  );
-
-  // Update active tab if the hash changes (e.g., via back/forward navigation)
-  useEffect(() => {
-    const hashTab = location.hash.slice(1);
-    if (validTabs.includes(hashTab as Tab) && hashTab !== activeTab) {
-      setActiveTab(hashTab as Tab);
-    }
-  }, [location.hash, activeTab]);
-
-  // Update URL hash when activeTab changes
-  useEffect(() => {
-    if (location.hash.slice(1) !== activeTab) {
-      navigate(`${location.pathname}#${activeTab}`, { replace: true });
-    }
-  }, [activeTab, location.pathname, location.hash, navigate]);
+  const activeTab = location.hash.slice(1) as Tab;
 
   const { currentFocus: charm, iframeRecipe } = useCharm(charmId);
 
@@ -416,7 +411,7 @@ function CharmEditView() {
       {/* Tab Navigation */}
       <div className="tabs mb-4 flex gap-2">
         <button
-          onClick={() => setActiveTab("iterate")}
+          onClick={() => navigate(`${location.pathname}#iterate`)}
           className={`px-4 py-2 rounded ${
             activeTab === "iterate" ? "bg-gray-200 font-bold" : "bg-gray-100"
           }`}
@@ -424,7 +419,7 @@ function CharmEditView() {
           Iteration
         </button>
         <button
-          onClick={() => setActiveTab("code")}
+          onClick={() => navigate(`${location.pathname}#code`)}
           className={`px-4 py-2 rounded ${
             activeTab === "code" ? "bg-gray-200 font-bold" : "bg-gray-100"
           }`}
@@ -432,7 +427,7 @@ function CharmEditView() {
           Edit Code
         </button>
         <button
-          onClick={() => setActiveTab("data")}
+          onClick={() => navigate(`${location.pathname}#data`)}
           className={`px-4 py-2 rounded ${
             activeTab === "data" ? "bg-gray-200 font-bold" : "bg-gray-100"
           }`}
@@ -443,14 +438,13 @@ function CharmEditView() {
 
       {(() => {
         switch (activeTab) {
-          case "iterate":
-            return <IterationTab charm={charm} />;
           case "code":
             return <CodeTab charm={charm} iframeRecipe={iframeRecipe} />;
           case "data":
             return <DataTab charm={charm} />;
+          case "iterate":
           default:
-            return null;
+            return <IterationTab charm={charm} />;
         }
       })()}
     </div>

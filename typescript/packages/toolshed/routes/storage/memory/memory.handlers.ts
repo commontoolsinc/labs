@@ -38,7 +38,7 @@ export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {
 export const query: AppRouteHandler<typeof Routes.query> = async (c) => {
   try {
     const query = await c.req.valid("json");
-    const result = await memory.query(query);
+    const result = await memory.query(query as any); // HACK(bf): temporarily allow any format for space
     if (result.ok) {
       return c.json(result, 200);
     } else {

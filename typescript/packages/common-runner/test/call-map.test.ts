@@ -32,21 +32,23 @@ describe("cell-map", () => {
     it("should return the entity ID for a cell", () => {
       const c = getDoc({});
       c.generateEntityId();
+      const id = getEntityId(c);
 
-      expect(getEntityId(c)).toEqual(c.entityId);
-      expect(getEntityId(c.getAsQueryResult())).toEqual(c.entityId);
-      expect(getEntityId(c.asCell())).toEqual(c.entityId);
-      expect(getEntityId({ cell: c, path: [] })).toEqual(c.entityId);
+      expect(getEntityId(c)).toEqual(id);
+      expect(getEntityId(c.getAsQueryResult())).toEqual(id);
+      expect(getEntityId(c.asCell())).toEqual(id);
+      expect(getEntityId({ cell: c, path: [] })).toEqual(id);
     });
 
     it("should return a different entity ID for reference with paths", () => {
       const c = getDoc({ foo: { bar: 42 } });
       c.generateEntityId();
+      const id = getEntityId(c);
 
-      expect(getEntityId(c.getAsQueryResult())).toEqual(c.entityId);
-      expect(getEntityId(c.getAsQueryResult(["foo"]))).not.toEqual(c.entityId);
-      expect(getEntityId(c.asCell(["foo"]))).not.toEqual(c.entityId);
-      expect(getEntityId({ cell: c, path: ["foo"] })).not.toEqual(c.entityId);
+      expect(getEntityId(c.getAsQueryResult())).toEqual(id);
+      expect(getEntityId(c.getAsQueryResult(["foo"]))).not.toEqual(id);
+      expect(getEntityId(c.asCell(["foo"]))).not.toEqual(id);
+      expect(getEntityId({ cell: c, path: ["foo"] })).not.toEqual(id);
 
       expect(getEntityId(c.getAsQueryResult(["foo"]))).toEqual(getEntityId(c.asCell(["foo"])));
       expect(getEntityId(c.getAsQueryResult(["foo"]))).toEqual(

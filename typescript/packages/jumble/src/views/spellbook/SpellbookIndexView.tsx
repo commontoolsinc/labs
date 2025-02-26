@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { SearchBox } from "@/components/spellbook/SearchBox";
-import SpellCard from "@/components/spellbook/SpellCard";
-import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
-import { LoadingSpinner } from "@/components/Loader";
-import { listAllSpells, type Spell } from "@/services/spellbook";
+import { SearchBox } from "@/components/spellbook/SearchBox.tsx";
+import SpellCard from "@/components/spellbook/SpellCard.tsx";
+import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader.tsx";
+import { LoadingSpinner } from "@/components/Loader.tsx";
+import { listAllSpells, type Spell } from "@/services/spellbook.ts";
 
 export default function SpellbookIndexView() {
   const [spells, setSpells] = useState<Spell[]>([]);

@@ -104,7 +104,7 @@ export async function saveSpell(
     const src = getRecipeSrc(spellId);
     const spec = getRecipeSpec(spellId);
     const parents = getRecipeParents(spellId);
-    const ui = spell.resultRef?.cell.get()?.[UI];
+    const ui = spell.resultRef?.[UI];
 
     if (spellId === undefined) {
       throw new Error("Spell ID is undefined");

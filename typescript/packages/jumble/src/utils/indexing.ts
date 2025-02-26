@@ -1,7 +1,7 @@
 import { CharmManager } from "@commontools/charm";
-import { BackgroundJob } from "@/contexts/BackgroundTaskContext";
-import { charmId } from "./charms";
-import { llm } from "./llm";
+import { BackgroundJob } from "@/contexts/BackgroundTaskContext.tsx";
+import { charmId } from "./charms.ts";
+import { llm } from "./llm.ts";
 import { Cell } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
 interface IndexingContext {
@@ -49,7 +49,7 @@ async function indexCharm(
     const stringified = JSON.stringify(charm.asSchema({}).get());
 
     const response = await llm.sendRequest({
-      model: "anthropic:claude-3-5-sonnet-latest",
+      model: "anthropic:claude-3-7-sonnet-latest",
       messages: [
         {
           role: "user",
