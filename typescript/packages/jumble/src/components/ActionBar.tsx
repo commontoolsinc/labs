@@ -1,5 +1,5 @@
 import { animated } from "@react-spring/web";
-import { useActionManager } from "../contexts/ActionManagerContext.ts";
+import { useActionManager } from "../contexts/ActionManagerContext.tsx";
 import { NavLink } from "react-router-dom";
 
 export function ActionBar() {
