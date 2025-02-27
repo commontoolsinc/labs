@@ -4,7 +4,7 @@ type CardProps = {
   children: React.ReactNode;
   className?: string;
 };
-export function Card({ details = false, children, className }: CardProps) {
+export function CommonCard({ details = false, children, className }: CardProps) {
   return (
     <animated.div
       className={`

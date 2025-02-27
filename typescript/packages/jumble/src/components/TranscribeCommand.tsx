@@ -23,7 +23,7 @@ export function TranscribeInput({ mode, context }: TranscribeInputProps) {
   useEffect(() => {
     startRecording();
     return () => stopRecording();
-  }, []); // Empty dependency array - only run once
+  }, [startRecording, stopRecording]);
 
   // Separate effect for keyboard handlers
   useEffect(() => {

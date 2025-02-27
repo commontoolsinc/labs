@@ -1,5 +1,5 @@
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { SpellPreview } from "@/components/spellbook/SpellPreview";
+import { SpellPreview } from "@/components/spellbook/SpellPreview.tsx";
 import { LuHeart, LuMessageSquare, LuSend } from "react-icons/lu";
 
 interface SpellCardProps {
@@ -35,7 +35,7 @@ export default function SpellCard({
     <Link
       to={`/spellbook/${spellId}`}
       className="
-        block bg-white border-2 border-black 
+        block bg-white border-2 border-black
         shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]
         hover:translate-y-[-2px] hover:shadow-[2px_4px_0px_0px_rgba(0,0,0,0.7)]
         transition-[transform,shadow] duration-100 ease-in-out

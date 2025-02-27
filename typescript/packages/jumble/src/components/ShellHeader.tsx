@@ -3,7 +3,7 @@ import ShapeLogo from "@/assets/ShapeLogo.svg";
 import { NavPath } from "@/components/NavPath.tsx";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { User } from "@/components/User.tsx";
-import { useSyncedStatus } from "@/hooks/use-synced-status";
+import { useSyncedStatus } from "@/hooks/use-synced-status.ts";
 
 type ShellHeaderProps = {
   replicaName?: string;
@@ -28,9 +28,8 @@ export function ShellHeader({ replicaName, charmId }: ShellHeaderProps) {
       <div className="header-end flex items-center gap-2">
         <div className="relative group">
           <div
-            className={`w-3 h-3 rounded-full ${
-              isSyncing ? "bg-yellow-400 animate-pulse" : "bg-green-500 "
-            }`}
+            className={`w-3 h-3 rounded-full ${isSyncing ? "bg-yellow-400 animate-pulse" : "bg-green-500 "
+              }`}
           />
           <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
             {isSyncing

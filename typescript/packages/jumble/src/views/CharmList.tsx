@@ -5,7 +5,7 @@ import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { Charm } from "@commontools/charm";
 import { charmId } from "@/utils/charms.ts";
 import { useEffect, useRef, useState } from "react";
-import { Card } from "@/components/Card.tsx";
+import { CommonCard } from "@/components/common/CommonCard.tsx";
 import { useParams } from "react-router-dom";
 import { render } from "@commontools/html";
 import { Cell } from "@commontools/runner";
@@ -52,7 +52,7 @@ function CharmPreview({ charm, replicaName }: { charm: Cell<Charm>; replicaName:
   }, [charm, isIntersecting]);
 
   return (
-    <Card className="p-2 group relative" details>
+    <CommonCard className="p-2 group relative" details>
       <button
         onClick={(e) => {
           e.preventDefault();
@@ -85,7 +85,7 @@ function CharmPreview({ charm, replicaName }: { charm: Cell<Charm>; replicaName:
           ></div>
         </div>
       </NavLink>
-    </Card>
+    </CommonCard>
   );
 }
 

@@ -81,6 +81,7 @@ export function CommandCenter() {
 
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
+  // TODO(bf): matchesRoute?
   const match = useMatch("/:replicaName/:charmId?/*");
   const focusedCharmId = match?.params.charmId ?? null;
   const focusedReplicaId = match?.params.replicaName ?? null;
@@ -373,6 +374,7 @@ export function CommandCenter() {
                             setOpen(false);
                           }
                         } else {
+                          // TODO(bf): need to refactor types
                           setMode({ type: cmd.type, command: cmd });
                         }
                       }}

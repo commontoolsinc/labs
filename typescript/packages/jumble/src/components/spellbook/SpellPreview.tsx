@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { render } from "@commontools/html";
-import { UI } from "@commontools/builder";
 
 interface SpellPreviewProps {
   ui: any;

@@ -9,6 +9,7 @@ import { Cell, EntityId } from "@commontools/runner";
 
 import { charmId } from "@/utils/charms.ts";
 import { fixRecipePrompt } from "@/utils/prompt-library/recipe-fix.ts";
+import { createPath } from "@/routes.ts";
 
 export async function fixItCharm(
   charmManager: CharmManager,
@@ -53,6 +54,7 @@ export async function iterateCharm(
   preferredModel?: string,
 ): Promise<string | undefined> {
   try {
+    console.group("Iterating Charm");
     console.log("Performing iteration");
     console.log("Focused Charm ID", focusedCharmId);
     console.log("Focused Replica ID", focusedReplicaId);
@@ -62,10 +64,18 @@ export async function iterateCharm(
     const charm = await charmManager.get(focusedCharmId);
     console.log("CHARM", charm);
     const newCharmId = await iterate(charmManager, charm ?? null, input, false, preferredModel);
+    if (!newCharmId) {
+      throw new Error("No new charm ID found after iterate()");
+    }
     console.log("NEW CHARM ID", newCharmId);
-    if (!newCharmId) return;
-    return `/${focusedReplicaId}/${charmId(newCharmId)}`;
+    console.groupEnd();
+    const id = charmId(newCharmId);
+    if (!id) {
+      throw new Error("Invalid charm ID");
+    }
+    return createPath('charmShow', { charmId: id, replicaName: focusedReplicaId })
   } catch (error) {
+    console.groupEnd();
     console.error("Edit recipe error:", error);
   }
 }

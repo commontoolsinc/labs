@@ -3,13 +3,14 @@ import { castNewRecipe, Charm, CharmManager, compileAndRunRecipe } from "@common
 import { NavigateFunction } from "react-router-dom";
 import { charmId } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
-import { Cell, getEntityId, getRecipe } from "@commontools/runner";
-import { iterateCharm } from "@/utils/charm-operations";
-import { BackgroundJob } from "@/contexts/BackgroundTaskContext";
-import { startCharmIndexing } from "@/utils/indexing";
-import { generateJSON } from "@/utils/prompt-library/json-gen";
+import { Cell, EntityId, getRecipe } from "@commontools/runner";
+import { iterateCharm } from "@/utils/charm-operations.ts";
+import { BackgroundJob } from "@/contexts/BackgroundTaskContext.tsx";
+import { startCharmIndexing } from "@/utils/indexing.ts";
+import { generateJSON } from "@/utils/prompt-library/json-gen.ts";
+import { createPath, createPathWithHash, ROUTES } from "@/routes.ts";
 
-export type CommandType = "action" | "input" | "confirm" | "select" | "menu" | "transcribe";
+export type CommandType = "action" | "input" | "confirm" | "select" | "menu" | "transcribe" | 'placeholder';
 
 export interface CommandItem {
   id: string;
@@ -80,7 +81,7 @@ export type CommandMode =
   | { type: "confirm"; command: CommandItem; message: string }
   | { type: "select"; command: CommandItem; options: SelectOption[] }
   | { type: "transcribe"; command: CommandItem; placeholder: string }
-  | { type: "loading" };
+  | { type: "loading" }
 
 export interface SelectOption {
   id: string;
@@ -119,10 +120,15 @@ async function handleNewCharm(deps: CommandContext, input: string | undefined) {
   try {
     // Generate JSON blob with an LLM
     const dummyData = await generateJSON(input);
-    const id = await castNewRecipe(deps.charmManager, dummyData, input);
-    if (id) {
-      deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
+    const newCharm = await castNewRecipe(deps.charmManager, dummyData, input);
+    if (!newCharm) {
+      throw new Error("Failed to cast charm");
     }
+    const id = charmId(newCharm);
+    if (!id || !deps.focusedReplicaId) {
+      throw new Error("Missing charm ID or replica name");
+    }
+    deps.navigate(createPath('charmShow', { charmId: id, replicaName: deps.focusedReplicaId }));
   } finally {
     deps.setLoading(false);
     deps.setOpen(false);
@@ -149,10 +155,13 @@ async function handleSearchCharms(deps: CommandContext) {
         id: "charm-select",
         type: "select",
         title: "Select Charm",
-        handler: async (id) => {
-          console.log("Select handler called with:", id);
-          console.log("Navigating to:", `/${deps.focusedReplicaId}/${charmId(id)}`);
-          deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
+        handler: async (selected) => {
+          const id = charmId(selected);
+          if (!id || !deps.focusedReplicaId) {
+            throw new Error("Missing charm ID or replica name");
+          }
+          const path = createPath('charmDetail', { charmId: id, replicaName: deps.focusedReplicaId });
+          deps.navigate(path);
           deps.setOpen(false);
         },
       },
@@ -198,7 +207,7 @@ async function handleRenameCharm(deps: CommandContext, input: string | undefined
 async function handleDeleteCharm(deps: CommandContext) {
   if (!deps.focusedCharmId) return;
   const result = await deps.charmManager.remove(deps.focusedCharmId);
-  if (result) deps.navigate("/");
+  if (result) deps.navigate(ROUTES.root);
   else deps.setOpen(false);
 }
 
@@ -256,9 +265,14 @@ async function handleImportJSON(deps: CommandContext) {
     const title = prompt("Enter a title for your imported recipe:");
     if (!title) return;
 
-    const id = await castNewRecipe(deps.charmManager, data, title);
+    const newCharm = await castNewRecipe(deps.charmManager, data, title);
+    if (!newCharm) throw new Error("Failed to create new charm");
+
+    const id = charmId(newCharm);
+    if (!id || !deps.focusedReplicaId) throw new Error("Missing charm ID or replica name");
+
     if (id) {
-      deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
+      deps.navigate(createPath('charmShow', { charmId: id, replicaName: deps.focusedReplicaId }));
     }
   } finally {
     deps.setLoading(false);
@@ -282,9 +296,16 @@ async function handleLoadRecipe(deps: CommandContext) {
     });
 
     const src = await file.text();
-    const id = await compileAndRunRecipe(deps.charmManager, src, "imported", {});
+    const newCharm = await compileAndRunRecipe(deps.charmManager, src, "imported", {});
+    if (!newCharm) {
+      throw new Error("Failed to cast charm");
+    }
+    const id = charmId(newCharm);
+    if (!id || !deps.focusedReplicaId) {
+      throw new Error("Missing charm ID or replica name");
+    }
     if (id) {
-      deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
+      deps.navigate(createPath('charmShow', { charmId: id, replicaName: deps.focusedReplicaId }));
     }
   } finally {
     deps.setLoading(false);
@@ -325,6 +346,18 @@ async function handleSelectModel(deps: CommandContext) {
   } finally {
     deps.setLoading(false);
   }
+}
+
+function navigateToCharm(charm: Charm | EntityId, deps: CommandContext) {
+  if (!charm) {
+    throw new Error("Failed to cast charm");
+  }
+  const id = charmId(charm);
+  if (!id || !deps.focusedReplicaId) {
+    throw new Error("Missing charm ID or replica name");
+  }
+
+  deps.navigate(createPath('charmShow', { charmId: id, replicaName: deps.focusedReplicaId }));
 }
 
 async function handleIndexCharms(deps: CommandContext) {
@@ -381,15 +414,11 @@ async function handleUseDataInSpell(deps: CommandContext) {
 
           const charm = await deps.charmManager.get(deps.focusedCharmId);
           const sourceCell = charm?.getSourceCell();
-          const sourceId = getEntityId(sourceCell)?.["/"];
-          if (!sourceId) {
-            throw new Error("No source ID found");
+
+          if (!sourceCell) {
+            throw new Error("No source cell found");
           }
-          deps.setLoading(true);
-          const newCharmId = await castSpellAsCharm(deps.charmManager, selectedSpell.id, sourceId);
-          if (newCharmId) {
-            deps.navigate(`/${deps.focusedReplicaId}/${charmId(newCharmId)}`);
-          }
+          navigateToCharm(sourceCell, deps);
           deps.setOpen(false);
           deps.setLoading(false);
         },
@@ -454,10 +483,10 @@ async function handleUseSpellOnOtherData(deps: CommandContext) {
           }
 
           deps.setLoading(true);
-          const newCharmId = await castSpellAsCharm(deps.charmManager, spellId, selectedCell.id);
-          if (newCharmId) {
-            deps.navigate(`/${deps.focusedReplicaId}/${charmId(newCharmId)}`);
-          }
+          const newCharm = await castSpellAsCharm(deps.charmManager, spellId, selectedCell.id);
+          if (!newCharm) throw new Error("Failed to cast spell");
+
+          navigateToCharm(newCharm, deps)
           deps.setOpen(false);
           deps.setLoading(false);
         },
@@ -544,11 +573,11 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       group: "View",
       predicate: !!deps.focusedCharmId,
       handler: () => {
-        if (!deps.focusedCharmId) {
+        if (!deps.focusedCharmId || !deps.focusedReplicaId) {
           deps.setOpen(false);
           return;
         }
-        deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}/detail`);
+        deps.navigate(createPath('charmDetail', { charmId: deps.focusedCharmId, replicaName: deps.focusedReplicaId }))
         deps.setOpen(false);
       },
     },
@@ -559,11 +588,11 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       group: "View",
       predicate: !!deps.focusedCharmId,
       handler: () => {
-        if (!deps.focusedCharmId) {
+        if (!deps.focusedCharmId || !deps.focusedReplicaId) {
           deps.setOpen(false);
           return;
         }
-        deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}/detail#code`);
+        deps.navigate(createPathWithHash('charmDetail', { charmId: deps.focusedCharmId, replicaName: deps.focusedReplicaId }, 'code'))
         deps.setOpen(false);
       },
     },
@@ -574,11 +603,11 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       group: "View",
       predicate: !!deps.focusedCharmId,
       handler: () => {
-        if (!deps.focusedCharmId) {
+        if (!deps.focusedCharmId || !deps.focusedReplicaId) {
           deps.setOpen(false);
           return;
         }
-        deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}/detail#data`);
+        deps.navigate(createPathWithHash('charmDetail', { charmId: deps.focusedCharmId, replicaName: deps.focusedReplicaId }, 'data'))
         deps.setOpen(false);
       },
     },
@@ -589,11 +618,11 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       group: "View",
       predicate: !!deps.focusedCharmId,
       handler: () => {
-        if (!deps.focusedCharmId) {
+        if (!deps.focusedCharmId || !deps.focusedReplicaId) {
           deps.setOpen(false);
           return;
         }
-        deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}`);
+        deps.navigate(createPath('charmShow', { charmId: deps.focusedCharmId, replicaName: deps.focusedReplicaId }))
         deps.setOpen(false);
       },
     },
@@ -615,7 +644,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       predicate: !!deps.focusedReplicaId,
       handler: () => {
         if (deps.focusedReplicaId) {
-          deps.navigate(`/${deps.focusedReplicaId}`);
+          deps.navigate(createPath('replicaRoot', { replicaName: deps.focusedReplicaId }))
         }
         deps.setOpen(false);
       },
@@ -736,7 +765,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
                     id: `msg-${job.id}-${i}`,
                     type: "action",
                     title: msg,
-                    handler: () => {},
+                    handler: () => { },
                   }),
                 ),
               },

@@ -4,7 +4,6 @@ import React, {
   useState,
   useCallback,
   useRef,
-  memo,
   createContext,
   useContext,
 } from "react";
@@ -23,6 +22,7 @@ import {
   type CharmSuggestion,
 } from "@/utils/prompt-library/charm-suggestions.ts";
 import { Cell } from "@commontools/runner";
+import { createPath, createPathWithHash } from "@/routes.ts";
 
 type Tab = "iterate" | "code" | "data";
 
@@ -32,9 +32,6 @@ const variantModels = [
   "groq:llama-3.3-70b-versatile",
   "google:gemini-2.0-pro",
 ] as const;
-
-// Memoized CharmRenderer to prevent unnecessary re-renders
-const MemoizedCharmRenderer = memo(CharmRenderer);
 
 // =================== Context for Shared State ===================
 interface IterationContextType {
@@ -270,7 +267,12 @@ const Variants = () => {
     handleCancelVariants,
   } = useIterationContext();
 
-  const { charmId: paramCharmId } = useParams();
+  const { charmId: paramCharmId, replicaName } = useParams();
+
+  if (!paramCharmId || !replicaName) {
+    throw new Error('Missing charmId or replicaName');
+  }
+
   const { currentFocus: charm } = useCharm(paramCharmId);
   const navigate = useNavigate();
 
@@ -300,11 +302,11 @@ const Variants = () => {
                     const variantId = charmId(selectedVariant);
                     if (variantId) {
                       // Navigate to the main view (without /detail) to close the drawer
-                      navigate(`/charms/${variantId}`);
+                      navigate(createPath('charmShow', { charmId: variantId, replicaName }));
                     }
                   } else {
                     // If it's the original charm, just close the drawer by navigating to the main view
-                    navigate(`/charms/${paramCharmId}`);
+                    navigate(createPath('charmShow', { charmId: paramCharmId, replicaName }));
                   }
                 }
               }}
@@ -319,9 +321,8 @@ const Variants = () => {
         {charm && (
           <div
             onClick={() => setSelectedVariant(charm)}
-            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${
-              selectedVariant === charm ? "border-blue-500" : "border-black"
-            }`}
+            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${selectedVariant === charm ? "border-blue-500" : "border-black"
+              }`}
           >
             <div className="h-full flex flex-col overflow-hidden">
               <div className="bg-gray-100 text-xs font-bold p-1 border-b border-gray-300">
@@ -351,9 +352,8 @@ const Variants = () => {
           <div
             key={idx}
             onClick={() => setSelectedVariant(variant)}
-            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${
-              selectedVariant === variant ? "border-blue-500" : "border-black"
-            }`}
+            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${selectedVariant === variant ? "border-blue-500" : "border-black"
+              }`}
           >
             <div className="h-full flex flex-col overflow-hidden">
               <div className="bg-gray-100 text-xs font-bold p-1 border-b border-gray-300">
@@ -627,25 +627,22 @@ const BottomSheet = ({
       <div className="tabs flex gap-0 border-b border-gray-200">
         <button
           onClick={() => handleTabChange("iterate")}
-          className={`px-4 py-2 flex-1 text-center ${
-            activeTab === "iterate" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
-          }`}
+          className={`px-4 py-2 flex-1 text-center ${activeTab === "iterate" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
+            }`}
         >
           Iteration
         </button>
         <button
           onClick={() => handleTabChange("code")}
-          className={`px-4 py-2 flex-1 text-center ${
-            activeTab === "code" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
-          }`}
+          className={`px-4 py-2 flex-1 text-center ${activeTab === "code" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
+            }`}
         >
           Edit Code
         </button>
         <button
           onClick={() => handleTabChange("data")}
-          className={`px-4 py-2 flex-1 text-center ${
-            activeTab === "data" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
-          }`}
+          className={`px-4 py-2 flex-1 text-center ${activeTab === "data" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
+            }`}
         >
           View Data
         </button>
@@ -660,6 +657,11 @@ const BottomSheet = ({
 // Main CharmDetailView Component
 function CharmDetailView() {
   const { charmId: paramCharmId, replicaName } = useParams();
+
+  if (!paramCharmId || !replicaName) {
+    throw new Error("Missing navigation params");
+  }
+
   const { currentFocus: charm } = useCharm(paramCharmId);
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
@@ -730,7 +732,7 @@ function CharmDetailView() {
           selectedModel,
         );
         if (newPath) {
-          navigate(`${newPath}/detail#iterate`);
+          navigate(createPathWithHash('charmDetail', { charmId: paramCharmId, replicaName }, 'iterate'));
         }
       } catch (error) {
         console.error("Iteration error:", error);
@@ -738,7 +740,7 @@ function CharmDetailView() {
         setLoading(false);
       }
     }
-  }, [showVariants, iterationInput, selectedModel, charmManager, charm, replicaName, navigate]);
+  }, [showVariants, paramCharmId, iterationInput, selectedModel, charmManager, charm, replicaName, navigate]);
 
   const handleCancelVariants = useCallback(() => {
     setVariants([]);
@@ -792,7 +794,7 @@ function CharmDetailView() {
             </div>
           )}
 
-          <MemoizedCharmRenderer
+          <CharmRenderer
             key="main"
             className="w-full h-full"
             charm={selectedVariant || charm}
