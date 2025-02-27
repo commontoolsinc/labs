@@ -1,15 +1,15 @@
 import { Command } from "cmdk";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import "./commands.css";
-import { useCharmManager } from "@/contexts/CharmManagerContext";
+import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { useMatch, useNavigate } from "react-router-dom";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { DialogDescription, DialogTitle } from "@radix-ui/react-dialog";
-import { DitheredCube } from "./DitherCube";
-import { CommandContext, CommandItem, CommandMode, getCommands } from "./commands";
-import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext";
-import { TranscribeInput } from "./TranscribeCommand";
-import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext";
+import { DitheredCube } from "./DitherCube.tsx";
+import { CommandContext, CommandItem, CommandMode, getCommands } from "./commands.ts";
+import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext.tsx";
+import { TranscribeInput } from "./TranscribeCommand.tsx";
+import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
 
 function CommandProcessor({
   mode,
@@ -81,6 +81,7 @@ export function CommandCenter() {
 
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
+  // TODO(bf): matchesRoute?
   const match = useMatch("/:replicaName/:charmId?/*");
   const focusedCharmId = match?.params.charmId ?? null;
   const focusedReplicaId = match?.params.replicaName ?? null;
@@ -373,6 +374,7 @@ export function CommandCenter() {
                             setOpen(false);
                           }
                         } else {
+                          // TODO(bf): need to refactor types
                           setMode({ type: cmd.type, command: cmd });
                         }
                       }}

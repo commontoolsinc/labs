@@ -21,10 +21,13 @@ export class MemoryError extends Error {
 }
 
 function handleErrorResponse(data: any) {
+  if (typeof data.error === "string") {
+    throw new MemoryError(data.error, data);
+  }
   if ("cause" in data.error) {
     throw new MemoryError(data?.error?.cause?.message, data);
   } else {
-    throw new MemoryError(data?.error?.message, data);
+    throw new MemoryError(data?.error?.message || "Unknown error", data);
   }
 }
 
@@ -55,24 +58,64 @@ export async function getAllMemories(
     return [];
   }
 
-  const rawMemories: { the?: string; of?: string; is?: any }[] =
-    Array.isArray(data.ok) ? data.ok : [data.ok];
-  const memories: { the: string; of: string; is: any }[] = rawMemories
-    .filter((m) => m.the && m.of && m.is)
-    .map((m: any) => ({
-      the: m.the,
-      of: m.of,
-      is: m.is,
-    }));
+  console.log(data);
+  // format
+  // {
+  //   ok: {
+  //     "did:key:replica": {
+  //       "of:charmId": {
+  //         "application/json": {
+  //           "causeId": {
+  //             "is": {
+  //               "value": {...}
+  //             }
+  //           }
+  //         },
+  //       "of:charmId2": {
+  //         "application/json": {
+  //           "causeId": {
+  //             "is": {
+  //               "value": {...}
+  //             }
+  //           }
+  //         }
+  //       }
+  //       "of:charmId3": {
+  //         "application/json": {
+  //           "causeId": {
+  //             "is": {
+  //               "value": {...}
+  //             }
+  //           }
+  //         }
+  //       }...
+  //     }
+  //   }
+  // }
+  //
+
+  const replicaData = Array.isArray(data.ok) ? data.ok[0] : data.ok;
+  if (!replicaData || !replicaData[replica]) {
+    return {};
+  }
 
   const memoryMap: { [key: string]: any } = {};
-  memories.forEach((memory) => {
-    // FIXME(ja): using jumble can result in memory.is == {}
-    const value = memory.is?.value?.argument;
-    if (value) {
-      memoryMap[memory.of] = value;
+  const memories = replicaData[replica];
+
+  Object.entries(memories).forEach(([key, value]) => {
+    if (!key.startsWith("of:")) return;
+
+    const charmId = key.substring(3); // Remove 'of:' prefix
+    const appJson = (value as any)["application/json"];
+    if (!appJson) return;
+
+    const [, firstMemory] = Object.entries(appJson)[0];
+    const isValue = (firstMemory as any)?.is;
+    if (isValue) {
+      memoryMap[charmId] = isValue;
     }
   });
+
   return memoryMap;
 }
 

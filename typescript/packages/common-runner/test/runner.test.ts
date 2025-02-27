@@ -3,6 +3,7 @@ import type { Recipe } from "@commontools/builder";
 import { getDoc } from "../src/doc.js";
 import { run, stop } from "../src/runner.js";
 import { idle } from "../src/scheduler.js";
+import { getSpace } from "../src/space.js";
 
 describe("runRecipe", () => {
   it("should work with passthrough", async () => {
@@ -28,7 +29,11 @@ describe("runRecipe", () => {
       ],
     } as Recipe;
 
-    const result = run(recipe, { input: 1 });
+    const result = run(
+      recipe,
+      { input: 1 },
+      getDoc(undefined, "should work with passthrough", getSpace("test")),
+    );
     await idle();
 
     expect(result.sourceCell?.getAsQueryResult()).toMatchObject({
@@ -89,7 +94,11 @@ describe("runRecipe", () => {
       ],
     } as Recipe;
 
-    const result = run(outerRecipe, { value: 5 });
+    const result = run(
+      outerRecipe,
+      { value: 5 },
+      getDoc(undefined, "should work with nested recipes", getSpace("test")),
+    );
     await idle();
 
     expect(result.getAsQueryResult()).toEqual({ result: 5 });
@@ -112,7 +121,11 @@ describe("runRecipe", () => {
       ],
     };
 
-    const result = run(mockRecipe, { value: 1 });
+    const result = run(
+      mockRecipe,
+      { value: 1 },
+      getDoc(undefined, "should run a simple module", getSpace("test")),
+    );
     await idle();
     expect(result.getAsQueryResult()).toEqual({ result: 2 });
   });
@@ -138,7 +151,11 @@ describe("runRecipe", () => {
       ],
     };
 
-    const result = run(mockRecipe, { value: 1 });
+    const result = run(
+      mockRecipe,
+      { value: 1 },
+      getDoc(undefined, "should run a simple module with no outputs", getSpace("test")),
+    );
     await idle();
     expect(result.getAsQueryResult()).toEqual({ result: undefined });
     expect(ran).toBe(true);
@@ -165,7 +182,11 @@ describe("runRecipe", () => {
       ],
     };
 
-    const result = run(mockRecipe, { value: 1 });
+    const result = run(
+      mockRecipe,
+      { value: 1 },
+      getDoc(undefined, "should handle incorrect inputs gracefully", getSpace("test")),
+    );
     await idle();
     expect(result.getAsQueryResult()).toEqual({ result: undefined });
     expect(ran).toBe(true);
@@ -201,7 +222,11 @@ describe("runRecipe", () => {
       ],
     };
 
-    const result = run(mockRecipe, { value: 1 });
+    const result = run(
+      mockRecipe,
+      { value: 1 },
+      getDoc(undefined, "should handle nested recipes", getSpace("test")),
+    );
     await idle();
     expect(result.getAsQueryResult()).toEqual({ result: 2 });
   });
@@ -223,9 +248,16 @@ describe("runRecipe", () => {
       ],
     };
 
-    const inputCell = getDoc({ input: 10, output: 0 });
-    inputCell.generateEntityId();
-    const result = run(recipe, inputCell);
+    const inputCell = getDoc(
+      { input: 10, output: 0 },
+      "should allow passing a cell as a binding: input cell",
+      getSpace("test"),
+    );
+    const result = run(
+      recipe,
+      inputCell,
+      getDoc(undefined, "should allow passing a cell as a binding", getSpace("test")),
+    );
 
     await idle();
 
@@ -257,8 +289,16 @@ describe("runRecipe", () => {
       ],
     };
 
-    const inputCell = getDoc({ input: 10, output: 0 });
-    const result = run(recipe, inputCell);
+    const inputCell = getDoc(
+      { input: 10, output: 0 },
+      "should allow stopping a recipe: input cell",
+      getSpace("test"),
+    );
+    const result = run(
+      recipe,
+      inputCell,
+      getDoc(undefined, "should allow stopping a recipe", getSpace("test")),
+    );
 
     await idle();
     expect(inputCell.get()).toMatchObject({ input: 10, output: 20 });

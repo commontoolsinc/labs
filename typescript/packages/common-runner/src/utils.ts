@@ -56,6 +56,8 @@ export function mergeObjects(...objects: any[]): any {
       Array.isArray(obj) ||
       isAlias(obj) ||
       isDocLink(obj) ||
+      isDoc(obj) ||
+      isCell(obj) ||
       isStatic(obj)
     ) {
       return obj;
@@ -533,6 +535,7 @@ export function normalizeToDocLinks(
         } else {
           value[i] = { cell: getDoc(value[i]), path: [] } satisfies DocLink;
           value[i].cell.entityId = itemId;
+          value[i].cell.space = parentDoc.space;
           value[i].cell.sourceCell = parentDoc;
 
           preceedingItemId = itemId;
@@ -611,6 +614,7 @@ export function containsOpaqueRef(value: any): boolean {
 }
 
 export function deepCopy(value: any): any {
+  if (isQueryResultForDereferencing(value)) return deepCopy(getDocLinkOrThrow(value));
   if (isDoc(value) || isCell(value)) return value;
   if (typeof value === "object" && value !== null) {
     return Array.isArray(value)

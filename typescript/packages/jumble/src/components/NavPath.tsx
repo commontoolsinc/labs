@@ -1,4 +1,4 @@
-import { useCharmManager } from "@/contexts/CharmManagerContext";
+import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { NAME } from "@commontools/builder";
 import React, { useEffect } from "react";
 import { NavLink } from "react-router-dom";

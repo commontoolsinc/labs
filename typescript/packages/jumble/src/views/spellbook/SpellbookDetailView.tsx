@@ -23,10 +23,11 @@ import {
   shareSpell,
   trackRun,
   deleteSpell,
-} from "@/services/spellbook";
-import { ActionButton } from "@/components/spellbook/ActionButton";
-import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
-import { SpellPreview } from "@/components/spellbook/SpellPreview";
+} from "@/services/spellbook.ts";
+import { ActionButton } from "@/components/spellbook/ActionButton.tsx";
+import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader.tsx";
+import { SpellPreview } from "@/components/spellbook/SpellPreview.tsx";
+import { createPath } from "@/routes.ts";
 
 export default function SpellbookDetailView() {
   const { spellId } = useParams<{ spellId: string }>();
@@ -100,7 +101,7 @@ export default function SpellbookDetailView() {
       });
 
       // Navigate immediately
-      navigate(`/spellbook/launch/${spellId}`);
+      navigate(createPath('spellbookLaunch', { spellId }));
 
       // Track the run in the background
       await trackRun(spellId);
@@ -154,7 +155,7 @@ export default function SpellbookDetailView() {
     try {
       const success = await deleteSpell(spellId);
       if (success) {
-        navigate("/spellbook");
+        navigate(createPath('spellbookIndex'));
       }
     } catch (error) {
       console.error("Failed to delete spell:", error);

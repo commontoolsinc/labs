@@ -24,6 +24,7 @@ router.use(
 const Router = router
   .openapi(routes.recast, handlers.recast)
   .openapi(routes.reuse, handlers.reuse)
+  .openapi(routes.fulfill, handlers.fulfill)
   .openapi(routes.spellSearch, handlers.spellSearch);
 
 export default Router;

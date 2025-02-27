@@ -1,4 +1,4 @@
-import { useCharmManager } from "@/contexts/CharmManagerContext";
+import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { Charm, getIframeRecipe, IFrameRecipe } from "@commontools/charm";
 import { Cell, effect } from "@commontools/runner";
 import React from "react";
@@ -16,7 +16,6 @@ export const useCharm = (charmId: string | undefined) => {
           await charmManager.syncRecipe(charm);
           const ir = getIframeRecipe(charm);
           setIframeRecipe(ir?.iframe ?? null);
-          console.log({ iframeRecipe: ir });
         }
         setCurrentFocus(charm);
       }

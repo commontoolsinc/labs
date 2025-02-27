@@ -24,23 +24,35 @@ export function fetchData(
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: DocImpl<any>[],
-  parentCell: DocImpl<any>,
+  parentDoc: DocImpl<any>,
 ): Action {
-  const pending = getDoc(false, { fetchData: { pending: cause } });
-  const result = getDoc<any | undefined>(undefined, {
-    fetchData: { result: cause },
-  });
-  const error = getDoc<any | undefined>(undefined, {
-    fetchData: { error: cause },
-  });
-  const requestHash = getDoc<string | undefined>(undefined, {
-    fetchData: { requestHash: cause },
-  });
+  const pending = getDoc(false, { fetchData: { pending: cause } }, parentDoc.space);
+  const result = getDoc<any | undefined>(
+    undefined,
+    {
+      fetchData: { result: cause },
+    },
+    parentDoc.space,
+  );
+  const error = getDoc<any | undefined>(
+    undefined,
+    {
+      fetchData: { error: cause },
+    },
+    parentDoc.space,
+  );
+  const requestHash = getDoc<string | undefined>(
+    undefined,
+    {
+      fetchData: { requestHash: cause },
+    },
+    parentDoc.space,
+  );
 
-  pending.sourceCell = parentCell;
-  result.sourceCell = parentCell;
-  error.sourceCell = parentCell;
-  requestHash.sourceCell = parentCell;
+  pending.sourceCell = parentDoc;
+  result.sourceCell = parentDoc;
+  error.sourceCell = parentDoc;
+  requestHash.sourceCell = parentDoc;
 
   sendResult({
     pending,
@@ -86,7 +98,7 @@ export function fetchData(
       .then(async (data) => {
         if (thisRun !== currentRun) return;
 
-        normalizeToDocLinks(parentCell, data, undefined, log, {
+        normalizeToDocLinks(parentDoc, data, undefined, log, {
           fetchData: { url },
           cause,
         });

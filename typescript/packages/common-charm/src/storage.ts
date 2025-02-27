@@ -16,32 +16,41 @@ import {
 } from "@commontools/runner";
 import { isStatic, markAsStatic } from "@commontools/builder";
 import { StorageProvider, StorageValue } from "./storage/base.js";
-import { LocalStorageProvider } from "./storage/localstorage.js";
-import { InMemoryStorageProvider } from "./storage/memory.js";
-import { RemoteStorageProvider, type MemorySpace } from "./storage/remote.js";
+import { RemoteStorageProvider } from "./storage/remote.js";
 import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
+import { Space } from "@commontools/runner/src/space.js";
+import { InMemoryStorageProvider } from "./storage/memory.js";
 
-export function log(...args: any[]) {
-  // Get absolute time in milliseconds since Unix epoch
-  const absoluteMs = (performance.timeOrigin % 3600000) + (performance.now() % 1000);
+export function log(fn: () => any[]) {
+  debug(() => {
+    // Get absolute time in milliseconds since Unix epoch
+    const absoluteMs = (performance.timeOrigin % 3600000) + (performance.now() % 1000);
 
-  // Extract components
-  const totalSeconds = Math.floor(absoluteMs / 1000);
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-    .toString()
-    .padStart(2, "0");
-  const seconds = (totalSeconds % 60).toString().padStart(2, "0");
-  const millis = Math.floor(absoluteMs % 1000)
-    .toString()
-    .padStart(3, "0");
-  const nanos = Math.floor((absoluteMs % 1) * 1000000)
-    .toString()
-    .padStart(6, "0");
+    // Extract components
+    const totalSeconds = Math.floor(absoluteMs / 1000);
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+      .toString()
+      .padStart(2, "0");
+    const seconds = (totalSeconds % 60).toString().padStart(2, "0");
+    const millis = Math.floor(absoluteMs % 1000)
+      .toString()
+      .padStart(3, "0");
+    const nanos = Math.floor((absoluteMs % 1) * 1000000)
+      .toString()
+      .padStart(6, "0");
 
-  debug(`${minutes}:${seconds}:${millis}:${nanos}`, ...args);
+    return [`${minutes}:${seconds}:${millis}:${nanos}`, ...fn()];
+  });
 }
 
 export interface Storage {
+  /**
+   * Set remote storage URL.
+   *
+   * @param url - URL to set.
+   */
+  setRemoteStorage(url: URL): void;
+
   /**
    * Load cell from storage. Will also subscribe to new changes.
    *
@@ -51,12 +60,27 @@ export interface Storage {
    * This works also for cells that haven't been persisted yet. In that case,
    * it'll write the current value into storage.
    *
-   * @param cell - Cell to load into, or entity ID as EntityId or string.
+   * @param cell - Document / Cell to load into.
+   * @param expectedInStorage - Whether the cell is expected to be in storage.
    * @returns Promise that resolves to the cell when it is loaded.
    * @throws Will throw if called on a cell without an entity ID.
    */
   syncCell<T = any>(
-    cell: DocImpl<T> | EntityId | string | Cell<any>,
+    cell: DocImpl<T> | Cell<any>,
+    expectedInStorage?: boolean,
+  ): Promise<DocImpl<T>> | DocImpl<T>;
+
+  /**
+   * Same as above.
+   *
+   * @param space - Space to load from.
+   * @param id - Entity ID as EntityId or string.
+   * @param expectedInStorage - Whether the cell is expected to be in storage.
+   * @returns Promise that resolves to the cell when it is loaded.
+   */
+  syncCellById<T = any>(
+    space: Space,
+    cell: EntityId | string,
     expectedInStorage?: boolean,
   ): Promise<DocImpl<T>> | DocImpl<T>;
 
@@ -68,16 +92,11 @@ export interface Storage {
   synced(): Promise<void>;
 
   /**
-   * Clear all stored data.
-   * @returns Promise that resolves when the operation is complete.
+   * Cancel all subscriptions and stop syncing.
+   *
+   * @returns Promise that resolves when the storage is destroyed.
    */
-  destroy(): Promise<void>;
-
-  /**
-   * Get the replica name.
-   * @returns The replica name.
-   */
-  getReplica(): string | undefined;
+  cancelAll(): Promise<void>;
 }
 
 type Job = {
@@ -118,11 +137,24 @@ type Job = {
  * is probably already further ahead.
  */
 class StorageImpl implements Storage {
-  constructor(private storageProvider: StorageProvider) {
+  constructor() {
     const [cancel, addCancel] = useCancelGroup();
     this.cancel = cancel;
     this.addCancel = addCancel;
+
+    // Check if we're in a browser environment before accessing location
+    if (
+      typeof globalThis !== "undefined" &&
+      typeof globalThis.location !== "undefined" &&
+      globalThis.location?.href
+    ) {
+      this.setRemoteStorage(new URL(globalThis.location.href));
+    }
   }
+
+  // Map from space to storage provider. TODO: Push spaces to storage providers.
+  private storageProviders = new Map<Space, StorageProvider>();
+  private remoteStorageUrl: URL | undefined;
 
   // Map from entity ID to cell, set at stage 2, i.e. already while loading
   private cellsById = new Map<string, DocImpl<any>>();
@@ -154,8 +186,20 @@ class StorageImpl implements Storage {
   private cancel: Cancel;
   private addCancel: AddCancel;
 
+  setRemoteStorage(url: URL): void {
+    this.remoteStorageUrl = url;
+  }
+
+  syncCellById<T>(
+    space: Space,
+    id: EntityId | string,
+    expectedInStorage: boolean = false,
+  ): Promise<DocImpl<T>> | DocImpl<T> {
+    return this.syncCell(getDocByEntityId<T>(space, id, true)!, expectedInStorage);
+  }
+
   syncCell<T>(
-    subject: DocImpl<T> | EntityId | string | Cell<any>,
+    subject: DocImpl<T> | Cell<any>,
     expectedInStorage: boolean = false,
   ): Promise<DocImpl<T>> | DocImpl<T> {
     const entityCell = this._ensureIsSynced(subject, expectedInStorage);
@@ -165,21 +209,71 @@ class StorageImpl implements Storage {
   }
 
   synced(): Promise<void> {
+    // If there's no batch processing and no pending batch, resolve immediately
+    if (!this.currentBatchProcessing && this.currentBatch.length === 0) {
+      return Promise.resolve();
+    }
+
     return this.currentBatchPromise;
   }
 
-  async destroy(): Promise<void> {
-    await this.storageProvider.destroy();
+  async cancelAll(): Promise<void> {
+    await Promise.all(
+      Array.from(this.storageProviders.values()).map((provider) => provider.destroy()),
+    );
     this.cellsById.clear();
     this.cellIsLoading.clear();
     this.cancel();
   }
 
-  private _ensureIsSynced<T>(
-    subject: DocImpl<T> | EntityId | string | Cell<any>,
+  // TODO: Should just be one again.
+  private _getStorageProviderForSpace(space: Space): StorageProvider {
+    if (!space) throw new Error("No space set");
+
+    let provider = this.storageProviders.get(space);
+
+    if (!provider) {
+      // Default to "remote", but let either custom URL (used in tests) or
+      // environment variable override this.
+      const type =
+        this.remoteStorageUrl?.protocol === "memory:"
+          ? "memory"
+          : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "remote");
+
+      if (type === "remote") {
+        if (!this.remoteStorageUrl) throw new Error("No remote storage URL set");
+
+        provider = new RemoteStorageProvider({
+          address: new URL("/api/storage/memory", this.remoteStorageUrl!),
+          space: space.uri as `did:${string}:${string}`,
+        });
+      } else if (type === "memory") {
+        provider = new InMemoryStorageProvider(space.uri);
+      } else {
+        throw new Error(`Unknown storage type: ${type}`);
+      }
+      this.storageProviders.set(space, provider);
+    }
+    return provider;
+  }
+
+  private _ensureIsSyncedById<T>(
+    space: Space,
+    id: EntityId | string,
     expectedInStorage: boolean = false,
   ): DocImpl<T> {
-    const entityCell = this._fromIdToCell<T>(subject);
+    return this._ensureIsSynced(getDocByEntityId<T>(space, id, true)!, expectedInStorage);
+  }
+
+  private _ensureIsSynced<T>(
+    subject: DocImpl<T> | Cell<any>,
+    expectedInStorage: boolean = false,
+  ): DocImpl<T> {
+    if (isCell(subject)) subject = subject.getAsDocLink().cell;
+    if (!isDoc(subject)) throw new Error("Invalid subject: " + JSON.stringify(subject));
+    if (!subject.entityId) throw new Error("Cell has no entity ID");
+
+    const entityCell = this.cellsById.get(JSON.stringify(subject.entityId)) ?? subject;
     const entityId = JSON.stringify(entityCell.entityId);
 
     // If the cell is ephemeral, we don't need to load it from storage. We still
@@ -199,7 +293,7 @@ class StorageImpl implements Storage {
     this.cellsById.set(entityId, entityCell);
 
     // Start loading the cell and safe the promise for processBatch to await for
-    const loadingPromise = this.storageProvider
+    const loadingPromise = this._getStorageProviderForSpace(entityCell.space!)
       .sync(entityCell.entityId!, expectedInStorage)
       .then(() => entityCell);
     this.loadingPromises.set(entityCell, loadingPromise);
@@ -244,10 +338,13 @@ class StorageImpl implements Storage {
       if (isDocLink(value)) {
         // Generate a causal ID for the cell if it doesn't have one yet
         if (!value.cell.entityId) {
-          value.cell.generateEntityId({
-            cell: cell.entityId?.toJSON ? cell.entityId.toJSON() : cell.entityId,
-            path,
-          });
+          value.cell.generateEntityId(
+            {
+              cell: cell.entityId?.toJSON ? cell.entityId.toJSON() : cell.entityId,
+              path,
+            },
+            cell.space!,
+          );
         }
         dependencies.add(this._ensureIsSynced(value.cell));
         return { ...value, cell: value.cell.toJSON() /* = the id */ };
@@ -286,19 +383,24 @@ class StorageImpl implements Storage {
 
       this._addToBatch([{ cell, type: "storage" }]);
 
-      log(
+      log(() => [
         "prep for storage",
         JSON.stringify(cell.entityId),
         value,
         [...dependencies].map((c) => JSON.stringify(c.entityId)),
-      );
+      ]);
     }
   }
 
   // Prepares value for cells, and updates dependencies, triggering cell loads
   // if necessary. Updates this.readValues and this.readDependentCells.
   private _batchForCell(cell: DocImpl<any>, value: any, source?: EntityId): void {
-    log("prep for cell", JSON.stringify(cell.entityId), value, JSON.stringify(source ?? null));
+    log(() => [
+      "prep for cell",
+      JSON.stringify(cell.entityId),
+      value,
+      JSON.stringify(source ?? null),
+    ]);
 
     const dependencies = new Set<DocImpl<any>>();
 
@@ -317,9 +419,9 @@ class StorageImpl implements Storage {
           // If the cell is not yet loaded, load it. As it's referenced in
           // something that came from storage, the id is known in storage and so
           // we have to wait for it to load. Hence true as second parameter.
-          const cell = this._ensureIsSynced(value.cell, true);
-          dependencies.add(cell);
-          return { ...value, cell };
+          const dependency = this._ensureIsSyncedById(cell.space!, value.cell, true);
+          dependencies.add(dependency);
+          return { ...value, cell: dependency };
         } else {
           console.warn("unexpected cell reference", value);
           return value;
@@ -339,7 +441,7 @@ class StorageImpl implements Storage {
     };
 
     if (source) {
-      const sourceCell = this._ensureIsSynced(source, true);
+      const sourceCell = this._ensureIsSyncedById(cell.space!, source, true);
       dependencies.add(sourceCell);
       newValue.source = sourceCell;
     }
@@ -370,10 +472,10 @@ class StorageImpl implements Storage {
     const loading = new Set<DocImpl<any>>();
     const loadedCells = new Set<DocImpl<any>>();
 
-    log(
+    log(() => [
       "processing batch",
       this.currentBatch.map(({ cell, type }) => `${JSON.stringify(cell.entityId)}:${type}`),
-    );
+    ]);
 
     do {
       // Load everything in loading
@@ -392,7 +494,7 @@ class StorageImpl implements Storage {
         // After first load, we set up sync: If storage doesn't know about the
         // cell, we need to persist the current value. If it does, we need to
         // update the cell value.
-        const value = this.storageProvider.get(cell.entityId!);
+        const value = this._getStorageProviderForSpace(cell.space!).get(cell.entityId!);
         if (value === undefined) this._batchForStorage(cell);
         else this._batchForCell(cell, value.value, value.source);
 
@@ -414,11 +516,11 @@ class StorageImpl implements Storage {
             type === "cell"
               ? this.readDependentCells.get(cell)
               : this.writeDependentCells.get(cell);
-          log(
+          log(() => [
             "dependent cells",
             JSON.stringify(cell.entityId),
             [...dependentCells!].map((c) => JSON.stringify(c.entityId)),
-          );
+          ]);
           if (dependentCells)
             Array.from(dependentCells)
               .filter(
@@ -427,18 +529,15 @@ class StorageImpl implements Storage {
               .forEach((dependent) => loading.add(dependent));
         }
       }
-      log(
-        "loading",
-        [...loading].map((c) => JSON.stringify(c.entityId)),
-      );
-      log(
+      log(() => ["loading", [...loading].map((c) => JSON.stringify(c.entityId))]);
+      log(() => [
         "cellIsLoading",
         [...this.cellIsLoading.keys()].map((c) => JSON.stringify(c.entityId)),
-      );
-      log(
+      ]);
+      log(() => [
         "currentBatch",
         this.currentBatch.map(({ cell, type }) => `${JSON.stringify(cell.entityId)}:${type}`),
-      );
+      ]);
     } while (loading.size > 0);
 
     // Convert batch jobs to operations:
@@ -463,20 +562,34 @@ class StorageImpl implements Storage {
 
     // Storage jobs override cell jobs. Write remaining cell jobs to cell.
     cellJobs.forEach(({ value, source }, cell) => {
-      if (!storageJobs.has(cell)) {
+      // TODO(seefeld): For frozen cells, show a warning if content is different.
+      // But also, we should serialize the fact that it is frozen to begin with...
+      if (!storageJobs.has(cell) && !cell.isFrozen()) {
         if (source) cell.sourceCell = this.cellsById.get(JSON.stringify(source))!;
 
-        log("send to cell", JSON.stringify(cell.entityId), JSON.stringify(value));
+        log(() => ["send to cell", JSON.stringify(cell.entityId), JSON.stringify(value)]);
         cell.send(value);
       }
     });
 
-    // Write all storage jobs to storage
-    await this.storageProvider.send(
-      Array.from(storageJobs).map(([cell, value]) => ({
-        entityId: cell.entityId!,
-        value,
-      })),
+    // Sort storage jobs by space
+    const storageJobsBySpace = new Map<Space, { entityId: EntityId; value: any }[]>();
+    storageJobs.forEach((value, cell) => {
+      const space = cell.space!;
+      if (!storageJobsBySpace.has(space)) storageJobsBySpace.set(space, []);
+      storageJobsBySpace.get(space)!.push({ entityId: cell.entityId!, value });
+    });
+
+    // Write all storage jobs to storage, in parallel
+    await Promise.all(
+      Array.from(storageJobsBySpace.keys()).map(async (space) =>
+        this._getStorageProviderForSpace(space).send(
+          storageJobsBySpace.get(space)!.map(({ entityId, value }) => ({
+            entityId,
+            value,
+          })),
+        ),
+      ),
     );
 
     // Finally, clear and resolve loading promise for all loaded cells
@@ -546,94 +659,23 @@ class StorageImpl implements Storage {
   }
 
   private _subscribeToChanges(cell: DocImpl<any>): void {
-    log("subscribe to changes", JSON.stringify(cell.entityId));
+    log(() => ["subscribe to changes", JSON.stringify(cell.entityId)]);
 
     // Subscribe to cell changes, send updates to storage
     this.addCancel(
       cell.updates((value) => {
-        log("got from cell", JSON.stringify(cell.entityId), JSON.stringify(value));
+        log(() => ["got from cell", JSON.stringify(cell.entityId), JSON.stringify(value)]);
         return this._batchForStorage(cell);
       }),
     );
 
     // Subscribe to storage updates, send results to cell
     this.addCancel(
-      this.storageProvider.sink(cell.entityId!, (value) =>
+      this._getStorageProviderForSpace(cell.space!).sink(cell.entityId!, (value) =>
         this._batchForCell(cell, value.value, value.source),
       ),
     );
   }
-
-  // Support referencing as cell, via entity ID or as stringified entity ID
-  private _fromIdToCell<T>(subject: DocImpl<any> | EntityId | string | Cell<any>): DocImpl<T> {
-    if (isCell(subject)) subject = subject.getAsDocLink().cell;
-    if (isDoc(subject)) {
-      if (!subject.entityId) throw new Error("Cell has no entity ID");
-      // If a cell by this id is already known, return the prior one instead.
-      return this.cellsById.get(JSON.stringify(subject.entityId)) ?? subject;
-    } else if (
-      (typeof subject === "string" && subject.startsWith('{"/":"')) ||
-      (typeof subject === "object" && subject !== null && "/" in subject)
-    ) {
-      return getDocByEntityId<T>(subject)!;
-    } else {
-      throw new Error(`Invalid cell or entity ID: ${subject}`);
-    }
-  }
-
-  getReplica(): string | undefined {
-    return this.storageProvider.getReplica();
-  }
 }
 
-export type StorageConfig =
-  | { type: "local" }
-  | { type: "memory" }
-  | { type: "remote"; replica: string; url: URL };
-
-// Add this cache at module scope
-const storageCache = new Map<string, Storage>();
-
-export function createStorage(config: StorageConfig): Storage {
-  let key: string;
-
-  switch (config.type) {
-    case "local":
-      key = "local";
-      break;
-    case "memory":
-      key = "memory";
-      break;
-    case "remote":
-      // Use URL.toString() to make sure the URL object is normalized as a string
-      key = `remote|${config.replica}|${config.url.toString()}`;
-      break;
-    default:
-      throw new Error("Invalid storage type");
-  }
-
-  // Return the cached instance if it exists
-  if (storageCache.has(key)) {
-    return storageCache.get(key)!;
-  }
-
-  // Create new storage provider based on config
-  let storageProvider: StorageProvider;
-  if (config.type === "local") {
-    storageProvider = new LocalStorageProvider();
-  } else if (config.type === "memory") {
-    storageProvider = new InMemoryStorageProvider();
-  } else if (config.type === "remote") {
-    storageProvider = new RemoteStorageProvider({
-      address: new URL("/api/storage/memory", config.url),
-      space: config.replica as MemorySpace,
-    });
-  } else {
-    throw new Error("Invalid storage type");
-  }
-
-  // Create the StorageImpl instance and cache it.
-  const storage = new StorageImpl(storageProvider);
-  storageCache.set(key, storage);
-  return storage;
-}
+export const storage = new StorageImpl();

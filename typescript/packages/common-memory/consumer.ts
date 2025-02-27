@@ -32,12 +32,18 @@ import {
   Clock,
   UTCUnixTimestampInSeconds,
   Seconds,
+  Subscribe,
+  Selector,
+  ChangesBuilder,
+  The,
+  Cause,
 } from "./interface.ts";
 import { refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
 import * as Changes from "./changes.ts";
 import * as Fact from "./fact.ts";
 import * as Access from "./access.ts";
+import * as Subscription from "./subscription.ts";
 
 export * from "./interface.ts";
 export { Changes as ChangesBuilder };
@@ -133,11 +139,29 @@ class MemoryConsumerSession<Space extends MemorySpace, MemoryProtocol extends Pr
       const invocation = this.invocations.get(id);
       this.invocations.delete(id);
       invocation?.return(command.is as {});
-    } else if (command.the === "task/effect") {
-      const invocation = this.invocations.get(id);
-      invocation?.perform(command.is);
+    }
+    // If it is an effect it can be for one specific subscription, yet we may
+    // have other subscriptions that will be affected. There for we simply
+    // pass effect to each one and they can detect if it concerns them.
+    // ℹ️ We could optimize this in the future and try indexing subscriptions
+    // so we don't have to broadcast to all.
+    else if (command.the === "task/effect") {
+      for (const [, invocation] of this.invocations) {
+        invocation.perform(command.is);
+      }
     }
   }
+
+  execute<Space extends MemorySpace, Ability extends string>(
+    invocation: ConsumerInvocation<Space, Ability>,
+  ) {
+    const command = invocation.toJSON();
+    const id = `job:${refer(command)}` as InvocationURL<Reference<Invocation>>;
+
+    const pending = this.invocations.get(id);
+    if (!pending) {
+      this.invocations.set(id, invocation as unknown as Job<Ability, Protocol>);
+      this.send(command as ConsumerCommand<Protocol>);
   invoke<Ability extends string>(command: ConsumerCommandFor<Ability, MemoryProtocol>) {
     const invocation = ConsumerInvocation.create(
       this.as.did(),
@@ -303,13 +327,18 @@ class QueryView<Space extends MemorySpace, MemoryProtocol extends Protocol<Space
 
     return view;
   }
-  selection: Selection<InferOf<Protocol>>;
+  selection: Selection<Space>;
+
   constructor(
     public session: MemoryConsumerSession<Space, MemoryProtocol>,
     public invocation: ConsumerInvocation<"/memory/query", MemoryProtocol>,
     public promise: Promise<Result<QueryView<Space, MemoryProtocol>, QueryError | ConnectionError>>,
   ) {
     this.selection = { [this.space]: {} } as Selection<InferOf<Protocol>>;
+  }
+
+  get selector() {
+    return (this.invocation.args as { select?: Selector }).select as Selector;
   }
 
   return(selection: Selection<InferOf<Protocol>>) {
@@ -329,22 +358,15 @@ class QueryView<Space extends MemorySpace, MemoryProtocol extends Protocol<Space
     return this.invocation.source.sub;
   }
 
-  transact(transaction: Transaction<InferOf<Protocol>>) {
+  integrate(differential: Changes) {
     const selection = this.selection[this.space];
-    for (const [of, attributes] of Object.entries(transaction.args.changes)) {
+    for (const [of, attributes] of Object.entries(differential)) {
       for (const [the, changes] of Object.entries(attributes)) {
-        const [[cause, change]] = Object.entries(changes);
-        if (change !== true) {
-          const state = Object.entries(selection?.[of as Entity]?.[the] ?? {});
-          const [current] = state.length > 0 ? state[0] : [];
-          if (cause !== current) {
-            Changes.set(selection, [of], the, { [cause]: change });
-          }
+        for (const [cause, change] of Object.entries(changes)) {
+          Changes.set(selection, [of], the, { [cause]: change });
         }
       }
     }
-
-    return { ok: {} };
   }
 
   get facts() {
@@ -365,6 +387,7 @@ class QuerySubscriptionInvocation<
 > extends ConsumerInvocation<"/memory/query/subscribe", MemoryProtocol> {
   readable: ReadableStream<Selection<Space>>;
   controller: undefined | ReadableStreamDefaultController<Selection<Space>>;
+  patterns: { the?: The; of?: Entity; cause?: Cause }[];
 
   selection: Selection<Space>;
   constructor(public query: QueryView<Space, MemoryProtocol>) {
@@ -379,6 +402,14 @@ class QuerySubscriptionInvocation<
     });
 
     this.selection = query.selection;
+
+    this.patterns = [...Subscription.fromSelector(this.selector)];
+  }
+  get space() {
+    return this.query.space;
+  }
+  get selector() {
+    return this.query.selector;
   }
 
   open(controller: ReadableStreamDefaultController<Selection<Space>>) {
@@ -397,7 +428,9 @@ class QuerySubscriptionInvocation<
   }
   override perform(transaction: Transaction<Space>) {
     const selection = this.selection[this.sub as MemorySpace as Space];
-    const changed = {};
+    // Here we will collect subset of changes that match the query.
+    let differential = null;
+
     for (const [of, attributes] of Object.entries(transaction.args.changes)) {
       for (const [the, changes] of Object.entries(attributes)) {
         const [[cause, change]] = Object.entries(changes);
@@ -405,17 +438,25 @@ class QuerySubscriptionInvocation<
           const state = Object.entries(selection?.[of as Entity]?.[the] ?? {});
           const [current] = state.length > 0 ? state[0] : [];
           if (cause !== current) {
-            Changes.set(changed, [of], the, { [cause]: change });
-            Changes.set(selection, [of], the, { [cause]: change });
+            for (const pattern of this.patterns) {
+              const match =
+                (!pattern.of || pattern.of === of) &&
+                (!pattern.the || pattern.the === the) &&
+                (!pattern.cause || pattern.cause === cause);
+
+              if (match) {
+                differential = differential ?? {};
+                Changes.set(differential, [of], the, { [cause]: change });
+              }
+            }
           }
         }
       }
     }
 
-    this.query.transact(transaction);
-
-    if (Object.keys(changed).length > 0) {
-      this.integrate({ [transaction.sub]: changed } as Selection<Space>);
+    if (differential) {
+      this.query.integrate(differential);
+      this.integrate({ [transaction.sub]: differential } as Selection<Space>);
     }
 
     return { ok: {} };

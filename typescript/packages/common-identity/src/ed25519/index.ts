@@ -51,11 +51,11 @@ export class Ed25519Signer implements Signer {
     return await Ed25519Signer.fromRaw(bytes);
   }
 
-  static deserialize(input: KeyPairRaw): Ed25519Signer {
+  static async deserialize(input: KeyPairRaw): Promise<Ed25519Signer> {
     if (isCryptoKeyPair(input)) {
-      return new Ed25519Signer(NativeEd25519Signer.deserialize(input));
+      return new Ed25519Signer(await NativeEd25519Signer.deserialize(input));
     } else if (isInsecureCryptoKeyPair(input)) {
-      return new Ed25519Signer(NobleEd25519Signer.deserialize(input));
+      return new Ed25519Signer(await NobleEd25519Signer.deserialize(input));
     } else {
       throw new Error("common-identity: Could not deserialize key.");
     }
@@ -64,22 +64,16 @@ export class Ed25519Signer implements Signer {
 
 export class Ed25519Verifier implements Verifier {
   private impl: NativeEd25519Verifier | NobleEd25519Verifier;
-  private _did: string | null;
   constructor(impl: NativeEd25519Verifier | NobleEd25519Verifier) {
     this.impl = impl;
-    this._did = null;
   }
 
   verify(signature: Uint8Array, data: Uint8Array): Promise<boolean> {
     return this.impl.verify(signature, data);
   }
 
-  async did(): Promise<string> {
-    if (this._did) {
-      return this._did;
-    }
-    this._did = await this.impl.did();
-    return this._did;
+  did(): DID {
+    return this.impl.did();
   }
 
   static async fromDid(did: DID): Promise<Ed25519Verifier> {

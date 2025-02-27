@@ -56,8 +56,8 @@ export class Identity implements Signer {
   }
 
   // Deserialize `input` from storage into an `Identity`.
-  static deserialize(input: any): Identity {
-    return new Identity(Ed25519Signer.deserialize(input)); 
+  static async deserialize(input: any): Promise<Identity> {
+    return new Identity(await Ed25519Signer.deserialize(input)); 
   }
 }
 
@@ -72,8 +72,8 @@ export class VerifierIdentity implements Verifier {
     return await this.inner.verify(signature, data);
   }
 
-  async did(): Promise<string> {
-    return await this.inner.did();
+  did(): DID {
+    return this.inner.did();
   }
 
   static async fromDid(did: DID): Promise<VerifierIdentity> {

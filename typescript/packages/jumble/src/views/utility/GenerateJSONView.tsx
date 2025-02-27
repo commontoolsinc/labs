@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { generateJSON } from "@/utils/prompt-library/json-gen";
+import { generateJSON } from "@/utils/prompt-library/json-gen.ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 
@@ -8,7 +8,7 @@ export default function LLMTestView() {
   const [result, setResult] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const MODEL = "anthropic:claude-3-5-sonnet-latest";
+  const MODEL = "anthropic:claude-3-7-sonnet-latest";
 
   const handleSubmit = async () => {
     setLoading(true);

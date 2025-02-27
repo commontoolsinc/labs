@@ -1,56 +1,33 @@
 import "@commontools/ui";
+import { Outlet, useParams } from "react-router-dom";
 
-import { useCallback } from "react";
-import { Outlet, useParams, useLocation } from "react-router-dom";
-import { animated } from "@react-spring/web";
-import { MdOutlineStar } from "react-icons/md";
-
-import ShellHeader from "@/components/ShellHeader";
-import { CommandCenter } from "@/components/CommandCenter";
-
+import ShellHeader from "@/components/ShellHeader.tsx";
+import { CommandCenter } from "@/components/CommandCenter.tsx";
+import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
+import { AuthenticationView } from "@/views/AuthenticationView.tsx";
+import { ActionBar } from "@/components/ActionBar.tsx";
+import { CharmPublisher } from "@/components/Publish.tsx";
+import { useGlobalActions } from "@/hooks/use-global-actions.tsx";
 
 export default function Shell() {
   const { charmId, replicaName } = useParams();
-  const location = useLocation();
+  useGlobalActions();
+  const { user } = useAuthentication();
 
-  // TOOLBAR START
-  // NOTE(jake): We will want to move this into a Toolbar component at some point
-  const isDetailActive = location.pathname.endsWith("/detail");
-  const togglePath = isDetailActive
-    ? `/${replicaName}/${charmId}`
-    : `/${replicaName}/${charmId}/detail`;
-  // TOOLBAR END
-
-  const onLaunchCommand = useCallback(() => {
-    window.dispatchEvent(new CustomEvent("open-command-center"));
-  }, []);
+  if (!user) {
+    return <AuthenticationView />;
+  }
 
   return (
-    <div className="shell h-full bg-gray-50 border-2 border-black">
-      <ShellHeader
-        replicaName={replicaName}
-        charmId={charmId}
-        isDetailActive={isDetailActive}
-        togglePath={togglePath}
-      />
+    <div className="flex flex-col shell h-full bg-gray-50 border-2 border-black">
+      <ShellHeader replicaName={replicaName} charmId={charmId} />
 
       <div className="relative h-full">
         <Outlet />
       </div>
 
-      <animated.button
-        className="
-          flex items-center justify-center fixed bottom-2 right-2 w-12 h-12 z-50
-          border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]
-          hover:translate-y-[-2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,0.7)]
-          transition-[border,box-shadow,transform] duration-100 ease-in-out
-          bg-white cursor-pointer
-        "
-        onClick={onLaunchCommand}
-      >
-        <MdOutlineStar fill="black" size={24} />
-      </animated.button>
-
+      <ActionBar />
+      <CharmPublisher />
       <CommandCenter />
     </div>
   );

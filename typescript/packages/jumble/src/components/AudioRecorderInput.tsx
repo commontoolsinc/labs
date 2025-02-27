@@ -1,5 +1,5 @@
 import React from 'react';
-import { CommonAudioRecording, useAudioRecorder } from '@/hooks/use-audio-recorder';
+import { CommonAudioRecording, useAudioRecorder } from '@/hooks/use-audio-recorder.ts';
 
 interface AudioRecorderProps {
   transcribe?: boolean;
@@ -39,7 +39,7 @@ const AudioRecorder: React.FC<AudioRecorderProps> = (props) => {
       >
         {props.stopButton || (
           <button className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600">
-            Finish Recording [{recordingSeconds}s, {transcribedWords} words]
+            Finish Recording ({recordingSeconds}s)
           </button>
         )}
       </div>

@@ -37,18 +37,31 @@ export function llm(
   }>,
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
-  cause?: any,
+  cause: any,
+  parentDoc: DocImpl<any>,
 ): Action {
-  const pending = getDoc(false, { llm: { pending: cause } });
-  const result = getDoc<string | undefined>(undefined, {
-    llm: { result: cause },
-  });
-  const partial = getDoc<string | undefined>(undefined, {
-    llm: { partial: cause },
-  });
-  const requestHash = getDoc<string | undefined>(undefined, {
-    llm: { requestHash: cause },
-  });
+  const pending = getDoc(false, { llm: { pending: cause } }, parentDoc.space);
+  const result = getDoc<string | undefined>(
+    undefined,
+    {
+      llm: { result: cause },
+    },
+    parentDoc.space,
+  );
+  const partial = getDoc<string | undefined>(
+    undefined,
+    {
+      llm: { partial: cause },
+    },
+    parentDoc.space,
+  );
+  const requestHash = getDoc<string | undefined>(
+    undefined,
+    {
+      llm: { requestHash: cause },
+    },
+    parentDoc.space,
+  );
 
   sendResult({ pending, result, partial, requestHash });
 

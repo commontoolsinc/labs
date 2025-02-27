@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTransition, useState, useEffect } from "react";
-import { useDebounce } from "@/hooks/use-debounce";
+import { useDebounce } from "@/hooks/use-debounce.ts";
 
 interface SearchBoxProps {
   defaultValue?: string;

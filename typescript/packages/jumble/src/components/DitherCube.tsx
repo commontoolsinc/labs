@@ -3,15 +3,12 @@ import { Canvas, useFrame, extend } from "@react-three/fiber";
 import { OrthographicCamera, Effects, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 
-// @ts-expect-error no types provided
-import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 
-// Add easing function
 const easeOutCubic = (x: number): number => {
   return 1 - Math.pow(1 - x, 3);
 };
 
-// Define the shader
 const DitheringShader = {
   uniforms: {
     tDiffuse: { value: null },
@@ -46,8 +43,11 @@ const DitheringShader = {
       float threshold = bayerMatrix[index];
 
       if (grey > 0.01) { // You might need to adjust this threshold
-        float final = grey > threshold ? 0.588 : 1.0;
-        gl_FragColor = vec4(vec3(final), 1.0);
+        if (grey > threshold) {
+          gl_FragColor = vec4(vec3(0.588), 1.0);
+        } else {
+          gl_FragColor = vec4(vec3(1.0), 0.0);
+        }
       } else {
         gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
       }
@@ -55,14 +55,12 @@ const DitheringShader = {
   `,
 };
 
-// Create a proper class for the pass
 class DitheringPassClass extends ShaderPass {
   constructor() {
     super(DitheringShader);
   }
 }
 
-// Extend the pass
 extend({ DitheringPass: DitheringPassClass });
 function MorphingMesh({
   animate = true,
@@ -71,7 +69,7 @@ function MorphingMesh({
   animate?: boolean;
   animationSpeed?: number;
 }) {
-  const meshRef = useRef<THREE.Mesh>();
+  const meshRef = useRef<THREE.Mesh | null>(null);
   const startAnimationRef = useRef({
     started: false,
     startTime: 0,
@@ -330,6 +328,7 @@ function MorphingMesh({
 
   return (
     <mesh ref={meshRef}>
+      {/* @ts-expect-error morphTargets typing is wacky, could be user error (bf) */}
       <meshStandardMaterial morphTargets morphNormals />
     </mesh>
   );
@@ -370,7 +369,7 @@ export const DitheredCube = ({
         <directionalLight position={[2, 2, 1]} intensity={0.5} />
         <directionalLight position={[-2, -2, 1]} intensity={2} />
         <MorphingMesh animate={animate} animationSpeed={animationSpeed} />
-        <OrbitControls enableZoom={true} />
+        <OrbitControls enableZoom={false} />
         <Effects>
           <ditheringPass />
         </Effects>

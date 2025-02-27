@@ -20,6 +20,12 @@ export const warn = (...args: unknown[]) => {
 /** Log if debugging is on */
 export const debug = (...args: unknown[]) => {
   if (isDebug) {
-    console.debug(...args);
+    if (typeof args[0] === "function") {
+      const result = args[0]();
+      if (Array.isArray(result)) console.debug(...result);
+      else console.debug(result);
+    } else {
+      console.debug(...args);
+    }
   }
 };

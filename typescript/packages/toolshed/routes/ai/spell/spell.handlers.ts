@@ -23,6 +23,7 @@ import { candidates } from "@/routes/ai/spell/caster.ts";
 import { CasterSchemaRoute } from "@/routes/ai/spell/spell.routes.ts";
 import { processSpellSearch } from "@/routes/ai/spell/behavior/spell-search.ts";
 import { captureException } from "@sentry/deno";
+import { areSchemaCompatible } from "./schema-compatibility.ts";
 
 export const ProcessSchemaRequestSchema = z.object({
   schema: z.record(
@@ -331,7 +332,8 @@ const CharmDataSchema = z.object({
 });
 
 export const RecastResponseSchema = z.object({
-  result: z.record(z.any()),
+  spellId: z.string(),
+  cells: z.record(z.any()),
 });
 
 export const ReuseResponseSchema = z.object({
@@ -352,16 +354,7 @@ export const recast: AppRouteHandler<RecastRoute> = async (c) => {
   const startTime = performance.now();
 
   try {
-    console.log("body", body);
-    const memories = await getAllMemories(body.replica);
-    console.log("memories", memories);
-    const charm = await getMemory(body.charmId, body.replica);
-    console.log("charm", charm);
-
-    const response: RecastResponse = {
-      result: {},
-    };
-
+    const response = await processRecast(body.charmId, body.replica, logger);
     return c.json(response, HttpStatusCodes.OK);
   } catch (error) {
     logger.error({ error }, "Error processing recast");
@@ -408,15 +401,20 @@ async function processReuse(
   if (Array.isArray(spells)) {
     throw new Error("Unexpected response format");
   }
+  const spellEntries = Object.entries(spells)
+    .filter(([id]) => id !== spellId);
 
-  // find spells with identical schemas
-  const candidates = Object.entries(spells)
-    .filter(([id, spell]) => {
-      if (id === spellId) return false;
+  const compatibilityChecks = await Promise.all(
+    spellEntries.map(async ([id, spell]) => {
       const spellSchema = spell.recipe.argumentSchema;
-      return (JSON.stringify(schema) === JSON.stringify(spellSchema));
-    })
-    .map(([id]) => id);
+      const isCompatible = await areSchemaCompatible(schema, spellSchema);
+      return isCompatible ? id : null;
+    }),
+  );
+
+  const candidates = compatibilityChecks.filter((id): id is string =>
+    id !== null
+  );
 
   const compatibleSpells = candidates.reduce((acc, id) => {
     acc[id] = spells[id];
@@ -428,6 +426,66 @@ async function processReuse(
     schema,
     argument,
     compatibleSpells,
+  };
+}
+
+async function processRecast(
+  charmId: string,
+  replica: string,
+  logger: Logger,
+): Promise<RecastResponse> {
+  const charm = await getMemory(charmId, replica);
+  logger.info(
+    { charmId, replica },
+    "Retrieved charm",
+  );
+
+  const source = await getMemory(charm.source["/"], replica);
+  logger.info({ sourceId: charm.source["/"] }, "Retrieved source charm");
+
+  const argument = source.value.argument;
+  const type = source.value.$TYPE;
+  logger.debug({ type, argument }, "Extracted argument and type from source");
+  const spellId = "spell-" + type;
+  logger.info({ spellId }, "Looking up spell");
+
+  const spell = await getBlob<Spell>(spellId);
+  logger.info({ spellId }, "Retrieved spell");
+  if (!spell) {
+    throw new Error("No spell found for id: " + spellId);
+  }
+
+  const schema = spell.recipe.argumentSchema;
+  logger.debug({ schema }, "Extracted argument schema from spell");
+
+  const cells = await getAllMemories(replica);
+  // First get all charms that have a $TYPE and their IDs
+  const typedCharms = Object.entries(cells)
+    .filter(([_, cell]) => cell?.value?.$TYPE)
+    .map(([id, cell]) => ({ id, cell }));
+  // Then filter to matching schemas and build record
+  const matchingCharms = await typedCharms.reduce(
+    async (accPromise, { id, cell }) => {
+      const acc = await accPromise;
+      const charmSpellId = "spell-" + cell.value.$TYPE;
+      try {
+        const charmSpell = await getBlob<Spell>(charmSpellId);
+        const charmSchema = charmSpell.recipe.argumentSchema;
+        if (await areSchemaCompatible(schema, charmSchema)) {
+          acc[id] = cell.value;
+        }
+      } catch (e) {
+        logger.error({ error: e, charmSpellId }, "Error loading spell");
+        // Skip charms where we can't load the spell
+      }
+      return acc;
+    },
+    Promise.resolve({} as Record<string, any>),
+  );
+
+  return {
+    spellId: spellId.replace("spell-", ""),
+    cells: matchingCharms,
   };
 }
 

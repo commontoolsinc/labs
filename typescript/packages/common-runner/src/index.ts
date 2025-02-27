@@ -6,7 +6,13 @@ export type { Cell, Stream } from "./cell.js";
 export type { QueryResult } from "./query-result-proxy.js";
 export type { ReactivityLog } from "./scheduler.js";
 export { getDoc, isDoc, isDocLink } from "./doc.js";
-export { isCell, isStream } from "./cell.js";
+export {
+  isCell,
+  isStream,
+  getCellFromEntityId,
+  getCellFromDocLink,
+  getImmutableCell,
+} from "./cell.js";
 export {
   getDocLinkOrThrow,
   getDocLinkOrValue,
@@ -26,3 +32,4 @@ export {
   getRecipeSrc,
 } from "./recipe-map.js";
 export { type AddCancel, type Cancel, useCancelGroup, noOp } from "./cancel.js";
+export { getSpace, type Space } from "./space.js";

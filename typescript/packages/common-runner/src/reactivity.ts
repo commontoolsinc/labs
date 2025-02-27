@@ -1,6 +1,5 @@
 import { Cancel, isCancel, noOp } from "./cancel.js";
 import { Cell, isCell } from "./cell.js";
-import { DocImpl, isDoc } from "./doc.js";
 
 /**
  * Effect that runs a callback when the value changes. The callback is also
@@ -12,12 +11,10 @@ import { DocImpl, isDoc } from "./doc.js";
  * @returns {function} - A function to cancel the effect.
  */
 export const effect = <T>(
-  value: Cell<T> | DocImpl<T> | T,
+  value: Cell<T> | T,
   callback: (value: T) => Cancel | undefined | void,
 ): Cancel => {
-  if (isDoc(value)) value = value.asCell();
-
-  if (isCell(value) || isDoc(value)) {
+  if (isCell(value)) {
     return value.sink(callback);
   } else {
     const cancel = callback(value as T);

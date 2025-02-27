@@ -22,10 +22,10 @@ export const DID = z
   .startsWith("did:")
   .refine((did): did is `did:${string}:${string}` => true);
 
-export const Space = DID.describe(
+export const Space = z.union([z.string(), DID]).describe(
   "Unique did:key identifier of the memory space",
 );
-export const Principal = DID.describe(
+export const Principal = z.union([z.string(), DID]).describe(
   "Unique DID identifier of the issuing principal",
 );
 

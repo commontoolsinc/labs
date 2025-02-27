@@ -34,33 +34,60 @@ Similarly, a `SpaceKey` is a generated (non-derived) keypair representing an ide
 Deriving a `PersonaKey` from a `RootKey` performs the following algorithm:
 
 * `i` = Encode `name` into bytes
-* `i` = SHA-512 hash `i` 
 * `i` = Sign `i` with root key
-* `i` = SHA-512 hash `i` 
+* `i` = SHA-256 hash `i` 
 * Use `i` as raw ed25519 private key material
 
 ```
-hash(sign(hash(encode(name))))
+hash(sign(encode(name)))
 ```
 
 ## Browser Support
 
 This design is bound by a complex support matrix of OS, browser, and authenticator: [Device Support]
 
-Additionally, the PRF extension **is not** currently supported in Firefox and Safari cross-device auth:
+Additionally, the PRF extension **is not** currently supported in Firefox and Safari **cross-device** auth (but is in other scenarios):
 
 * [Firefox: Support WebAuthn PRF Extension](https://bugzilla.mozilla.org/show_bug.cgi?id=1863819)
 * [Safari: PRF extension not supported in Safari's Cross-Device WebAuthn Flow](https://developer.apple.com/forums/thread/774112)
 
-### Algorithms
+### Web Authn Support Matrix
 
-The `RootKey` currently is an ed25519 key. [ed25519 is supported in Firefox and Safari](https://caniuse.com/mdn-api_subtlecrypto_sign_ed25519),
-though Chrome requires a feature flag to be enabled. As `RootKey` must be deterministically derived, we must use a consistent
-algorithm without side channel information, and algorithm support can vary between browsers.
-We could instead choose to always use RSA for the `RootKey`, which (should?) always be available, though it has less
-secure properties than ed25519.
+Here are the triples (OS+browser+authenticator) we've tested this identity flow on. Additionally, [passkeys.dev](https://passkeys.dev) maintains another [Device Support] matrix. Currently focused on desktop browsers, though we will want to support mobile auth as well.
 
-As the `RootKey` is the only key stored on the client, as such it is securely stored as a [CryptoKey](https://developer.mozilla.org/en-US/docs/Web/API/CryptoKey), requiring browser supporting the algorithm type. Otherwise, we could use userspace ed25519 algorithms, like we plan on doing for derived identities.
+| OS           | Browser        | Authenticator | Status             | Notes               |
+| ------------ | -------------- | ------------- | ------------------ | ------------------- |
+| Linux        | *              | 1Password     | :x:                | PRF not supported.  |
+| Linux        | Chrome         | Yubikey       | :white_check_mark: |                     |
+| Linux        | Firefox        | Yubikey       | :white_check_mark: | [Firefox 135+][bugzil.la/1935277] |
+| MacOS        | *              | 1Password     | :x:                | PRF not supported.  |
+| MacOS        | Chrome         | iCloud        | :white_check_mark: |                     |
+| MacOS        | Firefox        | iCloud        | :question:         |                     |
+| MacOS        | Safari         | iCloud        | :question:         |                     |
+| MacOS        | Chrome         | Yubikey       | :question:         |                     |
+| MacOS        | Firefox        | Yubikey       | :question:         |                     |
+| MacOS        | Safari         | Yubikey       | :question:         |                     |
+| Windows      | *              | 1Password     | :x:                | PRF not supported.  |
+| Windows      | Chrome         | Windows Hello | :question:         |                     |
+| Windows      | Edge           | Windows Hello | :question:         |                     |
+| Windows      | Firefox        | Windows Hello | :question:         |                     |
+| Windows      | Chrome         | Yubikey       | :question:         |                     |
+| Windows      | Edge           | Yubikey       | :question:         |                     |
+| Windows      | Firefox        | Yubikey       | :question:         | [Firefox 135+][bugzil.la/1935277] |
+
+### Web Crypto Ed25519 Keys
+
+Using the native [Web Crypto API] is preferred for security and distribution reasons, and also it's a prerequisite to safely storing keys in IndexedDB in a non-extractable form. [Ed25519 keys are supported in Firefox and Safari](https://caniuse.com/mdn-api_subtlecrypto_sign_ed25519), though Chromium browsers require *Experimental Web Platform Features* to be enabled.
+
+For unsupported browsers, we instead use the audited library, [@noble/ed25519]. The non-native keys are stored as buffers in IndexedDB and are **extractable** :warning:.
+
+In the future, we can explore upgrading a noble key to a native one when a noble key is recovered in a browser (that now) supports native ed25519 keys.
+
+| Browser  | Supported?         | Notes  |
+| -------- | ------------------ | ------ |
+| Firefox  | :heavy_check_mark: | [Firefox 136+][bugzil.la/1939993] |
+| Safari   | :white_check_mark: | |
+| Chrome   | :heavy_check_mark: | Requires *Experimental Web Platform Features* flag |
 
 ## Usage
 
@@ -117,5 +144,10 @@ function setRootKey(rootKey) {
 * Reset security keys via chrome `chrome://settings/securityKeys`
 * [Device Support](https://passkeys.dev/device-support/)
 
+[Web Crypto API]: https://developer.mozilla.org/en-US/docs/Web/API/Web_Crypto_API
 [Web Authentication API]: https://developer.mozilla.org/en-US/docs/Web/API/Web_Authentication_API
 [PRF extension]: https://github.com/w3c/webauthn/wiki/Explainer:-PRF-extension
+[Device Support]: https://passkeys.dev/device-support/
+[@noble/ed25519]: https://github.com/paulmillr/noble-ed25519
+[bugzil.la/1935277]: https://bugzilla.mozilla.org/show_bug.cgi?id=1935277
+[bugzil.la/1939993]: https://bugzilla.mozilla.org/show_bug.cgi?id=1939993
