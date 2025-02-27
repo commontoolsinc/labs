@@ -84,15 +84,15 @@ class MemoryConsumerSession
       const invocation = this.invocations.get(id);
       this.invocations.delete(id);
       invocation?.return(command.is);
-    } else if (command.the === "task/effect") {
-      for (const [, subscriber] of this.subscribers) {
-        const channels = new Set(
-          Subscription.channels(subscriber.query.space, subscriber.selector),
-        );
-
-        if (Subscription.match(command.is, channels)) {
-          subscriber.perform(command.is);
-        }
+    }
+    // If it is an effect it can be for one specific subscription, yet we may
+    // have other subscriptions that will be affected. There for we simply
+    // pass effect to each one and they can detect if it concerns them.
+    // ℹ️ We could optimize this in the future and try indexing subscriptions
+    // so we don't have to broadcast to all.
+    else if (command.the === "task/effect") {
+      for (const [, invocation] of this.invocations) {
+        invocation.perform(command.is);
       }
     }
   }
@@ -103,13 +103,9 @@ class MemoryConsumerSession
     const command = invocation.toJSON();
     const id = `job:${refer(command)}` as InvocationURL<Reference<Invocation>>;
 
-    // TODO: Don't do this hack
-    const invocations =
-      invocation instanceof QuerySubscriptionInvocation ? this.subscribers : this.invocations;
-
-    const pending = invocations.get(id);
+    const pending = this.invocations.get(id);
     if (!pending) {
-      invocations.set(id, invocation as unknown as Job<Ability, Protocol>);
+      this.invocations.set(id, invocation as unknown as Job<Ability, Protocol>);
       this.send(command as ConsumerCommand<Protocol>);
     } else {
       invocation.return(pending.promise as any);

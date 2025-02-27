@@ -17,7 +17,6 @@ const main = async () => {
   Deno.writeFileSync(`debug.json`, new TextEncoder().encode(JSON.stringify(tr, null, 2)));
 
   const start = Date.now();
-  console.log("start transaction");
   const transaction = await provider.transact(tr as Provider.Transaction);
   console.log("end transaction", Date.now() - start);
   console.log(transaction);

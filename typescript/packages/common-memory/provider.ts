@@ -141,7 +141,6 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
     this.sessions = null;
   }
   async invoke(command: ConsumerCommand<Protocol>) {
-    console.log(`invoke`, command.cmd, ++this.count);
     switch (command.cmd) {
       case "/memory/query": {
         return this.perform({
