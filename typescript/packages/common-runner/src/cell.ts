@@ -85,7 +85,6 @@ export interface Cell<T> {
 export interface Stream<T> {
   send(event: T): void;
   sink(callback: (event: T) => Cancel | undefined | void): Cancel;
-  updates(callback: (event: T) => Cancel | undefined | void): Cancel;
   [isStreamMarker]: true;
 }
 
@@ -154,7 +153,6 @@ function createStreamCell<T>(doc: DocImpl<any>, path: PropertyKey[]): Stream<T> 
       listeners.add(callback);
       return () => listeners.delete(callback);
     },
-    updates: (callback: (value: T) => Cancel | undefined): Cancel => self.sink(callback),
     [isStreamMarker]: true,
   } satisfies Stream<T>;
 
