@@ -32,21 +32,19 @@ import {
   Clock,
   UTCUnixTimestampInSeconds,
   Seconds,
-  Subscribe,
   Selector,
-  ChangesBuilder,
-  The,
+  Changes,
   Cause,
 } from "./interface.ts";
 import { refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
-import * as Changes from "./changes.ts";
+import * as ChangesBuilder from "./changes.ts";
 import * as Fact from "./fact.ts";
 import * as Access from "./access.ts";
 import * as Subscription from "./subscription.ts";
 
 export * from "./interface.ts";
-export { Changes as ChangesBuilder };
+export { ChangesBuilder };
 
 export const connect = ({
   address,
@@ -152,16 +150,6 @@ class MemoryConsumerSession<Space extends MemorySpace, MemoryProtocol extends Pr
     }
   }
 
-  execute<Space extends MemorySpace, Ability extends string>(
-    invocation: ConsumerInvocation<Space, Ability>,
-  ) {
-    const command = invocation.toJSON();
-    const id = `job:${refer(command)}` as InvocationURL<Reference<Invocation>>;
-
-    const pending = this.invocations.get(id);
-    if (!pending) {
-      this.invocations.set(id, invocation as unknown as Job<Ability, Protocol>);
-      this.send(command as ConsumerCommand<Protocol>);
   invoke<Ability extends string>(command: ConsumerCommandFor<Ability, MemoryProtocol>) {
     const invocation = ConsumerInvocation.create(
       this.as.did(),
@@ -172,6 +160,7 @@ class MemoryConsumerSession<Space extends MemorySpace, MemoryProtocol extends Pr
     this.execute(invocation);
     return invocation;
   }
+
   async execute<Ability extends string>(invocation: ConsumerInvocation<Ability, MemoryProtocol>) {
     const { error, ok: authorization } = await Access.authorize([invocation.refer()], this.as);
     if (error) {
@@ -354,8 +343,8 @@ class QueryView<Space extends MemorySpace, MemoryProtocol extends Protocol<Space
     return this.promise.then(onResolve, onReject);
   }
 
-  get space() {
-    return this.invocation.source.sub;
+  get space(): Space {
+    return this.invocation.sub as MemorySpace as Space;
   }
 
   integrate(differential: Changes) {
@@ -363,7 +352,7 @@ class QueryView<Space extends MemorySpace, MemoryProtocol extends Protocol<Space
     for (const [of, attributes] of Object.entries(differential)) {
       for (const [the, changes] of Object.entries(attributes)) {
         for (const [cause, change] of Object.entries(changes)) {
-          Changes.set(selection, [of], the, { [cause]: change });
+          ChangesBuilder.set(selection, [of], the, { [cause]: change });
         }
       }
     }
@@ -446,7 +435,7 @@ class QuerySubscriptionInvocation<
 
               if (match) {
                 differential = differential ?? {};
-                Changes.set(differential, [of], the, { [cause]: change });
+                ChangesBuilder.set(differential, [of], the, { [cause]: change });
               }
             }
           }

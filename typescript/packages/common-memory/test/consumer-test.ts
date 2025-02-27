@@ -408,7 +408,7 @@ test("cancel subscription", store, async (session) => {
 });
 
 test("several subscriptions receive single update", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space);
+  const memory = Consumer.open({ as: alice, session }).mount(space.did());
   const doc1 = `of:${refer({ doc: 1 })}` as const;
   const doc2 = `of:${refer({ doc: 2 })}` as const;
 
@@ -435,10 +435,10 @@ test("several subscriptions receive single update", store, async (session) => {
   assert(tr.ok);
 
   assertEquals(query1?.selection, {
-    [space]: Changes.from([fact1]),
+    [space.did()]: Changes.from([fact1]),
   });
 
   assertEquals(query2?.selection, {
-    [space]: Changes.from([fact2]),
+    [space.did()]: Changes.from([fact2]),
   });
 });

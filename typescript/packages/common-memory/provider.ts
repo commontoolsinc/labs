@@ -165,8 +165,6 @@ class MemoryProviderSession<Space extends MemorySpace, MemoryProtocol extends Pr
       Reference<ConsumerCommandInvocation<Protocol>>
     >;
 
-    invocation.cmd;
-
     switch (invocation.cmd) {
       case "/memory/query": {
         return this.perform({
