@@ -1,5 +1,5 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
-import type { LoginRoute, CallbackRoute } from "./google-oauth.routes.ts";
+import type { LoginRoute, CallbackRoute, RefreshRoute } from "./google-oauth.routes.ts";
 import { OAuth2Client } from "jsr:@cmd-johnson/oauth2-client@^2.0.0";
 import env from "@/env.ts";
 import { CharmManager, compileRecipe, createStorage } from "@commontools/charm";
@@ -352,3 +352,137 @@ async function fetchUserInfo(accessToken: string) {
     return { error: "Failed to fetch user info" };
   }
 }
+
+export const refresh: AppRouteHandler<RefreshRoute> = async (c) => {
+  const logger = c.get("logger");
+
+  try {
+    const payload = await c.req.json();
+    logger.info({ payload }, "Received Google OAuth refresh request");
+
+    if (!payload.authCellId) {
+      logger.error("No authCellId provided in refresh request");
+      return c.json(
+        {
+          success: false,
+          error: "No authCellId provided",
+        },
+        400,
+      );
+    }
+
+    // Parse the JSON string to get the DocLink object
+    const docLink = JSON.parse(payload.authCellId);
+    logger.info({ docLink }, "Parsed docLink for refresh");
+
+    const storage = createStorage({
+      type: "remote",
+      replica: "uh2",
+      url: new URL("http://localhost:8000"),
+    });
+
+    // Load the auth cell
+    await storage.syncCell(docLink.cell, true);
+    const authCell = getCellFromDocLink(docLink);
+
+    if (!authCell) {
+      logger.error("Auth cell not found");
+      return c.json(
+        {
+          success: false,
+          error: "Auth cell not found",
+        },
+        400,
+      );
+    }
+
+    // Get the current token data from the cell
+    const tokenData = authCell.get();
+    logger.info({ tokenDataExists: !!tokenData }, "Retrieved token data from auth cell");
+
+    if (!tokenData || !tokenData.refreshToken) {
+      logger.error("No refresh token found in auth cell");
+      return c.json(
+        {
+          success: false,
+          error: "No refresh token found",
+        },
+        400,
+      );
+    }
+
+    // Get the base URL from the request
+    const baseUrl = getBaseUrl(c.req.url);
+    const redirectUri = `${baseUrl}/api/integrations/google-oauth/callback`;
+
+    // Create OAuth client
+    const client = createOAuthClient(redirectUri);
+
+    // Refresh the token
+    try {
+      console.log("~~~~~");
+      console.log("PREVIOUS TOKEN", tokenData);
+      console.log("~~~~~");
+      const tokens = await client.refreshToken.refresh(tokenData.refreshToken);
+      console.log("~~~~~");
+      console.log("NEW TOKEN", tokens);
+      console.log("~~~~~");
+
+      logger.info(
+        {
+          accessToken: tokens.accessToken.substring(0, 10) + "...",
+          expiresAt: tokens.expiresAt,
+          hasRefreshToken: !!tokens.refreshToken,
+        },
+        "Refreshed OAuth tokens",
+      );
+
+      // Update the token data in the auth cell
+      const updatedTokenData = {
+        token: tokens.accessToken,
+        tokenType: tokens.tokenType,
+        scope: tokens.scope,
+        expiresIn: tokens.expiresIn,
+        // Keep the existing refresh token if a new one wasn't provided
+        refreshToken: tokens.refreshToken || tokenData.refreshToken,
+        expiresAt: Date.now() + tokens.expiresIn * 1000,
+      };
+
+      // Set the updated tokens to the auth cell
+      authCell.set(updatedTokenData);
+      logger.info("Updated tokens in auth cell");
+
+      // Ensure the cell is synced
+      await storage.synced();
+      logger.info("Storage synced after token refresh");
+
+      return c.json({
+        success: true,
+        message: "Token refreshed successfully",
+        tokenInfo: {
+          accessTokenPrefix: tokens.accessToken.substring(0, 10) + "...",
+          expiresAt: updatedTokenData.expiresAt,
+          hasRefreshToken: !!updatedTokenData.refreshToken,
+        },
+      });
+    } catch (error) {
+      logger.error({ error }, "Failed to refresh token");
+      return c.json(
+        {
+          success: false,
+          error: "Failed to refresh token. The refresh token may be invalid or expired.",
+        },
+        401,
+      );
+    }
+  } catch (error) {
+    logger.error({ error }, "Failed to process refresh request");
+    return c.json(
+      {
+        success: false,
+        error: "Failed to process refresh request",
+      },
+      400,
+    );
+  }
+};

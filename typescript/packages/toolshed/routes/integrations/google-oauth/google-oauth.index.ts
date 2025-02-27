@@ -5,7 +5,8 @@ import { cors } from "hono/cors";
 
 const router = createRouter()
   .openapi(routes.login, handlers.login)
-  .openapi(routes.callback, handlers.callback);
+  .openapi(routes.callback, handlers.callback)
+  .openapi(routes.refresh, handlers.refresh);
 
 router.use(
   "/api/integrations/google-oauth/*",

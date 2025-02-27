@@ -103,5 +103,76 @@ export const callback = createRoute({
   },
 });
 
+export const refresh = createRoute({
+  path: "/api/integrations/google-oauth/refresh",
+  method: "post",
+  tags,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z
+            .object({
+              authCellId: z
+                .string()
+                .describe("The authentication cell ID containing the refresh token"),
+            })
+            .openapi({
+              example: {
+                authCellId: "auth-cell-123",
+              },
+            }),
+        },
+      },
+    },
+  },
+  responses: {
+    [HttpStatusCodes.OK]: {
+      content: {
+        "application/json": {
+          schema: z.union([
+            z.object({
+              success: z.boolean(),
+              message: z.string(),
+              tokenInfo: z
+                .object({
+                  accessTokenPrefix: z.string(),
+                  expiresAt: z.number(),
+                  hasRefreshToken: z.boolean(),
+                })
+                .optional(),
+            }),
+            z.object({
+              error: z.string(),
+            }),
+          ]),
+        },
+      },
+      description: "Token refresh response",
+    },
+    [HttpStatusCodes.BAD_REQUEST]: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            error: z.string(),
+          }),
+        },
+      },
+      description: "Invalid request parameters or refresh token not found",
+    },
+    [HttpStatusCodes.UNAUTHORIZED]: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            error: z.string(),
+          }),
+        },
+      },
+      description: "Refresh token is invalid or expired",
+    },
+  },
+});
+
 export type LoginRoute = typeof login;
 export type CallbackRoute = typeof callback;
+export type RefreshRoute = typeof refresh;
