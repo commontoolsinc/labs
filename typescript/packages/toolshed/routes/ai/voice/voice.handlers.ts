@@ -24,6 +24,28 @@ interface TranscriptionResult {
   chunks: TranscriptionChunk[];
 }
 
+// ElevenLabs API types
+interface ElevenLabsTranscriptionResponse {
+  text: string;
+  words?: Array<{
+    word: string;
+    start: number;
+    end: number;
+    confidence: number;
+  }>;
+  iab_categories?: Record<string, number>;
+  audio_events?: Array<{
+    type: string;
+    start: number;
+    end: number;
+  }>;
+  speakers?: Array<{
+    speaker_id: string;
+    start: number;
+    end: number;
+  }>;
+}
+
 async function generateCacheKey(buffer: ArrayBuffer): Promise<string> {
   const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
@@ -83,6 +105,21 @@ function formatResponse(
   }
 }
 
+// Convert ElevenLabs word data to TranscriptionChunk format
+function convertElevenLabsToChunks(
+  response: ElevenLabsTranscriptionResponse,
+): TranscriptionChunk[] {
+  if (!response.words) {
+    return [];
+  }
+
+  return response.words.map((word) => ({
+    text: word.word,
+    timestamp: [word.start, word.end],
+    confidence: word.confidence,
+  }));
+}
+
 export const transcribeVoice: AppRouteHandler<TranscribeVoiceRoute> = async (
   c,
 ) => {
@@ -129,31 +166,47 @@ export const transcribeVoice: AppRouteHandler<TranscribeVoiceRoute> = async (
 
   logger.info({ promptSha }, "Cache MISS - Generating new transcription");
 
+  // Get the provider from query params, default to "fal"
+  const provider = c.req.query("provider") || "fal";
+
   try {
-    const audioUrl = await uploadToFAL(audioBuffer, contentType);
-    logger.info({ audioUrl }, "Audio uploaded to FAL storage");
+    let transcription: string;
+    let chunks: TranscriptionChunk[];
 
-    const result = await fal.subscribe("fal-ai/wizper", {
-      input: { audio_url: audioUrl },
-    });
+    if (provider === "elevenlabs") {
+      logger.info("Using ElevenLabs for transcription");
+      const result = await transcribeWithElevenLabs(
+        audioBuffer,
+        contentType,
+        logger,
+      );
+      transcription = result.transcription;
+      chunks = result.chunks;
+    } else {
+      // Default to FAL
+      logger.info("Using FAL for transcription");
+      const audioUrl = await uploadToFAL(audioBuffer, contentType);
+      logger.info({ audioUrl }, "Audio uploaded to FAL storage");
 
-    if (!result.data?.text) {
-      logger.error({ result }, "No transcription in response");
-      return c.json({ error: "Failed to transcribe audio" }, 400);
+      const result = await fal.subscribe("fal-ai/wizper", {
+        input: { audio_url: audioUrl },
+      });
+
+      if (!result.data?.text) {
+        logger.error({ result }, "No transcription in response");
+        return c.json({ error: "Failed to transcribe audio" }, 400);
+      }
+
+      transcription = result.data.text;
+      chunks = result.data.chunks as unknown as TranscriptionChunk[] || [];
     }
-
-    const transcription = result.data.text;
-    const chunks = result.data.chunks as unknown as TranscriptionChunk[] || [];
 
     logger.info(
       { chars: transcription.length, chunks: chunks.length },
       "Transcription generated successfully",
     );
 
-    const transcriptionResult = {
-      transcription,
-      chunks: chunks as unknown as TranscriptionChunk[],
-    };
+    const transcriptionResult = { transcription, chunks };
     await saveTranscriptionToCache(cachePath, transcriptionResult, logger);
 
     return c.json(
@@ -165,3 +218,62 @@ export const transcribeVoice: AppRouteHandler<TranscribeVoiceRoute> = async (
     return c.json({ error: "Failed to transcribe audio" }, 500);
   }
 };
+
+async function transcribeWithElevenLabs(
+  audioBuffer: ArrayBuffer,
+  contentType: AllowedContentType,
+  logger: Logger,
+): Promise<TranscriptionResult> {
+  if (!env.ELEVENLABS_API_KEY) {
+    throw new Error("ELEVENLABS_API_KEY is not configured");
+  }
+
+  const url = "https://api.elevenlabs.io/v1/speech-to-text";
+
+  // Create form data with the audio file
+  const formData = new FormData();
+  const file = new File([audioBuffer], "audio.wav", { type: contentType });
+  formData.append("file", file);
+  formData.append("model_id", "scribe_v1");
+  formData.append("tag_audio_events", "true");
+  formData.append("diarize", "true");
+
+  // Optional: detect language automatically by not specifying language_code
+  // formData.append("language_code", "eng");
+
+  logger.info("Sending request to ElevenLabs API");
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "xi-api-key": env.ELEVENLABS_API_KEY,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(
+      { status: response.status, error: errorText },
+      "ElevenLabs API error",
+    );
+    throw new Error(`ElevenLabs API error: ${response.status} ${errorText}`);
+  }
+
+  const data = await response.json() as ElevenLabsTranscriptionResponse;
+
+  if (!data.text) {
+    throw new Error("No transcription returned from ElevenLabs");
+  }
+
+  logger.info({
+    textLength: data.text.length,
+    hasWords: !!data.words,
+    wordCount: data.words?.length || 0,
+  }, "ElevenLabs transcription received");
+
+  return {
+    transcription: data.text,
+    chunks: convertElevenLabsToChunks(data),
+  };
+}

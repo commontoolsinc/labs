@@ -44,6 +44,10 @@ export const transcribeVoice = createRoute({
         .describe(
           "Type of response: full (default), text (transcription only), or chunks (timestamps only)",
         ),
+      provider: z.enum(["fal", "elevenlabs"]).default("fal")
+        .describe(
+          "Transcription provider to use: fal (default) or elevenlabs",
+        ),
     }),
     body: {
       content: {
