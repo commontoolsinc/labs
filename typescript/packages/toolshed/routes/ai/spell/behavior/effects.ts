@@ -21,10 +21,13 @@ export class MemoryError extends Error {
 }
 
 function handleErrorResponse(data: any) {
+  if (typeof data.error === "string") {
+    throw new MemoryError(data.error, data);
+  }
   if ("cause" in data.error) {
     throw new MemoryError(data?.error?.cause?.message, data);
   } else {
-    throw new MemoryError(data?.error?.message, data);
+    throw new MemoryError(data?.error?.message || "Unknown error", data);
   }
 }
 

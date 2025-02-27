@@ -446,12 +446,14 @@ async function processRecast(
   const argument = source.value.argument;
   const type = source.value.$TYPE;
   logger.debug({ type, argument }, "Extracted argument and type from source");
-
   const spellId = "spell-" + type;
   logger.info({ spellId }, "Looking up spell");
 
   const spell = await getBlob<Spell>(spellId);
   logger.info({ spellId }, "Retrieved spell");
+  if (!spell) {
+    throw new Error("No spell found for id: " + spellId);
+  }
 
   const schema = spell.recipe.argumentSchema;
   logger.debug({ schema }, "Extracted argument schema from spell");
