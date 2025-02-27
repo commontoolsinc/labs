@@ -1,5 +1,5 @@
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { SpellPreview } from "@/components/spellbook/SpellPreview.ts";
+import { SpellPreview } from "@/components/spellbook/SpellPreview.tsx";
 import { LuHeart, LuMessageSquare, LuSend } from "react-icons/lu";
 
 interface SpellCardProps {
