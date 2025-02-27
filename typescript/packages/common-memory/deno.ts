@@ -1,4 +1,3 @@
-import { copySync } from "@std/fs/copy";
 import * as Provider from "./provider.ts";
 import * as Socket from "./socket.ts";
 import * as Path from "jsr:@std/path";

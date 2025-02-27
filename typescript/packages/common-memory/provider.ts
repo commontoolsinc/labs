@@ -95,8 +95,6 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
 
   channels: Map<InvocationURL<Reference<Subscribe>>, Set<string>> = new Map();
 
-  count = 0;
-
   constructor(
     public memory: MemorySession,
     public sessions: null | Set<ProviderSession<Protocol>>,
@@ -189,9 +187,10 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
   transact(transaction: Transaction) {
     for (const [id, channels] of this.channels) {
       if (Subscription.match(transaction, channels)) {
-        // We exit on the first match as consumer will locally distribute
-        // updates to corresponding subscribed queries that way we avoid sending
-        // duplicate transactions to the same session.
+        // Note that we intentionally exit on the first match because we do not
+        // want to send same transaction multiple times to the same consumer.
+        // Consumer does it's own bookkeeping of all the subscriptions and will
+        // distribute transaction to all of them locally.
         return this.perform({
           the: "task/effect",
           of: id,

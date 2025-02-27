@@ -87,8 +87,7 @@ export const query = async (session: Session, query: Query) => {
     return { error };
   }
 
-  const result = space.query(query);
-  return result;
+  return space.query(query);
 };
 
 export const transact = async (session: Session, transaction: Transaction) => {
