@@ -136,7 +136,6 @@ export const refresh = createRoute({
               message: z.string(),
               tokenInfo: z
                 .object({
-                  accessTokenPrefix: z.string(),
                   expiresAt: z.number(),
                   hasRefreshToken: z.boolean(),
                 })
