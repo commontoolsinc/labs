@@ -34,9 +34,10 @@ async function main(
   let charm
   if (charmId) {
     charm = await manager.get(charmId, true);
-    console.log("got charm", charm);
+    console.log("got charm", charm.get());
     await idle();
-    charm.key("updater").send({ emails: emailsWithContent });
+    // charm.key("updater").send({ emails: emailsWithContent.slice(0, 1) });
+    charm.key("emails").push(emailsWithContent[0]);
   } else {
     const recipe = await compileRecipe(recipeSrc, "recipe", []);
 

@@ -219,6 +219,7 @@ export interface SpaceSession<Space extends MemorySpace = MemorySpace> extends S
 export interface MemorySession<Space extends MemorySpace = MemorySpace> extends Session<Space> {
   subscribe(subscriber: Subscriber<Space>): SubscribeResult;
   unsubscribe(subscriber: Subscriber<Space>): SubscribeResult;
+  listDatabases(): Promise<Result<string[], SystemError>>;
 }
 
 export interface Subscriber<Space extends MemorySpace = MemorySpace> {

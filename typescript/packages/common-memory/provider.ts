@@ -19,6 +19,7 @@ import type {
   InvocationURL,
   TransactionResult,
   QueryResult,
+  SystemError,
 } from "./interface.ts";
 import * as Subscription from "./subscription.ts";
 
@@ -49,6 +50,7 @@ export interface Provider {
 
   transact(transaction: Transaction): TransactionResult;
   query(source: Query): QueryResult;
+  listDatabases(): Promise<Result<string[], SystemError>>;
 }
 
 interface Session {
@@ -75,6 +77,10 @@ class MemoryProvider implements Provider {
     const session = new MemoryProviderSession(this.memory, this.sessions);
     this.sessions.add(session);
     return session;
+  }
+
+  async listDatabases(): Promise<Result<string[], SystemError>> {
+    return this.memory.listDatabases();
   }
 
   async close() {
@@ -218,6 +224,8 @@ export const fetch = async (session: Session, request: Request) => {
     return await patch(session, request);
   } else if (request.method === "POST") {
     return await post(session, request);
+  } else if (request.method === "GET" && request.url.endsWith("/databases")) {
+    return await getDatabases(session, request);
   } else {
     return new Response(null, { status: 501 });
   }
@@ -285,6 +293,35 @@ export const post = async (session: Session, request: Request) => {
           "Content-Type": "application/json",
         },
       },
+    );
+  }
+};
+
+export const getDatabases = async (session: Session, request: Request) => {
+  try {
+    const result = await session.memory.listDatabases();
+    const body = JSON.stringify(result);
+    const status = result.ok ? 200 : 503;
+
+    return new Response(body, {
+      status,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  } catch (cause) {
+    const error = cause as Partial<Error>;
+    return new Response(
+      JSON.stringify({
+        error: {
+          name: error?.name ?? "Error",
+          message: error?.message ?? "Unable to list databases",
+          stack: error?.stack ?? "",
+        },
+      }),
+      {
+        status: 500,
+      }
     );
   }
 };

@@ -69,6 +69,10 @@ export class Memory implements Session, MemorySession {
   close() {
     return this.perform(() => close(this));
   }
+
+  async listDatabases(): Promise<Result<string[], SystemError>> {
+    return this.perform(() => listDatabases(this));
+  }
 }
 
 export const subscribe = (session: Session, subscriber: Subscriber) => {
@@ -161,4 +165,33 @@ export const close = async (session: Session) => {
   const results = await Promise.all(promises);
   const result = results.find((result) => result?.error);
   return result ?? { ok: {} };
+};
+
+export const listDatabases = async (session: Session): Promise<Result<string[], SystemError>> => {
+  try {
+    // First, include all spaces that are already loaded in memory
+    const databases = new Set<string>(session.spaces.keys());
+    
+    // If it's a file-based store, also scan the directory for SQLite files
+    if (session.store.protocol === "file:") {
+      const dirPath = session.store.pathname;
+      
+      try {
+        for await (const entry of Deno.readDir(dirPath)) {
+          if (entry.isFile && entry.name.endsWith('.sqlite')) {
+            // Remove the .sqlite extension to get the database name
+            const dbName = entry.name.slice(0, -7); // Remove '.sqlite'
+            databases.add(dbName);
+          }
+        }
+      } catch (error) {
+        // If we can't read the directory, just return what we have in memory
+        console.error(`Error reading directory: ${error.message}`);
+      }
+    }
+    
+    return { ok: Array.from(databases) };
+  } catch (cause) {
+    return { error: cause as SystemError };
+  }
 };

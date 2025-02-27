@@ -8,6 +8,7 @@ const router = createRouter();
 const Router = router
   .openapi(routes.transact, handlers.transact)
   .openapi(routes.query, handlers.query)
-  .openapi(routes.subscribe, handlers.subscribe);
+  .openapi(routes.subscribe, handlers.subscribe)
+  .openapi(routes.listDatabases, handlers.listDatabases);
 
 export default Router;

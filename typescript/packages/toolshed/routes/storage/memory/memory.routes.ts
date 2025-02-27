@@ -260,3 +260,25 @@ export const subscribe = createRoute({
     },
   },
 });
+
+export const listDatabases = createRoute({
+  method: "get",
+  path: "/api/storage/memory/databases",
+  tags,
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      z.object({
+        ok: z.array(z.string()).describe("List of database names"),
+      }),
+      "List of available databases"
+    ),
+    [HttpStatusCodes.SERVICE_UNAVAILABLE]: jsonContent(
+      error(ConnectionError),
+      "Memory service unable to list databases"
+    ),
+    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(
+      error(SystemError),
+      "Memory service error"
+    ),
+  },
+});

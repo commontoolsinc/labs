@@ -57,3 +57,18 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
   session.readable.pipeThrough(memory.session()).pipeTo(session.writable);
   return response;
 };
+
+export const listDatabases: AppRouteHandler<typeof Routes.listDatabases> = async (c) => {
+  try {
+    const result = await memory.listDatabases();
+    
+    if (result.ok) {
+      return c.json({ ok: result.ok }, 200);
+    } else {
+      return c.json({ error: result.error }, 503);
+    }
+  } catch (cause) {
+    const { message, stack, name } = (cause ?? new Error(cause as any)) as Error;
+    return c.json({ error: { message, name, stack } }, 500);
+  }
+};
