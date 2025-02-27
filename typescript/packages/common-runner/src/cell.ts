@@ -35,10 +35,6 @@ import { Space } from "./space.js";
  * @param {function} callback - The callback to be called when the cell changes.
  * @returns {function} - A function to Cleanup the callback.
  *
- * @method updates Adds a callback that is called on cell changes.
- * @param {function} callback - The callback to be called when the cell changes.
- * @returns {function} - A function to Cleanup the callback.
- *
  * @method getAsProxy Returns a value proxy for the cell.
  * @param {Path} path - The path to follow.
  * @returns {QueryResult<DeepKeyLookup<T, Path>>}
@@ -68,7 +64,6 @@ export interface Cell<T> {
   ): void;
   equals(other: Cell<any>): boolean;
   sink(callback: (value: T) => Cancel | undefined | void): Cancel;
-  updates(callback: (value: T) => Cancel | undefined | void): Cancel;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
   asSchema(schema?: JSONSchema): Cell<T>;
   withLog(log: ReactivityLog): Cell<T>;
@@ -90,7 +85,6 @@ export interface Cell<T> {
 export interface Stream<T> {
   send(event: T): void;
   sink(callback: (event: T) => Cancel | undefined | void): Cancel;
-  updates(callback: (event: T) => Cancel | undefined | void): Cancel;
   [isStreamMarker]: true;
 }
 
@@ -159,7 +153,6 @@ function createStreamCell<T>(doc: DocImpl<any>, path: PropertyKey[]): Stream<T> 
       listeners.add(callback);
       return () => listeners.delete(callback);
     },
-    updates: (callback: (value: T) => Cancel | undefined): Cancel => self.sink(callback),
     [isStreamMarker]: true,
   } satisfies Stream<T>;
 
@@ -232,9 +225,7 @@ function createRegularCell<T>(
     },
     equals: (other: Cell<any>) => JSON.stringify(self) === JSON.stringify(other),
     sink: (callback: (value: T) => Cancel | undefined) =>
-      subscribeToReferencedDocs(callback, true, doc, path, schema, rootSchema),
-    updates: (callback: (value: T) => Cancel | undefined) =>
-      subscribeToReferencedDocs(callback, false, doc, path, schema, rootSchema),
+      subscribeToReferencedDocs(callback, doc, path, schema, rootSchema),
     key: <K extends keyof T>(key: K) => {
       const currentSchema =
         schema?.type === "object"
@@ -281,7 +272,6 @@ function createRegularCell<T>(
 
 function subscribeToReferencedDocs<T>(
   callback: (value: T) => Cancel | undefined,
-  callCallbackOnFirstRun: boolean,
   doc: DocImpl<any>,
   path: PropertyKey[],
   schema: JSONSchema | undefined,
@@ -291,13 +281,11 @@ function subscribeToReferencedDocs<T>(
     reads: [],
     writes: [],
   } satisfies ReactivityLog;
-  let cleanup: Cancel | undefined;
-
   // Get the value once to determine all the docs that need to be subscribed to.
   const value = validateAndTransform(doc, path, schema, initialLog, rootSchema) as T;
 
   // Call the callback once with initial value if requested.
-  if (callCallbackOnFirstRun) cleanup = callback(value);
+  let cleanup: Cancel | undefined = callback(value);
 
   // Subscribe to the docs that are read (via logs), call callback on next change.
   const cancel = subscribe((log) => {
