@@ -162,9 +162,34 @@ export async function processSchema(
   );
 
   let result: Record<string, unknown> | Array<Record<string, unknown>>;
+  function extractJSON(
+    text: string,
+  ): Record<string, unknown> | Array<Record<string, unknown>> {
+    try {
+      // Try to extract from markdown code block first
+      const markdownMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (markdownMatch) {
+        return JSON.parse(markdownMatch[1].trim());
+      }
+
+      // If not in markdown, try to find JSON-like content
+      const jsonMatch = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0].trim());
+      }
+
+      // If no special formatting, try parsing the original text
+      return JSON.parse(text.trim());
+    } catch (error) {
+      return {};
+    }
+  }
+
   try {
     logger.debug("Parsing LLM response");
-    result = JSON.parse(llmResponse);
+    result = extractJSON(llmResponse);
+    logger.debug({ extractedJSON: result }, "Extracted JSON from response");
+
     if (body.many && !Array.isArray(result)) {
       logger.debug("Converting single object to array for many=true");
       result = [result];
