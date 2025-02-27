@@ -103,7 +103,7 @@ export const castSpellAsCharm = async (
     if (!recipe) return;
 
     console.log("Syncing blob...");
-    const cell = await charmManager.getCellById(blobId, ["argument"]);
+    const cell = await charmManager.getCellById({ '/': blobId }, ["argument"]);
     console.log("Casting...");
     const charm: Cell<Charm> = await charmManager.runPersistent(recipe, cell);
     charmManager.add([charm]);
