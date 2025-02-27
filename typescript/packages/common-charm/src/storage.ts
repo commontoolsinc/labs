@@ -233,7 +233,12 @@ class StorageImpl implements Storage {
     let provider = this.storageProviders.get(space);
 
     if (!provider) {
-      const type = (import.meta as any).env?.VITE_STORAGE_TYPE ?? "remote";
+      // Default to "remote", but let either custom URL (used in tests) or
+      // environment variable override this.
+      const type =
+        this.remoteStorageUrl?.protocol === "memory:"
+          ? "memory"
+          : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "remote");
 
       if (type === "remote") {
         if (!this.remoteStorageUrl) throw new Error("No remote storage URL set");
