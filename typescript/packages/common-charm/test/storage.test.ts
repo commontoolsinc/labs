@@ -115,6 +115,7 @@ describe("Storage", () => {
       // the same cell.
       const cell2 = getDoc();
       cell2.entityId = testCell.entityId;
+      cell2.space = testCell.space;
       const cell3 = await storage.syncCell(cell2);
       expect(cell3).toBe(cell1);
     });
