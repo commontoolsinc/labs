@@ -187,7 +187,11 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
   transact(transaction: Transaction) {
     for (const [id, channels] of this.channels) {
       if (Subscription.match(transaction, channels)) {
-        this.perform({
+        // Note that we intentionally exit on the first match because we do not
+        // want to send same transaction multiple times to the same consumer.
+        // Consumer does it's own bookkeeping of all the subscriptions and will
+        // distribute transaction to all of them locally.
+        return this.perform({
           the: "task/effect",
           of: id,
           is: transaction,
