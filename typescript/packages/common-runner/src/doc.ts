@@ -105,14 +105,6 @@ export type DocImpl<T> = {
   updates(callback: (value: T, path: PropertyKey[]) => void): Cancel;
 
   /**
-   * Add callback for updates. Will call immediately with current value.
-   *
-   * @param callback - Callback to call on updates.
-   * @returns Cancel function.
-   */
-  sink(callback: (value: T, path: PropertyKey[]) => void): Cancel;
-
-  /**
    * Freeze cell, making it read-only.
    *
    * Useful for cells that just represent a query, like a cell composed to
@@ -260,11 +252,6 @@ export function getDoc<T>(value?: T, cause?: any, space?: Space): DocImpl<T> {
     ) => createCell<Q>(self, path || [], log, schema, rootSchema),
     send: (newValue: T, log?: ReactivityLog) => self.setAtPath([], newValue, log),
     updates: (callback: (value: T, path: PropertyKey[]) => void) => {
-      callbacks.add(callback);
-      return () => callbacks.delete(callback);
-    },
-    sink: (callback: (value: T, path: PropertyKey[]) => void) => {
-      callback(value as T, []);
       callbacks.add(callback);
       return () => callbacks.delete(callback);
     },
