@@ -233,3 +233,31 @@ export function createCallbackResponse(result: Record<string, unknown>): Respons
 
 // Store code verifiers (could be moved to a more persistent storage in production)
 export const codeVerifiers = new Map<string, string>();
+
+// Type-safe response helpers for route handlers
+export function createLoginSuccessResponse(c: any, url: string) {
+  return c.json({ url }, 200) as any;
+}
+
+export function createLoginErrorResponse(c: any, errorMessage: string) {
+  return c.json({ error: errorMessage }, 400) as any;
+}
+
+export function createRefreshSuccessResponse(
+  c: any,
+  message: string,
+  tokenInfo: { expiresAt: number; hasRefreshToken: boolean },
+) {
+  return c.json(
+    {
+      success: true,
+      message,
+      tokenInfo,
+    },
+    200,
+  ) as any;
+}
+
+export function createRefreshErrorResponse(c: any, errorMessage: string, status = 400) {
+  return c.json({ error: errorMessage }, status) as any;
+}
