@@ -135,7 +135,9 @@ export class RemoteStorageProvider implements StorageProvider {
       const query = local.memory.query({ select: { [of]: { [the]: {} } } });
       local.remote.set(of, new Query(query, new Set([RemoteStorageProvider.sync])));
 
-      await query.promise;
+      await query.promise.then(() => {
+        console.log("synced", of, the);
+      });
     }
   }
 

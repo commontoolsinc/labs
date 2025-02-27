@@ -57,6 +57,10 @@ export class CharmManager {
     return this.space.uri;
   }
 
+  getSpace(): Space {
+    return this.space;
+  }
+
   async synced(): Promise<void> {
     return await storage.synced();
   }
