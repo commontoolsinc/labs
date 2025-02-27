@@ -3,7 +3,7 @@ import { castNewRecipe, Charm, CharmManager, compileAndRunRecipe } from "@common
 import { NavigateFunction } from "react-router-dom";
 import { charmId } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
-import { Cell, EntityId, getRecipe } from "@commontools/runner";
+import { Cell, EntityId, getEntityId, getRecipe } from "@commontools/runner";
 import { iterateCharm } from "@/utils/charm-operations.ts";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext.tsx";
 import { startCharmIndexing } from "@/utils/indexing.ts";
@@ -415,10 +415,17 @@ async function handleUseDataInSpell(deps: CommandContext) {
           const charm = await deps.charmManager.get(deps.focusedCharmId);
           const sourceCell = charm?.getSourceCell();
 
-          if (!sourceCell) {
+          const sourceId = getEntityId(sourceCell)?.["/"];
+          if (!sourceId) {
+            throw new Error("No source ID found");
+          }
+          deps.setLoading(true);
+          const newCharm = await castSpellAsCharm(deps.charmManager, selectedSpell.id, sourceId);
+
+          if (!newCharm) {
             throw new Error("No source cell found");
           }
-          navigateToCharm(sourceCell, deps);
+          navigateToCharm(newCharm, deps);
           deps.setOpen(false);
           deps.setLoading(false);
         },
