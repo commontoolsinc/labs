@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "dev": "deno run -A --watch --env-file=.env index.ts",
+    "dev": "deno run -A --unstable-sloppy-imports --watch --env-file=.env index.ts",
     "test": "deno test -A --env-file=.env.test",
     "vendor": "cp -r ../common-memory ./vendor/common-memory"
   },
