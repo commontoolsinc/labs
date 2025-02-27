@@ -23,7 +23,7 @@ import {
   AuthMethod,
   AUTH_METHOD_PASSKEY,
   AUTH_METHOD_PASSPHRASE,
-} from "@/utils/credentials";
+} from "@/utils/credentials.ts";
 
 const BTN_PRIMARY = `w-full px-4 py-2 bg-black text-white hover:bg-gray-800 disabled:opacity-50 flex items-center justify-center gap-2`;
 const LIST_ITEM = `w-full p-2 text-left text-sm border-2 border-black hover:-translate-y-[2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.5)] shadow-[1px_1px_0px_0px_rgba(0,0,0,0.3)] transition-all duration-100 ease-in-out cursor-pointer flex items-center gap-2`;
@@ -91,9 +91,8 @@ function SuccessRegistration({
               />
               <button
                 onClick={copyToClipboard}
-                className={`absolute right-2 top-1/2 transform -translate-y-1/2 ${
-                  copied ? "text-green-500" : ""
-                }`}
+                className={`absolute right-2 top-1/2 transform -translate-y-1/2 ${copied ? "text-green-500" : ""
+                  }`}
               >
                 {copied ? <LuCheck className="w-5 h-5" /> : <LuCopy className="w-5 h-5" />}
               </button>

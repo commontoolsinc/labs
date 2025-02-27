@@ -2,8 +2,7 @@ import { useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { getRecipe } from "@commontools/runner";
-import { createPath } from "@/routes";
-import { Curve } from "three";
+import { createPath } from "@/routes.ts";
 
 export default function SpellbookLaunchView() {
   const { spellId } = useParams<{ spellId: string }>();

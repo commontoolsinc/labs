@@ -3,7 +3,8 @@ import { CharmRenderer } from "@/components/CharmRunner.tsx";
 import { charmId } from "@/utils/charms.ts";
 import { useNavigate, useParams } from "react-router-dom";
 import { Cell } from "@commontools/runner";
-import { createPath } from "@/routes";
+import { createPath } from "@/routes.ts";
+import { useCallback } from "react";
 
 interface VariantTrayProps {
   variants: Cell<Charm>[];
@@ -30,6 +31,18 @@ export function VariantTray({
   const remainingCount = Math.max(0, totalExpectedVariants - variants.length);
   const loadingPlaceholders = Array(remainingCount).fill(null);
 
+  const handleChooseClick = useCallback(() => {
+    if (!selectedVariant) return;
+
+    const id = charmId(selectedVariant);
+    if (!id || !replicaName) {
+      console.error('Missing required params', { id, replicaName });
+      return;
+    }
+
+    navigate(createPath('charmShow', { charmId: id, replicaName }));
+  }, [selectedVariant, replicaName, navigate]);
+
   return (
     <div className="absolute inset-x-4 bottom-24 bg-white/95 backdrop-blur border-2 border-black p-4">
       <div className="flex justify-between items-center mb-4">
@@ -42,9 +55,7 @@ export function VariantTray({
             Cancel
           </button>
           <button
-            onClick={() =>
-              selectedVariant && navigate(createPath('charmShow', { charmId: charmId(selectedVariant), replicaName }))
-            }
+            onClick={handleChooseClick}
             className="px-4 py-2 bg-black text-white rounded hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             disabled={!selectedVariant}
           >

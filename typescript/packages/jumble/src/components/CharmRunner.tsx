@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { fixItCharm } from "@/utils/charm-operations.ts";
 import { LuX } from "react-icons/lu";
 import { DitheredCube } from "@/components/DitherCube.tsx";
-import { createPath } from "@/routes";
+import { createPath } from "@/routes.ts";
 
 interface CharmLoaderProps {
   charmImport: () => Promise<any>;

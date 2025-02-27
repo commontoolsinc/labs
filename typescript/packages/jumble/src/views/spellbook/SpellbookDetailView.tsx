@@ -27,7 +27,7 @@ import {
 import { ActionButton } from "@/components/spellbook/ActionButton.tsx";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader.tsx";
 import { SpellPreview } from "@/components/spellbook/SpellPreview.tsx";
-import { createPath } from "@/routes";
+import { createPath } from "@/routes.ts";
 
 export default function SpellbookDetailView() {
   const { spellId } = useParams<{ spellId: string }>();

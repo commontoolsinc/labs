@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { generateJSON } from "@/utils/prompt-library/json-gen";
+import { generateJSON } from "@/utils/prompt-library/json-gen.ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 
