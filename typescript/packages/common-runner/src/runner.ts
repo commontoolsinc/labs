@@ -35,17 +35,25 @@ import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.js";
 import "./builtins/index.ts";
 import { addRecipe, getRecipe, getRecipeId } from "./recipe-map.js";
 import { isCell } from "./cell.js";
+import { isQueryResultForDereferencing } from "./query-result-proxy.js";
+import { getDocLinkOrThrow } from "./query-result-proxy.js";
 
 export const cancels = new WeakMap<DocImpl<any>, Cancel>();
 
 /**
  * Run a recipe.
  *
- * When called with a result cell, it'll read from the cell and update the
- * instance if appropriate. This can be used to rehydrate an instance.
+ * resultCell is required and should have an id. processCell is created if not
+ * already set.
  *
- * When called without a result cell, or the result cell is empty, a new
- * instance is created.
+ * If no recipe is provided, the previous one is used, and the recipe is started
+ * if it isn't already started.
+ *
+ * If no argument is provided, the previous one is used, and the recipe is
+ * started if it isn't already running.
+ *
+ * If a new recipe or any argument value is provided, a currently running recipe
+ * is stopped, the recipe and argument replaced and the recipe restarted.
  *
  * @param recipeFactory - Function that takes the argument and returns a recipe.
  * @param argument - The argument to pass to the recipe. Can be static data
@@ -69,22 +77,6 @@ export function run<T, R = any>(
   argument: T,
   resultCell: DocImpl<R>,
 ): DocImpl<R> {
-  if (cancels.has(resultCell)) {
-    // If it's already running and no new recipe or argument are given,
-    // we are just returning the result cell
-    if (recipeOrModule === undefined && argument === undefined) {
-      return resultCell;
-    }
-
-    // Otherwise stop execution of the old recipe. TODO: Await, but this will
-    // make all this async.
-    stop(resultCell);
-  }
-
-  // Keep track of subscriptions to cancel them later
-  const [cancel, addCancel] = useCancelGroup();
-  cancels.set(resultCell, cancel);
-
   let processCell: DocImpl<{
     [TYPE]: string;
     argument?: T;
@@ -97,7 +89,7 @@ export function run<T, R = any>(
     // TODO: Allow keeping of previous argument but still supply defaults
     argument = argument ?? (processCell.get()?.argument as T);
   } else {
-    processCell = getDoc();
+    processCell = getDoc(undefined, { cell: resultCell, path: [] }, resultCell.space) as any;
     resultCell.sourceCell = processCell;
   }
 
@@ -136,19 +128,45 @@ export function run<T, R = any>(
     recipe = recipeOrModule as Recipe;
   }
 
+  recipeId ??= addRecipe(recipe);
+
+  if (cancels.has(resultCell)) {
+    // If it's already running and no new recipe or argument are given,
+    // we are just returning the result cell
+    if (argument === undefined && recipeId === processCell.get()?.[TYPE]) return resultCell;
+
+    // TODO: If recipe is the same, but argument is different, just update the argument without stopping
+
+    // Otherwise stop execution of the old recipe. TODO: Await, but this will
+    // make all this async.
+    stop(resultCell);
+  }
+
+  // Keep track of subscriptions to cancel them later
+  const [cancel, addCancel] = useCancelGroup();
+  cancels.set(resultCell, cancel);
+
   // Walk the recipe's schema and extract all default values
   const defaults = extractDefaultValues(recipe.argumentSchema);
 
   // If the bindings are a cell or cell reference, convert them to an object
   // where each property is a cell reference.
   // TODO: If new keys are added after first load, this won't work.
-  if (isDoc(argument) || isDocLink(argument) || isCell(argument)) {
+
+  if (
+    isDoc(argument) ||
+    isDocLink(argument) ||
+    isCell(argument) ||
+    isQueryResultForDereferencing(argument)
+  ) {
     // If it's a cell, turn it into a cell reference
     const ref = isDocLink(argument)
       ? argument
       : isCell(argument)
         ? argument.getAsDocLink()
-        : ({ cell: argument, path: [] } satisfies DocLink);
+        : isQueryResultForDereferencing(argument)
+          ? getDocLinkOrThrow(argument)
+          : ({ cell: argument, path: [] } satisfies DocLink);
 
     // Get value, but just to get the keys. Throw if it isn't an object.
     const value = ref.cell.getAsQueryResult(ref.path);
@@ -166,15 +184,6 @@ export function run<T, R = any>(
     }
   }
 
-  // TODO: Add a causal relationship. For example a recipe that only transforms
-  // data from a fixed source could have an idea that depends on that source
-  // alone, as any instance of the recipe will do the same thing. The trouble is
-  // though that we support the recipe to change over time, and such a change
-  // might change this condition and we'd need distinct ideas for different
-  // instances of this recipe again.
-  if (!processCell.entityId && resultCell.entityId)
-    processCell.generateEntityId({ cell: resultCell, path: [] }, resultCell.space);
-
   const internal = processCell.get()?.internal ?? (recipe.initial as { internal: any })?.internal;
 
   // Ensure static data is converted to cell references, e.g. for arrays
@@ -184,7 +193,7 @@ export function run<T, R = any>(
   if (defaults) argument = mergeObjects(argument, deepCopy(defaults));
 
   processCell.send({
-    [TYPE]: recipeId ?? addRecipe(recipe),
+    [TYPE]: recipeId,
     argument,
     ...(internal ? { internal: deepCopy(internal) } : {}),
     resultRef: { cell: resultCell, path: [] },
