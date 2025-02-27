@@ -397,7 +397,7 @@ test("cancel subscription", store, async (session) => {
   assertEquals(query2.facts, [v4]);
 });
 
-test("only several subscriptions receive single update", store, async (session) => {
+test("several subscriptions receive single update", store, async (session) => {
   const memory = Consumer.open({ as: alice, session }).mount(space);
   const doc1 = `of:${refer({ doc: 1 })}` as const;
   const doc2 = `of:${refer({ doc: 2 })}` as const;
@@ -413,8 +413,8 @@ test("only several subscriptions receive single update", store, async (session) 
     },
   });
 
-  const sub1 = query1?.subscribe();
-  const sub2 = query2?.subscribe();
+  query1?.subscribe();
+  query2?.subscribe();
 
   const fact1 = Fact.assert({ the, of: doc1, is: { doc: 1 } });
   const fact2 = Fact.assert({ the, of: doc2, is: { doc: 2 } });
