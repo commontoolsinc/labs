@@ -396,3 +396,39 @@ test("cancel subscription", store, async (session) => {
 
   assertEquals(query2.facts, [v4]);
 });
+
+test("only several subscriptions receive single update", store, async (session) => {
+  const memory = Consumer.open({ as: alice, session }).mount(space);
+  const doc1 = `of:${refer({ doc: 1 })}` as const;
+  const doc2 = `of:${refer({ doc: 2 })}` as const;
+
+  const { ok: query1 } = await memory.query({
+    select: {
+      [doc1.toString()]: {},
+    },
+  });
+  const { ok: query2 } = await memory.query({
+    select: {
+      [doc2.toString()]: {},
+    },
+  });
+
+  const sub1 = query1?.subscribe();
+  const sub2 = query2?.subscribe();
+
+  const fact1 = Fact.assert({ the, of: doc1, is: { doc: 1 } });
+  const fact2 = Fact.assert({ the, of: doc2, is: { doc: 2 } });
+  const tr = await memory.transact({
+    changes: Changes.from([fact1, fact2]),
+  });
+
+  assert(tr.ok);
+
+  assertEquals(query1?.selection, {
+    [space]: Changes.from([fact1]),
+  });
+
+  assertEquals(query2?.selection, {
+    [space]: Changes.from([fact2]),
+  });
+});
