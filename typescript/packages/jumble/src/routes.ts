@@ -10,7 +10,7 @@ export const ROUTES = {
   spellbookIndex: '/spellbook',
   spellbookDetail: '/spellbook/:spellId',
   spellbookLaunch: '/spellbook/launch/:spellId',
-  utilityJsonGen: '/utility/jsongen',
+  utilityJsonGen: '/utility/json-gen',
 } as const;
 
 // Infer parameter types from route patterns
@@ -40,9 +40,6 @@ export const matchesRoute = <T extends keyof typeof ROUTES>(
 ): path is string => {
   return matchPath(ROUTES[route], path) !== null;
 };
-
-console.log(createPath('spellbookDetail', { spellId: '123' }))
-
 
 export function createPathWithQuery<T extends keyof typeof ROUTES>(
   route: T,
