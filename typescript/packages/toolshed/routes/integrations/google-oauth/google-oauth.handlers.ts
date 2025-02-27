@@ -5,6 +5,10 @@ import {
   getBaseUrl,
   createCallbackResponse,
   createErrorResponse,
+  createLoginSuccessResponse,
+  createLoginErrorResponse,
+  createRefreshSuccessResponse,
+  createRefreshErrorResponse,
   fetchUserInfo,
   getTokensFromAuthCell,
   persistTokens,
@@ -26,12 +30,7 @@ export const login: AppRouteHandler<LoginRoute> = async (c) => {
 
     if (!payload.authCellId) {
       logger.error("Missing authCellId in request payload");
-      return c.json(
-        {
-          error: "Missing authCellId in request",
-        },
-        400,
-      );
+      return createLoginErrorResponse(c, "Missing authCellId in request");
     }
 
     // Encode the auth cell ID as state parameter
@@ -57,12 +56,10 @@ export const login: AppRouteHandler<LoginRoute> = async (c) => {
 
     logger.info({ authUrl: authUrl.toString() }, "Generated OAuth URL");
 
-    return c.json({
-      url: authUrl.toString(),
-    });
+    return createLoginSuccessResponse(c, authUrl.toString());
   } catch (error) {
     logger.error({ error }, "Failed to process login request");
-    return c.json({ error: "Failed to process login request" }, 400);
+    return createLoginErrorResponse(c, "Failed to process login request");
   }
 };
 
@@ -192,13 +189,7 @@ export const refresh: AppRouteHandler<RefreshRoute> = async (c) => {
 
     if (!payload.authCellId) {
       logger.error("No authCellId provided in refresh request");
-      return c.json(
-        {
-          success: false,
-          error: "No authCellId provided",
-        },
-        400,
-      );
+      return createRefreshErrorResponse(c, "No authCellId provided");
     }
 
     try {
@@ -207,13 +198,7 @@ export const refresh: AppRouteHandler<RefreshRoute> = async (c) => {
 
       if (!tokenData.refreshToken) {
         logger.error("No refresh token found in auth cell");
-        return c.json(
-          {
-            success: false,
-            error: "No refresh token found",
-          },
-          400,
-        );
+        return createRefreshErrorResponse(c, "No refresh token found");
       }
 
       // Get redirect URI for client creation
@@ -244,29 +229,21 @@ export const refresh: AppRouteHandler<RefreshRoute> = async (c) => {
       const updatedTokenData = await persistTokens(tokens, payload.authCellId);
 
       // Return success response
-      return c.json({
-        success: true,
-        message: "Token refreshed successfully",
-        tokenInfo: formatTokenInfo(updatedTokenData),
-      });
+      return createRefreshSuccessResponse(
+        c,
+        "Token refreshed successfully",
+        formatTokenInfo(updatedTokenData),
+      );
     } catch (error) {
       logger.error({ error }, "Failed to refresh token");
-      return c.json(
-        {
-          success: false,
-          error: "Failed to refresh token. The refresh token may be invalid or expired.",
-        },
+      return createRefreshErrorResponse(
+        c,
+        "Failed to refresh token. The refresh token may be invalid or expired.",
         401,
       );
     }
   } catch (error) {
     logger.error({ error }, "Failed to process refresh request");
-    return c.json(
-      {
-        success: false,
-        error: "Failed to process refresh request",
-      },
-      400,
-    );
+    return createRefreshErrorResponse(c, "Failed to process refresh request");
   }
 };
