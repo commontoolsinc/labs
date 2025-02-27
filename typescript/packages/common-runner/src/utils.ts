@@ -56,6 +56,8 @@ export function mergeObjects(...objects: any[]): any {
       Array.isArray(obj) ||
       isAlias(obj) ||
       isDocLink(obj) ||
+      isDoc(obj) ||
+      isCell(obj) ||
       isStatic(obj)
     ) {
       return obj;
