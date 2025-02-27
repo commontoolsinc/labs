@@ -36,54 +36,67 @@ export async function areSchemaCompatible(
 
   return isCompatible;
 }
+
 function checkSchemaCompatibility(schema1: any, schema2: any): boolean {
-  // If schemas are identical, they're compatible
-  if (JSON.stringify(schema1) === JSON.stringify(schema2)) {
-    return true;
-  }
-
-  // For bare type definitions
-  if (typeof schema1 === "object" && !schema1.type && !schema2.type) {
-    // Check each field in schema1 has a compatible type in schema2
-    for (const [key, value] of Object.entries(schema1)) {
-      const value2 = schema2[key];
-      if (value2 && !checkSchemaCompatibility(value, value2)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  // Handle simple type definitions
-  if (typeof schema1.type === "string" && typeof schema2.type === "string") {
-    return schema1.type === schema2.type;
-  }
-
   // Handle array types
   if (schema1.type === "array" && schema2.type === "array") {
-    if (!schema1.items || !schema2.items) return true;
+    if (!schema1.items || !schema2.items) {
+      return !schema1.items && !schema2.items;
+    }
     return checkSchemaCompatibility(schema1.items, schema2.items);
   }
 
   // Handle object types with properties
   if (schema1.type === "object" && schema2.type === "object") {
-    if (!schema1.properties || !schema2.properties) return true;
+    const props1 = schema1.properties || {};
+    const props2 = schema2.properties || {};
+    const keys1 = Object.keys(props1);
 
-    // Check each property in schema1 has a compatible definition in schema2
-    for (const [key, prop1] of Object.entries(schema1.properties)) {
-      const prop2 = schema2.properties[key];
-      if (prop2 && !checkSchemaCompatibility(prop1, prop2)) {
-        return false;
-      }
+    // Schema1 must contain all and only the fields it needs
+    return keys1.length === Object.keys(props2).length &&
+      keys1.every((key) => {
+        const prop2 = props2[key];
+        return prop2 && checkSchemaCompatibility(props1[key], prop2);
+      });
+  }
+
+  // Handle primitive types including unions
+  if (schema1.type && schema2.type) {
+    if (Array.isArray(schema1.type) || Array.isArray(schema2.type)) {
+      const types1 = Array.isArray(schema1.type)
+        ? schema1.type
+        : [schema1.type];
+      const types2 = Array.isArray(schema2.type)
+        ? schema2.type
+        : [schema2.type];
+      return types1.length === types2.length &&
+        types1.every((t: any) => types2.includes(t));
     }
-    return true;
+    return schema1.type === schema2.type;
   }
 
-  // Handle union types
-  if (Array.isArray(schema1.type) && Array.isArray(schema2.type)) {
-    return schema1.type.every((type: any) => schema2.type.includes(type));
+  // For bare object schemas (no explicit type)
+  const keys1 = Object.keys(schema1);
+  const keys2 = Object.keys(schema2);
+
+  // Must have exactly the same keys
+  if (keys1.length !== keys2.length) {
+    return false;
   }
 
-  // Default to basic equality for other cases
-  return JSON.stringify(schema1) === JSON.stringify(schema2);
+  // Each key must have compatible values
+  return keys1.every((key) => {
+    if (!schema2[key]) return false;
+
+    const value1 = schema1[key];
+    const value2 = schema2[key];
+
+    if (typeof value1 !== typeof value2) return false;
+
+    if (typeof value1 === "object") {
+      return checkSchemaCompatibility(value1, value2);
+    }
+
+    return value1 === value2;
+  });
 }
