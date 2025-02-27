@@ -209,7 +209,6 @@ export async function getTokensFromAuthCell(authCellDocLink: string | DocLink) {
 // Format token info for response
 export function formatTokenInfo(tokenData: TokenData) {
   return {
-    accessTokenPrefix: tokenData.token.substring(0, 21) + "...",
     expiresAt: tokenData.expiresAt,
     hasRefreshToken: !!tokenData.refreshToken,
   };
