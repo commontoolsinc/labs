@@ -52,7 +52,7 @@ createRoot(document.getElementById("root")!).render(
                   <Route path={ROUTES.spellbookIndex} element={<SpellbookIndexView />} />
                   <Route path={ROUTES.spellbookDetail} element={<SpellbookDetailView />} />
                   <Route
-                    path={ROUTES.spellbookDetail}
+                    path={ROUTES.spellbookLaunch}
                     element={
                       <CharmsManagerProvider>
                         <SpellbookLaunchView />
