@@ -1,35 +1,30 @@
-import { OAuth2Client } from "jsr:@cmd-johnson/oauth2-client@^2.0.0";
-import { serve } from "https://deno.land/std@0.216.0/http/server.ts";
-import { open } from "https://deno.land/x/open@v0.0.6/index.ts";
-import { getAccessToken } from "./google.ts";
+// Helper function to decode base64 encoded email parts
+function decodeBase64(data: string) {
+  // Replace URL-safe characters back to their original form
+  const sanitized = data.replace(/-/g, '+').replace(/_/g, '/');
+  // Decode the base64 string
+  return atob(sanitized);
+}
 
-import { load } from "https://deno.land/std@0.216.0/dotenv/mod.ts";
-const env = await load({
-  envPath: "./.env",
-  // you can also specify multiple possible paths:
-  // paths: [".env.local", ".env"]
-  export: true, // this will export to process.env
-});
+// Helper function to extract email address from a header value
+function extractEmailAddress(header: string): string {
+  const emailMatch = header.match(/<([^>]*)>/);
+  if (emailMatch && emailMatch[1]) {
+    return emailMatch[1];
+  }
+  return header;
+}
 
-const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID")!;
-const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET")!;
-const SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"];
+// Helper function to extract header value from message headers
+function getHeader(headers: any[], name: string): string {
+  const header = headers.find((h) => h.name.toLowerCase() === name.toLowerCase());
+  return header ? header.value : "";
+}
 
-const client = new OAuth2Client({
-  clientId: GOOGLE_CLIENT_ID,
-  clientSecret: GOOGLE_CLIENT_SECRET,
-  tokenUri: "https://oauth2.googleapis.com/token",
-  authorizationEndpointUri: "https://accounts.google.com/o/oauth2/v2/auth",
-  redirectUri: "http://localhost:8080",
-  defaults: {
-    scope: SCOPES.join(" "),
-  },
-});
+export async function fetchInboxEmails(accessToken: string) {
 
-export async function fetchInboxEmails() {
-  const accessToken = await getAccessToken(client);
-
-  const response = await fetch(
+  // First, get the list of message IDs from the inbox
+  const listResponse = await fetch(
     "https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=INBOX&maxResults=10",
     {
       headers: {
@@ -38,5 +33,59 @@ export async function fetchInboxEmails() {
     },
   );
 
-  return await response.json();
+  const listData = await listResponse.json();
+  
+  if (!listData.messages || !Array.isArray(listData.messages)) {
+    return { messages: [] };
+  }
+
+  // Fetch full details for each message
+  const detailedMessages = await Promise.all(
+    listData.messages.map(async (message: { id: string }) => {
+      const messageResponse = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${message.id}?format=full`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      const messageData = await messageResponse.json();
+      
+      // Extract email details from the message data
+      const headers = messageData.payload.headers;
+      const subject = getHeader(headers, "Subject");
+      const from = getHeader(headers, "From");
+      const to = getHeader(headers, "To");
+      const date = getHeader(headers, "Date");
+      
+      // Extract plain text content if available
+      let plainText = "";
+      if (messageData.payload.parts && Array.isArray(messageData.payload.parts)) {
+        const textPart = messageData.payload.parts.find(
+          (part: any) => part.mimeType === "text/plain"
+        );
+        if (textPart && textPart.body && textPart.body.data) {
+          plainText = decodeBase64(textPart.body.data);
+        }
+      } else if (messageData.payload.body && messageData.payload.body.data) {
+        plainText = decodeBase64(messageData.payload.body.data);
+      }
+
+      return {
+        id: messageData.id,
+        threadId: messageData.threadId,
+        labelIds: messageData.labelIds || ["INBOX"],
+        snippet: messageData.snippet || "",
+        subject,
+        from: extractEmailAddress(from),
+        date,
+        to: extractEmailAddress(to),
+        plainText,
+      };
+    })
+  );
+
+  return { messages: detailedMessages };
 }
