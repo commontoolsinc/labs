@@ -9,3 +9,4 @@ export {
   compileRecipe,
 } from "./iterate.js";
 export { getIframeRecipe, type IFrameRecipe } from "./iframe/recipe.js";
+export { storage } from "./storage.js";

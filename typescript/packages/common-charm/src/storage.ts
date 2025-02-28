@@ -18,7 +18,7 @@ import { isStatic, markAsStatic } from "@commontools/builder";
 import { StorageProvider, StorageValue } from "./storage/base.js";
 import { RemoteStorageProvider } from "./storage/remote.js";
 import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
-import { Space } from "@commontools/runner/src/space.js";
+import { Space } from "@commontools/runner";
 import { InMemoryStorageProvider } from "./storage/memory.js";
 
 export function log(fn: () => any[]) {

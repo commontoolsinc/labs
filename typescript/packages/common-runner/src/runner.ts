@@ -184,7 +184,11 @@ export function run<T, R = any>(
     }
   }
 
-  const internal = processCell.get()?.internal ?? (recipe.initial as { internal: any })?.internal;
+  const internal = {
+    ...(deepCopy(defaults) as { internal: any })?.internal,
+    ...recipe.initial?.internal,
+    ...processCell.get()?.internal,
+  };
 
   // Ensure static data is converted to cell references, e.g. for arrays
   argument = staticDataToNestedCells(processCell, argument, undefined, resultCell);
@@ -195,7 +199,7 @@ export function run<T, R = any>(
   processCell.send({
     [TYPE]: recipeId,
     argument,
-    ...(internal ? { internal: deepCopy(internal) } : {}),
+    internal,
     resultRef: { cell: resultCell, path: [] },
   });
 
