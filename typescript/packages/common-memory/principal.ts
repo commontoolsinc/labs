@@ -9,9 +9,9 @@ import {
   Signer,
   DID,
 } from "./interface.ts";
-import { base58btc } from "npm:multiformats/bases/base58";
-import { base64pad } from "npm:multiformats/bases/base64";
-import { varint } from "npm:multiformats";
+import { base58btc } from "multiformats/bases/base58";
+import { base64pad } from "multiformats/bases/base64";
+import { varint } from "multiformats";
 import { unauthorized } from "./error.ts";
 
 const DID_PREFIX = "did:";

@@ -1,1 +1,1 @@
-export * from "npm:@ipld/dag-json";
+export * from "@ipld/dag-json";

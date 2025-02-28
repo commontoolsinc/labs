@@ -75,6 +75,8 @@
     "redis": "npm:redis@^4.7.0",
     "stoker": "npm:stoker@^1.4.2",
     "zod": "npm:zod@^3.24.1",
-    "mistreevous": "npm:mistreevous@4.2.0"
+    "mistreevous": "npm:mistreevous@4.2.0",
+    "multiformats": "npm:multiformats@^13.3.2",
+    "@ipld/dag-json": "npm:@ipld/dag-json@^10.2.3"
   }
 }
