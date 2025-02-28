@@ -1,25 +1,10 @@
 {
   "tasks": {
     "dev": "deno run -A --watch --env-file=.env index.ts",
-    "test": "deno test -A --env-file=.env.test",
-    "vendor": "cp -r ../common-memory ./vendor/common-memory"
+    "test": "deno test -A --env-file=.env.test"
   },
   "fmt": {
-    "indentWidth": 2,
-    "lineWidth": 80,
-    "semiColons": true,
-    "singleQuote": false,
-    "proseWrap": "always",
-    "include": ["./"],
     "exclude": ["./llm_documentation/*"]
-  },
-  "lint": {
-    "include": ["./"],
-    "rules": {
-      "tags": ["recommended"],
-      "include": ["ban-untagged-todo"],
-      "exclude": ["no-unused-vars", "no-explicit-any"]
-    }
   },
   "imports": {
     "@/": "./",

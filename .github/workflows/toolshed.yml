@@ -34,7 +34,7 @@ jobs:
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: "2.1.9"
+          deno-version: "2.2.2"
 
       - name: Cache dependencies
         uses: actions/cache@v3

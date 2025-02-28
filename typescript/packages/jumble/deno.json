@@ -2,7 +2,7 @@
   "tasks": {
     "dev": "deno run -A --node-modules-dir=auto npm:vite",
     "build": "deno run -A --node-modules-dir=auto npm:vite build",
-    "preview": "deno run -A --node-modules-dir npm:vite preview"
+    "preview": "deno run -A --node-modules-dir=auto npm:vite preview"
   },
   "imports": {
     "@/": "./src/",
