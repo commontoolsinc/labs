@@ -12,7 +12,7 @@ import type {
   AuthorizationError,
 } from "./interface.ts";
 import { MemorySpace } from "./interface.ts";
-import { refer } from "./util.ts";
+import { refer } from "merkle-reference";
 
 export const unauthorized = (message: string, cause?: Error): AuthorizationError =>
   new TheAuthorizationError(message, cause);

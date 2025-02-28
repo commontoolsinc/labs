@@ -4,7 +4,8 @@ import * as Changes from "../changes.ts";
 import * as Commit from "../commit.ts";
 import * as Transaction from "../transaction.ts";
 import * as Fact from "../fact.ts";
-import { refer, createTemporaryDirectory } from "../util.ts";
+import { createTemporaryDirectory } from "../util.ts";
+import { refer } from "merkle-reference";
 
 import { alice, space } from "./principal.ts";
 const the = "application/json";
