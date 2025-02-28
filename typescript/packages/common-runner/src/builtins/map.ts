@@ -94,7 +94,6 @@ export function map(
         },
         resultCell,
       );
-      console.log("map", initializedUpTo, resultCell);
       resultCell.sourceCell!.sourceCell = parentDoc;
 
       // TODO: Have `run` return cancel, once we make resultCell required
