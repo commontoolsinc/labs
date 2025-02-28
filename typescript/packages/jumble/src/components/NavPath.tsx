@@ -1,4 +1,4 @@
-import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { useSpaceManager } from "@/contexts/SpaceManagerContext";
 import { NAME } from "@commontools/builder";
 import React, { useEffect } from "react";
 import { NavLink } from "react-router-dom";
@@ -9,7 +9,7 @@ type NavPathProps = {
 };
 
 export function NavPath({ replicaId, charmId }: NavPathProps) {
-  const { charmManager } = useCharmManager();
+  const { spaceManager } = useSpaceManager();
 
   const [charmName, setCharmName] = React.useState<string | null>(null);
 
@@ -19,7 +19,7 @@ export function NavPath({ replicaId, charmId }: NavPathProps) {
 
     async function getCharm() {
       if (charmId) {
-        const charm = await charmManager.get(charmId);
+        const charm = await spaceManager.get(charmId);
         cancel = charm?.key(NAME).sink((value) => {
           if (mounted) setCharmName(value ?? null);
         });
@@ -31,7 +31,7 @@ export function NavPath({ replicaId, charmId }: NavPathProps) {
       mounted = false;
       cancel?.();
     };
-  }, [charmId, charmManager]);
+  }, [charmId, spaceManager]);
 
   return (
     <nav className="flex" aria-label="Breadcrumb">

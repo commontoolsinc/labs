@@ -1,13 +1,13 @@
 import { useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { useSpaceManager } from "@/contexts/SpaceManagerContext";
 import { getRecipe } from "@commontools/runner";
 import { createPath } from "@/routes.ts";
 
 export default function SpellbookLaunchView() {
   const { spellId } = useParams<{ spellId: string }>();
   const navigate = useNavigate();
-  const { charmManager, currentReplica } = useCharmManager();
+  const { spaceManager, currentSpaceURI: currentReplica } = useSpaceManager();
 
   useEffect(() => {
     const launchSpell = async () => {
@@ -15,7 +15,7 @@ export default function SpellbookLaunchView() {
 
       try {
         // Sync the recipe
-        await charmManager.syncRecipeBlobby(spellId);
+        await spaceManager.syncRecipeBlobby(spellId);
         const recipe = getRecipe(spellId);
 
         if (!recipe) {
@@ -54,9 +54,9 @@ export default function SpellbookLaunchView() {
         }
 
         // Run the recipe with the initial data
-        const charm = await charmManager.runPersistent(recipe, initialData);
+        const charm = await spaceManager.runPersistent(recipe, initialData);
         const charmIdString = charm.entityId?.toJSON?.()["/"];
-        await charmManager.add([charm]);
+        await spaceManager.add([charm]);
 
         if (charmIdString) {
           navigate(createPath('charmShow', { charmId: charmIdString, replicaName: currentReplica }));
@@ -71,7 +71,7 @@ export default function SpellbookLaunchView() {
     };
 
     launchSpell();
-  }, [spellId, navigate, charmManager, currentReplica]);
+  }, [spellId, navigate, spaceManager, currentReplica]);
 
   return (
     <div className="flex items-center justify-center h-screen">

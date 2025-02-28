@@ -1,6 +1,6 @@
 import React, { useRef } from "react";
 import { render } from "@commontools/html";
-import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { useSpaceManager } from "@/contexts/SpaceManagerContext";
 import { useNavigate } from "react-router-dom";
 import { fixItCharm } from "@/utils/charm-operations.ts";
 import { LuX } from "react-icons/lu";
@@ -29,7 +29,7 @@ function useCharmLoader({
   const [error, setError] = React.useState<Error | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
   const mountingKey = useRef(0);
-  const { charmManager } = useCharmManager();
+  const { spaceManager } = useSpaceManager();
 
   const onCharmReadyCallback = React.useCallback(onCharmReady, [onCharmReady]);
 
@@ -48,10 +48,10 @@ function useCharmLoader({
 
       if (currentMountKey !== mountingKey.current) return;
 
-      const charm = await charmManager.runPersistent(factory, argument);
+      const charm = await spaceManager.runPersistent(factory, argument);
       if (currentMountKey !== mountingKey.current) return;
 
-      charmManager.add([charm]);
+      spaceManager.add([charm]);
 
       if (currentMountKey !== mountingKey.current) return;
 
@@ -65,7 +65,7 @@ function useCharmLoader({
         setIsLoading(false);
       }
     }
-  }, [charmImport, argument, onCharmReadyCallback, charmManager]);
+  }, [charmImport, argument, onCharmReadyCallback, spaceManager]);
 
   React.useEffect(() => {
     if (autoLoad) {
@@ -83,24 +83,24 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [runtimeError, setRuntimeError] = React.useState<Error | null>(null);
   const [isFixing, setIsFixing] = React.useState(false);
-  const { charmManager, currentReplica } = useCharmManager();
+  const { spaceManager, currentSpaceURI: currentReplica } = useSpaceManager();
   const navigate = useNavigate();
 
   const handleFixIt = React.useCallback(async () => {
     if (!runtimeError || isFixing) return;
     setIsFixing(true);
     try {
-      const newPath = await fixItCharm(charmManager, charm, runtimeError);
+      const newPath = await fixItCharm(spaceManager, charm, runtimeError);
       if (newPath) {
         setRuntimeError(null);
-        navigate(createPath('charmShow', { charmId: newPath, replicaName: currentReplica }));
+        navigate(createPath("charmShow", { charmId: newPath, replicaName: currentReplica }));
       }
     } catch (error) {
       console.error("Fix it error:", error);
     } finally {
       setIsFixing(false);
     }
-  }, [runtimeError, isFixing, charmManager, charm, currentReplica, navigate]);
+  }, [runtimeError, isFixing, spaceManager, charm, currentReplica, navigate]);
 
   React.useEffect(() => {
     const container = containerRef.current;

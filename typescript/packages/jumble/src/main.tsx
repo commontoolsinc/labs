@@ -6,7 +6,7 @@ import Shell from "@/views/Shell.tsx";
 import { CharmsProvider } from "@/contexts/CharmsContext.tsx";
 
 import "./recipes/index.ts";
-import { CharmsManagerProvider } from "@/contexts/CharmManagerContext.tsx";
+import { CharmsManagerProvider } from "@/contexts/SpaceManagerContext.tsx";
 import CharmList from "@/views/CharmList.tsx";
 import CharmShowView from "@/views/CharmShowView.tsx";
 import CharmDetailView from "@/views/CharmDetailView.tsx";
@@ -33,7 +33,10 @@ createRoot(document.getElementById("root")!).render(
               <Router>
                 <Routes>
                   {/* Redirect root to common-knowledge */}
-                  <Route path={ROUTES.root} element={<Navigate to={ROUTES.defaultReplica} replace />} />
+                  <Route
+                    path={ROUTES.root}
+                    element={<Navigate to={ROUTES.defaultReplica} replace />}
+                  />
 
                   <Route
                     path={ROUTES.replicaRoot}

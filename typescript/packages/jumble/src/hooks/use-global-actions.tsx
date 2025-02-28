@@ -4,7 +4,7 @@ import { MdEdit, MdOutlineStar, MdShare } from "react-icons/md";
 
 import { useAction } from "@/contexts/ActionManagerContext.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { useSpaceManager } from "@/contexts/SpaceManagerContext";
 import { NAME } from "@commontools/builder";
 
 export function useGlobalActions() {
@@ -34,7 +34,7 @@ export function useGlobalActions() {
 
   const hasCharmId = useCallback(() => Boolean(charmId), [charmId]);
 
-  const { charmManager } = useCharmManager();
+  const { spaceManager } = useSpaceManager();
   const [charmName, setCharmName] = useState<string | null>(null);
   useEffect(() => {
     let mounted = true;
@@ -42,7 +42,7 @@ export function useGlobalActions() {
 
     async function getCharm() {
       if (charmId) {
-        const charm = await charmManager.get(charmId);
+        const charm = await spaceManager.get(charmId);
         cancel = charm?.key(NAME).sink((value) => {
           if (mounted) setCharmName(value ?? null);
         });
@@ -54,7 +54,7 @@ export function useGlobalActions() {
       mounted = false;
       cancel?.();
     };
-  }, [charmId, charmManager]);
+  }, [charmId, spaceManager]);
 
   useAction(
     useMemo(
@@ -84,7 +84,7 @@ export function useGlobalActions() {
         label: "Edit",
         icon: <MdEdit size={28} />,
         to: togglePath,
-        onClick: () => { },
+        onClick: () => {},
         predicate: hasCharmId,
         priority: 50,
       }),

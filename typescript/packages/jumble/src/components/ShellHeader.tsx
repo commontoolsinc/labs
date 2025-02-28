@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom";
 import ShapeLogo from "@/assets/ShapeLogo.svg";
 import { NavPath } from "@/components/NavPath.tsx";
-import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { useSpaceManager } from "@/contexts/SpaceManagerContext";
 import { User } from "@/components/User.tsx";
 import { useSyncedStatus } from "@/hooks/use-synced-status.ts";
 
@@ -11,8 +11,8 @@ type ShellHeaderProps = {
 };
 
 export function ShellHeader({ replicaName, charmId }: ShellHeaderProps) {
-  const { charmManager } = useCharmManager();
-  const { isSyncing, lastSyncTime } = useSyncedStatus(charmManager);
+  const { spaceManager } = useSpaceManager();
+  const { isSyncing, lastSyncTime } = useSyncedStatus(spaceManager);
 
   return (
     <header className="flex bg-gray-50 items-center justify-between border-b-2 p-2">
@@ -37,8 +37,8 @@ export function ShellHeader({ replicaName, charmId }: ShellHeaderProps) {
                 ? `Pending since ${new Date(lastSyncTime).toLocaleTimeString()})`
                 : "Pending..."
               : lastSyncTime
-                ? `Connected`
-                : "Connected"}
+              ? `Connected`
+              : "Connected"}
           </div>
         </div>
         <User />
