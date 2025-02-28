@@ -199,7 +199,7 @@ export function run<T, R = any>(
 
   const internal = {
     ...(deepCopy(defaults) as { internal: any })?.internal,
-    ...recipe.initial?.internal,
+    ...(recipe.initial as { internal: any } | void)?.internal,
     ...processCell.get()?.internal,
   };
 
