@@ -83,8 +83,10 @@ async function main() {
   // now lets try to store a batch of values
   console.log("storing all entities");
   const result = await storageProvider.send(people_batch);
-
-  console.log("sent entity, result: " + JSON.stringify(result, null, 2));
+  if (result.ok)
+    console.log("sent entities successfully");
+  else
+    console.log("got error: " + JSON.stringify(result.error, null, 2));
 }
 
 main();
