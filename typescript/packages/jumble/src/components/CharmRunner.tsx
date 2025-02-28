@@ -100,7 +100,7 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
     } finally {
       setIsFixing(false);
     }
-  }, [runtimeError, isFixing, charmManager, charm, currentReplica, navigate]);
+  }, [runtimeError, isFixing, spaceManager, charm, currentReplica, navigate]);
 
   React.useEffect(() => {
     const container = containerRef.current;

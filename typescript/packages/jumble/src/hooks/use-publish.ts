@@ -1,13 +1,13 @@
 // hooks/useCharmPublisher.tsx
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { useSpaceManager } from "@/contexts/SpaceManagerContext.tsx";
 import { TYPE } from "@commontools/builder";
 import { saveSpell } from "@/services/spellbook.ts";
 import { createPath } from "@/routes.ts";
 
 export function usePublish() {
-  const { charmManager } = useCharmManager();
+  const { spaceManager } = useSpaceManager();
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const navigate = useNavigate();
@@ -31,37 +31,40 @@ export function usePublish() {
     };
   }, []);
 
-  const handleShare = useCallback(async (data: { title: string; description: string; tags: string[] }) => {
-    if (!currentCharmId) return;
+  const handleShare = useCallback(
+    async (data: { title: string; description: string; tags: string[] }) => {
+      if (!currentCharmId) return;
 
-    setIsPublishing(true);
-    try {
-      const charm = await charmManager.get(currentCharmId);
-      if (!charm) throw new Error("Charm not found");
-      const spell = charm.getSourceCell()?.get();
-      const spellId = spell?.[TYPE];
-      if (!spellId) throw new Error("Spell not found");
+      setIsPublishing(true);
+      try {
+        const charm = await spaceManager.get(currentCharmId);
+        if (!charm) throw new Error("Charm not found");
+        const spell = charm.getSourceCell()?.get();
+        const spellId = spell?.[TYPE];
+        if (!spellId) throw new Error("Spell not found");
 
-      const success = await saveSpell(spellId, spell, data.title, data.description, data.tags);
+        const success = await saveSpell(spellId, spell, data.title, data.description, data.tags);
 
-      if (success) {
-        const fullUrl = `${window.location.protocol}//${window.location.host}/spellbook/${spellId}`;
-        try {
-          await navigator.clipboard.writeText(fullUrl);
-        } catch (err) {
-          console.error("Failed to copy to clipboard:", err);
+        if (success) {
+          const fullUrl = `${window.location.protocol}//${window.location.host}/spellbook/${spellId}`;
+          try {
+            await navigator.clipboard.writeText(fullUrl);
+          } catch (err) {
+            console.error("Failed to copy to clipboard:", err);
+          }
+          navigate(createPath("spellbookDetail", { spellId }));
+        } else {
+          throw new Error("Failed to publish");
         }
-        navigate(createPath('spellbookDetail', { spellId }));
-      } else {
-        throw new Error("Failed to publish");
+      } catch (error) {
+        console.error("Failed to publish:", error);
+      } finally {
+        setIsPublishing(false);
+        setIsShareDialogOpen(false);
       }
-    } catch (error) {
-      console.error("Failed to publish:", error);
-    } finally {
-      setIsPublishing(false);
-      setIsShareDialogOpen(false);
-    }
-  }, [currentCharmId, charmManager, navigate]);
+    },
+    [currentCharmId, spaceManager, navigate],
+  );
 
   return {
     isShareDialogOpen,
