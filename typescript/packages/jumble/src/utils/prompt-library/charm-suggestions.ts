@@ -1,4 +1,7 @@
-import { hydratePrompt, parseTagFromResponse } from "@/utils/prompt-library/prompting.ts";
+import {
+  hydratePrompt,
+  parseTagFromResponse,
+} from "@/utils/prompt-library/prompting.ts";
 import { llm } from "@/utils/llm.ts";
 import JSON5 from "json5";
 import { describeCharm } from "@/utils/prompt-library/charm-describe.ts";
@@ -91,7 +94,11 @@ export async function generateCharmSuggestions(
   // then we'll use that as a stand-in for the spec.
   const description = await describeCharm(spec, code, schema, model);
 
-  const system = hydratePrompt(SYSTEM_PROMPT, { SPEC: description, CODE: code, SCHEMA: schema });
+  const system = hydratePrompt(SYSTEM_PROMPT, {
+    SPEC: description,
+    CODE: code,
+    SCHEMA: schema,
+  });
 
   const prompt = `Give me ${count} charm suggestions`;
 

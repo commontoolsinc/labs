@@ -89,15 +89,21 @@ export class NotesWatcher {
 
       // Manually list directory contents first
       for await (const dirEntry of Deno.readDir(this.path)) {
-        console.log(`Found entry: ${dirEntry.name} (${dirEntry.isFile ? "file" : "directory"})`);
+        console.log(
+          `Found entry: ${dirEntry.name} (${
+            dirEntry.isFile ? "file" : "directory"
+          })`,
+        );
       }
 
       console.log("Starting walk...");
-      for await (const entry of walk(this.path, {
-        exts: [".md"],
-        followSymlinks: false,
-        includeDirs: false,
-      })) {
+      for await (
+        const entry of walk(this.path, {
+          exts: [".md"],
+          followSymlinks: false,
+          includeDirs: false,
+        })
+      ) {
         console.log(`Found .md file: ${entry.path}`);
         try {
           const content = await Deno.readTextFile(entry.path);

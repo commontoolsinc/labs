@@ -1,17 +1,17 @@
 import {
-  MemorySpace,
-  Transaction,
   Brief,
-  SubscriptionQuery,
+  Cause,
+  Entity,
+  MemorySpace,
   Query,
   QueryResult,
+  Selector,
   SubscriberCommand,
   SubscriptionCommand,
-  Selector,
   SubscriptionController,
-  Entity,
+  SubscriptionQuery,
   The,
-  Cause,
+  Transaction,
 } from "./interface.ts";
 
 interface Memory {
@@ -115,7 +115,8 @@ export const match = (transaction: Transaction, watched: Set<string>) => {
   return false;
 };
 
-const brief = (session: Session, brief: Brief) => publish(session, { brief: brief });
+const brief = (session: Session, brief: Brief) =>
+  publish(session, { brief: brief });
 
 const publish = (session: Session, command: SubscriptionCommand) => {
   if (session.controller) {
@@ -158,7 +159,9 @@ export const fromSelector = function* (selector: Selector) {
     const selector = Object.entries(attributes);
     for (const [the, members] of selector.length > 0 ? selector : all) {
       const selector = Object.entries(members);
-      for (const cause of selector.length > 0 ? Object.keys(selector) : [undefined]) {
+      for (
+        const cause of selector.length > 0 ? Object.keys(selector) : [undefined]
+      ) {
         const selector: { of?: Entity; the?: The; cause?: Cause } = {};
         if (of) {
           selector.of = of as Entity;

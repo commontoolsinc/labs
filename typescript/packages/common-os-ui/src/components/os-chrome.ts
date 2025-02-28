@@ -1,4 +1,4 @@
-import { LitElement, css, html } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.ts";
 import { base } from "../shared/styles.ts";
 
@@ -114,7 +114,8 @@ export class OsChrome extends LitElement {
     `,
   ];
 
-  @property({ type: Boolean, reflect: true }) sidebar = false;
+  @property({ type: Boolean, reflect: true })
+  sidebar = false;
 
   override render() {
     const onSidebarClose = () => {

@@ -27,7 +27,10 @@ import { getTopFrame } from "./recipe.ts";
  * @param fn - The function to apply to each value, which can return a new value
  * @returns Transformed value
  */
-export function traverseValue(value: Opaque<any>, fn: (value: any) => any): any {
+export function traverseValue(
+  value: Opaque<any>,
+  fn: (value: any) => any,
+): any {
   const staticWrap = isStatic(value) ? markAsStatic : (v: any) => v;
 
   // Perform operation, replaces value if non-undefined is returned
@@ -46,12 +49,18 @@ export function traverseValue(value: Opaque<any>, fn: (value: any) => any): any 
     isRecipe(value)
   ) {
     return staticWrap(
-      Object.fromEntries(Object.entries(value).map(([key, v]) => [key, traverseValue(v, fn)])),
+      Object.fromEntries(
+        Object.entries(value).map(([key, v]) => [key, traverseValue(v, fn)]),
+      ),
     );
   } else return staticWrap(value);
 }
 
-export function setValueAtPath(obj: any, path: PropertyKey[], value: any): boolean {
+export function setValueAtPath(
+  obj: any,
+  path: PropertyKey[],
+  value: any,
+): boolean {
   let parent = obj;
   for (let i = 0; i < path.length - 1; i++) {
     const key = path[i];
@@ -120,7 +129,9 @@ export function toJSONWithAliases(
   processStatic = false,
 ): JSONValue | undefined {
   if (isStatic(value) && !processStatic) {
-    return markAsStatic(toJSONWithAliases(value, paths, ignoreSelfAliases, path, true));
+    return markAsStatic(
+      toJSONWithAliases(value, paths, ignoreSelfAliases, path, true),
+    );
   } // Convert regular cells to opaque refs
   else if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
   // Convert parent opaque refs to shadow refs
@@ -150,7 +161,9 @@ export function toJSONWithAliases(
           frame = frame.parent;
         }
         if (!frame) {
-          throw new Error(`Shadow ref alias with parent cell not found in current frame`);
+          throw new Error(
+            `Shadow ref alias with parent cell not found in current frame`,
+          );
         }
         return value;
       }
@@ -174,7 +187,7 @@ export function toJSONWithAliases(
 
   if (Array.isArray(value)) {
     return (value as Opaque<any>).map((v: Opaque<any>, i: number) =>
-      toJSONWithAliases(v, paths, ignoreSelfAliases, [...path, i]),
+      toJSONWithAliases(v, paths, ignoreSelfAliases, [...path, i])
     );
   }
 
@@ -182,7 +195,12 @@ export function toJSONWithAliases(
     const result: any = {};
     let hasValue = false;
     for (const key in value as any) {
-      const jsonValue = toJSONWithAliases(value[key], paths, ignoreSelfAliases, [...path, key]);
+      const jsonValue = toJSONWithAliases(
+        value[key],
+        paths,
+        ignoreSelfAliases,
+        [...path, key],
+      );
       if (jsonValue !== undefined) {
         result[key] = jsonValue;
         hasValue = true;
@@ -197,7 +215,10 @@ export function toJSONWithAliases(
   return value;
 }
 
-export function createJsonSchema(defaultValues: any, referenceValues: any): JSONSchema {
+export function createJsonSchema(
+  defaultValues: any,
+  referenceValues: any,
+): JSONSchema {
   function analyzeType(value: any, defaultValue: any): JSONSchema {
     if (isAlias(value)) {
       const path = value.$alias.path;
@@ -221,7 +242,10 @@ export function createJsonSchema(defaultValues: any, referenceValues: any): JSON
               if (typeof item === "object" && item !== null) {
                 Object.keys(item).forEach((key) => {
                   if (!(key in properties)) {
-                    properties[key] = analyzeType(value?.[i]?.[key], defaultValue?.[i]?.[key]);
+                    properties[key] = analyzeType(
+                      value?.[i]?.[key],
+                      defaultValue?.[i]?.[key],
+                    );
                   }
                 });
               }
@@ -234,18 +258,25 @@ export function createJsonSchema(defaultValues: any, referenceValues: any): JSON
         } else if (value ?? defaultValue !== null) {
           schema.type = "object";
           schema.properties = {};
-          for (const key of new Set([
-            ...Object.keys(value ?? {}),
-            ...Object.keys(defaultValue ?? {}),
-          ])) {
-            schema.properties[key] = analyzeType(value?.[key], defaultValue?.[key]);
+          for (
+            const key of new Set([
+              ...Object.keys(value ?? {}),
+              ...Object.keys(defaultValue ?? {}),
+            ])
+          ) {
+            schema.properties[key] = analyzeType(
+              value?.[key],
+              defaultValue?.[key],
+            );
           }
         } else {
           schema.type = "null";
         }
         break;
       case "number":
-        schema.type = Number.isInteger(value ?? defaultValue) ? "integer" : "number";
+        schema.type = Number.isInteger(value ?? defaultValue)
+          ? "integer"
+          : "number";
         break;
       case "undefined":
         break;
@@ -267,10 +298,9 @@ export function createJsonSchema(defaultValues: any, referenceValues: any): JSON
 export function moduleToJSON(module: Module) {
   return {
     ...module,
-    implementation:
-      typeof module.implementation === "function"
-        ? module.implementation.toString()
-        : module.implementation,
+    implementation: typeof module.implementation === "function"
+      ? module.implementation.toString()
+      : module.implementation,
   };
 }
 

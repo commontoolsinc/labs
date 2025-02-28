@@ -1,4 +1,12 @@
-import { waitForEvent, assert, invertPromise, setIframeTestHandler, cleanup, render, assertEquals } from "./utils.js";
+import {
+  assert,
+  assertEquals,
+  cleanup,
+  invertPromise,
+  render,
+  setIframeTestHandler,
+  waitForEvent,
+} from "./utils.js";
 
 setIframeTestHandler();
 
@@ -65,7 +73,7 @@ describe("common-iframe CSP", () => {
   const cases = [[
     "allows inline script",
     `<script>console.log("foo")</script><style>* { background-color: red; }</style><div>foo</div>`,
-    null
+    null,
   ], [
     "allows 1P fetch",
     `<script>fetch("${ORIGIN_URL}/foo.js")</script>`,
@@ -165,7 +173,8 @@ describe("common-iframe CSP", () => {
       "disallows prerender",
       `<link rel="prerender" href="${HTML_URL}" />`,
       "CSP:default-src",
-    ]];
+    ],
+  ];
 
   for (let [name, html, expected] of cases) {
     defineTest(name, html, expected);
@@ -180,21 +189,21 @@ describe("common-iframe CSP", () => {
 
 function defineTest(name, html, expected) {
   it(name, async () => {
-      const body = `
+    const body = `
         ${CSP_REPORTER}
         ${html}
       `;
-      const iframe = await render(body);
-      if (expected == null) {
-        await invertPromise(waitForEvent(iframe, "common-iframe-error"));
+    const iframe = await render(body);
+    if (expected == null) {
+      await invertPromise(waitForEvent(iframe, "common-iframe-error"));
+    } else {
+      let event = await waitForEvent(iframe, "common-iframe-error");
+      if (typeof expected === "string") {
+        assertEquals(event.detail.description, expected);
       } else {
-        let event = await waitForEvent(iframe, "common-iframe-error");
-        if (typeof expected === "string") {
-          assertEquals(event.detail.description, expected);
-        } else {
-          assert(expected.test(event.detail.description));
-        }
+        assert(expected.test(event.detail.description));
       }
+    }
   });
 }
 

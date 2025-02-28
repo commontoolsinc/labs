@@ -5,8 +5,12 @@ import React from "react";
 
 export const useCharm = (charmId: string | undefined) => {
   const { charmManager } = useCharmManager();
-  const [currentFocus, setCurrentFocus] = React.useState<Cell<Charm> | null>(null);
-  const [iframeRecipe, setIframeRecipe] = React.useState<IFrameRecipe | null>(null);
+  const [currentFocus, setCurrentFocus] = React.useState<Cell<Charm> | null>(
+    null,
+  );
+  const [iframeRecipe, setIframeRecipe] = React.useState<IFrameRecipe | null>(
+    null,
+  );
 
   React.useEffect(() => {
     async function loadCharm() {

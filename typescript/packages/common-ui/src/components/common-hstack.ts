@@ -1,11 +1,13 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
 @customElement("common-hstack")
 export class CommonHstackElement extends LitElement {
-  @property({ type: String, reflect: true }) accessor gap?: string;
-  @property({ type: String, reflect: true }) accessor pad?: string;
+  @property({ type: String, reflect: true })
+  accessor gap: string;
+  @property({ type: String, reflect: true })
+  accessor pad: string;
 
   static override styles = [
     baseStyles,

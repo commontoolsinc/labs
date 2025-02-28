@@ -1,8 +1,8 @@
 export type DID = `did:${string}:${string}`;
 
 export type KeyPair = {
-  privateKey: Signer,
-  publicKey: Verifier,
+  privateKey: Signer;
+  publicKey: Verifier;
 };
 
 export interface Signer {
@@ -17,8 +17,8 @@ export interface Verifier {
 }
 
 export type InsecureCryptoKeyPair = {
-  privateKey: Uint8Array,
-  publicKey: Uint8Array,
+  privateKey: Uint8Array;
+  publicKey: Uint8Array;
 };
 
 export type KeyPairRaw = CryptoKeyPair | InsecureCryptoKeyPair;

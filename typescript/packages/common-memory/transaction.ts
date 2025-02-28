@@ -1,4 +1,10 @@
-import type { Principal, MemorySpace, ChangesBuilder, Meta, Transaction } from "./interface.ts";
+import type {
+  ChangesBuilder,
+  MemorySpace,
+  Meta,
+  Principal,
+  Transaction,
+} from "./interface.ts";
 export const create = <Space extends MemorySpace>({
   issuer,
   subject,

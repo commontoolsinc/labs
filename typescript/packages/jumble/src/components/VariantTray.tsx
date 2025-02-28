@@ -36,11 +36,11 @@ export function VariantTray({
 
     const id = charmId(selectedVariant);
     if (!id || !replicaName) {
-      console.error('Missing required params', { id, replicaName });
+      console.error("Missing required params", { id, replicaName });
       return;
     }
 
-    navigate(createPath('charmShow', { charmId: id, replicaName }));
+    navigate(createPath("charmShow", { charmId: id, replicaName }));
   }, [selectedVariant, replicaName, navigate]);
 
   return (
@@ -69,10 +69,11 @@ export function VariantTray({
             onClick={() => onSelectVariant(originalCharm)}
             className={`
               flex-shrink-0 w-80 h-56 border-2 border-black overflow-hidden relative
-              ${originalCharm === selectedVariant
+              ${
+              originalCharm === selectedVariant
                 ? "opacity-100 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)] -translate-y-0.5"
                 : "opacity-30 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]"
-              }
+            }
               transition-all duration-150 ease-in-out transform-gpu mt-0.5
             `}
           >
@@ -96,13 +97,15 @@ export function VariantTray({
         {variants.map((variant, i) => (
           <div key={i} className="flex flex-col items-center">
             <button
-              onClick={() => onSelectVariant(variant)}
+              onClick={() =>
+                onSelectVariant(variant)}
               className={`
                 flex-shrink-0 w-80 h-56 border-2 border-black overflow-hidden relative
-                ${variant === selectedVariant
+                ${
+                variant === selectedVariant
                   ? "opacity-100 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)] -translate-y-0.5"
                   : "opacity-30 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]"
-                }
+              }
                 transition-all duration-150 ease-in-out transform-gpu mt-0.5
               `}
             >

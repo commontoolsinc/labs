@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property, state } from "lit/decorators.ts";
 import { base } from "../shared/styles.ts";
 
@@ -105,9 +105,11 @@ export class OsFabgroup extends LitElement {
         <div class="bubbles">
           <slot></slot>
         </div>
-        ${this.expanded
-          ? html`<os-ai-box @submit=${onSubmit}></os-ai-box>`
-          : html`<os-fab @click=${onClick}></os-fab>`}
+        ${
+      this.expanded
+        ? html`<os-ai-box @submit=${onSubmit}></os-ai-box>`
+        : html`<os-fab @click=${onClick}></os-fab>`
+    }
       </div>
     `;
   }

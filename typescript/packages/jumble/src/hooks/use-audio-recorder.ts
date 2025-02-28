@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface AudioRecorderOptions {
   transcribe?: boolean;
@@ -15,7 +15,7 @@ export interface CommonAudioRecording {
 
 export function useAudioRecorder({
   transcribe = false,
-  url = '/api/ai/voice/transcribe',
+  url = "/api/ai/voice/transcribe",
   onRecording,
   onError,
 }: AudioRecorderOptions = {}) {
@@ -36,14 +36,14 @@ export function useAudioRecorder({
 
   const cleanupRecording = useCallback(() => {
     if (mediaRecorderRef.current) {
-      if (mediaRecorderRef.current.state === 'recording') {
+      if (mediaRecorderRef.current.state === "recording") {
         mediaRecorderRef.current.stop();
       }
       mediaRecorderRef.current = null;
     }
 
     if (activeStreamRef.current) {
-      activeStreamRef.current.getTracks().forEach(track => track.stop());
+      activeStreamRef.current.getTracks().forEach((track) => track.stop());
       activeStreamRef.current = null;
     }
 
@@ -63,7 +63,7 @@ export function useAudioRecorder({
     try {
       setIsTranscribing(true);
       const response = await fetch(url, {
-        method: 'POST',
+        method: "POST",
         body: audioBlob,
       });
       const data = await response.json();
@@ -74,7 +74,7 @@ export function useAudioRecorder({
         transcription: data.transcription,
       });
     } catch (error) {
-      console.error('Transcription error:', error);
+      console.error("Transcription error:", error);
       onError?.({ error, blob: audioBlob });
     } finally {
       setIsTranscribing(false);
@@ -82,54 +82,58 @@ export function useAudioRecorder({
   }, [transcribe, url, onRecording, onError]);
 
   const startRecording = useCallback(async () => {
-    console.log('Starting recording...');
+    console.log("Starting recording...");
 
     cleanupRecording();
 
     try {
-      console.log('Requesting microphone access...');
+      console.log("Requesting microphone access...");
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
       });
       activeStreamRef.current = stream;
-      console.log('Microphone access granted');
+      console.log("Microphone access granted");
 
-      console.log('Creating MediaRecorder...');
+      console.log("Creating MediaRecorder...");
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
       startTimeRef.current = Date.now();
       setRecordingSeconds(0);
-      console.log('MediaRecorder created');
+      console.log("MediaRecorder created");
 
       mediaRecorder.ondataavailable = (event) => {
         console.log(`Data available event, size: ${event.data.size}`);
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
-          console.log(`Chunk added, total chunks: ${audioChunksRef.current.length}`);
+          console.log(
+            `Chunk added, total chunks: ${audioChunksRef.current.length}`,
+          );
         }
       };
 
       mediaRecorder.onstop = async () => {
-        console.log('MediaRecorder stopped');
+        console.log("MediaRecorder stopped");
         if (audioChunksRef.current.length === 0) {
-          console.log('No audio chunks recorded, skipping processing');
+          console.log("No audio chunks recorded, skipping processing");
           return;
         }
 
-        console.log(`Creating blob from ${audioChunksRef.current.length} chunks`);
+        console.log(
+          `Creating blob from ${audioChunksRef.current.length} chunks`,
+        );
         const audioBlob = new Blob(audioChunksRef.current, {
-          type: 'audio/wav',
+          type: "audio/wav",
         });
         console.log(`Blob created, size: ${audioBlob.size}`);
 
         try {
           if (transcribe) {
-            console.log('Running final transcription...');
+            console.log("Running final transcription...");
             setIsTranscribing(true);
             await runFinalTranscription(audioBlob);
           } else {
-            console.log('Transcribe disabled, returning raw audio');
+            console.log("Transcribe disabled, returning raw audio");
             onRecording?.({
               id: crypto.randomUUID(),
               blob: audioBlob,
@@ -141,30 +145,38 @@ export function useAudioRecorder({
         }
       };
 
-      console.log('Starting MediaRecorder with 1s interval');
+      console.log("Starting MediaRecorder with 1s interval");
       mediaRecorder.start(1000);
       setIsRecording(true);
-      console.log('Recording started');
+      console.log("Recording started");
 
-      console.log('Setting up recording timer');
+      console.log("Setting up recording timer");
       recordingTimerRef.current = setInterval(updateRecordingTime, 100);
-      console.log('Timer started');
-
+      console.log("Timer started");
     } catch (error: any) {
       cleanupRecording();
-      console.error('Error in startRecording:', error);
-      console.error('Full error details:', {
+      console.error("Error in startRecording:", error);
+      console.error("Full error details:", {
         name: error.name,
         message: error.message,
-        stack: error.stack
+        stack: error.stack,
       });
       onError?.(error);
     }
-  }, [cleanupRecording, transcribe, onRecording, onError, runFinalTranscription, updateRecordingTime]);
+  }, [
+    cleanupRecording,
+    transcribe,
+    onRecording,
+    onError,
+    runFinalTranscription,
+    updateRecordingTime,
+  ]);
 
   const stopRecording = useCallback(() => {
-    console.log('Stopping recording...');
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+    console.log("Stopping recording...");
+    if (
+      mediaRecorderRef.current && mediaRecorderRef.current.state === "recording"
+    ) {
       mediaRecorderRef.current.stop();
     }
     cleanupRecording();

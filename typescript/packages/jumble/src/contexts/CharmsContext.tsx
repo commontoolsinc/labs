@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from "react";
+import React, { createContext, useCallback, useContext, useState } from "react";
 import { type Charm } from "@commontools/charm";
 
 export type CharmsContextType = {
@@ -11,7 +11,9 @@ export type CharmsContextType = {
 
 const CharmsContext = createContext<CharmsContextType>(null!);
 
-export const CharmsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const CharmsProvider: React.FC<{ children: React.ReactNode }> = (
+  { children },
+) => {
   const [charms, setCharms] = useState<Charm[]>([]);
   const [focusedCharm, setFocusedCharm] = useState<Charm | null>(null);
 
@@ -41,7 +43,9 @@ export const CharmsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   return (
-    <CharmsContext.Provider value={{ charms, focusedCharm, addCharm, removeCharm, runCharm }}>
+    <CharmsContext.Provider
+      value={{ charms, focusedCharm, addCharm, removeCharm, runCharm }}
+    >
       {children}
     </CharmsContext.Provider>
   );

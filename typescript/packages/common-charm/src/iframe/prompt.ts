@@ -38,7 +38,9 @@ export const buildPrompt = ({
   }
 
   messages.push(
-    `The user asked you to ${spec ? "update" : "create"} the source code with the following comments:
+    `The user asked you to ${
+      spec ? "update" : "create"
+    } the source code with the following comments:
 \`\`\`
 ${newSpec}
 \`\`\``,

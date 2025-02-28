@@ -4,14 +4,18 @@ import * as Changes from "../changes.ts";
 import * as Commit from "../commit.ts";
 import * as Transaction from "../transaction.ts";
 import * as Fact from "../fact.ts";
-import { refer, createTemporaryDirectory } from "../util.ts";
+import { createTemporaryDirectory, refer } from "../util.ts";
 
 const the = "application/json";
 const doc = `of:${refer({ hello: "world" })}` as const;
 const space = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
 const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
 
-const test = (title: string, url: URL, run: (replica: Space.View) => Promise<unknown>) => {
+const test = (
+  title: string,
+  url: URL,
+  run: (replica: Space.View) => Promise<unknown>,
+) => {
   const unit = async () => {
     const session = await Space.open({
       url,
@@ -249,110 +253,122 @@ test("updates memory", new URL(`memory:${space}`), async (session) => {
   );
 });
 
-test("fails updating non-existing memory", new URL(`memory:${space}`), async (session) => {
-  const v1 = Fact.assert({
-    the,
-    of: doc,
-    is: { v: 1 },
-  });
+test(
+  "fails updating non-existing memory",
+  new URL(`memory:${space}`),
+  async (session) => {
+    const v1 = Fact.assert({
+      the,
+      of: doc,
+      is: { v: 1 },
+    });
 
-  const v2 = Fact.assert({
-    the,
-    of: doc,
-    is: { v: 2 },
-    cause: v1,
-  });
+    const v2 = Fact.assert({
+      the,
+      of: doc,
+      is: { v: 2 },
+      cause: v1,
+    });
 
-  const tr = Transaction.create({
-    issuer: alice,
-    subject: space,
-    changes: Changes.from([v2]),
-  });
+    const tr = Transaction.create({
+      issuer: alice,
+      subject: space,
+      changes: Changes.from([v2]),
+    });
 
-  const result = await Space.transact(session, tr);
+    const result = await Space.transact(session, tr);
 
-  assert(result.error, "Update should fail if document does not exists");
-  assert(result.error.name === "ConflictError");
-  assertEquals(result.error.conflict, {
-    space,
-    the,
-    of: doc,
-    expected: refer(v1),
-    actual: null,
-  });
-});
+    assert(result.error, "Update should fail if document does not exists");
+    assert(result.error.name === "ConflictError");
+    assertEquals(result.error.conflict, {
+      space,
+      the,
+      of: doc,
+      expected: refer(v1),
+      actual: null,
+    });
+  },
+);
 
-test("create memory fails if already exists", new URL(`memory:${space}`), async (session) => {
-  const base = refer(Fact.unclaimed({ the, of: doc }));
-  const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
+test(
+  "create memory fails if already exists",
+  new URL(`memory:${space}`),
+  async (session) => {
+    const base = refer(Fact.unclaimed({ the, of: doc }));
+    const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
 
-  const create = Transaction.create({
-    issuer: alice,
-    subject: space,
-    changes: Changes.from([v1]),
-  });
+    const create = Transaction.create({
+      issuer: alice,
+      subject: space,
+      changes: Changes.from([v1]),
+    });
 
-  const init = await Space.transact(session, create);
+    const init = await Space.transact(session, create);
 
-  assert(init.ok, "Document created");
+    assert(init.ok, "Document created");
 
-  const r1 = Fact.assert({ the, of: doc, is: { r: 1 } });
+    const r1 = Fact.assert({ the, of: doc, is: { r: 1 } });
 
-  const createRace = Transaction.create({
-    issuer: alice,
-    subject: space,
-    changes: Changes.from([r1]),
-  });
+    const createRace = Transaction.create({
+      issuer: alice,
+      subject: space,
+      changes: Changes.from([r1]),
+    });
 
-  const conflict = await Space.transact(session, createRace);
+    const conflict = await Space.transact(session, createRace);
 
-  assert(conflict.error, "Create fail when already exists");
-  assert(conflict.error.name === "ConflictError");
-  assertEquals(conflict.error.conflict, {
-    space,
-    the,
-    of: doc,
-    expected: null,
-    actual: v1,
-  });
-});
+    assert(conflict.error, "Create fail when already exists");
+    assert(conflict.error.name === "ConflictError");
+    assertEquals(conflict.error.conflict, {
+      space,
+      the,
+      of: doc,
+      expected: null,
+      actual: v1,
+    });
+  },
+);
 
-test("update does not confuse the/of", new URL(`memory:${space}`), async (session) => {
-  const initial = Fact.assert({ the, of: doc, is: { v: 1 } });
+test(
+  "update does not confuse the/of",
+  new URL(`memory:${space}`),
+  async (session) => {
+    const initial = Fact.assert({ the, of: doc, is: { v: 1 } });
 
-  const initialize = Transaction.create({
-    issuer: alice,
-    subject: space,
-    changes: Changes.from([initial]),
-  });
+    const initialize = Transaction.create({
+      issuer: alice,
+      subject: space,
+      changes: Changes.from([initial]),
+    });
 
-  const create = await Space.transact(session, initialize);
-  assert(create.ok);
+    const create = await Space.transact(session, initialize);
+    assert(create.ok);
 
-  const malformed = Fact.assert({
-    the,
-    of: `of:${refer({ doc: 2 })}`,
-    is: { a: true },
-    cause: refer(initial),
-  });
+    const malformed = Fact.assert({
+      the,
+      of: `of:${refer({ doc: 2 })}`,
+      is: { a: true },
+      cause: refer(initial),
+    });
 
-  const change = Transaction.create({
-    issuer: alice,
-    subject: space,
-    changes: Changes.from([malformed]),
-  });
+    const change = Transaction.create({
+      issuer: alice,
+      subject: space,
+      changes: Changes.from([malformed]),
+    });
 
-  const update = await Space.transact(session, change);
-  assert(update.error);
-  assert(update.error.name === "ConflictError");
-  assertEquals(update.error.conflict, {
-    space,
-    the,
-    of: malformed.of,
-    expected: refer(initial),
-    actual: null,
-  });
-});
+    const update = await Space.transact(session, change);
+    assert(update.error);
+    assert(update.error.name === "ConflictError");
+    assertEquals(update.error.conflict, {
+      space,
+      the,
+      of: malformed.of,
+      expected: refer(initial),
+      actual: null,
+    });
+  },
+);
 
 test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
@@ -435,50 +451,54 @@ test(
   },
 );
 
-test("concurrent identical memory updates succeed", new URL(`memory:${space}`), async (session) => {
-  const v1 = Fact.assert({
-    the,
-    of: doc,
-    is: { v: 1 },
-  });
+test(
+  "concurrent identical memory updates succeed",
+  new URL(`memory:${space}`),
+  async (session) => {
+    const v1 = Fact.assert({
+      the,
+      of: doc,
+      is: { v: 1 },
+    });
 
-  const t1 = Transaction.create({
-    issuer: alice,
-    subject: space,
-    changes: Changes.from([v1]),
-  });
-  const r1 = await Space.transact(session, t1);
+    const t1 = Transaction.create({
+      issuer: alice,
+      subject: space,
+      changes: Changes.from([v1]),
+    });
+    const r1 = await Space.transact(session, t1);
 
-  assert(r1.ok);
+    assert(r1.ok);
 
-  const c1 = Commit.create({ space, transaction: t1 });
-  assertEquals(r1, {
-    ok: Changes.from([c1]),
-  });
+    const c1 = Commit.create({ space, transaction: t1 });
+    assertEquals(r1, {
+      ok: Changes.from([c1]),
+    });
 
-  const v2 = Fact.assert({ the, of: doc, is: { v: 2 }, cause: v1 });
+    const v2 = Fact.assert({ the, of: doc, is: { v: 2 }, cause: v1 });
 
-  const t2 = Transaction.create({
-    issuer: alice,
-    subject: space,
-    changes: Changes.from([v2]),
-  });
+    const t2 = Transaction.create({
+      issuer: alice,
+      subject: space,
+      changes: Changes.from([v2]),
+    });
 
-  const r2 = await Space.transact(session, t2);
-  assert(r2.ok);
-  const c2 = Commit.create({ space, transaction: t2, cause: c1 });
+    const r2 = await Space.transact(session, t2);
+    assert(r2.ok);
+    const c2 = Commit.create({ space, transaction: t2, cause: c1 });
 
-  assertEquals(r2, {
-    ok: Changes.from([c2]),
-  });
+    assertEquals(r2, {
+      ok: Changes.from([c2]),
+    });
 
-  const r3 = await Space.transact(session, t2);
-  const c3 = Commit.create({ space, transaction: t2, cause: c2 });
+    const r3 = await Space.transact(session, t2);
+    const c3 = Commit.create({ space, transaction: t2, cause: c2 });
 
-  assertEquals(r3, {
-    ok: Changes.from([c3]),
-  });
-});
+    assertEquals(r3, {
+      ok: Changes.from([c3]),
+    });
+  },
+);
 
 test("retract unclaimed", new URL(`memory:${space}`), async (session) => {
   const v0 = Fact.unclaimed({ the, of: doc });
@@ -672,62 +692,68 @@ test(
     assertMatch(
       result.error.message,
       RegExp(
-        `The application/json of ${doc} in ${space} was expected to be ${refer(
-          v2,
-        )}, but it is ${refer(v3)}`,
+        `The application/json of ${doc} in ${space} was expected to be ${
+          refer(
+            v2,
+          )
+        }, but it is ${refer(v3)}`,
       ),
     );
   },
 );
 
-test("new memory creation fails after retraction", new URL(`memory:${alice}`), async (session) => {
-  const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
-  const t1 = Transaction.create({
-    issuer: alice,
-    subject: space,
-    changes: Changes.from([v1]),
-  });
+test(
+  "new memory creation fails after retraction",
+  new URL(`memory:${alice}`),
+  async (session) => {
+    const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
+    const t1 = Transaction.create({
+      issuer: alice,
+      subject: space,
+      changes: Changes.from([v1]),
+    });
 
-  const create = await Space.transact(session, t1);
+    const create = await Space.transact(session, t1);
 
-  assert(create.ok, "Document created");
-  const c1 = Commit.create({ space, transaction: t1 });
-  assertEquals(create, { ok: Changes.from([c1]) });
+    assert(create.ok, "Document created");
+    const c1 = Commit.create({ space, transaction: t1 });
+    assertEquals(create, { ok: Changes.from([c1]) });
 
-  const v2 = Fact.retract(v1);
-  const t2 = Transaction.create({
-    issuer: alice,
-    subject: space,
-    changes: Changes.from([v2]),
-  });
+    const v2 = Fact.retract(v1);
+    const t2 = Transaction.create({
+      issuer: alice,
+      subject: space,
+      changes: Changes.from([v2]),
+    });
 
-  const retract = Space.transact(session, t2);
-  const c2 = Commit.create({ space, transaction: t2, cause: c1 });
+    const retract = Space.transact(session, t2);
+    const c2 = Commit.create({ space, transaction: t2, cause: c1 });
 
-  assertEquals(retract, {
-    ok: Changes.from([c2]),
-  });
+    assertEquals(retract, {
+      ok: Changes.from([c2]),
+    });
 
-  const v3 = Fact.assert({ the, of: doc, is: { conflict: true } });
+    const v3 = Fact.assert({ the, of: doc, is: { conflict: true } });
 
-  const t3 = Transaction.create({
-    issuer: alice,
-    subject: space,
-    changes: Changes.from([v3]),
-  });
+    const t3 = Transaction.create({
+      issuer: alice,
+      subject: space,
+      changes: Changes.from([v3]),
+    });
 
-  const conflict = await Space.transact(session, t3);
+    const conflict = await Space.transact(session, t3);
 
-  assert(conflict.error, "Create fails if cause not specified");
-  assert(conflict.error.name === "ConflictError");
-  assertEquals(conflict.error.conflict, {
-    space: space,
-    the,
-    of: doc,
-    expected: null,
-    actual: v2,
-  });
-});
+    assert(conflict.error, "Create fails if cause not specified");
+    assert(conflict.error.name === "ConflictError");
+    assertEquals(conflict.error.conflict, {
+      space: space,
+      the,
+      of: doc,
+      expected: null,
+      actual: v2,
+    });
+  },
+);
 
 test("batch updates", new URL(`memory:${space}`), async (session) => {
   const hi = `of:${refer({ hi: "world" })}` as const;
@@ -1018,71 +1044,75 @@ test("list single fact", new URL(`memory:${space}`), async (session) => {
   });
 });
 
-test("ony list excludes retracted facts", new URL(`memory:${space}`), async (session) => {
-  const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
-  // Create and then retract a fact
-  const tr = Transaction.create({
-    issuer: alice,
-    subject: space,
-    changes: Changes.from([v1]),
-  });
-  const fact = await session.transact(tr);
+test(
+  "ony list excludes retracted facts",
+  new URL(`memory:${space}`),
+  async (session) => {
+    const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
+    // Create and then retract a fact
+    const tr = Transaction.create({
+      issuer: alice,
+      subject: space,
+      changes: Changes.from([v1]),
+    });
+    const fact = await session.transact(tr);
 
-  assert(fact.ok);
-  const v2 = Fact.retract(v1);
-  const tr2 = Transaction.create({
-    issuer: alice,
-    subject: space,
-    changes: Changes.from([v2]),
-  });
-  const retract = session.transact(tr2);
-  assert(retract.ok);
+    assert(fact.ok);
+    const v2 = Fact.retract(v1);
+    const tr2 = Transaction.create({
+      issuer: alice,
+      subject: space,
+      changes: Changes.from([v2]),
+    });
+    const retract = session.transact(tr2);
+    assert(retract.ok);
 
-  const result = session.query({
-    cmd: "/memory/query",
-    iss: alice,
-    sub: space,
-    args: {
-      select: {
-        _: {
-          ["application/json"]: {
-            _: {
-              is: {},
+    const result = session.query({
+      cmd: "/memory/query",
+      iss: alice,
+      sub: space,
+      args: {
+        select: {
+          _: {
+            ["application/json"]: {
+              _: {
+                is: {},
+              },
             },
           },
         },
       },
-    },
-  });
+    });
 
-  assertEquals(
-    result,
-    {
-      ok: { [space]: {} },
-    },
-    "does not list retracted",
-  );
+    assertEquals(
+      result,
+      {
+        ok: { [space]: {} },
+      },
+      "does not list retracted",
+    );
 
-  const withRetractions = session.query({
-    cmd: "/memory/query",
-    iss: alice,
-    sub: space,
-    args: {
-      select: {
-        _: {
-          ["application/json"]: {
-            _: {},
+    const withRetractions = session.query({
+      cmd: "/memory/query",
+      iss: alice,
+      sub: space,
+      args: {
+        select: {
+          _: {
+            ["application/json"]: {
+              _: {},
+            },
           },
         },
       },
-    },
-  });
+    });
 
-  assertEquals(
-    withRetractions,
-    {
-      ok: { [space]: Changes.from([v2]) },
-    },
-    "selects retracted facts",
-  );
-});
+    assertEquals(
+      withRetractions,
+      {
+        ok: { [space]: Changes.from([v2]) },
+      },
+      "selects retracted facts",
+    );
+  },
+);

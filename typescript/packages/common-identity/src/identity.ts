@@ -6,7 +6,7 @@ const textEncoder = new TextEncoder();
 
 // An `Identity` represents a public/private key pair.
 //
-// Additional keys can be deterministically derived from an identity. 
+// Additional keys can be deterministically derived from an identity.
 export class Identity implements Signer {
   private keypair: Ed25519Signer;
   constructor(keypair: Ed25519Signer) {
@@ -21,12 +21,12 @@ export class Identity implements Signer {
   async sign(data: Uint8Array): Promise<Uint8Array> {
     return await this.keypair.sign(data);
   }
- 
+
   // Serialize this identity for storage.
   serialize(): KeyPairRaw {
     return this.keypair.serialize();
   }
-  
+
   // Derive a new `Identity` given a seed string.
   async derive(name: string): Promise<Identity> {
     const seed = textEncoder.encode(name);
@@ -39,7 +39,7 @@ export class Identity implements Signer {
   static async fromRaw(rawPrivateKey: Uint8Array): Promise<Identity> {
     return new Identity(await Ed25519Signer.fromRaw(rawPrivateKey));
   }
-  
+
   // Generate a new identity.
   static async generate(): Promise<Identity> {
     return new Identity(await Ed25519Signer.generate());
@@ -47,7 +47,7 @@ export class Identity implements Signer {
 
   static async generateMnemonic(): Promise<[Identity, string]> {
     let [signer, mnemonic] = await Ed25519Signer.generateMnemonic();
-    return [new Identity(signer), mnemonic]; 
+    return [new Identity(signer), mnemonic];
   }
 
   static async fromMnemonic(mnemonic: string): Promise<Identity> {
@@ -57,7 +57,7 @@ export class Identity implements Signer {
 
   // Deserialize `input` from storage into an `Identity`.
   static async deserialize(input: any): Promise<Identity> {
-    return new Identity(await Ed25519Signer.deserialize(input)); 
+    return new Identity(await Ed25519Signer.deserialize(input));
   }
 }
 

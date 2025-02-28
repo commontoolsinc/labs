@@ -1,12 +1,17 @@
 import { Command } from "cmdk";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import "./commands.css";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { useMatch, useNavigate } from "react-router-dom";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { DialogDescription, DialogTitle } from "@radix-ui/react-dialog";
 import { DitheredCube } from "./DitherCube.tsx";
-import { CommandContext, CommandItem, CommandMode, getCommands } from "./commands.ts";
+import {
+  CommandContext,
+  CommandItem,
+  CommandMode,
+  getCommands,
+} from "./commands.ts";
 import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext.tsx";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
@@ -38,7 +43,10 @@ function CommandProcessor({
     case "confirm":
       return (
         <Command.Group heading={"Confirm"}>
-          <Command.Item value="yes" onSelect={() => mode.command.handler?.(context)}>
+          <Command.Item
+            value="yes"
+            onSelect={() => mode.command.handler?.(context)}
+          >
             Yes
           </Command.Item>
           <Command.Item value="no" onSelect={onComplete}>
@@ -58,7 +66,10 @@ function CommandProcessor({
       return (
         <>
           {mode.options.map((option) => (
-            <Command.Item key={option.id} onSelect={() => mode.command.handler?.(option.value)}>
+            <Command.Item
+              key={option.id}
+              onSelect={() => mode.command.handler?.(option.value)}
+            >
               {option.title}
             </Command.Item>
           ))}
@@ -77,7 +88,8 @@ export function CommandCenter() {
   const [commandPathIds, setCommandPathIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const { modelId, setPreferredModel } = usePreferredLanguageModel();
-  const { stopJob, startJob, addJobMessage, listJobs, updateJobProgress } = useBackgroundTasks();
+  const { stopJob, startJob, addJobMessage, listJobs, updateJobProgress } =
+    useBackgroundTasks();
 
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
@@ -132,7 +144,9 @@ export function CommandCenter() {
 
   const getCommandById = useCallback(
     (id: string): CommandItem | undefined => {
-      const findInCommands = (commands: CommandItem[]): CommandItem | undefined => {
+      const findInCommands = (
+        commands: CommandItem[],
+      ): CommandItem | undefined => {
         for (const cmd of commands) {
           if (cmd.id === id) return cmd;
           if (cmd.children) {
@@ -148,7 +162,10 @@ export function CommandCenter() {
   );
 
   const currentCommandPath = useMemo(
-    () => commandPathIds.map((id) => getCommandById(id)).filter((cmd): cmd is CommandItem => !!cmd),
+    () =>
+      commandPathIds.map((id) => getCommandById(id)).filter((
+        cmd,
+      ): cmd is CommandItem => !!cmd),
     [commandPathIds, getCommandById],
   );
 
@@ -169,7 +186,10 @@ export function CommandCenter() {
 
     return () => {
       document.removeEventListener("keydown", down);
-      window.removeEventListener("open-command-center", handleOpenCommandCenter);
+      window.removeEventListener(
+        "open-command-center",
+        handleOpenCommandCenter,
+      );
     };
   }, []);
 
@@ -263,20 +283,27 @@ export function CommandCenter() {
   };
 
   const getCurrentCommands = () => {
-    const commands =
-      commandPathIds.length === 0
-        ? allCommands
-        : (getCommandById(commandPathIds[commandPathIds.length - 1])?.children ?? []);
+    const commands = commandPathIds.length === 0
+      ? allCommands
+      : (getCommandById(commandPathIds[commandPathIds.length - 1])?.children ??
+        []);
 
     return commands.filter((cmd) => cmd.predicate !== false); // Show command unless predicate is explicitly false
   };
 
   return (
-    <Command.Dialog title="Common" open={open} onOpenChange={setOpen} label="Command Menu">
+    <Command.Dialog
+      title="Common"
+      open={open}
+      onOpenChange={setOpen}
+      label="Command Menu"
+    >
       <VisuallyHidden>
         <>
           <DialogTitle>Common</DialogTitle>
-          <DialogDescription>Common commands for managing charms.</DialogDescription>
+          <DialogDescription>
+            Common commands for managing charms.
+          </DialogDescription>
         </>
       </VisuallyHidden>
 
@@ -295,13 +322,11 @@ export function CommandCenter() {
         </div>
 
         <Command.Input
-          placeholder={
-            mode.type === "confirm"
-              ? mode.message || "Are you sure?"
-              : mode.type === "input"
-                ? mode.placeholder
-                : "What would you like to do?"
-          }
+          placeholder={mode.type === "confirm"
+            ? mode.message || "Are you sure?"
+            : mode.type === "input"
+            ? mode.placeholder
+            : "What would you like to do?"}
           readOnly={mode.type === "confirm"}
           value={search}
           onValueChange={setSearch}
@@ -333,74 +358,81 @@ export function CommandCenter() {
           </Command.Loading>
         )}
 
-        {mode.type === "main" || mode.type === "menu" ? (
-          <>
-            {commandPathIds.length > 0 && (
-              <Command.Item onSelect={handleBack}>
-                ← Back to{" "}
-                {getCommandById(commandPathIds[commandPathIds.length - 2])?.title || "Main Menu"}
-              </Command.Item>
-            )}
+        {mode.type === "main" || mode.type === "menu"
+          ? (
+            <>
+              {commandPathIds.length > 0 && (
+                <Command.Item onSelect={handleBack}>
+                  ← Back to{" "}
+                  {getCommandById(commandPathIds[commandPathIds.length - 2])
+                    ?.title || "Main Menu"}
+                </Command.Item>
+              )}
 
-            {(() => {
-              const groups: Record<string, CommandItem[]> = getCurrentCommands().reduce(
-                (acc, cmd) => {
-                  const group = cmd.group || "Other";
-                  if (!acc[group]) acc[group] = [];
-                  acc[group].push(cmd);
-                  return acc;
-                },
-                {} as Record<string, CommandItem[]>,
-              );
+              {(() => {
+                const groups: Record<string, CommandItem[]> =
+                  getCurrentCommands().reduce(
+                    (acc, cmd) => {
+                      const group = cmd.group || "Other";
+                      if (!acc[group]) acc[group] = [];
+                      acc[group].push(cmd);
+                      return acc;
+                    },
+                    {} as Record<string, CommandItem[]>,
+                  );
 
-              return Object.entries(groups).map(([groupName, commands]) => (
-                <Command.Group key={groupName} heading={groupName}>
-                  {commands.map((cmd) => (
-                    <Command.Item
-                      key={cmd.id}
-                      onSelect={() => {
-                        if (cmd.children) {
-                          setCommandPathIds((prev) => [...prev, cmd.id]);
-                          setMode({
-                            type: "menu",
-                            path: [...commandPathIds, cmd.id],
-                            parent: cmd,
-                          });
-                        } else if (cmd.type === "action") {
-                          // Only close if the handler doesn't return a Promise
-                          // This allows async handlers that change mode to keep the palette open
-                          const result = cmd.handler?.(context);
-                          if (!cmd.handler || (!result && cmd.handler.length === 0)) {
-                            setOpen(false);
+                return Object.entries(groups).map(([groupName, commands]) => (
+                  <Command.Group key={groupName} heading={groupName}>
+                    {commands.map((cmd) => (
+                      <Command.Item
+                        key={cmd.id}
+                        onSelect={() => {
+                          if (cmd.children) {
+                            setCommandPathIds((prev) => [...prev, cmd.id]);
+                            setMode({
+                              type: "menu",
+                              path: [...commandPathIds, cmd.id],
+                              parent: cmd,
+                            });
+                          } else if (cmd.type === "action") {
+                            // Only close if the handler doesn't return a Promise
+                            // This allows async handlers that change mode to keep the palette open
+                            const result = cmd.handler?.(context);
+                            if (
+                              !cmd.handler ||
+                              (!result && cmd.handler.length === 0)
+                            ) {
+                              setOpen(false);
+                            }
+                          } else {
+                            // TODO(bf): need to refactor types
+                            setMode({ type: cmd.type, command: cmd });
                           }
-                        } else {
-                          // TODO(bf): need to refactor types
-                          setMode({ type: cmd.type, command: cmd });
-                        }
-                      }}
-                    >
-                      {cmd.title}
-                      {cmd.children && " →"}
-                    </Command.Item>
-                  ))}
-                </Command.Group>
-              ));
-            })()}
-          </>
-        ) : (
-          <CommandProcessor
-            mode={mode}
-            command={currentCommandPath[currentCommandPath.length - 1]}
-            context={context}
-            onComplete={() => {
-              setMode({
-                type: "menu",
-                path: commandPathIds,
-                parent: currentCommandPath[currentCommandPath.length - 1],
-              });
-            }}
-          />
-        )}
+                        }}
+                      >
+                        {cmd.title}
+                        {cmd.children && " →"}
+                      </Command.Item>
+                    ))}
+                  </Command.Group>
+                ));
+              })()}
+            </>
+          )
+          : (
+            <CommandProcessor
+              mode={mode}
+              command={currentCommandPath[currentCommandPath.length - 1]}
+              context={context}
+              onComplete={() => {
+                setMode({
+                  type: "menu",
+                  path: commandPathIds,
+                  parent: currentCommandPath[currentCommandPath.length - 1],
+                });
+              }}
+            />
+          )}
       </Command.List>
     </Command.Dialog>
   );

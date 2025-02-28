@@ -1,5 +1,10 @@
 import { EditorView } from "prosemirror-view";
-import { Command, EditorState, Transaction, TextSelection } from "prosemirror-state";
+import {
+  Command,
+  EditorState,
+  TextSelection,
+  Transaction,
+} from "prosemirror-state";
 
 /** Execute a command on the view, mutating it. */
 export const executeCommand = (view: EditorView, command: Command) => {
@@ -19,15 +24,20 @@ export const executeCommand = (view: EditorView, command: Command) => {
  * @see https://prosemirror.net/docs/guide/#commands
  * @see https://prosemirror.net/docs/ref/version/0.20.0.html#commands
  */
-export const command =
-  (definition: (state: EditorState) => Transaction | null | undefined): Command =>
-  (state: EditorState, dispatch?: (tr: Transaction) => void, _view?: EditorView) => {
-    if (dispatch == null) return false;
-    const tr = definition(state);
-    if (tr == null) return false;
-    dispatch(tr);
-    return true;
-  };
+export const command = (
+  definition: (state: EditorState) => Transaction | null | undefined,
+): Command =>
+(
+  state: EditorState,
+  dispatch?: (tr: Transaction) => void,
+  _view?: EditorView,
+) => {
+  if (dispatch == null) return false;
+  const tr = definition(state);
+  if (tr == null) return false;
+  dispatch(tr);
+  return true;
+};
 
 /**
  * Replace range with text, placing cursor at end

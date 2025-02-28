@@ -59,7 +59,7 @@ export function subscribe(action: Action, log: ReactivityLog): Cancel {
           queueExecution();
           pending.add(action);
         }
-      }),
+      })
     ),
   );
 
@@ -120,7 +120,9 @@ export function queueEvent(eventRef: DocLink, event: any) {
 export function addEventHandler(handler: EventHandler, ref: DocLink): Cancel {
   eventHandlers.push([ref, handler]);
   return () => {
-    const index = eventHandlers.findIndex(([r, h]) => r === ref && h === handler);
+    const index = eventHandlers.findIndex(([r, h]) =>
+      r === ref && h === handler
+    );
     if (index !== -1) eventHandlers.splice(index, 1);
   };
 }
@@ -215,8 +217,9 @@ function topologicalSort(
               dependencies
                 .get(relevantAction)!
                 .reads.some(
-                  ({ cell, path }) => cell === write.cell && pathAffected(write.path, path),
-                ),
+                  ({ cell, path }) =>
+                    cell === write.cell && pathAffected(write.path, path),
+                )
             )
           ) {
             relevantActions.add(action);
@@ -241,7 +244,9 @@ function topologicalSort(
         if (actionA !== actionB) {
           const { reads } = dependencies.get(actionB)!;
           if (
-            reads.some(({ cell, path }) => cell === write.cell && pathAffected(write.path, path))
+            reads.some(({ cell, path }) =>
+              cell === write.cell && pathAffected(write.path, path)
+            )
           ) {
             graph.get(actionA)!.add(actionB);
             inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);

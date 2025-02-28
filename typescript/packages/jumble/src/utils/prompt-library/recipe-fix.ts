@@ -1,5 +1,8 @@
 import { llm } from "@/utils/llm.ts";
-import { hydratePrompt, parseTagFromResponse } from "@/utils/prompt-library/prompting.ts";
+import {
+  hydratePrompt,
+  parseTagFromResponse,
+} from "@/utils/prompt-library/prompting.ts";
 import { recipeGuidePrompt } from "@/utils/prompt-library/recipe-guide.ts";
 
 const SYSTEM_PROMPT = `
@@ -77,7 +80,8 @@ export async function fixRecipePrompt(
     SCHEMA: schema,
     ERROR: error,
   });
-  const prompt = `Please fix the code, do not be lazy, or leave comments about code you didn't include. Include all of the code.`;
+  const prompt =
+    `Please fix the code, do not be lazy, or leave comments about code you didn't include. Include all of the code.`;
   const response = await llm.sendRequest({
     model,
     system,

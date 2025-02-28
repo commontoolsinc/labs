@@ -53,12 +53,22 @@ describe("Space with Docs", () => {
     const doc2a = getDoc({ id: "1a" }, "cause1", space2); // Same value/cause as doc1a
 
     // Verify space isolation
-    expect(getDocByEntityId(space1, doc1a.entityId!, true) === doc1a).toBe(true);
-    expect(getDocByEntityId(space1, doc1b.entityId!, true) === doc1b).toBe(true);
-    expect(getDocByEntityId(space2, doc2a.entityId!, true) === doc2a).toBe(true);
+    expect(getDocByEntityId(space1, doc1a.entityId!, true) === doc1a).toBe(
+      true,
+    );
+    expect(getDocByEntityId(space1, doc1b.entityId!, true) === doc1b).toBe(
+      true,
+    );
+    expect(getDocByEntityId(space2, doc2a.entityId!, true) === doc2a).toBe(
+      true,
+    );
 
     // Verify cross-space retrieval doesn't work
-    expect(getDocByEntityId(space2, doc1a.entityId!, false) !== doc1a).toBe(true);
-    expect(getDocByEntityId(space1, doc2a.entityId!, false) !== doc2a).toBe(true);
+    expect(getDocByEntityId(space2, doc1a.entityId!, false) !== doc1a).toBe(
+      true,
+    );
+    expect(getDocByEntityId(space1, doc2a.entityId!, false) !== doc2a).toBe(
+      true,
+    );
   });
 });

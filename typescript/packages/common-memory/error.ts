@@ -1,20 +1,22 @@
 import type {
-  ConflictError,
   Conflict,
-  Fact,
-  TransactionError,
-  QueryError,
-  ToJSON,
-  SystemError,
+  ConflictError,
   ConnectionError,
+  Fact,
+  QueryError,
   Selector,
+  SystemError,
+  ToJSON,
   Transaction,
+  TransactionError,
 } from "./interface.ts";
 import { MemorySpace } from "./interface.ts";
 import { refer } from "./util.ts";
 
-export const conflict = (transaction: Transaction, info: Conflict): ToJSON<ConflictError> =>
-  new TheConflictError(transaction, info);
+export const conflict = (
+  transaction: Transaction,
+  info: Conflict,
+): ToJSON<ConflictError> => new TheConflictError(transaction, info);
 
 export const transaction = (
   transaction: Transaction,
@@ -27,8 +29,10 @@ export const query = (
   cause: SystemError,
 ): ToJSON<QueryError> => new TheQueryError(space, selector, cause);
 
-export const connection = (address: URL, cause: SystemError): ToJSON<ConnectionError> =>
-  new TheConnectionError(address.href, cause);
+export const connection = (
+  address: URL,
+  cause: SystemError,
+): ToJSON<ConnectionError> => new TheConnectionError(address.href, cause);
 
 export class TheConflictError extends Error implements ConflictError {
   override name = "ConflictError" as const;
@@ -36,14 +40,16 @@ export class TheConflictError extends Error implements ConflictError {
   constructor(public transaction: Transaction, conflict: Conflict) {
     super(
       conflict.expected == null
-        ? `The ${conflict.the} of ${conflict.of} in ${conflict.space} already exists as ${refer(
+        ? `The ${conflict.the} of ${conflict.of} in ${conflict.space} already exists as ${
+          refer(
             conflict.actual,
-          )}`
+          )
+        }`
         : conflict.actual == null
         ? `The ${conflict.the} of ${conflict.of} in ${conflict.space} was expected to be ${conflict.expected}, but it does not exists`
-        : `The ${conflict.the} of ${conflict.of} in ${conflict.space} was expected to be ${
-            conflict.expected
-          }, but it is ${refer(conflict.actual)}`,
+        : `The ${conflict.the} of ${conflict.of} in ${conflict.space} was expected to be ${conflict.expected}, but it is ${
+          refer(conflict.actual)
+        }`,
     );
 
     this.conflict = conflict;
@@ -64,7 +70,10 @@ export type InFact = Fact & { in: string };
 
 export class TheTransactionError extends Error implements TransactionError {
   override name = "TransactionError" as const;
-  constructor(public transaction: Transaction, public override cause: SystemError) {
+  constructor(
+    public transaction: Transaction,
+    public override cause: SystemError,
+  ) {
     super(`Failed to commit transaction because: ${cause.message}`);
   }
   toJSON(): TransactionError {
@@ -90,7 +99,9 @@ export class TheQueryError extends Error implements QueryError {
     public selector: Selector,
     public override cause: SystemError,
   ) {
-    super(`Query ${JSON.stringify(selector)} in ${space} failed: ${cause.message}`);
+    super(
+      `Query ${JSON.stringify(selector)} in ${space} failed: ${cause.message}`,
+    );
   }
   toJSON(): QueryError {
     return {

@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.ts";
 import { base } from "../shared/styles.ts";
 
@@ -97,8 +97,10 @@ export class OsTabBar extends LitElement {
     `,
   ];
 
-  @property({ type: Array }) items: TabItem[] = [];
-  @property({ type: String }) selected = "";
+  @property({ type: Array })
+  items: TabItem[] = [];
+  @property({ type: String })
+  selected = "";
 
   private handleTabClick(id: string, _event: Event) {
     this.selected = id;
@@ -115,8 +117,10 @@ export class OsTabBar extends LitElement {
     return html`
       <div class="tab-container">
         <div class="reserved-space"></div>
-        ${this.items?.map(
-          (item) => html`
+        ${
+      this.items?.map(
+        (item) =>
+          html`
             <div class="tab-item">
               <button
                 class="tab-button"
@@ -132,7 +136,8 @@ export class OsTabBar extends LitElement {
               </button>
             </div>
           `,
-        )}
+      )
+    }
       </div>
     `;
   }

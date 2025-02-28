@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
@@ -28,7 +28,9 @@ export class SendMessageElement extends LitElement {
   send(event: Event) {
     event.preventDefault();
 
-    const inputEl = this.shadowRoot?.getElementById("input") as HTMLInputElement;
+    const inputEl = this.shadowRoot?.getElementById(
+      "input",
+    ) as HTMLInputElement;
     if (!inputEl) return;
     const value = inputEl.value;
     inputEl.value = "";

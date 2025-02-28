@@ -1,15 +1,18 @@
 import { describe, it } from "@std/testing/bdd";
 import { h, render, VNode } from "../src/index.ts";
-import { recipe, lift, str, UI } from "@commontools/builder";
-import { run, idle } from "@commontools/runner";
+import { lift, recipe, str, UI } from "@commontools/builder";
+import { idle, run } from "@commontools/runner";
 import * as assert from "./assert.ts";
 
 describe("recipes with HTML", () => {
   it("renders a simple UI", async () => {
-    const simpleRecipe = recipe<{ value: number }>("Simple UI Recipe", ({ value }) => {
-      const doubled = lift((x: number) => x * 2)(value);
-      return { [UI]: <div>{doubled}</div> };
-    });
+    const simpleRecipe = recipe<{ value: number }>(
+      "Simple UI Recipe",
+      ({ value }) => {
+        const doubled = lift((x: number) => x * 2)(value);
+        return { [UI]: <div>{doubled}</div> };
+      },
+    );
 
     const result = run(simpleRecipe, { value: 5 });
 
@@ -39,9 +42,7 @@ describe("recipes with HTML", () => {
           <div>
             <h1>{title}</h1>
             <ul>
-              {items.map((item) => (
-                <li>{item.title}</li>
-              ))}
+              {items.map((item) => <li>{item.title}</li>)}
             </ul>
           </div>
         ),
@@ -73,7 +74,10 @@ describe("recipes with HTML", () => {
       title: { name: string };
       items: { title: string; done: boolean }[];
     }>("todo list", ({ title }) => {
-      const { [UI]: summaryUI } = recipe<{ title: { name: string } }, { [UI]: VNode }>(
+      const { [UI]: summaryUI } = recipe<
+        { title: { name: string } },
+        { [UI]: VNode }
+      >(
         "summary",
         ({ title }) => {
           return { [UI]: <div>{title.name}</div> };

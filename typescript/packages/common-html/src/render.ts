@@ -1,11 +1,11 @@
-import { isVNode, type Child, type Props, type VNode } from "./jsx.ts";
+import { type Child, isVNode, type Props, type VNode } from "./jsx.ts";
 import {
-  effect,
-  useCancelGroup,
   type Cancel,
   type Cell,
+  effect,
   isCell,
   isStream,
+  useCancelGroup,
 } from "@commontools/runner";
 import { JSONSchema } from "@commontools/builder";
 import * as logger from "./logger.ts";
@@ -36,7 +36,10 @@ const vdomSchema: JSONSchema = {
 } as const;
 
 /** Render a view into a parent element */
-export const render = (parent: HTMLElement, view: VNode | Cell<VNode>): Cancel => {
+export const render = (
+  parent: HTMLElement,
+  view: VNode | Cell<VNode>,
+): Cancel => {
   // If this is a reactive cell, ensure the schema is VNode
   if (isCell(view)) view = view.asSchema(vdomSchema);
   return effect(view, (view: VNode) => renderImpl(parent, view));
@@ -88,7 +91,10 @@ const bindChildren = (
   // Render a child that can be static or reactive. For reactive cells we update
   // the already-rendered node (using replaceWith) so that we never add an extra
   // container.
-  const renderChild = (child: Child, key: string): { node: ChildNode; cancel: Cancel } => {
+  const renderChild = (
+    child: Child,
+    key: string,
+  ): { node: ChildNode; cancel: Cancel } => {
     let currentNode: ChildNode | null = null;
     const cancel = effect(child, (childValue: any) => {
       let newRendered: { node: ChildNode; cancel: Cancel };
@@ -115,7 +121,10 @@ const bindChildren = (
         // Replace the previous DOM node, if any
         currentNode.replaceWith(newRendered.node);
         // Update the mapping entry to capture any newly-rendered node.
-        keyedChildren.set(key, { ...keyedChildren.get(key)!, node: newRendered.node });
+        keyedChildren.set(key, {
+          ...keyedChildren.get(key)!,
+          node: newRendered.node,
+        });
       }
 
       currentNode = newRendered.node;
@@ -176,7 +185,10 @@ const bindChildren = (
   };
 
   // Set up a reactive effect so that changes to the children array are diffed and applied.
-  const cancelArrayEffect = effect(children, (childrenVal) => updateChildren(childrenVal));
+  const cancelArrayEffect = effect(
+    children,
+    (childrenVal) => updateChildren(childrenVal),
+  );
 
   // Return a cancel function that tears down the effect and cleans up any rendered nodes.
   return () => {
@@ -195,7 +207,9 @@ const bindProps = (element: HTMLElement, props: Props): Cancel => {
       // If prop is an event, we need to add an event listener
       if (isEventProp(propKey)) {
         if (!isStream(propValue)) {
-          throw new TypeError(`Event prop "${propKey}" does not have a send method`);
+          throw new TypeError(
+            `Event prop "${propKey}" does not have a send method`,
+          );
         }
         const key = cleanEventProp(propKey);
         if (key != null) {
@@ -238,7 +252,11 @@ const cleanEventProp = (key: string) => {
 };
 
 /** Attach an event listener, returning a function to cancel the listener */
-const listen = (element: HTMLElement, key: string, callback: (event: Event) => void) => {
+const listen = (
+  element: HTMLElement,
+  key: string,
+  callback: (event: Event) => void,
+) => {
   element.addEventListener(key, callback);
   return () => {
     element.removeEventListener(key, callback);

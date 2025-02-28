@@ -1,7 +1,11 @@
 import { css, html } from "lit";
 import { customElement } from "lit/decorators.ts";
 import { base } from "../shared/styles.ts";
-import { ResponsiveElement, breakpointLg, breakpointMd } from "./responsive-element.ts";
+import {
+  breakpointLg,
+  breakpointMd,
+  ResponsiveElement,
+} from "./responsive-element.ts";
 
 @customElement("os-colgrid")
 export class OsColgrid extends ResponsiveElement {

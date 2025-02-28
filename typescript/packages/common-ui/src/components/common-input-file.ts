@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
@@ -56,12 +56,18 @@ export class CommonFileInputElement extends LitElement {
     `,
   ];
 
-  @property({ type: Array }) accessor files: File[] = [];
-  @property({ type: Array }) accessor filesContent: FileContent[] = [];
-  @property({ type: Boolean }) accessor multiple = false;
-  @property({ type: String }) accessor accept: string = "";
-  @property({ type: String }) accessor appearance = "default";
-  @property({ type: String }) accessor loadMode: "base64" | "json" | "text" = "base64";
+  @property({ type: Array })
+  accessor files: File[] = [];
+  @property({ type: Array })
+  accessor filesContent: FileContent[] = [];
+  @property({ type: Boolean })
+  accessor multiple = false;
+  @property({ type: String })
+  accessor accept: string = "";
+  @property({ type: String })
+  accessor appearance = "default";
+  @property({ type: String })
+  accessor loadMode: "base64" | "json" | "text" = "base64";
 
   /**
    * Handles the file input change event.
@@ -100,7 +106,10 @@ export class CommonFileInputElement extends LitElement {
             try {
               content = JSON.parse(reader.result);
             } catch (error) {
-              console.error(`Error parsing JSON from file: ${file.name}`, error);
+              console.error(
+                `Error parsing JSON from file: ${file.name}`,
+                error,
+              );
               content = null;
             }
           }

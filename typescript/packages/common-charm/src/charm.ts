@@ -1,16 +1,23 @@
-import { Module, Recipe, NAME, TYPE, UI, JSONSchema } from "@commontools/builder";
 import {
-  getDoc,
-  type DocLink,
-  DocImpl,
-  EntityId,
-  idle,
-  createRef,
-  run,
+  JSONSchema,
+  Module,
+  NAME,
+  Recipe,
+  TYPE,
+  UI,
+} from "@commontools/builder";
+import {
   type Cell,
+  createRef,
+  DocImpl,
+  type DocLink,
+  EntityId,
+  getDoc,
   getEntityId,
-  isCell,
   getRecipe,
+  idle,
+  isCell,
+  run,
 } from "@commontools/runner";
 import { storage } from "./storage.ts";
 import { syncRecipeBlobby } from "./syncRecipe.ts";
@@ -73,14 +80,18 @@ export class CharmManager {
     await idle();
 
     newCharms.forEach((charm) => {
-      if (!this.charms.get().some((otherCharm) => otherCharm.equals(charm)))
+      if (!this.charms.get().some((otherCharm) => otherCharm.equals(charm))) {
         this.charms.push(charm);
+      }
     });
 
     await idle();
   }
 
-  async get(id: string | Cell<Charm>, runIt: boolean = true): Promise<Cell<Charm> | undefined> {
+  async get(
+    id: string | Cell<Charm>,
+    runIt: boolean = true,
+  ): Promise<Cell<Charm> | undefined> {
     // Load the charm from storage.
     let charm: Cell<Charm> | undefined;
     if (isCell(id)) {
@@ -109,10 +120,12 @@ export class CharmManager {
             ...resultSchema?.properties,
           },
         };
-        if (hasUI && !resultSchema.properties![UI])
+        if (hasUI && !resultSchema.properties![UI]) {
           resultSchema.properties![UI] = { type: "object" }; // TODO: vdom schema
-        if (hasName && !resultSchema.properties![NAME])
+        }
+        if (hasName && !resultSchema.properties![NAME]) {
           resultSchema.properties![NAME] = { type: "string" };
+        }
       }
     }
 
@@ -134,7 +147,11 @@ export class CharmManager {
     path: string[] = [],
     schema?: JSONSchema,
   ): Promise<Cell<T>> {
-    return (await storage.syncCellById(this.space, id)).asCell(path, undefined, schema);
+    return (await storage.syncCellById(this.space, id)).asCell(
+      path,
+      undefined,
+      schema,
+    );
   }
 
   // Return Cell with argument content according to the schema of the charm.
@@ -153,7 +170,9 @@ export class CharmManager {
     const id = getEntityId(idOrCharm);
     if (!id) return false;
 
-    const newCharms = this.charms.get().filter((charm) => getEntityId(charm)?.["/"] !== id?.["/"]);
+    const newCharms = this.charms.get().filter((charm) =>
+      getEntityId(charm)?.["/"] !== id?.["/"]
+    );
     if (newCharms.length !== this.charms.get().length) {
       this.charms.set(newCharms);
       await idle();
@@ -163,7 +182,11 @@ export class CharmManager {
     return false;
   }
 
-  async runPersistent(recipe: Recipe | Module, inputs?: any, cause?: any): Promise<Cell<Charm>> {
+  async runPersistent(
+    recipe: Recipe | Module,
+    inputs?: any,
+    cause?: any,
+  ): Promise<Cell<Charm>> {
     await idle();
 
     // Fill in missing parameters from other charms. It's a simple match on
@@ -207,15 +230,22 @@ export class CharmManager {
     }*/
 
     const syncAllMentionedCells = (value: any, promises: any[] = []) => {
-      if (isCell(value)) promises.push(storage.syncCell(value.getAsDocLink().cell));
-      else if (typeof value === "object" && value !== null)
-        for (const key in value) promises.push(syncAllMentionedCells(value[key], promises));
+      if (isCell(value)) {
+        promises.push(storage.syncCell(value.getAsDocLink().cell));
+      } else if (typeof value === "object" && value !== null) {
+        for (const key in value) {
+          promises.push(syncAllMentionedCells(value[key], promises));
+        }
+      }
       return promises;
     };
 
     await syncAllMentionedCells(inputs);
 
-    const doc = await storage.syncCellById(this.space, createRef({ recipe, inputs }, cause));
+    const doc = await storage.syncCellById(
+      this.space,
+      createRef({ recipe, inputs }, cause),
+    );
     const resultDoc = run(recipe, inputs, doc);
 
     // FIXME(ja): should we add / sync explicitly here?
@@ -228,7 +258,10 @@ export class CharmManager {
   syncRecipe(charm: Cell<Charm>): Promise<string> {
     const recipeId = charm.getSourceCell()?.get()?.[TYPE];
 
-    return Promise.all([this.syncRecipeCells(recipeId), this.syncRecipeBlobby(recipeId)]).then(
+    return Promise.all([
+      this.syncRecipeCells(recipeId),
+      this.syncRecipeBlobby(recipeId),
+    ]).then(
       () => recipeId,
     );
   }

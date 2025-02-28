@@ -1,5 +1,13 @@
 import { h } from "@commontools/html";
-import { recipe, handler, UI, NAME, cell, derive, JSONSchema } from "@commontools/builder";
+import {
+  cell,
+  derive,
+  handler,
+  JSONSchema,
+  NAME,
+  recipe,
+  UI,
+} from "@commontools/builder";
 
 const inputSchema: JSONSchema = {
   type: "object",
@@ -16,14 +24,16 @@ const outputSchema: JSONSchema = {
   },
 };
 
-const updater = handler<{ newValues: string[] }, { values: string[] }>((event, state) => {
-  if (!state.values) state.values = [];
-  console.log("updating values", event);
-  event?.newValues?.forEach((value) => {
-    console.log("adding value", value);
-    state.values.push(value);
-  });
-});
+const updater = handler<{ newValues: string[] }, { values: string[] }>(
+  (event, state) => {
+    if (!state.values) state.values = [];
+    console.log("updating values", event);
+    event?.newValues?.forEach((value) => {
+      console.log("adding value", value);
+      state.values.push(value);
+    });
+  },
+);
 
 const adder = handler<{}, { values: string[] }>((_, state) => {
   console.log("adding a value");

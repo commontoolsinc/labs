@@ -1,12 +1,14 @@
 // Load .env file
 import { parse } from "https://deno.land/std/flags/mod.ts";
-import { CharmManager, storage, compileRecipe } from "@commontools/charm";
+import { CharmManager, compileRecipe, storage } from "@commontools/charm";
 import { getEntityId, isStream } from "@commontools/runner";
 
 const { space, charmId, recipeFile, cause } = parse(Deno.args);
 
 storage.setRemoteStorage(
-  new URL(process?.env?.TOOLSHED_API_URL ?? "https://toolshed.saga-castor.ts.net/"),
+  new URL(
+    process?.env?.TOOLSHED_API_URL ?? "https://toolshed.saga-castor.ts.net/",
+  ),
 );
 
 async function main() {

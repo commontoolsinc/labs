@@ -1,24 +1,24 @@
 import * as Memory from "./memory.ts";
 import type {
   AsyncResult,
+  CloseResult,
   ConnectionError,
-  Transaction,
+  ConsumerCommand,
+  InvocationURL,
   MemorySession,
-  Query,
   Protocol as Protocol,
   ProviderCommand,
-  ConsumerCommand,
-  Subscriber,
   ProviderSession,
-  Reference,
-  Subscribe,
-  CloseResult,
+  Query,
   QueryError,
+  QueryResult,
+  Reference,
   Result,
   Selection,
-  InvocationURL,
+  Subscribe,
+  Subscriber,
+  Transaction,
   TransactionResult,
-  QueryResult,
 } from "./interface.ts";
 import * as Subscription from "./subscription.ts";
 
@@ -29,9 +29,11 @@ export * as Space from "./space.ts";
 export * as Memory from "./memory.ts";
 export * as Subscriber from "./subscriber.ts";
 export * as Subscription from "./subscription.ts";
-import { refer, fromString } from "./reference.ts";
+import { fromString, refer } from "./reference.ts";
 
-export const open = async (options: Memory.Options): AsyncResult<Provider, ConnectionError> => {
+export const open = async (
+  options: Memory.Options,
+): AsyncResult<Provider, ConnectionError> => {
   const result = await Memory.open(options);
   if (result.error) {
     return result;
@@ -91,7 +93,9 @@ class MemoryProvider implements Provider {
 class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
   readable: ReadableStream<ProviderCommand<Protocol>>;
   writable: WritableStream<ConsumerCommand<Protocol>>;
-  controller: ReadableStreamDefaultController<ProviderCommand<Protocol>> | undefined;
+  controller:
+    | ReadableStreamDefaultController<ProviderCommand<Protocol>>
+    | undefined;
 
   channels: Map<InvocationURL<Reference<Subscribe>>, Set<string>> = new Map();
 
@@ -143,20 +147,30 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
       case "/memory/query": {
         return this.perform({
           the: "task/return",
-          of: `job:${refer(command)}` as InvocationURL<Reference<ConsumerCommand<Protocol>>>,
-          is: (await this.memory.query(command)) as Result<Selection, QueryError>,
+          of: `job:${refer(command)}` as InvocationURL<
+            Reference<ConsumerCommand<Protocol>>
+          >,
+          is: (await this.memory.query(command)) as Result<
+            Selection,
+            QueryError
+          >,
         });
       }
       case "/memory/transact": {
         return this.perform({
           the: "task/return",
-          of: `job:${refer(command)}` as InvocationURL<Reference<ConsumerCommand<Protocol>>>,
+          of: `job:${refer(command)}` as InvocationURL<
+            Reference<ConsumerCommand<Protocol>>
+          >,
           is: await this.memory.transact(command),
         });
       }
       case "/memory/query/subscribe": {
         const id = `job:${refer(command)}` as InvocationURL<Subscribe>;
-        this.channels.set(id, new Set(Subscription.channels(command.sub, command.args.select)));
+        this.channels.set(
+          id,
+          new Set(Subscription.channels(command.sub, command.args.select)),
+        );
         return this.memory.subscribe(this);
       }
       case "/memory/query/unsubscribe": {
@@ -176,7 +190,9 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
         // End unsubscribe call
         this.perform({
           the: "task/return",
-          of: `job:${refer(command)}` as InvocationURL<Reference<ConsumerCommand<Protocol>>>,
+          of: `job:${refer(command)}` as InvocationURL<
+            Reference<ConsumerCommand<Protocol>>
+          >,
           is: { ok: {} },
         });
       }
@@ -206,7 +222,8 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
 export const transact = ({ memory }: Session, transaction: Transaction) =>
   memory.transact(transaction);
 
-export const query = ({ memory }: Session, source: Query) => memory.query(source);
+export const query = ({ memory }: Session, source: Query) =>
+  memory.query(source);
 
 export const subscribe = ({ memory }: Session, subscriber: Subscriber) =>
   memory.subscribe(subscriber);
@@ -228,7 +245,11 @@ export const patch = async (session: Session, request: Request) => {
     const transaction = (await request.json()) as Transaction;
     const result = await session.memory.transact(transaction);
     const body = JSON.stringify(result);
-    const status = result.ok ? 200 : result.error.name === "ConflictError" ? 409 : 503;
+    const status = result.ok
+      ? 200
+      : result.error.name === "ConflictError"
+      ? 409
+      : 503;
 
     return new Response(body, {
       status,

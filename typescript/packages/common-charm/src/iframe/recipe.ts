@@ -23,7 +23,9 @@ export const buildFullRecipe = (iframe: IFrameRecipe) => {
     name: string,
   }
   
-  const inst: IFrameRecipe = /* IFRAME-V0 */ ${JSON.stringify(iframe, null, 2)} /* IFRAME-V0 */
+  const inst: IFrameRecipe = /* IFRAME-V0 */ ${
+    JSON.stringify(iframe, null, 2)
+  } /* IFRAME-V0 */
   
   
   const runIframeRecipe = ({ argumentSchema, resultSchema, src, name }: IFrameRecipe) =>
@@ -41,7 +43,9 @@ export const buildFullRecipe = (iframe: IFrameRecipe) => {
 
 function parseIframeRecipe(source: string): IFrameRecipe | undefined {
   // Extract content between IFRAME-V0 comments
-  const match = source.match(/\/\* IFRAME-V0 \*\/([\s\S]*?)\/\* IFRAME-V0 \*\//);
+  const match = source.match(
+    /\/\* IFRAME-V0 \*\/([\s\S]*?)\/\* IFRAME-V0 \*\//,
+  );
   if (!match) {
     console.warn("no IFRAME-V0 section in source");
     return undefined;

@@ -9,7 +9,6 @@ function CharmShowView() {
   const { currentFocus: charm } = useCharm(charmId);
 
   function test() {
-
   }
 
   if (!charm) {

@@ -1,34 +1,38 @@
-import { Database, Transaction as DBTransaction, SqliteError } from "jsr:@db/sqlite";
+import {
+  Database,
+  SqliteError,
+  Transaction as DBTransaction,
+} from "jsr:@db/sqlite";
 import { fromString, refer } from "./reference.ts";
 import { unclaimed } from "./fact.ts";
 import { from as toChanges, set } from "./changes.ts";
 import { create as createCommit, the as COMMIT_THE } from "./commit.ts";
 import type {
-  Result,
-  MemorySpace,
-  Entity,
-  CommitData,
-  Selection,
-  Unit,
-  Fact,
-  The,
-  Transaction,
-  JSONValue,
-  ConflictError,
-  TransactionError,
-  QueryError,
-  ToJSON,
-  Reference,
-  ConnectionError,
-  Commit,
+  Assert,
   Assertion,
   AsyncResult,
-  SystemError,
-  Retract,
-  Assert,
   Claim,
+  Commit,
+  CommitData,
+  ConflictError,
+  ConnectionError,
+  Entity,
+  Fact,
+  JSONValue,
+  MemorySpace,
   Query,
+  QueryError,
+  Reference,
+  Result,
+  Retract,
+  Selection,
   SpaceSession,
+  SystemError,
+  The,
+  ToJSON,
+  Transaction,
+  TransactionError,
+  Unit,
 } from "./interface.ts";
 import * as Error from "./error.ts";
 export * from "./interface.ts";
@@ -87,11 +91,14 @@ JOIN
 COMMIT;
 `;
 
-const IMPORT_DATUM = `INSERT OR IGNORE INTO datum (this, source) VALUES (:this, :source);`;
+const IMPORT_DATUM =
+  `INSERT OR IGNORE INTO datum (this, source) VALUES (:this, :source);`;
 
-const IMPORT_FACT = `INSERT OR IGNORE INTO fact (this, the, of, 'is', cause, since) VALUES (:this, :the, :of, :is, :cause, :since);`;
+const IMPORT_FACT =
+  `INSERT OR IGNORE INTO fact (this, the, of, 'is', cause, since) VALUES (:this, :the, :of, :is, :cause, :since);`;
 
-const IMPORT_MEMORY = `INSERT OR IGNORE INTO memory (the, of, fact) VALUES (:the, :of, :fact);`;
+const IMPORT_MEMORY =
+  `INSERT OR IGNORE INTO memory (the, of, fact) VALUES (:the, :of, :fact);`;
 
 const SWAP = `UPDATE memory
   SET fact = :fact
@@ -127,7 +134,8 @@ interface Session<Space extends MemorySpace> {
   store: Database;
 }
 
-class Space<Subject extends MemorySpace = MemorySpace> implements Session<Subject>, SpaceSession {
+class Space<Subject extends MemorySpace = MemorySpace>
+  implements Session<Subject>, SpaceSession {
   constructor(public subject: Subject, public store: Database) {}
 
   transact(transaction: Transaction<Subject>) {
@@ -164,7 +172,9 @@ export type { Space as View };
 const readAddress = (url: URL) => {
   const { pathname } = url;
   const base = pathname.split("/").pop() as string;
-  const subject = base.endsWith(".sqlite") ? base.slice(0, -".sqlite".length) : base;
+  const subject = base.endsWith(".sqlite")
+    ? base.slice(0, -".sqlite".length)
+    : base;
 
   return { location: url.protocol === "file:" ? url : ":memory:", subject };
 };
@@ -230,7 +240,9 @@ const recall = <Space extends MemorySpace>(
     const fact: Fact = {
       the,
       of,
-      cause: row.cause ? (fromString(row.cause) as Reference<Assertion>) : refer(unclaimed(row)),
+      cause: row.cause
+        ? (fromString(row.cause) as Reference<Assertion>)
+        : refer(unclaimed(row)),
     };
 
     if (row.is) {
@@ -298,7 +310,9 @@ const importDatum = <Space extends MemorySpace>(
   return is;
 };
 
-const iterate = function* (transaction: Transaction): Iterable<Retract | Assert | Claim> {
+const iterate = function* (
+  transaction: Transaction,
+): Iterable<Retract | Assert | Claim> {
   for (const [of, attributes] of Object.entries(transaction.args.changes)) {
     for (const [the, revisions] of Object.entries(attributes)) {
       for (const [cause, change] of Object.entries(revisions)) {
@@ -307,7 +321,9 @@ const iterate = function* (transaction: Transaction): Iterable<Retract | Assert 
         } else if (change.is === undefined) {
           yield { retract: { the, of, cause: fromString(cause) } } as Retract;
         } else {
-          yield { assert: { the, of, is: change.is, cause: fromString(cause) } } as Assert;
+          yield {
+            assert: { the, of, is: change.is, cause: fromString(cause) },
+          } as Assert;
         }
       }
     }
@@ -403,13 +419,15 @@ const commit = <Space extends MemorySpace>(
 ): Commit<Space> => {
   const the = COMMIT_THE;
   const of = transaction.sub;
-  const row = session.store.prepare(EXPORT).get({ the, of }) as StateRow | undefined;
+  const row = session.store.prepare(EXPORT).get({ the, of }) as
+    | StateRow
+    | undefined;
 
   const [since, cause] = row
     ? [
-        (JSON.parse(row.is as string) as CommitData).since + 1,
-        fromString(row.fact) as Reference<Assertion>,
-      ]
+      (JSON.parse(row.is as string) as CommitData).since + 1,
+      fromString(row.fact) as Reference<Assertion>,
+    ]
     : [0, refer(unclaimed({ the, of }))];
 
   const commit = createCommit({ space: of, since, transaction, cause });
@@ -426,7 +444,10 @@ const commit = <Space extends MemorySpace>(
 const execute = <
   Subject extends MemorySpace,
   Tr extends DBTransaction<
-    (session: Session<Subject>, transaction: Transaction<Subject>) => Commit<Subject>
+    (
+      session: Session<Subject>,
+      transaction: Transaction<Subject>,
+    ) => Commit<Subject>
   >,
 >(
   update: Tr,
@@ -440,12 +461,12 @@ const execute = <
   } catch (error) {
     return (error as Error).name === "ConflictError"
       ? { error: error as ToJSON<ConflictError> }
-      : // SQLite transactions may produce various errors when DB is busy, locked
-        // or file is corrupt. We wrap those in a generic store error.
-        // @see https://www.sqlite.org/rescode.html
-        {
-          error: Error.transaction(transaction, error as SqliteError),
-        };
+      // SQLite transactions may produce various errors when DB is busy, locked
+      // or file is corrupt. We wrap those in a generic store error.
+      // @see https://www.sqlite.org/rescode.html
+      : {
+        error: Error.transaction(transaction, error as SqliteError),
+      };
   }
 };
 
@@ -465,7 +486,9 @@ export const query = <Space extends MemorySpace>(
       } as Selection<Space>,
     };
   } catch (error) {
-    return { error: Error.query(source.sub, source.args.select, error as SqliteError) };
+    return {
+      error: Error.query(source.sub, source.args.select, error as SqliteError),
+    };
   }
 };
 

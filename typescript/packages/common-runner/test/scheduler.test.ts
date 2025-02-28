@@ -23,7 +23,9 @@ describe("scheduler", () => {
     const c = getDoc(0);
     const adder: Action = (log) => {
       runCount++;
-      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      );
     };
     await run(adder);
     expect(runCount).toBe(1);
@@ -41,7 +43,9 @@ describe("scheduler", () => {
     const c = getDoc(0);
     const adder: Action = (log) => {
       runCount++;
-      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      );
     };
     schedule(adder, {
       reads: [
@@ -65,7 +69,9 @@ describe("scheduler", () => {
     const c = getDoc(0);
     const adder: Action = (log) => {
       runCount++;
-      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      );
     };
     await run(adder);
     expect(runCount).toBe(1);
@@ -90,7 +96,9 @@ describe("scheduler", () => {
     const c = getDoc(0);
     const adder: Action = (log) => {
       runCount++;
-      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      );
     };
     const cancel = schedule(adder, {
       reads: [
@@ -121,11 +129,15 @@ describe("scheduler", () => {
     const e = getDoc(0);
     const adder1: Action = (log) => {
       runs.push("adder1");
-      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      );
     };
     const adder2: Action = (log) => {
       runs.push("adder2");
-      e.asCell([], log).send(c.getAsQueryResult([], log) + d.getAsQueryResult([], log));
+      e.asCell([], log).send(
+        c.getAsQueryResult([], log) + d.getAsQueryResult([], log),
+      );
     };
     await run(adder1);
     await run(adder2);
@@ -154,18 +166,24 @@ describe("scheduler", () => {
     const d = getDoc(1);
     const e = getDoc(0);
     const adder1: Action = (log) => {
-      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      );
     };
     const adder2: Action = (log) => {
-      e.asCell([], log).send(c.getAsQueryResult([], log) + d.getAsQueryResult([], log));
+      e.asCell([], log).send(
+        c.getAsQueryResult([], log) + d.getAsQueryResult([], log),
+      );
     };
     const adder3: Action = (log) => {
       if (--maxRuns <= 0) return;
-      c.asCell([], log).send(e.getAsQueryResult([], log) + b.getAsQueryResult([], log));
+      c.asCell([], log).send(
+        e.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      );
     };
 
     const stopper = {
-      stop:()=>{},
+      stop: () => {},
     };
     const stopped = spy(stopper, "stop");
     onError(() => stopper.stop());
@@ -189,7 +207,7 @@ describe("scheduler", () => {
         .send(counter.getAsQueryResult([], log) + by.getAsQueryResult([], log));
 
     const stopper = {
-      stop:()=>{},
+      stop: () => {},
     };
     const stopped = spy(stopper, "stop");
     onError(() => stopper.stop());

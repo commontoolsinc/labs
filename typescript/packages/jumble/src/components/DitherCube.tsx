@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
-import { Canvas, useFrame, extend } from "@react-three/fiber";
-import { OrthographicCamera, Effects, OrbitControls } from "@react-three/drei";
+import { Canvas, extend, useFrame } from "@react-three/fiber";
+import { Effects, OrbitControls, OrthographicCamera } from "@react-three/drei";
 import * as THREE from "three";
 
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
@@ -83,7 +83,9 @@ function MorphingMesh({
     const vertexCount = baseGeometry.attributes.position.count;
 
     // Helper function to map icosphere vertices to target shape positions
-    const createMorphTarget = (shapeFn: (t: THREE.Vector3) => THREE.Vector3) => {
+    const createMorphTarget = (
+      shapeFn: (t: THREE.Vector3) => THREE.Vector3,
+    ) => {
       const positions = new Float32Array(vertexCount * 3);
       const positionAttribute = baseGeometry.attributes.position;
       const tempVector = new THREE.Vector3();
@@ -143,7 +145,9 @@ function MorphingMesh({
     ];
 
     // Create morph targets
-    baseGeometry.morphAttributes.position = shapes.map((shapeFn) => createMorphTarget(shapeFn));
+    baseGeometry.morphAttributes.position = shapes.map((shapeFn) =>
+      createMorphTarget(shapeFn)
+    );
 
     // Update mesh geometry
     meshRef.current.geometry = baseGeometry;
@@ -170,7 +174,8 @@ function MorphingMesh({
     }
 
     const startProgress = Math.min(
-      (state.clock.getElapsedTime() - startAnimationRef.current.startTime) / 0.3,
+      (state.clock.getElapsedTime() - startAnimationRef.current.startTime) /
+        0.3,
       1.0,
     );
     const startScale = easeOutCubic(startProgress);
@@ -278,14 +283,23 @@ function MorphingMesh({
       );
 
       // Interpolate scale
-      meshRef.current.scale.x =
-        THREE.MathUtils.lerp(currentAnim.scale[0], nextAnim.scale[0], transitionProgress) *
+      meshRef.current.scale.x = THREE.MathUtils.lerp(
+        currentAnim.scale[0],
+        nextAnim.scale[0],
+        transitionProgress,
+      ) *
         startScale;
-      meshRef.current.scale.y =
-        THREE.MathUtils.lerp(currentAnim.scale[1], nextAnim.scale[1], transitionProgress) *
+      meshRef.current.scale.y = THREE.MathUtils.lerp(
+        currentAnim.scale[1],
+        nextAnim.scale[1],
+        transitionProgress,
+      ) *
         startScale;
-      meshRef.current.scale.z =
-        THREE.MathUtils.lerp(currentAnim.scale[2], nextAnim.scale[2], transitionProgress) *
+      meshRef.current.scale.z = THREE.MathUtils.lerp(
+        currentAnim.scale[2],
+        nextAnim.scale[2],
+        transitionProgress,
+      ) *
         startScale;
 
       // Interpolate position
@@ -352,7 +366,10 @@ export const DitheredCube = ({
   animationSpeed = 1,
 }: DitheredCubeProps) => {
   return (
-    <div style={{ width, height, imageRendering: "pixelated" }} className={className}>
+    <div
+      style={{ width, height, imageRendering: "pixelated" }}
+      className={className}
+    >
       <Canvas
         gl={{
           antialias: false,

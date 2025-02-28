@@ -1,33 +1,33 @@
 import {
-  MemorySpace,
-  Query,
-  Transaction,
-  Entity,
-  Principal,
-  Selection,
-  ProviderCommand,
+  Abilities,
+  Await,
+  Cause,
+  ChangesBuilder,
+  ConnectionError,
   ConsumerCommand,
   ConsumerCommandFor,
-  Await,
-  QueryError,
-  Result,
-  ConsumerSession,
-  ConsumerResultFor,
-  ProviderSession,
-  Reference,
-  Protocol,
-  ConnectionError,
   ConsumerEffectFor,
+  ConsumerResultFor,
+  ConsumerSession,
+  Entity,
   InferProtocol,
-  Abilities,
   Invocation,
   InvocationURL,
-  TransactionResult,
-  Subscribe,
+  MemorySpace,
+  Principal,
+  Protocol,
+  ProviderCommand,
+  ProviderSession,
+  Query,
+  QueryError,
+  Reference,
+  Result,
+  Selection,
   Selector,
-  ChangesBuilder,
+  Subscribe,
   The,
-  Cause,
+  Transaction,
+  TransactionResult,
 } from "./interface.ts";
 import { refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
@@ -44,31 +44,42 @@ export const connect = ({ address, as }: { address: URL; as: Principal }) =>
     session: Socket.from(new WebSocket(address)) as ProviderSession<Protocol>,
   });
 
-export const open = ({ as, session }: { as: Principal; session: ProviderSession<Protocol> }) => {
+export const open = (
+  { as, session }: { as: Principal; session: ProviderSession<Protocol> },
+) => {
   const consumer = new MemoryConsumerSession(as);
   session.readable.pipeThrough(consumer).pipeTo(session.writable);
   return consumer;
 };
 
-export const create = ({ as }: { as: Principal }) => new MemoryConsumerSession(as);
+export const create = ({ as }: { as: Principal }) =>
+  new MemoryConsumerSession(as);
 
 class MemoryConsumerSession
   extends TransformStream<ProviderCommand<Protocol>, ConsumerCommand<Protocol>>
-  implements ConsumerSession<Protocol>, MemorySession
-{
-  controller: TransformStreamDefaultController<ConsumerCommand<Protocol>> | undefined;
-  invocations: Map<InvocationURL<Reference<Invocation>>, Job<Abilities<Protocol>, Protocol>> =
-    new Map();
+  implements ConsumerSession<Protocol>, MemorySession {
+  controller:
+    | TransformStreamDefaultController<ConsumerCommand<Protocol>>
+    | undefined;
+  invocations: Map<
+    InvocationURL<Reference<Invocation>>,
+    Job<Abilities<Protocol>, Protocol>
+  > = new Map();
 
-  subscribers: Map<InvocationURL<Reference<Invocation>>, QuerySubscriptionInvocation<MemorySpace>> =
-    new Map();
+  subscribers: Map<
+    InvocationURL<Reference<Invocation>>,
+    QuerySubscriptionInvocation<MemorySpace>
+  > = new Map();
   constructor(public as: Principal) {
-    let controller: undefined | TransformStreamDefaultController<ConsumerCommand<Protocol>>;
+    let controller:
+      | undefined
+      | TransformStreamDefaultController<ConsumerCommand<Protocol>>;
     super({
       start: (control) => {
         controller = control;
       },
-      transform: (command) => this.receive(command as ProviderCommand<Protocol>),
+      transform: (command) =>
+        this.receive(command as ProviderCommand<Protocol>),
       // @ts-ignore: "Object literal may only specify known properties, and
       // 'cancel' does not exist in type 'Transformer<..>'"
       cancel: () => this.cancel(),
@@ -86,8 +97,7 @@ class MemoryConsumerSession
       const invocation = this.invocations.get(id);
       this.invocations.delete(id);
       invocation?.return(command.is);
-    }
-    // If it is an effect it can be for one specific subscription, yet we may
+    } // If it is an effect it can be for one specific subscription, yet we may
     // have other subscriptions that will be affected. There for we simply
     // pass effect to each one and they can detect if it concerns them.
     // ℹ️ We could optimize this in the future and try indexing subscriptions
@@ -120,14 +130,18 @@ class MemoryConsumerSession
   cancel() {}
 
   abort<Ability extends Abilities<Protocol>>(
-    invocation: InferProtocol<Protocol>[Ability]["Invocation"] & { cmd: Ability },
+    invocation: InferProtocol<Protocol>[Ability]["Invocation"] & {
+      cmd: Ability;
+    },
   ) {
     const command = invocation.toJSON();
     const id = `job:${refer(command)}` as InvocationURL<Reference<Invocation>>;
     this.invocations.delete(id);
   }
 
-  mount<Space extends MemorySpace>(space: Space): MemorySpaceConsumerSession<Space> {
+  mount<Space extends MemorySpace>(
+    space: Space,
+  ): MemorySpaceConsumerSession<Space> {
     return new MemorySpaceConsumerSession(space, this);
   }
 }
@@ -143,7 +157,8 @@ export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {
 
 export type { QueryView };
 
-class MemorySpaceConsumerSession<Space extends MemorySpace> implements MemorySpaceSession<Space> {
+class MemorySpaceConsumerSession<Space extends MemorySpace>
+  implements MemorySpaceSession<Space> {
   constructor(public space: Space, public session: MemoryConsumerSession) {}
   transact(source: Transaction["args"]) {
     const invocation = new ConsumerInvocation({
@@ -191,7 +206,9 @@ class ConsumerInvocation<Space extends MemorySpace, Ability extends string> {
   }
 
   then<T, X>(
-    onResolve: (value: ConsumerResultFor<Ability, Protocol<Space>>) => T | PromiseLike<T>,
+    onResolve: (
+      value: ConsumerResultFor<Ability, Protocol<Space>>,
+    ) => T | PromiseLike<T>,
     onReject: (reason: any) => X | Promise<X>,
   ) {
     return this.promise.then(onResolve, onReject);
@@ -251,7 +268,9 @@ class QueryView<Space extends MemorySpace> {
   constructor(
     public session: MemoryConsumerSession,
     public invocation: ConsumerInvocation<Space, "/memory/query">,
-    public promise: Promise<Result<QueryView<Space>, QueryError | ConnectionError>>,
+    public promise: Promise<
+      Result<QueryView<Space>, QueryError | ConnectionError>
+    >,
   ) {
     this.selection = { [this.space]: {} } as Selection<Space>;
   }
@@ -300,10 +319,11 @@ class QueryView<Space extends MemorySpace> {
   }
 }
 
-class QuerySubscriptionInvocation<Space extends MemorySpace> extends ConsumerInvocation<
-  Space,
-  "/memory/query/subscribe"
-> {
+class QuerySubscriptionInvocation<Space extends MemorySpace>
+  extends ConsumerInvocation<
+    Space,
+    "/memory/query/subscribe"
+  > {
   readable: ReadableStream<Selection<Space>>;
   controller: undefined | ReadableStreamDefaultController<Selection<Space>>;
   patterns: { the?: The; of?: Entity; cause?: Cause }[];
@@ -344,7 +364,11 @@ class QuerySubscriptionInvocation<Space extends MemorySpace> extends ConsumerInv
       cmd: "/memory/query/unsubscribe",
       iss: this.iss,
       sub: this.sub,
-      args: { source: `job:${refer(this.toJSON())}` as InvocationURL<Reference<Subscribe>> },
+      args: {
+        source: `job:${refer(this.toJSON())}` as InvocationURL<
+          Reference<Subscribe>
+        >,
+      },
     });
 
     this.query.session.execute(invocation);
@@ -364,8 +388,7 @@ class QuerySubscriptionInvocation<Space extends MemorySpace> extends ConsumerInv
           const [current] = state.length > 0 ? state[0] : [];
           if (cause !== current) {
             for (const pattern of this.patterns) {
-              const match =
-                (!pattern.of || pattern.of === of) &&
+              const match = (!pattern.of || pattern.of === of) &&
                 (!pattern.the || pattern.the === the) &&
                 (!pattern.cause || pattern.cause === cause);
 

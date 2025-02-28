@@ -84,11 +84,18 @@ export function map(
 
     // Add values that have been appended
     while (initializedUpTo < list.length) {
-      const resultCell = getDoc(undefined, { result, index: initializedUpTo }, parentDoc.space);
+      const resultCell = getDoc(
+        undefined,
+        { result, index: initializedUpTo },
+        parentDoc.space,
+      );
       run(
         op,
         {
-          element: { cell: listRef.cell, path: [...listRef.path, initializedUpTo] },
+          element: {
+            cell: listRef.cell,
+            path: [...listRef.path, initializedUpTo],
+          },
           index: initializedUpTo,
           array: list,
         },

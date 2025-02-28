@@ -1,7 +1,11 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
-import { readSuggestion, Suggestion, suggestionTemplate } from "./common-suggestion.ts";
+import {
+  readSuggestion,
+  Suggestion,
+  suggestionTemplate,
+} from "./common-suggestion.ts";
 import { getId } from "./identifiable.ts";
 
 export class SelectSuggestionEvent extends Event {
@@ -31,10 +35,14 @@ export class CommonSuggestionsElement extends LitElement {
     }
   `;
 
-  @property({ type: Array }) accessor suggestions: Array<Suggestion> = [];
-  @property({ type: Number }) accessor limit = 3;
-  @property({ type: String }) accessor gap = "sm";
-  @property({ type: String }) accessor pad = "none";
+  @property({ type: Array })
+  accessor suggestions: Array<Suggestion> = [];
+  @property({ type: Number })
+  accessor limit = 3;
+  @property({ type: String })
+  accessor gap = "sm";
+  @property({ type: String })
+  accessor pad = "none";
 
   override render() {
     const onclick = (event: Event) => {

@@ -12,10 +12,12 @@ const CharmManagerContext = createContext<CharmManagerContextType>({
   currentReplica: undefined!,
 });
 
-export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = (
+  { children },
+) => {
   const { replicaName } = useParams<{ replicaName: string }>();
   const [effectiveReplica, setEffectiveReplica] = React.useState<string>(
-    () => localStorage.getItem("lastReplica") || "common-knowledge"
+    () => localStorage.getItem("lastReplica") || "common-knowledge",
   );
 
   React.useEffect(() => {
@@ -33,7 +35,9 @@ export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [effectiveReplica]);
 
   return (
-    <CharmManagerContext.Provider value={{ charmManager, currentReplica: effectiveReplica }}>
+    <CharmManagerContext.Provider
+      value={{ charmManager, currentReplica: effectiveReplica }}
+    >
       {children}
     </CharmManagerContext.Provider>
   );

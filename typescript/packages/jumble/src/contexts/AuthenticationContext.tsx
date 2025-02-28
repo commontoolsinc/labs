@@ -1,4 +1,10 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
 import { Identity, KeyStore, PassKey } from "@commontools/identity";
 
 // Location in storage of root key.
@@ -12,7 +18,9 @@ interface AuthenticationContextType {
   // Call PassKey registration.
   passkeyRegister: (name: string, displayName: string) => Promise<PassKey>;
   // Authenticate the user via passkey.
-  passkeyAuthenticate: (descriptor?: PublicKeyCredentialDescriptor) => Promise<PassKey>;
+  passkeyAuthenticate: (
+    descriptor?: PublicKeyCredentialDescriptor,
+  ) => Promise<PassKey>;
   // Generate a passphrase for a new user
   passphraseRegister: () => Promise<string>;
   // Authenticate via passphrase.
@@ -27,7 +35,9 @@ interface AuthenticationContextType {
 
 const AuthenticationContext = createContext<AuthenticationContextType>(null!);
 
-export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
+  { children },
+) => {
   const [keyStore, setKeyStore] = useState<KeyStore | void>(undefined);
   const [user, setUser] = useState<Identity | void>(undefined);
   const [root, setRoot] = useState<Identity | void>(undefined);
@@ -76,10 +86,13 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
   // only be tracked per document), so this doesn't use any hooks.
   //
   // Must be called within a user gesture.
-  const passkeyRegister = useCallback(async (name: string, displayName: string) => {
-    const credential = await PassKey.create(name, displayName);
-    return credential;
-  }, []);
+  const passkeyRegister = useCallback(
+    async (name: string, displayName: string) => {
+      const credential = await PassKey.create(name, displayName);
+      return credential;
+    },
+    [],
+  );
 
   // This should be called when a passkey (possibly) exists for the user already,
   // and no root key has yet been stored (e.g. first login). Subsequent page loads

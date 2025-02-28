@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.ts";
 import { base } from "../shared/styles.ts";
 
@@ -38,7 +38,8 @@ export class OsIcon extends LitElement {
     `,
   ];
 
-  @property({ type: String }) icon = "";
+  @property({ type: String })
+  icon = "";
 
   override render() {
     return html` <div class="icon material-symbols-rounded">${this.icon}</div> `;

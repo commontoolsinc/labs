@@ -30,32 +30,34 @@ export default function SpellbookIndexView() {
     fetchSpells();
   }, [searchQuery]);
 
-  const content = loading ? (
-    <div className="flex justify-center items-center h-[50vh]">
-      <LoadingSpinner height={256} width={256} cameraZoom={50} />
-    </div>
-  ) : (
-    <div>
-      <div className="mb-8">
-        <SearchBox defaultValue={searchQuery} />
+  const content = loading
+    ? (
+      <div className="flex justify-center items-center h-[50vh]">
+        <LoadingSpinner height={256} width={256} cameraZoom={50} />
       </div>
+    )
+    : (
+      <div>
+        <div className="mb-8">
+          <SearchBox defaultValue={searchQuery} />
+        </div>
 
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {spells.map((spell) => (
-          <SpellCard
-            key={spell.id}
-            spellId={spell.id}
-            title={spell.title}
-            tags={spell.tags}
-            ui={spell.ui}
-            likes={spell.likes.length}
-            comments={spell.comments.length}
-            shares={spell.shares}
-          />
-        ))}
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {spells.map((spell) => (
+            <SpellCard
+              key={spell.id}
+              spellId={spell.id}
+              title={spell.title}
+              tags={spell.tags}
+              ui={spell.ui}
+              likes={spell.likes.length}
+              comments={spell.comments.length}
+              shares={spell.shares}
+            />
+          ))}
+        </div>
       </div>
-    </div>
-  );
+    );
 
   return (
     <div className="shell h-screen flex flex-col bg-gray-50 border-2 border-black">

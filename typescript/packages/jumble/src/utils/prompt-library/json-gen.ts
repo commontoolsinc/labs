@@ -1,6 +1,9 @@
 import JSON5 from "json5";
 
-import { hydratePrompt, parseTagFromResponse } from "@/utils/prompt-library/prompting.ts";
+import {
+  hydratePrompt,
+  parseTagFromResponse,
+} from "@/utils/prompt-library/prompting.ts";
 import { llm } from "@/utils/llm.ts";
 
 const SYSTEM_PROMPT = `
@@ -38,7 +41,8 @@ After your analysis, generate the JSON blob. Your output should be valid JSON, c
 Begin your response with a <scratchpad> section for your thought process, followed by the JSON blob enclosed in <json_blob> tags.
 `;
 
-const PROMPT = `Create a JSON object that illustrates the <product_description>`;
+const PROMPT =
+  `Create a JSON object that illustrates the <product_description>`;
 /**
  * Generates a JSON object with hallucinated data from a product/feature description.
  * @param description - The product/feature description to generate a JSON object from.
@@ -49,7 +53,9 @@ export async function generateJSON(
   description: string,
   model: string = "groq:llama-3.3-70b-versatile",
 ): Promise<Record<string, unknown>> {
-  const system = hydratePrompt(SYSTEM_PROMPT, { PRODUCT_DESCRIPTION: description });
+  const system = hydratePrompt(SYSTEM_PROMPT, {
+    PRODUCT_DESCRIPTION: description,
+  });
   const response = await llm.sendRequest({
     model,
     system,

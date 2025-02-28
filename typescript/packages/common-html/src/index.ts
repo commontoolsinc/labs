@@ -1,3 +1,3 @@
-export { render, setNodeSanitizer, setEventSanitizer } from "./render.ts";
-export { setDebug, debug } from "./logger.ts";
-export { h, Fragment, type VNode } from "./jsx.ts";
+export { render, setEventSanitizer, setNodeSanitizer } from "./render.ts";
+export { debug, setDebug } from "./logger.ts";
+export { Fragment, h, type VNode } from "./jsx.ts";

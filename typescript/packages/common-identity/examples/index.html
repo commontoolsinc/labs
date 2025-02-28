@@ -1,198 +1,256 @@
 <!DOCTYPE html>
 <html>
-<head>
-<style>
-body { background-color: #eee; }
-body[state] #auth { display: none; }
-#register, #login, #authenticated { display: none; }
-body[state="register"] #register { display: flex; }
-body[state="login"] #login { display: flex; }
-body[state="authenticated"] #unauthenticated { display: none; }
-body[state="authenticated"] #authenticated { display: flex; }
-#verification { display: none; }
-#verification > * { display: none; }
-#verification[state] { display: flex; }
-#verification[state="verified"] .verified { display: block; color: lime; }
-#verification[state="unverified"] .unverified { display: block; color: red; }
-#registersuccess { display: none; background-color: lime; text-align: center; }
-#registersuccess[enabled] { display: block; }
-#container {
-  padding: 50px;
-  border: 1px solid #ccc;
-  background-color: #fff; 
-  width: 50%;
-  margin: 50px auto;
-}
-.vstack {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-}
-.hstack {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-}
-.vstack > * { flex: 1; }
-.hstack > * { flex: 1; }
-button { padding: 5px; margin: 5px; min-width: 300px; }
-label { padding: 10px; }
-</style>
-</head>
-<body>
-<div id="container">
-<div id="registersuccess">Successfully created passkey! Now login</div>
-<div id="unauthenticated">
-<div id="auth" class="vstack">
-  <button id="show-register">Register</button>
-  <button id="show-login">Login</button>
-</div>
+  <head>
+    <style>
+      body {
+        background-color: #eee;
+      }
+      body[state] #auth {
+        display: none;
+      }
+      #register, #login, #authenticated {
+        display: none;
+      }
+      body[state="register"] #register {
+        display: flex;
+      }
+      body[state="login"] #login {
+        display: flex;
+      }
+      body[state="authenticated"] #unauthenticated {
+        display: none;
+      }
+      body[state="authenticated"] #authenticated {
+        display: flex;
+      }
+      #verification {
+        display: none;
+      }
+      #verification > * {
+        display: none;
+      }
+      #verification[state] {
+        display: flex;
+      }
+      #verification[state="verified"] .verified {
+        display: block;
+        color: lime;
+      }
+      #verification[state="unverified"] .unverified {
+        display: block;
+        color: red;
+      }
+      #registersuccess {
+        display: none;
+        background-color: lime;
+        text-align: center;
+      }
+      #registersuccess[enabled] {
+        display: block;
+      }
+      #container {
+        padding: 50px;
+        border: 1px solid #ccc;
+        background-color: #fff;
+        width: 50%;
+        margin: 50px auto;
+      }
+      .vstack {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+      .hstack {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: center;
+      }
+      .vstack > * {
+        flex: 1;
+      }
+      .hstack > * {
+        flex: 1;
+      }
+      button {
+        padding: 5px;
+        margin: 5px;
+        min-width: 300px;
+      }
+      label {
+        padding: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="container">
+      <div id="registersuccess">Successfully created passkey! Now login</div>
+      <div id="unauthenticated">
+        <div id="auth" class="vstack">
+          <button id="show-register">Register</button>
+          <button id="show-login">Login</button>
+        </div>
 
-<div id="register" class="vstack">
-  <span class="hstack"><label for="register-name">Name</label><input type="text" id="register-name" /></span>
-  <span class="hstack"><label for="register-display-name">Display Name</label><input type="text" id="register-display-name" /></span>
-  <button id="register-submit">Register</button>
-</div> 
-<div id="login" class="vstack">
-</div>
-</div>
+        <div id="register" class="vstack">
+          <span class="hstack"><label for="register-name">Name</label><input
+              type="text"
+              id="register-name"
+            /></span>
+          <span class="hstack"><label for="register-display-name"
+            >Display Name</label><input
+              type="text"
+              id="register-display-name"
+            /></span>
+          <button id="register-submit">Register</button>
+        </div>
+        <div id="login" class="vstack"></div>
+      </div>
 
-<div id="authenticated" class="vstack">
-  <div>You are authenticated!</div>
-  <div class="vstack">
-    <h3>Sign message</h3>
-    <textarea id="sign-message"></textarea>
-  </div>
-  <div class="vstack">
-    <h3>Signature</h3>
-    <div id="signature" class="code"></div>
-    <div id="verification">
-      <span class="verified">Verified!</span>
-      <span class="unverified">Unverified!</span>
+      <div id="authenticated" class="vstack">
+        <div>You are authenticated!</div>
+        <div class="vstack">
+          <h3>Sign message</h3>
+          <textarea id="sign-message"></textarea>
+        </div>
+        <div class="vstack">
+          <h3>Signature</h3>
+          <div id="signature" class="code"></div>
+          <div id="verification">
+            <span class="verified">Verified!</span>
+            <span class="unverified">Unverified!</span>
+          </div>
+        </div>
+      </div>
+      <nav class="hstack">
+        <button id="clear-db">Clear Key Store (not passkey)</button>
+      </nav>
     </div>
-  </div>
-</div>
-<nav class="hstack">
-  <button id="clear-db">Clear Key Store (not passkey)</button>
-</nav>
-</div>
-<script type="module">
-import { PassKey, Identity, KeyStore } from "../dist/identity.js";
-const $ = s => document.querySelector(s);
-const ROOT_KEY = "$ROOT_KEY";
-const encoder = new TextEncoder();
-let passKeyDeferred = defer();
-let rootKey = null;
-let store = null;
+    <script type="module">
+      import { Identity, KeyStore, PassKey } from "../dist/identity.js";
+      const $ = (s) => document.querySelector(s);
+      const ROOT_KEY = "$ROOT_KEY";
+      const encoder = new TextEncoder();
+      let passKeyDeferred = defer();
+      let rootKey = null;
+      let store = null;
 
-(async function init() {
-  // Show registration success if we were redirected
-  // from a successful registration
-  maybeDisplayRegisterSuccess();
+      (async function init() {
+        // Show registration success if we were redirected
+        // from a successful registration
+        maybeDisplayRegisterSuccess();
 
-  // Open the key store at the default location.
-  store = await KeyStore.open();
+        // Open the key store at the default location.
+        store = await KeyStore.open();
 
-  // First check if we've already stored a root key.
-  let rootKey = await store.get(ROOT_KEY);
-  if (rootKey) {
-    setRootKey(rootKey);
-    return;
-  }
+        // First check if we've already stored a root key.
+        let rootKey = await store.get(ROOT_KEY);
+        if (rootKey) {
+          setRootKey(rootKey);
+          return;
+        }
 
-  // If no root key set, wait for user to authenticate a PassKey,
-  // either by creating a new one, or reauthenticating.
-  let passKey = await passKeyDeferred.promise;
-  // Create a root key derive from the pass key.
-  rootKey = await passKey.createRootKey();
-  // Store root key to storage for subsequent page loads
-  await store.set(ROOT_KEY, rootKey);
-  setRootKey(rootKey);
-})();
+        // If no root key set, wait for user to authenticate a PassKey,
+        // either by creating a new one, or reauthenticating.
+        let passKey = await passKeyDeferred.promise;
+        // Create a root key derive from the pass key.
+        rootKey = await passKey.createRootKey();
+        // Store root key to storage for subsequent page loads
+        await store.set(ROOT_KEY, rootKey);
+        setRootKey(rootKey);
+      })();
 
-async function setRootKey(key) {
-  rootKey = key;
-  setState("authenticated");
-}
+      async function setRootKey(key) {
+        rootKey = key;
+        setState("authenticated");
+      }
 
-async function setPassKey(passkey) {
-  console.log("Setting passkey", passkey);
-  passKeyDeferred.resolve(passkey);
-}
+      async function setPassKey(passkey) {
+        console.log("Setting passkey", passkey);
+        passKeyDeferred.resolve(passkey);
+      }
 
-async function getKey() {
-  let rootKey = await PassKey.get({ userVerification: "discouraged" });
-  setPassKey(rootKey);
-}
+      async function getKey() {
+        let rootKey = await PassKey.get({
+          userVerification: "discouraged",
+        });
+        setPassKey(rootKey);
+      }
 
-$("#register-submit").addEventListener("click", async (e) => {
-  const name = $("#register-name").value;
-  const displayName = $("#register-display-name").value;
-  console.log(`Creating key ${name}:${displayName}`);
-  await PassKey.create(name, displayName);
-  showRegisterSuccess();
-});
+      $("#register-submit").addEventListener("click", async (e) => {
+        const name = $("#register-name").value;
+        const displayName = $("#register-display-name").value;
+        console.log(`Creating key ${name}:${displayName}`);
+        await PassKey.create(name, displayName);
+        showRegisterSuccess();
+      });
 
-$("#sign-message").addEventListener("input", async (e) => {
-  console.assert(rootKey);
-  const data = encoder.encode(e.target.value);
-  const signature = await rootKey.sign(data);
-  $("#signature").innerText = btoa(String.fromCharCode(...new Uint8Array(signature))); 
-  setVerificationStatus(await rootKey.verifier().verify(signature, data));
-});
+      $("#sign-message").addEventListener("input", async (e) => {
+        console.assert(rootKey);
+        const data = encoder.encode(e.target.value);
+        const signature = await rootKey.sign(data);
+        $("#signature").innerText = btoa(
+          String.fromCharCode(...new Uint8Array(signature)),
+        );
+        setVerificationStatus(
+          await rootKey.verifier().verify(signature, data),
+        );
+      });
 
-$("#clear-db").addEventListener("click", async (e) => {
-  if (store) {
-    await store.clear();
-    window.location.reload();
-  }
-});
+      $("#clear-db").addEventListener("click", async (e) => {
+        if (store) {
+          await store.clear();
+          window.location.reload();
+        }
+      });
 
-$("#auth").addEventListener("click", e => {
-  switch (e.target.id) {
-	case "show-register": {
-	  setState("register");
-	  return;
-	} 
-	case "show-login": {
-      getKey();
-	  setState("login");
-	  return;
-	} 
-  }
-})
+      $("#auth").addEventListener("click", (e) => {
+        switch (e.target.id) {
+          case "show-register": {
+            setState("register");
+            return;
+          }
+          case "show-login": {
+            getKey();
+            setState("login");
+            return;
+          }
+        }
+      });
 
-function setVerificationStatus(isVerified) {
-  $("#verification").setAttribute("state", isVerified ? "verified" : "unverified");
-}
+      function setVerificationStatus(isVerified) {
+        $("#verification").setAttribute(
+          "state",
+          isVerified ? "verified" : "unverified",
+        );
+      }
 
-function setState(state) {
-  document.body.setAttribute("state", state);
-}
+      function setState(state) {
+        document.body.setAttribute("state", state);
+      }
 
-function showRegisterSuccess() {
-  const url = new URL(window.location.href);
-  window.location.href = `${url.origin}${url.pathname}?registersuccess`;
-}
+      function showRegisterSuccess() {
+        const url = new URL(window.location.href);
+        window.location.href =
+          `${url.origin}${url.pathname}?registersuccess`;
+      }
 
-function maybeDisplayRegisterSuccess() {
-  const url = new URL(window.location.href);
-  if (url.searchParams.has("registersuccess")) {
-	$("#registersuccess").setAttribute("enabled", "");
-  }
-}
+      function maybeDisplayRegisterSuccess() {
+        const url = new URL(window.location.href);
+        if (url.searchParams.has("registersuccess")) {
+          $("#registersuccess").setAttribute("enabled", "");
+        }
+      }
 
-function defer() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-</script>
-</body>
+      function defer() {
+        let resolve;
+        let reject;
+        const promise = new Promise((res, rej) => {
+          resolve = res;
+          reject = rej;
+        });
+        return { promise, resolve, reject };
+      }
+    </script>
+  </body>
 </html>

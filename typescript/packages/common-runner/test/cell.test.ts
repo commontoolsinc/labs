@@ -147,9 +147,15 @@ describe("createProxy", () => {
     expect(isDocLink(c.get()[1])).toBeTruthy();
     expect(c.get()[1].cell.get()).toBe(2);
     expect(log.reads.map((r) => r.path)).toEqual([[]]);
-    expect(log.writes.filter((w) => w.cell === c).map((w) => w.path)).toEqual([["0"], ["1"]]);
-    expect(log.writes.filter((w) => w.cell === c.get()[0].cell).map((w) => w.path)).toEqual([[]]);
-    expect(log.writes.filter((w) => w.cell === c.get()[1].cell).map((w) => w.path)).toEqual([[]]);
+    expect(log.writes.filter((w) => w.cell === c).map((w) => w.path)).toEqual([[
+      "0",
+    ], ["1"]]);
+    expect(
+      log.writes.filter((w) => w.cell === c.get()[0].cell).map((w) => w.path),
+    ).toEqual([[]]);
+    expect(
+      log.writes.filter((w) => w.cell === c.get()[1].cell).map((w) => w.path),
+    ).toEqual([[]]);
   });
 
   it("should support pop() and only read the popped element", () => {
@@ -209,7 +215,13 @@ describe("createProxy", () => {
     const proxy = c.getAsQueryResult([], log);
     const result = proxy.a.map((x: any) => x + 1);
     expect(result).toEqual([2, 3, 4]);
-    expect(log.reads.map((r) => r.path)).toEqual([[], ["a"], ["a", 0], ["a", 1], ["a", 2]]);
+    expect(log.reads.map((r) => r.path)).toEqual([
+      [],
+      ["a"],
+      ["a", 0],
+      ["a", 1],
+      ["a", 2],
+    ]);
   });
 
   it("should allow changig array lengts by writing length", () => {
@@ -240,7 +252,11 @@ describe("createProxy", () => {
 
 describe("asCell", () => {
   it("should create a simple cell interface", () => {
-    const c = getDoc({ x: 1, y: 2 }, "should create a simple cell interface", getSpace("test"));
+    const c = getDoc(
+      { x: 1, y: 2 },
+      "should create a simple cell interface",
+      getSpace("test"),
+    );
     const simpleCell = c.asCell();
 
     expect(simpleCell.get()).toEqual({ x: 1, y: 2 });
@@ -784,11 +800,19 @@ describe("asCell with schema", () => {
     );
     const ref1 = { cell: innerCell, path: [] };
     const ref2 = {
-      cell: getDoc({ ref: ref1 }, "should handle nested references: ref2", getSpace("test")),
+      cell: getDoc(
+        { ref: ref1 },
+        "should handle nested references: ref2",
+        getSpace("test"),
+      ),
       path: ["ref"],
     };
     const ref3 = {
-      cell: getDoc({ ref: ref2 }, "should handle nested references: ref3", getSpace("test")),
+      cell: getDoc(
+        { ref: ref2 },
+        "should handle nested references: ref3",
+        getSpace("test"),
+      ),
       path: ["ref"],
     };
 
@@ -1028,12 +1052,16 @@ describe("JSON.stringify bug", () => {
     expect(json).toEqual('{"internal":{"a":1}}');
     expect(JSON.stringify(c.get())).toEqual('{"result":{"data":1}}');
     expect(JSON.stringify(d.get())).toEqual(
-      `{"internal":{"__#2":{"cell":${JSON.stringify(c.entityId)},"path":["result"]}}}`,
+      `{"internal":{"__#2":{"cell":${
+        JSON.stringify(c.entityId)
+      },"path":["result"]}}}`,
     );
     expect(JSON.stringify(e.get())).toEqual(
-      `{"internal":{"a":{"$alias":{"cell":${JSON.stringify(
-        d.entityId,
-      )},"path":["internal","__#2","data"]}}}}`,
+      `{"internal":{"a":{"$alias":{"cell":${
+        JSON.stringify(
+          d.entityId,
+        )
+      },"path":["internal","__#2","data"]}}}}`,
     );
   });
 });

@@ -105,7 +105,9 @@ export class PassKey {
       timeout: TIMEOUT,
     };
 
-    let result = (await navigator.credentials.create({ publicKey })) as PublicKeyCredential | null;
+    let result = (await navigator.credentials.create({ publicKey })) as
+      | PublicKeyCredential
+      | null;
     if (!result) {
       throw new Error("common-identity: Could not create passkey");
     }

@@ -1,10 +1,11 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.ts";
 import { base } from "../shared/styles.ts";
 
 @customElement("os-avatar")
 export class OsAvatar extends LitElement {
-  @property({ type: String }) name = "";
+  @property({ type: String })
+  name = "";
 
   static override styles = [
     base,

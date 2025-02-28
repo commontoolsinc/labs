@@ -44,7 +44,10 @@ export class ArenaClient {
     this.apiKey = config.apiKey ?? Deno.env.get("ARENA_API_KEY") ?? "";
   }
 
-  private async fetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  private async fetch<T>(
+    endpoint: string,
+    options: RequestInit = {},
+  ): Promise<T> {
     const headers: HeadersInit = {
       "Content-Type": "application/json",
     };
@@ -62,7 +65,9 @@ export class ArenaClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Arena API Error: ${response.status} ${response.statusText}`);
+      throw new Error(
+        `Arena API Error: ${response.status} ${response.statusText}`,
+      );
     }
 
     return response.json();
@@ -81,10 +86,14 @@ export class ArenaClient {
     if (params.per) queryParams.set("per", params.per.toString());
 
     const query = queryParams.toString();
-    return this.fetch<Channel["contents"]>(`/channels/${slug}/contents${query ? `?${query}` : ""}`);
+    return this.fetch<Channel["contents"]>(
+      `/channels/${slug}/contents${query ? `?${query}` : ""}`,
+    );
   }
 
-  async createChannel(params: { title: string; status?: Channel["status"] }): Promise<Channel> {
+  async createChannel(
+    params: { title: string; status?: Channel["status"] },
+  ): Promise<Channel> {
     return this.fetch<Channel>("/channels", {
       method: "POST",
       body: JSON.stringify(params),
