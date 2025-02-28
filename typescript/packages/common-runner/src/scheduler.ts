@@ -68,32 +68,39 @@ export function subscribe(action: Action, log: ReactivityLog): Cancel {
 
 // Like schedule, but runs the action immediately to gather dependencies
 export async function run(action: Action): Promise<any> {
+  const log: ReactivityLog = { reads: [], writes: [] };
+
   if (running) await running;
 
   let result: any;
-  running = new Promise((resolve) =>
-    runAction(action).then(() => {
+  running = new Promise((resolve) => {
+    const finalizeAction = (error?: unknown) => {
+      if (error) {
+        console.error("caught error", error, action);
+        if (error instanceof Error) handleError(error);
+      }
+
+      // Note: By adding the listeners after the call we avoid triggering a re-run
+      // of the action if it changed a r/w cell. Note that this also means that
+      // those actions can't loop on themselves.
+      subscribe(action, log);
       running = undefined;
       resolve(result);
-    })
-  );
+    };
+
+    try {
+      Promise.resolve(action(log))
+        .then((actionResult) => {
+          result = actionResult;
+          finalizeAction();
+        })
+        .catch((error) => finalizeAction(error));
+    } catch (error) {
+      finalizeAction(error);
+    }
+  });
 
   return running;
-}
-
-async function runAction(action: Action) {
-  const log: ReactivityLog = { reads: [], writes: [] };
-
-  try {
-    await action(log);
-  } catch (e) {
-    console.error("caught error", e, action);
-  } finally {
-    // Note: By adding the listeners after the call we avoid triggering a re-run
-    // of the action if it changed a r/w cell. Note that this also means that
-    // those actions can't loop on themselves.
-    subscribe(action, log);
-  }
 }
 
 export function idle() {
