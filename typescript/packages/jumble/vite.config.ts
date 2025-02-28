@@ -8,7 +8,11 @@ import * as path from "@std/path";
 export default defineConfig({
   plugins: [deno(), react(), tailwindcss()],
   server: {
-    allowedHosts: ["localhost", "127.0.0.1", "bens-macbook-pro.saga-castor.ts.net"],
+    allowedHosts: [
+      "localhost",
+      "127.0.0.1",
+      "bens-macbook-pro.saga-castor.ts.net",
+    ],
     proxy: {
       "/api/ai/spell/": {
         target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
@@ -43,7 +47,8 @@ export default defineConfig({
         changeOrigin: true,
       },
       "/api/storage/memory": {
-        target: process.env.MEMORY_URL ?? process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
+        target: process.env.MEMORY_URL ?? process.env.TOOLSHED_API_URL ??
+          "http://localhost:8000/",
         ws: true,
         changeOrigin: true,
         rewriteWsOrigin: true,
@@ -52,5 +57,5 @@ export default defineConfig({
     headers: {
       "Service-Worker-Allowed": "/data/",
     },
-  }
+  },
 });

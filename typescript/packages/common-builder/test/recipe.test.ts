@@ -61,7 +61,9 @@ describe("complex recipe function", () => {
 
   it("has the correct nodes", () => {
     expect(nodes.length).toBe(2);
-    expect(isModule(nodes[0].module) && nodes[0].module.type).toBe("javascript");
+    expect(isModule(nodes[0].module) && nodes[0].module.type).toBe(
+      "javascript",
+    );
     expect(nodes[0].inputs).toEqual({ $alias: { path: ["argument", "x"] } });
     expect(nodes[0].outputs).toEqual({
       $alias: { path: ["internal", "__#0"] },
@@ -141,7 +143,9 @@ describe("complex recipe with path aliases", () => {
 
   it("has the correct nodes", () => {
     expect(nodes.length).toBe(2);
-    expect(isModule(nodes[0].module) && nodes[0].module.type).toBe("javascript");
+    expect(isModule(nodes[0].module) && nodes[0].module.type).toBe(
+      "javascript",
+    );
     expect(nodes[0].inputs).toEqual({
       x: { $alias: { path: ["argument", "x"] } },
     });
@@ -165,13 +169,16 @@ describe("complex recipe with path aliases", () => {
 });
 
 describe("recipe with map node", () => {
-  const doubleArray = recipe<{ values: { x: number }[] }>("Double numbers", ({ values }) => {
-    const doubled = values.map(({ x }) => {
-      const double = lift<number>((x) => x * 2);
-      return { doubled: double(x) };
-    });
-    return { doubled };
-  });
+  const doubleArray = recipe<{ values: { x: number }[] }>(
+    "Double numbers",
+    ({ values }) => {
+      const doubled = values.map(({ x }) => {
+        const double = lift<number>((x) => x * 2);
+        return { doubled: double(x) };
+      });
+      return { doubled };
+    },
+  );
 
   it("correctly serializes to a single map node", () => {
     expect(doubleArray.nodes.length).toBe(1);
@@ -215,29 +222,36 @@ describe("recipe with map node that references a parent cell", () => {
   );
 
   it("correctly creates references to the parent cells", () => {
-    expect((multiplyArray.nodes[0].inputs as { op: Recipe }).op.nodes[0].inputs).toEqual({
-      x: { $alias: { cell: 1, path: ["argument", "element", "x"] } },
-      factor: { $alias: { path: ["argument", "factor"] } },
-    });
+    expect((multiplyArray.nodes[0].inputs as { op: Recipe }).op.nodes[0].inputs)
+      .toEqual({
+        x: { $alias: { cell: 1, path: ["argument", "element", "x"] } },
+        factor: { $alias: { path: ["argument", "factor"] } },
+      });
   });
 });
 
 describe("recipe with map node that references a parent cell in another recipe", () => {
   it("correctly creates references to the parent cells", () => {
-    const multiplyArray = recipe<{ values: { x: number }[] }>("Double numbers", ({ values }) => {
-      const wrapper = recipe("Wrapper", () => {
-        const multiplied = values.map(({ x }, index) => {
-          const multiply = lift<{ x: number; factor: number }>(({ x, factor }) => ({
-            x: x * factor,
-          }));
-          return { multiplied: multiply({ x, factor: index }) };
+    const multiplyArray = recipe<{ values: { x: number }[] }>(
+      "Double numbers",
+      ({ values }) => {
+        const wrapper = recipe("Wrapper", () => {
+          const multiplied = values.map(({ x }, index) => {
+            const multiply = lift<{ x: number; factor: number }>((
+              { x, factor },
+            ) => ({
+              x: x * factor,
+            }));
+            return { multiplied: multiply({ x, factor: index }) };
+          });
+          return { multiplied };
         });
-        return { multiplied };
-      });
-      return wrapper({ values });
-    });
+        return wrapper({ values });
+      },
+    );
 
-    const subRecipe = (multiplyArray.nodes[0].module as Module).implementation as Recipe;
+    const subRecipe = (multiplyArray.nodes[0].module as Module)
+      .implementation as Recipe;
     expect(isRecipe(subRecipe)).toBeTruthy();
     const subSubRecipe = (subRecipe.nodes[0].inputs as { op: Recipe }).op;
     expect(isRecipe(subSubRecipe)).toBeTruthy();

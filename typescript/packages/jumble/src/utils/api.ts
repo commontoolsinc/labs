@@ -1,10 +1,13 @@
 import React from "react";
 
-const TOOLSHED_API_URL = import.meta.env.VITE_TOOLSHED_API_URL || "http://localhost:8000";
+const TOOLSHED_API_URL = import.meta.env.VITE_TOOLSHED_API_URL ||
+  "http://localhost:8000";
 
 export async function getAllBlobs(): Promise<any[]> {
   try {
-    const response = await fetch(`${TOOLSHED_API_URL}/api/storage/blobby?allWithData=true`);
+    const response = await fetch(
+      `${TOOLSHED_API_URL}/api/storage/blobby?allWithData=true`,
+    );
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }

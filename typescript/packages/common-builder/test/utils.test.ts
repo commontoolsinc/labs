@@ -1,7 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { isAlias, isModule, isRecipe, type Opaque } from "../src/types.ts";
-import { getValueAtPath, hasValueAtPath, setValueAtPath } from "../src/utils.ts";
+import {
+  getValueAtPath,
+  hasValueAtPath,
+  setValueAtPath,
+} from "../src/utils.ts";
 
 describe("value type", () => {
   it("can destructure a value without TS errors", () => {
@@ -37,7 +41,9 @@ describe("utility functions", () => {
   });
 
   it("isModule correctly identifies modules", () => {
-    expect(isModule({ type: "javascript", implementation: () => {} })).toBe(true);
+    expect(isModule({ type: "javascript", implementation: () => {} })).toBe(
+      true,
+    );
     expect(isModule({ notModule: "something" })).toBe(false);
   });
 

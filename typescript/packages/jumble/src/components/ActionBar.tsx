@@ -3,7 +3,9 @@ import { useActionManager } from "../contexts/ActionManagerContext.tsx";
 import { NavLink } from "react-router-dom";
 import { ReactNode } from "react";
 
-const ActionButton = ({ children, label }: { children: ReactNode, label: string }) => (
+const ActionButton = (
+  { children, label }: { children: ReactNode; label: string },
+) => (
   <>
     {children}
     <div className="absolute top-[-40px] left-1/2 -translate-x-1/2 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">

@@ -63,7 +63,13 @@ export async function iterateCharm(
     console.log("Preferred Model", preferredModel);
     const charm = await charmManager.get(focusedCharmId);
     console.log("CHARM", charm);
-    const newCharmId = await iterate(charmManager, charm ?? null, input, false, preferredModel);
+    const newCharmId = await iterate(
+      charmManager,
+      charm ?? null,
+      input,
+      false,
+      preferredModel,
+    );
     if (!newCharmId) {
       throw new Error("No new charm ID found after iterate()");
     }
@@ -73,7 +79,10 @@ export async function iterateCharm(
     if (!id) {
       throw new Error("Invalid charm ID");
     }
-    return createPath('charmShow', { charmId: id, replicaName: focusedReplicaId })
+    return createPath("charmShow", {
+      charmId: id,
+      replicaName: focusedReplicaId,
+    });
   } catch (error) {
     console.groupEnd();
     console.error("Edit recipe error:", error);

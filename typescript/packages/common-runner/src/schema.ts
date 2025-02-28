@@ -1,8 +1,8 @@
 import { isAlias, JSONSchema } from "@commontools/builder";
-import { isDocLink, type DocImpl, type DocLink } from "./doc.ts";
-import { isCell, createCell } from "./cell.ts";
+import { type DocImpl, type DocLink, isDocLink } from "./doc.ts";
+import { createCell, isCell } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { resolvePath, followLinks } from "./utils.ts";
+import { followLinks, resolvePath } from "./utils.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -34,8 +34,12 @@ export function resolveSchema(
   filterAsCell = false,
 ): JSONSchema | undefined {
   // Treat undefined/null/{} or any other non-object as no schema
-  if (typeof schema !== "object" || schema === null || Object.keys(schema).length === 0)
+  if (
+    typeof schema !== "object" || schema === null ||
+    Object.keys(schema).length === 0
+  ) {
     return undefined;
+  }
 
   let resolvedSchema = schema.$ref === "#" ? rootSchema : schema;
 
@@ -55,8 +59,9 @@ export function resolveSchema(
     (resolvedSchema.type === "object" &&
       !resolvedSchema.additionalProperties &&
       !resolvedSchema.properties)
-  )
+  ) {
     return undefined;
+  }
 
   return resolvedSchema;
 }
@@ -100,8 +105,11 @@ export function validateAndTransform(
     // the top of the current doc is already a reference.
     for (let i = -1; i < path.length; i++) {
       const value = doc.getAtPath(path.slice(0, i + 1));
-      if (isAlias(value))
-        throw new Error("Unexpected alias in path, should have been handled by resolvePath");
+      if (isAlias(value)) {
+        throw new Error(
+          "Unexpected alias in path, should have been handled by resolvePath",
+        );
+      }
       if (isDocLink(value)) {
         log?.reads.push({ cell: doc, path: path.slice(0, i + 1) });
         return createCell(
@@ -142,15 +150,23 @@ export function validateAndTransform(
     if (Array.isArray(value)) {
       const arrayOptions = options.filter((option) => option.type === "array");
       if (arrayOptions.length === 0) return undefined;
-      if (arrayOptions.length === 1)
-        return validateAndTransform(doc, path, arrayOptions[0], log, rootSchema, seen);
+      if (arrayOptions.length === 1) {
+        return validateAndTransform(
+          doc,
+          path,
+          arrayOptions[0],
+          log,
+          rootSchema,
+          seen,
+        );
+      }
 
       // TODO: Handle more corner cases like empty anyOf, etc.
       const merged: JSONSchema[] = [];
       for (const option of arrayOptions) {
-        if (option.items?.anyOf && Array.isArray(option.items.anyOf))
+        if (option.items?.anyOf && Array.isArray(option.items.anyOf)) {
           merged.push(...option.items.anyOf);
-        else if (option.items) merged.push(option.items);
+        } else if (option.items) merged.push(option.items);
       }
 
       return validateAndTransform(
@@ -162,8 +178,12 @@ export function validateAndTransform(
         seen,
       );
     } else if (typeof value === "object" && value !== null) {
-      let objectCandidates = options.filter((option) => option.type === "object");
-      const numAsCells = objectCandidates.filter((option) => option.asCell).length;
+      let objectCandidates = options.filter((option) =>
+        option.type === "object"
+      );
+      const numAsCells = objectCandidates.filter((option) =>
+        option.asCell
+      ).length;
 
       // If there are more than two asCell branches, merge them
       if (numAsCells > 2) {
@@ -176,7 +196,7 @@ export function validateAndTransform(
                 ...rest
               } = branch as any;
               return rest;
-            }),
+            })
           )
           .flat();
         objectCandidates = objectCandidates.filter((option) => !option.asCell);
@@ -190,7 +210,14 @@ export function validateAndTransform(
           const extraLog = { reads: [], writes: [] } satisfies ReactivityLog;
           return {
             schema: option,
-            result: validateAndTransform(doc, path, option, extraLog, rootSchema, seen),
+            result: validateAndTransform(
+              doc,
+              path,
+              option,
+              extraLog,
+              rootSchema,
+              seen,
+            ),
             extraLog,
           };
         });
@@ -208,16 +235,28 @@ export function validateAndTransform(
           merged = { ...merged, ...result };
           extraReads.push(...extraLog.reads);
         } else {
-          console.warn("validateAndTransform: unexpected non-object result", result);
+          console.warn(
+            "validateAndTransform: unexpected non-object result",
+            result,
+          );
         }
       }
       return merged;
     } else {
       const candidates = options
-        .filter((option) => (option.type === "integer" ? "number" : option.type) === typeof value)
+        .filter((option) =>
+          (option.type === "integer" ? "number" : option.type) === typeof value
+        )
         .map((option) => ({
           schema: option,
-          result: validateAndTransform(doc, path, option, log, rootSchema, seen),
+          result: validateAndTransform(
+            doc,
+            path,
+            option,
+            log,
+            rootSchema,
+            seen,
+          ),
         }));
 
       if (candidates.length === 0) return undefined;
@@ -225,9 +264,16 @@ export function validateAndTransform(
 
       // If we get more than one candidate, see if there is one that matches anything, and if not return the first one
       const anyTypeOption = options.find((option) => option.type === undefined);
-      if (anyTypeOption)
-        return validateAndTransform(doc, path, anyTypeOption, log, rootSchema, seen);
-      else return candidates[0].result;
+      if (anyTypeOption) {
+        return validateAndTransform(
+          doc,
+          path,
+          anyTypeOption,
+          log,
+          rootSchema,
+          seen,
+        );
+      } else return candidates[0].result;
     }
   }
 
@@ -238,8 +284,10 @@ export function validateAndTransform(
 
     // Handle explicitly defined properties
     if (resolvedSchema.properties) {
-      for (const [key, propSchema] of Object.entries(resolvedSchema.properties)) {
-        if (propSchema.asCell || key in value)
+      for (
+        const [key, propSchema] of Object.entries(resolvedSchema.properties)
+      ) {
+        if (propSchema.asCell || key in value) {
           result[key] = validateAndTransform(
             doc,
             [...path, key],
@@ -248,6 +296,7 @@ export function validateAndTransform(
             rootSchema,
             seen,
           );
+        }
       }
     }
 
@@ -281,7 +330,14 @@ export function validateAndTransform(
       return [];
     }
     return value.map((_, i) =>
-      validateAndTransform(doc, [...path, i], resolvedSchema.items!, log, rootSchema, seen),
+      validateAndTransform(
+        doc,
+        [...path, i],
+        resolvedSchema.items!,
+        log,
+        rootSchema,
+        seen,
+      )
     );
   }
 

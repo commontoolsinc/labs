@@ -7,10 +7,9 @@ import { Charm, CharmManager } from "./charm.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt } from "./iframe/prompt.ts";
 
-const llmUrl =
-  typeof window !== "undefined"
-    ? window.location.protocol + "//" + window.location.host + "/api/ai/llm"
-    : "//api/ai/llm";
+const llmUrl = typeof window !== "undefined"
+  ? window.location.protocol + "//" + window.location.host + "/api/ai/llm"
+  : "//api/ai/llm";
 
 const llm = new LLMClient(llmUrl);
 
@@ -54,7 +53,9 @@ export async function iterate(
 
   const { iframe } = getIframeRecipe(charm);
   if (!iframe) {
-    console.error("FIXME, no compatible iframe found in charm, what should we do?");
+    console.error(
+      "FIXME, no compatible iframe found in charm, what should we do?",
+    );
     return;
   }
 
@@ -123,7 +124,11 @@ export async function castNewRecipe(
   return compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, data);
 }
 
-export async function compileRecipe(recipeSrc: string, spec: string, parents?: string[]) {
+export async function compileRecipe(
+  recipeSrc: string,
+  spec: string,
+  parents?: string[],
+) {
   const { exports, errors } = await tsToExports(recipeSrc);
   if (errors) {
     console.error("Compilation errors in recipe:", errors);
@@ -150,7 +155,7 @@ export async function compileAndRunRecipe(
   if (!recipe) {
     return;
   }
-  
+
   const newCharm = await charmManager.runPersistent(recipe, runOptions);
   charmManager.add([newCharm]);
   await charmManager.syncRecipe(newCharm);

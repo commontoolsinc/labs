@@ -2,19 +2,19 @@ import * as Space from "./space.ts";
 import * as Error from "./error.ts";
 import * as FS from "jsr:@std/fs";
 import {
-  Transaction,
-  Result,
   AsyncResult,
-  Query,
   ConnectionError,
-  SystemError,
-  MemorySpace as Subject,
   MemorySession,
+  MemorySpace as Subject,
+  Query,
+  QueryResult,
+  Result,
   SpaceSession,
   Subscriber,
   SubscribeResult,
+  SystemError,
+  Transaction,
   TransactionResult,
-  QueryResult,
 } from "./interface.ts";
 export * from "./interface.ts";
 
@@ -137,7 +137,9 @@ export interface Options {
   store: URL;
 }
 
-export const open = async (options: Options): AsyncResult<Memory, ConnectionError> => {
+export const open = async (
+  options: Options,
+): AsyncResult<Memory, ConnectionError> => {
   try {
     if (options.store.protocol === "file:") {
       await FS.ensureDir(options.store);

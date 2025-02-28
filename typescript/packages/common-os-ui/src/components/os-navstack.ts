@@ -1,11 +1,11 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.ts";
 import {
+  durationMd,
+  easeOutCubicCss,
+  easeOutExpoCss,
   setTransitions,
   transition,
-  durationMd,
-  easeOutExpoCss,
-  easeOutCubicCss,
 } from "../shared/animation.ts";
 
 @customElement("os-navstack")

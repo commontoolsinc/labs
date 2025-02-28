@@ -25,7 +25,11 @@ export function streamData(
   cause: DocImpl<any>[],
   parentDoc: DocImpl<any>,
 ): Action {
-  const pending = getDoc(false, { streamData: { pending: cause } }, parentDoc.space);
+  const pending = getDoc(
+    false,
+    { streamData: { pending: cause } },
+    parentDoc.space,
+  );
   const result = getDoc<any | undefined>(
     undefined,
     {

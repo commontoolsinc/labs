@@ -99,10 +99,9 @@ export function llm(
     } as StandardParams;
 
     if (model?.startsWith("openai:o1")) {
-      const combinedMessage =
-        system && prompt
-          ? (`${system}\n\n${prompt}` as SimpleContent)
-          : ((system || prompt) as SimpleContent);
+      const combinedMessage = system && prompt
+        ? (`${system}\n\n${prompt}` as SimpleContent)
+        : ((system || prompt) as SimpleContent);
 
       llmParams = {
         messages: messages ?? (combinedMessage ? [combinedMessage] : []),

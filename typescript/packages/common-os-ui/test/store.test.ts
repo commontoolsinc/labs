@@ -19,7 +19,8 @@ describe("createStore", () => {
     }
   };
 
-  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const sleep = (ms: number) =>
+    new Promise((resolve) => setTimeout(resolve, ms));
 
   it("should initialize with the correct state", () => {
     const state = init();
@@ -129,7 +130,9 @@ describe("cursor", () => {
   };
 
   type UserState = BigState["user"];
-  type UserMsg = { type: "changeName"; name: string } | { type: "incrementAge" };
+  type UserMsg = { type: "changeName"; name: string } | {
+    type: "incrementAge";
+  };
 
   const initialBigState: BigState = {
     user: { name: "John", age: 30 },

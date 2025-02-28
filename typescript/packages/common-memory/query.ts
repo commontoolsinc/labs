@@ -1,4 +1,10 @@
-import type { Principal, MemorySpace, Selector, Meta, Query } from "./interface.ts";
+import type {
+  MemorySpace,
+  Meta,
+  Principal,
+  Query,
+  Selector,
+} from "./interface.ts";
 
 export const create = <Space extends MemorySpace>({
   issuer,

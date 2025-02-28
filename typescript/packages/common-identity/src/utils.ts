@@ -4,16 +4,22 @@ export function random(length: number): Uint8Array {
   return buffer;
 }
 
-export function bufferSourceToArrayBuffer(source: BufferSource): ArrayBuffer | SharedArrayBuffer {
+export function bufferSourceToArrayBuffer(
+  source: BufferSource,
+): ArrayBuffer | SharedArrayBuffer {
   return ArrayBuffer.isView(source) ? source.buffer : source;
 }
 
 // Bind a handler to an `EventTarget`'s event once.
-export function once(target: EventTarget, eventName: string, callback: (e: any) => any) {
+export function once(
+  target: EventTarget,
+  eventName: string,
+  callback: (e: any) => any,
+) {
   const wrap = (e: Event) => {
     callback(e);
     target.removeEventListener(eventName, wrap);
-  }
+  };
   target.addEventListener(eventName, wrap);
 }
 
@@ -28,8 +34,8 @@ export async function hash(input: Uint8Array): Promise<Uint8Array> {
 export function clone<T>(obj: T): Promise<T> {
   return new Promise((resolve, reject) => {
     let { port1, port2 } = new MessageChannel();
-    port1.onmessage = msg => resolve(msg.data);
-    port1.onmessageerror = e => reject(e);
+    port1.onmessage = (msg) => resolve(msg.data);
+    port1.onmessageerror = (e) => reject(e);
     port2.postMessage(obj);
   });
 }

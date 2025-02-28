@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { getRecipe } from "@commontools/runner";
 import { createPath } from "@/routes.ts";
@@ -20,7 +20,7 @@ export default function SpellbookLaunchView() {
 
         if (!recipe) {
           console.error("Recipe not found");
-          navigate(createPath('spellbookDetail', { spellId }));
+          navigate(createPath("spellbookDetail", { spellId }));
           return;
         }
 
@@ -59,14 +59,19 @@ export default function SpellbookLaunchView() {
         await charmManager.add([charm]);
 
         if (charmIdString) {
-          navigate(createPath('charmShow', { charmId: charmIdString, replicaName: currentReplica }));
+          navigate(
+            createPath("charmShow", {
+              charmId: charmIdString,
+              replicaName: currentReplica,
+            }),
+          );
         } else {
           console.error("Failed to create charm");
-          navigate(createPath('spellbookDetail', { spellId }));
+          navigate(createPath("spellbookDetail", { spellId }));
         }
       } catch (error) {
         console.error("Error launching spell:", error);
-        navigate(createPath('spellbookDetail', { spellId }));
+        navigate(createPath("spellbookDetail", { spellId }));
       }
     };
 
@@ -77,7 +82,9 @@ export default function SpellbookLaunchView() {
     <div className="flex items-center justify-center h-screen">
       <div className="text-center">
         <h1 className="text-2xl font-bold mb-4">Launching Spell...</h1>
-        <p className="text-gray-600">Please wait while we prepare your spell.</p>
+        <p className="text-gray-600">
+          Please wait while we prepare your spell.
+        </p>
       </div>
     </div>
   );

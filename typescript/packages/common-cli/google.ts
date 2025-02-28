@@ -11,7 +11,9 @@ export async function getAccessToken(client: OAuth2Client) {
       if (url.searchParams.has("code")) {
         authCode = url.searchParams.get("code");
         controller.abort();
-        return new Response("Authentication successful! You can close this window.");
+        return new Response(
+          "Authentication successful! You can close this window.",
+        );
       }
       return new Response("Waiting for authentication...");
     },
@@ -32,9 +34,12 @@ export async function getAccessToken(client: OAuth2Client) {
     throw new Error("Failed to get authorization code");
   }
 
-  const tokens = await client.code.getToken(new URL(`http://localhost:8080?code=${authCode}`), {
-    codeVerifier,
-  });
+  const tokens = await client.code.getToken(
+    new URL(`http://localhost:8080?code=${authCode}`),
+    {
+      codeVerifier,
+    },
+  );
 
   return tokens.accessToken;
 }

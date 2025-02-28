@@ -1,4 +1,8 @@
-import { getRecipeSpec, getRecipeSrc, getRecipeParents } from "@commontools/runner";
+import {
+  getRecipeParents,
+  getRecipeSpec,
+  getRecipeSrc,
+} from "@commontools/runner";
 import { UI } from "@commontools/builder";
 
 export interface Spell {
@@ -154,7 +158,10 @@ export async function toggleLike(spellId: string): Promise<LikeResponse> {
   return response.json();
 }
 
-export async function createComment(spellId: string, content: string): Promise<Comment> {
+export async function createComment(
+  spellId: string,
+  content: string,
+): Promise<Comment> {
   const response = await fetch(`/api/spellbook/${spellId}/comment`, {
     method: "POST",
     headers: {

@@ -12,6 +12,6 @@ describe("KeyStore", async () => {
     await store.set("key", key);
     let recovered = await store.get("key");
 
-    assert(did === recovered.verifier().did())
+    assert(did === recovered.verifier().did());
   });
 });

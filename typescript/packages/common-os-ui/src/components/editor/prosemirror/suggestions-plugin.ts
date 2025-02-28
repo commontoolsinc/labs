@@ -11,13 +11,20 @@ const freeze = Object.freeze;
 export type Suggestion = ReturnType<typeof createSuggestion>;
 
 /// Create a frozen suggestion
-export const createSuggestion = (from: number, to: number, active: boolean, text: string) =>
-  freeze({ from, to, active, text });
+export const createSuggestion = (
+  from: number,
+  to: number,
+  active: boolean,
+  text: string,
+) => freeze({ from, to, active, text });
 
 export const isSuggestionActive = (suggestion: Suggestion) => suggestion.active;
 
 /** Get the rect representing the suggestion range */
-export const getSuggestionRect = (view: EditorView, suggestion: Suggestion): Rect => {
+export const getSuggestionRect = (
+  view: EditorView,
+  suggestion: Suggestion,
+): Rect => {
   const fromRect = view.coordsAtPos(suggestion.from);
   const toRect = view.coordsAtPos(suggestion.to);
   return freeze({
@@ -165,7 +172,12 @@ export const suggestionsPlugin = ({
               const from = pos + match.index;
               const to = from + match[0].length;
               suggestions.push(
-                createSuggestion(from, to, isBetweenInclusive(from, to, headPos), match[0]),
+                createSuggestion(
+                  from,
+                  to,
+                  isBetweenInclusive(from, to, headPos),
+                  match[0],
+                ),
               );
             }
           }
@@ -204,5 +216,7 @@ export const suggestionsPlugin = ({
   });
 };
 
-export const replaceSuggestionWithText = (suggestion: Suggestion, text: string) =>
-  replaceWithText(suggestion.from, suggestion.to, text);
+export const replaceSuggestionWithText = (
+  suggestion: Suggestion,
+  text: string,
+) => replaceWithText(suggestion.from, suggestion.to, text);

@@ -10,10 +10,13 @@ import { getSpace } from "../src/space.ts";
 
 describe("Recipe Runner", () => {
   it("should run a simple recipe", async () => {
-    const simpleRecipe = recipe<{ value: number }>("Simple Recipe", ({ value }) => {
-      const doubled = lift((x: number) => x * 2)(value);
-      return { result: doubled };
-    });
+    const simpleRecipe = recipe<{ value: number }>(
+      "Simple Recipe",
+      ({ value }) => {
+        const doubled = lift((x: number) => x * 2)(value);
+        return { result: doubled };
+      },
+    );
 
     const result = run(
       simpleRecipe,
@@ -34,13 +37,16 @@ describe("Recipe Runner", () => {
       return { squared };
     });
 
-    const outerRecipe = recipe<{ value: number }>("Outer Recipe", ({ value }) => {
-      const { squared } = innerRecipe({ x: value });
-      const result = lift((n: number) => {
-        return n + 1;
-      })(squared);
-      return { result };
-    });
+    const outerRecipe = recipe<{ value: number }>(
+      "Outer Recipe",
+      ({ value }) => {
+        const { squared } = innerRecipe({ x: value });
+        const result = lift((n: number) => {
+          return n + 1;
+        })(squared);
+        return { result };
+      },
+    );
 
     const result = run(
       outerRecipe,
@@ -67,7 +73,11 @@ describe("Recipe Runner", () => {
     const result1 = run(
       recipeWithDefaults,
       {},
-      getDoc(undefined, "should handle recipes with defaults", getSpace("test")),
+      getDoc(
+        undefined,
+        "should handle recipes with defaults",
+        getSpace("test"),
+      ),
     );
 
     await idle();
@@ -77,7 +87,11 @@ describe("Recipe Runner", () => {
     const result2 = run(
       recipeWithDefaults,
       { a: 20 },
-      getDoc(undefined, "should handle recipes with defaults (2)", getSpace("test")),
+      getDoc(
+        undefined,
+        "should handle recipes with defaults (2)",
+        getSpace("test"),
+      ),
     );
 
     await idle();
@@ -102,7 +116,11 @@ describe("Recipe Runner", () => {
       {
         values: [{ x: 1 }, { x: 2 }, { x: 3 }],
       },
-      getDoc(undefined, "should handle recipes with map nodes", getSpace("test")),
+      getDoc(
+        undefined,
+        "should handle recipes with map nodes",
+        getSpace("test"),
+      ),
     );
 
     await idle();
@@ -113,7 +131,9 @@ describe("Recipe Runner", () => {
   });
 
   it("should handle recipes with map nodes with closures", async () => {
-    const double = lift<{ x: number; factor: number }>(({ x, factor }) => x * factor);
+    const double = lift<{ x: number; factor: number }>(({ x, factor }) =>
+      x * factor
+    );
 
     const doubleArray = recipe<{ values: number[]; factor: number }>(
       "Double numbers",
@@ -129,7 +149,11 @@ describe("Recipe Runner", () => {
         values: [1, 2, 3],
         factor: 3,
       },
-      getDoc(undefined, "should handle recipes with map nodes with closures", getSpace("test")),
+      getDoc(
+        undefined,
+        "should handle recipes with map nodes with closures",
+        getSpace("test"),
+      ),
     );
 
     await idle();
@@ -140,15 +164,21 @@ describe("Recipe Runner", () => {
   });
 
   it("should execute handlers", async () => {
-    const incHandler = handler<{ amount: number }, { counter: { value: number } }>(
+    const incHandler = handler<
+      { amount: number },
+      { counter: { value: number } }
+    >(
       ({ amount }, { counter }) => {
         counter.value += amount;
       },
     );
 
-    const incRecipe = recipe<{ counter: { value: number } }>("Increment counter", ({ counter }) => {
-      return { counter, stream: incHandler({ counter }) };
-    });
+    const incRecipe = recipe<{ counter: { value: number } }>(
+      "Increment counter",
+      ({ counter }) => {
+        return { counter, stream: incHandler({ counter }) };
+      },
+    );
 
     const result = run(
       incRecipe,
@@ -169,21 +199,31 @@ describe("Recipe Runner", () => {
 
   it("should execute handlers that use bind and this", async () => {
     // Switch to `function` so that we can set the type of `this`.
-    const incHandler = handler<{ amount: number }, { counter: { value: number } }>(function (
+    const incHandler = handler<
+      { amount: number },
+      { counter: { value: number } }
+    >(function (
       this: { counter: { value: number } },
       { amount },
     ) {
       this.counter.value += amount;
     });
 
-    const incRecipe = recipe<{ counter: { value: number } }>("Increment counter", ({ counter }) => {
-      return { counter, stream: incHandler.bind({ counter }) };
-    });
+    const incRecipe = recipe<{ counter: { value: number } }>(
+      "Increment counter",
+      ({ counter }) => {
+        return { counter, stream: incHandler.bind({ counter }) };
+      },
+    );
 
     const result = run(
       incRecipe,
       { counter: { value: 0 } },
-      getDoc(undefined, "should execute handlers that use bind and this", getSpace("test")),
+      getDoc(
+        undefined,
+        "should execute handlers that use bind and this",
+        getSpace("test"),
+      ),
     );
 
     await idle();
@@ -199,13 +239,18 @@ describe("Recipe Runner", () => {
 
   it("should execute handlers that use bind and this (no types)", async () => {
     // Switch to `function` so that we can set the type of `this`.
-    const incHandler = handler(function (this: { counter: { value: number } }, { amount }) {
-      this.counter.value += amount;
-    });
+    const incHandler = handler(
+      function (this: { counter: { value: number } }, { amount }) {
+        this.counter.value += amount;
+      },
+    );
 
-    const incRecipe = recipe<{ counter: { value: number } }>("Increment counter", ({ counter }) => {
-      return { counter, stream: incHandler.bind({ counter }) };
-    });
+    const incRecipe = recipe<{ counter: { value: number } }>(
+      "Increment counter",
+      ({ counter }) => {
+        return { counter, stream: incHandler.bind({ counter }) };
+      },
+    );
 
     const result = run(
       incRecipe,
@@ -261,7 +306,11 @@ describe("Recipe Runner", () => {
     const result = run(
       incRecipe,
       { counter, nested },
-      getDoc(undefined, "should execute recipes returned by handlers", getSpace("test")),
+      getDoc(
+        undefined,
+        "should execute recipes returned by handlers",
+        getSpace("test"),
+      ),
     );
 
     await idle();
@@ -308,17 +357,24 @@ describe("Recipe Runner", () => {
       return multiply({ x, y });
     });
 
-    const multiplyRecipe = recipe<{ x: number; y: number }>("multiply", (args) => {
-      return {
-        result1: multiplyGenerator(args),
-        result2: multiplyGenerator2(args),
-      };
-    });
+    const multiplyRecipe = recipe<{ x: number; y: number }>(
+      "multiply",
+      (args) => {
+        return {
+          result1: multiplyGenerator(args),
+          result2: multiplyGenerator2(args),
+        };
+      },
+    );
 
     const result = run(
       multiplyRecipe,
       { x, y },
-      getDoc(undefined, "should handle recipes returned by lifted functions", getSpace("test")),
+      getDoc(
+        undefined,
+        "should handle recipes returned by lifted functions",
+        getSpace("test"),
+      ),
     );
 
     await idle();
@@ -357,10 +413,13 @@ describe("Recipe Runner", () => {
 
     const double = byRef("double");
 
-    const simpleRecipe = recipe<{ value: number }>("Simple Recipe", ({ value }) => {
-      const doubled = double(value);
-      return { result: doubled };
-    });
+    const simpleRecipe = recipe<{ value: number }>(
+      "Simple Recipe",
+      ({ value }) => {
+        const doubled = double(value);
+        return { result: doubled };
+      },
+    );
 
     const result = run(
       simpleRecipe,
@@ -406,7 +465,11 @@ describe("Recipe Runner", () => {
         settings: settingsCell,
         multiplier: 3,
       },
-      getDoc(undefined, "should handle schema with cell references", getSpace("test")),
+      getDoc(
+        undefined,
+        "should handle schema with cell references",
+        getSpace("test"),
+      ),
     );
 
     await idle();
@@ -446,8 +509,14 @@ describe("Recipe Runner", () => {
     const sumRecipe = recipe<{ data: { items: Array<{ value: number }> } }>(
       "Sum Items",
       ({ data }) => {
-        const result = lift(schema, { type: "number" }, ({ data }) =>
-          data.items.reduce((sum: number, item: any) => sum + item.get().value, 0),
+        const result = lift(
+          schema,
+          { type: "number" },
+          ({ data }) =>
+            data.items.reduce(
+              (sum: number, item: any) => sum + item.get().value,
+              0,
+            ),
         )({ data });
         return { result };
       },
@@ -458,7 +527,11 @@ describe("Recipe Runner", () => {
     const result = run(
       sumRecipe,
       { data: { items: [item1, item2] } },
-      getDoc(undefined, "should handle nested cell references in schema", getSpace("test")),
+      getDoc(
+        undefined,
+        "should handle nested cell references in schema",
+        getSpace("test"),
+      ),
     );
 
     await idle();
@@ -483,11 +556,14 @@ describe("Recipe Runner", () => {
     const dynamicRecipe = recipe<{ context: Record<string, number> }>(
       "Dynamic Context",
       ({ context }) => {
-        const result = lift(schema, { type: "number" }, ({ context }) =>
-          Object.values(context ?? {}).reduce(
-            (sum: number, val) => sum + (val as Cell<number>).get(),
-            0,
-          ),
+        const result = lift(
+          schema,
+          { type: "number" },
+          ({ context }) =>
+            Object.values(context ?? {}).reduce(
+              (sum: number, val) => sum + (val as Cell<number>).get(),
+              0,
+            ),
         )({ context });
         return { result };
       },
@@ -503,7 +579,11 @@ describe("Recipe Runner", () => {
           second: value2,
         },
       },
-      getDoc(undefined, "should handle dynamic cell references with schema", getSpace("test")),
+      getDoc(
+        undefined,
+        "should handle dynamic cell references with schema",
+        getSpace("test"),
+      ),
     );
 
     await idle();
@@ -529,14 +609,21 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const incRecipe = recipe<{ counter: number }>("Increment counter", ({ counter }) => {
-      return { counter, stream: incHandler({ counter }) };
-    });
+    const incRecipe = recipe<{ counter: number }>(
+      "Increment counter",
+      ({ counter }) => {
+        return { counter, stream: incHandler({ counter }) };
+      },
+    );
 
     const result = run(
       incRecipe,
       { counter: 0 },
-      getDoc(undefined, "should execute handlers with schemas", getSpace("test")),
+      getDoc(
+        undefined,
+        "should execute handlers with schemas",
+        getSpace("test"),
+      ),
     );
 
     await idle();

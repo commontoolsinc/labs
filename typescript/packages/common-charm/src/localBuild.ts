@@ -17,7 +17,8 @@ const importCache: Record<string, any> = {};
 
 const ensureRequires = async (js: string): Promise<Record<string, any>> => {
   const requires = /require\((['"])([^'"]+)\1\)/g;
-  const sagaCastorPattern = /https:\/\/paas\.saga-castor\.ts\.net\/blobby\/blob\/[^/]+\/src/;
+  const sagaCastorPattern =
+    /https:\/\/paas\.saga-castor\.ts\.net\/blobby\/blob\/[^/]+\/src/;
 
   const matches = [...js.matchAll(requires)];
   const localImports: Record<string, any> = {};
@@ -29,7 +30,9 @@ const ensureRequires = async (js: string): Promise<Record<string, any>> => {
         const importSrc = await fetch(modulePath).then((resp) => resp.text());
         const importedModule = await tsToExports(importSrc);
         if (importedModule.errors) {
-          throw new Error(`Failed to import ${modulePath}: ${importedModule.errors}`);
+          throw new Error(
+            `Failed to import ${modulePath}: ${importedModule.errors}`,
+          );
         }
         importCache[modulePath] = importedModule.exports;
       }
@@ -39,7 +42,9 @@ const ensureRequires = async (js: string): Promise<Record<string, any>> => {
   return localImports;
 };
 
-export const tsToExports = async (src: string): Promise<{ exports?: any; errors?: string }> => {
+export const tsToExports = async (
+  src: string,
+): Promise<{ exports?: any; errors?: string }> => {
   // Add error handling for compilation
   const result = ts.transpileModule(src, {
     compilerOptions: {
@@ -58,13 +63,17 @@ export const tsToExports = async (src: string): Promise<{ exports?: any; errors?
   if (result.diagnostics && result.diagnostics.length > 0) {
     const errors = result.diagnostics
       .map((diagnostic) => {
-        const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
+        const message = ts.flattenDiagnosticMessageText(
+          diagnostic.messageText,
+          "\n",
+        );
         let locationInfo = "";
 
         if (diagnostic.file && diagnostic.start !== undefined) {
-          const { line, character } = diagnostic.file.getLineAndCharacterOfPosition(
-            diagnostic.start,
-          );
+          const { line, character } = diagnostic.file
+            .getLineAndCharacterOfPosition(
+              diagnostic.start,
+            );
           locationInfo = `[${line + 1}:${character + 1}] `; // +1 because TypeScript uses 0-based positions
         }
 

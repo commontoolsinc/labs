@@ -1,4 +1,4 @@
-import { chromeLauncher } from '@web/test-runner-chrome';
+import { chromeLauncher } from "@web/test-runner-chrome";
 
 const ED25519_FLAG = "--enable-experimental-web-platform-features";
 export default {

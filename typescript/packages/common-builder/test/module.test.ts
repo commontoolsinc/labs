@@ -86,22 +86,27 @@ describe("module", () => {
 
   describe("handler function", () => {
     it("creates a node factory for event handlers", () => {
-      const clickHandler = handler<MouseEvent, { x: number; y: number }>((event, props) => {
-        props.x = event.clientX;
-        props.y = event.clientY;
-      });
+      const clickHandler = handler<MouseEvent, { x: number; y: number }>(
+        (event, props) => {
+          props.x = event.clientX;
+          props.y = event.clientY;
+        },
+      );
       expect(typeof clickHandler).toBe("function");
       expect(isModule(clickHandler)).toBe(true);
     });
 
     it("creates a opaque ref with stream when called", () => {
-      const clickHandler = handler<MouseEvent, { x: number; y: number }>((event, props) => {
-        props.x = event.clientX;
-        props.y = event.clientY;
-      });
+      const clickHandler = handler<MouseEvent, { x: number; y: number }>(
+        (event, props) => {
+          props.x = event.clientX;
+          props.y = event.clientY;
+        },
+      );
       const stream = clickHandler({ x: opaqueRef(10), y: opaqueRef(20) });
       expect(isOpaqueRef(stream)).toBe(true);
-      const { value, nodes } = (stream as unknown as OpaqueRef<{ $stream: true }>).export();
+      const { value, nodes } =
+        (stream as unknown as OpaqueRef<{ $stream: true }>).export();
       expect(value).toEqual({ $stream: true });
       expect(nodes.size).toBe(1);
       expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });
@@ -127,10 +132,14 @@ describe("module", () => {
         },
       } as JSONSchema;
 
-      const mouseHandler = handler(eventSchema, stateSchema, (event: any, state: any) => {
-        state.lastX = event.x;
-        state.lastY = event.y;
-      });
+      const mouseHandler = handler(
+        eventSchema,
+        stateSchema,
+        (event: any, state: any) => {
+          state.lastX = event.x;
+          state.lastY = event.y;
+        },
+      );
 
       expect(isModule(mouseHandler)).toBe(true);
       const module = mouseHandler as unknown as Module;
@@ -171,9 +180,13 @@ describe("module", () => {
         elements: z.record(z.string(), z.boolean()),
       });
 
-      const toggleHandler = handler(eventSchema, stateSchema, (event, state) => {
-        state.elements[event.target] = !state.elements[event.target];
-      });
+      const toggleHandler = handler(
+        eventSchema,
+        stateSchema,
+        (event, state) => {
+          state.elements[event.target] = !state.elements[event.target];
+        },
+      );
 
       const elements = opaqueRef({ button1: true, button2: false });
       const result = toggleHandler({ elements } as any);
@@ -187,13 +200,16 @@ describe("module", () => {
     });
 
     it("creates a opaque ref with stream when with is called", () => {
-      const clickHandler = handler<MouseEvent, { x: number; y: number }>((event, props) => {
-        props.x = event.clientX;
-        props.y = event.clientY;
-      });
+      const clickHandler = handler<MouseEvent, { x: number; y: number }>(
+        (event, props) => {
+          props.x = event.clientX;
+          props.y = event.clientY;
+        },
+      );
       const stream = clickHandler.with({ x: opaqueRef(10), y: opaqueRef(20) });
       expect(isOpaqueRef(stream)).toBe(true);
-      const { value, nodes } = (stream as unknown as OpaqueRef<{ $stream: true }>).export();
+      const { value, nodes } =
+        (stream as unknown as OpaqueRef<{ $stream: true }>).export();
       expect(value).toEqual({ $stream: true });
       expect(nodes.size).toBe(1);
       expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });

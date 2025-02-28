@@ -2,8 +2,13 @@ import { ShareDialog } from "@/components/spellbook/ShareDialog.tsx";
 import { usePublish } from "@/hooks/use-publish.ts";
 
 export function CharmPublisher() {
-  const { isShareDialogOpen, setIsShareDialogOpen, isPublishing, handleShare, defaultTitle } =
-    usePublish();
+  const {
+    isShareDialogOpen,
+    setIsShareDialogOpen,
+    isPublishing,
+    handleShare,
+    defaultTitle,
+  } = usePublish();
 
   return (
     <ShareDialog

@@ -155,7 +155,11 @@ describe("runRecipe", () => {
     const result = run(
       mockRecipe,
       { value: 1 },
-      getDoc(undefined, "should run a simple module with no outputs", getSpace("test")),
+      getDoc(
+        undefined,
+        "should run a simple module with no outputs",
+        getSpace("test"),
+      ),
     );
     await idle();
     expect(result.getAsQueryResult()).toEqual({ result: undefined });
@@ -186,7 +190,11 @@ describe("runRecipe", () => {
     const result = run(
       mockRecipe,
       { value: 1 },
-      getDoc(undefined, "should handle incorrect inputs gracefully", getSpace("test")),
+      getDoc(
+        undefined,
+        "should handle incorrect inputs gracefully",
+        getSpace("test"),
+      ),
     );
     await idle();
     expect(result.getAsQueryResult()).toEqual({ result: undefined });
@@ -257,7 +265,11 @@ describe("runRecipe", () => {
     const result = run(
       recipe,
       inputCell,
-      getDoc(undefined, "should allow passing a cell as a binding", getSpace("test")),
+      getDoc(
+        undefined,
+        "should allow passing a cell as a binding",
+        getSpace("test"),
+      ),
     );
 
     await idle();

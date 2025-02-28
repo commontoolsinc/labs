@@ -1,13 +1,18 @@
-import { saveNewRecipeVersion, IFrameRecipe, Charm, getIframeRecipe } from "@commontools/charm";
+import {
+  Charm,
+  getIframeRecipe,
+  IFrameRecipe,
+  saveNewRecipeVersion,
+} from "@commontools/charm";
 import React, {
-  useEffect,
-  useState,
-  useCallback,
-  useRef,
   createContext,
+  useCallback,
   useContext,
+  useEffect,
+  useRef,
+  useState,
 } from "react";
-import { useParams, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { LoadingSpinner } from "@/components/Loader.tsx";
 import { useCharm } from "@/hooks/use-charm.ts";
@@ -18,8 +23,8 @@ import { iterateCharm } from "@/utils/charm-operations.ts";
 import { charmId } from "@/utils/charms.ts";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import {
-  generateCharmSuggestions,
   type CharmSuggestion,
+  generateCharmSuggestions,
 } from "@/utils/prompt-library/charm-suggestions.ts";
 import { Cell } from "@commontools/runner";
 import { createPath, createPathWithHash } from "@/routes.ts";
@@ -55,7 +60,9 @@ const IterationContext = createContext<IterationContextType | null>(null);
 const useIterationContext = () => {
   const context = useContext(IterationContext);
   if (!context) {
-    throw new Error("useIterationContext must be used within an IterationProvider");
+    throw new Error(
+      "useIterationContext must be used within an IterationProvider",
+    );
   }
   return context;
 };
@@ -152,7 +159,9 @@ function useBottomSheet(initialHeight = 420) {
         document.removeEventListener("touchend", handleTouchEnd);
       };
 
-      document.addEventListener("touchmove", handleTouchMove, { passive: false });
+      document.addEventListener("touchmove", handleTouchMove, {
+        passive: false,
+      });
       document.addEventListener("touchend", handleTouchEnd);
     },
     [sheetHeight],
@@ -171,7 +180,9 @@ function useTabNavigation() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] = useState<Tab>((location.hash.slice(1) as Tab) || "iterate");
+  const [activeTab, setActiveTab] = useState<Tab>(
+    (location.hash.slice(1) as Tab) || "iterate",
+  );
 
   useEffect(() => {
     setActiveTab((location.hash.slice(1) as Tab) || "iterate");
@@ -229,7 +240,10 @@ function useSuggestions(charm: Cell<Charm> | null) {
 }
 
 // Hook for code editing
-function useCodeEditor(charm: Cell<Charm> | null, iframeRecipe: IFrameRecipe | null) {
+function useCodeEditor(
+  charm: Cell<Charm> | null,
+  iframeRecipe: IFrameRecipe | null,
+) {
   const { charmManager } = useCharmManager();
   const [workingSrc, setWorkingSrc] = useState<string | undefined>(undefined);
 
@@ -270,7 +284,7 @@ const Variants = () => {
   const { charmId: paramCharmId, replicaName } = useParams();
 
   if (!paramCharmId || !replicaName) {
-    throw new Error('Missing charmId or replicaName');
+    throw new Error("Missing charmId or replicaName");
   }
 
   const { currentFocus: charm } = useCharm(paramCharmId);
@@ -302,11 +316,21 @@ const Variants = () => {
                     const variantId = charmId(selectedVariant);
                     if (variantId) {
                       // Navigate to the main view (without /detail) to close the drawer
-                      navigate(createPath('charmShow', { charmId: variantId, replicaName }));
+                      navigate(
+                        createPath("charmShow", {
+                          charmId: variantId,
+                          replicaName,
+                        }),
+                      );
                     }
                   } else {
                     // If it's the original charm, just close the drawer by navigating to the main view
-                    navigate(createPath('charmShow', { charmId: paramCharmId, replicaName }));
+                    navigate(
+                      createPath("charmShow", {
+                        charmId: paramCharmId,
+                        replicaName,
+                      }),
+                    );
                   }
                 }
               }}
@@ -321,8 +345,9 @@ const Variants = () => {
         {charm && (
           <div
             onClick={() => setSelectedVariant(charm)}
-            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${selectedVariant === charm ? "border-blue-500" : "border-black"
-              }`}
+            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${
+              selectedVariant === charm ? "border-blue-500" : "border-black"
+            }`}
           >
             <div className="h-full flex flex-col overflow-hidden">
               <div className="bg-gray-100 text-xs font-bold p-1 border-b border-gray-300">
@@ -352,8 +377,9 @@ const Variants = () => {
           <div
             key={idx}
             onClick={() => setSelectedVariant(variant)}
-            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${selectedVariant === variant ? "border-blue-500" : "border-black"
-              }`}
+            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${
+              selectedVariant === variant ? "border-blue-500" : "border-black"
+            }`}
           >
             <div className="h-full flex flex-col overflow-hidden">
               <div className="bg-gray-100 text-xs font-bold p-1 border-b border-gray-300">
@@ -380,7 +406,10 @@ const Variants = () => {
         ))}
 
         {/* Loading placeholders */}
-        {Array.from({ length: expectedVariantCount - variants.length }).map((_, idx) => (
+        {Array.from({ length: expectedVariantCount - variants.length }).map((
+          _,
+          idx,
+        ) => (
           <div
             key={`loading-${idx}`}
             className="variant-item min-w-36 h-24 border-2 border-dashed border-gray-300 flex items-center justify-center flex-shrink-0"
@@ -404,7 +433,8 @@ const Suggestions = () => {
   const { charmId: paramCharmId } = useParams();
   const { currentFocus: charm } = useCharm(paramCharmId);
   const { suggestions, loadingSuggestions } = useSuggestions(charm);
-  const { setIterationInput, setShowVariants, handleIterate } = useIterationContext();
+  const { setIterationInput, setShowVariants, handleIterate } =
+    useIterationContext();
 
   const handleSuggestion = (suggestion: CharmSuggestion) => {
     setIterationInput(suggestion.prompt);
@@ -416,26 +446,34 @@ const Suggestions = () => {
   return (
     <div className="suggestions-container mb-4">
       <h3 className="text-sm font-bold mb-2">Suggestions</h3>
-      {loadingSuggestions ? (
-        <div className="flex items-center justify-center p-4">
-          <DitheredCube animationSpeed={2} width={24} height={24} animate={true} cameraZoom={12} />
-        </div>
-      ) : (
-        <div className="flex overflow-x-auto pb-2 gap-3">
-          {suggestions.map((suggestion, index) => (
-            <button
-              key={index}
-              onClick={() => handleSuggestion(suggestion)}
-              className="p-2 text-left text-sm border border-gray-300 hover:border-black hover:bg-gray-50 shadow-sm transition-all duration-100 ease-in-out cursor-pointer flex-shrink-0 min-w-40 max-w-56"
-            >
-              <span className="font-medium text-xs uppercase text-gray-500 block">
-                {suggestion.type}
-              </span>
-              <p className="text-xs line-clamp-2">{suggestion.prompt}</p>
-            </button>
-          ))}
-        </div>
-      )}
+      {loadingSuggestions
+        ? (
+          <div className="flex items-center justify-center p-4">
+            <DitheredCube
+              animationSpeed={2}
+              width={24}
+              height={24}
+              animate={true}
+              cameraZoom={12}
+            />
+          </div>
+        )
+        : (
+          <div className="flex overflow-x-auto pb-2 gap-3">
+            {suggestions.map((suggestion, index) => (
+              <button
+                key={index}
+                onClick={() => handleSuggestion(suggestion)}
+                className="p-2 text-left text-sm border border-gray-300 hover:border-black hover:bg-gray-50 shadow-sm transition-all duration-100 ease-in-out cursor-pointer flex-shrink-0 min-w-40 max-w-56"
+              >
+                <span className="font-medium text-xs uppercase text-gray-500 block">
+                  {suggestion.type}
+                </span>
+                <p className="text-xs line-clamp-2">{suggestion.prompt}</p>
+              </button>
+            ))}
+          </div>
+        )}
     </div>
   );
 };
@@ -488,8 +526,12 @@ const IterateTab = () => {
             onChange={(e) => setSelectedModel(e.target.value)}
             className="p-1 border-2 border-black bg-white text-xs"
           >
-            <option value="anthropic:claude-3-7-sonnet-latest">Claude 3.7 ✨</option>
-            <option value="anthropic:claude-3-5-sonnet-latest">Claude 3.5 ✨</option>
+            <option value="anthropic:claude-3-7-sonnet-latest">
+              Claude 3.7 ✨
+            </option>
+            <option value="anthropic:claude-3-5-sonnet-latest">
+              Claude 3.5 ✨
+            </option>
             <option value="groq:llama-3.3-70b-versatile">Llama 3.3 🔥</option>
             <option value="openai:o3-mini-low-latest">o3-mini-low</option>
             <option value="openai:o3-mini-medium-latest">o3-mini-medium</option>
@@ -503,23 +545,27 @@ const IterateTab = () => {
             disabled={loading || !iterationInput}
             className="px-4 py-2 border-2 text-sm border-white bg-black text-white flex items-center gap-2 disabled:opacity-50"
           >
-            {loading ? (
-              <>
-                <DitheredCube
-                  animationSpeed={2}
-                  width={16}
-                  height={16}
-                  animate={true}
-                  cameraZoom={12}
-                />
-                <span>Iterating...</span>
-              </>
-            ) : (
-              <span className="text-xs">
-                Iterate{" "}
-                <span className="hidden md:inline text-gray-400 font-bold italic">(⌘ + enter)</span>
-              </span>
-            )}
+            {loading
+              ? (
+                <>
+                  <DitheredCube
+                    animationSpeed={2}
+                    width={16}
+                    height={16}
+                    animate={true}
+                    cameraZoom={12}
+                  />
+                  <span>Iterating...</span>
+                </>
+              )
+              : (
+                <span className="text-xs">
+                  Iterate{" "}
+                  <span className="hidden md:inline text-gray-400 font-bold italic">
+                    (⌘ + enter)
+                  </span>
+                </span>
+              )}
           </button>
         </div>
       </div>
@@ -537,10 +583,11 @@ const IterateTab = () => {
 const CodeTab = () => {
   const { charmId: paramCharmId } = useParams();
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
-  const { workingSrc, setWorkingSrc, hasUnsavedChanges, saveChanges } = useCodeEditor(
-    charm,
-    iframeRecipe,
-  );
+  const { workingSrc, setWorkingSrc, hasUnsavedChanges, saveChanges } =
+    useCodeEditor(
+      charm,
+      iframeRecipe,
+    );
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -606,7 +653,8 @@ const BottomSheet = ({
 }: {
   children: (activeTab: Tab, isResizing: boolean) => React.ReactNode;
 }) => {
-  const { sheetHeight, isResizing, handleResizeStart, handleTouchResizeStart } = useBottomSheet();
+  const { sheetHeight, isResizing, handleResizeStart, handleTouchResizeStart } =
+    useBottomSheet();
   const { activeTab, handleTabChange } = useTabNavigation();
 
   return (
@@ -627,29 +675,40 @@ const BottomSheet = ({
       <div className="tabs flex gap-0 border-b border-gray-200">
         <button
           onClick={() => handleTabChange("iterate")}
-          className={`px-4 py-2 flex-1 text-center ${activeTab === "iterate" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
-            }`}
+          className={`px-4 py-2 flex-1 text-center ${
+            activeTab === "iterate"
+              ? "bg-gray-100 font-bold border-b-2 border-black"
+              : ""
+          }`}
         >
           Iteration
         </button>
         <button
           onClick={() => handleTabChange("code")}
-          className={`px-4 py-2 flex-1 text-center ${activeTab === "code" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
-            }`}
+          className={`px-4 py-2 flex-1 text-center ${
+            activeTab === "code"
+              ? "bg-gray-100 font-bold border-b-2 border-black"
+              : ""
+          }`}
         >
           Edit Code
         </button>
         <button
           onClick={() => handleTabChange("data")}
-          className={`px-4 py-2 flex-1 text-center ${activeTab === "data" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
-            }`}
+          className={`px-4 py-2 flex-1 text-center ${
+            activeTab === "data"
+              ? "bg-gray-100 font-bold border-b-2 border-black"
+              : ""
+          }`}
         >
           View Data
         </button>
       </div>
 
       {/* Tab Content */}
-      <div className="tab-content flex-grow overflow-hidden">{children(activeTab, isResizing)}</div>
+      <div className="tab-content flex-grow overflow-hidden">
+        {children(activeTab, isResizing)}
+      </div>
     </div>
   );
 };
@@ -668,11 +727,15 @@ function CharmDetailView() {
 
   // Iteration state
   const [iterationInput, setIterationInput] = useState("");
-  const [selectedModel, setSelectedModel] = useState("anthropic:claude-3-7-sonnet-latest");
+  const [selectedModel, setSelectedModel] = useState(
+    "anthropic:claude-3-7-sonnet-latest",
+  );
   const [showVariants, setShowVariants] = useState(true);
   const [loading, setLoading] = useState(false);
   const [variants, setVariants] = useState<Cell<Charm>[]>([]);
-  const [selectedVariant, setSelectedVariant] = useState<Cell<Charm> | null>(null);
+  const [selectedVariant, setSelectedVariant] = useState<Cell<Charm> | null>(
+    null,
+  );
   const [expectedVariantCount, setExpectedVariantCount] = useState(0);
 
   // Handle iteration
@@ -686,7 +749,14 @@ function CharmDetailView() {
 
       try {
         const variantPromises = variantModels.map((model) =>
-          iterateCharm(charmManager, charmId(charm)!, replicaName!, iterationInput, false, model),
+          iterateCharm(
+            charmManager,
+            charmId(charm)!,
+            replicaName!,
+            iterationInput,
+            false,
+            model,
+          )
         );
 
         // Instead of waiting for all promises, handle them as they complete
@@ -732,7 +802,12 @@ function CharmDetailView() {
           selectedModel,
         );
         if (newPath) {
-          navigate(createPathWithHash('charmDetail', { charmId: paramCharmId, replicaName }, 'iterate'));
+          navigate(
+            createPathWithHash("charmDetail", {
+              charmId: paramCharmId,
+              replicaName,
+            }, "iterate"),
+          );
         }
       } catch (error) {
         console.error("Iteration error:", error);
@@ -740,7 +815,16 @@ function CharmDetailView() {
         setLoading(false);
       }
     }
-  }, [showVariants, paramCharmId, iterationInput, selectedModel, charmManager, charm, replicaName, navigate]);
+  }, [
+    showVariants,
+    paramCharmId,
+    iterationInput,
+    selectedModel,
+    charmManager,
+    charm,
+    replicaName,
+    navigate,
+  ]);
 
   const handleCancelVariants = useCallback(() => {
     setVariants([]);

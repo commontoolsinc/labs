@@ -18,7 +18,9 @@ export interface CommonDataEvent extends CustomEvent {
     data: any[];
   };
 }
-function CharmPreview({ charm, replicaName }: { charm: Cell<Charm>; replicaName: string }) {
+function CharmPreview(
+  { charm, replicaName }: { charm: Cell<Charm>; replicaName: string },
+) {
   const previewRef = useRef<HTMLDivElement | null>(null);
   const [isIntersecting, setIsIntersecting] = useState(false);
 
@@ -77,12 +79,14 @@ function CharmPreview({ charm, replicaName }: { charm: Cell<Charm>; replicaName:
       <NavLink to={`/${replicaName}/${charmId(charm)}`}>
         <div>
           <h3 className="text-xl font-semibold text-gray-800 mb-4">
-            {(charm.get()[NAME] || "Unnamed Charm") + ` (#${charmId(charm)!.slice(-4)})`}
+            {(charm.get()[NAME] || "Unnamed Charm") +
+              ` (#${charmId(charm)!.slice(-4)})`}
           </h3>
           <div
             ref={previewRef}
             className="w-full bg-gray-50 rounded border border-gray-100 min-h-[192px] pointer-events-none select-none"
-          ></div>
+          >
+          </div>
         </div>
       </NavLink>
     </CommonCard>
@@ -101,20 +105,20 @@ export default function CharmList() {
         <div className="mb-6">
           <ShapeLogo />
         </div>
-        <h2 className="text-2xl font-semibold text-gray-800 mb-4">No charms here!</h2>
+        <h2 className="text-2xl font-semibold text-gray-800 mb-4">
+          No charms here!
+        </h2>
         <p className="text-gray-600 mb-6 max-w-md">
           Create your first charm by opening the command palette with{" "}
           <kbd className="px-2 py-1 bg-gray-100 border border-gray-300 rounded text-sm font-mono">
             {navigator.platform.indexOf("Mac") === 0 ? "⌘K" : "Ctrl+K"}
           </kbd>{" "}
           or by clicking the{" "}
-          <span
-            className="
+          <span className="
               inline-flex items-center justify-center w-8 h-8 z-50
               border-2 border-grey shadow-[2px_2px_0px_0px_rgba(0,0,0,0.25)]
               bg-white
-            "
-          >
+            ">
             <MdOutlineStar fill="grey" size={16} />
           </span>{" "}
           button.
@@ -127,7 +131,11 @@ export default function CharmList() {
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-8">
       {replicaName &&
         charms.map((charm) => (
-          <CharmPreview key={charmId(charm)} charm={charm} replicaName={replicaName} />
+          <CharmPreview
+            key={charmId(charm)}
+            charm={charm}
+            replicaName={replicaName}
+          />
         ))}
     </div>
   );

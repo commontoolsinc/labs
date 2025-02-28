@@ -7,13 +7,13 @@ export type SimpleContent = string | TypedContent[];
 
 type TypedContent =
   | {
-      type: "text";
-      text: string;
-    }
+    type: "text";
+    text: string;
+  }
   | {
-      type: "image";
-      url: string;
-    };
+    type: "image";
+    url: string;
+  };
 
 export type LLMRequest = {
   messages: SimpleMessage[] | SimpleContent[];
@@ -31,8 +31,13 @@ export class LLMClient {
     this.serverUrl = serverUrl;
   }
 
-  async sendRequest(userRequest: LLMRequest, partialCB?: (text: string) => void): Promise<string> {
-    const models = Array.isArray(userRequest.model) ? userRequest.model : [userRequest.model];
+  async sendRequest(
+    userRequest: LLMRequest,
+    partialCB?: (text: string) => void,
+  ): Promise<string> {
+    const models = Array.isArray(userRequest.model)
+      ? userRequest.model
+      : [userRequest.model];
 
     const errors: Error[] = [];
 
@@ -54,7 +59,9 @@ export class LLMClient {
 
         if (!response.ok) {
           const errorText = await response.text();
-          throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
+          throw new Error(
+            `HTTP error! status: ${response.status}, body: ${errorText}`,
+          );
         }
 
         if (!response.body) {
@@ -80,7 +87,10 @@ export class LLMClient {
     throw new Error("All models failed");
   }
 
-  private async stream(body: ReadableStream, cb?: (partial: string) => void): Promise<string> {
+  private async stream(
+    body: ReadableStream,
+    cb?: (partial: string) => void,
+  ): Promise<string> {
     const reader = body.getReader();
     const decoder = new TextDecoder();
 
@@ -128,7 +138,10 @@ export class LLMClient {
   }
 }
 
-function processMessage(m: SimpleMessage | SimpleContent, idx: number): SimpleMessage {
+function processMessage(
+  m: SimpleMessage | SimpleContent,
+  idx: number,
+): SimpleMessage {
   if (typeof m === "string" || Array.isArray(m)) {
     return {
       role: idx % 2 === 0 ? "user" : "assistant",

@@ -1,4 +1,5 @@
-const TOOLSHED_API_URL = import.meta.env.TOOLSHED_API_URL || "http://localhost:8000";
+const TOOLSHED_API_URL = import.meta.env.TOOLSHED_API_URL ||
+  "http://localhost:8000";
 const BLOBBY_BASE_URL = `${TOOLSHED_API_URL}/api/storage/blobby`;
 
 export const getAllBlobs = async () => {

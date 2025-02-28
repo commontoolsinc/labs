@@ -1,9 +1,9 @@
-import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { storage } from "../src/storage.ts";
 import { StorageProvider } from "../src/storage/base.ts";
 import { InMemoryStorageProvider } from "../src/storage/memory.ts";
-import { getDoc, DocImpl, createRef, getSpace } from "@commontools/runner";
+import { createRef, DocImpl, getDoc, getSpace } from "@commontools/runner";
 
 storage.setRemoteStorage(new URL("memory://"));
 

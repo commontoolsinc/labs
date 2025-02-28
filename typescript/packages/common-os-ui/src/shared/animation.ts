@@ -27,8 +27,12 @@ export type CubicBezier = {
   y2: number;
 };
 
-export const cubicBezier = (x1: number, y1: number, x2: number, y2: number): CubicBezier =>
-  freeze({ x1, y1, x2, y2 });
+export const cubicBezier = (
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): CubicBezier => freeze({ x1, y1, x2, y2 });
 
 export const easeOutCubic = cubicBezier(0.215, 0.61, 0.355, 1);
 export const easeOutExpo = cubicBezier(0.19, 1, 0.22, 1);
@@ -74,11 +78,14 @@ export const transition = ({
   });
 
 /** Get full transition duration by finding the longest duration + delay */
-export const fullTransitionDuration = (transitions: Array<Transition>): number =>
-  Math.max(...transitions.map((t) => t.duration + t.delay));
+export const fullTransitionDuration = (
+  transitions: Array<Transition>,
+): number => Math.max(...transitions.map((t) => t.duration + t.delay));
 
 const transitionsToCssRule = (transitions: Array<Transition>) =>
-  transitions.map((t) => `${t.property} ${t.duration}ms ${t.easing} ${t.delay}ms`).join(", ");
+  transitions.map((t) =>
+    `${t.property} ${t.duration}ms ${t.easing} ${t.delay}ms`
+  ).join(", ");
 
 /**
  * Set a property on an element with a CSS transition.

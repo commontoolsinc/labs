@@ -3,7 +3,7 @@ import React, { createContext, useCallback, useContext, useRef } from "react";
 export interface BackgroundJob {
   id: string;
   name: string;
-  status: 'running' | 'paused' | 'stopped' | 'completed';
+  status: "running" | "paused" | "stopped" | "completed";
   progress?: number;
   messages: string[];
   startTime: number;
@@ -22,13 +22,15 @@ interface BackgroundTaskContextType {
 const BackgroundTaskContext = createContext<BackgroundTaskContextType>({
   listJobs: () => [],
   startJob: () => "",
-  pauseJob: () => { },
-  resumeJob: () => { },
-  stopJob: () => { },
-  updateJobProgress: () => { },
-  addJobMessage: () => { }
+  pauseJob: () => {},
+  resumeJob: () => {},
+  stopJob: () => {},
+  updateJobProgress: () => {},
+  addJobMessage: () => {},
 });
-export const BackgroundTaskProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const BackgroundTaskProvider: React.FC<{ children: React.ReactNode }> = (
+  { children },
+) => {
   const jobsRef = useRef<BackgroundJob[]>([]);
 
   const startJob = useCallback((name: string) => {
@@ -36,39 +38,39 @@ export const BackgroundTaskProvider: React.FC<{ children: React.ReactNode }> = (
     jobsRef.current = [...jobsRef.current, {
       id,
       name,
-      status: 'running',
+      status: "running",
       messages: [],
-      startTime: Date.now()
+      startTime: Date.now(),
     }];
     return id;
   }, []);
 
   const pauseJob = useCallback((id: string) => {
-    jobsRef.current = jobsRef.current.map(job =>
-      job.id === id ? { ...job, status: 'paused' } : job
+    jobsRef.current = jobsRef.current.map((job) =>
+      job.id === id ? { ...job, status: "paused" } : job
     );
   }, []);
 
   const resumeJob = useCallback((id: string) => {
-    jobsRef.current = jobsRef.current.map(job =>
-      job.id === id ? { ...job, status: 'running' } : job
+    jobsRef.current = jobsRef.current.map((job) =>
+      job.id === id ? { ...job, status: "running" } : job
     );
   }, []);
 
   const stopJob = useCallback((id: string) => {
-    jobsRef.current = jobsRef.current.map(job =>
-      job.id === id ? { ...job, status: 'stopped' } : job
+    jobsRef.current = jobsRef.current.map((job) =>
+      job.id === id ? { ...job, status: "stopped" } : job
     );
   }, []);
 
   const updateJobProgress = useCallback((id: string, progress: number) => {
-    jobsRef.current = jobsRef.current.map(job =>
+    jobsRef.current = jobsRef.current.map((job) =>
       job.id === id ? { ...job, progress } : job
     );
   }, []);
 
   const addJobMessage = useCallback((id: string, message: string) => {
-    jobsRef.current = jobsRef.current.map(job =>
+    jobsRef.current = jobsRef.current.map((job) =>
       job.id === id ? { ...job, messages: [...job.messages, message] } : job
     );
   }, []);
@@ -78,15 +80,17 @@ export const BackgroundTaskProvider: React.FC<{ children: React.ReactNode }> = (
   }, []);
 
   return (
-    <BackgroundTaskContext.Provider value={{
-      listJobs,
-      startJob,
-      pauseJob,
-      resumeJob,
-      stopJob,
-      updateJobProgress,
-      addJobMessage
-    }}>
+    <BackgroundTaskContext.Provider
+      value={{
+        listJobs,
+        startJob,
+        pauseJob,
+        resumeJob,
+        stopJob,
+        updateJobProgress,
+        addJobMessage,
+      }}
+    >
       {children}
     </BackgroundTaskContext.Provider>
   );

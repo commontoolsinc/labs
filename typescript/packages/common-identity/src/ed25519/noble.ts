@@ -1,5 +1,5 @@
 import * as ed25519 from "@noble/ed25519";
-import { InsecureCryptoKeyPair, Verifier, Signer, DID } from "../interface.ts";
+import { DID, InsecureCryptoKeyPair, Signer, Verifier } from "../interface.ts";
 import { bytesToDid, didToBytes } from "./utils.ts";
 
 export class NobleEd25519Signer implements Signer {
@@ -15,7 +15,7 @@ export class NobleEd25519Signer implements Signer {
   serialize(): InsecureCryptoKeyPair {
     return this.keypair;
   }
-  
+
   async sign(data: Uint8Array): Promise<Uint8Array> {
     return await ed25519.signAsync(data, this.keypair.privateKey);
   }
@@ -47,16 +47,18 @@ export class NobleEd25519Verifier implements Verifier {
     return await ed25519.verifyAsync(signature, data, this.publicKey);
   }
 
-  did(): DID{
+  did(): DID {
     return this._did;
   }
-  
+
   static async fromDid(did: DID): Promise<NobleEd25519Verifier> {
     let bytes = didToBytes(did);
     return await NobleEd25519Verifier.fromRaw(bytes);
   }
-  
-  static async fromRaw(rawPublicKey: Uint8Array): Promise<NobleEd25519Verifier> {
+
+  static async fromRaw(
+    rawPublicKey: Uint8Array,
+  ): Promise<NobleEd25519Verifier> {
     return new NobleEd25519Verifier(rawPublicKey);
   }
 }

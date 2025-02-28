@@ -1,28 +1,28 @@
 // SpellbookDetailView.tsx
 
-import { useState, useEffect } from "react";
-import { useParams, NavLink, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { NavLink, useNavigate, useParams } from "react-router-dom";
 import JsonView from "@uiw/react-json-view";
 import {
-  LuHeart,
   LuBookOpen,
-  LuSend,
   LuChevronDown,
   LuChevronRight,
+  LuHeart,
   LuMessageSquare,
+  LuSend,
   LuShare2,
   LuTrash2,
 } from "react-icons/lu";
 import {
+  createComment,
+  deleteSpell,
   getSpellbookBlob,
+  shareSpell,
   type Spell,
   toggleLike,
-  createComment,
-  whoami,
-  type UserProfile,
-  shareSpell,
   trackRun,
-  deleteSpell,
+  type UserProfile,
+  whoami,
 } from "@/services/spellbook.ts";
 import { ActionButton } from "@/components/spellbook/ActionButton.tsx";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader.tsx";
@@ -101,7 +101,7 @@ export default function SpellbookDetailView() {
       });
 
       // Navigate immediately
-      navigate(createPath('spellbookLaunch', { spellId }));
+      navigate(createPath("spellbookLaunch", { spellId }));
 
       // Track the run in the background
       await trackRun(spellId);
@@ -148,26 +148,31 @@ export default function SpellbookDetailView() {
   const handleDelete = async () => {
     if (!spellId || !spell) return;
 
-    if (!confirm("Are you sure you want to delete this spell? This action cannot be undone.")) {
+    if (
+      !confirm(
+        "Are you sure you want to delete this spell? This action cannot be undone.",
+      )
+    ) {
       return;
     }
 
     try {
       const success = await deleteSpell(spellId);
       if (success) {
-        navigate(createPath('spellbookIndex'));
+        navigate(createPath("spellbookIndex"));
       }
     } catch (error) {
       console.error("Failed to delete spell:", error);
     }
   };
 
-  const content =
-    loading || !spell || !spellId ? (
+  const content = loading || !spell || !spellId
+    ? (
       <div className="container mx-auto">
         <div className="text-center">Loading spell...</div>
       </div>
-    ) : (
+    )
+    : (
       <div className="container mx-auto max-w-4xl flex flex-col gap-4">
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between gap-4">
@@ -198,20 +203,28 @@ export default function SpellbookDetailView() {
             <div className="flex gap-2 justify-between">
               <ActionButton
                 icon={<LuShare2 size={24} />}
-                label={`${spell.shares} ${spell.shares === 1 ? "Share" : "Shares"}`}
+                label={`${spell.shares} ${
+                  spell.shares === 1 ? "Share" : "Shares"
+                }`}
                 onClick={handleShare}
                 popoverMessage="Shareable spell link copied to clipboard!"
               />
 
               <ActionButton
-                icon={<LuHeart size={24} className={isLiked ? "fill-black" : ""} />}
-                label={`${spell.likes.length} ${spell.likes.length === 1 ? "Like" : "Likes"}`}
+                icon={
+                  <LuHeart size={24} className={isLiked ? "fill-black" : ""} />
+                }
+                label={`${spell.likes.length} ${
+                  spell.likes.length === 1 ? "Like" : "Likes"
+                }`}
                 onClick={handleLike}
                 popoverMessage={isLiked ? "Liked!" : "Unliked!"}
               />
               <ActionButton
                 icon={<LuSend size={24} />}
-                label={`${spell.runs || 0} ${(spell.runs || 0) === 1 ? "Run" : "Runs"}`}
+                label={`${spell.runs || 0} ${
+                  (spell.runs || 0) === 1 ? "Run" : "Runs"
+                }`}
                 onClick={handleRun}
                 popoverMessage="Launching spell..."
               />
@@ -235,16 +248,14 @@ export default function SpellbookDetailView() {
               icon={
                 <div className="flex items-center gap-2">
                   <LuBookOpen className="w-5 h-5" />
-                  <span className="text-lg font-semibold">Spellbook Description</span>
+                  <span className="text-lg font-semibold">
+                    Spellbook Description
+                  </span>
                 </div>
               }
-              label={
-                isDescriptionExpanded ? (
-                  <LuChevronDown className="w-5 h-5" />
-                ) : (
-                  <LuChevronRight className="w-5 h-5" />
-                )
-              }
+              label={isDescriptionExpanded
+                ? <LuChevronDown className="w-5 h-5" />
+                : <LuChevronRight className="w-5 h-5" />}
               onClick={() => setIsDescriptionExpanded(!isDescriptionExpanded)}
               popoverMessage=""
             />
@@ -265,13 +276,9 @@ export default function SpellbookDetailView() {
                 <span className="text-lg font-semibold">Comments</span>
               </div>
             }
-            label={
-              isCommentsExpanded ? (
-                <LuChevronDown className="w-5 h-5" />
-              ) : (
-                <LuChevronRight className="w-5 h-5" />
-              )
-            }
+            label={isCommentsExpanded
+              ? <LuChevronDown className="w-5 h-5" />
+              : <LuChevronRight className="w-5 h-5" />}
             onClick={() => setIsCommentsExpanded(!isCommentsExpanded)}
             popoverMessage=""
           />
@@ -298,7 +305,10 @@ export default function SpellbookDetailView() {
                 </div>
 
                 {[...spell.comments]
-                  .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                  .sort((a, b) =>
+                    new Date(b.createdAt).getTime() -
+                    new Date(a.createdAt).getTime()
+                  )
                   .map((comment) => (
                     <div key={comment.id} className="flex flex-col gap-2">
                       <div className="flex items-center gap-2">
@@ -329,13 +339,9 @@ export default function SpellbookDetailView() {
                 <span className="text-lg font-semibold">Spellbook Data</span>
               </div>
             }
-            label={
-              isDetailsExpanded ? (
-                <LuChevronDown className="w-5 h-5" />
-              ) : (
-                <LuChevronRight className="w-5 h-5" />
-              )
-            }
+            label={isDetailsExpanded
+              ? <LuChevronDown className="w-5 h-5" />
+              : <LuChevronRight className="w-5 h-5" />}
             onClick={() => setIsDetailsExpanded(!isDetailsExpanded)}
             popoverMessage=""
           />

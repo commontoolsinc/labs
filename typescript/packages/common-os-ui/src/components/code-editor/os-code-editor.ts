@@ -1,7 +1,7 @@
-import { css, html, render, ReactiveElement, PropertyValues } from "lit";
+import { css, html, PropertyValues, ReactiveElement, render } from "lit";
 import { customElement, property } from "lit/decorators.ts";
 import { basicSetup, EditorView } from "codemirror";
-import { EditorState, Compartment, Extension } from "@codemirror/state";
+import { Compartment, EditorState, Extension } from "@codemirror/state";
 import { LanguageSupport } from "@codemirror/language";
 import { javascript as createJavaScript } from "@codemirror/lang-javascript";
 import { markdown as createMarkdown } from "@codemirror/lang-markdown";
@@ -14,15 +14,17 @@ import { createCancelGroup } from "../../shared/cancel.ts";
 
 const freeze = Object.freeze;
 
-export const MimeType = freeze({
-  css: "text/css",
-  html: "text/html",
-  javascript: "text/javascript",
-  jsx: "text/x.jsx",
-  typescript: "text/x.typescript",
-  json: "application/json",
-  markdown: "text/markdown",
-} as const);
+export const MimeType = freeze(
+  {
+    css: "text/css",
+    html: "text/html",
+    javascript: "text/javascript",
+    jsx: "text/x.jsx",
+    typescript: "text/x.typescript",
+    json: "application/json",
+    markdown: "text/markdown",
+  } as const,
+);
 
 export type MimeType = (typeof MimeType)[keyof typeof MimeType];
 
@@ -142,7 +144,11 @@ export class OsCodeEditor extends ReactiveElement {
     });
     this.#editorView = createEditor({
       element: editorRoot,
-      extensions: [this.#lang.of(defaultLang), this.#tabSize.of(EditorState.tabSize.of(4)), ext],
+      extensions: [
+        this.#lang.of(defaultLang),
+        this.#tabSize.of(EditorState.tabSize.of(4)),
+        ext,
+      ],
     });
 
     this.destroy.add(() => {

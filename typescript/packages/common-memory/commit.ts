@@ -1,4 +1,10 @@
-import type { Transaction, MemorySpace, Reference, Assertion, CommitData } from "./interface.ts";
+import type {
+  Assertion,
+  CommitData,
+  MemorySpace,
+  Reference,
+  Transaction,
+} from "./interface.ts";
 import { assert } from "./fact.ts";
 
 export const the = "application/commit+json" as const;

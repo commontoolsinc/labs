@@ -15,18 +15,19 @@ export function h(
   props: { [key: string]: any } | null,
   ...children: Child[]
 ): VNode {
-  if (typeof name === "function")
+  if (typeof name === "function") {
     return name({
       ...(props ?? {}),
       children: children.flat(),
     });
-  else
+  } else {
     return {
       type: "vnode",
       name,
       props: props ?? {},
       children: children.flat(),
     };
+  }
 }
 
 /**
@@ -34,7 +35,15 @@ export function h(
  * variable (dynamic).
  */
 export type Props = {
-  [key: string]: string | number | boolean | object | Array<any> | null | Cell<any> | Stream<any>;
+  [key: string]:
+    | string
+    | number
+    | boolean
+    | object
+    | Array<any>
+    | null
+    | Cell<any>
+    | Stream<any>;
 };
 
 /** A child in a view can be one of a few things */

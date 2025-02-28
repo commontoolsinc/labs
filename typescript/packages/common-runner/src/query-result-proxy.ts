@@ -1,6 +1,13 @@
 import { isAlias } from "@commontools/builder";
 import { getTopFrame, toOpaqueRef } from "@commontools/builder";
-import { getDoc, isDoc, isDocLink, makeOpaqueRef, type DocImpl, type DocLink } from "./doc.ts";
+import {
+  type DocImpl,
+  type DocLink,
+  getDoc,
+  isDoc,
+  isDocLink,
+  makeOpaqueRef,
+} from "./doc.ts";
 import { queueEvent, type ReactivityLog } from "./scheduler.ts";
 import {
   followAliases,
@@ -134,77 +141,86 @@ export function createQueryResultProxy<T>(
 
         return isReadWrite === ArrayMethodType.ReadOnly
           ? (...args: any[]) => {
-              // This will also mark each element read in the log. Almost all
-              // methods implicitly read all elements. TODO: Deal with
-              // exceptions like at().
-              const copy = target.map((_, index) =>
-                createQueryResultProxy(valueCell, [...valuePath, index], log),
-              );
+            // This will also mark each element read in the log. Almost all
+            // methods implicitly read all elements. TODO: Deal with
+            // exceptions like at().
+            const copy = target.map((_, index) =>
+              createQueryResultProxy(valueCell, [...valuePath, index], log)
+            );
 
-              return method.apply(copy, args);
-            }
+            return method.apply(copy, args);
+          }
           : (...args: any[]) => {
-              // Operate on a copy so we can diff. For write-only methods like
-              // push, don't proxy the other members so we don't log reads.
-              // Wraps values in a proxy that remembers the original index and
-              // creates cell value proxies on demand.
-              let copy: any;
-              if (isReadWrite === ArrayMethodType.WriteOnly) copy = [...target];
-              else {
-                copy = target.map((_, index) =>
-                  createProxyForArrayValue(index, valueCell, [...valuePath, index], log),
-                );
+            // Operate on a copy so we can diff. For write-only methods like
+            // push, don't proxy the other members so we don't log reads.
+            // Wraps values in a proxy that remembers the original index and
+            // creates cell value proxies on demand.
+            let copy: any;
+            if (isReadWrite === ArrayMethodType.WriteOnly) copy = [...target];
+            else {
+              copy = target.map((_, index) =>
+                createProxyForArrayValue(index, valueCell, [
+                  ...valuePath,
+                  index,
+                ], log)
+              );
+            }
+
+            let result = method.apply(copy, args);
+
+            // Unwrap results and return as value proxies
+            if (isProxyForArrayValue(result)) result = result.valueOf();
+            else if (Array.isArray(result)) {
+              result = result.map((value) =>
+                isProxyForArrayValue(value) ? value.valueOf() : value
+              );
+            }
+
+            if (isReadWrite === ArrayMethodType.ReadWrite) {
+              // Undo the proxy wrapping and assign original items.
+              copy = copy.map((value: any) =>
+                isProxyForArrayValue(value)
+                  ? target[value[originalIndex]]
+                  : value
+              );
+            }
+
+            // Turn any newly added elements into cells. And if there was a
+            // change at all, update the cell.
+            normalizeToDocLinks(valueCell, copy, target, log, {
+              parent: valueCell.entityId,
+              method: prop,
+              call: new Error().stack,
+              context: getTopFrame()?.cause ?? "unknown",
+            });
+            setNestedValue(valueCell, valuePath, copy, log);
+
+            if (Array.isArray(result)) {
+              if (!valueCell.entityId) {
+                throw new Error("No entity id for cell holding array");
               }
 
-              let result = method.apply(copy, args);
-
-              // Unwrap results and return as value proxies
-              if (isProxyForArrayValue(result)) result = result.valueOf();
-              else if (Array.isArray(result)) {
-                result = result.map((value) =>
-                  isProxyForArrayValue(value) ? value.valueOf() : value,
-                );
-              }
-
-              if (isReadWrite === ArrayMethodType.ReadWrite) {
-                // Undo the proxy wrapping and assign original items.
-                copy = copy.map((value: any) =>
-                  isProxyForArrayValue(value) ? target[value[originalIndex]] : value,
-                );
-              }
-
-              // Turn any newly added elements into cells. And if there was a
-              // change at all, update the cell.
-              normalizeToDocLinks(valueCell, copy, target, log, {
+              const cause = {
                 parent: valueCell.entityId,
-                method: prop,
+                path: valuePath,
+                resultOf: prop,
                 call: new Error().stack,
                 context: getTopFrame()?.cause ?? "unknown",
-              });
-              setNestedValue(valueCell, valuePath, copy, log);
+              };
+              normalizeToDocLinks(valueCell, result, undefined, log, cause);
 
-              if (Array.isArray(result)) {
-                if (!valueCell.entityId) {
-                  throw new Error("No entity id for cell holding array");
-                }
+              const resultCell = getDoc<any[]>(
+                undefined,
+                cause,
+                valueCell.space,
+              );
+              resultCell.send(result);
 
-                const cause = {
-                  parent: valueCell.entityId,
-                  path: valuePath,
-                  resultOf: prop,
-                  call: new Error().stack,
-                  context: getTopFrame()?.cause ?? "unknown",
-                };
-                normalizeToDocLinks(valueCell, result, undefined, log, cause);
+              result = resultCell.getAsQueryResult([], log);
+            }
 
-                const resultCell = getDoc<any[]>(undefined, cause, valueCell.space);
-                resultCell.send(result);
-
-                result = resultCell.getAsQueryResult([], log);
-              }
-
-              return result;
-            };
+            return result;
+          };
       }
 
       return createQueryResultProxy(valueCell, [...valuePath, prop], log);
@@ -214,10 +230,19 @@ export function createQueryResultProxy<T>(
 
       if (Array.isArray(target) && prop === "length") {
         const oldLength = target.length;
-        const result = setNestedValue(valueCell, [...valuePath, prop], value, log);
+        const result = setNestedValue(
+          valueCell,
+          [...valuePath, prop],
+          value,
+          log,
+        );
         const newLength = value;
         if (result) {
-          for (let i = Math.min(oldLength, newLength); i < Math.max(oldLength, newLength); i++) {
+          for (
+            let i = Math.min(oldLength, newLength);
+            i < Math.max(oldLength, newLength);
+            i++
+          ) {
             log?.writes.push({ cell: valueCell, path: [...valuePath, i] });
             queueEvent({ cell: valueCell, path: [...valuePath, i] }, undefined);
           }
@@ -240,10 +265,9 @@ export function createQueryResultProxy<T>(
             undefined,
             {
               list: { cell: valueCell.entityId, path: valuePath },
-              previous:
-                Number(prop) > 0
-                  ? (target[Number(prop) - 1].cell?.entityId ?? Number(prop) - 1)
-                  : null,
+              previous: Number(prop) > 0
+                ? (target[Number(prop) - 1].cell?.entityId ?? Number(prop) - 1)
+                : null,
             },
             valueCell.space,
           ),
@@ -324,7 +348,8 @@ export function getDocLinkOrThrow(value: any): DocLink {
  * @returns {boolean}
  */
 export function isQueryResult(value: any): value is QueryResult<any> {
-  return typeof value === "object" && value !== null && value[getDocLink] !== undefined;
+  return typeof value === "object" && value !== null &&
+    value[getDocLink] !== undefined;
 }
 
 const getDocLink = Symbol("isQueryResultProxy");
@@ -336,7 +361,9 @@ const getDocLink = Symbol("isQueryResultProxy");
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-export function isQueryResultForDereferencing(value: any): value is QueryResultInternals {
+export function isQueryResultForDereferencing(
+  value: any,
+): value is QueryResultInternals {
   return isQueryResult(value);
 }
 

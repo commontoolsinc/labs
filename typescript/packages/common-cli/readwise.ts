@@ -45,7 +45,10 @@ export class ReadwiseClient {
     this.token = token;
   }
 
-  private async fetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  private async fetch<T>(
+    endpoint: string,
+    options: RequestInit = {},
+  ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
     const response = await fetch(url, {
       ...options,
@@ -57,7 +60,9 @@ export class ReadwiseClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Readwise API error: ${response.status} ${response.statusText}`);
+      throw new Error(
+        `Readwise API error: ${response.status} ${response.statusText}`,
+      );
     }
 
     return response.json();
@@ -66,11 +71,15 @@ export class ReadwiseClient {
   async getRandomHighlights(count = 5): Promise<ReadwiseHighlight[]> {
     try {
       // First, get total count of highlights
-      const initial: HighlightResponse = await this.fetch("/highlights/?page_size=1");
+      const initial: HighlightResponse = await this.fetch(
+        "/highlights/?page_size=1",
+      );
       const totalHighlights = initial.count;
 
       // Generate random offset
-      const randomOffset = Math.floor(Math.random() * Math.max(0, totalHighlights - count));
+      const randomOffset = Math.floor(
+        Math.random() * Math.max(0, totalHighlights - count),
+      );
 
       // Fetch highlights with random offset
       const response: HighlightResponse = await this.fetch(
@@ -85,7 +94,9 @@ export class ReadwiseClient {
   }
 
   async getHighlightsByBook(bookId: number): Promise<ReadwiseHighlight[]> {
-    const response: HighlightResponse = await this.fetch(`/highlights/?book_id=${bookId}`);
+    const response: HighlightResponse = await this.fetch(
+      `/highlights/?book_id=${bookId}`,
+    );
     return response.results;
   }
 

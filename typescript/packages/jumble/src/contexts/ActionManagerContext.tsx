@@ -1,4 +1,11 @@
-import React, { createContext, useContext, useCallback, useState, useEffect, useMemo } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 export type KeyCombo = {
   key: string;
@@ -24,9 +31,13 @@ type ActionManagerContextType = {
   availableActions: Action[];
 };
 
-const ActionManagerContext = createContext<ActionManagerContextType | null>(null);
+const ActionManagerContext = createContext<ActionManagerContextType | null>(
+  null,
+);
 
-export function ActionManagerProvider({ children }: { children: React.ReactNode }) {
+export function ActionManagerProvider(
+  { children }: { children: React.ReactNode },
+) {
   const [actions, setActions] = useState<Action[]>([]);
 
   // Combined register function that returns an unregister function
@@ -87,13 +98,19 @@ export function ActionManagerProvider({ children }: { children: React.ReactNode 
     [registerAction, availableActions],
   );
 
-  return <ActionManagerContext.Provider value={value}>{children}</ActionManagerContext.Provider>;
+  return (
+    <ActionManagerContext.Provider value={value}>
+      {children}
+    </ActionManagerContext.Provider>
+  );
 }
 
 export function useActionManager() {
   const context = useContext(ActionManagerContext);
   if (!context) {
-    throw new Error("useActionManager must be used within an ActionManagerProvider");
+    throw new Error(
+      "useActionManager must be used within an ActionManagerProvider",
+    );
   }
   return context;
 }

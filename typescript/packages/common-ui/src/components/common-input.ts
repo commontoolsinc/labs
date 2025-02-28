@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
@@ -82,9 +82,12 @@ export class CommonInputElement extends LitElement {
     `,
   ];
 
-  @property({ type: String }) accessor value = "";
-  @property({ type: String }) accessor placeholder = "";
-  @property({ type: String }) accessor appearance = "default";
+  @property({ type: String })
+  accessor value = "";
+  @property({ type: String })
+  accessor placeholder = "";
+  @property({ type: String })
+  accessor appearance = "default";
 
   override render() {
     const oninput = (event: Event) => {
@@ -96,12 +99,18 @@ export class CommonInputElement extends LitElement {
 
     const onkeydown = (event: KeyboardEvent) => {
       this.dispatchEvent(
-        new CommonKeydownEvent({ id: this.id, key: event.key, value: this.value }),
+        new CommonKeydownEvent({
+          id: this.id,
+          key: event.key,
+          value: this.value,
+        }),
       );
     };
 
     const onblur = () => {
-      this.dispatchEvent(new CommonBlurEvent({ id: this.id, value: this.value }));
+      this.dispatchEvent(
+        new CommonBlurEvent({ id: this.id, value: this.value }),
+      );
     };
 
     return html`

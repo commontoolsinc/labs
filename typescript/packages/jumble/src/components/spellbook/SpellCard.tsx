@@ -1,4 +1,4 @@
-import { Link, useNavigate, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { SpellPreview } from "@/components/spellbook/SpellPreview.tsx";
 import { LuHeart, LuMessageSquare, LuSend } from "react-icons/lu";
 
@@ -24,7 +24,10 @@ export default function SpellCard({
   const navigate = useNavigate();
   const location = useLocation();
 
-  const handleTagClick = (e: React.MouseEvent<HTMLSpanElement>, tag: string) => {
+  const handleTagClick = (
+    e: React.MouseEvent<HTMLSpanElement>,
+    tag: string,
+  ) => {
     e.preventDefault();
     const searchParams = new URLSearchParams(location.search);
     searchParams.set("q", tag);

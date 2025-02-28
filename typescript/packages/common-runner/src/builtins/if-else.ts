@@ -16,7 +16,9 @@ export function ifElse(
   return (log: ReactivityLog) => {
     const condition = inputsCell.getAsQueryResult([0], log);
 
-    const ref = getDocLinkOrThrow(inputsCell.getAsQueryResult([condition ? 1 : 2], log));
+    const ref = getDocLinkOrThrow(
+      inputsCell.getAsQueryResult([condition ? 1 : 2], log),
+    );
     result.send(ref.cell.getAtPath(ref.path), log);
   };
 }
