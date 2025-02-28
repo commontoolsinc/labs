@@ -3,6 +3,6 @@
     "start": "deno run --allow-read --allow-env --allow-net main.ts",
     "memtest": "deno run --allow-read --allow-env --allow-net memory_test.ts",
     "test": "deno test"
-    "charmtest": "deno run --import-map=import_map.json --unstable-sloppy-imports --allow-read --allow-env --allow-net charm_test.ts"
+    "charmtest": "deno run --allow-read --allow-env --allow-net charm_test.ts"
   }
 }
