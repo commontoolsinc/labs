@@ -1,8 +1,8 @@
 import { isAlias, JSONSchema } from "@commontools/builder";
-import { isDocLink, type DocImpl, type DocLink } from "./doc.js";
-import { isCell, createCell } from "./cell.js";
-import { type ReactivityLog } from "./scheduler.js";
-import { resolvePath, followLinks } from "./utils.js";
+import { isDocLink, type DocImpl, type DocLink } from "./doc.ts";
+import { isCell, createCell } from "./cell.ts";
+import { type ReactivityLog } from "./scheduler.ts";
+import { resolvePath, followLinks } from "./utils.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.

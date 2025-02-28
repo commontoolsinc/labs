@@ -1,7 +1,7 @@
-import { type DocImpl, getDoc } from "../doc.js";
-import { type ReactivityLog } from "../scheduler.js";
-import { normalizeToDocLinks } from "../utils.js";
-import { type Action, idle } from "../scheduler.js";
+import { type DocImpl, getDoc } from "../doc.ts";
+import { type ReactivityLog } from "../scheduler.ts";
+import { normalizeToDocLinks } from "../utils.ts";
+import { type Action, idle } from "../scheduler.ts";
 import { refer } from "merkle-reference";
 
 /**

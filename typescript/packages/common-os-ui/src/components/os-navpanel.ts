@@ -1,6 +1,6 @@
 import { LitElement, html, css } from "lit";
-import { customElement } from "lit/decorators.js";
-import { base } from "../shared/styles.js";
+import { customElement } from "lit/decorators.ts";
+import { base } from "../shared/styles.ts";
 
 @customElement("os-navpanel")
 export class OsNavpanel extends LitElement {

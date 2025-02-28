@@ -1,6 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { baseStyles } from "./style.ts";
 
 export type CommonAudioRecording = {
   id: string;
@@ -40,10 +40,10 @@ export class CommonAudioRecorderElement extends LitElement {
   ];
 
   @property({ type: Boolean })
-  transcribe = false;
+  accessor transcribe = false;
 
   @property({ type: String })
-  url = "/api/ai/voice/transcribe";
+  accessor url = "/api/ai/voice/transcribe";
 
   private mediaRecorder?: MediaRecorder;
   private audioChunks: Blob[] = [];

@@ -1,0 +1,7 @@
+{
+  "name": "@commontools/identity",
+  "exports": "./src/index.ts",
+  "imports": {
+    "@scure/bip39": "npm:@scure/bip39@^1.5.4"
+  }
+}

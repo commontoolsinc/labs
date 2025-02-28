@@ -9,13 +9,13 @@ import {
   setValueAtPath,
   toOpaqueRef,
 } from "@commontools/builder";
-import { createCell, type Cell } from "./cell.js";
-import { createQueryResultProxy, type QueryResult } from "./query-result-proxy.js";
-import { createRef, type EntityId, getDocByEntityId, setDocByEntityId } from "./cell-map.js";
-import { type ReactivityLog } from "./scheduler.js";
-import { type Cancel } from "./cancel.js";
-import { arrayEqual } from "./utils.js";
-import { type Space } from "./space.js";
+import { createCell, type Cell } from "./cell.ts";
+import { createQueryResultProxy, type QueryResult } from "./query-result-proxy.ts";
+import { createRef, type EntityId, getDocByEntityId, setDocByEntityId } from "./cell-map.ts";
+import { type ReactivityLog } from "./scheduler.ts";
+import { type Cancel } from "./cancel.ts";
+import { arrayEqual } from "./utils.ts";
+import { type Space } from "./space.ts";
 
 /**
  * Lowest level cell implementation.

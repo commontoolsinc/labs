@@ -1,9 +1,9 @@
 import { LitElement, PropertyValues, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { Ref, createRef, ref } from "lit/directives/ref.js";
-import * as IPC from "./ipc.js";
-import { getIframeContextHandler } from "./context.js";
-import OuterFrame from "./outer-frame.js";
+import * as IPC from "./ipc.ts";
+import { getIframeContextHandler } from "./context.ts";
+import OuterFrame from "./outer-frame.ts";
 
 // TODO this should probably be randomly generated
 let FRAME_IDS = 0;
@@ -16,8 +16,8 @@ let FRAME_IDS = 0;
 // @event {CustomEvent} load - The iframe was successfully loaded.
 @customElement("common-iframe-sandbox")
 export class CommonIframeSandboxElement extends LitElement {
-  @property({ type: String }) src = "";
-  @property({ type: Object }) context?: object;
+  @property({ type: String }) accessor src = "";
+  @property({ type: Object }) accessor context?: object;
 
   // Static id for this component for its lifetime.
   private frameId: number = ++FRAME_IDS;

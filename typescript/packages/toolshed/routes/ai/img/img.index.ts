@@ -1,7 +1,7 @@
 import { createRouter } from "@/lib/create-app.ts";
 import * as handlers from "./img.handlers.ts";
 import * as routes from "./img.routes.ts";
-import { cors } from "hono/cors";
+import { cors } from "@hono/hono/cors";
 
 const router = createRouter()
   .openapi(routes.generateImage, handlers.generateImage)

@@ -1,5 +1,5 @@
-import { Identity } from "./identity.js";
-import { once } from "./utils.js";
+import { Identity } from "./identity.ts";
+import { once } from "./utils.ts";
 
 const DEFAULT_DB_NAME = "common-key-store";
 const DEFAULT_STORE_NAME = "key-store";

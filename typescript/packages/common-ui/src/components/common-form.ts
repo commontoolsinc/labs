@@ -1,15 +1,15 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { baseStyles } from "./style.ts";
 import { ZodObject } from "zod";
 import { fromString } from "merkle-reference";
 
 // Reference Field Component
 @customElement("reference-field")
 export class ReferenceFieldElement extends LitElement {
-  @property({ type: String }) key = "";
-  @property({ type: String }) value = "";
-  @property({ type: String }) error = "";
+  @property({ type: String }) accessor key = "";
+  @property({ type: String }) accessor value = "";
+  @property({ type: String }) accessor error = "";
 
   static override styles = css`
     :host {
@@ -89,14 +89,16 @@ export class ZodFormSubmitEvent extends Event {
 
 @customElement("common-form")
 export class CommonFormElement extends LitElement {
+  static properties = {
+    value: {},
+  };
   private _internalValue: { [key: string]: any } = {};
-  @property({ type: Object }) schema: ZodObject<any> | null = null;
-  @property({ type: String, attribute: "field-path" }) fieldPath = "";
-  @property({ type: Object }) errors: { [key: string]: any } = {};
-  @property({ type: Boolean }) reset = false;
-  @property({ type: Object }) referenceFields: Set<string> = new Set();
+  @property({ type: Object }) accessor schema: ZodObject<any> | null = null;
+  @property({ type: String, attribute: "field-path" }) accessor fieldPath = "";
+  @property({ type: Object }) accessor errors: { [key: string]: any } = {};
+  @property({ type: Boolean }) accessor reset = false;
+  @property({ type: Object }) accessor referenceFields: Set<string> = new Set();
 
-  @property({ type: Object })
   get value() {
     return this._internalValue;
   }

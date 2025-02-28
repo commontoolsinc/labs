@@ -1,6 +1,6 @@
-import type { DocImpl, DocLink } from "./doc.js";
-import { compactifyPaths, pathAffected } from "./utils.js";
-import type { Cancel } from "./cancel.js";
+import type { DocImpl, DocLink } from "./doc.ts";
+import { compactifyPaths, pathAffected } from "./utils.ts";
+import type { Cancel } from "./cancel.ts";
 
 export type Action = (log: ReactivityLog) => any;
 export type EventHandler = (event: any) => any;

@@ -5,14 +5,14 @@
   font-family: "JetBrainsMono";
   font-style: normal;
   font-weight: 100 900;
-  src: url("@/assets/fonts/JetBrainsMono[wght].ttf") format("truetype");
+  src: url("/fonts/JetBrainsMono[wght].ttf") format("truetype");
 }
 
 @font-face {
   font-family: "JetBrainsMono";
   font-style: italic;
   font-weight: 100 900;
-  src: url("@/assets/fonts/JetBrainsMono-Italic[wght].ttf") format("truetype");
+  src: url("/fonts/JetBrainsMono-Italic[wght].ttf") format("truetype");
 }
 
 .jetbrains-mono {

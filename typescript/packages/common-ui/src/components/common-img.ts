@@ -26,9 +26,9 @@ export class CommonImgElement extends LitElement {
     }
   `;
 
-  @property({ type: String }) src = "";
-  @property({ type: String }) alt = "";
-  @state() isLoaded = false;
+  @property({ type: String }) accessor src = "";
+  @property({ type: String }) accessor alt = "";
+  @state() accessor isLoaded = false;
 
   override render() {
     const onload = () => (this.isLoaded = true);

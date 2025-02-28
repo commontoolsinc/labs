@@ -1,5 +1,5 @@
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
-import ShapeLogo from "@/assets/ShapeLogo.svg";
+import ShapeLogo from "@/assets/ShapeLogo.tsx";
 import { useCallback, useEffect, useState } from "react";
 import {
   LuArrowLeft,

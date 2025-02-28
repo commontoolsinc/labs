@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { createCancelGroup } from "../src/shared/cancel.js";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { createCancelGroup } from "../src/shared/cancel.ts";
 
 describe("cleanupGroup", () => {
   it("should create a cleanup group with add and cleanup methods", () => {

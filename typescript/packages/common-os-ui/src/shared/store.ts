@@ -1,4 +1,4 @@
-import { debug } from "./debug.js";
+import { debug } from "./debug.ts";
 
 /** A basic msg with no payload */
 export type TypeMsg<T> = {

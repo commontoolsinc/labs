@@ -1,0 +1,4 @@
+{
+  "name": "@commontools/runner",
+  "exports": "./src/index.ts"
+}

@@ -1,6 +1,6 @@
 import * as ed25519 from "@noble/ed25519";
-import { InsecureCryptoKeyPair, Verifier, Signer, DID } from "../interface.js";
-import { bytesToDid, didToBytes } from "./utils.js";
+import { InsecureCryptoKeyPair, Verifier, Signer, DID } from "../interface.ts";
+import { bytesToDid, didToBytes } from "./utils.ts";
 
 export class NobleEd25519Signer implements Signer {
   private keypair: InsecureCryptoKeyPair;

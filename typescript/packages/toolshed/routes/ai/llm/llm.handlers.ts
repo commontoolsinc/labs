@@ -3,7 +3,7 @@ import type { AppRouteHandler } from "@/lib/types.ts";
 import type { GenerateTextRoute, GetModelsRoute } from "./llm.routes.ts";
 import { ALIAS_NAMES, ModelList, MODELS, TASK_MODELS } from "./models.ts";
 import * as cache from "./cache.ts";
-import type { Context } from "hono";
+import type { Context } from "@hono/hono";
 import { generateText as generateTextCore } from "./generateText.ts";
 import { findModel } from "./models.ts";
 /**

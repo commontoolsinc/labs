@@ -1,6 +1,6 @@
 import { LitElement, css, html } from "lit";
-import { customElement, property } from "lit/decorators.js";
-import { base } from "../shared/styles.js";
+import { customElement, property } from "lit/decorators.ts";
+import { base } from "../shared/styles.ts";
 
 /**
  * Icon for a charm

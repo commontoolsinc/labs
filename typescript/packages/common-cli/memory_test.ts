@@ -1,3 +1,4 @@
+import { MemorySpace } from "@commontools/memory";
 import { CharmManager, createStorage } from "@commontools/charm";
 import { RemoteStorageProvider } from "../common-charm/src/storage/remote.ts"
 import { StorageProvider, StorageValue } from "../common-charm/src/storage/base.ts";

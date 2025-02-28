@@ -1,5 +1,5 @@
 import { AppType } from "@/app.ts";
-import { hc } from "hono/client";
+import { hc } from "@hono/hono/client";
 
 // NOTE(jake): Ideally this would be exposed via the hono client, but I wasn't
 // able to get it all wired up. Importing the route definition is fine for now.

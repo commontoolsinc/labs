@@ -1,6 +1,6 @@
-export { opaqueRef as cell, stream } from "./opaque-ref.js";
-export { $, event, select, Spell } from "./spell.js";
-export { byRef, compute, createNodeFactory, derive, handler, lift, render } from "./module.js";
+export { opaqueRef as cell, stream } from "./opaque-ref.ts";
+export { $, event, select, Spell } from "./spell.ts";
+export { byRef, compute, createNodeFactory, derive, handler, lift, render } from "./module.ts";
 export {
   getTopFrame,
   popFrame,
@@ -8,8 +8,8 @@ export {
   pushFrameFromCause,
   recipe,
   recipeFromFrame,
-} from "./recipe.js";
-export { fetchData, ifElse, llm, navigateTo, str, streamData } from "./built-in.js";
+} from "./recipe.ts";
+export { fetchData, ifElse, llm, navigateTo, str, streamData } from "./built-in.ts";
 export {
   type Alias,
   type Frame,
@@ -42,7 +42,7 @@ export {
   unsafe_originalRecipe,
   unsafe_parentRecipe,
   type UnsafeBinding,
-} from "./types.js";
+} from "./types.ts";
 
 // This should be a separate package, but for now it's easier to keep it here.
-export { createJsonSchema, deepEqual, getValueAtPath, setValueAtPath } from "./utils.js";
+export { createJsonSchema, deepEqual, getValueAtPath, setValueAtPath } from "./utils.ts";

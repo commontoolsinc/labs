@@ -1,0 +1,6 @@
+{
+  "name": "@commontools/deno-vite-plugin",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

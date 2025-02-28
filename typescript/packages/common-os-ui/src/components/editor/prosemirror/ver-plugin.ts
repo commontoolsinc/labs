@@ -1,7 +1,7 @@
 import { EditorState, Plugin, PluginKey, Transaction } from "prosemirror-state";
-import cid from "../../../shared/cid.js";
+import cid from "../../../shared/cid.ts";
 import { EditorView } from "prosemirror-view";
-import { debug } from "../../../shared/debug.js";
+import { debug } from "../../../shared/debug.ts";
 
 /** Generates a unique client ID version for each state change */
 const verPluginKey = new PluginKey("ver");

@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import ShapeLogo from "@/assets/ShapeLogo.svg";
+import ShapeLogo from "@/assets/ShapeLogo.tsx";
 
 export function SpellbookHeader() {
   return (

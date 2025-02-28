@@ -1,6 +1,6 @@
 import { setIframeContextHandler } from "@commontools/iframe-sandbox";
 import { Action, ReactivityLog, addAction, isCell, removeAction } from "@commontools/runner";
-import { llm } from "@/utils/llm";
+import { llm } from "@/utils/llm.ts";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 // This is to prepare Proxy objects to be serialized

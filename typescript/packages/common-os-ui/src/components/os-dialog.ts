@@ -1,7 +1,7 @@
 import { LitElement, html, css } from "lit";
-import { customElement, property } from "lit/decorators.js";
-import { base } from "../shared/styles.js";
-import { classMap } from "lit/directives/class-map.js";
+import { customElement, property } from "lit/decorators.ts";
+import { base } from "../shared/styles.ts";
+import { classMap } from "lit/directives/class-map.ts";
 
 @customElement("os-dialog")
 export class OsDialog extends LitElement {

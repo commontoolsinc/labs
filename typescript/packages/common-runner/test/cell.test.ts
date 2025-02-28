@@ -1,12 +1,13 @@
-import { describe, it, expect } from "vitest";
-import { getDoc, isDoc, isDocLink } from "../src/doc.js";
-import { isCell } from "../src/cell.js";
-import { isQueryResult } from "../src/query-result-proxy.js";
-import { type ReactivityLog } from "../src/scheduler.js";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { getDoc, isDoc, isDocLink } from "../src/doc.ts";
+import { isCell } from "../src/cell.ts";
+import { isQueryResult } from "../src/query-result-proxy.ts";
+import { type ReactivityLog } from "../src/scheduler.ts";
 import { JSONSchema } from "@commontools/builder";
-import { addEventHandler, idle } from "../src/scheduler.js";
-import { compactifyPaths } from "../src/utils.js";
-import { getSpace } from "../src/space.js";
+import { addEventHandler, idle } from "../src/scheduler.ts";
+import { compactifyPaths } from "../src/utils.ts";
+import { getSpace } from "../src/space.ts";
 
 describe("Cell", () => {
   it("should create a cell with initial value", () => {

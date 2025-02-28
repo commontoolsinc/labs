@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { getSpace } from "../src/space.js";
-import { getDoc } from "../src/doc.js";
-import { getDocByEntityId } from "../src/cell-map.js";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { getSpace } from "../src/space.ts";
+import { getDoc } from "../src/doc.ts";
+import { getDocByEntityId } from "../src/cell-map.ts";
 
 describe("Space", () => {
   it("should create spaces with URIs", () => {

@@ -1,0 +1,7 @@
+{
+  "name": "@commontools/ui",
+  "exports": "./src/index.ts",
+  "imports": {
+    "@shoelace-style/shoelace": "npm:@shoelace-style/shoelace@^2.19.1"
+  }
+}

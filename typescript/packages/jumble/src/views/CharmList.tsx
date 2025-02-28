@@ -9,7 +9,7 @@ import { CommonCard } from "@/components/common/CommonCard.tsx";
 import { useParams } from "react-router-dom";
 import { render } from "@commontools/html";
 import { Cell } from "@commontools/runner";
-import ShapeLogo from "@/assets/ShapeLogo.svg";
+import ShapeLogo from "@/assets/ShapeLogo.tsx";
 import { MdOutlineStar } from "react-icons/md";
 import { useSyncedStatus } from "@/hooks/use-synced-status.ts";
 

@@ -1,4 +1,4 @@
-import { derive, type OpaqueRef, recipe, stream, UI } from "./index.js";
+import { derive, type OpaqueRef, recipe, stream, UI } from "./index.ts";
 
 // $ is a proxy that just collect paths, so that one can call [getPath] on it
 // and get an array. For example for `q = $.foo.bar[0]` `q[getPath]` yields

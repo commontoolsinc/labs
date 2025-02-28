@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot } from "react-dom";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
-import "@/styles/index.css";
+import "./styles/index.css";
 import Shell from "@/views/Shell.tsx";
 import { CharmsProvider } from "@/contexts/CharmsContext.tsx";
 

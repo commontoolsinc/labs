@@ -1,7 +1,7 @@
 import { JSONSchema } from "@commontools/builder";
 import { LLMRequest } from "@commontools/llm-client";
 
-import { prefillHtml, systemMd } from "./static.js";
+import { prefillHtml, systemMd } from "./static.ts";
 
 const responsePrefill = "```html\n" + prefillHtml;
 

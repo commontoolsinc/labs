@@ -1,6 +1,6 @@
 import { base58btc } from "multiformats/bases/base58";
 import { varint } from "multiformats";
-import { DID } from "../interface.js";
+import { DID } from "../interface.ts";
 
 export const ED25519_ALG = "Ed25519";
 const ED25519_CODE = 0xed;

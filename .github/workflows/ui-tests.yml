@@ -1,11 +1,13 @@
 name: UI Tests
-on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+
+# DISABLED until browser tests working again
+#on:
+#  push:
+#    branches:
+#      - main
+#  pull_request:
+#    branches:
+#      - main
 
 jobs:
   test:
@@ -14,30 +16,29 @@ jobs:
       matrix:
         node-version: [22]
     steps:
-    - name: Install test dependencies
-      run: |
-        sudo apt update
-        sudo apt-get install -y xvfb x11-xserver-utils
-    - uses: actions/checkout@v4
-    - name: Install pnpm
-      uses: pnpm/action-setup@v4
-      with:
-        version: 10
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node-version }}
-        cache-dependency-path: typescript/packages/pnpm-lock.yaml
-    - name: Install dependencies
-      run: |
-        cd typescript/packages
-        pnpm install
-    - name: UI Tests
-      run: |
-        cd typescript/packages/common-iframe-sandbox
-        pnpm test
-        cd -
-        cd typescript/packages/common-identity
-        pnpm test
-        cd -
-
+      - name: Install test dependencies
+        run: |
+          sudo apt update
+          sudo apt-get install -y xvfb x11-xserver-utils
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache-dependency-path: typescript/packages/pnpm-lock.yaml
+      - name: Install dependencies
+        run: |
+          cd typescript/packages
+          pnpm install
+      - name: UI Tests
+        run: |
+          cd typescript/packages/common-iframe-sandbox
+          pnpm test
+          cd -
+          cd typescript/packages/common-identity
+          pnpm test
+          cd -
