@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useMemo } from "react";
 import { CharmManager } from "@commontools/charm";
 import { useParams } from "react-router-dom";
+import { useAuthentication } from "./AuthenticationContext.tsx";
 
 export type CharmManagerContextType = {
-  charmManager: CharmManager;
+  charmManager: CharmManager | null;
   currentReplica: string;
 };
 
@@ -15,8 +16,9 @@ const CharmManagerContext = createContext<CharmManagerContextType>({
 export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { replicaName } = useParams<{ replicaName: string }>();
   const [effectiveReplica, setEffectiveReplica] = React.useState<string>(
-    () => localStorage.getItem("lastReplica") || "common-knowledge"
+    () => localStorage.getItem("lastReplica") || "common-knowledge",
   );
+  const { user } = useAuthentication();
 
   React.useEffect(() => {
     console.log("CharmManagerProvider", replicaName);
@@ -29,8 +31,8 @@ export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [replicaName]);
 
   const charmManager = useMemo(() => {
-    return new CharmManager(effectiveReplica);
-  }, [effectiveReplica]);
+    return user ? new CharmManager(effectiveReplica, user) : null;
+  }, [effectiveReplica, user]);
 
   return (
     <CharmManagerContext.Provider value={{ charmManager, currentReplica: effectiveReplica }}>

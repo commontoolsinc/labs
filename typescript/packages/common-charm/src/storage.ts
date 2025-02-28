@@ -14,12 +14,14 @@ import {
   Cell,
   isCell,
 } from "@commontools/runner";
+
 import { isStatic, markAsStatic } from "@commontools/builder";
 import { StorageProvider, StorageValue } from "./storage/base.js";
 import { RemoteStorageProvider } from "./storage/remote.js";
 import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
 import { Space } from "@commontools/runner/src/space.js";
 import { InMemoryStorageProvider } from "./storage/memory.js";
+import { Signer } from "@commontools/identity";
 
 export function log(fn: () => any[]) {
   debug(() => {
@@ -50,6 +52,8 @@ export interface Storage {
    * @param url - URL to set.
    */
   setRemoteStorage(url: URL): void;
+
+  setSigner(signer: Signer): void;
 
   /**
    * Load cell from storage. Will also subscribe to new changes.
@@ -156,6 +160,8 @@ class StorageImpl implements Storage {
   private storageProviders = new Map<Space, StorageProvider>();
   private remoteStorageUrl: URL | undefined;
 
+  private signer: Signer | undefined;
+
   // Map from entity ID to cell, set at stage 2, i.e. already while loading
   private cellsById = new Map<string, DocImpl<any>>();
 
@@ -188,6 +194,10 @@ class StorageImpl implements Storage {
 
   setRemoteStorage(url: URL): void {
     this.remoteStorageUrl = url;
+  }
+
+  setSigner(signer: Signer): void {
+    this.signer = signer;
   }
 
   syncCellById<T>(
@@ -246,6 +256,7 @@ class StorageImpl implements Storage {
         provider = new RemoteStorageProvider({
           address: new URL("/api/storage/memory", this.remoteStorageUrl!),
           space: space.uri as `did:${string}:${string}`,
+          as: this.signer,
         });
       } else if (type === "memory") {
         provider = new InMemoryStorageProvider(space.uri);

@@ -57,6 +57,9 @@ importers:
       '@commontools/html':
         specifier: workspace:*
         version: link:../common-html
+      '@commontools/identity':
+        specifier: workspace:*
+        version: link:../common-identity
       '@commontools/llm-client':
         specifier: workspace:*
         version: link:../llm-client
