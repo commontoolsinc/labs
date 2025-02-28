@@ -1,6 +1,6 @@
-import { CharmManager, Charm, createStorage } from "@commontools/charm";
+import { CharmManager, Charm } from "../common-charm/src/charm.ts";
 import { Cell } from "../common-runner/src/cell.ts";
-import { getDoc } from "../common-runner/src/doc.ts";
+import { DocImpl, getDoc } from "../common-runner/src/doc.ts";
 import { EntityId } from "../common-runner/src/cell-map.ts";
 import { storage } from "../common-charm/src/storage.ts";
 import { getSpace, Space } from "../common-runner/src/space.ts";
@@ -13,12 +13,17 @@ const BASE_URL = "http://localhost:8000"
 
 // simple log function
 const log: <T>(s: T, prefix?: string) => void = (s, prefix?) => 
-  console.log((prefix ? prefix : "") + "--------\n" + JSON.stringify(s, null, 2));
+  console.log("-------------\n" + (prefix ? prefix : "") + ":\n" + JSON.stringify(s, null, 2));
 
-function createCell(space: Space): Cell<any>  {
-  const emptyDoc = getDoc<number>(10, crypto.randomUUID(), space);
-  log(emptyDoc, "empty doc");
-  return emptyDoc.asCell();
+function createCell(space: Space): Cell<Charm>  {
+  const myCharm: Charm = {
+    NAME: "mycharm",
+    UI: "someui",
+    "somekey": "some value",
+  };
+  const myDoc: DocImpl<Charm> = getDoc<Charm>(myCharm, crypto.randomUUID(), space);
+  log(myDoc, "mydoc, should have name and ui and `somekey`");
+  return myDoc.asCell();
 }
 
 async function main() {
@@ -30,9 +35,10 @@ async function main() {
   // let's try to create a cell 
   const space: Space = getSpace(replica);
   const cell: Cell<Charm> = createCell(space);
-  log(cell, "charmmanager empty cell");
+  log(cell, "same mydoc but asCell()");
 
-  // this feels like magic and wrong
+  // this feels like magic and wrong, 
+  // but we crash in the next CharmManager.add() if this isn't set 
   storage.setRemoteStorage(
     new URL(TOOLSHED_API_URL)
   );
