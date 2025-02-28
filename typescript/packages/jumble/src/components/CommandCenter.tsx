@@ -38,7 +38,7 @@ function CommandProcessor({
 
   switch (mode.type) {
     case "input":
-      return <></>;
+      return null;
 
     case "confirm":
       return (
@@ -235,7 +235,10 @@ export function CommandCenter() {
 
     return () => {
       document.removeEventListener("keydown", handleEditRecipe);
-      globalThis.removeEventListener("edit-recipe-command", handleEditRecipeEvent);
+      globalThis.removeEventListener(
+        "edit-recipe-command",
+        handleEditRecipeEvent,
+      );
     };
   }, [focusedCharmId, allCommands]);
 
@@ -285,8 +288,8 @@ export function CommandCenter() {
   const getCurrentCommands = () => {
     const commands = commandPathIds.length === 0
       ? allCommands
-      : (getCommandById(commandPathIds[commandPathIds.length - 1])?.children ??
-        []);
+      : getCommandById(commandPathIds[commandPathIds.length - 1])?.children ??
+        [];
 
     return commands.filter((cmd) => cmd.predicate !== false); // Show command unless predicate is explicitly false
   };
@@ -299,12 +302,10 @@ export function CommandCenter() {
       label="Command Menu"
     >
       <VisuallyHidden>
-        <>
-          <DialogTitle>Common</DialogTitle>
-          <DialogDescription>
-            Common commands for managing charms.
-          </DialogDescription>
-        </>
+        <DialogTitle>Common</DialogTitle>
+        <DialogDescription>
+          Common commands for managing charms.
+        </DialogDescription>
       </VisuallyHidden>
 
       <div

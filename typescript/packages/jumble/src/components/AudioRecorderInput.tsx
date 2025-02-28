@@ -17,12 +17,8 @@ interface AudioRecorderProps {
 }
 
 const AudioRecorder: React.FC<AudioRecorderProps> = (props) => {
-  const {
-    isRecording,
-    recordingSeconds,
-    startRecording,
-    stopRecording,
-  } = useAudioRecorder(props);
+  const { isRecording, recordingSeconds, startRecording, stopRecording } =
+    useAudioRecorder(props);
 
   return (
     <div className="block">
@@ -31,7 +27,10 @@ const AudioRecorder: React.FC<AudioRecorderProps> = (props) => {
         onClick={startRecording}
       >
         {props.startButton || (
-          <button className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+          <button
+            type="button"
+            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+          >
             Start Recording
           </button>
         )}
@@ -41,7 +40,10 @@ const AudioRecorder: React.FC<AudioRecorderProps> = (props) => {
         onClick={stopRecording}
       >
         {props.stopButton || (
-          <button className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600">
+          <button
+            type="button"
+            className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+          >
             Finish Recording ({recordingSeconds}s)
           </button>
         )}

@@ -300,6 +300,7 @@ const Variants = () => {
         </h3>
         <div className="flex gap-2">
           <button
+            type="button"
             onClick={handleCancelVariants}
             className="px-3 py-1 text-sm text-gray-600 hover:text-black border border-gray-300"
           >
@@ -308,6 +309,7 @@ const Variants = () => {
 
           {selectedVariant && (
             <button
+              type="button"
               onClick={() => {
                 // If we have a selected variant, make it the main view
                 if (selectedVariant) {
@@ -462,6 +464,7 @@ const Suggestions = () => {
           <div className="flex overflow-x-auto pb-2 gap-3">
             {suggestions.map((suggestion, index) => (
               <button
+                type="button"
                 key={index}
                 onClick={() => handleSuggestion(suggestion)}
                 className="p-2 text-left text-sm border border-gray-300 hover:border-black hover:bg-gray-50 shadow-sm transition-all duration-100 ease-in-out cursor-pointer flex-shrink-0 min-w-40 max-w-56"
@@ -541,6 +544,7 @@ const IterateTab = () => {
           </select>
 
           <button
+            type="button"
             onClick={handleIterate}
             disabled={loading || !iterationInput}
             className="px-4 py-2 border-2 text-sm border-white bg-black text-white flex items-center gap-2 disabled:opacity-50"
@@ -608,6 +612,7 @@ const CodeTab = () => {
         </div>
         <div className="mt-4 flex justify-end">
           <button
+            type="button"
             onClick={saveChanges}
             disabled={!hasUnsavedChanges}
             className="px-4 py-2 bg-black text-white border-2 border-black disabled:opacity-50"
@@ -674,6 +679,7 @@ const BottomSheet = ({
       {/* Tab Navigation */}
       <div className="tabs flex gap-0 border-b border-gray-200">
         <button
+          type="button"
           onClick={() => handleTabChange("iterate")}
           className={`px-4 py-2 flex-1 text-center ${
             activeTab === "iterate"
@@ -684,6 +690,7 @@ const BottomSheet = ({
           Iteration
         </button>
         <button
+          type="button"
           onClick={() => handleTabChange("code")}
           className={`px-4 py-2 flex-1 text-center ${
             activeTab === "code"
@@ -694,6 +701,7 @@ const BottomSheet = ({
           Edit Code
         </button>
         <button
+          type="button"
           onClick={() => handleTabChange("data")}
           className={`px-4 py-2 flex-1 text-center ${
             activeTab === "data"
@@ -743,7 +751,7 @@ function CharmDetailView() {
     if (!iterationInput || !charm) return;
     setLoading(true);
 
-    const handleVariants = async () => {
+    const handleVariants = () => {
       setVariants([]);
       setSelectedVariant(charm);
 
@@ -803,10 +811,14 @@ function CharmDetailView() {
         );
         if (newPath) {
           navigate(
-            createPathWithHash("charmDetail", {
-              charmId: paramCharmId,
-              replicaName,
-            }, "iterate"),
+            createPathWithHash(
+              "charmDetail",
+              {
+                charmId: paramCharmId,
+                replicaName,
+              },
+              "iterate",
+            ),
           );
         }
       } catch (error) {

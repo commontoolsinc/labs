@@ -295,6 +295,7 @@ export default function SpellbookDetailView() {
                   />
                   <div className="flex justify-end">
                     <button
+                      type="button"
                       className="px-4 py-2 bg-black text-white hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={handleComment}
                       disabled={!commentText.trim()}

@@ -49,7 +49,9 @@ function ErrorCallout({ error, onDismiss }: ErrorCalloutProps) {
     <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-4">
       <div className="flex">
         <div className="flex-1">{error}</div>
-        <button onClick={onDismiss}>×</button>
+        <button type="button" onClick={onDismiss}>
+          ×
+        </button>
       </div>
     </div>
   );
@@ -96,6 +98,7 @@ function SuccessRegistration({
                   className="w-full p-2 pr-10 border-2 border-black resize-none"
                 />
                 <button
+                  type="button"
                   onClick={copyToClipboard}
                   className={`absolute right-2 top-1/2 transform -translate-y-1/2 ${
                     copied ? "text-green-500" : ""
@@ -112,7 +115,7 @@ function SuccessRegistration({
             </div>
           )
         )}
-      <button className={BTN_PRIMARY} onClick={onLogin}>
+      <button type="button" className={BTN_PRIMARY} onClick={onLogin}>
         <LuLock className="w-5 h-5" /> Continue to Login
       </button>
     </div>
@@ -287,6 +290,7 @@ export function AuthenticationView() {
                 ? (
                   <>
                     <button
+                      type="button"
                       className={BTN_PRIMARY}
                       onClick={async () => {
                         if (storedCredential.method === AUTH_METHOD_PASSKEY) {
@@ -303,18 +307,21 @@ export function AuthenticationView() {
                         : "Unlock with Passphrase"}
                     </button>
                     <button
+                      type="button"
                       className={LIST_ITEM}
                       onClick={() => setFlow("login")}
                     >
                       <LuLock className="w-5 h-5" /> Login with Different Method
                     </button>
                     <button
+                      type="button"
                       className={LIST_ITEM}
                       onClick={() => setFlow("register")}
                     >
                       <LuKeyRound className="w-5 h-5" /> Register New Key
                     </button>
                     <button
+                      type="button"
                       className={LIST_ITEM}
                       onClick={() => {
                         clearStoredCredential();
@@ -328,12 +335,14 @@ export function AuthenticationView() {
                 : (
                   <>
                     <button
+                      type="button"
                       className={BTN_PRIMARY}
                       onClick={() => setFlow("register")}
                     >
                       <LuCirclePlus className="w-5 h-5" /> Register
                     </button>
                     <button
+                      type="button"
                       className={BTN_PRIMARY}
                       onClick={() => setFlow("login")}
                     >
@@ -352,6 +361,7 @@ export function AuthenticationView() {
               {availableMethods.map((m) => (
                 <button
                   key={m}
+                  type="button"
                   className={LIST_ITEM}
                   onClick={async () => await handleMethodSelect(m)}
                 >
@@ -368,7 +378,11 @@ export function AuthenticationView() {
                     )}
                 </button>
               ))}
-              <button className={BTN_PRIMARY} onClick={() => setFlow(null)}>
+              <button
+                type="button"
+                className={BTN_PRIMARY}
+                onClick={() => setFlow(null)}
+              >
                 <LuArrowLeft className="w-5 h-5" /> Back
               </button>
             </div>
@@ -379,6 +393,7 @@ export function AuthenticationView() {
               {flow === "register"
                 ? (
                   <button
+                    type="button"
                     className={BTN_PRIMARY}
                     onClick={() => handleRegister(AUTH_METHOD_PASSPHRASE)}
                   >
@@ -410,7 +425,11 @@ export function AuthenticationView() {
                     </button>
                   </form>
                 )}
-              <button className={BTN_PRIMARY} onClick={() => setFlow(null)}>
+              <button
+                type="button"
+                className={BTN_PRIMARY}
+                onClick={() => setFlow(null)}
+              >
                 <LuArrowLeft className="w-5 h-5" /> Back
               </button>
             </div>

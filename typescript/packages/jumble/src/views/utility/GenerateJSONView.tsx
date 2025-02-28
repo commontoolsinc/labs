@@ -43,6 +43,7 @@ export default function LLMTestView() {
         />
 
         <button
+          type="button"
           onClick={handleSubmit}
           disabled={loading || !prompt.trim()}
           className="px-4 py-2 bg-black text-white hover:bg-gray-800 disabled:opacity-50"

@@ -56,9 +56,12 @@ function CharmPreview(
   return (
     <CommonCard className="p-2 group relative" details>
       <button
+        type="button"
         onClick={(e) => {
           e.preventDefault();
-          if (globalThis.confirm("Are you sure you want to remove this charm?")) {
+          if (
+            globalThis.confirm("Are you sure you want to remove this charm?")
+          ) {
             charmManager.remove({ "/": charmId(charm)! });
           }
         }}
