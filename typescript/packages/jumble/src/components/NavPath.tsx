@@ -9,7 +9,7 @@ type NavPathProps = {
 };
 
 export function NavPath({ replicaId, charmId }: NavPathProps) {
-  const { spaceManager: charmManager } = useSpaceManager();
+  const { spaceManager } = useSpaceManager();
 
   const [charmName, setCharmName] = React.useState<string | null>(null);
 
@@ -19,7 +19,7 @@ export function NavPath({ replicaId, charmId }: NavPathProps) {
 
     async function getCharm() {
       if (charmId) {
-        const charm = await charmManager.get(charmId);
+        const charm = await spaceManager.get(charmId);
         cancel = charm?.key(NAME).sink((value) => {
           if (mounted) setCharmName(value ?? null);
         });
@@ -31,7 +31,7 @@ export function NavPath({ replicaId, charmId }: NavPathProps) {
       mounted = false;
       cancel?.();
     };
-  }, [charmId, charmManager]);
+  }, [charmId, spaceManager]);
 
   return (
     <nav className="flex" aria-label="Breadcrumb">

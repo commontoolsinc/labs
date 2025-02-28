@@ -22,7 +22,7 @@ function CharmPreview({ charm, replicaName }: { charm: Cell<Charm>; replicaName:
   const previewRef = useRef<HTMLDivElement | null>(null);
   const [isIntersecting, setIsIntersecting] = useState(false);
 
-  const { spaceManager: charmManager } = useSpaceManager();
+  const { spaceManager } = useSpaceManager();
 
   useEffect(() => {
     if (!previewRef.current) return;
@@ -57,7 +57,7 @@ function CharmPreview({ charm, replicaName }: { charm: Cell<Charm>; replicaName:
         onClick={(e) => {
           e.preventDefault();
           if (window.confirm("Are you sure you want to remove this charm?")) {
-            charmManager.remove({ "/": charmId(charm)! });
+            spaceManager.remove({ "/": charmId(charm)! });
           }
         }}
         className="absolute hidden group-hover:block top-2 right-2 p-2 text-gray-400 hover:text-red-500 transition-colors"
@@ -91,9 +91,9 @@ function CharmPreview({ charm, replicaName }: { charm: Cell<Charm>; replicaName:
 
 export default function CharmList() {
   const { replicaName } = useParams<{ replicaName: string }>();
-  const { spaceManager: charmManager } = useSpaceManager();
-  const [charms] = useCell(charmManager.getCharms());
-  const { isSyncing } = useSyncedStatus(charmManager);
+  const { spaceManager } = useSpaceManager();
+  const [charms] = useCell(spaceManager.getCharms());
+  const { isSyncing } = useSyncedStatus(spaceManager);
 
   if (!isSyncing && (!charms || charms.length === 0)) {
     return (

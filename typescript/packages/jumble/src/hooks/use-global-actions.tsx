@@ -34,7 +34,7 @@ export function useGlobalActions() {
 
   const hasCharmId = useCallback(() => Boolean(charmId), [charmId]);
 
-  const { spaceManager: charmManager } = useSpaceManager();
+  const { spaceManager } = useSpaceManager();
   const [charmName, setCharmName] = useState<string | null>(null);
   useEffect(() => {
     let mounted = true;
@@ -42,7 +42,7 @@ export function useGlobalActions() {
 
     async function getCharm() {
       if (charmId) {
-        const charm = await charmManager.get(charmId);
+        const charm = await spaceManager.get(charmId);
         cancel = charm?.key(NAME).sink((value) => {
           if (mounted) setCharmName(value ?? null);
         });
@@ -54,7 +54,7 @@ export function useGlobalActions() {
       mounted = false;
       cancel?.();
     };
-  }, [charmId, charmManager]);
+  }, [charmId, spaceManager]);
 
   useAction(
     useMemo(

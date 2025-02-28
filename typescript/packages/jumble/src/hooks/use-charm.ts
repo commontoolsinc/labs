@@ -4,16 +4,16 @@ import { Cell, effect } from "@commontools/runner";
 import React from "react";
 
 export const useCharm = (charmId: string | undefined) => {
-  const { spaceManager: charmManager } = useSpaceManager();
+  const { spaceManager } = useSpaceManager();
   const [currentFocus, setCurrentFocus] = React.useState<Cell<Charm> | null>(null);
   const [iframeRecipe, setIframeRecipe] = React.useState<IFrameRecipe | null>(null);
 
   React.useEffect(() => {
     async function loadCharm() {
       if (charmId) {
-        const charm = (await charmManager.get(charmId)) ?? null;
+        const charm = (await spaceManager.get(charmId)) ?? null;
         if (charm) {
-          await charmManager.syncRecipe(charm);
+          await spaceManager.syncRecipe(charm);
           const ir = getIframeRecipe(charm);
           setIframeRecipe(ir?.iframe ?? null);
         }
@@ -24,13 +24,13 @@ export const useCharm = (charmId: string | undefined) => {
     loadCharm();
 
     // Subscribe to changes in the charms list
-    const cleanup = effect(charmManager.getCharms(), () => {
+    const cleanup = effect(spaceManager.getCharms(), () => {
       loadCharm();
     });
 
-    // Cleanup subscription when component unmounts or charmId/charmManager changes
+    // Cleanup subscription when component unmounts or charmId/spaceManager changes
     return cleanup;
-  }, [charmId, charmManager]);
+  }, [charmId, spaceManager]);
 
   return {
     currentFocus,

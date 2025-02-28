@@ -33,9 +33,7 @@ export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [effectiveSpaceId]);
 
   return (
-    <SpaceManagerContext.Provider
-      value={{ spaceManager: spaceManager, currentSpaceURI: effectiveSpaceId }}
-    >
+    <SpaceManagerContext.Provider value={{ spaceManager, currentSpaceURI: effectiveSpaceId }}>
       {children}
     </SpaceManagerContext.Provider>
   );

@@ -11,8 +11,8 @@ type ShellHeaderProps = {
 };
 
 export function ShellHeader({ replicaName, charmId }: ShellHeaderProps) {
-  const { spaceManager: charmManager } = useSpaceManager();
-  const { isSyncing, lastSyncTime } = useSyncedStatus(charmManager);
+  const { spaceManager } = useSpaceManager();
+  const { isSyncing, lastSyncTime } = useSyncedStatus(spaceManager);
 
   return (
     <header className="flex bg-gray-50 items-center justify-between border-b-2 p-2">

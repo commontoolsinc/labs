@@ -79,7 +79,7 @@ export function CommandCenter() {
   const { modelId, setPreferredModel } = usePreferredLanguageModel();
   const { stopJob, startJob, addJobMessage, listJobs, updateJobProgress } = useBackgroundTasks();
 
-  const { spaceManager: charmManager } = useSpaceManager();
+  const { spaceManager } = useSpaceManager();
   const navigate = useNavigate();
   // TODO(bf): matchesRoute?
   const match = useMatch("/:replicaName/:charmId?/*");
@@ -89,7 +89,7 @@ export function CommandCenter() {
   const allCommands = useMemo(
     () =>
       getCommands({
-        spaceManager: charmManager,
+        spaceManager,
         navigate,
         focusedCharmId,
         focusedReplicaId,
@@ -113,7 +113,7 @@ export function CommandCenter() {
         commandPathIds,
       }),
     [
-      charmManager,
+      spaceManager,
       navigate,
       focusedCharmId,
       focusedReplicaId,
@@ -220,7 +220,7 @@ export function CommandCenter() {
   }, [focusedCharmId, allCommands]);
 
   const context: CommandContext = {
-    spaceManager: charmManager,
+    spaceManager,
     navigate,
     focusedCharmId,
     focusedReplicaId,

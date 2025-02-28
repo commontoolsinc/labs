@@ -1,12 +1,5 @@
 import { saveNewRecipeVersion, IFrameRecipe, Charm, getIframeRecipe } from "@commontools/charm";
-import React, {
-  useEffect,
-  useState,
-  useCallback,
-  useRef,
-  createContext,
-  useContext,
-} from "react";
+import React, { useEffect, useState, useCallback, useRef, createContext, useContext } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { useSpaceManager } from "@/contexts/SpaceManagerContext";
 import { LoadingSpinner } from "@/components/Loader.tsx";
@@ -230,7 +223,7 @@ function useSuggestions(charm: Cell<Charm> | null) {
 
 // Hook for code editing
 function useCodeEditor(charm: Cell<Charm> | null, iframeRecipe: IFrameRecipe | null) {
-  const { spaceManager: charmManager } = useSpaceManager();
+  const { spaceManager } = useSpaceManager();
   const [workingSrc, setWorkingSrc] = useState<string | undefined>(undefined);
 
   useEffect(() => {
@@ -243,9 +236,9 @@ function useCodeEditor(charm: Cell<Charm> | null, iframeRecipe: IFrameRecipe | n
 
   const saveChanges = useCallback(() => {
     if (workingSrc && iframeRecipe && charm) {
-      saveNewRecipeVersion(charmManager, charm, workingSrc, iframeRecipe.spec);
+      saveNewRecipeVersion(spaceManager, charm, workingSrc, iframeRecipe.spec);
     }
-  }, [workingSrc, iframeRecipe, charm, charmManager]);
+  }, [workingSrc, iframeRecipe, charm, spaceManager]);
 
   return {
     workingSrc,
@@ -270,7 +263,7 @@ const Variants = () => {
   const { charmId: paramCharmId, replicaName } = useParams();
 
   if (!paramCharmId || !replicaName) {
-    throw new Error('Missing charmId or replicaName');
+    throw new Error("Missing charmId or replicaName");
   }
 
   const { currentFocus: charm } = useCharm(paramCharmId);
@@ -302,11 +295,11 @@ const Variants = () => {
                     const variantId = charmId(selectedVariant);
                     if (variantId) {
                       // Navigate to the main view (without /detail) to close the drawer
-                      navigate(createPath('charmShow', { charmId: variantId, replicaName }));
+                      navigate(createPath("charmShow", { charmId: variantId, replicaName }));
                     }
                   } else {
                     // If it's the original charm, just close the drawer by navigating to the main view
-                    navigate(createPath('charmShow', { charmId: paramCharmId, replicaName }));
+                    navigate(createPath("charmShow", { charmId: paramCharmId, replicaName }));
                   }
                 }
               }}
@@ -321,8 +314,9 @@ const Variants = () => {
         {charm && (
           <div
             onClick={() => setSelectedVariant(charm)}
-            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${selectedVariant === charm ? "border-blue-500" : "border-black"
-              }`}
+            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${
+              selectedVariant === charm ? "border-blue-500" : "border-black"
+            }`}
           >
             <div className="h-full flex flex-col overflow-hidden">
               <div className="bg-gray-100 text-xs font-bold p-1 border-b border-gray-300">
@@ -352,8 +346,9 @@ const Variants = () => {
           <div
             key={idx}
             onClick={() => setSelectedVariant(variant)}
-            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${selectedVariant === variant ? "border-blue-500" : "border-black"
-              }`}
+            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${
+              selectedVariant === variant ? "border-blue-500" : "border-black"
+            }`}
           >
             <div className="h-full flex flex-col overflow-hidden">
               <div className="bg-gray-100 text-xs font-bold p-1 border-b border-gray-300">
@@ -627,22 +622,25 @@ const BottomSheet = ({
       <div className="tabs flex gap-0 border-b border-gray-200">
         <button
           onClick={() => handleTabChange("iterate")}
-          className={`px-4 py-2 flex-1 text-center ${activeTab === "iterate" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
-            }`}
+          className={`px-4 py-2 flex-1 text-center ${
+            activeTab === "iterate" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
+          }`}
         >
           Iteration
         </button>
         <button
           onClick={() => handleTabChange("code")}
-          className={`px-4 py-2 flex-1 text-center ${activeTab === "code" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
-            }`}
+          className={`px-4 py-2 flex-1 text-center ${
+            activeTab === "code" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
+          }`}
         >
           Edit Code
         </button>
         <button
           onClick={() => handleTabChange("data")}
-          className={`px-4 py-2 flex-1 text-center ${activeTab === "data" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
-            }`}
+          className={`px-4 py-2 flex-1 text-center ${
+            activeTab === "data" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
+          }`}
         >
           View Data
         </button>
@@ -663,7 +661,7 @@ function CharmDetailView() {
   }
 
   const { currentFocus: charm } = useCharm(paramCharmId);
-  const { spaceManager: charmManager } = useSpaceManager();
+  const { spaceManager } = useSpaceManager();
   const navigate = useNavigate();
 
   // Iteration state
@@ -686,7 +684,7 @@ function CharmDetailView() {
 
       try {
         const variantPromises = variantModels.map((model) =>
-          iterateCharm(charmManager, charmId(charm)!, replicaName!, iterationInput, false, model),
+          iterateCharm(spaceManager, charmId(charm)!, replicaName!, iterationInput, false, model),
         );
 
         // Instead of waiting for all promises, handle them as they complete
@@ -696,7 +694,7 @@ function CharmDetailView() {
             const path = await promise;
             if (path) {
               const id = path.split("/").pop()!;
-              const newCharm = await charmManager.get(id);
+              const newCharm = await spaceManager.get(id);
               if (newCharm) {
                 setVariants((prev) => [...prev, newCharm]);
                 // Set the first completed variant as selected if none selected
@@ -724,7 +722,7 @@ function CharmDetailView() {
     } else {
       try {
         const newPath = await iterateCharm(
-          charmManager,
+          spaceManager,
           charmId(charm)!,
           replicaName!,
           iterationInput,
@@ -732,7 +730,9 @@ function CharmDetailView() {
           selectedModel,
         );
         if (newPath) {
-          navigate(createPathWithHash('charmDetail', { charmId: paramCharmId, replicaName }, 'iterate'));
+          navigate(
+            createPathWithHash("charmDetail", { charmId: paramCharmId, replicaName }, "iterate"),
+          );
         }
       } catch (error) {
         console.error("Iteration error:", error);
@@ -740,7 +740,16 @@ function CharmDetailView() {
         setLoading(false);
       }
     }
-  }, [showVariants, paramCharmId, iterationInput, selectedModel, charmManager, charm, replicaName, navigate]);
+  }, [
+    showVariants,
+    paramCharmId,
+    iterationInput,
+    selectedModel,
+    spaceManager,
+    charm,
+    replicaName,
+    navigate,
+  ]);
 
   const handleCancelVariants = useCallback(() => {
     setVariants([]);
@@ -794,11 +803,7 @@ function CharmDetailView() {
             </div>
           )}
 
-          <CharmRenderer
-            key="main"
-            className="w-full h-full"
-            charm={selectedVariant || charm}
-          />
+          <CharmRenderer key="main" className="w-full h-full" charm={selectedVariant || charm} />
         </div>
 
         {/* Bottom Sheet */}
