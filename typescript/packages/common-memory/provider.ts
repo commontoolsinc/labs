@@ -1,4 +1,5 @@
 import * as Memory from "./memory.ts";
+import * as JSON from "./json.ts";
 import type {
   AsyncResult,
   ConnectionError,
@@ -17,13 +18,14 @@ import type {
   Result,
   Selection,
   InvocationURL,
-  TransactionResult,
-  QueryResult,
   UCAN,
   Invocation,
   Proto,
   MemorySpace,
   ProviderCommandFor,
+  ConsumerInvocationFor,
+  ConsumerResultFor,
+  Await,
 } from "./interface.ts";
 import * as Subscription from "./subscription.ts";
 
@@ -35,6 +37,7 @@ export * as Memory from "./memory.ts";
 export * as Subscription from "./subscription.ts";
 import { refer } from "./reference.ts";
 import * as Access from "./access.ts";
+export { JSON };
 
 export const open = async (
   options: Memory.Options,
@@ -52,10 +55,11 @@ export interface Provider<Protocol extends Proto> {
 
   session(): ProviderSession<Protocol>;
 
-  close(): CloseResult;
+  invoke<Ability>(
+    ucan: UCAN<ConsumerInvocationFor<Ability, Protocol>>,
+  ): Await<ConsumerResultFor<Ability, Protocol>>;
 
-  transact(transaction: Transaction): TransactionResult;
-  query(source: Query): QueryResult;
+  close(): CloseResult;
 }
 
 interface Session {
@@ -66,17 +70,20 @@ class MemoryProvider<Space extends MemorySpace, MemoryProtocol extends Protocol<
   implements Provider<MemoryProtocol>
 {
   sessions: Set<ProviderSession<MemoryProtocol>> = new Set();
+  #localSession: MemoryProviderSession<Space, MemoryProtocol> | null = null;
   constructor(public memory: MemorySession) {}
-  subscribe(subscriber: Subscriber) {
-    return subscribe(this, subscriber);
+
+  invoke<Ability>(
+    ucan: UCAN<ConsumerInvocationFor<Ability, MemoryProtocol>>,
+  ): Await<ConsumerResultFor<Ability, MemoryProtocol>> {
+    let session = this.#localSession;
+    if (!session) {
+      session = new MemoryProviderSession(this.memory, null);
+    }
+
+    return session.invoke(ucan as unknown as UCAN<ConsumerCommandInvocation<Protocol>>);
   }
 
-  transact(source: Transaction<Space>) {
-    return transact(this, source);
-  }
-  query(source: Query<Space>) {
-    return query(this, source);
-  }
   fetch(request: Request) {
     return fetch(this, request);
   }
@@ -234,14 +241,6 @@ class MemoryProviderSession<Space extends MemorySpace, MemoryProtocol extends Pr
   }
 }
 
-export const transact = ({ memory }: Session, transaction: Transaction) =>
-  memory.transact(transaction);
-
-export const query = ({ memory }: Session, source: Query) => memory.query(source);
-
-export const subscribe = ({ memory }: Session, subscriber: Subscriber) =>
-  memory.subscribe(subscriber);
-
 export const close = ({ memory }: Session) => memory.close();
 
 export const fetch = async (session: Session, request: Request) => {
@@ -256,7 +255,8 @@ export const fetch = async (session: Session, request: Request) => {
 
 export const patch = async (session: Session, request: Request) => {
   try {
-    const transaction = (await request.json()) as Transaction;
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    const transaction = JSON.decode(bytes) as Transaction;
     const result = await session.memory.transact(transaction);
     const body = JSON.stringify(result);
     const status = result.ok ? 200 : result.error.name === "ConflictError" ? 409 : 503;
@@ -270,7 +270,7 @@ export const patch = async (session: Session, request: Request) => {
   } catch (cause) {
     const error = cause as Partial<Error>;
     return new Response(
-      JSON.stringify({
+      JSON.encode({
         error: {
           name: error?.name ?? "Error",
           message: error?.message ?? "Unable to parse request body",
@@ -289,7 +289,8 @@ export const patch = async (session: Session, request: Request) => {
 
 export const post = async (session: Session, request: Request) => {
   try {
-    const selector = (await request.json()) as Query;
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    const selector = JSON.decode(bytes) as Query;
     const result = await session.memory.query(selector);
     const body = JSON.stringify(result);
     const status = result.ok ? 200 : 404;
@@ -303,7 +304,7 @@ export const post = async (session: Session, request: Request) => {
   } catch (cause) {
     const error = cause as Partial<Error>;
     return new Response(
-      JSON.stringify({
+      JSON.encode({
         error: {
           name: error?.name ?? "Error",
           message: error?.message ?? "Unable to parse request body",

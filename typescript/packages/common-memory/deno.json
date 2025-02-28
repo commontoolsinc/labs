@@ -1,5 +1,5 @@
 {
-  "nodeModulesDir": "none",
+  "nodeModulesDir": "auto",
   "tasks": {
     "start": "deno run --allow-read --allow-write --allow-net --allow-ffi --allow-env deno.ts",
     "test": "deno test --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check"
@@ -21,6 +21,7 @@
     "@std/encoding": "jsr:@std/encoding@^1.0.5",
     "@std/path": "jsr:@std/path@^1.0.8",
     "@commontools/identity": "../common-identity/src/index.ts",
-    "multiformats": "npm:multiformats@^13.3.2"
+    "multiformats": "npm:multiformats@^13.3.2",
+    "@ipld/dag-json": "npm:@ipld/dag-json@^10.2.3"
   }
 }

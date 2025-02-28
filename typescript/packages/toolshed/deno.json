@@ -10,15 +10,28 @@
     "semiColons": true,
     "singleQuote": false,
     "proseWrap": "always",
-    "include": ["./"],
-    "exclude": ["./llm_documentation/*"]
+    "include": [
+      "./"
+    ],
+    "exclude": [
+      "./llm_documentation/*"
+    ]
   },
   "lint": {
-    "include": ["./"],
+    "include": [
+      "./"
+    ],
     "rules": {
-      "tags": ["recommended"],
-      "include": ["ban-untagged-todo"],
-      "exclude": ["no-unused-vars", "no-explicit-any"]
+      "tags": [
+        "recommended"
+      ],
+      "include": [
+        "ban-untagged-todo"
+      ],
+      "exclude": [
+        "no-unused-vars",
+        "no-explicit-any"
+      ]
     }
   },
   "nodeModulesDir": "auto",

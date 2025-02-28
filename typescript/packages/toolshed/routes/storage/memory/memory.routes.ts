@@ -2,19 +2,24 @@ import { z } from "zod";
 import { createRoute } from "@hono/zod-openapi";
 import { jsonContent } from "stoker/openapi/helpers";
 import * as HttpStatusCodes from "stoker/http-status-codes";
+import { JSON } from "@commontools/memory";
 
 export const tags = ["Memory Storage"];
 
 export const Null = z.literal(null);
 export const Unit = z.object({});
-export const Meta = z.record(z.string(), z.string()).describe(
-  "Arbitrary metadata",
+export const Meta = z.record(z.string(), z.string()).describe("Arbitrary metadata");
+export const The = z.string().describe("Type of the fact usually formatted as media type");
+export const Of = z.string().describe("Unique identifier for the mutable entity");
+
+export const UTCUnixTimestampInSeconds = z.number().int();
+
+export const ExpirationTime = UTCUnixTimestampInSeconds.describe(
+  "Expiry time as a unix timestamp in seconds",
 );
-export const The = z.string().describe(
-  "Type of the fact usually formatted as media type",
-);
-export const Of = z.string().describe(
-  "Unique identifier for the mutable entity",
+
+const InvocationTime = UTCUnixTimestampInSeconds.describe(
+  "Invocation time as unix timestamp in seconds",
 );
 
 export const DID = z
@@ -22,21 +27,17 @@ export const DID = z
   .startsWith("did:")
   .refine((did): did is `did:${string}:${string}` => true);
 
-export const Space = z.union([z.string(), DID]).describe(
-  "Unique did:key identifier of the memory space",
-);
-export const Principal = z.union([z.string(), DID]).describe(
-  "Unique DID identifier of the issuing principal",
-);
+export const Space = z
+  .union([z.string(), DID])
+  .describe("Unique did:key identifier of the memory space");
+export const Principal = z
+  .union([z.string(), DID])
+  .describe("Unique DID identifier of the issuing principal");
 
-export const Cause = z.string().describe(
-  "Merkle reference to the previous state of the entity",
-);
+export const Cause = z.string().describe("Merkle reference to the previous state of the entity");
 export const Retract = z
   .object({
-    is: z.literal(undefined).optional().describe(
-      "Retraction has no 'is' field",
-    ),
+    is: z.literal(undefined).optional().describe("Retraction has no 'is' field"),
   })
   .describe("Retracts fact");
 export const Claim = z.literal(true).describe("Expects fact");
@@ -65,9 +66,8 @@ export const Fact = z.object({
   cause: Reference,
 });
 
-export const Since = z.number().int().describe(
-  "Sequence number of the transaction",
-);
+export const Delegation = z.never().describe("UCAN delegation");
+export const Since = z.number().int().describe("Sequence number of the transaction");
 export const Selector = z.record(
   Of,
   z.record(
@@ -75,32 +75,62 @@ export const Selector = z.record(
     z.record(
       Cause,
       z.object({
-        is: Unit.optional().describe(
-          "If omitted will includes retracted facts",
-        ),
+        is: Unit.optional().describe("If omitted will includes retracted facts"),
       }),
     ),
   ),
 );
 
-export const Transaction = z.object({
-  cmd: z.literal("/memory/transact"),
-  iss: Principal,
-  sub: Space,
-  args: z.object({ changes: Changes }),
-  meta: Meta.optional(),
+const Access = z
+  .record(
+    z.string().describe("Merkle reference to the invocation / delegation being authorized"),
+    Unit,
+  )
+  .describe("Access that was authorized");
+
+const Bytes = z
+  .object({
+    "/": z.object({
+      bytes: z.string().describe("Base64 encoded binary"),
+    }),
+  })
+  .transform<Uint8Array>((source) => JSON.decode<Uint8Array>(JSON.encode(source) as Uint8Array))
+  .describe("Bytes in DAG-JSON format");
+
+const Signature = Bytes.describe("Signature");
+
+const Authorization = z.object({
+  signature: Signature,
+  access: Access,
 });
 
-export const Query = z.object({
-  cmd: z.literal("/memory/query"),
-  iss: Principal,
-  sub: Space,
-  args: z.object({
+export const ucan = <T extends z.ZodTypeAny>(invocation: T) =>
+  z.object({
+    invocation,
+    authorization: Authorization,
+  });
+
+const invocation = <Ability extends string, Args extends z.ZodTypeAny>(cmd: Ability, args: Args) =>
+  z.object({
+    cmd: z.literal(cmd),
+    iss: Principal,
+    sub: Space,
+    args,
+    meta: Meta.optional(),
+    exp: ExpirationTime.optional(),
+    iat: InvocationTime.optional(),
+    prf: Delegation.array().describe("UCAN delegation chain"),
+  });
+
+export const Transaction = invocation("/memory/transact", z.object({ changes: Changes }));
+
+export const Query = invocation(
+  "/memory/query",
+  z.object({
     select: Selector,
     since: z.number().optional(),
   }),
-  meta: Meta.optional(),
-});
+);
 
 export const CommitData = z.object({
   since: z.number().int(),
@@ -125,6 +155,8 @@ export const ConflictError = z.object({
   name: z.literal("ConflictError"),
   transaction: Transaction.describe("Transaction that caused an error"),
   conflict: Conflict.describe("Conflicting fact in the memory space"),
+  message: z.string(),
+  stack: z.string().optional(),
 });
 
 export const SystemError = z.object({
@@ -139,6 +171,7 @@ export const TransactionError = z.object({
   message: z.string(),
   cause: SystemError,
   transaction: Transaction.describe("Transaction that caused an error"),
+  stack: z.string().optional(),
 });
 
 export const ConnectionError = z
@@ -146,6 +179,8 @@ export const ConnectionError = z
     name: z.literal("ConnectionError"),
     cause: SystemError,
     address: z.string(),
+    message: z.string(),
+    stack: z.string().optional(),
   })
   .describe("Error connecting with a memory space");
 
@@ -153,6 +188,14 @@ export const QueryError = z.object({
   name: z.literal("QueryError"),
   cause: SystemError,
   selector: Selector,
+  message: z.string(),
+  stack: z.string().optional(),
+});
+
+export const AuthorizationError = z.object({
+  name: z.literal("AuthorizationError"),
+  message: z.string(),
+  stack: z.string().optional(),
 });
 
 const ok = <T extends z.ZodTypeAny>(ok: T) => z.object({ ok });
@@ -166,17 +209,15 @@ export const transact = createRoute({
     body: {
       content: {
         "application/json": {
-          schema: Transaction,
+          schema: ucan(Transaction),
         },
       },
     },
   },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(ok(Commit), "Successful transaction"),
-    [HttpStatusCodes.CONFLICT]: jsonContent(
-      error(ConflictError),
-      "Conflict occurred",
-    ),
+    [HttpStatusCodes.CONFLICT]: jsonContent(error(ConflictError), "Conflict occurred"),
+    [HttpStatusCodes.UNAUTHORIZED]: jsonContent(error(AuthorizationError), "Unauthorized"),
     [HttpStatusCodes.SERVICE_UNAVAILABLE]: jsonContent(
       error(ConnectionError.or(TransactionError)),
       "Memory service is unable to process transaction",
@@ -196,7 +237,7 @@ export const query = createRoute({
     body: {
       content: {
         "application/json": {
-          schema: Query,
+          schema: ucan(Query),
         },
       },
     },
@@ -228,6 +269,7 @@ export const query = createRoute({
       error(QueryError.or(ConnectionError)),
       "Memory service unable to process query",
     ),
+    [HttpStatusCodes.UNAUTHORIZED]: jsonContent(error(AuthorizationError), "Unauthorized"),
     [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(
       error(SystemError),
       "Memory service error",

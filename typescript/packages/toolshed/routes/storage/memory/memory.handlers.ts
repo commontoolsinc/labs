@@ -1,21 +1,13 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type * as Routes from "./memory.routes.ts";
-import * as Memory from "@commontools/memory";
-import env from "@/env.ts";
-
-const { ok: memory, error } = await Memory.Provider.open({
-  store: new URL(env.MEMORY_URL),
-});
-
-if (error) {
-  throw error;
-}
+import { memory, Memory } from "../memory.ts";
 
 export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {
   try {
-    const transaction = await c.req.valid("json");
-    const result = await memory.transact(transaction as Memory.Transaction);
-
+    const ucan = (await c.req.valid("json")) as Memory.UCAN<
+      Memory.ConsumerInvocationFor<"/memory/transact", Memory.Protocol>
+    >;
+    const result = await memory.invoke(ucan);
     if (result.ok) {
       return c.json(result, 200);
     } else {
@@ -24,29 +16,34 @@ export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {
       const { error } = result;
       if (error.name === "ConflictError") {
         return c.json({ error }, 409);
+      } else if (error.name === "AuthorizationError") {
+        return c.json({ error }, 401);
       } else {
         return c.json({ error }, 503);
       }
     }
   } catch (cause) {
-    const { message, stack, name } =
-      (cause ?? new Error(cause as any)) as Error;
+    const { message, stack, name } = (cause ?? new Error(cause as any)) as Error;
     return c.json({ error: { message, name, stack } }, 500);
   }
 };
 
 export const query: AppRouteHandler<typeof Routes.query> = async (c) => {
   try {
-    const query = await c.req.valid("json");
-    const result = await memory.query(query as any); // HACK(bf): temporarily allow any format for space
-    if (result.ok) {
-      return c.json(result, 200);
+    const ucan = (await c.req.valid("json")) as Memory.UCAN<
+      Memory.ConsumerInvocationFor<"/memory/query", Memory.Protocol>
+    >;
+    const { ok, error } = await memory.invoke(ucan);
+
+    if (ok) {
+      return c.json({ ok }, 200);
+    } else if (error.name === "AuthorizationError") {
+      return c.json({ error }, 401);
     } else {
-      return c.json(result, 503);
+      return c.json({ error }, 503);
     }
   } catch (cause) {
-    const { message, stack, name } =
-      (cause ?? new Error(cause as any)) as Error;
+    const { message, stack, name } = (cause ?? new Error(cause as any)) as Error;
     return c.json({ error: { message, name, stack } }, 500);
   }
 };
