@@ -1,6 +1,7 @@
 {
   "tasks": {
     "start": "deno run --allow-read --allow-env --allow-net main.ts",
-    "memtest": "deno run --allow-read --allow-env --allow-net memory_test.ts"
+    "memtest": "deno run --allow-read --allow-env --allow-net memory_test.ts",
+    "test": "deno test"
   }
 }

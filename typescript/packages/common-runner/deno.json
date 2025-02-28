@@ -1,4 +1,7 @@
 {
   "name": "@commontools/runner",
+  "tasks": {
+    "test": "deno test"
+  },
   "exports": "./src/index.ts"
 }

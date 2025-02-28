@@ -2,6 +2,6 @@
   "name": "@commontools/html",
   "exports": "./src/index.ts",
   "tasks": {
-    "test-browser": "../scripts/test-browser.ts test-browser/**/*.ts"
+    "test": "deno test"
   }
 }

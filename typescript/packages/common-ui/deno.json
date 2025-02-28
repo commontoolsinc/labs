@@ -1,6 +1,9 @@
 {
   "name": "@commontools/ui",
   "exports": "./src/index.ts",
+  "tasks": {
+    "test": "echo 'No tests to run.'"
+  },
   "imports": {
     "@shoelace-style/shoelace": "npm:@shoelace-style/shoelace@^2.19.1"
   }

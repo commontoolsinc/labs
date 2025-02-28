@@ -1,5 +1,8 @@
 {
   "name": "@commontools/os-ui",
+  "tasks": {
+    "test": "deno test"
+  },
   "exports": "./src/index.ts",
   "imports": {
     "@codemirror/lang-css": "npm:@codemirror/lang-css@^6.3.1",

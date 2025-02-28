@@ -2,6 +2,6 @@
   "name": "@commontools/builder",
   "exports": "./src/index.ts",
   "tasks": {
-    "build": "../scripts/build.ts"
+    "test": "deno test"
   }
 }
