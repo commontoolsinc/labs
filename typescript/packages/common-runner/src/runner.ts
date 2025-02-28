@@ -91,7 +91,7 @@ export function run<T, R = any>(
 
   if (resultCell.sourceCell !== undefined) {
     processCell = resultCell.sourceCell;
-    // TODO: Allow keeping of previous argument but still supply defaults
+    // TODO(seefeld): Allow keeping of previous argument but still supply defaults
     argument = argument ?? (processCell.get()?.argument as T);
   } else {
     processCell = getDoc(
@@ -148,7 +148,7 @@ export function run<T, R = any>(
       return resultCell;
     }
 
-    // TODO: If recipe is the same, but argument is different, just update the argument without stopping
+    // TODO(seefeld): If recipe is the same, but argument is different, just update the argument without stopping
 
     // Otherwise stop execution of the old recipe. TODO: Await, but this will
     // make all this async.
@@ -164,7 +164,7 @@ export function run<T, R = any>(
 
   // If the bindings are a cell or cell reference, convert them to an object
   // where each property is a cell reference.
-  // TODO: If new keys are added after first load, this won't work.
+  // TODO(seefeld): If new keys are added after first load, this won't work.
 
   if (
     isDoc(argument) ||
@@ -211,7 +211,7 @@ export function run<T, R = any>(
     resultCell,
   );
 
-  // TODO: Move up, only do this if it's not from the sourceCell
+  // TODO(seefeld): Move up, only do this if it's not from the sourceCell
   if (defaults) argument = mergeObjects(argument, deepCopy(defaults));
 
   processCell.send({
@@ -332,7 +332,7 @@ function instantiateNode(
         throw new Error(`Unknown module type: ${module.type}`);
     }
   } else if (isAlias(module)) {
-    // TODO: Implement, a dynamic node
+    // TODO(seefeld): Implement, a dynamic node
   } else {
     throw new Error(`Unknown module type: ${module}`);
   }
@@ -351,7 +351,7 @@ function instantiateJavaScriptNode(
     processCell,
   );
 
-  // TODO: This isn't correct, as module can write into passed cells. We
+  // TODO(seefeld): This isn't correct, as module can write into passed cells. We
   // should look at the schema to find out what cells are read and
   // written.
   const reads = findAllAliasedCells(inputs, processCell);
@@ -407,7 +407,7 @@ function instantiateJavaScriptNode(
           )
         ) {
           eventInputs[key] = event;
-          cause[key] = crypto.randomUUID(); // TODO: Track this ID for integrity
+          cause[key] = crypto.randomUUID(); // TODO(seefeld): Track this ID for integrity
         }
       }
 
@@ -599,7 +599,7 @@ function instantiateRecipeNode(
     cell: resultCell,
     path: [],
   });
-  // TODO: Make sure to not cancel after a recipe is elevated to a charm, e.g.
+  // TODO(seefeld): Make sure to not cancel after a recipe is elevated to a charm, e.g.
   // via navigateTo. Nothing is cancelling right now, so leaving this as TODO.
   addCancel(cancels.get(resultCell.sourceCell!));
 }

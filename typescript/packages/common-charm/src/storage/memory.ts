@@ -52,7 +52,9 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     }
   }
 
-  async send<T = any>(batch: { entityId: EntityId; value: StorageValue<T> }[]) {
+  send<T = any>(
+    batch: { entityId: EntityId; value: StorageValue<T> }[],
+  ): Promise<{ ok: object }> {
     const spaceStorage = getOrCreateSpaceStorage(this.spaceName);
     const spaceSubscribers = getOrCreateSpaceSubscribers(this.spaceName);
 
@@ -67,10 +69,10 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
       }
     }
 
-    return { ok: {} };
+    return Promise.resolve({ ok: {} });
   }
 
-  async sync(
+  sync(
     entityId: EntityId,
     expectedInStorage: boolean = false,
   ): Promise<void> {
@@ -81,9 +83,10 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     );
     if (spaceStorage.has(key)) {
       this.lastValues.set(key, JSON.stringify(spaceStorage.get(key)!));
-    } else if (expectedInStorage) {
-      return Promise.resolve(); // nothing to sync
-    } else this.lastValues.delete(key);
+    } else if (!expectedInStorage) {
+      this.lastValues.delete(key);
+    }
+    return Promise.resolve();
   }
 
   get<T>(entityId: EntityId): StorageValue<T> | undefined {
@@ -94,7 +97,7 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
       : undefined;
   }
 
-  async destroy(): Promise<void> {
+  destroy(): Promise<void> {
     const spaceSubscribers = getOrCreateSpaceSubscribers(this.spaceName);
     const spaceStorage = getOrCreateSpaceStorage(this.spaceName);
 
@@ -103,6 +106,8 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     // Only clear this space's storage
     spaceStorage.clear();
     this.subscribers.clear();
+
+    return Promise.resolve();
   }
 
   getReplica(): string | undefined {

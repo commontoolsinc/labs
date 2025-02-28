@@ -122,8 +122,8 @@ export function fetchData(
         pending.setAtPath([], false, log);
         error.setAtPath([], err, log);
 
-        // TODO: Not writing now, so we retry the request after failure. Replace
-        // this with more fine-grained retry logic.
+        // TODO(seefeld): Not writing now, so we retry the request after failure.
+        // Replace this with more fine-grained retry logic.
         // requestHash.setAtPath([], hash, log);
       });
   };
