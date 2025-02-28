@@ -26,6 +26,7 @@ export function ActionButton({
   return (
     <div className="relative">
       <button
+        type="button"
         onClick={handleClick}
         className={`
           flex items-center gap-2 px-4 py-2 bg-white

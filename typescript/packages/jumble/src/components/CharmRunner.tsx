@@ -140,6 +140,7 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
               </pre>
               <div className="flex gap-2 shrink-0">
                 <button
+                  type="button"
                   onClick={handleFixIt}
                   disabled={isFixing}
                   className="px-2 py-1 bg-white text-red-500 rounded text-sm hover:bg-red-50 disabled:opacity-50 flex items-center gap-2 whitespace-nowrap"
@@ -149,13 +150,14 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
                       animationSpeed={2}
                       width={16}
                       height={16}
-                      animate={true}
+                      animate
                       cameraZoom={12}
                     />
                   )}
                   {isFixing ? "Fixing..." : "Fix It"}
                 </button>
                 <button
+                  type="button"
                   className="hover:opacity-75"
                   onClick={() => setRuntimeError(null)}
                 >

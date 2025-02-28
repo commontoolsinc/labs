@@ -24,7 +24,7 @@ export function useGlobalActions() {
         label: "Commands",
         icon: <MdOutlineStar fill="black" size={28} />,
         onClick: () => {
-          window.dispatchEvent(new CustomEvent("open-command-center"));
+          globalThis.dispatchEvent(new CustomEvent("open-command-center"));
         },
         priority: 100,
       }),
@@ -63,7 +63,7 @@ export function useGlobalActions() {
         label: "Publish",
         icon: <MdShare fill="black" size={28} />,
         onClick: () => {
-          window.dispatchEvent(
+          globalThis.dispatchEvent(
             new CustomEvent("publish-charm", {
               detail: { charmId, charmName },
             }),

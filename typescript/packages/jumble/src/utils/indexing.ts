@@ -13,7 +13,7 @@ interface IndexingContext {
 }
 
 const CONCURRENT_LIMIT = 3;
-async function saveToMemory(
+function saveToMemory(
   space: string,
   entity: string,
   data: any,

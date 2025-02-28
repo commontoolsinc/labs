@@ -14,7 +14,7 @@ function CharmShowView() {
   if (!charm) {
     return (
       <div className="max-w-xl mx-auto">
-        <LoadingSpinner visible={true} />
+        <LoadingSpinner visible />
       </div>
     );
   }

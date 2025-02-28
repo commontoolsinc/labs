@@ -77,7 +77,7 @@ export default function SpellbookDetailView() {
     if (!spellId || !spell) return;
 
     try {
-      const url = `${window.location.origin}/spellbook/${spellId}`;
+      const url = `${globalThis.location.origin}/spellbook/${spellId}`;
       await navigator.clipboard.writeText(url);
 
       const { shares } = await shareSpell(spellId);
@@ -295,6 +295,7 @@ export default function SpellbookDetailView() {
                   />
                   <div className="flex justify-end">
                     <button
+                      type="button"
                       className="px-4 py-2 bg-black text-white hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={handleComment}
                       disabled={!commentText.trim()}

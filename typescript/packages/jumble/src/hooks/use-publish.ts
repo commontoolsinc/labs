@@ -24,13 +24,13 @@ export function usePublish() {
       }
     };
 
-    window.addEventListener(
+    globalThis.addEventListener(
       "publish-charm",
       handlePublishCharm as EventListener,
     );
 
     return () => {
-      window.removeEventListener(
+      globalThis.removeEventListener(
         "publish-charm",
         handlePublishCharm as EventListener,
       );
@@ -59,7 +59,7 @@ export function usePublish() {
 
         if (success) {
           const fullUrl =
-            `${window.location.protocol}//${window.location.host}/spellbook/${spellId}`;
+            `${globalThis.location.protocol}//${globalThis.location.host}/spellbook/${spellId}`;
           try {
             await navigator.clipboard.writeText(fullUrl);
           } catch (err) {
