@@ -3,14 +3,14 @@ import { parse } from "https://deno.land/std/flags/mod.ts";
 import { CharmManager, storage, compileRecipe } from "@commontools/charm";
 import { getEntityId, isStream } from "@commontools/runner";
 
-const { replica, charmId, recipeFile, cause } = parse(Deno.args);
+const { space, charmId, recipeFile, cause } = parse(Deno.args);
 
 storage.setRemoteStorage(
   new URL(process?.env?.TOOLSHED_API_URL ?? "https://toolshed.saga-castor.ts.net/"),
 );
 
 async function main() {
-  const manager = new CharmManager(replica ?? "common-cli");
+  const manager = new CharmManager(space ?? "common-cli");
   const charms = await manager.getCharms();
 
   charms.sink((charms) => {
