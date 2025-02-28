@@ -7,11 +7,12 @@ const { space, charmId, recipeFile, cause } = parse(Deno.args);
 
 storage.setRemoteStorage(
   new URL(
-    process?.env?.TOOLSHED_API_URL ?? "https://toolshed.saga-castor.ts.net/",
+    Deno.env.get("TOOLSHED_API_URL") ?? "https://toolshed.saga-castor.ts.net/"
   ),
 );
 
 async function main() {
+  console.log("starting common-cli");
   const manager = new CharmManager(space ?? "common-cli");
 
   if (charmId) {
@@ -60,3 +61,5 @@ async function main() {
     console.log("Program running. Press Ctrl+C to exit.");
   });
 }
+
+main();

@@ -4,10 +4,15 @@ import { baseStyles } from "./style.js";
 
 @customElement("common-google-oauth")
 export class CommonGoogleOauthElement extends LitElement {
-  @property({ type: Object }) auth: Record<string, unknown> = {};
-  @state() private authStatus: string = "";
-  @state() private isLoading: boolean = false;
-  @state() private authResult: Record<string, unknown> | null = null;
+  @property({ type: Object })
+  accessor auth: Record<string, unknown> = {};
+
+  @property({ type: String })
+  accessor authStatus: string = "";
+  @property({ type: Boolean })
+  accessor isLoading: boolean = false;
+  @property({ type: Object })
+  accessor authResult: Record<string, unknown> | null = null;
 
   async handleClick() {
     this.isLoading = true;
