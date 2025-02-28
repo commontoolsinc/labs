@@ -14,19 +14,19 @@ const SpaceManagerContext = createContext<SpaceManagerContextType>({
 
 export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { replicaName: spaceId } = useParams<{ replicaName: string }>();
+  const [effectiveSpaceId, setEffectiveSpaceId] = React.useState<string>(
+    () => localStorage.getItem("@common:lastSpaceId") || "common-knowledge",
+  );
 
-  console.log("SpaceManagerProvider", spaceId);
+  React.useEffect(() => {
+    console.log("SpaceManagerProvider", spaceId);
 
-  let effectiveSpaceId: string;
-  if (spaceId) {
-    // When a replica is provided in the URL, use it and save it as the last visited
-    effectiveSpaceId = spaceId;
-    localStorage.setItem("@common/lastSpace", spaceId);
-  } else {
-    // Otherwise, pull the last visited replica from local storage.
-    // Falling back to "common-knowledge" if nothing was stored.
-    effectiveSpaceId = localStorage.getItem("@common/lastSpace") || "common-knowledge";
-  }
+    if (spaceId) {
+      // When a replica is provided in the URL, use it and save it as the last visited
+      setEffectiveSpaceId(spaceId);
+      localStorage.setItem("@common:lastSpaceId", spaceId);
+    }
+  }, [spaceId]);
 
   const spaceManager = useMemo(() => {
     return new SpaceManager(effectiveSpaceId);
