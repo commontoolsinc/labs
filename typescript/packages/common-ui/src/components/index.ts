@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 export * as CommonButton from "./common-button.ts";
 export * as CommonDatatable from "./common-datatable.ts";
 export * as CommonSendMessage from "./send-input.ts";
