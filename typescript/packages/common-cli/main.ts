@@ -1,15 +1,13 @@
 // Load .env file
 import { parse } from "https://deno.land/std/flags/mod.ts";
-import { CharmManager, compileRecipe, storage } from "@commontools/charm";
+import { CharmManager, compileRecipe, storage, setBobbyServerUrl } from "@commontools/charm";
 import { getEntityId, isStream } from "@commontools/runner";
 
 const { space, charmId, recipeFile, cause } = parse(Deno.args);
 
-storage.setRemoteStorage(
-  new URL(
-    Deno.env.get("TOOLSHED_API_URL") ?? "https://toolshed.saga-castor.ts.net/"
-  ),
-);
+const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ?? "https://toolshed.saga-castor.ts.net/";
+storage.setRemoteStorage(new URL(toolshedUrl));
+setBobbyServerUrl(toolshedUrl);
 
 async function main() {
   console.log("starting common-cli");
@@ -29,7 +27,13 @@ async function main() {
       const charm = await manager.runPersistent(recipe, undefined, cause);
       await manager.syncRecipe(charm);
       manager.add([charm]);
+      console.log("charm:", `${toolshedUrl}/${space}/${getEntityId(charm)}`);
+
       const charmWithSchema = await manager.get(charm);
+      if (!charmWithSchema) {
+        console.error("charm not found");
+        return;
+      }
       charmWithSchema.sink((value) => {
         console.log("running charm:", getEntityId(charm), value);
       });
@@ -38,17 +42,19 @@ async function main() {
         console.log("running updater");
         const randomId = Math.random().toString(36).substring(2, 15);
         updater.send({
-            emails: [{
-                id: randomId,
-                threadId: randomId,
-                labelIds: ["INBOX"],
-                snippet: "test",
-                subject: "test",
-                from: "test",
-                date: "test",
-                to: "test",
-                plainText: "test",
-            }],
+          emails: [
+            {
+              id: randomId,
+              threadId: randomId,
+              labelIds: ["INBOX"],
+              snippet: "test",
+              subject: "test",
+              from: "test",
+              date: "test",
+              to: "test",
+              plainText: "test",
+            },
+          ],
         });
       }
     } catch (error) {

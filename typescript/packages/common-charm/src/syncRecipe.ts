@@ -10,12 +10,15 @@ import { buildRecipe } from "./localBuild.ts";
 
 // FIXME(jake): This needs to be settable by environment variable...
 // If this is hardcoded, then it is not possible to develop spellbook locally.
-export const BLOBBY_SERVER_URL =
-  "https://toolshed.saga-castor.ts.net/api/storage/blobby";
+let BLOBBY_SERVER_URL = "/api/storage/blobby";
+
+export function setBobbyServerUrl(url: string) {
+  BLOBBY_SERVER_URL = new URL("/api/storage/blobby", url).toString();
+}
 
 const recipesKnownToStorage = new Set<string>();
 
-// FIXME(JA): this really really really needs to be revisited
+// FIXME(Jake): this really really really needs to be revisited
 export async function syncRecipeBlobby(id: string) {
   if (getRecipe(id)) {
     if (recipesKnownToStorage.has(id)) return;
@@ -26,6 +29,7 @@ export async function syncRecipeBlobby(id: string) {
     return;
   }
 
+  console.log("Syncing recipe", id, BLOBBY_SERVER_URL);
   const response = await fetch(`${BLOBBY_SERVER_URL}/spell-${id}`);
   let src: string;
   let spec: string;
