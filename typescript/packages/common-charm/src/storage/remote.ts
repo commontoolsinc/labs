@@ -1,8 +1,9 @@
 import type { EntityId, Cancel } from "@commontools/runner";
 import { log } from "../storage.js";
 import { type StorageProvider, type StorageValue } from "./base.js";
-import type { Entity, JSONValue, MemorySpace } from "@commontools/memory/interface";
+import type { Entity, JSONValue, MemorySpace, Protocol } from "@commontools/memory/interface";
 import * as Memory from "@commontools/memory/consumer";
+import * as Principal from "@commontools/memory/principal";
 import { assert } from "@commontools/memory/fact";
 import * as Changes from "@commontools/memory/changes";
 export * from "@commontools/memory/interface";
@@ -32,17 +33,22 @@ interface MemoryState<Space extends MemorySpace = MemorySpace> {
  * ed25519 key derived from the sha256 of the "common knowledge".
  */
 const HOME = "did:key:z6Mko2qR9b8mbdPnaEKXvcYwdK7iDnRkh8mEcEP2719aCu6P";
+
 /**
  * ed25519 key derived from the sha256 of the "common operator".
  */
-const AS = "did:key:z6Mkge3xkXc4ksLsf8CtRxunUxcX6dByT4QdWCVEHbUJ8YVn";
+const AS =
+  Principal.ED25519Signer.fromString<"did:key:z6Mkge3xkXc4ksLsf8CtRxunUxcX6dByT4QdWCVEHbUJ8YVn">(
+    "MgCZHlm5ODrbwDGXGIgBhqp2HmKj3dcxxyaqkopec6vK7xO0BIHsZlqE1qjfTHd7TN9Xcw59xgzDElFlwH2OmKQOO0Gk=",
+  );
+
 export class RemoteStorageProvider implements StorageProvider {
   connection: WebSocket | null = null;
   address: URL;
   workspace: MemorySpace;
   the: string;
   state: Map<MemorySpace, MemoryState> = new Map();
-  session: Memory.MemorySession;
+  session: Memory.MemorySession<MemorySpace>;
 
   /**
    * queue that holds commands that we read from the session, but could not
@@ -61,7 +67,7 @@ export class RemoteStorageProvider implements StorageProvider {
     the = "application/json",
   }: {
     address: URL;
-    as?: Memory.DID;
+    as?: Memory.Signer;
     space?: MemorySpace;
     the?: string;
   }) {
@@ -377,7 +383,7 @@ export interface Subscriber {
 class Query<Space extends MemorySpace> {
   reader: ReadableStreamDefaultReader;
   constructor(
-    public query: Memory.QueryView<Space>,
+    public query: Memory.QueryView<Space, Protocol<Space>>,
     public subscribers: Set<Subscriber> = new Set(),
   ) {
     this.reader = query.subscribe().getReader();

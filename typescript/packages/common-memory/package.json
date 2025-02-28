@@ -8,7 +8,8 @@
     "./fact": "./fact.ts",
     "./transaction": "./transaction.ts",
     "./changes": "./changes.ts",
-    "./commit": "./commit.ts"
+    "./commit": "./commit.ts",
+    "./principal": "./principal.ts"
   },
   "dependencies": {
     "merkle-reference": "^2.0.1",
