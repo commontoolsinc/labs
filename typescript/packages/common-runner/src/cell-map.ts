@@ -20,63 +20,50 @@ export type EntityId = {
  * @param cause - Optional causal source. Otherwise a random n is used.
  */
 export const createRef = (
-  source: Object = {},
+  source: any = {},
   cause: any = crypto.randomUUID(),
 ): EntityId => {
-  try {
-    // Unwrap query result proxies, replace cells with their ids and remove
-    // functions and undefined values, since `merkle-reference` doesn't support
-    // them.
-    const seen = new Set<any>();
-    function traverse(obj: any): any {
-      // Avoid cycles
-      if (seen.has(obj)) return null;
-      seen.add(obj);
+  const seen = new Set<any>();
 
-      // Don't traverse into ids.
-      if (typeof obj === "object" && obj !== null && "/" in obj) return obj;
+  // Unwrap query result proxies, replace cells with their ids and remove
+  // functions and undefined values, since `merkle-reference` doesn't support
+  // them.
+  function traverse(obj: any): any {
+    // Avoid cycles
+    if (seen.has(obj)) return null;
+    seen.add(obj);
 
-      // If there is a .toJSON method, replace obj with it, then descend.
-      if (
-        typeof obj === "object" && obj !== null &&
-        typeof obj.toJSON === "function"
-      ) {
-        obj = obj.toJSON() ?? obj;
-      }
+    // Don't traverse into ids.
+    if (typeof obj === "object" && obj !== null && "/" in obj) return obj;
 
-      if (isOpaqueRef(obj)) return obj.export().value ?? crypto.randomUUID();
-
-      if (isQueryResultForDereferencing(obj)) {
-        // It'll traverse this and call .toJSON on the cell in the reference.
-        obj = getDocLinkOrThrow(obj);
-      }
-
-      // If referencing other cells, return their ids (or random as fallback).
-      if (isDoc(obj) || isCell(obj)) return obj.entityId ?? crypto.randomUUID();
-      else if (Array.isArray(obj)) return obj.map(traverse);
-      else if (typeof obj === "object" && obj !== null) {
-        return Object.fromEntries(
-          Object.entries(obj).map(([key, value]) => [key, traverse(value)]),
-        );
-      } else if (typeof obj === "function") return obj.toString();
-      else if (obj === undefined) return null;
-      else return obj;
+    // If there is a .toJSON method, replace obj with it, then descend.
+    if (
+      typeof obj === "object" && obj !== null &&
+      typeof obj.toJSON === "function"
+    ) {
+      obj = obj.toJSON() ?? obj;
     }
-    return refer(traverse({ ...source, causal: cause }));
-  } catch (e) {
-    // HACK: merkle-reference currently fails in a jsdom vitest environment, so
-    // we replace the id with a random UUID.
 
-    // @ts-ignore
-    if (typeof process !== "undefined" && process.env.VITEST) {
-      // We're in Vitest, so use a random UUID
-      console.warn("Using random UUID as fallback for entity ID");
-      return crypto.randomUUID() as unknown as EntityId;
-    } else {
-      // We're not in Vitest, so re-throw the error
-      throw e;
+    if (isOpaqueRef(obj)) return obj.export().value ?? crypto.randomUUID();
+
+    if (isQueryResultForDereferencing(obj)) {
+      // It'll traverse this and call .toJSON on the cell in the reference.
+      obj = getDocLinkOrThrow(obj);
     }
+
+    // If referencing other cells, return their ids (or random as fallback).
+    if (isDoc(obj) || isCell(obj)) return obj.entityId ?? crypto.randomUUID();
+    else if (Array.isArray(obj)) return obj.map(traverse);
+    else if (typeof obj === "object" && obj !== null) {
+      return Object.fromEntries(
+        Object.entries(obj).map(([key, value]) => [key, traverse(value)]),
+      );
+    } else if (typeof obj === "function") return obj.toString();
+    else if (obj === undefined) return null;
+    else return obj;
   }
+
+  return refer(traverse({ ...source, causal: cause }));
 };
 
 /**

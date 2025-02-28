@@ -15,7 +15,9 @@ export interface StorageProvider {
    */
   send<T = any>(
     batch: { entityId: EntityId; value: StorageValue<T> }[],
-  ): Promise<{ ok: {}; error?: undefined } | { ok?: undefined; error?: Error }>;
+  ): Promise<
+    { ok: object; error?: undefined } | { ok?: undefined; error?: Error }
+  >;
 
   /**
    * Sync a value from storage. Use `get()` to retrieve the value.
@@ -69,7 +71,9 @@ export abstract class BaseStorageProvider implements StorageProvider {
 
   abstract send<T = any>(
     batch: { entityId: EntityId; value: StorageValue<T> }[],
-  ): Promise<{ ok: {}; error?: undefined } | { ok?: undefined; error: Error }>;
+  ): Promise<
+    { ok: object; error?: undefined } | { ok?: undefined; error: Error }
+  >;
 
   abstract sync(entityId: EntityId, expectedInStorage: boolean): Promise<void>;
 

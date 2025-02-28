@@ -48,7 +48,7 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
       get: () => unsafe_materialize(unsafe_binding, path),
       set: (newValue: Opaque<any>) => {
         if (unsafe_binding) {
-          unsafe_materialize(unsafe_binding, path); // TODO: Set value
+          unsafe_materialize(unsafe_binding, path); // TODO(seefeld): Set value
         } else setValueAtPath(store, ["value", ...path], newValue);
       },
       key: (key: PropertyKey) => createNestedProxy([...path, key]),
@@ -101,7 +101,7 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
           ),
         });
       },
-      toJSON: () => null, // TODO: Merge with Cell and cover doc-less case
+      toJSON: () => null, // TODO(seefeld): Merge with Cell and cover doc-less case
       /**
        * We assume the cell is an array and will provide an infinite iterator.
        * The primary use-case is destructuring a tuple (`[a, b] = ...`). We

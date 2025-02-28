@@ -237,7 +237,7 @@ class StorageImpl implements Storage {
     this.cancel();
   }
 
-  // TODO: Should just be one again.
+  // TODO(seefeld,gozala): Should just be one again.
   private _getStorageProviderForSpace(space: Space): StorageProvider {
     if (!space) throw new Error("No space set");
 
@@ -649,7 +649,7 @@ class StorageImpl implements Storage {
 
     // Write all storage jobs to storage, in parallel
     await Promise.all(
-      Array.from(storageJobsBySpace.keys()).map(async (space) =>
+      Array.from(storageJobsBySpace.keys()).map((space) =>
         this._getStorageProviderForSpace(space).send(
           storageJobsBySpace.get(space)!.map(({ entityId, value }) => ({
             entityId,

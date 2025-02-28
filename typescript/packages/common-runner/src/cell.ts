@@ -107,7 +107,7 @@ export function getCellFromEntityId<T>(
 }
 
 export function getCellFromDocLink<T>(
-  space: Space, // TODO: Read from DocLink
+  space: Space, // TODO(seefeld): Read from DocLink once it's defined there
   docLink: DocLink,
   schema?: JSONSchema,
   log?: ReactivityLog,
@@ -183,7 +183,7 @@ function createRegularCell<T>(
   const self: Cell<T> = {
     get: () => validateAndTransform(doc, path, schema, log, rootSchema),
     set: (newValue: T) => {
-      // TODO: This doesn't respect aliases on write. Should it?
+      // TODO(seefeld): This doesn't respect aliases on write. Should it?
       const ref = resolvePath(doc, path, log);
       if (
         prepareForSaving(
@@ -203,7 +203,7 @@ function createRegularCell<T>(
     },
     send: (newValue: T) => self.set(newValue),
     update: (value: Partial<T>) => {
-      // TODO: This doesn't respect aliases on write. Should it?
+      // TODO(seefeld): This doesn't respect aliases on write. Should it?
       const ref = resolvePath(doc, path, log);
       const previousValue = ref.cell.getAtPath(ref.path);
       if (typeof previousValue !== "object" || previousValue === null) {
@@ -236,7 +236,7 @@ function createRegularCell<T>(
             path: path,
             length: array.length,
             // Context is the event id in event handlers, making this unique.
-            // TODO: In this case it shouldn't depend on the length, maybe
+            // TODO(seefeld): In this case it shouldn't depend on the length, maybe
             // instead just call order in the current context.
             context: getTopFrame()?.cause ?? "unknown",
           };
@@ -278,7 +278,7 @@ function createRegularCell<T>(
     getSourceCell: <T = any>(schema?: JSONSchema) =>
       doc.sourceCell?.asCell([], log, schema) as Cell<T> | undefined,
     toJSON: () =>
-      // TODO: Should this include the schema, as cells are defiined by doclink & schema?
+      // TODO(seefeld): Should this include the schema, as cells are defiined by doclink & schema?
       ({ cell: doc.toJSON(), path }) satisfies {
         cell: { "/": string } | undefined;
         path: PropertyKey[];

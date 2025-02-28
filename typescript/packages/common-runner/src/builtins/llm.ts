@@ -136,7 +136,7 @@ export function llm(
       partial.setAtPath([], text, log);
     };
 
-    let resultPromise = makeClient().sendRequest(llmParams, updatePartial);
+    const resultPromise = makeClient().sendRequest(llmParams, updatePartial);
 
     resultPromise
       .then(async (text) => {
@@ -161,8 +161,8 @@ export function llm(
         result.setAtPath([], undefined, log);
         partial.setAtPath([], undefined, log);
 
-        // TODO: Not writing now, so we retry the request after failure. Replace
-        // this with more fine-grained retry logic.
+        // TODO(seefeld): Not writing now, so we retry the request after failure.
+        // Replace this with more fine-grained retry logic.
         // requestHash.setAtPath([], hash, log);
       });
   };

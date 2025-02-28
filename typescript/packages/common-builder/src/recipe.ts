@@ -204,7 +204,7 @@ function factoryFromRecipe<T, R>(
   paths.set(inputs, ["argument"]);
 
   // Add paths for all the internal cells
-  // TODO: Infer more stable identifiers
+  // TODO(seefeld): Infer more stable identifiers
   let count = 0;
   cells.forEach((cell: OpaqueRef<any>) => {
     if (paths.has(cell)) return;
@@ -249,12 +249,12 @@ function factoryFromRecipe<T, R>(
   let argumentSchema: JSONSchema;
 
   if (typeof argumentSchemaArg === "string") {
-    // TODO: initial is likely not needed anymore
-    // TODO: But we need a new one for the result
+    // TODO(seefeld): initial is likely not needed anymore
+    // TODO(seefeld): But we need a new one for the result
     argumentSchema = createJsonSchema(defaults, {});
     argumentSchema.description = argumentSchemaArg;
 
-    delete argumentSchema.properties?.[UI]; // TODO: This should be a schema for views
+    delete argumentSchema.properties?.[UI]; // TODO(seefeld): This should be a schema for views
     if (argumentSchema.properties?.internal?.properties) {
       for (
         const key of Object.keys(
@@ -314,7 +314,7 @@ function factoryFromRecipe<T, R>(
   }, recipe) satisfies RecipeFactory<T, R>;
 
   // Bind all cells to the recipe
-  // TODO: Does OpaqueRef cause issues here?
+  // TODO(seefeld): Does OpaqueRef cause issues here?
   [...cells]
     .filter((cell) => !cell.export().path.length) // Only bind root cells
     .forEach((cell) =>

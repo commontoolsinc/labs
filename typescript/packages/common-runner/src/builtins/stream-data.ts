@@ -117,7 +117,7 @@ export function streamData(
 
           buffer += utf8.decode(value);
           while (buffer.includes("\n")) {
-            let line = buffer.split("\n")[0];
+            const line = buffer.split("\n")[0];
             buffer = buffer.slice(line.length + 1);
 
             if (line.startsWith("id:")) {

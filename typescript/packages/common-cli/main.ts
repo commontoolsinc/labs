@@ -1,5 +1,5 @@
 // Load .env file
-import { parse } from "https://deno.land/std/flags/mod.ts";
+import { parse } from "https://deno.land/std@0.224.0/flags/mod.ts";
 import { CharmManager, compileRecipe, storage } from "@commontools/charm";
 import { getEntityId, isStream } from "@commontools/runner";
 
@@ -7,7 +7,7 @@ const { space, charmId, recipeFile, cause } = parse(Deno.args);
 
 storage.setRemoteStorage(
   new URL(
-    process?.env?.TOOLSHED_API_URL ?? "https://toolshed.saga-castor.ts.net/",
+    Deno.env.get("TOOLSHED_API_URL") ?? "https://toolshed.saga-castor.ts.net/",
   ),
 );
 
@@ -18,7 +18,7 @@ async function main() {
   charms.sink((charms) => {
     console.log(
       "charms:",
-      charms.map((c) => c.toJSON().cell["/"]),
+      charms.map((c) => c.toJSON().cell?.["/"]),
     );
   });
 
@@ -36,7 +36,7 @@ async function main() {
       const charm = await manager.runPersistent(recipe, undefined, cause);
       await manager.syncRecipe(charm);
       manager.add([charm]);
-      const charmWithSchema = await manager.get(charm);
+      const charmWithSchema = (await manager.get(charm))!;
       charmWithSchema.sink((value) => {
         console.log("running charm:", getEntityId(charm), value);
       });
