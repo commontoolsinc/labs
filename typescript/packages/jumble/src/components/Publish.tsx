@@ -74,7 +74,7 @@ function useCharmPublisher() {
 
 export function CharmPublisher() {
   const { isShareDialogOpen, setIsShareDialogOpen, isPublishing, handleShare, defaultTitle } =
-    usePublish();
+    useCharmPublisher();
 
   return (
     <ShareDialog
