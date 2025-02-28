@@ -1,7 +1,7 @@
 import { hc } from "hono/client";
 import { AppType } from "@/app.ts";
-import { Principal, Consumer } from "@commontools/memory";
-import { memory, Memory } from "@/routes/storage/memory.ts";
+import { Consumer, Principal } from "@commontools/memory";
+import { Memory, memory } from "@/routes/storage/memory.ts";
 
 // Create a spellbook consumer.
 const spellbook = Consumer.open({
@@ -41,7 +41,9 @@ function handleErrorResponse(data: any) {
   }
 }
 
-export async function getAllMemories(replica: string): Promise<Record<string, any>> {
+export async function getAllMemories(
+  replica: string,
+): Promise<Record<string, any>> {
   const result = await spellbook.mount(replica as Memory.DID).query({
     select: {
       _: {

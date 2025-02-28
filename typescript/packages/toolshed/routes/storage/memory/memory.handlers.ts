@@ -1,6 +1,6 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type * as Routes from "./memory.routes.ts";
-import { memory, Memory } from "../memory.ts";
+import { Memory, memory } from "../memory.ts";
 
 export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {
   try {
@@ -23,7 +23,8 @@ export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {
       }
     }
   } catch (cause) {
-    const { message, stack, name } = (cause ?? new Error(cause as any)) as Error;
+    const { message, stack, name } =
+      (cause ?? new Error(cause as any)) as Error;
     return c.json({ error: { message, name, stack } }, 500);
   }
 };
@@ -43,7 +44,8 @@ export const query: AppRouteHandler<typeof Routes.query> = async (c) => {
       return c.json({ error }, 503);
     }
   } catch (cause) {
-    const { message, stack, name } = (cause ?? new Error(cause as any)) as Error;
+    const { message, stack, name } =
+      (cause ?? new Error(cause as any)) as Error;
     return c.json({ error: { message, name, stack } }, 500);
   }
 };
