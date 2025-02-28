@@ -149,7 +149,7 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
                       animationSpeed={2}
                       width={16}
                       height={16}
-                      animate={true}
+                      animate
                       cameraZoom={12}
                     />
                   )}

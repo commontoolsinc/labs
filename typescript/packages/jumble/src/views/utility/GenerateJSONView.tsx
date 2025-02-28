@@ -58,7 +58,7 @@ export default function LLMTestView() {
             value={result}
             theme="dark"
             extensions={[javascript()]}
-            editable={true}
+            editable
           />;
         </div>
       )}

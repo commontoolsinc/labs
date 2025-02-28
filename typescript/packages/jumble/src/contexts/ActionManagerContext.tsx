@@ -71,14 +71,14 @@ export function ActionManagerProvider(
 
     // Register keyboard listener if keyCombo exists
     if (action.keyCombo) {
-      window.addEventListener("keydown", handleKeyDown);
+      globalThis.addEventListener("keydown", handleKeyDown);
     }
 
     // Return a function to unregister this action and clean up event listeners
     return () => {
       setActions((prev) => prev.filter((a) => a.id !== action.id));
       if (action.keyCombo) {
-        window.removeEventListener("keydown", handleKeyDown);
+        globalThis.removeEventListener("keydown", handleKeyDown);
       }
     };
   }, []);

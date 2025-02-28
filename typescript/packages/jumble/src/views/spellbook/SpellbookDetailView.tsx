@@ -77,7 +77,7 @@ export default function SpellbookDetailView() {
     if (!spellId || !spell) return;
 
     try {
-      const url = `${window.location.origin}/spellbook/${spellId}`;
+      const url = `${globalThis.location.origin}/spellbook/${spellId}`;
       await navigator.clipboard.writeText(url);
 
       const { shares } = await shareSpell(spellId);

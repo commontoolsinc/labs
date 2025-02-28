@@ -730,7 +730,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       title: "Navigate Back",
       group: "Navigation",
       handler: () => {
-        window.history.back();
+        globalThis.history.back();
         deps.setOpen(false);
       },
     },
@@ -785,7 +785,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           placeholder: "Enter replica name",
           handler: (input) => {
             if (input) {
-              window.location.href = `/${input}`;
+              globalThis.location.href = `/${input}`;
             }
             deps.setOpen(false);
           },

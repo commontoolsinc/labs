@@ -58,7 +58,7 @@ function CharmPreview(
       <button
         onClick={(e) => {
           e.preventDefault();
-          if (window.confirm("Are you sure you want to remove this charm?")) {
+          if (globalThis.confirm("Are you sure you want to remove this charm?")) {
             charmManager.remove({ "/": charmId(charm)! });
           }
         }}

@@ -42,7 +42,7 @@ function CommandProcessor({
 
     case "confirm":
       return (
-        <Command.Group heading={"Confirm"}>
+        <Command.Group heading="Confirm">
           <Command.Item
             value="yes"
             onSelect={() => mode.command.handler?.(context)}
@@ -182,11 +182,11 @@ export function CommandCenter() {
     };
 
     document.addEventListener("keydown", down);
-    window.addEventListener("open-command-center", handleOpenCommandCenter);
+    globalThis.addEventListener("open-command-center", handleOpenCommandCenter);
 
     return () => {
       document.removeEventListener("keydown", down);
-      window.removeEventListener(
+      globalThis.removeEventListener(
         "open-command-center",
         handleOpenCommandCenter,
       );
@@ -231,11 +231,11 @@ export function CommandCenter() {
     };
 
     document.addEventListener("keydown", handleEditRecipe);
-    window.addEventListener("edit-recipe-command", handleEditRecipeEvent);
+    globalThis.addEventListener("edit-recipe-command", handleEditRecipeEvent);
 
     return () => {
       document.removeEventListener("keydown", handleEditRecipe);
-      window.removeEventListener("edit-recipe-command", handleEditRecipeEvent);
+      globalThis.removeEventListener("edit-recipe-command", handleEditRecipeEvent);
     };
   }, [focusedCharmId, allCommands]);
 

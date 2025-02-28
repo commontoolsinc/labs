@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import deno from "../deno-vite-plugin/src/index.ts";
 import tailwindcss from "@tailwindcss/vite";
 import * as path from "@std/path";
+import process from "node:process";
 
 // https://vite.dev/config/
 export default defineConfig({

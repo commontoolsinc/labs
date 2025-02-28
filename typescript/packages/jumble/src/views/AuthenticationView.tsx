@@ -135,8 +135,8 @@ export function AuthenticationView() {
   useEffect(() => {
     const methods: AuthMethod[] = [];
     // Add passkey if available
-    const isPasskeyAvailable = window.location.hostname !== "localhost" &&
-      window.PublicKeyCredential !== undefined;
+    const isPasskeyAvailable = globalThis.location.hostname !== "localhost" &&
+      globalThis.PublicKeyCredential !== undefined;
 
     if (isPasskeyAvailable) {
       methods.push(AUTH_METHOD_PASSKEY);

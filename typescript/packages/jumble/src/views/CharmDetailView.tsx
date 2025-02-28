@@ -100,7 +100,7 @@ function useBottomSheet(initialHeight = 420) {
           const diff = resizeStartY.current - e.clientY;
           const newHeight = Math.max(
             150,
-            Math.min(window.innerHeight * 0.8, startHeight.current + diff),
+            Math.min(globalThis.innerHeight * 0.8, startHeight.current + diff),
           );
           setSheetHeight(newHeight);
         }
@@ -145,7 +145,7 @@ function useBottomSheet(initialHeight = 420) {
           const diff = resizeStartY.current - e.touches[0].clientY;
           const newHeight = Math.max(
             150,
-            Math.min(window.innerHeight * 0.8, startHeight.current + diff),
+            Math.min(globalThis.innerHeight * 0.8, startHeight.current + diff),
           );
           setSheetHeight(newHeight);
         }
@@ -418,7 +418,7 @@ const Variants = () => {
               animationSpeed={2}
               width={24}
               height={24}
-              animate={true}
+              animate
               cameraZoom={12}
             />
           </div>
@@ -453,7 +453,7 @@ const Suggestions = () => {
               animationSpeed={2}
               width={24}
               height={24}
-              animate={true}
+              animate
               cameraZoom={12}
             />
           </div>
@@ -552,7 +552,7 @@ const IterateTab = () => {
                     animationSpeed={2}
                     width={16}
                     height={16}
-                    animate={true}
+                    animate
                     cameraZoom={12}
                   />
                   <span>Iterating...</span>
@@ -852,7 +852,7 @@ function CharmDetailView() {
   if (!charm) {
     return (
       <div className="max-w-xl mx-auto">
-        <LoadingSpinner visible={true} />
+        <LoadingSpinner visible />
       </div>
     );
   }
@@ -872,7 +872,7 @@ function CharmDetailView() {
                 blendMode="exclusion"
                 height={1024}
                 width={1024}
-                visible={true}
+                visible
                 cameraZoom={128}
               />
             </div>
