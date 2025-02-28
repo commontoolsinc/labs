@@ -1,3 +1,11 @@
+/**
+ * @file This file is Ellyse's exploration into the interactions between 
+ * charms, cells, and documents, and how they relate to common memory. 
+ *
+ * I'm starting from the bottom (common memory) up and purposely calling
+ * APIs that would normally call into common memory.
+ *
+ */
 import { CharmManager, Charm } from "../common-charm/src/charm.ts";
 import { Cell } from "../common-runner/src/cell.ts";
 import { DocImpl, getDoc } from "../common-runner/src/doc.ts";
@@ -5,11 +13,8 @@ import { EntityId } from "../common-runner/src/cell-map.ts";
 import { storage } from "../common-charm/src/storage.ts";
 import { getSpace, Space } from "../common-runner/src/space.ts";
 
-const replica = "ellyse6";
+const replica = "ellyse7";
 const TOOLSHED_API_URL = "https://toolshed.saga-castor.ts.net/";
-
-// i'm running common memory locally, so connect to it directly
-const BASE_URL = "http://localhost:8000"
 
 // simple log function
 const log: <T>(s: T, prefix?: string) => void = (s, prefix?) => 
@@ -21,13 +26,14 @@ function createCell(space: Space): Cell<Charm>  {
     UI: "someui",
     "somekey": "some value",
   };
+
+  // make this a DocImpl<Charm> because we need to return a Cell<Charm> since 
+  // that's what CharmManger.add() needs later on
   const myDoc: DocImpl<Charm> = getDoc<Charm>(myCharm, crypto.randomUUID(), space);
-  log(myDoc, "mydoc, should have name and ui and `somekey`");
   return myDoc.asCell();
 }
 
 async function main() {
-  
   // create a charm manager to start things off
   const charmManager = new CharmManager(replica);
   log(charmManager, "charmManager");
@@ -35,8 +41,8 @@ async function main() {
   // let's try to create a cell 
   const space: Space = getSpace(replica);
   const cell: Cell<Charm> = createCell(space);
-  log(cell, "same mydoc but asCell()");
-
+  log(cell.get(), "cell value from Cell.get()");
+  
   // this feels like magic and wrong, 
   // but we crash in the next CharmManager.add() if this isn't set 
   storage.setRemoteStorage(
