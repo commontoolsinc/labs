@@ -1,6 +1,6 @@
 import type { EntityId } from "@commontools/runner";
-import { log } from "../storage.js";
-import { BaseStorageProvider, type StorageValue } from "./base.js";
+import { log } from "../storage.ts";
+import { BaseStorageProvider, type StorageValue } from "./base.ts";
 
 /**
  * In-memory storage provider. Just for testing.
@@ -9,7 +9,10 @@ import { BaseStorageProvider, type StorageValue } from "./base.js";
  * But for testing we can create multiple instances that share the memory.
  */
 const spaceStorageMap = new Map<string, Map<string, StorageValue>>();
-const spaceSubscribersMap = new Map<string, Set<(key: string, value: StorageValue) => void>>();
+const spaceSubscribersMap = new Map<
+  string,
+  Set<(key: string, value: StorageValue) => void>
+>();
 
 // Helper to get or create storage for a space
 function getOrCreateSpaceStorage(spaceName: string): Map<string, StorageValue> {
@@ -67,14 +70,20 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     return { ok: {} };
   }
 
-  async sync(entityId: EntityId, expectedInStorage: boolean = false): Promise<void> {
+  async sync(
+    entityId: EntityId,
+    expectedInStorage: boolean = false,
+  ): Promise<void> {
     const spaceStorage = getOrCreateSpaceStorage(this.spaceName);
     const key = JSON.stringify(entityId);
-    log(() => ["sync in memory", this.spaceName, key, this.lastValues.get(key)]);
-    if (spaceStorage.has(key)) this.lastValues.set(key, JSON.stringify(spaceStorage.get(key)!));
-    else if (expectedInStorage)
+    log(
+      () => ["sync in memory", this.spaceName, key, this.lastValues.get(key)],
+    );
+    if (spaceStorage.has(key)) {
+      this.lastValues.set(key, JSON.stringify(spaceStorage.get(key)!));
+    } else if (expectedInStorage) {
       return Promise.resolve(); // nothing to sync
-    else this.lastValues.delete(key);
+    } else this.lastValues.delete(key);
   }
 
   get<T>(entityId: EntityId): StorageValue<T> | undefined {

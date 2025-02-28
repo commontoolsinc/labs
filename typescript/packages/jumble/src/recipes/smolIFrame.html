@@ -1,14 +1,23 @@
 <html>
   <head>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+    <script
+      crossorigin
+      src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"
+    ></script>
     <script
       crossorigin
       src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"
     ></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script>
-      window.onerror = function (message, source, lineno, colno, error) {
+      window.onerror = function (
+        message,
+        source,
+        lineno,
+        colno,
+        error,
+      ) {
         window.parent.postMessage(
           {
             type: "error",
@@ -17,7 +26,9 @@
               source: source,
               lineno: lineno,
               colno: colno,
-              stacktrace: error && error.stack ? error.stack : new Error().stack,
+              stacktrace: error && error.stack
+                ? error.stack
+                : new Error().stack,
             },
           },
           "*",
@@ -64,7 +75,18 @@
   <body>
     <div id="root"></div>
     <script type="text/babel">
-      const emojis = ["😊", "🎉", "🌟", "🚀", "💫", "✨", "🌈", "🎨", "🎭", "🎪"];
+      const emojis = [
+        "😊",
+        "🎉",
+        "🌟",
+        "🚀",
+        "💫",
+        "✨",
+        "🌈",
+        "🎨",
+        "🎭",
+        "🎪",
+      ];
 
       function App() {
         const [count, setCount] = React.useState(0);
@@ -74,7 +96,10 @@
           function handleMessage(event) {
             if (event.data.type === "update") {
               if (event.data.data[0] === "count") {
-                setData((prev) => ({ ...prev, [event.data.data[0]]: event.data.data[1] }));
+                setData((prev) => ({
+                  ...prev,
+                  [event.data.data[0]]: event.data.data[1],
+                }));
               }
             }
           }
@@ -104,8 +129,12 @@
               >
                 {currentEmoji}
               </div>
-              <div className="text-4xl font-light text-gray-700">Count: {data.count || 0}</div>
-              <div className="mt-4 text-sm text-gray-500">Click the emoji to count up!</div>
+              <div className="text-4xl font-light text-gray-700">
+                Count: {data.count || 0}
+              </div>
+              <div className="mt-4 text-sm text-gray-500">
+                Click the emoji to count up!
+              </div>
             </div>
           </div>
         );

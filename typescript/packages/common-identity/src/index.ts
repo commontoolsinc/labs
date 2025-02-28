@@ -1,4 +1,4 @@
-export { PassKey } from "./pass-key.js";
-export { Identity } from "./identity.js";
-export { KeyStore } from "./key-store.js";
-export * from "./interface.js";
+export { PassKey } from "./pass-key.ts";
+export { Identity } from "./identity.ts";
+export { KeyStore } from "./key-store.ts";
+export * from "./interface.ts";

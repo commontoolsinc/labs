@@ -1,7 +1,12 @@
 import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
-import "@/styles/index.css";
+import { createRoot } from "react-dom";
+import {
+  BrowserRouter as Router,
+  Navigate,
+  Route,
+  Routes,
+} from "react-router-dom";
+import "./styles/index.css";
 import Shell from "@/views/Shell.tsx";
 import { CharmsProvider } from "@/contexts/CharmsContext.tsx";
 
@@ -33,7 +38,10 @@ createRoot(document.getElementById("root")!).render(
               <Router>
                 <Routes>
                   {/* Redirect root to common-knowledge */}
-                  <Route path={ROUTES.root} element={<Navigate to={ROUTES.defaultReplica} replace />} />
+                  <Route
+                    path={ROUTES.root}
+                    element={<Navigate to={ROUTES.defaultReplica} replace />}
+                  />
 
                   <Route
                     path={ROUTES.replicaRoot}
@@ -44,13 +52,25 @@ createRoot(document.getElementById("root")!).render(
                     }
                   >
                     <Route index element={<CharmList />} />
-                    <Route path={ROUTES.charmShow} element={<CharmShowView />} />
-                    <Route path={ROUTES.charmDetail} element={<CharmDetailView />} />
+                    <Route
+                      path={ROUTES.charmShow}
+                      element={<CharmShowView />}
+                    />
+                    <Route
+                      path={ROUTES.charmDetail}
+                      element={<CharmDetailView />}
+                    />
                   </Route>
 
                   {/* Spellbook routes */}
-                  <Route path={ROUTES.spellbookIndex} element={<SpellbookIndexView />} />
-                  <Route path={ROUTES.spellbookDetail} element={<SpellbookDetailView />} />
+                  <Route
+                    path={ROUTES.spellbookIndex}
+                    element={<SpellbookIndexView />}
+                  />
+                  <Route
+                    path={ROUTES.spellbookDetail}
+                    element={<SpellbookDetailView />}
+                  />
                   <Route
                     path={ROUTES.spellbookLaunch}
                     element={
@@ -61,7 +81,10 @@ createRoot(document.getElementById("root")!).render(
                   />
 
                   {/* internal tools / experimental routes */}
-                  <Route path={ROUTES.utilityJsonGen} element={<GenerateJSONView />} />
+                  <Route
+                    path={ROUTES.utilityJsonGen}
+                    element={<GenerateJSONView />}
+                  />
                 </Routes>
               </Router>
             </LanguageModelProvider>

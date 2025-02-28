@@ -40,13 +40,11 @@ export function ActionButton({
         <span>{label}</span>
       </button>
       {showPopover && (
-        <div
-          className="
+        <div className="
           absolute -top-8 left-1/2 -translate-x-1/2 
           bg-black text-white px-2 py-1 text-sm
           border border-white
-        "
-        >
+        ">
           {popoverMessage}
         </div>
       )}

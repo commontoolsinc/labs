@@ -1,4 +1,4 @@
-import { debug } from "./debug.js";
+import { debug } from "./debug.ts";
 
 /** A basic msg with no payload */
 export type TypeMsg<T> = {
@@ -82,31 +82,32 @@ export const createStore = <State, Msg>({
   return { send, sink, get };
 };
 
-export const forward =
-  <ParentMsg, ChildMsg>(send: (msg: ParentMsg) => void, tag: (child: ChildMsg) => ParentMsg) =>
-  (msg: ChildMsg) => {
-    send(tag(msg));
-  };
+export const forward = <ParentMsg, ChildMsg>(
+  send: (msg: ParentMsg) => void,
+  tag: (child: ChildMsg) => ParentMsg,
+) =>
+(msg: ChildMsg) => {
+  send(tag(msg));
+};
 
 /** Decorate an update function so that it updates a larger element */
-export const cursor =
-  <BigState, SmallState, SmallMsg>({
-    update,
-    get,
-    put,
-  }: {
-    update: (small: SmallState, msg: SmallMsg) => SmallState;
-    get: (big: BigState) => SmallState;
-    put: (big: BigState, small: SmallState) => BigState;
-  }) =>
-  (big: BigState, msg: SmallMsg) => {
-    const small = get(big);
-    const small2 = update(small, msg);
-    if (small === small2) {
-      return big;
-    }
-    return put(big, small2);
-  };
+export const cursor = <BigState, SmallState, SmallMsg>({
+  update,
+  get,
+  put,
+}: {
+  update: (small: SmallState, msg: SmallMsg) => SmallState;
+  get: (big: BigState) => SmallState;
+  put: (big: BigState, small: SmallState) => BigState;
+}) =>
+(big: BigState, msg: SmallMsg) => {
+  const small = get(big);
+  const small2 = update(small, msg);
+  if (small === small2) {
+    return big;
+  }
+  return put(big, small2);
+};
 
 /**
  * Convenience updater for update function fallthroughs when an unknown

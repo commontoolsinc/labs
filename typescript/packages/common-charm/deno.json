@@ -1,0 +1,7 @@
+{
+  "name": "@commontools/charm",
+  "tasks": {
+    "test": "deno test"
+  },
+  "exports": "./src/index.ts"
+}

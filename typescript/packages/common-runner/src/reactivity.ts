@@ -1,5 +1,5 @@
-import { Cancel, isCancel, noOp } from "./cancel.js";
-import { Cell, isCell } from "./cell.js";
+import { Cancel, isCancel, noOp } from "./cancel.ts";
+import { Cell, isCell } from "./cell.ts";
 
 /**
  * Effect that runs a callback when the value changes. The callback is also

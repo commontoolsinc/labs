@@ -1,10 +1,10 @@
 import { type Recipe } from "@commontools/builder";
-import { type DocImpl, getDoc } from "../doc.js";
-import { getDocLinkOrThrow } from "../query-result-proxy.js";
-import { type ReactivityLog } from "../scheduler.js";
-import { cancels, run } from "../runner.js";
-import { type Action } from "../scheduler.js";
-import { type AddCancel } from "../cancel.js";
+import { type DocImpl, getDoc } from "../doc.ts";
+import { getDocLinkOrThrow } from "../query-result-proxy.ts";
+import { type ReactivityLog } from "../scheduler.ts";
+import { cancels, run } from "../runner.ts";
+import { type Action } from "../scheduler.ts";
+import { type AddCancel } from "../cancel.ts";
 
 /**
  * Implemention of built-in map module. Unlike regular modules, this will be
@@ -84,17 +84,23 @@ export function map(
 
     // Add values that have been appended
     while (initializedUpTo < list.length) {
-      const resultCell = getDoc(undefined, { result, index: initializedUpTo }, parentDoc.space);
+      const resultCell = getDoc(
+        undefined,
+        { result, index: initializedUpTo },
+        parentDoc.space,
+      );
       run(
         op,
         {
-          element: { cell: listRef.cell, path: [...listRef.path, initializedUpTo] },
+          element: {
+            cell: listRef.cell,
+            path: [...listRef.path, initializedUpTo],
+          },
           index: initializedUpTo,
           array: list,
         },
         resultCell,
       );
-      console.log("map", initializedUpTo, resultCell);
       resultCell.sourceCell!.sourceCell = parentDoc;
 
       // TODO: Have `run` return cancel, once we make resultCell required

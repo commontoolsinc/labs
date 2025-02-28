@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
 @customElement("common-img")
@@ -26,15 +26,20 @@ export class CommonImgElement extends LitElement {
     }
   `;
 
-  @property({ type: String }) src = "";
-  @property({ type: String }) alt = "";
-  @state() isLoaded = false;
+  @property({ type: String })
+  accessor src = "";
+  @property({ type: String })
+  accessor alt = "";
+  @state()
+  accessor isLoaded = false;
 
   override render() {
     const onload = () => (this.isLoaded = true);
 
     return html`
-      <img @load=${onload} class="${this.isLoaded ? "img loaded" : "img"}" src="${this.src}" />
+      <img @load=${onload} class="${
+      this.isLoaded ? "img loaded" : "img"
+    }" src="${this.src}" />
     `;
   }
 }

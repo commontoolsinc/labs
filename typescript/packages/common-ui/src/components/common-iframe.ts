@@ -1,6 +1,9 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { CommonIframeSandboxElement as _, IPC } from "@commontools/iframe-sandbox";
+import {
+  CommonIframeSandboxElement as _,
+  IPC,
+} from "@commontools/iframe-sandbox";
 
 // @summary An iframe to execute arbitrary scripts. See `@commontools/iframe-sandbox`
 //          for security details.
@@ -10,13 +13,16 @@ import { CommonIframeSandboxElement as _, IPC } from "@commontools/iframe-sandbo
 // @event {CustomEvent} load - The iframe was successfully loaded.
 @customElement("common-iframe")
 export class CommonIframeElement extends LitElement {
-  @property({ type: String }) src = "";
+  @property({ type: String })
+  accessor src = "";
   // HACK: The UI framework already translates the top level cell into updated
   // properties, but we want to only have to deal with one type of listening, so
   // we'll add a an extra level of indirection with the "context" property.
-  @property({ type: Object }) context?: object;
+  @property({ type: Object })
+  accessor context: object;
 
-  @state() private errorDetails: IPC.GuestError | null = null;
+  @state()
+  accessor errorDetails: IPC.GuestError | null = null;
 
   static override styles = css`
     .error-modal {
@@ -54,7 +60,7 @@ export class CommonIframeElement extends LitElement {
   private onLoad() {
     this.dispatchEvent(new CustomEvent("load"));
   }
-  
+
   private onError(e: CustomEvent) {
     this.errorDetails = e.detail;
   }
@@ -65,7 +71,7 @@ export class CommonIframeElement extends LitElement {
 
   private fixError() {
     this.dispatchEvent(
-      new CustomEvent("fix", { detail: this.errorDetails, bubbles: true })
+      new CustomEvent("fix", { detail: this.errorDetails, bubbles: true }),
     );
     this.errorDetails = null;
   }
@@ -81,7 +87,8 @@ export class CommonIframeElement extends LitElement {
         @load=${this.onLoad}
         @error=${this.onError}
       ></iframe>
-      ${this.errorDetails
+      ${
+      this.errorDetails
         ? html`
             <div class="error-modal">
               <div class="error-content">
@@ -98,7 +105,8 @@ export class CommonIframeElement extends LitElement {
               </div>
             </div>
           `
-        : ""}
+        : ""
+    }
     `;
   }
 }

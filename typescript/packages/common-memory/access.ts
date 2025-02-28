@@ -1,11 +1,11 @@
 import {
-  Authorization,
-  Invocation,
   AsyncResult,
+  Authorization,
   AuthorizationError,
-  Signer,
+  Invocation,
   Proof,
   Reference,
+  Signer,
 } from "./interface.ts";
 import { refer } from "merkle-reference";
 import { unauthorized } from "./error.ts";
@@ -55,7 +55,9 @@ export const authorize = async <Access extends Reference[]>(
     proof[invocation.toString()] = {};
   }
 
-  const { ok: signature, error } = await as.sign<Access[number]>(refer(proof).bytes);
+  const { ok: signature, error } = await as.sign<Access[number]>(
+    refer(proof).bytes,
+  );
   if (error) {
     return { error };
   } else {

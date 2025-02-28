@@ -7,8 +7,8 @@ import {
   AsBytes,
   Signature,
   Result,
-} from "../interface.js";
-import { bytesToDid, didToBytes, AuthorizationError } from "./utils.js";
+} from "../interface.ts";
+import { bytesToDid, didToBytes, AuthorizationError } from "./utils.ts";
 
 export class NobleEd25519Signer<ID extends DIDKey> implements Signer<ID> {
   private keypair: InsecureCryptoKeyPair;
@@ -81,9 +81,7 @@ export class NobleEd25519Verifier<ID extends DIDKey> implements Verifier<ID> {
     return await NobleEd25519Verifier.fromRaw(bytes);
   }
 
-  static async fromRaw<ID extends DIDKey>(
-    rawPublicKey: Uint8Array,
-  ): Promise<NobleEd25519Verifier<ID>> {
+  static async fromRaw(rawPublicKey: Uint8Array): Promise<NobleEd25519Verifier> {
     return new NobleEd25519Verifier(rawPublicKey);
   }
 }

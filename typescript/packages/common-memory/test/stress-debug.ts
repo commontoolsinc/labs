@@ -1,4 +1,11 @@
-import { assert, assertEquals, AssertionError, assertMatch } from "jsr:@std/assert";
+// @ts-nocheck
+
+import {
+  assert,
+  assertEquals,
+  AssertionError,
+  assertMatch,
+} from "jsr:@std/assert";
 import * as Provider from "../provider.ts";
 import * as Transaction from "../transaction.ts";
 import * as Changes from "../changes.ts";
@@ -14,7 +21,10 @@ const main = async () => {
 
   const tr = generateTransaction(2000);
 
-  Deno.writeFileSync(`debug.json`, new TextEncoder().encode(JSON.stringify(tr, null, 2)));
+  Deno.writeFileSync(
+    `debug.json`,
+    new TextEncoder().encode(JSON.stringify(tr, null, 2)),
+  );
 
   const start = Date.now();
   const transaction = await provider.transact(tr as Provider.Transaction);
@@ -36,9 +46,11 @@ const generateTransaction = (count: number) => {
       of: `of:${refer(event)}`,
       is: {
         value: event,
-        source: { "/": "baedreib3eqm4usqyhc7cukeapc7ftzjkly672cd7u3fvr7b364urlwiugy" },
+        source: {
+          "/": "baedreib3eqm4usqyhc7cukeapc7ftzjkly672cd7u3fvr7b364urlwiugy",
+        },
       },
-    }),
+    })
   );
 
   const facts = [
@@ -68,14 +80,16 @@ const generateTransaction = (count: number) => {
               },
               "__#1": {
                 cell: {
-                  "/": "baedreialhcm4rsjrz577nvlvm45qmzxsywy346deacjgpqzd6vf4c43mue",
+                  "/":
+                    "baedreialhcm4rsjrz577nvlvm45qmzxsywy346deacjgpqzd6vf4c43mue",
                 },
                 path: [],
               },
             },
             resultRef: {
               cell: {
-                "/": "baedreieqaqfy4ojtvoosntfm62ezhf4kwtzdsnr3h24oqgfwydxnnzzo5i",
+                "/":
+                  "baedreieqaqfy4ojtvoosntfm62ezhf4kwtzdsnr3h24oqgfwydxnnzzo5i",
               },
               path: [],
             },

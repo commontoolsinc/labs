@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
-import { DocLink, getDoc } from "../src/doc.js";
-import { isCell } from "../src/cell.js";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { DocLink, getDoc } from "../src/doc.ts";
+import { isCell } from "../src/cell.ts";
 import type { JSONSchema } from "@commontools/builder";
-import { idle } from "../src/scheduler.js";
-import { getSpace } from "../src/space.js";
+import { idle } from "../src/scheduler.ts";
+import { getSpace } from "../src/space.ts";
 
 describe("Schema Support", () => {
   describe("Examples", () => {
@@ -54,7 +55,11 @@ describe("Schema Support", () => {
         type: "object",
         properties: {
           value: { type: "string" },
-          current: { type: "object", properties: { label: { type: "string" } }, asCell: true },
+          current: {
+            type: "object",
+            properties: { label: { type: "string" } },
+            asCell: true,
+          },
         },
       } as const;
 
@@ -119,9 +124,23 @@ describe("Schema Support", () => {
       second.set({ label: "second - update" });
       await idle();
 
-      expect(currentByGetValues).toEqual(["first", "first - update", "first - updated again"]);
-      expect(currentByKeyValues).toEqual(["first", "first - update", "second", "second - update"]);
-      expect(currentValues).toEqual(["first", "first - update", "second", "second - update"]);
+      expect(currentByGetValues).toEqual([
+        "first",
+        "first - update",
+        "first - updated again",
+      ]);
+      expect(currentByKeyValues).toEqual([
+        "first",
+        "first - update",
+        "second",
+        "second - update",
+      ]);
+      expect(currentValues).toEqual([
+        "first",
+        "first - update",
+        "second",
+        "second - update",
+      ]);
       expect(rootValues).toEqual(["root", "cancelled", "root"]);
     });
 
@@ -135,12 +154,20 @@ describe("Schema Support", () => {
         type: "object",
         properties: {
           value: { type: "string" },
-          current: { type: "object", properties: { label: { type: "string" } }, asCell: true },
+          current: {
+            type: "object",
+            properties: { label: { type: "string" } },
+            asCell: true,
+          },
         },
       } as const;
 
       // Construct an alias that also has a path to the actual data
-      const initialDoc = getDoc({ foo: { label: "first" } }, "initial", getSpace("test"));
+      const initialDoc = getDoc(
+        { foo: { label: "first" } },
+        "initial",
+        getSpace("test"),
+      );
       const initial = initialDoc.asCell();
       const linkDoc = getDoc(initial.getAsDocLink(), "link", getSpace("test"));
       const doc = getDoc(
@@ -204,7 +231,12 @@ describe("Schema Support", () => {
         path: ["foo"],
       });
       expect(log.reads.length).toEqual(4);
-      expect(log.reads.map((r: DocLink) => ({ cell: r.cell.toJSON(), path: r.path }))).toEqual([
+      expect(
+        log.reads.map((r: DocLink) => ({
+          cell: r.cell.toJSON(),
+          path: r.path,
+        })),
+      ).toEqual([
         { cell: doc.toJSON(), path: ["current"] },
         { cell: linkDoc.toJSON(), path: [] },
         { cell: initialDoc.toJSON(), path: ["foo"] },
@@ -229,7 +261,13 @@ describe("Schema Support", () => {
       // Change unrelated value should update root, but not the other cells
       root.key("value").set("root - updated");
       await idle();
-      expect(rootValues).toEqual(["root", "cancelled", "root", "cancelled", "root - updated"]);
+      expect(rootValues).toEqual([
+        "root",
+        "cancelled",
+        "root",
+        "cancelled",
+        "root - updated",
+      ]);
 
       // Now change the first one again, should only change currentByGetValues
       initial.set({ foo: { label: "first - updated again" } });
@@ -239,13 +277,21 @@ describe("Schema Support", () => {
       second.set({ foo: { label: "second - update" } });
       await idle();
 
-      expect(rootValues).toEqual(["root", "cancelled", "root", "cancelled", "root - updated"]);
+      expect(rootValues).toEqual([
+        "root",
+        "cancelled",
+        "root",
+        "cancelled",
+        "root - updated",
+      ]);
 
       // Now change the alias. This should also be seen by the root cell. It
       // will not be seen by the .get()s earlier, since they anchored on the
       // link, not the alias ahead of it. That's intentional.
       const third = getDoc({ label: "third" }).asCell();
-      doc.setAtPath(["current"], { $alias: { cell: third.getAsDocLink().cell, path: [] } });
+      doc.setAtPath(["current"], {
+        $alias: { cell: third.getAsDocLink().cell, path: [] },
+      });
 
       await idle();
 

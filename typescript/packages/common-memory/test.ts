@@ -1,7 +1,7 @@
 type Paths<T, Path extends string[] = []> = {
-  [K in keyof T & string]: T[K] extends object ? Paths<T[K], [K]> : [...Path, K];
+  [K in keyof T & string]: T[K] extends object ? Paths<T[K], [K]>
+    : [...Path, K];
 };
-
 
 interface Example {
   foo: string;
@@ -23,4 +23,4 @@ interface Example {
   };
 }
 
-type EPath = Paths<Example>
+type EPath = Paths<Example>;

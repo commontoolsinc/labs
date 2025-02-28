@@ -1,5 +1,5 @@
 import type { Module, Recipe } from "@commontools/builder";
-import { createRef } from "./cell-map.js";
+import { createRef } from "./cell-map.ts";
 
 const recipeById = new Map<string, Recipe | Module>();
 const recipeNameById = new Map<string, string>();

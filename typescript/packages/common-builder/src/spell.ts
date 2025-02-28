@@ -1,4 +1,4 @@
-import { derive, type OpaqueRef, recipe, stream, UI } from "./index.js";
+import { derive, type OpaqueRef, recipe, stream, UI } from "./index.ts";
 
 // $ is a proxy that just collect paths, so that one can call [getPath] on it
 // and get an array. For example for `q = $.foo.bar[0]` `q[getPath]` yields
@@ -79,7 +79,9 @@ export function select(query: any) {
       select({
         ...resolve$(self, query),
         ...Object.fromEntries(
-          Object.keys(schema.properties ?? {}).map((key) => [key, (self as any)[key]]),
+          Object.keys(schema.properties ?? {}).map((
+            key,
+          ) => [key, (self as any)[key]]),
         ),
       }),
   });
@@ -182,7 +184,10 @@ export abstract class Spell<T extends Record<string, any>> {
 
       this.eventListeners.forEach(({ type, handlerFn }) => {
         this.streams[type] ??= stream();
-        derive({ self, $event: this.streams[type] }, ({ self, $event }) => handlerFn(self, $event));
+        derive(
+          { self, $event: this.streams[type] },
+          ({ self, $event }) => handlerFn(self, $event),
+        );
       });
 
       this.rules.forEach((rule) => {
@@ -199,7 +204,9 @@ export abstract class Spell<T extends Record<string, any>> {
         let condition = rule.condition(self);
 
         if (Array.isArray(condition)) {
-          condition = Object.fromEntries(condition.map((key) => [key, self[key]]));
+          condition = Object.fromEntries(
+            condition.map((key) => [key, self[key]]),
+          );
         } else if (
           condition &&
           typeof condition === "object" &&

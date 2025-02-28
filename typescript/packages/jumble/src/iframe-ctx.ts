@@ -1,6 +1,12 @@
 import { setIframeContextHandler } from "@commontools/iframe-sandbox";
-import { Action, ReactivityLog, addAction, isCell, removeAction } from "@commontools/runner";
-import { llm } from "@/utils/llm";
+import {
+  Action,
+  addAction,
+  isCell,
+  ReactivityLog,
+  removeAction,
+} from "@commontools/runner";
+import { llm } from "@/utils/llm.ts";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 // This is to prepare Proxy objects to be serialized
@@ -25,9 +31,15 @@ export const setupIframe = () =>
         context[key] = value;
       }
     },
-    subscribe(context: any, key: string, callback: (key: string, value: any) => void): any {
+    subscribe(
+      context: any,
+      key: string,
+      callback: (key: string, value: any) => void,
+    ): any {
       const action: Action = (log: ReactivityLog) => {
-        const data = isCell(context) ? context.withLog(log).key(key).get() : context?.[key];
+        const data = isCell(context)
+          ? context.withLog(log).key(key).get()
+          : context?.[key];
         const serialized = serializeProxyObjects(data);
         callback(key, serialized);
       };
@@ -42,7 +54,10 @@ export const setupIframe = () =>
       console.log("onLLMRequest", payload);
       const jsonPayload = JSON.parse(payload);
       if (!jsonPayload.model) {
-        jsonPayload.model = ["groq:llama-3.3-70b-versatile", "anthropic:claude-3-7-sonnet-latest"];
+        jsonPayload.model = [
+          "groq:llama-3.3-70b-versatile",
+          "anthropic:claude-3-7-sonnet-latest",
+        ];
       }
 
       const res = await llm.sendRequest(jsonPayload);

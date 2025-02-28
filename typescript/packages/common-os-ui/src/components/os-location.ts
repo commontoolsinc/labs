@@ -1,6 +1,6 @@
-import { LitElement, css, html } from "lit";
-import { customElement, property } from "lit/decorators.js";
-import { base } from "../shared/styles.js";
+import { css, html, LitElement } from "lit";
+import { customElement, property } from "lit/decorators.ts";
+import { base } from "../shared/styles.ts";
 
 /**
  * A custom element representing a location display.

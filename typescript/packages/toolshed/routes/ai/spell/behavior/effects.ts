@@ -1,4 +1,4 @@
-import { hc } from "hono/client";
+import { hc } from "@hono/hono/client";
 import { AppType } from "@/app.ts";
 import { Consumer, Principal } from "@commontools/memory";
 import { Memory, memory } from "@/routes/storage/memory.ts";

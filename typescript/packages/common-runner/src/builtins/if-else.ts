@@ -1,7 +1,7 @@
-import { type DocImpl, getDoc } from "../doc.js";
-import { type Action } from "../scheduler.js";
-import { type ReactivityLog } from "../scheduler.js";
-import { getDocLinkOrThrow } from "../query-result-proxy.js";
+import { type DocImpl, getDoc } from "../doc.ts";
+import { type Action } from "../scheduler.ts";
+import { type ReactivityLog } from "../scheduler.ts";
+import { getDocLinkOrThrow } from "../query-result-proxy.ts";
 export function ifElse(
   inputsCell: DocImpl<[any, any, any]>,
   sendResult: (result: any) => void,
@@ -16,7 +16,9 @@ export function ifElse(
   return (log: ReactivityLog) => {
     const condition = inputsCell.getAsQueryResult([0], log);
 
-    const ref = getDocLinkOrThrow(inputsCell.getAsQueryResult([condition ? 1 : 2], log));
+    const ref = getDocLinkOrThrow(
+      inputsCell.getAsQueryResult([condition ? 1 : 2], log),
+    );
     result.send(ref.cell.getAtPath(ref.path), log);
   };
 }

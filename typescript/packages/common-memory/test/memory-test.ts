@@ -232,7 +232,11 @@ test("list excludes retracted facts", memory, async (session) => {
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
   // First create and then retract a fact
   await session.transact(
-    Transaction.create({ issuer: alice, subject: space, changes: Changes.from([v1]) }),
+    Transaction.create({
+      issuer: alice,
+      subject: space,
+      changes: Changes.from([v1]),
+    }),
   );
 
   assertEquals(

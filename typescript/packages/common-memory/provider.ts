@@ -2,30 +2,32 @@ import * as Memory from "./memory.ts";
 import * as JSON from "./json.ts";
 import type {
   AsyncResult,
-  ConnectionError,
-  Transaction,
-  MemorySession,
-  Query,
-  Protocol as Protocol,
-  ProviderCommand,
-  ConsumerCommandInvocation,
-  Subscriber,
-  ProviderSession,
-  Reference,
-  Subscribe,
+  Await,
   CloseResult,
-  QueryError,
-  Result,
-  Selection,
-  InvocationURL,
-  UCAN,
-  Invocation,
-  Proto,
-  MemorySpace,
-  ProviderCommandFor,
+  ConnectionError,
+  ConsumerCommand,
+  ConsumerCommandInvocation,
   ConsumerInvocationFor,
   ConsumerResultFor,
-  Await,
+  Invocation,
+  InvocationURL,
+  MemorySession,
+  MemorySpace,
+  Proto,
+  Protocol as Protocol,
+  ProviderCommand,
+  ProviderCommandFor,
+  ProviderSession,
+  Query,
+  QueryError,
+  QueryResult,
+  Reference,
+  Result,
+  Selection,
+  Subscribe,
+  Subscriber,
+  Transaction,
+  UCAN,
 } from "./interface.ts";
 import * as Subscription from "./subscription.ts";
 
@@ -66,9 +68,10 @@ interface Session {
   memory: MemorySession;
 }
 
-class MemoryProvider<Space extends MemorySpace, MemoryProtocol extends Protocol<Space>>
-  implements Provider<MemoryProtocol>
-{
+class MemoryProvider<
+  Space extends MemorySpace,
+  MemoryProtocol extends Protocol<Space>,
+> implements Provider<MemoryProtocol> {
   sessions: Set<ProviderSession<MemoryProtocol>> = new Set();
   #localSession: MemoryProviderSession<Space, MemoryProtocol> | null = null;
   constructor(public memory: MemorySession) {}
@@ -81,7 +84,9 @@ class MemoryProvider<Space extends MemorySpace, MemoryProtocol extends Protocol<
       session = new MemoryProviderSession(this.memory, null);
     }
 
-    return session.invoke(ucan as unknown as UCAN<ConsumerCommandInvocation<Protocol>>);
+    return session.invoke(
+      ucan as unknown as UCAN<ConsumerCommandInvocation<Protocol>>,
+    );
   }
 
   fetch(request: Request) {
@@ -104,12 +109,15 @@ class MemoryProvider<Space extends MemorySpace, MemoryProtocol extends Protocol<
   }
 }
 
-class MemoryProviderSession<Space extends MemorySpace, MemoryProtocol extends Protocol<Space>>
-  implements ProviderSession<MemoryProtocol>, Subscriber
-{
+class MemoryProviderSession<
+  Space extends MemorySpace,
+  MemoryProtocol extends Protocol<Space>,
+> implements ProviderSession<MemoryProtocol>, Subscriber {
   readable: ReadableStream<ProviderCommand<MemoryProtocol>>;
   writable: WritableStream<UCAN<ConsumerCommandInvocation<MemoryProtocol>>>;
-  controller: ReadableStreamDefaultController<ProviderCommand<MemoryProtocol>> | undefined;
+  controller:
+    | ReadableStreamDefaultController<ProviderCommand<MemoryProtocol>>
+    | undefined;
 
   channels: Map<InvocationURL<Reference<Subscribe>>, Set<string>> = new Map();
 
@@ -121,7 +129,9 @@ class MemoryProviderSession<Space extends MemorySpace, MemoryProtocol extends Pr
       start: (controller) => this.open(controller),
       cancel: () => this.cancel(),
     });
-    this.writable = new WritableStream<UCAN<ConsumerCommandInvocation<MemoryProtocol>>>({
+    this.writable = new WritableStream<
+      UCAN<ConsumerCommandInvocation<MemoryProtocol>>
+    >({
       write: async (command) => {
         await this.invoke(command as UCAN<ConsumerCommandInvocation<Protocol>>);
       },
@@ -133,11 +143,17 @@ class MemoryProviderSession<Space extends MemorySpace, MemoryProtocol extends Pr
       },
     });
   }
-  perform<Ability extends string>(command: ProviderCommandFor<Ability, MemoryProtocol>) {
+  perform<Ability extends string>(
+    command: ProviderCommandFor<Ability, MemoryProtocol>,
+  ) {
     this.controller?.enqueue(command as ProviderCommand<MemoryProtocol>);
     return { ok: {} };
   }
-  open(controller: ReadableStreamDefaultController<ProviderCommand<MemoryProtocol>>) {
+  open(
+    controller: ReadableStreamDefaultController<
+      ProviderCommand<MemoryProtocol>
+    >,
+  ) {
     this.controller = controller;
   }
   cancel() {
@@ -156,7 +172,9 @@ class MemoryProviderSession<Space extends MemorySpace, MemoryProtocol extends Pr
     this.sessions?.delete(this);
     this.sessions = null;
   }
-  async invoke({ invocation, authorization }: UCAN<ConsumerCommandInvocation<Protocol>>) {
+  async invoke(
+    { invocation, authorization }: UCAN<ConsumerCommandInvocation<Protocol>>,
+  ) {
     const { error } = await Access.claim(invocation, authorization);
     if (error) {
       return this.perform({
@@ -177,7 +195,10 @@ class MemoryProviderSession<Space extends MemorySpace, MemoryProtocol extends Pr
         return this.perform({
           the: "task/return",
           of,
-          is: (await this.memory.query(invocation)) as Result<Selection<Space>, QueryError>,
+          is: (await this.memory.query(invocation)) as Result<
+            Selection<Space>,
+            QueryError
+          >,
         });
       }
       case "/memory/transact": {
@@ -190,7 +211,9 @@ class MemoryProviderSession<Space extends MemorySpace, MemoryProtocol extends Pr
       case "/memory/query/subscribe": {
         this.channels.set(
           of,
-          new Set(Subscription.channels(invocation.sub, invocation.args.select)),
+          new Set(
+            Subscription.channels(invocation.sub, invocation.args.select),
+          ),
         );
         return this.memory.subscribe(this);
       }
@@ -216,7 +239,9 @@ class MemoryProviderSession<Space extends MemorySpace, MemoryProtocol extends Pr
       }
       default: {
         return {
-          error: new RangeError(`Unknown command ${(invocation as Invocation).cmd}`),
+          error: new RangeError(
+            `Unknown command ${(invocation as Invocation).cmd}`,
+          ),
         };
       }
     }
@@ -259,7 +284,11 @@ export const patch = async (session: Session, request: Request) => {
     const transaction = JSON.decode(bytes) as Transaction;
     const result = await session.memory.transact(transaction);
     const body = JSON.stringify(result);
-    const status = result.ok ? 200 : result.error.name === "ConflictError" ? 409 : 503;
+    const status = result.ok
+      ? 200
+      : result.error.name === "ConflictError"
+      ? 409
+      : 503;
 
     return new Response(body, {
       status,

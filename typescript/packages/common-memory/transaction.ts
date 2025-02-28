@@ -1,4 +1,10 @@
-import type { DID, MemorySpace, Changes, Meta, Transaction } from "./interface.ts";
+import type {
+  Changes,
+  DID,
+  MemorySpace,
+  Meta,
+  Transaction,
+} from "./interface.ts";
 export const create = <Space extends MemorySpace>({
   issuer,
   subject,

@@ -1,6 +1,6 @@
-import { LitElement, css, html } from "lit";
-import { customElement, property } from "lit/decorators.js";
-import { base } from "../shared/styles.js";
+import { css, html, LitElement } from "lit";
+import { customElement, property } from "lit/decorators.ts";
+import { base } from "../shared/styles.ts";
 
 /**
  * Custom element representing the chrome (outer structure) of the application.
@@ -114,7 +114,8 @@ export class OsChrome extends LitElement {
     `,
   ];
 
-  @property({ type: Boolean, reflect: true }) sidebar = false;
+  @property({ type: Boolean, reflect: true })
+  sidebar = false;
 
   override render() {
     const onSidebarClose = () => {

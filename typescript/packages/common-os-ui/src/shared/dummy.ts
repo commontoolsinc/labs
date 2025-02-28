@@ -37,7 +37,8 @@ Totam rem aperiam
 Eaque ipsa quae ab illo
 `;
 
-export const titles = (max = Infinity) => randomSample(splitlines(DUMMY_TITLES), max);
+export const titles = (max = Infinity) =>
+  randomSample(splitlines(DUMMY_TITLES), max);
 
 let _cid = 0;
 export const id = () => `dummy${_cid++}`;

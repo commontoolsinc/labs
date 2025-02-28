@@ -1,9 +1,12 @@
 import { isOpaqueRef } from "@commontools/builder";
-import { type DocImpl, type DocLink, getDoc, isDoc, isDocLink } from "./doc.js";
-import { getDocLinkOrThrow, isQueryResultForDereferencing } from "./query-result-proxy.js";
-import { isCell } from "./cell.js";
+import { type DocImpl, type DocLink, getDoc, isDoc, isDocLink } from "./doc.ts";
+import {
+  getDocLinkOrThrow,
+  isQueryResultForDereferencing,
+} from "./query-result-proxy.ts";
+import { isCell } from "./cell.ts";
 import { refer } from "merkle-reference";
-import { type Space } from "./space.js";
+import { type Space } from "./space.ts";
 
 export type EntityId = {
   "/": string | Uint8Array;
@@ -16,7 +19,10 @@ export type EntityId = {
  * @param source - The source object.
  * @param cause - Optional causal source. Otherwise a random n is used.
  */
-export const createRef = (source: Object = {}, cause: any = crypto.randomUUID()): EntityId => {
+export const createRef = (
+  source: Object = {},
+  cause: any = crypto.randomUUID(),
+): EntityId => {
   try {
     // Unwrap query result proxies, replace cells with their ids and remove
     // functions and undefined values, since `merkle-reference` doesn't support
@@ -31,7 +37,10 @@ export const createRef = (source: Object = {}, cause: any = crypto.randomUUID())
       if (typeof obj === "object" && obj !== null && "/" in obj) return obj;
 
       // If there is a .toJSON method, replace obj with it, then descend.
-      if (typeof obj === "object" && obj !== null && typeof obj.toJSON === "function") {
+      if (
+        typeof obj === "object" && obj !== null &&
+        typeof obj.toJSON === "function"
+      ) {
         obj = obj.toJSON() ?? obj;
       }
 
@@ -78,9 +87,12 @@ export const createRef = (source: Object = {}, cause: any = crypto.randomUUID())
  * @returns The entity ID, or undefined if the value is not a cell.
  */
 export const getEntityId = (value: any): { "/": string } | undefined => {
-  if (typeof value === "string") return value.startsWith("{") ? JSON.parse(value) : { "/": value };
-  if (typeof value === "object" && value !== null && "/" in value)
+  if (typeof value === "string") {
+    return value.startsWith("{") ? JSON.parse(value) : { "/": value };
+  }
+  if (typeof value === "object" && value !== null && "/" in value) {
     return JSON.parse(JSON.stringify(value));
+  }
 
   let ref: DocLink | undefined = undefined;
 
@@ -92,7 +104,9 @@ export const getEntityId = (value: any): { "/": string } | undefined => {
   if (!ref?.cell.entityId) return undefined;
 
   if (ref.path.length > 0) {
-    return JSON.parse(JSON.stringify(createRef({ path: ref.path }, ref.cell.entityId)));
+    return JSON.parse(
+      JSON.stringify(createRef({ path: ref.path }, ref.cell.entityId)),
+    );
   } else return JSON.parse(JSON.stringify(ref.cell.entityId));
 };
 
@@ -180,6 +194,10 @@ export function getDocByEntityId<T = any>(
   return doc;
 }
 
-export const setDocByEntityId = (space: Space, entityId: EntityId, cell: DocImpl<any>) => {
+export const setDocByEntityId = (
+  space: Space,
+  entityId: EntityId,
+  cell: DocImpl<any>,
+) => {
   entityIdToDocMap.set(space, JSON.stringify(entityId), cell);
 };

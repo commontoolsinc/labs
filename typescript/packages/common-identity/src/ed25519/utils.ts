@@ -1,6 +1,6 @@
 import { base58btc } from "multiformats/bases/base58";
 import { varint } from "multiformats";
-import { DIDKey } from "../interface.js";
+import { DIDKey } from "../interface.ts";
 
 export const ED25519_ALG = "Ed25519";
 const ED25519_CODE = 0xed;
@@ -37,7 +37,9 @@ export function didToBytes(did: DIDKey): Uint8Array {
   const [code] = varint.decode(bytes);
   if (code !== ED25519_CODE) {
     throw new RangeError(
-      `Unsupported key algorithm expected 0x${ED25519_CODE.toString(16)}, instead of 0x${code.toString(16)}`,
+      `Unsupported key algorithm expected 0x${ED25519_CODE.toString(
+        16,
+      )}, instead of 0x${code.toString(16)}`,
     );
   }
   if (bytes.length !== ED25519_PUB_KEY_TAGGED_SIZE) {

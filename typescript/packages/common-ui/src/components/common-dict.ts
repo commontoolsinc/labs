@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 
@@ -18,7 +18,7 @@ export class CommonDictElement extends LitElement {
   `;
 
   @property({ type: Object })
-  records: Record<string, string> = {};
+  accessor records: Record<string, string> = {};
 
   override render() {
     const records = repeat(Object.entries(this.records), ([key, value]) => {

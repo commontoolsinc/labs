@@ -1,11 +1,15 @@
 // An `IframeContextHandler` is used by consumers to
 // register how read/writing values from frames are handled.
 export interface IframeContextHandler {
-  read(context: any, key: string): any,
-  write(context: any, key: string, value: any): void,
-  subscribe(context: any, key: string, callback: (key: string, value: any) => void): any,
-  unsubscribe(context: any, receipt: any): void,
-  onLLMRequest(context: any, payload: string): Promise<object>,
+  read(context: any, key: string): any;
+  write(context: any, key: string, value: any): void;
+  subscribe(
+    context: any,
+    key: string,
+    callback: (key: string, value: any) => void,
+  ): any;
+  unsubscribe(context: any, receipt: any): void;
+  onLLMRequest(context: any, payload: string): Promise<object>;
 }
 
 let IframeHandler: IframeContextHandler | null = null;

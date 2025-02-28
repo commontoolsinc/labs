@@ -1,5 +1,5 @@
-import type { EntityId, Cancel } from "@commontools/runner";
-import { log } from "../storage.js";
+import type { Cancel, EntityId } from "@commontools/runner";
+import { log } from "../storage.ts";
 
 export interface StorageValue<T = any> {
   value: T;
@@ -42,7 +42,10 @@ export interface StorageProvider {
    * @param callback - Callback function.
    * @returns Cancel function to stop the subscription.
    */
-  sink<T = any>(entityId: EntityId, callback: (value: StorageValue<T>) => void): Cancel;
+  sink<T = any>(
+    entityId: EntityId,
+    callback: (value: StorageValue<T>) => void,
+  ): Cancel;
 
   /**
    * Destroy the storage provider. Used for tests only.
@@ -72,11 +75,15 @@ export abstract class BaseStorageProvider implements StorageProvider {
 
   abstract get<T = any>(entityId: EntityId): StorageValue<T> | undefined;
 
-  sink<T = any>(entityId: EntityId, callback: (value: StorageValue<T>) => void): Cancel {
+  sink<T = any>(
+    entityId: EntityId,
+    callback: (value: StorageValue<T>) => void,
+  ): Cancel {
     const key = JSON.stringify(entityId);
 
-    if (!this.subscribers.has(key))
+    if (!this.subscribers.has(key)) {
       this.subscribers.set(key, new Set<(value: StorageValue) => void>());
+    }
     const listeners = this.subscribers.get(key)!;
     listeners.add(callback);
 
@@ -87,18 +94,25 @@ export abstract class BaseStorageProvider implements StorageProvider {
   }
 
   protected notifySubscribers(key: string, value: StorageValue): void {
-    log("notify subscribers", key, JSON.stringify(value));
+    log(() => [`notify subscribers ${key} ${JSON.stringify(value)}`]);
     const listeners = this.subscribers.get(key);
-    if (this.waitingForSync.has(key) && listeners && listeners.size > 0)
-      throw new Error("Subscribers are expected to only start after first sync.");
+    if (this.waitingForSync.has(key) && listeners && listeners.size > 0) {
+      throw new Error(
+        "Subscribers are expected to only start after first sync.",
+      );
+    }
     this.resolveWaitingForSync(key);
-    if (listeners) for (const listener of listeners) listener(value);
+    if (listeners) { for (const listener of listeners) listener(value); }
   }
 
   protected waitForSync(key: string): Promise<void> {
-    if (!this.waitingForSync.has(key))
-      this.waitingForSync.set(key, new Promise((r) => this.waitingForSyncResolvers.set(key, r)));
-    log("waiting for sync", key, [...this.waitingForSync.keys()]);
+    if (!this.waitingForSync.has(key)) {
+      this.waitingForSync.set(
+        key,
+        new Promise((r) => this.waitingForSyncResolvers.set(key, r)),
+      );
+    }
+    log(() => [`waiting for sync ${key} ${[...this.waitingForSync.keys()]}`]);
     return this.waitingForSync.get(key)!;
   }
 

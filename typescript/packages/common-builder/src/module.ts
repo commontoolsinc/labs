@@ -8,15 +8,21 @@ import type {
   Opaque,
   OpaqueRef,
   toJSON,
-} from "./types.js";
-import { isModule } from "./types.js";
-import { opaqueRef } from "./opaque-ref.js";
-import { connectInputAndOutputs, moduleToJSON, traverseValue } from "./utils.js";
-import { getTopFrame } from "./recipe.js";
+} from "./types.ts";
+import { isModule } from "./types.ts";
+import { opaqueRef } from "./opaque-ref.ts";
+import {
+  connectInputAndOutputs,
+  moduleToJSON,
+  traverseValue,
+} from "./utils.ts";
+import { getTopFrame } from "./recipe.ts";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
-export function createNodeFactory<T = any, R = any>(moduleSpec: Module): ModuleFactory<T, R> {
+export function createNodeFactory<T = any, R = any>(
+  moduleSpec: Module,
+): ModuleFactory<T, R> {
   const module: Module & toJSON = {
     ...moduleSpec,
     toJSON: () => moduleToJSON(module),
@@ -47,9 +53,13 @@ export function lift<T, R>(
 export function lift<T extends z.ZodTypeAny, R extends z.ZodTypeAny>(
   argumentSchema: T,
   resultSchema: R,
-  implementation: (input: z.infer<typeof argumentSchema>) => z.infer<typeof resultSchema>,
+  implementation: (
+    input: z.infer<typeof argumentSchema>,
+  ) => z.infer<typeof resultSchema>,
 ): ModuleFactory<T, R>;
-export function lift<T, R>(implementation: (input: T) => R): ModuleFactory<T, R>;
+export function lift<T, R>(
+  implementation: (input: T) => R,
+): ModuleFactory<T, R>;
 export function lift<T>(
   implementation: (input: T) => any,
 ): ModuleFactory<T, ReturnType<typeof implementation>>;
@@ -95,11 +105,20 @@ export function handler<E, T>(
 export function handler<E extends z.ZodTypeAny, T extends z.ZodTypeAny>(
   eventSchema: E,
   stateSchema: T,
-  handler: (event: z.infer<typeof eventSchema>, props: z.infer<typeof stateSchema>) => any,
+  handler: (
+    event: z.infer<typeof eventSchema>,
+    props: z.infer<typeof stateSchema>,
+  ) => any,
 ): HandlerFactory<T, E>;
-export function handler<E, T>(handler: (event: E, props: T) => any): HandlerFactory<T, E>;
 export function handler<E, T>(
-  eventSchema: JSONSchema | z.ZodTypeAny | ((event: E, props: T) => any) | undefined,
+  handler: (event: E, props: T) => any,
+): HandlerFactory<T, E>;
+export function handler<E, T>(
+  eventSchema:
+    | JSONSchema
+    | z.ZodTypeAny
+    | ((event: E, props: T) => any)
+    | undefined,
   stateSchema?: JSONSchema | z.ZodTypeAny,
   handler?: (event: E, props: T) => any,
 ): HandlerFactory<T, E> {
@@ -115,18 +134,19 @@ export function handler<E, T>(
     stateSchema = zodToJsonSchema(stateSchema) as JSONSchema;
   }
 
-  const schema: JSONSchema | undefined =
-    eventSchema || stateSchema
-      ? {
-          type: "object",
-          properties: {
-            $event: eventSchema ?? {},
-            ...(stateSchema?.properties ?? {}),
-          },
-        }
-      : undefined;
+  const schema: JSONSchema | undefined = eventSchema || stateSchema
+    ? {
+      type: "object",
+      properties: {
+        $event: eventSchema ?? {},
+        ...(stateSchema?.properties ?? {}),
+      },
+    }
+    : undefined;
 
-  const module: Handler & toJSON & { bind: (inputs: Opaque<T>) => OpaqueRef<E> } = {
+  const module: Handler & toJSON & {
+    bind: (inputs: Opaque<T>) => OpaqueRef<E>;
+  } = {
     type: "javascript",
     implementation: handler,
     wrapper: "handler",
@@ -157,11 +177,14 @@ export function handler<E, T>(
   return factory;
 }
 
-export const derive = <In, Out>(input: Opaque<In>, f: (input: In) => Out): OpaqueRef<Out> =>
-  lift(f)(input);
+export const derive = <In, Out>(
+  input: Opaque<In>,
+  f: (input: In) => Out,
+): OpaqueRef<Out> => lift(f)(input);
 
 // unsafe closures: like derive, but doesn't need any arguments
-export const compute: <T>(fn: () => T) => OpaqueRef<T> = (fn: () => any) => lift(fn)(undefined);
+export const compute: <T>(fn: () => T) => OpaqueRef<T> = (fn: () => any) =>
+  lift(fn)(undefined);
 
 // unsafe closures: like compute, but also convert all functions to handlers
 export const render = <T>(fn: () => T): OpaqueRef<T> =>
@@ -170,5 +193,5 @@ export const render = <T>(fn: () => T): OpaqueRef<T> =>
       // Modules are functions, so we need to exclude them
       if (!isModule(v) && typeof v === "function") return handler(v)({});
       else return v;
-    }),
+    })
   );

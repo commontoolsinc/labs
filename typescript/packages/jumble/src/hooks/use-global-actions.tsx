@@ -1,5 +1,5 @@
 import "@commontools/ui";
-import { useParams, useLocation } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { MdEdit, MdOutlineStar, MdShare } from "react-icons/md";
 
 import { useAction } from "@/contexts/ActionManagerContext.tsx";
@@ -84,7 +84,7 @@ export function useGlobalActions() {
         label: "Edit",
         icon: <MdEdit size={28} />,
         to: togglePath,
-        onClick: () => { },
+        onClick: () => {},
         predicate: hasCharmId,
         priority: 50,
       }),

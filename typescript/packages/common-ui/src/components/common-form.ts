@@ -1,15 +1,18 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { baseStyles } from "./style.ts";
 import { ZodObject } from "zod";
 import { fromString } from "merkle-reference";
 
 // Reference Field Component
 @customElement("reference-field")
 export class ReferenceFieldElement extends LitElement {
-  @property({ type: String }) key = "";
-  @property({ type: String }) value = "";
-  @property({ type: String }) error = "";
+  @property({ type: String })
+  accessor key = "";
+  @property({ type: String })
+  accessor value = "";
+  @property({ type: String })
+  accessor error = "";
 
   static override styles = css`
     :host {
@@ -60,15 +63,19 @@ export class ReferenceFieldElement extends LitElement {
         class="field-input ${this.error ? "has-error" : ""}"
         .value=${this.value}
         @input=${async (e: Event) => {
-          const value = (e.target as HTMLInputElement).value;
-          this.dispatch(value);
-        }}
+      const value = (e.target as HTMLInputElement).value;
+      this.dispatch(value);
+    }}
         @blur=${async (e: Event) => {
-          const error = await this.validateReference((e.target as HTMLInputElement).value);
-          this.dispatch(this.value, error);
-        }}
+      const error = await this.validateReference(
+        (e.target as HTMLInputElement).value,
+      );
+      this.dispatch(this.value, error);
+    }}
       />
-      ${this.error ? html` <div class="field-error">${this.error}</div> ` : null}
+      ${
+      this.error ? html` <div class="field-error">${this.error}</div> ` : null
+    }
     `;
   }
 }
@@ -89,14 +96,21 @@ export class ZodFormSubmitEvent extends Event {
 
 @customElement("common-form")
 export class CommonFormElement extends LitElement {
+  static properties = {
+    value: {},
+  };
   private _internalValue: { [key: string]: any } = {};
-  @property({ type: Object }) schema: ZodObject<any> | null = null;
-  @property({ type: String, attribute: "field-path" }) fieldPath = "";
-  @property({ type: Object }) errors: { [key: string]: any } = {};
-  @property({ type: Boolean }) reset = false;
-  @property({ type: Object }) referenceFields: Set<string> = new Set();
-
   @property({ type: Object })
+  accessor schema: ZodObject<any> | null = null;
+  @property({ type: String, attribute: "field-path" })
+  accessor fieldPath = "";
+  @property({ type: Object })
+  accessor errors: { [key: string]: any } = {};
+  @property({ type: Boolean })
+  accessor reset = false;
+  @property({ type: Object })
+  accessor referenceFields: Set<string> = new Set();
+
   get value() {
     return this._internalValue;
   }
@@ -317,7 +331,9 @@ export class CommonFormElement extends LitElement {
   }
 
   async handleFileImport() {
-    const input = this.shadowRoot?.querySelector("#file-input") as HTMLInputElement;
+    const input = this.shadowRoot?.querySelector(
+      "#file-input",
+    ) as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
 
@@ -533,15 +549,17 @@ export class CommonFormElement extends LitElement {
           <div class="field">
             <label class="field-label" title="References to ${key}"> ${key} (refs) </label>
             <div class="list-controls">
-              ${refs.map(
-                (ref: string, index: number) => html`
+              ${
+          refs.map(
+            (ref: string, index: number) =>
+              html`
                   <div class="list-item">
                     <reference-field
                       .key=${key}
                       .value=${ref}
                       .error=${this.errors[`${key}.${index}`]}
                       @reference-changed=${(e: CustomEvent) =>
-                        this.handleReferenceChange(key, index, e)}
+                this.handleReferenceChange(key, index, e)}
                     ></reference-field>
                     <button
                       type="button"
@@ -552,8 +570,10 @@ export class CommonFormElement extends LitElement {
                     </button>
                   </div>
                 `,
-              )}
-              <button type="button" class="icon-button" @click=${() => this.addArrayItem(key)}>
+          )
+        }
+              <button type="button" class="icon-button" @click=${() =>
+          this.addArrayItem(key)}>
                 ➕
               </button>
             </div>
@@ -569,7 +589,8 @@ export class CommonFormElement extends LitElement {
               .key=${key}
               .value=${ref}
               .error=${this.errors[key]}
-              @reference-changed=${(e: CustomEvent) => this.handleReferenceChange(key, null, e)}
+              @reference-changed=${(e: CustomEvent) =>
+          this.handleReferenceChange(key, null, e)}
             ></reference-field>
           </div>
         `;
@@ -580,9 +601,10 @@ export class CommonFormElement extends LitElement {
     const error = this.errors[key];
     const description = schema.description;
 
-    const isLongString =
-      schema._def.typeName === "ZodString" &&
-      schema._def.checks?.some((check: any) => check.kind === "max" && check.value > 1024);
+    const isLongString = schema._def.typeName === "ZodString" &&
+      schema._def.checks?.some((check: any) =>
+        check.kind === "max" && check.value > 1024
+      );
 
     let input;
 
@@ -595,35 +617,44 @@ export class CommonFormElement extends LitElement {
 
       input = html`
         <div class="list-controls">
-          ${items.map(
-            (item: any, index: number) => html`
+          ${
+        items.map(
+          (item: any, index: number) =>
+            html`
               <div class="list-item">
-                ${isPrimitive
-                  ? html`
+                ${
+              isPrimitive
+                ? html`
                       <input
                         class="field-input"
                         .value=${item}
-                        type=${innerType._def.typeName === "ZodNumber" ? "number" : "text"}
+                        type=${
+                  innerType._def.typeName === "ZodNumber" ? "number" : "text"
+                }
                         @input=${(e: Event) =>
-                          this.handleArrayUpdate(
-                            key,
-                            index,
-                            new CustomEvent("value-changed", {
-                              detail: { value: (e.target as HTMLInputElement).value },
-                            }),
-                          )}
+                  this.handleArrayUpdate(
+                    key,
+                    index,
+                    new CustomEvent("value-changed", {
+                      detail: { value: (e.target as HTMLInputElement).value },
+                    }),
+                  )}
                       />
                     `
-                  : html`
+                : html`
                       <common-form
                         .schema=${innerType}
                         .value=${item}
-                        field-path=${this.fieldPath
-                          ? `${this.fieldPath}.${key}.${index}`
-                          : `${key}.${index}`}
-                        @value-changed=${(e: CustomEvent) => this.handleArrayUpdate(key, index, e)}
+                        field-path=${
+                  this.fieldPath
+                    ? `${this.fieldPath}.${key}.${index}`
+                    : `${key}.${index}`
+                }
+                        @value-changed=${(e: CustomEvent) =>
+                  this.handleArrayUpdate(key, index, e)}
                       ></common-form>
-                    `}
+                    `
+            }
                 <button
                   type="button"
                   class="icon-button"
@@ -633,8 +664,10 @@ export class CommonFormElement extends LitElement {
                 </button>
               </div>
             `,
-          )}
-          <button type="button" class="icon-button" @click=${() => this.addArrayItem(key)}>
+        )
+      }
+          <button type="button" class="icon-button" @click=${() =>
+        this.addArrayItem(key)}>
             ➕
           </button>
         </div>
@@ -664,8 +697,10 @@ export class CommonFormElement extends LitElement {
       if (values.length <= 3) {
         input = html`
           <div class="radio-group">
-            ${values.map(
-              (v: string) => html`
+            ${
+          values.map(
+            (v: string) =>
+              html`
                 <label>
                   <input
                     type="radio"
@@ -677,7 +712,8 @@ export class CommonFormElement extends LitElement {
                   ${v}
                 </label>
               `,
-            )}
+          )
+        }
           </div>
         `;
       } else {
@@ -686,9 +722,12 @@ export class CommonFormElement extends LitElement {
             class="field-input ${error ? "has-error" : ""}"
             @change=${(e: Event) => this.handleInput(key, e)}
           >
-            ${values.map(
-              (v: string) => html` <option value=${v} ?selected=${value === v}>${v}</option> `,
-            )}
+            ${
+          values.map(
+            (v: string) =>
+              html` <option value=${v} ?selected=${value === v}>${v}</option> `,
+          )
+        }
           </select>
         `;
       }
@@ -716,7 +755,9 @@ export class CommonFormElement extends LitElement {
         <label class="field-label" title=${description || ""}>
           ${key.replace(/([A-Z])/g, " $1").trim()}
         </label>
-        ${input} ${error ? html` <div class="field-error">${error}</div> ` : null}
+        ${input} ${
+      error ? html` <div class="field-error">${error}</div> ` : null
+    }
       </div>
     `;
   }
@@ -728,14 +769,18 @@ export class CommonFormElement extends LitElement {
 
     return html`
       <form @submit=${this.handleSubmit}>
-        ${Object.entries(this.schema.shape).map(([key, fieldSchema]) =>
-          this.renderField(key, fieldSchema),
-        )}
-        ${this.fieldPath === ""
-          ? html`
+        ${
+      Object.entries(this.schema.shape).map(([key, fieldSchema]) =>
+        this.renderField(key, fieldSchema)
+      )
+    }
+        ${
+      this.fieldPath === ""
+        ? html`
               <div class="actions">
                 <button type="submit">Submit</button>
-                <button type="button" class="icon-button" @click=${() => this.generateSampleData()}>
+                <button type="button" class="icon-button" @click=${() =>
+          this.generateSampleData()}>
                   🎲
                 </button>
                 <input
@@ -749,13 +794,15 @@ export class CommonFormElement extends LitElement {
                   type="button"
                   class="icon-button"
                   @click=${() =>
-                    (this.shadowRoot?.querySelector("#file-input") as HTMLInputElement)?.click()}
+          (this.shadowRoot?.querySelector("#file-input") as HTMLInputElement)
+            ?.click()}
                 >
                   📄
                 </button>
               </div>
             `
-          : null}
+        : null
+    }
       </form>
     `;
   }

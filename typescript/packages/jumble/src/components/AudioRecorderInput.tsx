@@ -1,5 +1,8 @@
-import React from 'react';
-import { CommonAudioRecording, useAudioRecorder } from '@/hooks/use-audio-recorder.ts';
+import React from "react";
+import {
+  CommonAudioRecording,
+  useAudioRecorder,
+} from "@/hooks/use-audio-recorder.ts";
 
 interface AudioRecorderProps {
   transcribe?: boolean;
@@ -24,7 +27,7 @@ const AudioRecorder: React.FC<AudioRecorderProps> = (props) => {
   return (
     <div className="block">
       <div
-        className={`${isRecording ? 'hidden' : ''}`}
+        className={`${isRecording ? "hidden" : ""}`}
         onClick={startRecording}
       >
         {props.startButton || (
@@ -34,7 +37,7 @@ const AudioRecorder: React.FC<AudioRecorderProps> = (props) => {
         )}
       </div>
       <div
-        className={`${!isRecording ? 'hidden' : ''}`}
+        className={`${!isRecording ? "hidden" : ""}`}
         onClick={stopRecording}
       >
         {props.stopButton || (

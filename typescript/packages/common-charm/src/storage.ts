@@ -1,26 +1,26 @@
 import {
-  type DocImpl,
-  isDoc,
-  type DocLink,
-  isDocLink,
-  type EntityId,
-  type Cancel,
   type AddCancel,
-  useCancelGroup,
-  getDocByEntityId,
-  idle,
-  isQueryResultForDereferencing,
-  getDocLinkOrThrow,
+  type Cancel,
   Cell,
+  type DocImpl,
+  type DocLink,
+  type EntityId,
+  getDocByEntityId,
+  getDocLinkOrThrow,
+  idle,
   isCell,
+  isDoc,
+  isDocLink,
+  isQueryResultForDereferencing,
+  Space,
+  useCancelGroup,
 } from "@commontools/runner";
 
 import { isStatic, markAsStatic } from "@commontools/builder";
-import { StorageProvider, StorageValue } from "./storage/base.js";
-import { RemoteStorageProvider } from "./storage/remote.js";
+import { StorageProvider, StorageValue } from "./storage/base.ts";
+import { RemoteStorageProvider } from "./storage/remote.ts";
 import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
-import { Space } from "@commontools/runner/src/space.js";
-import { InMemoryStorageProvider } from "./storage/memory.js";
+import { InMemoryStorageProvider } from "./storage/memory.ts";
 import { Signer } from "@commontools/identity";
 
 export function log(fn: () => any[]) {
@@ -251,7 +251,9 @@ class StorageImpl implements Storage {
           : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "remote");
 
       if (type === "remote") {
-        if (!this.remoteStorageUrl) throw new Error("No remote storage URL set");
+        if (!this.remoteStorageUrl) {
+          throw new Error("No remote storage URL set");
+        }
 
         provider = new RemoteStorageProvider({
           address: new URL("/api/storage/memory", this.remoteStorageUrl!),
@@ -281,7 +283,9 @@ class StorageImpl implements Storage {
     expectedInStorage: boolean = false,
   ): DocImpl<T> {
     if (isCell(subject)) subject = subject.getAsDocLink().cell;
-    if (!isDoc(subject)) throw new Error("Invalid subject: " + JSON.stringify(subject));
+    if (!isDoc(subject)) {
+      throw new Error("Invalid subject: " + JSON.stringify(subject));
+    }
     if (!subject.entityId) throw new Error("Cell has no entity ID");
 
     const entityCell = this.cellsById.get(JSON.stringify(subject.entityId)) ?? subject;
@@ -343,7 +347,9 @@ class StorageImpl implements Storage {
       if (isDoc(value)) value = { cell: value, path: [] } satisfies DocLink;
 
       // If it's a query result proxy, make it a cell reference
-      if (isQueryResultForDereferencing(value)) value = getDocLinkOrThrow(value);
+      if (isQueryResultForDereferencing(value)) {
+        value = getDocLinkOrThrow(value);
+      }
 
       // If it's a cell reference, convert it to a cell reference with an id
       if (isDocLink(value)) {
@@ -362,15 +368,16 @@ class StorageImpl implements Storage {
       } else if (isStatic(value) && !processStatic) {
         return { $static: traverse(value, path, true) };
       } else if (typeof value === "object" && value !== null) {
-        if (Array.isArray(value))
+        if (Array.isArray(value)) {
           return value.map((value, index) => traverse(value, [...path, index]));
-        else
+        } else {
           return Object.fromEntries(
             Object.entries(value).map(([key, value]: [PropertyKey, any]) => [
               key,
               traverse(value, [...path, key]),
             ]),
           );
+        }
       } else return value;
     };
 
@@ -378,7 +385,9 @@ class StorageImpl implements Storage {
     if (cell.sourceCell) {
       // If there is a source cell, make sure it has an entity ID.
       // It's always the causal child of the result cell.
-      if (!cell.sourceCell.entityId) cell.sourceCell.generateEntityId(cell.entityId!);
+      if (!cell.sourceCell.entityId) {
+        cell.sourceCell.generateEntityId(cell.entityId!);
+      }
       dependencies.add(this._ensureIsSynced(cell.sourceCell));
     }
 
@@ -493,10 +502,11 @@ class StorageImpl implements Storage {
       const loaded = await Promise.all(
         Array.from(loading).map((cell) => this.loadingPromises.get(cell)!),
       );
-      if (loading.size === 0)
+      if (loading.size === 0) {
         // If there was nothing queued, let the event loop settle before
         // continuing. We might have gotten new data from storage.
         await new Promise((r) => setTimeout(r, 0));
+      }
       loading.clear();
 
       for (const cell of loaded) {
@@ -519,7 +529,9 @@ class StorageImpl implements Storage {
       // dependencies.
       for (const { cell, type } of this.currentBatch) {
         if (type === "sync") {
-          if (this.cellIsLoading.has(cell) && !loadedCells.has(cell)) loading.add(cell);
+          if (this.cellIsLoading.has(cell) && !loadedCells.has(cell)) {
+            loading.add(cell);
+          }
         } else {
           // Invariant: Jobs with "cell" or "storage" type are already loaded.
           // But dependencies might change, even while this loop is running.
@@ -532,12 +544,13 @@ class StorageImpl implements Storage {
             JSON.stringify(cell.entityId),
             [...dependentCells!].map((c) => JSON.stringify(c.entityId)),
           ]);
-          if (dependentCells)
+          if (dependentCells) {
             Array.from(dependentCells)
               .filter(
                 (dependent) => this.cellIsLoading.has(dependent) && !loadedCells.has(dependent),
               )
               .forEach((dependent) => loading.add(dependent));
+          }
         }
       }
       log(() => ["loading", [...loading].map((c) => JSON.stringify(c.entityId))]);
@@ -576,7 +589,9 @@ class StorageImpl implements Storage {
       // TODO(seefeld): For frozen cells, show a warning if content is different.
       // But also, we should serialize the fact that it is frozen to begin with...
       if (!storageJobs.has(cell) && !cell.isFrozen()) {
-        if (source) cell.sourceCell = this.cellsById.get(JSON.stringify(source))!;
+        if (source) {
+          cell.sourceCell = this.cellsById.get(JSON.stringify(source))!;
+        }
 
         log(() => ["send to cell", JSON.stringify(cell.entityId), JSON.stringify(value)]);
         cell.send(value);

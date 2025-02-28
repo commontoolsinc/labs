@@ -1,6 +1,6 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { baseStyles } from "./style.ts";
 
 @customElement("common-hscroll")
 export class CommonHscrollElement extends LitElement {

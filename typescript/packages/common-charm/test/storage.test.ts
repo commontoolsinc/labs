@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { storage } from "../src/storage.js";
-import { StorageProvider } from "../src/storage/base.js";
-import { InMemoryStorageProvider } from "../src/storage/memory.js";
-import { getDoc, DocImpl, createRef, getSpace } from "@commontools/runner";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { storage } from "../src/storage.ts";
+import { StorageProvider } from "../src/storage/base.ts";
+import { InMemoryStorageProvider } from "../src/storage/memory.ts";
+import { createRef, DocImpl, getDoc, getSpace } from "@commontools/runner";
 
 storage.setRemoteStorage(new URL("memory://"));
 

@@ -1,8 +1,8 @@
-import { type DocImpl, getDoc } from "../doc.js";
-import { makeClient, SimpleContent, SimpleMessage } from "../llm-client.js";
-import { type Action, idle } from "../scheduler.js";
+import { type DocImpl, getDoc } from "../doc.ts";
+import { makeClient, SimpleContent, SimpleMessage } from "../llm-client.ts";
+import { type Action, idle } from "../scheduler.ts";
 import { refer } from "merkle-reference";
-import { type ReactivityLog } from "../scheduler.js";
+import { type ReactivityLog } from "../scheduler.ts";
 // TODO(ja): investigate if generateText should be replaced by
 // fetchData with streaming support
 
@@ -99,10 +99,9 @@ export function llm(
     } as StandardParams;
 
     if (model?.startsWith("openai:o1")) {
-      const combinedMessage =
-        system && prompt
-          ? (`${system}\n\n${prompt}` as SimpleContent)
-          : ((system || prompt) as SimpleContent);
+      const combinedMessage = system && prompt
+        ? (`${system}\n\n${prompt}` as SimpleContent)
+        : ((system || prompt) as SimpleContent);
 
       llmParams = {
         messages: messages ?? (combinedMessage ? [combinedMessage] : []),

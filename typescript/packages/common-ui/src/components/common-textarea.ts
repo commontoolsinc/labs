@@ -1,6 +1,6 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { baseStyles } from "./style.ts";
 
 export type CommonTextarea = {
   id: string;
@@ -81,10 +81,14 @@ export class CommonTextareaElement extends LitElement {
     `,
   ];
 
-  @property({ type: String }) value = "";
-  @property({ type: String }) placeholder = "";
-  @property({ type: String }) appearance = "default";
-  @property({ type: Number }) rows = 3;
+  @property({ type: String })
+  accessor value = "";
+  @property({ type: String })
+  accessor placeholder = "";
+  @property({ type: String })
+  accessor appearance = "default";
+  @property({ type: Number })
+  accessor rows = 3;
 
   override render() {
     const oninput = (event: Event) => {
@@ -105,7 +109,9 @@ export class CommonTextareaElement extends LitElement {
     };
 
     const onblur = () => {
-      this.dispatchEvent(new CommonTextareaBlurEvent({ id: this.id, value: this.value }));
+      this.dispatchEvent(
+        new CommonTextareaBlurEvent({ id: this.id, value: this.value }),
+      );
     };
 
     return html`

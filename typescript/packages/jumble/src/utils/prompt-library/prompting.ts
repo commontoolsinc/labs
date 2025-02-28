@@ -19,7 +19,10 @@ export function hydratePrompt(prompt: string, context: any): string {
  */
 // NOTE(jake): To parse content in <foo> tags, call with:
 // `await parseTagFromResponse(response, "foo")`
-export function parseTagFromResponse(response: string, tag: string): string | null {
+export function parseTagFromResponse(
+  response: string,
+  tag: string,
+): string | null {
   const escapedTag = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const regex = new RegExp(`<${escapedTag}>([\\s\\S]*?)</${escapedTag}>`);
   const match = response.trim().match(regex);

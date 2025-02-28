@@ -1,7 +1,7 @@
 import * as ed25519 from "@noble/ed25519";
-import { ED25519_ALG, bytesToDid, didToBytes, AuthorizationError } from "./utils.js";
-import { AsBytes, DIDKey, Signature, Signer, Verifier, Result } from "../interface.js";
-import { clone } from "../utils.js";
+import { ED25519_ALG, bytesToDid, didToBytes, AuthorizationError } from "./utils.ts";
+import { AsBytes, DIDKey, Signature, Signer, Verifier, Result } from "../interface.ts";
+import { clone } from "../utils.ts";
 
 // WebCrypto Key formats for Ed25519
 // Non-explicitly described in https://wicg.github.io/webcrypto-secure-curves/#ed25519
@@ -87,11 +87,18 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
       false,
       ["sign"],
     );
+    const privateKey = await window.crypto.subtle.importKey(
+      "pkcs8",
+      pkcs8Private,
+      ED25519_ALG,
+      false,
+      ["sign"],
+    );
     // Set the public key to be extractable for DID generation.
     const publicKey = await window.crypto.subtle.importKey("raw", rawPublic, ED25519_ALG, true, [
       "verify",
     ]);
-    let did = bytesToDid(new Uint8Array(rawPublic)) as ID;
+    let did = bytesToDid(new Uint8Array(rawPublic));
     return new NativeEd25519Signer({ publicKey, privateKey }, did);
   }
 
@@ -152,6 +159,7 @@ const PKCS8_PREFIX = new Uint8Array([48, 46, 2, 1, 0, 48, 5, 6, 3, 43, 101, 112,
 
 // Signer Ed25519 keys cannot be imported into Subtle Crypto in "raw" format.
 // Convert to "pkcs8" before doing so.
+//
 //
 // @AUDIT
 // via https://stackoverflow.com/a/79135112

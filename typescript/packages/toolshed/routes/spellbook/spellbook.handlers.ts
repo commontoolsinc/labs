@@ -9,7 +9,7 @@ import type {
   toggleLike,
   trackRun,
 } from "./spellbook.routes.ts";
-import { hc } from "hono/client";
+import { hc } from "@hono/hono/client";
 import { type AppType } from "@/app.ts";
 import env from "@/env.ts";
 

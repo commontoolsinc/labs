@@ -1,13 +1,13 @@
 import {
-  DIDKey,
+  AsBytes,
   AsyncResult,
+  AuthorizationError,
+  DID,
+  DIDKey,
+  Result,
+  Signer,
   Unit,
   Verifier,
-  Result,
-  AuthorizationError,
-  AsBytes,
-  Signer,
-  DID,
 } from "./interface.ts";
 import { base58btc } from "multiformats/bases/base58";
 import { base64pad } from "multiformats/bases/base64";
@@ -29,7 +29,9 @@ export const fromDID = <ID extends DIDKey>(
   } else if (id.startsWith(DID_KEY_PREFIX)) {
     return fromDIDKey(id as ID);
   } else {
-    return { error: new SyntaxError(`Expected did identifier instead got ${id}`) };
+    return {
+      error: new SyntaxError(`Expected did identifier instead got ${id}`),
+    };
   }
 };
 
@@ -42,7 +44,9 @@ const fromDIDKey = <ID extends DIDKey>(source: ID) => {
     default:
       return {
         error: new RangeError(
-          `Unsupported key algorithm denoted by multicode 0x${code.toString(16)}.`,
+          `Unsupported key algorithm denoted by multicode 0x${
+            code.toString(16)
+          }.`,
         ),
       };
   }
@@ -60,18 +64,24 @@ export class ED25519Verifier<ID extends DIDKey> implements Verifier<ID> {
   #did: ID;
   #key: CryptoKey | null = null;
 
-  static fromString<ID extends DIDKey>(key: string): Result<ED25519Verifier<ID>, Error> {
+  static fromString<ID extends DIDKey>(
+    key: string,
+  ): Result<ED25519Verifier<ID>, Error> {
     return this.fromBytes(base64pad.decode(key));
   }
 
-  static fromBytes<ID extends DIDKey>(bytes: Uint8Array): Result<ED25519Verifier<ID>, Error> {
+  static fromBytes<ID extends DIDKey>(
+    bytes: Uint8Array,
+  ): Result<ED25519Verifier<ID>, Error> {
     const [algorithm] = varint.decode(bytes);
     if (algorithm !== this.code) {
       return {
         error: new RangeError(
-          `Unsupported key algorithm expected 0x${this.code.toString(
-            16,
-          )}, instead of 0x${algorithm.toString(16)}`,
+          `Unsupported key algorithm expected 0x${
+            this.code.toString(
+              16,
+            )
+          }, instead of 0x${algorithm.toString(16)}`,
         ),
       };
     }
@@ -123,14 +133,32 @@ export class ED25519Signer<ID extends DIDKey> implements Signer<ID> {
   static tagSize = varint.encodingLength(this.code);
   static keySize = 32;
   static publicOffset = this.tagSize + this.keySize;
-  static size = this.tagSize + this.keySize + ED25519Verifier.tagSize + ED25519Verifier.keySize;
+  static size = this.tagSize + this.keySize + ED25519Verifier.tagSize +
+    ED25519Verifier.keySize;
 
   static fromString<ID extends DIDKey>(key: string): ED25519Signer<ID> {
     return this.fromBytes<ID>(base64pad.decode(key));
   }
   // 0x302e020100300506032b657004220420
   // via https://stackoverflow.com/a/79135112
-  static PKCS8_PREFIX = new Uint8Array([48, 46, 2, 1, 0, 48, 5, 6, 3, 43, 101, 112, 4, 34, 4, 32]);
+  static PKCS8_PREFIX = new Uint8Array([
+    48,
+    46,
+    2,
+    1,
+    0,
+    48,
+    5,
+    6,
+    3,
+    43,
+    101,
+    112,
+    4,
+    34,
+    4,
+    32,
+  ]);
 
   static fromBytes<ID extends DIDKey>(bytes: Uint8Array): ED25519Signer<ID> {
     if (bytes.byteLength !== this.size) {
@@ -142,7 +170,9 @@ export class ED25519Signer<ID extends DIDKey> implements Signer<ID> {
     {
       const [keyCode] = varint.decode(bytes);
       if (keyCode !== this.code) {
-        throw new Error(`Given bytes must be a multiformat with ${this.code} tag`);
+        throw new Error(
+          `Given bytes must be a multiformat with ${this.code} tag`,
+        );
       }
     }
 
@@ -162,7 +192,9 @@ export class ED25519Signer<ID extends DIDKey> implements Signer<ID> {
   verifier: ED25519Verifier<ID>;
   constructor(key: Uint8Array) {
     this.#rawKey = key;
-    this.verifier = new ED25519Verifier<ID>(this.#rawKey.subarray(ED25519Signer.publicOffset));
+    this.verifier = new ED25519Verifier<ID>(
+      this.#rawKey.subarray(ED25519Signer.publicOffset),
+    );
   }
   did() {
     return this.verifier.did();
@@ -172,9 +204,14 @@ export class ED25519Signer<ID extends DIDKey> implements Signer<ID> {
     try {
       const pkcs8 = new Uint8Array(this.PKCS8_PREFIX.length + this.keySize);
       pkcs8.set(this.PKCS8_PREFIX);
-      pkcs8.set(raw.subarray(this.tagSize, this.publicOffset), this.PKCS8_PREFIX.length);
+      pkcs8.set(
+        raw.subarray(this.tagSize, this.publicOffset),
+        this.PKCS8_PREFIX.length,
+      );
 
-      const key = await crypto.subtle.importKey("pkcs8", pkcs8, ALG, false, ["sign"]);
+      const key = await crypto.subtle.importKey("pkcs8", pkcs8, ALG, false, [
+        "sign",
+      ]);
       return { ok: key };
     } catch (reason) {
       return { error: reason as Error };

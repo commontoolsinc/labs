@@ -1,6 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
-import { getDoc } from "../src/doc.js";
-import { type ReactivityLog } from "../src/scheduler.js";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { assertSpyCalls, spy } from "@std/testing/mock";
+import { getDoc } from "../src/doc.ts";
+import { type ReactivityLog } from "../src/scheduler.ts";
 import {
   type Action,
   addEventHandler,
@@ -11,7 +13,7 @@ import {
   run,
   schedule,
   unschedule,
-} from "../src/scheduler.js";
+} from "../src/scheduler.ts";
 
 describe("scheduler", () => {
   it("should run actions when cells change", async () => {
@@ -21,7 +23,9 @@ describe("scheduler", () => {
     const c = getDoc(0);
     const adder: Action = (log) => {
       runCount++;
-      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      );
     };
     await run(adder);
     expect(runCount).toBe(1);
@@ -39,7 +43,9 @@ describe("scheduler", () => {
     const c = getDoc(0);
     const adder: Action = (log) => {
       runCount++;
-      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      );
     };
     schedule(adder, {
       reads: [
@@ -63,7 +69,9 @@ describe("scheduler", () => {
     const c = getDoc(0);
     const adder: Action = (log) => {
       runCount++;
-      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      );
     };
     await run(adder);
     expect(runCount).toBe(1);
@@ -88,7 +96,9 @@ describe("scheduler", () => {
     const c = getDoc(0);
     const adder: Action = (log) => {
       runCount++;
-      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      );
     };
     const cancel = schedule(adder, {
       reads: [
@@ -119,11 +129,15 @@ describe("scheduler", () => {
     const e = getDoc(0);
     const adder1: Action = (log) => {
       runs.push("adder1");
-      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      );
     };
     const adder2: Action = (log) => {
       runs.push("adder2");
-      e.asCell([], log).send(c.getAsQueryResult([], log) + d.getAsQueryResult([], log));
+      e.asCell([], log).send(
+        c.getAsQueryResult([], log) + d.getAsQueryResult([], log),
+      );
     };
     await run(adder1);
     await run(adder2);
@@ -152,18 +166,27 @@ describe("scheduler", () => {
     const d = getDoc(1);
     const e = getDoc(0);
     const adder1: Action = (log) => {
-      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      );
     };
     const adder2: Action = (log) => {
-      e.asCell([], log).send(c.getAsQueryResult([], log) + d.getAsQueryResult([], log));
+      e.asCell([], log).send(
+        c.getAsQueryResult([], log) + d.getAsQueryResult([], log),
+      );
     };
     const adder3: Action = (log) => {
       if (--maxRuns <= 0) return;
-      c.asCell([], log).send(e.getAsQueryResult([], log) + b.getAsQueryResult([], log));
+      c.asCell([], log).send(
+        e.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      );
     };
 
-    const stopped = vi.fn();
-    onError(() => stopped());
+    const stopper = {
+      stop: () => {},
+    };
+    const stopped = spy(stopper, "stop");
+    onError(() => stopper.stop());
 
     await run(adder1);
     await run(adder2);
@@ -172,7 +195,7 @@ describe("scheduler", () => {
     await idle();
 
     expect(maxRuns).toBeGreaterThan(0);
-    expect(stopped).toHaveBeenCalled();
+    assertSpyCalls(stopped, 1);
   });
 
   it("should not loop on r/w changes on its own output", async () => {
@@ -183,8 +206,11 @@ describe("scheduler", () => {
         .asCell([], log)
         .send(counter.getAsQueryResult([], log) + by.getAsQueryResult([], log));
 
-    const stopped = vi.fn();
-    onError(() => stopped());
+    const stopper = {
+      stop: () => {},
+    };
+    const stopped = spy(stopper, "stop");
+    onError(() => stopper.stop());
 
     await run(inc);
     expect(counter.get()).toBe(1);
@@ -195,7 +221,7 @@ describe("scheduler", () => {
     await idle();
     expect(counter.get()).toBe(3);
 
-    expect(stopped).not.toHaveBeenCalled();
+    assertSpyCalls(stopped, 0);
   });
 
   it("should immediately run actions that have no dependencies", async () => {

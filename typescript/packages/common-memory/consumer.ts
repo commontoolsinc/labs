@@ -1,40 +1,40 @@
 import {
-  The,
-  MemorySpace,
-  Query,
-  Transaction,
-  Entity,
-  DID,
-  Selection,
-  ProviderCommand,
-  ConsumerInvocationFor,
-  Await,
-  QueryError,
-  Result,
-  ConsumerSession,
-  ConsumerResultFor,
-  ProviderSession,
-  Reference,
-  Protocol,
-  ConnectionError,
-  ConsumerEffectFor,
   Abilities,
+  Await,
+  Cause,
+  Changes,
+  Clock,
+  Command,
+  ConnectionError,
+  ConsumerCommandFor,
+  ConsumerCommandInvocation,
+  ConsumerEffectFor,
+  ConsumerInvocationFor,
+  ConsumerResultFor,
+  ConsumerSession,
+  DID,
+  Entity,
+  InferOf,
   Invocation,
   InvocationURL,
+  MemorySpace,
+  Proto,
+  Protocol,
+  ProviderCommand,
+  ProviderSession,
+  Query,
+  QueryError,
+  Reference,
+  Result,
+  Seconds,
+  Selection,
+  Selector,
+  Signer,
+  The,
+  Transaction,
   TransactionResult,
   UCAN,
-  ConsumerCommandInvocation,
-  ConsumerCommandFor,
-  Command,
-  InferOf,
-  Proto,
-  Signer,
-  Clock,
   UTCUnixTimestampInSeconds,
-  Seconds,
-  Selector,
-  Changes,
-  Cause,
 } from "./interface.ts";
 import { refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
@@ -80,19 +80,22 @@ export const open = ({
   return consumer;
 };
 
-export const create = ({ as, clock, ttl }: { as: Signer; clock?: Clock; ttl?: Seconds }) =>
-  new MemoryConsumerSession(as, clock, ttl);
+export const create = (
+  { as, clock, ttl }: { as: Signer; clock?: Clock; ttl?: Seconds },
+) => new MemoryConsumerSession(as, clock, ttl);
 
-class MemoryConsumerSession<Space extends MemorySpace, MemoryProtocol extends Protocol<Space>>
-  extends TransformStream
+class MemoryConsumerSession<
+  Space extends MemorySpace,
+  MemoryProtocol extends Protocol<Space>,
+> extends TransformStream implements
   // <
   //   // ProviderCommand<Protocol>,
   //   InferProtocol<Protocol>,
   //   // UCAN<ConsumerCommandInvocation<Protocol>>
   //   unknown
   // >
-  implements ConsumerSession<MemoryProtocol>, MemorySession<Space>
-{
+  ConsumerSession<MemoryProtocol>,
+  MemorySession<Space> {
   static clock: Clock = {
     now(): UTCUnixTimestampInSeconds {
       return (Date.now() / 1000) | 0;
@@ -103,7 +106,9 @@ class MemoryConsumerSession<Space extends MemorySpace, MemoryProtocol extends Pr
    */
   static ttl = 60 * 60;
   controller:
-    | TransformStreamDefaultController<UCAN<ConsumerCommandInvocation<MemoryProtocol>>>
+    | TransformStreamDefaultController<
+      UCAN<ConsumerCommandInvocation<MemoryProtocol>>
+    >
     | undefined;
   invocations: Map<
     InvocationURL<Reference<Invocation>>,
@@ -116,13 +121,15 @@ class MemoryConsumerSession<Space extends MemorySpace, MemoryProtocol extends Pr
   ) {
     let controller:
       | undefined
-      | TransformStreamDefaultController<UCAN<ConsumerCommandInvocation<MemoryProtocol>>>;
+      | TransformStreamDefaultController<
+        UCAN<ConsumerCommandInvocation<MemoryProtocol>>
+      >;
     super({
       start: (control) => {
         controller = control;
       },
-      transform: (command) => this.receive(command as ProviderCommand<MemoryProtocol>),
-      cancel: () => this.cancel(),
+      transform: (command) =>
+        this.receive(command as ProviderCommand<MemoryProtocol>),
       flush: () => this.close(),
     });
     this.controller = controller;
@@ -137,8 +144,7 @@ class MemoryConsumerSession<Space extends MemorySpace, MemoryProtocol extends Pr
       const invocation = this.invocations.get(id);
       this.invocations.delete(id);
       invocation?.return(command.is as {});
-    }
-    // If it is an effect it can be for one specific subscription, yet we may
+    } // If it is an effect it can be for one specific subscription, yet we may
     // have other subscriptions that will be affected. There for we simply
     // pass effect to each one and they can detect if it concerns them.
     // ℹ️ We could optimize this in the future and try indexing subscriptions
@@ -150,7 +156,9 @@ class MemoryConsumerSession<Space extends MemorySpace, MemoryProtocol extends Pr
     }
   }
 
-  invoke<Ability extends string>(command: ConsumerCommandFor<Ability, MemoryProtocol>) {
+  invoke<Ability extends string>(
+    command: ConsumerCommandFor<Ability, MemoryProtocol>,
+  ) {
     const invocation = ConsumerInvocation.create(
       this.as.did(),
       command as Command<Ability, InferOf<MemoryProtocol>>,
@@ -161,20 +169,34 @@ class MemoryConsumerSession<Space extends MemorySpace, MemoryProtocol extends Pr
     return invocation;
   }
 
-  async execute<Ability extends string>(invocation: ConsumerInvocation<Ability, MemoryProtocol>) {
-    const { error, ok: authorization } = await Access.authorize([invocation.refer()], this.as);
+  async execute<Ability extends string>(
+    invocation: ConsumerInvocation<Ability, MemoryProtocol>,
+  ) {
+    const { error, ok: authorization } = await Access.authorize([
+      invocation.refer(),
+    ], this.as);
     if (error) {
       invocation.return({ error });
     } else {
       const url = invocation.toURL();
       const pending = this.invocations.get(url);
       if (pending) {
-        invocation.return(pending.promise as unknown as ConsumerResultFor<Ability, MemoryProtocol>);
+        invocation.return(
+          pending.promise as unknown as ConsumerResultFor<
+            Ability,
+            MemoryProtocol
+          >,
+        );
       } else {
-        this.invocations.set(url, invocation as unknown as Job<Ability, MemoryProtocol>);
-        this.send({ invocation: invocation.source, authorization } as unknown as UCAN<
-          ConsumerCommandInvocation<MemoryProtocol>
-        >);
+        this.invocations.set(
+          url,
+          invocation as unknown as Job<Ability, MemoryProtocol>,
+        );
+        this.send(
+          { invocation: invocation.source, authorization } as unknown as UCAN<
+            ConsumerCommandInvocation<MemoryProtocol>
+          >,
+        );
       }
     }
   }
@@ -185,7 +207,9 @@ class MemoryConsumerSession<Space extends MemorySpace, MemoryProtocol extends Pr
   abort(invocation: InvocationHandle) {
     this.invocations.delete(invocation.toURL());
   }
-  mount<Subject extends Space>(space: Subject): MemorySpaceConsumerSession<Subject> {
+  mount<Subject extends Space>(
+    space: Subject,
+  ): MemorySpaceConsumerSession<Subject> {
     return new MemorySpaceConsumerSession(
       space,
       this as unknown as MemoryConsumerSession<Subject, Protocol<Subject>>,
@@ -204,8 +228,12 @@ export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {
 
 export type { QueryView };
 
-class MemorySpaceConsumerSession<Space extends MemorySpace> implements MemorySpaceSession<Space> {
-  constructor(public space: Space, public session: MemoryConsumerSession<Space, Protocol<Space>>) {}
+class MemorySpaceConsumerSession<Space extends MemorySpace>
+  implements MemorySpaceSession<Space> {
+  constructor(
+    public space: Space,
+    public session: MemoryConsumerSession<Space, Protocol<Space>>,
+  ) {}
   transact(source: Transaction["args"]) {
     return this.session.invoke({
       cmd: "/memory/transact",
@@ -276,7 +304,9 @@ class ConsumerInvocation<Ability extends The, Protocol extends Proto> {
   }
 
   then<T, X>(
-    onResolve: (value: ConsumerResultFor<Ability, Protocol>) => T | PromiseLike<T>,
+    onResolve: (
+      value: ConsumerResultFor<Ability, Protocol>,
+    ) => T | PromiseLike<T>,
     onReject: (reason: any) => X | Promise<X>,
   ) {
     return this.promise.then(onResolve, onReject);
@@ -296,8 +326,14 @@ class ConsumerInvocation<Ability extends The, Protocol extends Proto> {
   perform(effect: ConsumerEffectFor<Ability, Protocol>) {}
 }
 
-class QueryView<Space extends MemorySpace, MemoryProtocol extends Protocol<Space>> {
-  static create<Space extends MemorySpace, MemoryProtocol extends Protocol<Space>>(
+class QueryView<
+  Space extends MemorySpace,
+  MemoryProtocol extends Protocol<Space>,
+> {
+  static create<
+    Space extends MemorySpace,
+    MemoryProtocol extends Protocol<Space>,
+  >(
     session: MemoryConsumerSession<Space, MemoryProtocol>,
     invocation: ConsumerInvocation<"/memory/query", MemoryProtocol>,
   ): QueryView<Space, MemoryProtocol> {
@@ -321,7 +357,9 @@ class QueryView<Space extends MemorySpace, MemoryProtocol extends Protocol<Space
   constructor(
     public session: MemoryConsumerSession<Space, MemoryProtocol>,
     public invocation: ConsumerInvocation<"/memory/query", MemoryProtocol>,
-    public promise: Promise<Result<QueryView<Space, MemoryProtocol>, QueryError | ConnectionError>>,
+    public promise: Promise<
+      Result<QueryView<Space, MemoryProtocol>, QueryError | ConnectionError>
+    >,
   ) {
     this.selection = { [this.space]: {} } as Selection<InferOf<Protocol>>;
   }
@@ -336,7 +374,10 @@ class QueryView<Space extends MemorySpace, MemoryProtocol extends Protocol<Space
 
   then<T, X>(
     onResolve: (
-      value: Result<QueryView<Space, MemoryProtocol>, QueryError | ConnectionError>,
+      value: Result<
+        QueryView<Space, MemoryProtocol>,
+        QueryError | ConnectionError
+      >,
     ) => T | PromiseLike<T>,
     onReject: (reason: any) => X | Promise<X>,
   ) {
@@ -428,14 +469,15 @@ class QuerySubscriptionInvocation<
           const [current] = state.length > 0 ? state[0] : [];
           if (cause !== current) {
             for (const pattern of this.patterns) {
-              const match =
-                (!pattern.of || pattern.of === of) &&
+              const match = (!pattern.of || pattern.of === of) &&
                 (!pattern.the || pattern.the === the) &&
                 (!pattern.cause || pattern.cause === cause);
 
               if (match) {
                 differential = differential ?? {};
-                ChangesBuilder.set(differential, [of], the, { [cause]: change });
+                ChangesBuilder.set(differential, [of], the, {
+                  [cause]: change,
+                });
               }
             }
           }

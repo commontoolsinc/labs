@@ -1,7 +1,7 @@
-import { type DocImpl, getDoc } from "../doc.js";
-import { type ReactivityLog } from "../scheduler.js";
-import { normalizeToDocLinks } from "../utils.js";
-import { type Action, idle } from "../scheduler.js";
+import { type DocImpl, getDoc } from "../doc.ts";
+import { type ReactivityLog } from "../scheduler.ts";
+import { normalizeToDocLinks } from "../utils.ts";
+import { type Action, idle } from "../scheduler.ts";
 import { refer } from "merkle-reference";
 
 /**
@@ -26,7 +26,11 @@ export function fetchData(
   cause: DocImpl<any>[],
   parentDoc: DocImpl<any>,
 ): Action {
-  const pending = getDoc(false, { fetchData: { pending: cause } }, parentDoc.space);
+  const pending = getDoc(
+    false,
+    { fetchData: { pending: cause } },
+    parentDoc.space,
+  );
   const result = getDoc<any | undefined>(
     undefined,
     {
@@ -76,8 +80,9 @@ export function fetchData(
     if (hash === previousCallHash || hash === requestHash.get()) return;
     previousCallHash = hash;
 
-    const processResponse =
-      (mode || "json") === "json" ? (r: Response) => r.json() : (r: Response) => r.text();
+    const processResponse = (mode || "json") === "json"
+      ? (r: Response) => r.json()
+      : (r: Response) => r.text();
 
     if (url === undefined) {
       pending.setAtPath([], false, log);

@@ -93,7 +93,12 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
       const newPath = await fixItCharm(charmManager, charm, runtimeError);
       if (newPath) {
         setRuntimeError(null);
-        navigate(createPath('charmShow', { charmId: newPath, replicaName: currentReplica }));
+        navigate(
+          createPath("charmShow", {
+            charmId: newPath,
+            replicaName: currentReplica,
+          }),
+        );
       }
     } catch (error) {
       console.error("Fix it error:", error);
@@ -126,36 +131,41 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
 
   return (
     <>
-      {runtimeError ? (
-        <div className="bg-red-500 text-white p-4">
-          <div className="flex items-start justify-between gap-4">
-            <pre title={runtimeError.stack} className="overflow-auto flex-1">
+      {runtimeError
+        ? (
+          <div className="bg-red-500 text-white p-4">
+            <div className="flex items-start justify-between gap-4">
+              <pre title={runtimeError.stack} className="overflow-auto flex-1">
               {runtimeError.stack}
-            </pre>
-            <div className="flex gap-2 shrink-0">
-              <button
-                onClick={handleFixIt}
-                disabled={isFixing}
-                className="px-2 py-1 bg-white text-red-500 rounded text-sm hover:bg-red-50 disabled:opacity-50 flex items-center gap-2 whitespace-nowrap"
-              >
-                {isFixing && (
-                  <DitheredCube
-                    animationSpeed={2}
-                    width={16}
-                    height={16}
-                    animate={true}
-                    cameraZoom={12}
-                  />
-                )}
-                {isFixing ? "Fixing..." : "Fix It"}
-              </button>
-              <button className="hover:opacity-75" onClick={() => setRuntimeError(null)}>
-                <LuX className="w-4 h-4" />
-              </button>
+              </pre>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  onClick={handleFixIt}
+                  disabled={isFixing}
+                  className="px-2 py-1 bg-white text-red-500 rounded text-sm hover:bg-red-50 disabled:opacity-50 flex items-center gap-2 whitespace-nowrap"
+                >
+                  {isFixing && (
+                    <DitheredCube
+                      animationSpeed={2}
+                      width={16}
+                      height={16}
+                      animate={true}
+                      cameraZoom={12}
+                    />
+                  )}
+                  {isFixing ? "Fixing..." : "Fix It"}
+                </button>
+                <button
+                  className="hover:opacity-75"
+                  onClick={() => setRuntimeError(null)}
+                >
+                  <LuX className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      ) : null}
+        )
+        : null}
       <div className={className + " overflow-clip"} ref={containerRef}></div>
     </>
   );
@@ -163,7 +173,9 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
 
 export const CharmRenderer = React.memo(RawCharmRenderer);
 
-function RawCharmRunner(props: CharmLoaderProps & Omit<CharmRendererProps, "charm">) {
+function RawCharmRunner(
+  props: CharmLoaderProps & Omit<CharmRendererProps, "charm">,
+) {
   const [charm, setCharm] = React.useState<any>(null);
   const { error, isLoading } = useCharmLoader({
     ...props,

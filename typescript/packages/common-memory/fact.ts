@@ -1,22 +1,23 @@
 import {
-  The,
-  Entity,
-  JSONValue,
-  Fact,
-  Reference,
   Assertion,
-  Retraction,
-  Invariant,
-  Unclaimed,
+  Entity,
+  Fact,
   FactSelection,
+  Invariant,
+  JSONValue,
+  Reference,
+  Retraction,
+  The,
+  Unclaimed,
 } from "./interface.ts";
-import { refer, fromString } from "merkle-reference";
+import { fromString, refer } from "merkle-reference";
 
 /**
  * Creates an unclaimed fact.
-
  */
-export const unclaimed = ({ the, of }: { the: The; of: Entity }): Unclaimed => ({
+export const unclaimed = (
+  { the, of }: { the: The; of: Entity },
+): Unclaimed => ({
   the,
   of,
 });

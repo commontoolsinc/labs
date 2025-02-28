@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
 import type { Recipe } from "@commontools/builder";
-import { getDoc } from "../src/doc.js";
-import { run, stop } from "../src/runner.js";
-import { idle } from "../src/scheduler.js";
-import { getSpace } from "../src/space.js";
+import { getDoc } from "../src/doc.ts";
+import { run, stop } from "../src/runner.ts";
+import { idle } from "../src/scheduler.ts";
+import { getSpace } from "../src/space.ts";
 
 describe("runRecipe", () => {
   it("should work with passthrough", async () => {
@@ -154,7 +155,11 @@ describe("runRecipe", () => {
     const result = run(
       mockRecipe,
       { value: 1 },
-      getDoc(undefined, "should run a simple module with no outputs", getSpace("test")),
+      getDoc(
+        undefined,
+        "should run a simple module with no outputs",
+        getSpace("test"),
+      ),
     );
     await idle();
     expect(result.getAsQueryResult()).toEqual({ result: undefined });
@@ -185,7 +190,11 @@ describe("runRecipe", () => {
     const result = run(
       mockRecipe,
       { value: 1 },
-      getDoc(undefined, "should handle incorrect inputs gracefully", getSpace("test")),
+      getDoc(
+        undefined,
+        "should handle incorrect inputs gracefully",
+        getSpace("test"),
+      ),
     );
     await idle();
     expect(result.getAsQueryResult()).toEqual({ result: undefined });
@@ -256,7 +265,11 @@ describe("runRecipe", () => {
     const result = run(
       recipe,
       inputCell,
-      getDoc(undefined, "should allow passing a cell as a binding", getSpace("test")),
+      getDoc(
+        undefined,
+        "should allow passing a cell as a binding",
+        getSpace("test"),
+      ),
     );
 
     await idle();

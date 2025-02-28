@@ -1,6 +1,6 @@
-import { LitElement, css, html } from "lit";
-import { customElement, property } from "lit/decorators.js";
-import { base } from "../shared/styles.js";
+import { css, html, LitElement } from "lit";
+import { customElement, property } from "lit/decorators.ts";
+import { base } from "../shared/styles.ts";
 
 /**
  * A button with an icon inside, using the `os-icon` component.
@@ -59,7 +59,8 @@ export class OsIconButton extends LitElement {
     `,
   ];
 
-  @property({ type: String }) icon = "";
+  @property({ type: String })
+  icon = "";
 
   override render() {
     return html`

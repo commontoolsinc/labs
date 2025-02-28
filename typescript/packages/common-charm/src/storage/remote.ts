@@ -1,6 +1,6 @@
-import type { EntityId, Cancel } from "@commontools/runner";
-import { log } from "../storage.js";
-import { type StorageProvider, type StorageValue } from "./base.js";
+import type { Cancel, EntityId } from "@commontools/runner";
+import { log } from "../storage.ts";
+import { type StorageProvider, type StorageValue } from "./base.ts";
 import type { Entity, JSONValue, MemorySpace, Protocol } from "@commontools/memory/interface";
 import * as Memory from "@commontools/memory/consumer";
 import * as Principal from "@commontools/memory/principal";
@@ -292,8 +292,7 @@ export class RemoteStorageProvider implements StorageProvider {
       // have lost connection while waiting to read a command.
       if (this.connection === socket) {
         socket.send(JSON.stringify(command));
-      }
-      // If it is no longer our connection we simply add the command into a
+      } // If it is no longer our connection we simply add the command into a
       // queue so it will be send once connection is reopen.
       else {
         this.queue.add(command);

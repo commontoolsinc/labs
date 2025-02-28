@@ -34,18 +34,18 @@ export const useCharmDetailAnimations = (details: boolean) => {
     borderRadius: details ? "16px" : "0px",
     opacity: details
       ? (() => {
-          if (scrollProgress < 0.5) return 1;
-          if (scrollProgress > 0.8) return 0;
-          return 1 - (scrollProgress - 0.5) / 0.3;
-        })()
+        if (scrollProgress < 0.5) return 1;
+        if (scrollProgress > 0.8) return 0;
+        return 1 - (scrollProgress - 0.5) / 0.3;
+      })()
       : 1,
     transform: details
       ? (() => {
-          const baseScale = 1;
-          if (scrollProgress < 0.5) return `scale(${baseScale})`;
-          if (scrollProgress > 0.8) return `scale(0)`;
-          return `scale(${baseScale * (1 - (scrollProgress - 0.5) / 0.3)})`;
-        })()
+        const baseScale = 1;
+        if (scrollProgress < 0.5) return `scale(${baseScale})`;
+        if (scrollProgress > 0.8) return `scale(0)`;
+        return `scale(${baseScale * (1 - (scrollProgress - 0.5) / 0.3)})`;
+      })()
       : "scale(1)",
     config: { tension: 400, friction: 38 },
   });

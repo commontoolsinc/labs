@@ -1,4 +1,4 @@
-export * from "./csp.js";
-export * as IPC from "./ipc.js";
-export * from "./context.js";
-export * from "./common-iframe-sandbox.js";
+export * from "./csp.ts";
+export * as IPC from "./ipc.ts";
+export * from "./context.ts";
+export * from "./common-iframe-sandbox.ts";

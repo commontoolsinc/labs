@@ -1,7 +1,7 @@
-import { LitElement, html, css } from "lit";
-import { customElement, property } from "lit/decorators.js";
-import { base } from "../shared/styles.js";
-import { classMap } from "lit/directives/class-map.js";
+import { css, html, LitElement } from "lit";
+import { customElement, property } from "lit/decorators.ts";
+import { base } from "../shared/styles.ts";
+import { classMap } from "lit/directives/class-map.ts";
 
 @customElement("os-dialog")
 export class OsDialog extends LitElement {
@@ -64,7 +64,8 @@ export class OsDialog extends LitElement {
     `,
   ];
 
-  @property({ type: Boolean, reflect: true }) open = false;
+  @property({ type: Boolean, reflect: true })
+  open = false;
 
   override connectedCallback(): void {
     window.addEventListener("keydown", this.#onEsc);

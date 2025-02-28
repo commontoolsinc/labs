@@ -9,13 +9,21 @@ import {
   setValueAtPath,
   toOpaqueRef,
 } from "@commontools/builder";
-import { createCell, type Cell } from "./cell.js";
-import { createQueryResultProxy, type QueryResult } from "./query-result-proxy.js";
-import { createRef, type EntityId, getDocByEntityId, setDocByEntityId } from "./cell-map.js";
-import { type ReactivityLog } from "./scheduler.js";
-import { type Cancel } from "./cancel.js";
-import { arrayEqual } from "./utils.js";
-import { type Space } from "./space.js";
+import { type Cell, createCell } from "./cell.ts";
+import {
+  createQueryResultProxy,
+  type QueryResult,
+} from "./query-result-proxy.ts";
+import {
+  createRef,
+  type EntityId,
+  getDocByEntityId,
+  setDocByEntityId,
+} from "./cell-map.ts";
+import { type ReactivityLog } from "./scheduler.ts";
+import { type Cancel } from "./cancel.ts";
+import { arrayEqual } from "./utils.ts";
+import { type Space } from "./space.ts";
 
 /**
  * Lowest level cell implementation.
@@ -213,15 +221,13 @@ export type DocLink = {
   path: PropertyKey[];
 };
 
-export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends []
-  ? T
+export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
   : Path extends [infer First, ...infer Rest]
     ? First extends keyof T
-      ? Rest extends PropertyKey[]
-        ? DeepKeyLookup<T[First], Rest>
-        : any
+      ? Rest extends PropertyKey[] ? DeepKeyLookup<T[First], Rest>
       : any
-    : any;
+    : any
+  : any;
 
 export function getDoc<T>(value?: T, cause?: any, space?: Space): DocImpl<T> {
   const callbacks = new Set<(value: T, path: PropertyKey[]) => void>();
@@ -238,19 +244,27 @@ export function getDoc<T>(value?: T, cause?: any, space?: Space): DocImpl<T> {
     if (existing) return existing;
   }
 
-  if (cause && !space) throw new Error("Space is required when cause is provided");
+  if (cause && !space) {
+    throw new Error("Space is required when cause is provided");
+  }
 
   const self: DocImpl<T> = {
     get: () => value as T,
-    getAsQueryResult: <Path extends PropertyKey[]>(path?: Path, log?: ReactivityLog) =>
-      createQueryResultProxy(self, path ?? [], log) as QueryResult<DeepKeyLookup<T, Path>>,
+    getAsQueryResult: <Path extends PropertyKey[]>(
+      path?: Path,
+      log?: ReactivityLog,
+    ) =>
+      createQueryResultProxy(self, path ?? [], log) as QueryResult<
+        DeepKeyLookup<T, Path>
+      >,
     asCell: <Q = T, Path extends PropertyKey[] = []>(
       path?: Path,
       log?: ReactivityLog,
       schema?: JSONSchema,
       rootSchema?: JSONSchema,
     ) => createCell<Q>(self, path || [], log, schema, rootSchema),
-    send: (newValue: T, log?: ReactivityLog) => self.setAtPath([], newValue, log),
+    send: (newValue: T, log?: ReactivityLog) =>
+      self.setAtPath([], newValue, log),
     updates: (callback: (value: T, path: PropertyKey[]) => void) => {
       callbacks.add(callback);
       return () => callbacks.delete(callback);
@@ -283,7 +297,9 @@ export function getDoc<T>(value?: T, cause?: any, space?: Space): DocImpl<T> {
     isFrozen: () => readOnly,
     generateEntityId: (cause?: any, space?: Space): void => {
       if (space) docSpace = space;
-      if (!docSpace) throw new Error("Space is required when generating entity ID");
+      if (!docSpace) {
+        throw new Error("Space is required when generating entity ID");
+      }
       entityId = generateEntityId(value, cause);
       setDocByEntityId(docSpace, entityId, self);
     },
@@ -319,7 +335,9 @@ export function getDoc<T>(value?: T, cause?: any, space?: Space): DocImpl<T> {
     set sourceCell(cell: DocImpl<any> | undefined) {
       if (sourceCell && sourceCell !== cell) {
         throw new Error(
-          `Source cell already set: ${JSON.stringify(sourceCell)} -> ${JSON.stringify(cell)}`,
+          `Source cell already set: ${JSON.stringify(sourceCell)} -> ${
+            JSON.stringify(cell)
+          }`,
         );
       }
       sourceCell = cell;
@@ -349,8 +367,8 @@ function generateEntityId(value: any, cause?: any): EntityId {
     typeof value === "object" && value !== null
       ? (value as Object)
       : value !== undefined
-        ? { value }
-        : {},
+      ? { value }
+      : {},
     cause,
   );
 }
@@ -363,7 +381,10 @@ const docLinkToOpaqueRef = new WeakMap<
 // Creates aliases to value, used in recipes to refer to this specific cell. We
 // have to memoize these, as conversion happens at multiple places when
 // creaeting the recipe.
-export function makeOpaqueRef(doc: DocImpl<any>, path: PropertyKey[]): OpaqueRef<any> {
+export function makeOpaqueRef(
+  doc: DocImpl<any>,
+  path: PropertyKey[],
+): OpaqueRef<any> {
   const frame = getTopFrame();
   if (!frame) throw new Error("No frame");
   if (!docLinkToOpaqueRef.has(frame)) {
@@ -390,7 +411,8 @@ export function makeOpaqueRef(doc: DocImpl<any>, path: PropertyKey[]): OpaqueRef
  * @returns {boolean}
  */
 export function isDoc(value: any): value is DocImpl<any> {
-  return typeof value === "object" && value !== null && value[isDocMarker] === true;
+  return typeof value === "object" && value !== null &&
+    value[isDocMarker] === true;
 }
 
 const isDocMarker = Symbol("isDoc");
@@ -403,6 +425,7 @@ const isDocMarker = Symbol("isDoc");
  */
 export function isDocLink(value: any): value is DocLink {
   return (
-    typeof value === "object" && value !== null && isDoc(value.cell) && Array.isArray(value.path)
+    typeof value === "object" && value !== null && isDoc(value.cell) &&
+    Array.isArray(value.path)
   );
 }

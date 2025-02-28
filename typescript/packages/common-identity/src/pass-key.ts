@@ -1,5 +1,5 @@
-import { Identity } from "./identity.js";
-import { bufferSourceToArrayBuffer, random } from "./utils.js";
+import { Identity } from "./identity.ts";
+import { bufferSourceToArrayBuffer, random } from "./utils.ts";
 
 const RP = "Common Tools";
 const RP_ID = new URL(window.location.href).host;
@@ -105,7 +105,9 @@ export class PassKey {
       timeout: TIMEOUT,
     };
 
-    let result = (await navigator.credentials.create({ publicKey })) as PublicKeyCredential | null;
+    let result = (await navigator.credentials.create({ publicKey })) as
+      | PublicKeyCredential
+      | null;
     if (!result) {
       throw new Error("common-identity: Could not create passkey");
     }

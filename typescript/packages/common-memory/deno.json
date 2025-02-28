@@ -1,5 +1,5 @@
 {
-  "nodeModulesDir": "auto",
+  "name": "@commontools/memory",
   "tasks": {
     "start": "deno run --allow-read --allow-write --allow-net --allow-ffi --allow-env deno.ts",
     "test": "deno test --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check"
@@ -10,7 +10,11 @@
     ]
   },
   "exports": {
-    ".": "./lib.ts"
+    ".": "./lib.ts",
+    "./interface": "./interface.ts",
+    "./fact": "./fact.ts",
+    "./changes": "./changes.ts",
+    "./consumer": "./consumer.ts"
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",

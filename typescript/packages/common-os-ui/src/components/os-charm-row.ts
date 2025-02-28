@@ -1,6 +1,6 @@
-import { LitElement, html, css } from "lit";
-import { customElement, property } from "lit/decorators.js";
-import { base } from "../shared/styles.js";
+import { css, html, LitElement } from "lit";
+import { customElement, property } from "lit/decorators.ts";
+import { base } from "../shared/styles.ts";
 
 @customElement("os-charm-row")
 export class OsCharmRow extends LitElement {
@@ -82,7 +82,11 @@ export class OsCharmRow extends LitElement {
           <os-charm-icon class="charm-row-icon" icon="${this.icon}"></os-charm-icon>
           <div class="vstack">
             <div class="charm-row-text body">${this.text}</div>
-            ${this.subtitle ? html`<div class="charm-row-subtitle">${this.subtitle}</div>` : ""}
+            ${
+      this.subtitle
+        ? html`<div class="charm-row-subtitle">${this.subtitle}</div>`
+        : ""
+    }
           </div>
         </div>
         <div class="hstack gap-sm toolbar-end charm-row-extra">

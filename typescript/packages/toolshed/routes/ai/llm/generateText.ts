@@ -1,4 +1,4 @@
-import { streamText } from "npm:ai";
+import { streamText } from "ai";
 
 import { findModel, TASK_MODELS } from "./models.ts";
 

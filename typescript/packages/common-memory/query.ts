@@ -1,4 +1,4 @@
-import type { DID, MemorySpace, Selector, Meta, Query } from "./interface.ts";
+import type { DID, MemorySpace, Meta, Query, Selector } from "./interface.ts";
 
 export const create = <Space extends MemorySpace>({
   issuer,

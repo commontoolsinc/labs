@@ -77,14 +77,22 @@ export interface AuthorizationError extends Error {
   name: "AuthorizationError";
 }
 
-export type Call<Ability extends The = The, Of extends DID = DID, Args extends {} = {}> = {
+export type Call<
+  Ability extends The = The,
+  Of extends DID = DID,
+  Args extends {} = {},
+> = {
   cmd: Ability;
   sub: Of;
   args: Command;
   nonce?: Uint8Array;
 };
 
-export type Command<Ability extends The = The, Of extends DID = DID, In extends {} = {}> = {
+export type Command<
+  Ability extends The = The,
+  Of extends DID = DID,
+  In extends {} = {},
+> = {
   cmd: Ability;
   sub: Of;
   args: In;
@@ -92,7 +100,11 @@ export type Command<Ability extends The = The, Of extends DID = DID, In extends 
   nonce?: Uint8Array;
 };
 
-export type Invocation<Ability extends The = The, Of extends DID = DID, In extends {} = {}> = {
+export type Invocation<
+  Ability extends The = The,
+  Of extends DID = DID,
+  In extends {} = {},
+> = {
   iss: DID;
   aud?: DID;
   cmd: Ability;
@@ -123,7 +135,10 @@ export type Protocol<Space extends MemorySpace = MemorySpace> = {
       }): Task<
         Result<
           Commit<Space>,
-          AuthorizationError | ConflictError | TransactionError | ConnectionError
+          | AuthorizationError
+          | ConflictError
+          | TransactionError
+          | ConnectionError
         >
       >;
       query: {
@@ -132,7 +147,10 @@ export type Protocol<Space extends MemorySpace = MemorySpace> = {
         >;
         subscribe(
           source: Subscribe<Space>["args"],
-        ): Task<Result<Unit, SystemError | AuthorizationError>, Transaction<Space>>;
+        ): Task<
+          Result<Unit, SystemError | AuthorizationError>,
+          Transaction<Space>
+        >;
         unsubscribe(
           source: Unsubscribe<Space>["args"],
         ): Task<Result<Unit, SystemError | AuthorizationError>>;
@@ -158,24 +176,29 @@ export type InferProtoMethods<
 > = {
   [Name in keyof Methods & string]: Methods[Name] extends (
     input: infer In extends {},
-  ) => Task<infer Out extends {}, infer Effect>
-    ?
-        | {
-            [The in `${Prefix}/${Name}`]: Method<
-              Protocol,
-              `${Prefix}/${Name}`,
-              In,
-              Awaited<Out>,
-              Effect
-            >;
-          }
-        | InferProtoMethods<Protocol, Methods[Name], `${Prefix}/${Name}`>
+  ) => Task<infer Out extends {}, infer Effect> ?
+      | {
+        [The in `${Prefix}/${Name}`]: Method<
+          Protocol,
+          `${Prefix}/${Name}`,
+          In,
+          Awaited<Out>,
+          Effect
+        >;
+      }
+      | InferProtoMethods<Protocol, Methods[Name], `${Prefix}/${Name}`>
     : Methods[Name] extends object
-    ? InferProtoMethods<Protocol, Methods[Name], `${Prefix}/${Name}`>
+      ? InferProtoMethods<Protocol, Methods[Name], `${Prefix}/${Name}`>
     : never;
 }[keyof Methods & string];
 
-export type Method<Protocol, Ability extends The, In extends {}, Out extends {}, Effect> = {
+export type Method<
+  Protocol,
+  Ability extends The,
+  In extends {},
+  Out extends {},
+  Effect,
+> = {
   The: Ability;
   Protocol: Protocol;
   Of: InferOf<Protocol>;
@@ -192,8 +215,16 @@ export type Method<Protocol, Ability extends The, In extends {}, Out extends {},
     nonce?: Uint8Array;
   };
   ConsumerInvocation: Invocation<Ability, InferOf<Protocol>, In>;
-  ProviderCommand: Receipt<Invocation<Ability, InferOf<Protocol>, In>, Out, Effect>;
-  Invocation: InvocationView<Invocation<Ability, InferOf<Protocol>, In>, Out, Effect>;
+  ProviderCommand: Receipt<
+    Invocation<Ability, InferOf<Protocol>, In>,
+    Out,
+    Effect
+  >;
+  Invocation: InvocationView<
+    Invocation<Ability, InferOf<Protocol>, In>,
+    Out,
+    Effect
+  >;
   Pending: {
     return(result: Out): void;
     perform(effect: Effect): void;
@@ -208,8 +239,8 @@ export type InferOf<T> = keyof T extends DID ? keyof T : never;
 /**
  * Utility type that takes union type `U` and produces intersection type of it's members.
  */
-type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (k: infer I) => void
-  ? I
+type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends
+  (k: infer I) => void ? I
   : never;
 
 export type Provider<Protocol extends {}> = {
@@ -217,65 +248,85 @@ export type Provider<Protocol extends {}> = {
 };
 
 export interface ConsumerSession<Protocol extends Proto>
-  extends TransformStream<ProviderCommand<Protocol>, UCAN<ConsumerCommandInvocation<Protocol>>> {}
+  extends
+    TransformStream<
+      ProviderCommand<Protocol>,
+      UCAN<ConsumerCommandInvocation<Protocol>>
+    > {}
 
 export interface ProviderSession<Protocol extends Proto>
-  extends TransformStream<UCAN<ConsumerCommandInvocation<Protocol>>, ProviderCommand<Protocol>> {
+  extends
+    TransformStream<
+      UCAN<ConsumerCommandInvocation<Protocol>>,
+      ProviderCommand<Protocol>
+    > {
   close(): CloseResult;
 }
 
-export type ProviderCommand<Protocol extends Proto> = ProtocolMethod<Protocol> extends {
-  ProviderCommand: Receipt<infer Command, infer Result, infer Effect>;
-}
-  ? Receipt<Command, Result, Effect>
-  : never;
+export type ProviderCommand<Protocol extends Proto> =
+  ProtocolMethod<Protocol> extends {
+    ProviderCommand: Receipt<infer Command, infer Result, infer Effect>;
+  } ? Receipt<Command, Result, Effect>
+    : never;
 
-export type ProtocolMethod<Protocol extends Proto> = InferProtocol<Protocol>[Abilities<Protocol>];
+export type ProtocolMethod<Protocol extends Proto> = InferProtocol<
+  Protocol
+>[Abilities<Protocol>];
 
-export type ConsumerCommand<Protocol extends Proto> = ProtocolMethod<Protocol> extends {
-  ConsumerCommand: Command<infer Ability, infer Of, infer In>;
-}
-  ? Command<Ability, Of, In>
-  : never;
+export type ConsumerCommand<Protocol extends Proto> =
+  ProtocolMethod<Protocol> extends {
+    ConsumerCommand: Command<infer Ability, infer Of, infer In>;
+  } ? Command<Ability, Of, In>
+    : never;
 
 export type ConsumerCommandInvocation<
   Protocol extends Proto,
   Method = ProtocolMethod<Protocol>,
 > = Method extends {
   ConsumerInvocation: Invocation;
-}
-  ? Method["ConsumerInvocation"]
+} ? Method["ConsumerInvocation"]
   : never;
 
-export type ConsumerCommandFor<Ability, Protocol extends Proto> = MethodFor<
-  Ability,
-  Protocol
->["ConsumerCommand"] & { cmd: Ability };
+export type ConsumerCommandFor<Ability, Protocol extends Proto> =
+  & MethodFor<
+    Ability,
+    Protocol
+  >["ConsumerCommand"]
+  & { cmd: Ability };
 
 export type ProviderCommandFor<Ability, Protocol extends Proto> = MethodFor<
   Ability,
   Protocol
 >["ProviderCommand"];
 
-export type ConsumerInvocationFor<Ability, Protocol extends Proto> = MethodFor<
+export type ConsumerInvocationFor<Ability, Protocol extends Proto> =
+  & MethodFor<
+    Ability,
+    Protocol
+  >["ConsumerInvocation"]
+  & { cmd: Ability };
+
+export type ConsumerInputFor<Ability, Protocol extends Proto> = MethodFor<
   Ability,
   Protocol
->["ConsumerInvocation"] & { cmd: Ability };
-
-export type ConsumerInputFor<Ability, Protocol extends Proto> = MethodFor<Ability, Protocol>["In"];
+>["In"];
 
 export type ConsumerEffectFor<Ability, Protocol extends Proto> = MethodFor<
   Ability,
   Protocol
 >["Effect"];
 
-export type ConsumerSpaceFor<Ability, Protocol extends Proto> = MethodFor<Ability, Protocol>["Of"];
+export type ConsumerSpaceFor<Ability, Protocol extends Proto> = MethodFor<
+  Ability,
+  Protocol
+>["Of"];
 
 export type MethodFor<
   Ability,
   Protocol extends Proto,
   Case = ProtocolMethod<Protocol>,
-> = Case extends Method<Protocol, Ability & The, infer In, infer Out, infer Effect>
+> = Case extends
+  Method<Protocol, Ability & The, infer In, infer Out, infer Effect>
   ? Method<Protocol, Ability & The, In, Out, Effect>
   : never;
 
@@ -284,8 +335,11 @@ export type ConsumerResultFor<Ability, Protocol extends Proto> = MethodFor<
   Protocol
 >["Out"];
 
-export interface InvocationView<Source extends Invocation, Return extends {}, Effect>
-  extends Invocation<Source["cmd"], Source["sub"], Source["args"]> {
+export interface InvocationView<
+  Source extends Invocation,
+  Return extends {},
+  Effect,
+> extends Invocation<Source["cmd"], Source["sub"], Source["args"]> {
   return(result: Await<Return>): void;
   perform(effect: Effect): void;
 
@@ -294,7 +348,11 @@ export interface InvocationView<Source extends Invocation, Return extends {}, Ef
 
 export type Task<Return, Command = never> = Iterable<Command, Return>;
 
-export type Job<Command extends {} = {}, Return extends {} | null = {} | null, Effect = unknown> = {
+export type Job<
+  Command extends {} = {},
+  Return extends {} | null = {} | null,
+  Effect = unknown,
+> = {
   invoke: Command;
   return: Return;
   effect: Effect;
@@ -312,13 +370,22 @@ export type UnwatchTask<Space extends MemorySpace> = Job<
   never
 >;
 
-export type SessionTask<Space extends MemorySpace> = UnwatchTask<Space> | WatchTask<Space>;
+export type SessionTask<Space extends MemorySpace> =
+  | UnwatchTask<Space>
+  | WatchTask<Space>;
 
 export type Receipt<Command extends {}, Result extends {} | null, Effect> =
-  | { the: "task/return"; of: InvocationURL<Reference<Command>>; is: Awaited<Result> }
-  | (Effect extends never
-      ? never
-      : { the: "task/effect"; of: InvocationURL<Reference<Command>>; is: Effect });
+  | {
+    the: "task/return";
+    of: InvocationURL<Reference<Command>>;
+    is: Awaited<Result>;
+  }
+  | (Effect extends never ? never
+    : {
+      the: "task/effect";
+      of: InvocationURL<Reference<Command>>;
+      is: Effect;
+    });
 
 export type Effect<Of extends {}, Command> = {
   of: Reference<Of>;
@@ -363,15 +430,19 @@ export interface Session<Space extends MemorySpace = MemorySpace> {
   close(): CloseResult;
 }
 
-export interface SpaceSession<Space extends MemorySpace = MemorySpace> extends Session {
+export interface SpaceSession<Space extends MemorySpace = MemorySpace>
+  extends Session {
   subject: Space;
 
-  transact(transact: Transaction<Space>): Result<Commit<Space>, ConflictError | TransactionError>;
+  transact(
+    transact: Transaction<Space>,
+  ): Result<Commit<Space>, ConflictError | TransactionError>;
   query(source: Query<Space>): Result<Selection<Space>, QueryError>;
   close(): Result<Unit, SystemError>;
 }
 
-export interface MemorySession<Space extends MemorySpace = MemorySpace> extends Session<Space> {
+export interface MemorySession<Space extends MemorySpace = MemorySpace>
+  extends Session<Space> {
   subscribe(subscriber: Subscriber<Space>): SubscribeResult;
   unsubscribe(subscriber: Subscriber<Space>): SubscribeResult;
 }
@@ -411,9 +482,13 @@ export type Entity = `${string}:${string}`;
  */
 export type The = string & { toString(): The };
 
-export type Cause<T = Assertion | Retraction | Unclaimed> = string & { toString(): Cause<T> };
+export type Cause<T = Assertion | Retraction | Unclaimed> = string & {
+  toString(): Cause<T>;
+};
 
-export type InvocationURL<T> = `job:${string}` & { toString(): InvocationURL<T> };
+export type InvocationURL<T> = `job:${string}` & {
+  toString(): InvocationURL<T>;
+};
 
 /**
  * Describes not yet claimed memory. It describes a lack of fact about memory.
@@ -585,10 +660,11 @@ export type Transaction<Space extends MemorySpace = MemorySpace> = Invocation<
   { changes: Changes }
 >;
 
-export type TransactionResult<Space extends MemorySpace = MemorySpace> = AwaitResult<
-  Commit<Space>,
-  ConflictError | TransactionError | ConnectionError | AuthorizationError
->;
+export type TransactionResult<Space extends MemorySpace = MemorySpace> =
+  AwaitResult<
+    Commit<Space>,
+    ConflictError | TransactionError | ConnectionError | AuthorizationError
+  >;
 
 export type Query<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/query",
@@ -630,16 +706,21 @@ export type SubscriptionQuery = {
 };
 
 export type SelectAll = "_";
-export type Select<Key extends string, Match> = {
-  [key in Key]: Match;
-} & {
-  _?: Match;
-};
+export type Select<Key extends string, Match> =
+  & {
+    [key in Key]: Match;
+  }
+  & {
+    _?: Match;
+  };
 
 /**
  * Selector that replica can be queried by.
  */
-export type Selector = Select<Entity, Select<The, Select<Cause, { is?: Unit }>>>;
+export type Selector = Select<
+  Entity,
+  Select<The, Select<Cause, { is?: Unit }>>
+>;
 
 export type Selection<Space extends MemorySpace = MemorySpace> = {
   [space in Space]: FactSelection;
@@ -652,19 +733,30 @@ export type Unit = {};
  */
 export type In<T> = { [For: MemorySpace]: T };
 
-export type JSONValue = null | boolean | number | string | JSONObject | JSONArray;
+export type JSONValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JSONObject
+  | JSONArray;
 
 export interface JSONObject extends Record<string, JSONValue> {}
 
 export interface JSONArray extends ArrayLike<JSONValue> {}
 
-export type AsyncResult<T extends Unit = Unit, E extends Error = Error> = Promise<Result<T, E>>;
+export type AsyncResult<T extends Unit = Unit, E extends Error = Error> =
+  Promise<Result<T, E>>;
 
 export type Await<T> = PromiseLike<T> | T;
 
-export type AwaitResult<T extends Unit = Unit, E extends Error = Error> = Await<Result<T, E>>;
+export type AwaitResult<T extends Unit = Unit, E extends Error = Error> = Await<
+  Result<T, E>
+>;
 
-export type Result<T extends Unit = Unit, E extends Error = Error> = Ok<T> | Fail<E>;
+export type Result<T extends Unit = Unit, E extends Error = Error> =
+  | Ok<T>
+  | Fail<E>;
 
 export interface Ok<T extends Unit> {
   ok: T;
@@ -785,7 +877,9 @@ export interface QueryError extends Error {
  * [keyed union]:https://ipld.io/docs/schemas/features/representation-strategies/#union-keyed-representation
  */
 export type Variant<U extends Record<string, unknown>> = {
-  [Key in keyof U]: { [K in Exclude<keyof U, Key>]?: never } & {
-    [K in Key]: U[Key];
-  };
+  [Key in keyof U]:
+    & { [K in Exclude<keyof U, Key>]?: never }
+    & {
+      [K in Key]: U[Key];
+    };
 }[keyof U];

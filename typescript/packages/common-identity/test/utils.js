@@ -2,7 +2,7 @@ export const assert = (condition) => {
   if (!condition) {
     throw new Error("assertion failed.");
   }
-}
+};
 
 export const bytesEqual = (a, b) => {
   let aLen = a.length;
@@ -12,4 +12,4 @@ export const bytesEqual = (a, b) => {
     if (a[i] != b[i]) return false;
   }
   return true;
-}
+};

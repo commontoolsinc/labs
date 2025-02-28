@@ -1,5 +1,5 @@
-export * from "./components.js";
-import theme from "./theme/light.styles.js";
+export * from "./components.ts";
+import theme from "./theme/light.styles.ts";
 import { registerIconLibrary } from "@shoelace-style/shoelace";
 
 /**
@@ -7,7 +7,9 @@ import { registerIconLibrary } from "@shoelace-style/shoelace";
  * This should typically be called on `document`.
  * Calling with no arguments will perform this on `document`.
  */
-export const adoptShoelaceStyles = (host: Document | ShadowRoot = window.document) => {
+export const adoptShoelaceStyles = (
+  host: Document | ShadowRoot = window.document,
+) => {
   host.adoptedStyleSheets = [theme.styleSheet!];
 };
 
@@ -16,7 +18,9 @@ export const registerShoelaceIcons = () => {
     resolver: (name: string) => {
       const match = name.match(/^(.*?)(_(round|sharp))?$/);
       return match
-        ? `https://cdn.jsdelivr.net/npm/@material-icons/svg@1.0.5/svg/${match[1]}/${match[3] || "outline"}.svg`
+        ? `https://cdn.jsdelivr.net/npm/@material-icons/svg@1.0.5/svg/${
+          match[1]
+        }/${match[3] || "outline"}.svg`
         : "about:blank";
     },
     mutator: (svg: SVGElement) => svg.setAttribute("fill", "currentColor"),

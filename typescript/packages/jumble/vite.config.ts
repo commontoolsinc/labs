@@ -1,13 +1,18 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import path from "node:path";
+import deno from "../deno-vite-plugin/src/index.ts";
 import tailwindcss from "@tailwindcss/vite";
+import * as path from "@std/path";
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [deno(), react(), tailwindcss()],
   server: {
-    allowedHosts: ["localhost", "127.0.0.1", "bens-macbook-pro.saga-castor.ts.net"],
+    allowedHosts: [
+      "localhost",
+      "127.0.0.1",
+      "bens-macbook-pro.saga-castor.ts.net",
+    ],
     proxy: {
       "/api/ai/spell/": {
         target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
@@ -42,24 +47,15 @@ export default defineConfig({
         changeOrigin: true,
       },
       "/api/storage/memory": {
-        target: process.env.MEMORY_URL ?? process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
+        target: process.env.MEMORY_URL ?? process.env.TOOLSHED_API_URL ??
+          "http://localhost:8000/",
         ws: true,
         changeOrigin: true,
         rewriteWsOrigin: true,
       },
     },
     headers: {
-      "*.wasm": {
-        "Content-Type": "application/wasm",
-      },
       "Service-Worker-Allowed": "/data/",
-    },
-  },
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-      // NOTE: We need to import local modules from the pnpm workspace.
-      "@commontools/ui": path.resolve(__dirname, "../common-ui/src/index.ts"),
     },
   },
 });

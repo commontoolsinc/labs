@@ -1,6 +1,6 @@
-import { LitElement, html, css } from "lit";
-import { customElement } from "lit/decorators.js";
-import { base } from "../shared/styles.js";
+import { css, html, LitElement } from "lit";
+import { customElement } from "lit/decorators.ts";
+import { base } from "../shared/styles.ts";
 
 @customElement("os-ai-icon")
 export class OsAiIcon extends LitElement {

@@ -1,9 +1,9 @@
-import { LitElement, PropertyValues, html } from "lit";
+import { html, LitElement, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { Ref, createRef, ref } from "lit/directives/ref.js";
-import * as IPC from "./ipc.js";
-import { getIframeContextHandler } from "./context.js";
-import OuterFrame from "./outer-frame.js";
+import { createRef, Ref, ref } from "lit/directives/ref.js";
+import * as IPC from "./ipc.ts";
+import { getIframeContextHandler } from "./context.ts";
+import OuterFrame from "./outer-frame.ts";
 
 // TODO this should probably be randomly generated
 let FRAME_IDS = 0;
@@ -16,13 +16,15 @@ let FRAME_IDS = 0;
 // @event {CustomEvent} load - The iframe was successfully loaded.
 @customElement("common-iframe-sandbox")
 export class CommonIframeSandboxElement extends LitElement {
-  @property({ type: String }) src = "";
-  @property({ type: Object }) context?: object;
+  @property({ type: String })
+  accessor src = "";
+  @property({ type: Object })
+  accessor context: object;
 
   // Static id for this component for its lifetime.
   private frameId: number = ++FRAME_IDS;
   // An incrementing id for each new page load to disambiguate
-  // requests between inner page loads. 
+  // requests between inner page loads.
   private instanceId: number = 0;
   private iframeRef: Ref<HTMLIFrameElement> = createRef();
   private initialized: boolean = false;
@@ -30,7 +32,7 @@ export class CommonIframeSandboxElement extends LitElement {
 
   // Called when the outer frame emits
   // `IPCGuestMessageType.Ready`, only once, upon
-  // the initial render. 
+  // the initial render.
   private onOuterReady() {
     if (this.initialized) {
       throw new Error(`common-iframe-sandbox: Already initialized.`);
@@ -51,9 +53,11 @@ export class CommonIframeSandboxElement extends LitElement {
       return;
     }
 
-
     if (!IPC.isIPCGuestMessage(event.data)) {
-      console.error("common-iframe-sandbox: Malformed message from guest.", event.data);
+      console.error(
+        "common-iframe-sandbox: Malformed message from guest.",
+        event.data,
+      );
       return;
     }
 
@@ -65,7 +69,9 @@ export class CommonIframeSandboxElement extends LitElement {
         return;
       }
       case IPC.IPCGuestMessageType.Error: {
-        console.error(`common-iframe-sandbox: Error from outer frame: ${outerMessage.data}`);
+        console.error(
+          `common-iframe-sandbox: Error from outer frame: ${outerMessage.data}`,
+        );
         return;
       }
       case IPC.IPCGuestMessageType.Ready: {
@@ -77,7 +83,7 @@ export class CommonIframeSandboxElement extends LitElement {
         return;
       }
     }
-  }
+  };
 
   // Message from the inner frame.
   private onGuestMessage(message: IPC.GuestMessage) {
@@ -105,12 +111,13 @@ export class CommonIframeSandboxElement extends LitElement {
           stack: stacktrace,
         };
 
-
-        this.dispatchEvent(new CustomEvent("common-iframe-error", {
-          detail: error,
-          bubbles: true,
-          composed: true,
-        }));
+        this.dispatchEvent(
+          new CustomEvent("common-iframe-error", {
+            detail: error,
+            bubbles: true,
+            composed: true,
+          }),
+        );
         return;
       }
 
@@ -133,7 +140,7 @@ export class CommonIframeSandboxElement extends LitElement {
         IframeHandler.write(this.context, key, value);
         return;
       }
-      
+
       case IPC.GuestMessageType.Subscribe: {
         const key = message.data;
 
@@ -141,7 +148,11 @@ export class CommonIframeSandboxElement extends LitElement {
           console.warn("common-iframe-sandbox: Already subscribed to `${key}`");
           return;
         }
-        let receipt = IframeHandler.subscribe(this.context, key, (key, value) => this.notifySubscribers(key, value));
+        let receipt = IframeHandler.subscribe(
+          this.context,
+          key,
+          (key, value) => this.notifySubscribers(key, value),
+        );
         this.subscriptions.set(key, receipt);
         return;
       }
@@ -156,7 +167,7 @@ export class CommonIframeSandboxElement extends LitElement {
         this.subscriptions.delete(key);
         return;
       }
-      
+
       case IPC.GuestMessageType.LLMRequest: {
         const payload = message.data;
         let promise = IframeHandler.onLLMRequest(this.context, payload);
@@ -197,7 +208,7 @@ export class CommonIframeSandboxElement extends LitElement {
         return;
       }
     }
-  } 
+  }
 
   private loadInnerDoc() {
     // Remove all active subscriptions when navigating
@@ -211,7 +222,7 @@ export class CommonIframeSandboxElement extends LitElement {
     }
 
     ++this.instanceId;
-    
+
     this.toGuest({
       id: this.frameId,
       type: IPC.IPCHostMessageType.LoadDocument,
@@ -226,11 +237,11 @@ export class CommonIframeSandboxElement extends LitElement {
       data: {
         type: IPC.HostMessageType.Update,
         data: [key, value],
-      }
+      },
     };
     this.toGuest(response);
   }
-        
+
   private toGuest(event: IPC.IPCHostMessage) {
     this.iframeRef.value?.contentWindow?.postMessage(event, "*");
   }
@@ -248,7 +259,7 @@ export class CommonIframeSandboxElement extends LitElement {
   }
 
   override willUpdate(changedProperties: PropertyValues<this>) {
-    if (changedProperties.has('src') && this.initialized) {
+    if (changedProperties.has("src") && this.initialized) {
       this.loadInnerDoc();
     }
   }

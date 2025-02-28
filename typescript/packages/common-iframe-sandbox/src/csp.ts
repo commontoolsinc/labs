@@ -1,6 +1,6 @@
 const SCRIPT_CDNS = [
-  'https://unpkg.com',
-  'https://cdn.tailwindcss.com'
+  "https://unpkg.com",
+  "https://cdn.tailwindcss.com",
 ];
 
 // In Chromium browsers, "'self'" selects the top frame origin from
@@ -16,7 +16,7 @@ export const CSP = `` +
   // each specific fetch directive as needed.
   `default-src 'none';` +
   // Scripts: Allow 1P, inline, and CDNs.
-  `script-src ${HOST_ORIGIN} 'unsafe-inline' ${SCRIPT_CDNS.join(' ')};` +
+  `script-src ${HOST_ORIGIN} 'unsafe-inline' ${SCRIPT_CDNS.join(" ")};` +
   // Styles: Allow 1P, inline.
   `style-src ${HOST_ORIGIN} 'unsafe-inline';` +
   // Images: Allow 1P, inline.

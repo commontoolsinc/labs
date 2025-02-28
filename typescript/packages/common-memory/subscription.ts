@@ -1,4 +1,11 @@
-import { MemorySpace, Selector, Transaction, Entity, The, Cause } from "./interface.ts";
+import {
+  Cause,
+  Entity,
+  MemorySpace,
+  Selector,
+  The,
+  Transaction,
+} from "./interface.ts";
 
 export const match = (transaction: Transaction, watched: Set<string>) => {
   for (const [of, attributes] of Object.entries(transaction.args.changes)) {
@@ -41,7 +48,9 @@ export const fromSelector = function* (selector: Selector) {
     const selector = Object.entries(attributes);
     for (const [the, members] of selector.length > 0 ? selector : all) {
       const selector = Object.entries(members);
-      for (const cause of selector.length > 0 ? Object.keys(selector) : [undefined]) {
+      for (
+        const cause of selector.length > 0 ? Object.keys(selector) : [undefined]
+      ) {
         const selector: { of?: Entity; the?: The; cause?: Cause } = {};
         if (of) {
           selector.of = of as Entity;

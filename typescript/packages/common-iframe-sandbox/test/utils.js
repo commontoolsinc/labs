@@ -47,7 +47,7 @@ export function setIframeTestHandler() {
     },
     unsubscribe(context, receipt) {
       context.unsubscribe(receipt);
-    }
+    },
   });
 }
 
@@ -65,14 +65,14 @@ export function assertEquals(a, b) {
 
 const FIXTURE_ID = "common-iframe-csp-fixture-container";
 export function render(src, context = {}) {
-  return new Promise(resolve => {
-    const parent = document.createElement('div');
+  return new Promise((resolve) => {
+    const parent = document.createElement("div");
     parent.id = FIXTURE_ID;
-    const iframe = document.createElement('common-iframe-sandbox');
+    const iframe = document.createElement("common-iframe-sandbox");
     iframe.context = context;
-    iframe.addEventListener('load', _ => {
+    iframe.addEventListener("load", (_) => {
       resolve(iframe);
-    })
+    });
     parent.appendChild(iframe);
     document.body.appendChild(parent);
     iframe.src = src;
@@ -85,15 +85,15 @@ export function cleanup() {
 }
 
 export function invertPromise(promise) {
-  return new Promise((resolve, reject) => promise.then(reject, resolve))
+  return new Promise((resolve, reject) => promise.then(reject, resolve));
 }
 
 export function waitForEvent(element, eventName, timeout = 1000) {
   return new Promise((resolve, reject) => {
     let timer = setTimeout(() => {
-      reject(`Timeout reached waiting for ${eventName}`)
+      reject(`Timeout reached waiting for ${eventName}`);
     }, timeout);
-    let handler = e => {
+    let handler = (e) => {
       element.removeEventListener(eventName, handler);
       clearTimeout(timer);
       resolve(e);

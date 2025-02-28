@@ -1,34 +1,59 @@
 // Load .env file
-import { CharmManager, createStorage } from "@commontools/charm";
-import { fetchInboxEmails } from "./gmail.ts";
+import { parse } from "https://deno.land/std/flags/mod.ts";
+import { CharmManager, compileRecipe, storage } from "@commontools/charm";
+import { getEntityId, isStream } from "@commontools/runner";
 
-const replica = "anotherjesse-test5";
-const charmId = "baedreihwuw4dbkvcel76siqztlxvloddfahgu535yupgxvkh5ml3wtqgqu";
+const { space, charmId, recipeFile, cause } = parse(Deno.args);
+
+storage.setRemoteStorage(
+  new URL(
+    process?.env?.TOOLSHED_API_URL ?? "https://toolshed.saga-castor.ts.net/",
+  ),
+);
+
 async function main() {
-  const storage = createStorage({
-    type: "remote",
-    replica,
-    url: new URL("https://toolshed.saga-castor.ts.net/"),
-  });
-  const manager = new CharmManager(storage);
+  const manager = new CharmManager(space ?? "common-cli");
   const charms = await manager.getCharms();
 
-  await new Promise((resolve) => {
-    charms.sink((charms) => {
-      if (charms.length > 0) {
-        charms.forEach((charm) => {
-          manager.get(charm.cell.entityId["/"]);
-        });
-        resolve(undefined);
-      }
-    });
+  charms.sink((charms) => {
+    console.log(
+      "charms:",
+      charms.map((c) => c.toJSON().cell["/"]),
+    );
   });
 
-  const charm = await charms.get(charmId);
-  console.log({ charm });
+  if (charmId) {
+    const charm = await manager.get(charmId);
+    charm?.sink((value) => {
+      console.log("charm:", charmId, value);
+    });
+  }
 
-  const emails = await fetchInboxEmails();
-  console.log({ emails });
+  if (recipeFile) {
+    try {
+      const recipeSrc = await Deno.readTextFile(recipeFile);
+      const recipe = await compileRecipe(recipeSrc, "recipe", []);
+      const charm = await manager.runPersistent(recipe, undefined, cause);
+      await manager.syncRecipe(charm);
+      manager.add([charm]);
+      const charmWithSchema = await manager.get(charm);
+      charmWithSchema.sink((value) => {
+        console.log("running charm:", getEntityId(charm), value);
+      });
+      const updater = charmWithSchema.get()?.updater;
+      if (isStream(updater)) {
+        console.log("running updater");
+        updater.send({ newValues: ["test"] });
+      }
+    } catch (error) {
+      console.error("Error loading and compiling recipe:", error);
+    }
+  }
+
+  return new Promise(() => {
+    // This promise never resolves, keeping the program alive
+    console.log("Program running. Press Ctrl+C to exit.");
+  });
 }
 
 main();

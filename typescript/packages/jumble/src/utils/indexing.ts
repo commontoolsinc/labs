@@ -53,19 +53,28 @@ async function indexCharm(
       messages: [
         {
           role: "user",
-          content: `Analyze this UI component JSON and describe it in a single terse paragraph with up to 2 relevant hashtags: ${stringified}`,
+          content:
+            `Analyze this UI component JSON and describe it in a single terse paragraph with up to 2 relevant hashtags: ${stringified}`,
         },
       ],
     });
     context.addJobMessage(jobId, response);
     console.log(stringified, response);
 
-    await saveToMemory(replica, charmId(charm)!, response, "text/plain;variant=description");
+    await saveToMemory(
+      replica,
+      charmId(charm)!,
+      response,
+      "text/plain;variant=description",
+    );
 
     await new Promise((resolve) => setTimeout(resolve, 200)); // Simulate work
     context.addJobMessage(jobId, `✓ Indexed charm ${charmId(charm)}`);
   } catch (error) {
-    context.addJobMessage(jobId, `Failed to index charm ${charm.entityId}: ${error}`);
+    context.addJobMessage(
+      jobId,
+      `Failed to index charm ${charm.entityId}: ${error}`,
+    );
     console.error(error);
   }
 }
@@ -102,7 +111,9 @@ export async function startCharmIndexing(
       }
 
       await Promise.all(
-        batch.map((charm) => indexCharm(charm, jobId, context, charmManager.getReplica()!)),
+        batch.map((charm) =>
+          indexCharm(charm, jobId, context, charmManager.getReplica()!)
+        ),
       );
 
       completed += batch.length;
@@ -110,7 +121,9 @@ export async function startCharmIndexing(
       context.updateJobProgress(jobId, progress);
       context.addJobMessage(
         jobId,
-        `Progress: ${completed}/${total} charms (${Math.round(progress * 100)}%)`,
+        `Progress: ${completed}/${total} charms (${
+          Math.round(progress * 100)
+        }%)`,
       );
     }
 

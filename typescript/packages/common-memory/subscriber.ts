@@ -1,16 +1,17 @@
 import {
-  SubscriberCommand,
-  SubscriptionCommand,
-  Query,
   ConsumerSession,
   Protocol,
+  Query,
+  SubscriberCommand,
+  SubscriptionCommand,
 } from "./interface.ts";
 import * as Socket from "./socket.ts";
 
 /**
  * Takes a WebSocket and creates Subscriber.
  */
-export const fromWebSocket = (socket: WebSocket): ConsumerSession<Protocol> => Socket.from(socket);
+export const fromWebSocket = (socket: WebSocket): ConsumerSession<Protocol> =>
+  Socket.from(socket);
 
 export const create = () => new SubscriberChannel();
 
@@ -25,7 +26,10 @@ class SubscriberChannel {
       start: (controller) => this.open(controller),
     });
 
-    const { readable, writable } = new TransformStream<SubscriptionCommand, SubscriptionCommand>();
+    const { readable, writable } = new TransformStream<
+      SubscriptionCommand,
+      SubscriptionCommand
+    >();
     this.writable = writable;
 
     this.commands = readable;

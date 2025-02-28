@@ -1,10 +1,12 @@
-import { LitElement, html, css } from "lit";
-import { customElement, state } from "lit/decorators.js";
+import { css, html, LitElement } from "lit";
+import { customElement, state } from "lit/decorators.ts";
 
 @customElement("os-common-import")
 export class OsCommonImport extends LitElement {
-  @state() private importedContent: object | null = null;
-  @state() private draggedFilesCount: number = 0;
+  @state()
+  private importedContent: object | null = null;
+  @state()
+  private draggedFilesCount: number = 0;
 
   static override styles = css`
     :host {
@@ -88,7 +90,8 @@ export class OsCommonImport extends LitElement {
     const minute = parseInt(dateString.slice(11, 13));
     const second = parseInt(dateString.slice(13, 15));
 
-    return new Date(Date.UTC(year, month, day, hour, minute, second)).toString();
+    return new Date(Date.UTC(year, month, day, hour, minute, second))
+      .toString();
   }
 
   private readFile(file: File): Promise<any> {
@@ -128,15 +131,19 @@ export class OsCommonImport extends LitElement {
                 const lines = event.split("\n");
                 return {
                   contentType: "calendar-event",
-                  summary: lines.find((line) => line.startsWith("SUMMARY:"))?.slice(8),
+                  summary: lines.find((line) => line.startsWith("SUMMARY:"))
+                    ?.slice(8),
                   dtstart: this.parseICSDate(
                     lines.find((line) => line.startsWith("DTSTART:"))?.slice(8),
                   ),
                   dtend: this.parseICSDate(
                     lines.find((line) => line.startsWith("DTEND:"))?.slice(6),
                   ),
-                  description: lines.find((line) => line.startsWith("DESCRIPTION:"))?.slice(12),
-                  location: lines.find((line) => line.startsWith("LOCATION:"))?.slice(9),
+                  description: lines.find((line) =>
+                    line.startsWith("DESCRIPTION:")
+                  )?.slice(12),
+                  location: lines.find((line) => line.startsWith("LOCATION:"))
+                    ?.slice(9),
                   category: lines
                     .find((line) => line.startsWith("CATEGORIES:"))
                     ?.slice(11)
@@ -183,13 +190,17 @@ export class OsCommonImport extends LitElement {
     return html`
       <div>
         <slot></slot>
-        ${this.draggedFilesCount > 0
-          ? html`
+        ${
+      this.draggedFilesCount > 0
+        ? html`
               <div class="import-message">
-                Import ${this.draggedFilesCount} file${this.draggedFilesCount > 1 ? "s" : ""}?
+                Import ${this.draggedFilesCount} file${
+          this.draggedFilesCount > 1 ? "s" : ""
+        }?
               </div>
             `
-          : ""}
+        : ""
+    }
       </div>
     `;
   }

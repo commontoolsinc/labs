@@ -1,4 +1,9 @@
-import { assert, assertEquals, assertMatch, assertObjectMatch } from "jsr:@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertMatch,
+  assertObjectMatch,
+} from "jsr:@std/assert";
 import * as Fact from "../fact.ts";
 import * as Transaction from "../transaction.ts";
 import * as Changes from "../changes.ts";
@@ -14,7 +19,9 @@ const the = "application/json";
 const test = (
   title: string,
   url: URL,
-  run: (replica: Provider.ProviderSession<Provider.Protocol>) => Promise<unknown>,
+  run: (
+    replica: Provider.ProviderSession<Provider.Protocol>,
+  ) => Promise<unknown>,
 ) => {
   const unit = async () => {
     const open = await Provider.open({
@@ -152,7 +159,11 @@ test("list single fact", store, async (session) => {
 
   const result = await memory.query({ select: { _: { [the]: {} } } });
 
-  assertEquals(result.ok?.selection, { [space.did()]: Changes.from([v1]) }, "lists single fact");
+  assertEquals(
+    result.ok?.selection,
+    { [space.did()]: Changes.from([v1]) },
+    "lists single fact",
+  );
 });
 
 test("list multiple facts", store, async (session) => {
@@ -227,7 +238,6 @@ test("list different fact types", store, async (session) => {
   assertEquals(
     jsonResult.ok?.selection,
     { [space.did()]: Changes.from([json]) },
-
     "lists json facts",
   );
 
@@ -267,13 +277,19 @@ test("list facts from different memory spaces", store, async (session) => {
     "lists alice's facts",
   );
 
-  assertEquals(bobResult.ok?.selection, { [bob.did()]: Changes.from([b]) }, "lists bob's facts");
+  assertEquals(
+    bobResult.ok?.selection,
+    { [bob.did()]: Changes.from([b]) },
+    "lists bob's facts",
+  );
 });
 
 test("subscribe receives unclaimed state", store, async (session) => {
   const memory = Consumer.open({ as: alice, session }).mount(space.did());
 
-  const { ok: query } = await memory.query({ select: { [doc]: { [the]: {} } } });
+  const { ok: query } = await memory.query({
+    select: { [doc]: { [the]: {} } },
+  });
   assert(query);
 
   assertEquals(
@@ -301,7 +317,9 @@ test("subscribe receives unclaimed state", store, async (session) => {
 test("subscribe receives unclaimed state", store, async (session) => {
   const memory = Consumer.open({ as: alice, session }).mount(space.did());
 
-  const { ok: query } = await memory.query({ select: { [doc]: { [the]: {} } } });
+  const { ok: query } = await memory.query({
+    select: { [doc]: { [the]: {} } },
+  });
   assert(query);
   assertEquals(
     query.selection,
@@ -397,7 +415,11 @@ test("cancel subscription", store, async (session) => {
   const r3 = await memory.transact({ changes: Changes.from([v3]) });
   assert(r3.ok);
 
-  assertEquals(query.facts, [v1], "cancelled subscription does not receives a transaction");
+  assertEquals(
+    query.facts,
+    [v1],
+    "cancelled subscription does not receives a transaction",
+  );
 
   const v4 = Fact.assert({ the, of: doc2, is: { doc: 2, t: 4 }, cause: v2 });
 

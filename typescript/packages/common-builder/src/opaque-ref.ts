@@ -9,10 +9,10 @@ import {
   type ShadowRef,
   toOpaqueRef,
   type UnsafeBinding,
-} from "./types.js";
-import { hasValueAtPath, setValueAtPath } from "./utils.js";
-import { getTopFrame, recipe } from "./recipe.js";
-import { createNodeFactory } from "./module.js";
+} from "./types.ts";
+import { hasValueAtPath, setValueAtPath } from "./utils.ts";
+import { getTopFrame, recipe } from "./recipe.ts";
+import { createNodeFactory } from "./module.ts";
 
 let mapFactory: NodeFactory<any, any>;
 
@@ -40,7 +40,10 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
 
   let unsafe_binding: { recipe: Recipe; path: PropertyKey[] } | undefined;
 
-  function createNestedProxy(path: PropertyKey[], target?: any): OpaqueRef<any> {
+  function createNestedProxy(
+    path: PropertyKey[],
+    target?: any,
+  ): OpaqueRef<any> {
     const methods: OpaqueRefMethods<any> = {
       get: () => unsafe_materialize(unsafe_binding, path),
       set: (newValue: Opaque<any>) => {
@@ -65,8 +68,10 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
         path,
         ...store,
       }),
-      unsafe_bindToRecipeAndPath: (recipe: Recipe, path: PropertyKey[]) =>
-        (unsafe_binding = { recipe, path }),
+      unsafe_bindToRecipeAndPath: (
+        recipe: Recipe,
+        path: PropertyKey[],
+      ) => (unsafe_binding = { recipe, path }),
       unsafe_getExternal: () => {
         if (!unsafe_binding) return proxy;
         const value = unsafe_materialize(unsafe_binding, path);
@@ -89,8 +94,10 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
         });
         return mapFactory({
           list: proxy,
-          op: recipe("mapping function", ({ element, index, array }: Opaque<any>) =>
-            fn(element, index, array),
+          op: recipe(
+            "mapping function",
+            ({ element, index, array }: Opaque<any>) =>
+              fn(element, index, array),
           ),
         });
       },
@@ -106,7 +113,9 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
         return {
           next: () => {
             if (index >= 50) {
-              throw new Error("Can't use iterator over an opaque value in an unlimited loop.");
+              throw new Error(
+                "Can't use iterator over an opaque value in an unlimited loop.",
+              );
             }
             return {
               done: false,
@@ -128,7 +137,10 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
         if (typeof prop === "symbol") {
           return methods[prop as keyof OpaqueRefMethods<any>];
         } else if (prop in methods) {
-          return createNestedProxy([...path, prop], methods[prop as keyof OpaqueRefMethods<any>]);
+          return createNestedProxy(
+            [...path, prop],
+            methods[prop as keyof OpaqueRefMethods<any>],
+          );
         } else return createNestedProxy([...path, prop], store);
       },
       set(_, prop, value) {

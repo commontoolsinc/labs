@@ -7,7 +7,12 @@ export type Rect = {
   left: number;
 };
 
-export const createRect = (top: number, right: number, bottom: number, left: number): Rect =>
+export const createRect = (
+  top: number,
+  right: number,
+  bottom: number,
+  left: number,
+): Rect =>
   Object.freeze({
     top,
     right,
@@ -70,12 +75,19 @@ export class VirtualRect {
   }
 }
 
-export const positionMenu = async (menu: HTMLElement, { top, right, bottom, left }: Rect) => {
-  const { x, y } = await computePosition(new VirtualRect(top, right, bottom, left), menu, {
-    strategy: "absolute",
-    placement: "bottom-start",
-    middleware: [shift()],
-  });
+export const positionMenu = async (
+  menu: HTMLElement,
+  { top, right, bottom, left }: Rect,
+) => {
+  const { x, y } = await computePosition(
+    new VirtualRect(top, right, bottom, left),
+    menu,
+    {
+      strategy: "absolute",
+      placement: "bottom-start",
+      middleware: [shift()],
+    },
+  );
   menu.style.position = "absolute";
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;

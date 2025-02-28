@@ -11,7 +11,11 @@ import { alice, space } from "./principal.ts";
 const the = "application/json";
 const doc = `of:${refer({ hello: "world" })}` as const;
 
-const test = (title: string, url: URL, run: (replica: Space.View) => Promise<unknown>) => {
+const test = (
+  title: string,
+  url: URL,
+  run: (replica: Space.View) => Promise<unknown>,
+) => {
   const unit = async () => {
     const session = await Space.open({
       url,
@@ -208,7 +212,11 @@ test("explicit {}", DB, async (session) => {
     changes: Changes.from([v2]),
   });
 
-  const c2 = Commit.create({ space: space.did(), transaction: update, cause: c1 });
+  const c2 = Commit.create({
+    space: space.did(),
+    transaction: update,
+    cause: c1,
+  });
 
   assertEquals(await Space.transact(session, update), {
     ok: Changes.from([c2]),
@@ -244,7 +252,11 @@ test("updates memory", DB, async (session) => {
   });
 
   const update = await Space.transact(session, change);
-  const c2 = Commit.create({ space: space.did(), transaction: change, cause: c1 });
+  const c2 = Commit.create({
+    space: space.did(),
+    transaction: change,
+    cause: c1,
+  });
 
   assertEquals(
     update,
@@ -430,7 +442,11 @@ test("concurrent identical memory creation succeeds", DB, async (session) => {
   });
 
   const update = await Space.transact(session, init);
-  const c2 = Commit.create({ space: space.did(), transaction: init, cause: c1 });
+  const c2 = Commit.create({
+    space: space.did(),
+    transaction: init,
+    cause: c1,
+  });
 
   assertEquals(update, {
     ok: Changes.from([c2]),
@@ -600,7 +616,11 @@ test("retract document", DB, async (session) => {
   });
 
   const drop = session.transact(retract);
-  const c2 = Commit.create({ space: space.did(), transaction: retract, cause: c1 });
+  const c2 = Commit.create({
+    space: space.did(),
+    transaction: retract,
+    cause: c1,
+  });
 
   assertEquals(drop, { ok: Changes.from([c2]) });
 
@@ -625,62 +645,68 @@ test("retract document", DB, async (session) => {
   );
 });
 
-test("fails to retract if expected version is out of date", DB, async (session) => {
-  const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
-  const v2 = Fact.assert({ the, of: doc, is: { v: 2 }, cause: v1 });
-  const v3 = Fact.assert({ the, of: doc, is: { v: 3 }, cause: v2 });
+test(
+  "fails to retract if expected version is out of date",
+  DB,
+  async (session) => {
+    const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
+    const v2 = Fact.assert({ the, of: doc, is: { v: 2 }, cause: v1 });
+    const v3 = Fact.assert({ the, of: doc, is: { v: 3 }, cause: v2 });
 
-  const t1 = Transaction.create({
-    issuer: alice.did(),
-    subject: space.did(),
-    changes: Changes.from([v1]),
-  });
-
-  const t2 = Transaction.create({
-    issuer: alice.did(),
-    subject: space.did(),
-    changes: Changes.from([v2]),
-  });
-
-  const t3 = Transaction.create({
-    issuer: alice.did(),
-    subject: space.did(),
-    changes: Changes.from([v3]),
-  });
-
-  assert(await session.transact(t1).ok);
-  assert(await session.transact(t2).ok);
-  assert(await session.transact(t3).ok);
-
-  const r2 = Fact.retract(v2);
-
-  const result = session.transact(
-    Transaction.create({
+    const t1 = Transaction.create({
       issuer: alice.did(),
       subject: space.did(),
-      changes: Changes.from([r2]),
-    }),
-  );
+      changes: Changes.from([v1]),
+    });
 
-  assert(result.error, "Retract fails if expected version is out of date");
-  assert(result.error.name === "ConflictError");
-  assertEquals(result.error.conflict, {
-    space: space.did(),
-    the,
-    of: doc,
-    expected: refer(v2),
-    actual: v3,
-  });
+    const t2 = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v2]),
+    });
 
-  assertMatch(
-    result.error.message,
-    RegExp(
-      `The application/json of ${doc} in ${space.did()} was expected to be ${refer(
-        v2,
-      )}, but it is ${refer(v3)}`,
-    ),
-  );
-});
+    const t3 = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v3]),
+    });
+
+    assert(await session.transact(t1).ok);
+    assert(await session.transact(t2).ok);
+    assert(await session.transact(t3).ok);
+
+    const r2 = Fact.retract(v2);
+
+    const result = session.transact(
+      Transaction.create({
+        issuer: alice.did(),
+        subject: space.did(),
+        changes: Changes.from([r2]),
+      }),
+    );
+
+    assert(result.error, "Retract fails if expected version is out of date");
+    assert(result.error.name === "ConflictError");
+    assertEquals(result.error.conflict, {
+      space: space.did(),
+      the,
+      of: doc,
+      expected: refer(v2),
+      actual: v3,
+    });
+
+    assertMatch(
+      result.error.message,
+      RegExp(
+        `The application/json of ${doc} in ${space.did()} was expected to be ${
+          refer(
+            v2,
+          )
+        }, but it is ${refer(v3)}`,
+      ),
+    );
+  },
+);
 
 test(
   "new memory creation fails after retraction",
@@ -707,8 +733,15 @@ test(
     });
 
     const retract = Space.transact(session, t2);
-    const c2 = Commit.create({ space: space.did(), transaction: t2, cause: c1 });
+    const c2 = Commit.create({
+      space: space.did(),
+      transaction: t2,
+      cause: c1,
+    });
 
+    assertEquals(retract, {
+      ok: Changes.from([c2]),
+    });
     assertEquals(retract, {
       ok: Changes.from([c2]),
     });
@@ -924,7 +957,10 @@ test("batch updates", DB, async (session) => {
 });
 
 Deno.test("fail to connect to non-existing replica", async () => {
-  const url = new URL(`./${space.did()}.sqlite`, await createTemporaryDirectory());
+  const url = new URL(
+    `./${space.did()}.sqlite`,
+    await createTemporaryDirectory(),
+  );
   const session = await Space.connect({ url });
 
   await assert(session.error, "Replica does not exist");
@@ -994,7 +1030,11 @@ test("list empty store", DB, async (session) => {
     },
     prf: [],
   });
-  assertEquals(result, { ok: { [space.did()]: { [doc]: {} } } }, "no facts exist");
+  assertEquals(
+    result,
+    { ok: { [space.did()]: { [doc]: {} } } },
+    "no facts exist",
+  );
 });
 
 test("list single fact", DB, async (session) => {

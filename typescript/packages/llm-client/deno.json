@@ -1,0 +1,7 @@
+{
+  "name": "@commontools/llm-client",
+  "tasks": {
+    "test": "echo 'No tests to run.'"
+  },
+  "exports": "./src/index.ts"
+}

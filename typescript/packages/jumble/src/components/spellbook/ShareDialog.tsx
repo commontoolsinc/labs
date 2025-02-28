@@ -1,9 +1,11 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 
 interface ShareDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (data: { title: string; description: string; tags: string[] }) => void;
+  onSubmit: (
+    data: { title: string; description: string; tags: string[] },
+  ) => void;
   defaultTitle?: string;
   isPublishing?: boolean;
 }
@@ -43,7 +45,16 @@ export function ShareDialog({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose, onSubmit, tagInput, title, description, tags, isPublishing]);
+  }, [
+    isOpen,
+    onClose,
+    onSubmit,
+    tagInput,
+    title,
+    description,
+    tags,
+    isPublishing,
+  ]);
 
   if (!isOpen) return null;
 
@@ -52,7 +63,10 @@ export function ShareDialog({
     // If tag starts with #, keep it, otherwise add it
     const tagWithHash = cleanTag.startsWith("#") ? cleanTag : `#${cleanTag}`;
     // Remove any invalid characters after the #
-    const finalTag = tagWithHash.replace(/#([^a-z0-9-]*)/, "#").replace(/[^#a-z0-9-]/g, "");
+    const finalTag = tagWithHash.replace(/#([^a-z0-9-]*)/, "#").replace(
+      /[^#a-z0-9-]/g,
+      "",
+    );
 
     if (finalTag.length > 1 && !tags.includes(finalTag)) {
       setTags([...tags, finalTag]);
@@ -121,7 +135,9 @@ export function ShareDialog({
           </div>
 
           <div className="mb-4">
-            <label className="block text-sm font-medium mb-1">Description</label>
+            <label className="block text-sm font-medium mb-1">
+              Description
+            </label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -179,13 +195,15 @@ export function ShareDialog({
               className="px-4 py-2 bg-black text-white border-2 border-black hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               disabled={isPublishing}
             >
-              {isPublishing ? (
-                "Publishing..."
-              ) : (
-                <span>
-                  Publish <span className="text-xs">cmd+enter</span>
-                </span>
-              )}
+              {isPublishing
+                ? (
+                  "Publishing..."
+                )
+                : (
+                  <span>
+                    Publish <span className="text-xs">cmd+enter</span>
+                  </span>
+                )}
             </button>
           </div>
         </form>

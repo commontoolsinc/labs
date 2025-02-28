@@ -54,7 +54,12 @@ export default function LLMTestView() {
       {result && (
         <div className="mt-8">
           <h2 className="text-xl font-semibold mb-4">Result:</h2>
-          <CodeMirror value={result} theme="dark" extensions={[javascript()]} editable={true} />;
+          <CodeMirror
+            value={result}
+            theme="dark"
+            extensions={[javascript()]}
+            editable={true}
+          />;
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-import { CSP, HOST_ORIGIN } from "./csp.js";
+import { CSP, HOST_ORIGIN } from "./csp.ts";
 
 export default `
 <!DOCTYPE html>

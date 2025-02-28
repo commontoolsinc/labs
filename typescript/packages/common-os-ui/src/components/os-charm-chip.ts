@@ -1,6 +1,6 @@
-import { LitElement, html, css } from "lit";
-import { customElement, property } from "lit/decorators.js";
-import { base } from "../shared/styles.js";
+import { css, html, LitElement } from "lit";
+import { customElement, property } from "lit/decorators.ts";
+import { base } from "../shared/styles.ts";
 
 @customElement("os-charm-chip")
 export class OsCharmChip extends LitElement {
@@ -36,9 +36,12 @@ export class OsCharmChip extends LitElement {
     `,
   ];
 
-  @property({ type: String }) text = "";
-  @property({ type: String }) icon = "";
-  @property({ type: Boolean }) highlight = false;
+  @property({ type: String })
+  text = "";
+  @property({ type: String })
+  icon = "";
+  @property({ type: Boolean })
+  highlight = false;
 
   override render() {
     return html`
@@ -72,8 +75,10 @@ export class OsCharmChipGroup extends LitElement {
     `,
   ];
 
-  @property({ type: String }) text = "";
-  @property({ type: String }) icon = "";
+  @property({ type: String })
+  text = "";
+  @property({ type: String })
+  icon = "";
 
   override render() {
     return html`

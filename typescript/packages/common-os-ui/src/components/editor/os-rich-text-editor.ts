@@ -1,32 +1,32 @@
-import { css, html, render, adoptStyles } from "lit";
+import { adoptStyles, css, html, render } from "lit";
 import { EditorState } from "prosemirror-state";
-import { EditorView, Decoration } from "prosemirror-view";
-import { Schema, Node } from "prosemirror-model";
+import { Decoration, EditorView } from "prosemirror-view";
+import { Node, Schema } from "prosemirror-model";
 import { history } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap } from "prosemirror-commands";
-import { customElement } from "lit/decorators.js";
-import { base } from "../../shared/styles.js";
-import { editorClassPlugin } from "./prosemirror/editor-class-plugin.js";
-import { verPlugin, updateVerState } from "./prosemirror/ver-plugin.js";
-import * as suggestions from "./suggestions.js";
-import * as completion from "./completion.js";
-import { createSelection, TextSelection } from "./selection.js";
+import { customElement } from "lit/decorators.ts";
+import { base } from "../../shared/styles.ts";
+import { editorClassPlugin } from "./prosemirror/editor-class-plugin.ts";
+import { updateVerState, verPlugin } from "./prosemirror/ver-plugin.ts";
+import * as suggestions from "./suggestions.ts";
+import * as completion from "./completion.ts";
+import { createSelection, TextSelection } from "./selection.ts";
 import {
   createStore,
   cursor,
   forward,
-  unknown,
-  mapFx,
   Fx,
+  mapFx,
   Store,
+  unknown,
   ValueMsg,
-} from "../../shared/store.js";
-import { createCancelGroup } from "../../shared/cancel.js";
+} from "../../shared/store.ts";
+import { createCancelGroup } from "../../shared/cancel.ts";
 import { TemplateResult } from "lit";
-import { classes, on } from "../../shared/dom.js";
-import { ClickCompletion } from "../os-floating-completions.js";
-import { Suggestion } from "./prosemirror/suggestions-plugin.js";
+import { classes, on } from "../../shared/dom.ts";
+import { ClickCompletion } from "../os-floating-completions.ts";
+import { Suggestion } from "./prosemirror/suggestions-plugin.ts";
 
 const freeze = Object.freeze;
 
@@ -42,7 +42,8 @@ export const createHashtagMsg = (value: suggestions.Msg): HashtagMsg =>
 
 export type InfoMsg = ValueMsg<"info", string>;
 
-export const createInfoMsg = (value: string): InfoMsg => freeze({ type: "info", value });
+export const createInfoMsg = (value: string): InfoMsg =>
+  freeze({ type: "info", value });
 
 export type Msg = MentionMsg | HashtagMsg | InfoMsg;
 
@@ -124,7 +125,9 @@ export const createFx = ({
   fetchCompletions,
 }: {
   view: EditorView;
-  fetchCompletions: (suggestion: Suggestion) => Promise<Array<completion.Model>>;
+  fetchCompletions: (
+    suggestion: Suggestion,
+  ) => Promise<Array<completion.Model>>;
 }) => {
   const suggestionsFx = suggestions.createFx({
     view,
@@ -173,7 +176,9 @@ const schema = new Schema({
 
 /** Parse a text string into a document of schema type */
 export const parseTextToDoc = (text: string): Node => {
-  const content = text.split("\n").map((p) => schema.nodes.paragraph.create(null, schema.text(p)));
+  const content = text.split("\n").map((p) =>
+    schema.nodes.paragraph.create(null, schema.text(p))
+  );
 
   return schema.nodes.doc.create(null, content);
 };
@@ -352,7 +357,8 @@ export class OsRichTextEditor extends HTMLElement {
     // Create fx driver
     const fx = createFx({
       view: this.#editorView,
-      fetchCompletions: (suggestion: Suggestion) => this.fetchCompletions(suggestion),
+      fetchCompletions: (suggestion: Suggestion) =>
+        this.fetchCompletions(suggestion),
     });
 
     this.#store = createStore({
@@ -392,11 +398,15 @@ export class OsRichTextEditor extends HTMLElement {
     const mentionState = this.#store.get().mention;
 
     const onHashtagClickCompletion = (event: ClickCompletion) => {
-      this.#store.send(createHashtagMsg(suggestions.createClickCompletionMsg(event.detail)));
+      this.#store.send(
+        createHashtagMsg(suggestions.createClickCompletionMsg(event.detail)),
+      );
     };
 
     const onMentionClickCompletion = (event: ClickCompletion) => {
-      this.#store.send(createMentionMsg(suggestions.createClickCompletionMsg(event.detail)));
+      this.#store.send(
+        createMentionMsg(suggestions.createClickCompletionMsg(event.detail)),
+      );
     };
 
     return html`
