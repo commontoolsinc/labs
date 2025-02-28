@@ -20,7 +20,7 @@ export type EntityId = {
  * @param cause - Optional causal source. Otherwise a random n is used.
  */
 export const createRef = (
-  source: object = {},
+  source: any = {},
   cause: any = crypto.randomUUID(),
 ): EntityId => {
   const seen = new Set<any>();

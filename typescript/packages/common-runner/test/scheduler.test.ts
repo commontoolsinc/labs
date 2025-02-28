@@ -121,7 +121,7 @@ describe("scheduler", () => {
   });
 
   it("should run actions in topological order", async () => {
-    let runs: string[] = [];
+    const runs: string[] = [];
     const a = getDoc(1);
     const b = getDoc(2);
     const c = getDoc(0);

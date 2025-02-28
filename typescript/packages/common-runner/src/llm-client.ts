@@ -10,8 +10,9 @@ export const suggestSystem =
 export const jsonDataRequest =
   `Generate dummy data as JSON as per the provided spec. Use the input to imagine what an API response would look like for a request.`;
 
-export const LLM_SERVER_URL = typeof window !== "undefined"
-  ? window.location.protocol + "//" + window.location.host + "/api/ai/llm"
+export const LLM_SERVER_URL = typeof globalThis.location !== "undefined"
+  ? globalThis.location.protocol + "//" + globalThis.location.host +
+    "/api/ai/llm"
   : "//api/ai/llm";
 export const makeClient = (url?: string) =>
   new LLMClient(url || LLM_SERVER_URL);
