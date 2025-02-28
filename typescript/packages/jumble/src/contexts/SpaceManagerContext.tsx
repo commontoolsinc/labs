@@ -13,27 +13,27 @@ const SpaceManagerContext = createContext<SpaceManagerContextType>({
 });
 
 export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { replicaName: spaceId } = useParams<{ replicaName: string }>();
-  const [effectiveSpaceId, setEffectiveSpaceId] = React.useState<string>(
-    () => localStorage.getItem("@common:lastSpaceId") || "common-knowledge",
+  const { replicaName: spaceURI } = useParams<{ replicaName: string }>();
+  const [effectiveSpaceURI, setEffectiveSpaceURI] = React.useState<string>(
+    () => localStorage.getItem("@common:lastSpaceURI") || "common-knowledge",
   );
 
   React.useEffect(() => {
-    console.log("SpaceManagerProvider", spaceId);
+    console.log("SpaceManagerProvider", spaceURI);
 
-    if (spaceId) {
+    if (spaceURI) {
       // When a replica is provided in the URL, use it and save it as the last visited
-      setEffectiveSpaceId(spaceId);
-      localStorage.setItem("@common:lastSpaceId", spaceId);
+      setEffectiveSpaceURI(spaceURI);
+      localStorage.setItem("@common:lastSpaceURI", spaceURI);
     }
-  }, [spaceId]);
+  }, [spaceURI]);
 
   const spaceManager = useMemo(() => {
-    return new SpaceManager(effectiveSpaceId);
-  }, [effectiveSpaceId]);
+    return new SpaceManager(effectiveSpaceURI);
+  }, [effectiveSpaceURI]);
 
   return (
-    <SpaceManagerContext.Provider value={{ spaceManager, currentSpaceURI: effectiveSpaceId }}>
+    <SpaceManagerContext.Provider value={{ spaceManager, currentSpaceURI: effectiveSpaceURI }}>
       {children}
     </SpaceManagerContext.Provider>
   );
