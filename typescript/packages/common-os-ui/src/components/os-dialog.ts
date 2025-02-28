@@ -68,12 +68,12 @@ export class OsDialog extends LitElement {
   open = false;
 
   override connectedCallback(): void {
-    window.addEventListener("keydown", this.#onEsc);
+    globalThis.addEventListener("keydown", this.#onEsc);
     super.connectedCallback();
   }
 
   override disconnectedCallback(): void {
-    window.removeEventListener("keydown", this.#onEsc);
+    globalThis.removeEventListener("keydown", this.#onEsc);
   }
 
   #onEsc = (event: KeyboardEvent) => {

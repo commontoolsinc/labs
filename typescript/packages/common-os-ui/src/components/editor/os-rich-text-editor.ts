@@ -384,8 +384,8 @@ export class OsRichTextEditor extends HTMLElement {
   }
 
   /** TODO implement */
-  async fetchCompletions(_suggestion: Suggestion) {
-    return [];
+  fetchCompletions(_suggestion: Suggestion) {
+    return Promise.resolve([]);
   }
 
   /**

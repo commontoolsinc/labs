@@ -62,7 +62,7 @@ export class ReferenceFieldElement extends LitElement {
       <input
         class="field-input ${this.error ? "has-error" : ""}"
         .value=${this.value}
-        @input=${async (e: Event) => {
+        @input=${(e: Event) => {
       const value = (e.target as HTMLInputElement).value;
       this.dispatch(value);
     }}
@@ -96,7 +96,7 @@ export class ZodFormSubmitEvent extends Event {
 
 @customElement("common-form")
 export class CommonFormElement extends LitElement {
-  static properties = {
+  static override properties = {
     value: {},
   };
   private _internalValue: { [key: string]: any } = {};
@@ -316,10 +316,11 @@ export class CommonFormElement extends LitElement {
         case "ZodObject":
           sample[key] = {};
           break;
-        case "ZodEnum":
+        case "ZodEnum": {
           const values = (fieldSchema as any)._def.values;
           sample[key] = values[Math.floor(Math.random() * values.length)];
           break;
+        }
         case "ZodArray":
           sample[key] = [];
           break;
@@ -486,7 +487,7 @@ export class CommonFormElement extends LitElement {
     }
 
     // Create a copy of the current value to modify
-    let submitValue = { ...this._internalValue };
+    const submitValue = { ...this._internalValue };
 
     // If there are reference fields, convert them before submission
     if (this.referenceFields.size > 0) {

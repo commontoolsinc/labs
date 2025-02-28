@@ -214,18 +214,18 @@ const replaceFx = (
   suggestion: Suggestion | null,
   completion: string | null,
 ) =>
-async () => {
+() => {
   if (suggestion == null) {
-    return createInfoMsg("No active suggestion to replace");
+    return Promise.resolve(createInfoMsg("No active suggestion to replace"));
   }
   if (completion == null) {
-    return createInfoMsg("No completion to replace");
+    return Promise.resolve(createInfoMsg("No completion to replace"));
   }
   executeCommand(
     view,
     replaceWithText(suggestion.from, suggestion.to, completion),
   );
-  return createInfoMsg("Replaced suggestion with completion");
+  return Promise.resolve(createInfoMsg("Replaced suggestion with completion"));
 };
 
 /**

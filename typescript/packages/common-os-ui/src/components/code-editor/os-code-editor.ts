@@ -135,9 +135,9 @@ export class OsCodeEditor extends ReactiveElement {
     const ext = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
         if (this.#docChangeTimeout) {
-          window.clearTimeout(this.#docChangeTimeout);
+          globalThis.clearTimeout(this.#docChangeTimeout);
         }
-        this.#docChangeTimeout = window.setTimeout(() => {
+        this.#docChangeTimeout = globalThis.setTimeout(() => {
           this.dispatchEvent(new CustomEvent("doc-change", { detail: update }));
         }, 500);
       }
@@ -154,7 +154,7 @@ export class OsCodeEditor extends ReactiveElement {
     this.destroy.add(() => {
       this.#editorView?.destroy();
       if (this.#docChangeTimeout) {
-        window.clearTimeout(this.#docChangeTimeout);
+        globalThis.clearTimeout(this.#docChangeTimeout);
       }
     });
   }
