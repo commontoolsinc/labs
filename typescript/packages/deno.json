@@ -16,7 +16,7 @@
     "./toolshed"
   ],
   "tasks": {
-    "build": "./scripts/build.ts"
+    "test-all": "./scripts/test-all.sh"
   },
   "compilerOptions": {
     "jsx": "react-jsxdev",
