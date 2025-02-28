@@ -115,7 +115,7 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
     // Get the code verifier for this state
     const codeVerifier = codeVerifiers.get(state);
     if (!codeVerifier) {
-      logger.error({ state }, "No code verifier found for state");
+      logger.error(state, "No code verifier found for state");
       const callbackResult: CallbackResult = {
         success: false,
         error: "Invalid state parameter",
@@ -167,7 +167,7 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
     };
     return createCallbackResponse(callbackResult);
   } catch (error) {
-    logger.error({ error }, "Failed to process callback");
+    logger.error(error, "Failed to process callback");
     const callbackResult: CallbackResult = {
       success: false,
       error: "Failed to process callback",

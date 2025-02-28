@@ -1,7 +1,7 @@
 import { OAuth2Client } from "jsr:@cmd-johnson/oauth2-client@^2.0.0";
 import env from "@/env.ts";
 import { storage } from "@commontools/charm";
-import { getCellFromDocLink, type DocLink } from "@commontools/runner";
+import { getCellFromDocLink, getSpace, type DocLink } from "@commontools/runner";
 import { Context } from "@hono/hono/context";
 
 // Types
@@ -93,7 +93,9 @@ export function generateCallbackHtml(result: Record<string, unknown>): string {
       <h1 class="${result.success ? "success" : "error"}">
         ${result.success ? "Authentication Successful!" : "Authentication Failed"}
       </h1>
-      <p>${result.success ? "You can close this window now." : result.error || "An error occurred"}</p>
+      <p>${
+        result.success ? "You can close this window now." : result.error || "An error occurred"
+      }</p>
       <script>
         // Send message to opener and close window
         if (window.opener) {
@@ -137,15 +139,13 @@ export async function getAuthCellAndStorage(docLink: DocLink | string) {
     // Parse string to docLink if needed
     const parsedDocLink = typeof docLink === "string" ? JSON.parse(docLink) : docLink;
 
-    const storage = createStorage({
-      type: "remote",
-      replica: "uh2",
-      url: new URL("http://localhost:8000"),
-    });
+    storage.setRemoteStorage(new URL(env.MEMORY_URL));
 
     // Load the auth cell
     await storage.syncCell(parsedDocLink.cell, true);
-    const authCell = getCellFromDocLink(parsedDocLink);
+
+    // FIXME(jake): We need to somehow get the space for the doclink, hardcoding for the moment.
+    const authCell = getCellFromDocLink(getSpace("uh4"), parsedDocLink);
 
     return { authCell, storage };
   } catch (error) {
@@ -156,7 +156,10 @@ export async function getAuthCellAndStorage(docLink: DocLink | string) {
 // Persist encrypted tokens to the auth cell
 export async function persistTokens(tokens: OAuth2Tokens, authCellDocLink: string | DocLink) {
   try {
+    console.log("authCellDocLink", authCellDocLink);
     const { authCell, storage } = await getAuthCellAndStorage(authCellDocLink);
+
+    console.log("authCellzzz", authCell);
 
     if (!authCell) {
       throw new Error("Auth cell not found");
