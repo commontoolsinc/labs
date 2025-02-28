@@ -6,7 +6,7 @@ import { derive, type OpaqueRef, recipe, stream, UI } from "./index.ts";
 
 type PathSegment = PropertyKey | { fn: string; args: any[] };
 const getPath = Symbol("getPath");
-type PathCollector = Function & {
+type PathCollector = ((this: any, ...args: any[]) => any) & {
   [getPath]: PathSegment[];
   [key: string]: PathCollector;
 };
@@ -44,7 +44,7 @@ function createPathCollector(path: PathSegment[] = []): PathCollector {
 export const $ = createPathCollector();
 
 // Resolve $ to a paths on `self`
-// TODO: Also for non-top-level ones
+// TODO(seefeld): Also for non-top-level ones
 function resolve$(self: OpaqueRef<any>, query: PathCollector) {
   const entries = Object.entries(query);
   const result: Record<string, any> = {};
