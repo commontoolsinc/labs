@@ -1,11 +1,5 @@
 {
   "editor.formatOnSave": true,
-  "editor.defaultFormatter": "esbenp.prettier-vscode",
-  "deno.enable": false,
-  "deno.enablePaths": [
-    "typescript/packages/common-memory",
-    "typescript/packages/toolshed",
-    "typescript/packages/common-cli",
-    "typescript/packages/common-charm"
-  ]
+  "editor.defaultFormatter": "denoland.vscode-deno",
+  "deno.enable": true
 }
