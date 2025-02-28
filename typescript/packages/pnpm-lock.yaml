@@ -256,9 +256,15 @@ importers:
 
   common-memory:
     dependencies:
+      '@ipld/dag-json':
+        specifier: ^10.2.3
+        version: 10.2.3
       merkle-reference:
         specifier: ^2.0.1
         version: 2.0.1
+      multiformats:
+        specifier: ^13.3.2
+        version: 13.3.2
 
   common-os-ui:
     dependencies:
@@ -1030,6 +1036,10 @@ packages:
   '@humanwhocodes/retry@0.4.1':
     resolution: {integrity: sha512-c7hNEllBlenFTHBky65mhq8WD2kbN9Q6gk0bTk8lSBvc554jpXSkST1iePudpt7+A/AQvuHs9EMqjHDXMY1lrA==}
     engines: {node: '>=18.18'}
+
+  '@ipld/dag-json@10.2.3':
+    resolution: {integrity: sha512-itacv1j1hvYgLox2B42Msn70QLzcr0MEo5yGIENuw2SM/lQzq9bmBiMky+kDsIrsqqblKTXcHBZnnmK7D4a6ZQ==}
+    engines: {node: '>=16.0.0', npm: '>=7.0.0'}
 
   '@jridgewell/gen-mapping@0.3.8':
     resolution: {integrity: sha512-imAbBGkb+ebQyxKgzv5Hu2nmROxoDOXHh80evxdoXNOrvAnVx7zimzc1Oo5h9RlfV4vPXaE2iM5pOFbvOCClWA==}
@@ -2287,6 +2297,10 @@ packages:
 
   caniuse-lite@1.0.30001696:
     resolution: {integrity: sha512-pDCPkvzfa39ehJtJ+OwGT/2yvT2SbjfHhiIW2LWOAcMQ7BzwxT/XuyUp4OTOd0XFWA6BKw0JalnBHgSi5DGJBQ==}
+
+  cborg@4.2.8:
+    resolution: {integrity: sha512-z9M+TZCWQbf89Gl8ulpYThM9fqmkjBDdMiq+wS72OAK2zqDaXNquoAWFDrAKHQAukVtPspmadB9chuFC0ut7ew==}
+    hasBin: true
 
   ccount@2.0.1:
     resolution: {integrity: sha512-eyrF0jiFpY+3drT6383f1qhkbGsLSifNAjA61IUjZjmLCWjItY6LB9ft9YhoDgwfmclB2zhu51Lc7+95b8NRAg==}
@@ -5265,6 +5279,11 @@ snapshots:
 
   '@humanwhocodes/retry@0.4.1': {}
 
+  '@ipld/dag-json@10.2.3':
+    dependencies:
+      cborg: 4.2.8
+      multiformats: 13.3.2
+
   '@jridgewell/gen-mapping@0.3.8':
     dependencies:
       '@jridgewell/set-array': 1.2.1
@@ -6812,6 +6831,8 @@ snapshots:
       three: 0.173.0
 
   caniuse-lite@1.0.30001696: {}
+
+  cborg@4.2.8: {}
 
   ccount@2.0.1: {}
 
