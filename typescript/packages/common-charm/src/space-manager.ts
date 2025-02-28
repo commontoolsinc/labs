@@ -47,6 +47,11 @@ export class SpaceManager {
   private charmsDoc: DocImpl<DocLink[]>;
   private charms: Cell<Cell<Charm>[]>;
 
+  /**
+   * Instantiate a new SpaceManager.
+   *
+   * @param spaceURI - The URI of the space to use, but can for now be a string
+   */
   constructor(private spaceURI: string) {
     this.space = getSpace(this.spaceURI);
     this.charmsDoc = getDoc<DocLink[]>([], "charms", this.space);
