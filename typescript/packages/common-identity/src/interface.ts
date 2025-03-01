@@ -32,9 +32,13 @@ export interface Signature<Payload> extends Uint8Array {
 export type Unit = {};
 
 export type Await<T> = PromiseLike<T> | T;
-export type AwaitResult<T extends Unit = Unit, E extends Error = Error> = Await<Result<T, E>>;
+export type AwaitResult<T extends Unit = Unit, E extends Error = Error> = Await<
+  Result<T, E>
+>;
 
-export type Result<T extends Unit = Unit, E extends Error = Error> = Ok<T> | Fail<E>;
+export type Result<T extends Unit = Unit, E extends Error = Error> =
+  | Ok<T>
+  | Fail<E>;
 
 export interface Ok<T extends Unit> {
   ok: T;
