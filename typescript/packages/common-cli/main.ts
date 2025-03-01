@@ -4,7 +4,9 @@ import { CharmManager, compileRecipe, storage, setBobbyServerUrl } from "@common
 import { getEntityId, isStream, Cell } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
 
-let { space, charmId, recipeFile, cause } = parse(Deno.args);
+let { space, charmId, recipeFile, cause, interval } = parse(Deno.args);
+
+const CHECK_INTERVAL = parseInt(interval ?? "30") * 1000;
 
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ?? "https://toolshed.saga-castor.ts.net/";
 storage.setRemoteStorage(new URL(toolshedUrl));
@@ -12,14 +14,11 @@ setBobbyServerUrl(toolshedUrl);
 
 async function updateOnce(charm: Cell<Charm>) {
   console.log(Date.now(), "updating once", getEntityId(charm));
-  // const authKey = charm.key("auth");
   const auth = charm.key("auth");
   const googleUpdater = charm.key("googleUpdater");
 
   if (googleUpdater && auth) {
     console.log("googleUpdater flow!");
-    // const auth = manager.getArgument(charm).key("auth");
-    // FIXME(ja): the space should be included in the authCellId
     const { token, expiresAt } = auth.get();
 
     if (token && expiresAt && expiresAt < Date.now()) {
@@ -63,7 +62,7 @@ const watchCharm = (charm: Cell<Charm>) => {
   const auth = charm.key("auth");
   const googleUpdater = charm.key("googleUpdater");
 
-  if (googleUpdater && auth) {
+  if (isStream(googleUpdater) && auth) {
     manager.get(id).then((c) => {
       if (!c) {
         console.error("charm not found");
@@ -72,7 +71,7 @@ const watchCharm = (charm: Cell<Charm>) => {
       updateOnce(c);
       setInterval(() => {
         updateOnce(c);
-      }, 1000 * 30);
+      }, CHECK_INTERVAL);
     });
   }
 };
