@@ -81,7 +81,9 @@ export class NobleEd25519Verifier<ID extends DIDKey> implements Verifier<ID> {
     return await NobleEd25519Verifier.fromRaw(bytes);
   }
 
-  static async fromRaw(rawPublicKey: Uint8Array): Promise<NobleEd25519Verifier> {
+  static async fromRaw<ID extends DIDKey>(
+    rawPublicKey: Uint8Array,
+  ): Promise<NobleEd25519Verifier<ID>> {
     return new NobleEd25519Verifier(rawPublicKey);
   }
 }

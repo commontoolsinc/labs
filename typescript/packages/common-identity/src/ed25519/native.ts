@@ -87,19 +87,12 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
       false,
       ["sign"],
     );
-    const privateKey = await window.crypto.subtle.importKey(
-      "pkcs8",
-      pkcs8Private,
-      ED25519_ALG,
-      false,
-      ["sign"],
-    );
     // Set the public key to be extractable for DID generation.
     const publicKey = await window.crypto.subtle.importKey("raw", rawPublic, ED25519_ALG, true, [
       "verify",
     ]);
     let did = bytesToDid(new Uint8Array(rawPublic));
-    return new NativeEd25519Signer({ publicKey, privateKey }, did);
+    return new NativeEd25519Signer({ publicKey, privateKey }, did as ID);
   }
 
   static async generate<ID extends DIDKey>(): Promise<NativeEd25519Signer<ID>> {
