@@ -120,6 +120,14 @@ export type JSONSchema = {
   readonly additionalProperties?: Readonly<JSONSchema> | boolean;
 };
 
+type Writable<T> = {
+  -readonly [P in keyof T]: T[P] extends ReadonlyArray<infer U> ? Writable<U>[]
+    : T[P] extends Readonly<infer U> ? Writable<U>
+    : T[P];
+};
+
+export type JSONSchemaWritable = Writable<JSONSchema>;
+
 export type Alias = {
   $alias: { cell?: any; path: PropertyKey[] };
 };

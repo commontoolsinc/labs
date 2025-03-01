@@ -1,13 +1,26 @@
-import { describe, it, expect } from "vitest";
-import { Schema } from "../src/schema-to-ts.js";
-import { Cell, getImmutableCell } from "../src/cell.js";
-import { getDoc } from "../src/doc.js";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Schema } from "../src/schema-to-ts.ts";
+import { handler, lift } from "../src/module.ts";
+import { type Frame } from "../src/types.ts";
+import { popFrame, pushFrame } from "../src/recipe.ts";
+import { Cell, getDoc, getImmutableCell, isCell } from "@commontools/runner";
 
 // Helper function to check type compatibility at compile time
 // This doesn't run any actual tests, but ensures types are correct
 function expectType<T, _U extends T>() {}
 
 describe("Schema-to-TS Type Conversion", () => {
+  let frame: Frame;
+
+  beforeEach(() => {
+    frame = pushFrame();
+  });
+
+  afterEach(() => {
+    popFrame(frame);
+  });
+
   // These tests verify the type conversion at compile time
   // They don't have runtime assertions but help ensure the Schema type works correctly
 
@@ -220,10 +233,142 @@ describe("Schema-to-TS Type Conversion", () => {
 
     // Expected types
     type ExpectedStrictObject = { id?: number };
-    type ExpectedDynamicObject = { id?: number; [key: string]: string | number | undefined };
+    type ExpectedDynamicObject = {
+      id?: number;
+      [key: string]: string | number | undefined;
+    };
 
     expectType<ExpectedStrictObject, StrictObjectSchema>();
     expectType<ExpectedDynamicObject, DynamicObjectSchema>();
+  });
+
+  it("should correctly infer types when using lift with JSON schema", () => {
+    // Define input and output schemas
+    const inputSchema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        count: { type: "number" },
+        tags: {
+          type: "array",
+          items: { type: "string" },
+        },
+      },
+      required: ["name"],
+    } as const;
+
+    const outputSchema = {
+      type: "object",
+      properties: {
+        processed: { type: "boolean" },
+        nameLength: { type: "number" },
+        firstTag: { type: "string" },
+      },
+      required: ["processed", "nameLength"],
+    } as const;
+
+    // Create a module using lift with JSON schemas
+    // This tests type inference - TypeScript should infer the correct input and output types
+    const processModule = lift(
+      inputSchema,
+      outputSchema,
+      (input) => {
+        // This will only compile if input is correctly typed according to inputSchema
+        const nameLength = input.name.length;
+        const firstTag = input.tags?.[0] || "";
+        const count = input.count || 0;
+
+        // This will only compile if the return type matches outputSchema
+        return {
+          processed: true,
+          nameLength,
+          firstTag,
+        };
+      },
+    );
+
+    // Test with actual data
+    processModule({
+      name: "Test",
+      count: 5,
+      tags: ["important", "test"],
+    });
+
+    // Check that optional property works
+    processModule({
+      name: "NoTags",
+    });
+  });
+
+  it("should correctly infer types when using handler with JSON schema", () => {
+    // Define event and state schemas
+    const eventSchema = {
+      type: "object",
+      properties: {
+        type: { type: "string" },
+        payload: { type: "string" },
+      },
+      required: ["type"],
+    } as const;
+
+    const stateSchema = {
+      type: "object",
+      properties: {
+        count: { type: "number" },
+        history: {
+          type: "array",
+          items: { type: "string" },
+        },
+        preferences: {
+          type: "object",
+          properties: {
+            notifyOnChange: { type: "boolean" },
+          },
+          asCell: true,
+        },
+      },
+      required: ["count", "preferences"],
+    } as const;
+
+    // Create a handler using JSON schemas
+    const eventHandler = handler(
+      eventSchema,
+      stateSchema,
+      (event, state) => {
+        // Type checking - this should compile only if types are correctly inferred
+        const eventType = event.type;
+        const payload = event.payload || "default";
+
+        // Access state properties, including the cell
+        const currentCount = state.count;
+        const _notifyOnChange = state.preferences.get().notifyOnChange;
+
+        // Add to history if it exists
+        const history = state.history || [];
+        history.push(payload);
+
+        return {
+          type: "EVENT_PROCESSED",
+          count: currentCount + 1,
+          timestamp: Date.now(),
+        };
+      },
+    );
+
+    // TODO(seefeld): Passing data into the handler should use OpaqueRef, but
+    // we're going to merge that soon.
+    /*
+    // Runtime test with actual data
+    const preferences = getDoc({ notifyOnChange: true }).asCell();
+
+    eventHandler({
+      count: 5,
+      history: ["previous_event"],
+      preferences: preferences,
+    });*/
+
+    // We're not testing actual handler execution here since that would require a runner setup,
+    // but the types should be correctly inferred
   });
 
   // Runtime tests to verify the Schema type works with actual data

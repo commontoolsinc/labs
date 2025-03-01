@@ -18,7 +18,7 @@ import { queueEvent, type ReactivityLog, subscribe } from "./scheduler.ts";
 import { type EntityId, getDocByEntityId, getEntityId } from "./cell-map.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import { validateAndTransform } from "./schema.ts";
-import { type Schema } from "./schema-to-ts.ts";
+import { type Schema } from "@commontools/builder";
 import { Space } from "./space.ts";
 
 /**
@@ -73,18 +73,24 @@ export interface Cell<T> {
   equals(other: Cell<any>): boolean;
   sink(callback: (value: T) => Cancel | undefined | void): Cancel;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
-  asSchema<T = never, S extends JSONSchema | undefined = JSONSchema>(
-    schema?: S,
-  ): Cell<TypeOrSchema<T, S>>;
+  asSchema<T>(
+    schema?: JSONSchema,
+  ): Cell<T>;
+  asSchema<S extends JSONSchema = JSONSchema>(
+    schema: S,
+  ): Cell<Schema<S>>;
   withLog(log: ReactivityLog): Cell<T>;
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Path,
     log?: ReactivityLog,
   ): QueryResult<DeepKeyLookup<T, Path>>;
   getAsDocLink(): DocLink;
-  getSourceCell<T = never, S extends JSONSchema | undefined = JSONSchema>(
-    schema?: S,
-  ): Cell<TypeOrSchema<T, S>>;
+  getSourceCell<T>(
+    schema?: JSONSchema,
+  ): Cell<T>;
+  getSourceCell<S extends JSONSchema = JSONSchema>(
+    schema: S,
+  ): Cell<Schema<S>>;
   toJSON(): { cell: { "/": string } | undefined; path: PropertyKey[] };
   value: T;
   docLink: DocLink;
@@ -199,7 +205,7 @@ function createRegularCell<T>(
   schema?: JSONSchema,
   rootSchema?: JSONSchema,
 ): Cell<T> {
-  const self: Cell<T> = {
+  const self = {
     get: () => validateAndTransform(doc, path, schema, log, rootSchema),
     set: (newValue: T) => {
       // TODO(seefeld): This doesn't respect aliases on write. Should it?
@@ -318,7 +324,7 @@ function createRegularCell<T>(
       );
     },
     schema,
-  };
+  } as Cell<T>;
 
   return self;
 }

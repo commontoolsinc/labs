@@ -195,12 +195,12 @@ describe("recipe with map node", () => {
   });
 
   it("correctly lists the recipe as input to the map node", () => {
-    const inputs = doubleArray.nodes[0].inputs as { op: Recipe };
+    const inputs = doubleArray.nodes[0].inputs as unknown as { op: Recipe };
     expect(isRecipe(inputs.op)).toBe(true);
   });
 
   it("correctly associated the code with the inner recipe", () => {
-    const inputs = doubleArray.nodes[0].inputs as { op: Recipe };
+    const inputs = doubleArray.nodes[0].inputs as unknown as { op: Recipe };
     const module = inputs.op.nodes[0].module as Module;
     expect(module.type).toBe("javascript");
     expect(typeof module.implementation).toBe("function");
@@ -222,11 +222,13 @@ describe("recipe with map node that references a parent cell", () => {
   );
 
   it("correctly creates references to the parent cells", () => {
-    expect((multiplyArray.nodes[0].inputs as { op: Recipe }).op.nodes[0].inputs)
-      .toEqual({
-        x: { $alias: { cell: 1, path: ["argument", "element", "x"] } },
-        factor: { $alias: { path: ["argument", "factor"] } },
-      });
+    expect(
+      (multiplyArray.nodes[0].inputs as unknown as { op: Recipe }).op
+        .nodes[0].inputs,
+    ).toEqual({
+      x: { $alias: { cell: 1, path: ["argument", "element", "x"] } },
+      factor: { $alias: { path: ["argument", "factor"] } },
+    });
   });
 });
 
@@ -253,7 +255,9 @@ describe("recipe with map node that references a parent cell in another recipe",
     const subRecipe = (multiplyArray.nodes[0].module as Module)
       .implementation as Recipe;
     expect(isRecipe(subRecipe)).toBeTruthy();
-    const subSubRecipe = (subRecipe.nodes[0].inputs as { op: Recipe }).op;
+    const subSubRecipe =
+      (subRecipe.nodes[0].inputs as unknown as { op: Recipe })
+        .op;
     expect(isRecipe(subSubRecipe)).toBeTruthy();
     expect(subSubRecipe.nodes[0].inputs).toEqual({
       x: { $alias: { cell: 2, path: ["argument", "element", "x"] } },
