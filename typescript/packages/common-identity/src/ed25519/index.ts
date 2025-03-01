@@ -76,7 +76,6 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
       throw new Error("common-identity: Could not deserialize key.");
     }
   }
-  }
 }
 
 export class Ed25519Verifier<ID extends DIDKey> implements Verifier<ID> {
@@ -109,4 +108,3 @@ export class Ed25519Verifier<ID extends DIDKey> implements Verifier<ID> {
     );
   }
 }
-

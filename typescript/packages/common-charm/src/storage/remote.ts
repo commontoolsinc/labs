@@ -3,7 +3,7 @@ import { log } from "../storage.ts";
 import { type StorageProvider, type StorageValue } from "./base.ts";
 import type { Entity, JSONValue, MemorySpace, Protocol } from "@commontools/memory/interface";
 import * as Memory from "@commontools/memory/consumer";
-import * as Principal from "@commontools/memory/principal";
+import { Identity } from "@commontools/identity";
 import { assert } from "@commontools/memory/fact";
 import * as Changes from "@commontools/memory/changes";
 export * from "@commontools/memory/interface";
@@ -37,10 +37,7 @@ const HOME = "did:key:z6Mko2qR9b8mbdPnaEKXvcYwdK7iDnRkh8mEcEP2719aCu6P";
 /**
  * ed25519 key derived from the sha256 of the "common operator".
  */
-const AS =
-  Principal.ED25519Signer.fromString<"did:key:z6Mkge3xkXc4ksLsf8CtRxunUxcX6dByT4QdWCVEHbUJ8YVn">(
-    "MgCZHlm5ODrbwDGXGIgBhqp2HmKj3dcxxyaqkopec6vK7xO0BIHsZlqE1qjfTHd7TN9Xcw59xgzDElFlwH2OmKQOO0Gk=",
-  );
+const defaultProfile = await Identity.fromPassphrase("common operator");
 
 export class RemoteStorageProvider implements StorageProvider {
   connection: WebSocket | null = null;
@@ -62,7 +59,7 @@ export class RemoteStorageProvider implements StorageProvider {
 
   constructor({
     address,
-    as = AS,
+    as = defaultProfile,
     space = HOME,
     the = "application/json",
   }: {

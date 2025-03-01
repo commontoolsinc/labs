@@ -67,6 +67,11 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return new Identity(signer);
   }
 
+  static async fromPassphrase<ID extends DIDKey>(passphrase: string): Promise<Identity<ID>> {
+    const rawPrivateKey = await hash(new TextEncoder().encode(passphrase));
+    return new Identity(await Ed25519Signer.fromRaw<ID>(rawPrivateKey));
+  }
+
   // Deserialize `input` from storage into an `Identity`.
   static async deserialize<ID extends DIDKey>(input: any): Promise<Identity<ID>> {
     return new Identity(await Ed25519Signer.deserialize(input));

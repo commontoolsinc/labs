@@ -14,7 +14,8 @@
     "./interface": "./interface.ts",
     "./fact": "./fact.ts",
     "./changes": "./changes.ts",
-    "./consumer": "./consumer.ts"
+    "./consumer": "./consumer.ts",
+    "./principal": "./principal.ts"
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
