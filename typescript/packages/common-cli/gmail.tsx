@@ -75,11 +75,20 @@ const updater = handler<{}, { emails: Email[]; auth: Auth }>((_event, state) => 
     console.log("token expired at ", state.auth.expiresAt);
     return;
   }
+
+  // Get the set of existing email IDs for efficient lookup
+  const existingEmailIds = new Set(state.emails.map((email) => email.id));
+
   fetchInboxEmails(state.auth.token).then((emails) => {
-    emails.messages.forEach((email) => {
-      console.log("adding email", email.subject);
-      state.emails.push(email);
-    });
+    // Filter out any duplicates by ID
+    const newEmails = emails.messages.filter((email) => !existingEmailIds.has(email.id));
+
+    if (newEmails.length > 0) {
+      console.log(`Adding ${newEmails.length} new emails`);
+      state.emails.push(...newEmails);
+    } else {
+      console.log("No new emails found");
+    }
   });
 });
 

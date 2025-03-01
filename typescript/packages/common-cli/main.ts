@@ -10,6 +10,52 @@ const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ?? "https://toolshed.saga-c
 storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
 
+async function updateOnce(charm: Cell<Charm>) {
+  console.log(Date.now(), "updating once", getEntityId(charm));
+  // const authKey = charm.key("auth");
+  const auth = charm.key("auth");
+  const updater = charm.key("updater");
+
+  if (updater && auth) {
+    console.log("updater flow!");
+    // const auth = manager.getArgument(charm).key("auth");
+    // FIXME(ja): the space should be included in the authCellId
+    const { token, expiresAt } = auth.get();
+    if (token && expiresAt && expiresAt < Date.now()) {
+      console.log("token expired, refreshing");
+
+      const authCellId = JSON.parse(JSON.stringify(auth.getAsDocLink()));
+      authCellId.space = space;
+      console.log("authCellId", JSON.stringify(authCellId));
+      const refresh_url = new URL("/api/integrations/google-oauth/refresh", toolshedUrl);
+      const refresh_response = await fetch(refresh_url, {
+        method: "POST",
+        body: JSON.stringify({ authCellId }),
+      });
+      const refresh_data = await refresh_response.json();
+      if (!refresh_data.success) {
+        console.error("refresh_data", refresh_data);
+        return;
+      }
+      await storage.synced();
+    }
+
+    updater.send({});
+  }
+}
+
+const watchCharm = (charm: Cell<Charm>) => {
+  const auth = charm.key("auth");
+  const updater = charm.key("updater");
+
+  if (updater && auth) {
+    updateOnce(charm);
+    setInterval(() => {
+      updateOnce(charm);
+    }, 1000 * 60);
+  }
+};
+
 async function main() {
   console.log("starting common-cli");
   const manager = new CharmManager(space ?? "common-cli");
@@ -38,50 +84,25 @@ async function main() {
     }
 
     await storage.synced();
+    watchCharm(charm);
   } else if (charmId) {
     charm = await manager.get(charmId);
     if (!charm) {
       console.error("charm not found");
       return;
     }
+    // FIXME(ja): is syncCell actually 'ensureIsLoaded'
     await storage.syncCell(charm, true);
+    watchCharm(charm);
+  } else if (space) {
+    // FIXME(ja): is syncCell actually 'ensureIsLoaded'
+    // const charm = await storage.syncCellById(space, "cron", true);
+    // watchCharm(charm);
+    console.log("implement watchSpace");
   }
 
   // FIXME(ja): we need to keep checking this incase the token state changes
-  if (charm) {
-    // const authKey = charm.key("auth");
-    const auth = charm.key("auth");
-    const updater = charm.key("updater");
-
-    // return;
-    if (updater) {
-      console.log("updater flow!");
-      // const auth = manager.getArgument(charm).key("auth");
-      // FIXME(ja): the space should be included in the authCellId
-      const expiresAt = auth.get().expiresAt;
-      console.log("checking expiresAt", expiresAt);
-      if (expiresAt && expiresAt < Date.now()) {
-        console.log("token expired, refreshing");
-
-        const authCellId = JSON.parse(JSON.stringify(auth.getAsDocLink()));
-        authCellId.space = space;
-        console.log("authCellId", JSON.stringify(authCellId));
-        const refresh_url = new URL("/api/integrations/google-oauth/refresh", toolshedUrl);
-        const refresh_response = await fetch(refresh_url, {
-          method: "POST",
-          body: JSON.stringify({ authCellId }),
-        });
-        const refresh_data = await refresh_response.json();
-        if (!refresh_data.success) {
-          console.error("refresh_data", refresh_data);
-          return;
-        }
-        await storage.synced();
-      }
-
-      updater.send({});
-    }
-  }
+  // }
 
   // if (recipeFile) {
   //   try {
