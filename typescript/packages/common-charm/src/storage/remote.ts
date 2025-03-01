@@ -34,11 +34,6 @@ interface MemoryState<Space extends MemorySpace = MemorySpace> {
  */
 const HOME = "did:key:z6Mko2qR9b8mbdPnaEKXvcYwdK7iDnRkh8mEcEP2719aCu6P";
 
-/**
- * ed25519 key derived from the sha256 of the "common operator".
- */
-const defaultProfile = await Identity.fromPassphrase("common operator");
-
 export class RemoteStorageProvider implements StorageProvider {
   connection: WebSocket | null = null;
   address: URL;
@@ -59,12 +54,12 @@ export class RemoteStorageProvider implements StorageProvider {
 
   constructor({
     address,
-    as = defaultProfile,
+    as,
     space = HOME,
     the = "application/json",
   }: {
     address: URL;
-    as?: Memory.Signer;
+    as: Memory.Signer;
     space?: MemorySpace;
     the?: string;
   }) {
