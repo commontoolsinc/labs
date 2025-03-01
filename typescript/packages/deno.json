@@ -28,8 +28,7 @@
       "clipper-extension",
       "collectathon",
       "deno-vite-plugin",
-      "spellbookjr",
-      "snap"
+      "spellbookjr"
     ],
     "rules": {
       "tags": ["recommended"],
