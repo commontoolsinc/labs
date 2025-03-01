@@ -365,7 +365,7 @@ export function getDoc<T>(value?: T, cause?: any, space?: Space): DocImpl<T> {
 function generateEntityId(value: any, cause?: any): EntityId {
   return createRef(
     typeof value === "object" && value !== null
-      ? (value as Object)
+      ? (value as object)
       : value !== undefined
       ? { value }
       : {},

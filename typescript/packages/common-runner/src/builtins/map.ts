@@ -77,8 +77,8 @@ export function map(
 
     // Same for op, but here it's so that the proxy doesn't follow the aliases
     // in the recipe instead of returning the recipe.
-    // TODO: Instead we should reify the recipe as a NodeFactory and teach the
-    // query result proxy to not enter those.
+    // TODO(seefeld): Instead we should reify the recipe as a NodeFactory and
+    // teach the query result proxy to not enter those.
     const opRef = getDocLinkOrThrow(op);
     op = opRef.cell.getAtPath(opRef.path);
 
@@ -103,7 +103,7 @@ export function map(
       );
       resultCell.sourceCell!.sourceCell = parentDoc;
 
-      // TODO: Have `run` return cancel, once we make resultCell required
+      // TODO(seefeld): Have `run` return cancel, once we make resultCell required
       addCancel(cancels.get(resultCell));
 
       // Send the result value to the result cell

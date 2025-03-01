@@ -127,7 +127,7 @@ export class CharmManager {
           },
         };
         if (hasUI && !resultSchema.properties![UI]) {
-          resultSchema.properties![UI] = { type: "object" }; // TODO: vdom schema
+          resultSchema.properties![UI] = { type: "object" }; // TODO(seefeld): make this the vdom schema
         }
         if (hasName && !resultSchema.properties![NAME]) {
           resultSchema.properties![NAME] = { type: "string" };

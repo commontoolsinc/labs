@@ -74,8 +74,6 @@ export function validateAndTransform(
   rootSchema: JSONSchema | undefined = schema,
   seen: DocLink[] = [],
 ): any {
-  if (seen.length > 100) debugger;
-
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based of this value, as that
   // is what a setter would change when they update a value or reference.
@@ -136,7 +134,7 @@ export function validateAndTransform(
   const value = ref.cell.getAtPath(ref.path);
   log?.reads.push({ cell: ref.cell, path: ref.path });
 
-  // TODO: The behavior when one of the options is very permissive (e.g. no type
+  // TODO(seefeld): The behavior when one of the options is very permissive (e.g. no type
   // or an object that allows any props) is not well defined.
   if (Array.isArray(resolvedSchema.anyOf)) {
     const options = resolvedSchema.anyOf
@@ -161,7 +159,7 @@ export function validateAndTransform(
         );
       }
 
-      // TODO: Handle more corner cases like empty anyOf, etc.
+      // TODO(seefeld): Handle more corner cases like empty anyOf, etc.
       const merged: JSONSchema[] = [];
       for (const option of arrayOptions) {
         if (option.items?.anyOf && Array.isArray(option.items.anyOf)) {
@@ -192,7 +190,7 @@ export function validateAndTransform(
           .map((option) =>
             (option.anyOf ?? [option]).map((branch) => {
               const {
-                asCell: {},
+                asCell: _filteredOut,
                 ...rest
               } = branch as any;
               return rest;
@@ -230,7 +228,7 @@ export function validateAndTransform(
       for (const { result, extraLog } of candidates) {
         if (isCell(result)) {
           log?.reads.push(...extraLog.reads);
-          return result; // TODO: Complain if it's a mix of cells and non-cells?
+          return result; // TODO(seefeld): Complain if it's a mix of cells and non-cells?
         } else if (typeof result === "object" && result !== null) {
           merged = { ...merged, ...result };
           extraReads.push(...extraLog.reads);
@@ -245,7 +243,8 @@ export function validateAndTransform(
     } else {
       const candidates = options
         .filter((option) =>
-          (option.type === "integer" ? "number" : option.type) === typeof value
+          (option.type === "integer" ? "number" : option.type) ===
+            typeof value as string
         )
         .map((option) => ({
           schema: option,
@@ -342,6 +341,6 @@ export function validateAndTransform(
   }
 
   // For primitive types, just return the value
-  // TODO: Should we validate/coerce types here?
+  // TODO(seefeld): Should we validate/coerce types here?
   return value;
 }

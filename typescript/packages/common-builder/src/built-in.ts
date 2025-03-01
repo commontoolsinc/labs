@@ -64,7 +64,7 @@ export const navigateTo = createNodeFactory({
 // Example:
 // str`Hello, ${name}!`
 //
-// TODO: This should be a built-in module
+// TODO(seefeld): This should be a built-in module
 export function str(
   strings: TemplateStringsArray,
   ...values: any[]

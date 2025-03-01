@@ -131,7 +131,7 @@ export class RemoteStorageProvider implements StorageProvider {
     // Just wait to have a local revision.
     const of = RemoteStorageProvider.toEntity(entityId);
     const local = this.mount(this.workspace);
-    let query = local.remote.get(of);
+    const query = local.remote.get(of);
     if (query) {
       query.subscribe(RemoteStorageProvider.sync);
     } else {
@@ -307,7 +307,7 @@ export class RemoteStorageProvider implements StorageProvider {
     }
   }
 
-  async close(): Promise<{}> {
+  close() {
     const { connection } = this;
     this.connection = null;
     if (connection && connection.readyState !== WebSocket.CLOSED) {
@@ -317,6 +317,7 @@ export class RemoteStorageProvider implements StorageProvider {
       return {};
     }
   }
+
   async destroy(): Promise<void> {
     await this.close();
   }
@@ -411,7 +412,7 @@ class Query<Space extends MemorySpace> {
   }
 
   reconnect() {
-    // TODO: We could make it possible to rerun the subscription
+    // TODO(gozala): We could make it possible to rerun the subscription
     this.reader.cancel();
     this.reader = this.query.subscribe().getReader();
     this.poll();

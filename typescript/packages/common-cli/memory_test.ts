@@ -1,10 +1,6 @@
 import { MemorySpace } from "@commontools/memory";
-import { CharmManager, createStorage } from "@commontools/charm";
 import { RemoteStorageProvider } from "../common-charm/src/storage/remote.ts";
-import {
-  StorageProvider,
-  StorageValue,
-} from "../common-charm/src/storage/base.ts";
+import { StorageProvider } from "../common-charm/src/storage/base.ts";
 import { EntityId } from "../common-runner/src/cell-map.ts";
 
 // some config stuff, hardcoded, ofcourse
@@ -83,8 +79,10 @@ async function main() {
   // now lets try to store a batch of values
   console.log("storing all entities");
   const result = await storageProvider.send(people_batch);
-
-  console.log("sent entity, result: " + JSON.stringify(result, null, 2));
+  if (result.ok)
+    console.log("sent entities successfully");
+  else
+    console.log("got error: " + JSON.stringify(result.error, null, 2));
 }
 
 main();

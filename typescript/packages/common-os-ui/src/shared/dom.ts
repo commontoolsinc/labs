@@ -1,6 +1,6 @@
 /** Create a class string using a record of classnames to toggle-states */
 export const classes = (classRecord: Record<string, boolean>) => {
-  let toggledClasses: Array<string> = [];
+  const toggledClasses: Array<string> = [];
   for (const [className, isActive] of Object.entries(classRecord)) {
     if (isActive) toggledClasses.push(className);
   }
@@ -11,7 +11,7 @@ export const classes = (classRecord: Record<string, boolean>) => {
 export const animationFrame = () =>
   new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
-export const toggleInvisible = async (
+export const toggleInvisible = (
   element: HTMLElement,
   isInvisible: boolean,
 ) => {

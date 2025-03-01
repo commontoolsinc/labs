@@ -35,7 +35,7 @@ export const CharmsProvider: React.FC<{ children: React.ReactNode }> = (
     async (charm: Charm) => {
       // Stub: runs charm asynchronously and then adds it
 
-      // TODO: Is this still needed?
+      // TODO(@jumble): Is this still needed?
       await new Promise((resolve) => setTimeout(resolve, 300));
       addCharm(charm);
     },

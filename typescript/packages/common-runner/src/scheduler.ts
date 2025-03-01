@@ -73,30 +73,41 @@ export async function run(action: Action): Promise<any> {
   if (running) await running;
 
   let result: any;
-  running = new Promise(async (resolve) => {
-    try {
-      result = await action(log);
-    } catch (e) {
-      console.error("caught error", e, action);
-    } finally {
+  running = new Promise((resolve) => {
+    const finalizeAction = (error?: unknown) => {
+      if (error) {
+        console.error("caught error", error, action);
+        if (error instanceof Error) handleError(error);
+      }
+
       // Note: By adding the listeners after the call we avoid triggering a re-run
       // of the action if it changed a r/w cell. Note that this also means that
       // those actions can't loop on themselves.
       subscribe(action, log);
-
       running = undefined;
       resolve(result);
+    };
+
+    try {
+      Promise.resolve(action(log))
+        .then((actionResult) => {
+          result = actionResult;
+          finalizeAction();
+        })
+        .catch((error) => finalizeAction(error));
+    } catch (error) {
+      finalizeAction(error);
     }
   });
 
   return running;
 }
 
-export async function idle() {
-  return new Promise<void>(async (resolve) => {
-    if (running) await running;
-    if (pending.size === 0 && eventQueue.length === 0) resolve();
-    idlePromises.push(resolve);
+export function idle() {
+  return new Promise<void>((resolve) => {
+    if (running) running.then(() => resolve());
+    else if (pending.size === 0 && eventQueue.length === 0) resolve();
+    else idlePromises.push(resolve);
   });
 }
 
@@ -194,7 +205,7 @@ function topologicalSort(
   // First pass: identify relevant actions
   for (const action of actions) {
     const { reads } = dependencies.get(action)!;
-    // TODO: Keep track of affected paths
+    // TODO(seefeld): Keep track of affected paths
     if (reads.length === 0) {
       // Actions with no dependencies are always relevant. Note that they must
       // be manually added to `pending`, which happens only once on `schedule`.

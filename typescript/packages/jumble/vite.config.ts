@@ -15,39 +15,40 @@ export default defineConfig({
     ],
     proxy: {
       "/api/ai/spell/": {
-        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
+        target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/spellbook": {
-        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
+        target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/whoami": {
-        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
+        target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/ai/llm": {
-        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
+        target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/ai/img": {
-        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
+        target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/ai/voice": {
-        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
+        target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/ai/webreader": {
-        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
+        target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/storage/blobby": {
-        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
+        target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/storage/memory": {
-        target: process.env.MEMORY_URL ?? process.env.TOOLSHED_API_URL ??
+        target: Deno.env.get("MEMORY_URL") ??
+          Deno.env.get("TOOLSHED_API_URL") ??
           "http://localhost:8000/",
         ws: true,
         changeOrigin: true,

@@ -127,7 +127,7 @@ export function setNestedValue(
   value: any,
   log?: ReactivityLog,
 ): boolean {
-  let destValue = currentCell.getAtPath(path);
+  const destValue = currentCell.getAtPath(path);
   if (isAlias(destValue)) {
     const ref = followAliases(destValue, currentCell, log);
     return setNestedValue(ref.cell, ref.path, value, log);
@@ -330,7 +330,7 @@ export function resolvePath(
 
   let ref: DocLink = { cell: doc, path: [] };
 
-  let keys = [...path];
+  const keys = [...path];
   while (keys.length) {
     // First follow all the aliases and links, _before_ accessing the key.
     ref = followLinks(ref, seen, log);
@@ -554,7 +554,7 @@ export function normalizeToDocLinks(
       if (item !== value[i]) value[i] = item; // Capture unwrapped value
       const previousItem = previous ? maybeUnwrapProxy(previous[i]) : undefined;
       if (!(isDoc(item) || isDocLink(item) || isAlias(item))) {
-        // TODO: Should this depend on the value if there is no id provided?
+        // TODO(seefeld): Should this depend on the value if there is no id provided?
         // This is probably generating extra churn on ids.
         itemId = typeof item === "object" && item !== null && "id" in item
           ? createRef({ id: item.id }, { parent: cause })
@@ -604,7 +604,7 @@ export function normalizeToDocLinks(
       const previousItem = previous
         ? maybeUnwrapProxy(previous[key])
         : undefined;
-      let change = normalizeToDocLinks(parentDoc, item, previousItem, log, {
+      const change = normalizeToDocLinks(parentDoc, item, previousItem, log, {
         parent: cause,
         key,
       });

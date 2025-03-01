@@ -8,7 +8,7 @@ import { registerIconLibrary } from "@shoelace-style/shoelace";
  * Calling with no arguments will perform this on `document`.
  */
 export const adoptShoelaceStyles = (
-  host: Document | ShadowRoot = window.document,
+  host: Document | ShadowRoot = globalThis.document,
 ) => {
   host.adoptedStyleSheets = [theme.styleSheet!];
 };
@@ -28,7 +28,7 @@ export const registerShoelaceIcons = () => {
 };
 
 export const setupShoelace = ({
-  host = window.document,
+  host = globalThis.document,
 }: {
   host?: Document | ShadowRoot;
 } = {}) => {

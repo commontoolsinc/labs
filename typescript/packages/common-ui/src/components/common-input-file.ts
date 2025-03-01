@@ -95,7 +95,7 @@ export class CommonFileInputElement extends LitElement {
    * @param files Array of File objects to be read.
    * @returns Promise resolving to an array containing each file and its content.
    */
-  private async readFiles(files: File[]): Promise<FileContent[]> {
+  private readFiles(files: File[]): Promise<FileContent[]> {
     const readFile = (file: File): Promise<FileContent> => {
       return new Promise((resolve) => {
         const reader = new FileReader();

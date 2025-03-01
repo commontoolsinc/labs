@@ -236,7 +236,7 @@ export function createJsonSchema(
         if (Array.isArray(value ?? defaultValue)) {
           schema.type = "array";
           if ((value ?? defaultValue).length > 0) {
-            let properties: { [key: string]: any } = {};
+            const properties: { [key: string]: any } = {};
             for (let i = 0; i < (value ?? defaultValue).length; i++) {
               const item = value?.[i] ?? defaultValue?.[i];
               if (typeof item === "object" && item !== null) {

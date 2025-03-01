@@ -138,7 +138,7 @@ export function isStreamAlias(value: any): value is StreamAlias {
 
 export type Module = {
   type: "ref" | "javascript" | "recipe" | "raw" | "isolated" | "passthrough";
-  implementation?: Function | Recipe | string;
+  implementation?: ((...args: any[]) => any) | Recipe | string;
   wrapper?: "handler";
   argumentSchema?: JSONSchema;
   resultSchema?: JSONSchema;

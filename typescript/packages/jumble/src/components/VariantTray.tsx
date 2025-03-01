@@ -49,12 +49,14 @@ export function VariantTray({
         <h3 className="text-lg font-bold">Choose a variant</h3>
         <div className="flex gap-2">
           <button
+            type="button"
             onClick={onCancel}
             className="px-4 py-2 border-2 border-black bg-white text-black hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             Cancel
           </button>
           <button
+            type="button"
             onClick={handleChooseClick}
             className="px-4 py-2 bg-black text-white rounded hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             disabled={!selectedVariant}
@@ -66,6 +68,7 @@ export function VariantTray({
       <div className="flex gap-4 overflow-x-auto">
         <div className="flex flex-col items-center">
           <button
+            type="button"
             onClick={() => onSelectVariant(originalCharm)}
             className={`
               flex-shrink-0 w-80 h-56 border-2 border-black overflow-hidden relative
@@ -97,6 +100,7 @@ export function VariantTray({
         {variants.map((variant, i) => (
           <div key={i} className="flex flex-col items-center">
             <button
+              type="button"
               onClick={() =>
                 onSelectVariant(variant)}
               className={`

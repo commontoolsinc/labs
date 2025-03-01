@@ -73,7 +73,7 @@ export class OsNavstack extends LitElement {
 
   async back() {
     const panels = [...this.panels];
-    let lastPanel = panels.at(-1);
+    const lastPanel = panels.at(-1);
     if (!lastPanel) {
       return;
     }

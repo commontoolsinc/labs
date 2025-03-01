@@ -180,7 +180,7 @@ async function handleSearchCharms(deps: CommandContext) {
         id: "charm-select",
         type: "select",
         title: "Select Charm",
-        handler: async (selected) => {
+        handler: (selected) => {
           const id = charmId(selected);
           if (!id || !deps.focusedReplicaId) {
             throw new Error("Missing charm ID or replica name");
@@ -245,7 +245,7 @@ async function handleDeleteCharm(deps: CommandContext) {
   else deps.setOpen(false);
 }
 
-async function handleStartCounterJob(deps: CommandContext) {
+function handleStartCounterJob(deps: CommandContext) {
   const jobId = deps.startJob("Counter Job");
   console.log("Started counter job with ID:", jobId);
 
@@ -390,7 +390,7 @@ async function handleSelectModel(deps: CommandContext) {
         id: "model-select",
         type: "select",
         title: "Select Model",
-        handler: async (selectedModel) => {
+        handler: (selectedModel) => {
           deps.setPreferredModel(selectedModel.id);
           deps.setOpen(false);
         },
@@ -421,7 +421,7 @@ function navigateToCharm(charm: Charm | EntityId, deps: CommandContext) {
   );
 }
 
-async function handleIndexCharms(deps: CommandContext) {
+function handleIndexCharms(deps: CommandContext) {
   startCharmIndexing(deps.charmManager, {
     startJob: deps.startJob,
     stopJob: deps.stopJob,
@@ -676,10 +676,14 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           return;
         }
         deps.navigate(
-          createPathWithHash("charmDetail", {
-            charmId: deps.focusedCharmId,
-            replicaName: deps.focusedReplicaId,
-          }, "code"),
+          createPathWithHash(
+            "charmDetail",
+            {
+              charmId: deps.focusedCharmId,
+              replicaName: deps.focusedReplicaId,
+            },
+            "code",
+          ),
         );
         deps.setOpen(false);
       },
@@ -696,10 +700,14 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           return;
         }
         deps.navigate(
-          createPathWithHash("charmDetail", {
-            charmId: deps.focusedCharmId,
-            replicaName: deps.focusedReplicaId,
-          }, "data"),
+          createPathWithHash(
+            "charmDetail",
+            {
+              charmId: deps.focusedCharmId,
+              replicaName: deps.focusedReplicaId,
+            },
+            "data",
+          ),
         );
         deps.setOpen(false);
       },
@@ -730,7 +738,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       title: "Navigate Back",
       group: "Navigation",
       handler: () => {
-        window.history.back();
+        globalThis.history.back();
         deps.setOpen(false);
       },
     },
@@ -785,7 +793,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           placeholder: "Enter replica name",
           handler: (input) => {
             if (input) {
-              window.location.href = `/${input}`;
+              globalThis.location.href = `/${input}`;
             }
             deps.setOpen(false);
           },
@@ -807,7 +815,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       }`,
       group: "Edit",
       predicate: !!deps.focusedCharmId,
-      handler: async (transcription) => {
+      handler: (transcription) => {
         if (!transcription) return;
 
         const commands = getCommands(deps);
@@ -842,7 +850,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
                 id: `job-${job.id}-toggle`,
                 type: "action",
                 title: job.status === "running" ? "Pause" : "Resume",
-                handler: async () => {
+                handler: () => {
                   if (job.status === "running") {
                     deps.stopJob(job.id);
                   } else {
@@ -855,7 +863,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
                 id: `job-${job.id}-cancel`,
                 type: "action",
                 title: "Stop",
-                handler: async () => {
+                handler: () => {
                   deps.stopJob(job.id);
                   deps.setMode({ type: "main" });
                 },
@@ -880,7 +888,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           id: "clear-completed-jobs",
           type: "action",
           title: "Clear Completed Jobs",
-          handler: async () => {
+          handler: () => {
             // deps.clearCompletedJobs();
             deps.setMode({ type: "main" });
           },

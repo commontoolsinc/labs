@@ -6725,6 +6725,8 @@
     "https://deno.land/std@0.224.0/path/windows/normalize.ts": "78126170ab917f0ca355a9af9e65ad6bfa5be14d574c5fb09bb1920f52577780",
     "https://deno.land/std@0.224.0/path/windows/normalize_glob.ts": "9c87a829b6c0f445d03b3ecadc14492e2864c3ebb966f4cea41e98326e4435c6",
     "https://deno.land/std@0.224.0/path/windows/resolve.ts": "8dae1dadfed9d46ff46cc337c9525c0c7d959fb400a6308f34595c45bdca1972",
+    "https://deno.land/std@0.224.0/testing/_test_suite.ts": "f10a8a6338b60c403f07a76f3f46bdc9f1e1a820c0a1decddeb2949f7a8a0546",
+    "https://deno.land/std@0.224.0/testing/bdd.ts": "3e4de4ff6d8f348b5574661cef9501b442046a59079e201b849d0e74120d476b",
     "https://deno.land/std@v0.204.0/assert/_constants.ts": "8a9da298c26750b28b326b297316cdde860bc237533b07e1337c021379e6b2a9",
     "https://deno.land/std@v0.204.0/assert/_diff.ts": "58e1461cc61d8eb1eacbf2a010932bf6a05b79344b02ca38095f9b805795dc48",
     "https://deno.land/std@v0.204.0/assert/_format.ts": "a69126e8a469009adf4cf2a50af889aca364c349797e63174884a52ff75cf4c7",

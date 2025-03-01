@@ -355,26 +355,26 @@ export class CommonTableElement extends LitElement {
   handleDownload(item: any) {
     const data = JSON.stringify(item, null, 2);
     const blob = new Blob([data], { type: "application/json" });
-    const url = window.URL.createObjectURL(blob);
+    const url = globalThis.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = `data-${Date.now()}.json`;
     document.body.appendChild(a);
     a.click();
-    window.URL.revokeObjectURL(url);
+    globalThis.URL.revokeObjectURL(url);
     document.body.removeChild(a);
   }
 
   handleDownloadAll() {
     const data = JSON.stringify(this.data, null, 2);
     const blob = new Blob([data], { type: "application/json" });
-    const url = window.URL.createObjectURL(blob);
+    const url = globalThis.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = `all-data-${Date.now()}.json`;
     document.body.appendChild(a);
     a.click();
-    window.URL.revokeObjectURL(url);
+    globalThis.URL.revokeObjectURL(url);
     document.body.removeChild(a);
   }
 
@@ -386,7 +386,7 @@ export class CommonTableElement extends LitElement {
     }
   }
 
-  async handleImport(_: Event) {
+  handleImport(_: Event) {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".json";

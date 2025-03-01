@@ -7,8 +7,9 @@ import { Charm, CharmManager } from "./charm.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt } from "./iframe/prompt.ts";
 
-const llmUrl = typeof window !== "undefined"
-  ? window.location.protocol + "//" + window.location.host + "/api/ai/llm"
+const llmUrl = typeof globalThis.location !== "undefined"
+  ? globalThis.location.protocol + "//" + globalThis.location.host +
+    "/api/ai/llm"
   : "//api/ai/llm";
 
 const llm = new LLMClient(llmUrl);
@@ -93,7 +94,7 @@ export const saveNewRecipeVersion = async (
     name,
   });
 
-  return compileAndRunRecipe(
+  return await compileAndRunRecipe(
     charmManager,
     newRecipeSrc,
     newSpec,
@@ -121,7 +122,7 @@ export async function castNewRecipe(
     name,
   });
 
-  return compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, data);
+  return await compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, data);
 }
 
 export async function compileRecipe(
@@ -157,7 +158,7 @@ export async function compileAndRunRecipe(
   }
 
   const newCharm = await charmManager.runPersistent(recipe, runOptions);
-  charmManager.add([newCharm]);
+  await charmManager.add([newCharm]);
   await charmManager.syncRecipe(newCharm);
 
   return newCharm.entityId;
