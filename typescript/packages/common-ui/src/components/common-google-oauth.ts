@@ -6,6 +6,8 @@ import { baseStyles } from "./style.js";
 export class CommonGoogleOauthElement extends LitElement {
   @property({ type: Object })
   accessor auth: Record<string, unknown> = {};
+  @property({ type: Object })
+  accessor authCell: Record<string, unknown> = {};
 
   @property({ type: String })
   accessor authStatus: string = "";
@@ -19,7 +21,10 @@ export class CommonGoogleOauthElement extends LitElement {
     this.authStatus = "Initiating OAuth flow...";
     this.authResult = null;
 
-    const authCellId = JSON.stringify(this.auth, null, 2);
+    let authCellId = JSON.parse(JSON.stringify(this.authCell, null, 2));
+    authCellId.space = location.pathname.split("/")[1];
+    authCellId = JSON.stringify(authCellId);
+
     const payload = {
       authCellId,
     };
@@ -38,6 +43,7 @@ export class CommonGoogleOauthElement extends LitElement {
       console.log("OAuth URL:", resp.url);
       this.authStatus = "Opening OAuth window...";
 
+      // TODO(jesse): do we need this? Since we have a cell
       // Create a message listener for the OAuth callback
       const messageListener = (event: MessageEvent) => {
         // Verify origin for security

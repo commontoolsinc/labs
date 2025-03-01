@@ -139,13 +139,14 @@ export async function getAuthCellAndStorage(docLink: DocLink | string) {
     // Parse string to docLink if needed
     const parsedDocLink = typeof docLink === "string" ? JSON.parse(docLink) : docLink;
 
-    storage.setRemoteStorage(new URL(env.MEMORY_URL));
+    storage.setRemoteStorage(new URL("http://localhost:8000"));
 
-    // Load the auth cell
-    await storage.syncCell(parsedDocLink.cell, true);
+    // FIXME(ja): the space should be inferred from the doclink - but it isn't there yet
+    const authCell = getCellFromDocLink(getSpace(parsedDocLink.space), parsedDocLink, undefined);
 
-    // FIXME(jake): We need to somehow get the space for the doclink, hardcoding for the moment.
-    const authCell = getCellFromDocLink(getSpace("uh4"), parsedDocLink);
+    // make sure the cell is live!
+    await storage.syncCell(authCell, true);
+    await storage.synced();
 
     return { authCell, storage };
   } catch (error) {
