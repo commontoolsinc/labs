@@ -4,6 +4,7 @@ import {
   isOpaqueRef,
   isShadowRef,
   type JSONSchema,
+  type JSONSchemaWritable,
   makeOpaqueRef,
   type Module,
   type Node,
@@ -246,15 +247,15 @@ function factoryFromRecipe<T, R>(
     if (external) setValueAtPath(initial, paths.get(cell)!, external);
   });
 
-  let argumentSchema: JSONSchema;
+  let argumentSchema: JSONSchemaWritable;
 
   if (typeof argumentSchemaArg === "string") {
     // TODO(seefeld): initial is likely not needed anymore
     // TODO(seefeld): But we need a new one for the result
-    argumentSchema = createJsonSchema(defaults, {});
+    argumentSchema = createJsonSchema(defaults, {}) as JSONSchemaWritable;
     argumentSchema.description = argumentSchemaArg;
 
-    delete argumentSchema.properties?.[UI]; // TODO(seefeld): This should be a schema for views
+    delete (argumentSchema.properties as any)?.[UI]; // TODO(seefeld): This should be a schema for views
     if (argumentSchema.properties?.internal?.properties) {
       for (
         const key of Object.keys(
@@ -277,7 +278,7 @@ function factoryFromRecipe<T, R>(
     : (resultSchemaArg ?? ({} as JSONSchema));
 
   const serializedNodes = Array.from(nodes).map((node) => {
-    const module = toJSONWithAliases(node.module, paths) as Module;
+    const module = toJSONWithAliases(node.module, paths) as unknown as Module;
     const inputs = toJSONWithAliases(node.inputs, paths)!;
     const outputs = toJSONWithAliases(node.outputs, paths)!;
     return { module, inputs, outputs } satisfies Node;
