@@ -10,8 +10,7 @@ import {
 } from "../src/types.ts";
 import { handler, lift } from "../src/module.ts";
 import { opaqueRef } from "../src/opaque-ref.ts";
-import { pushFrame } from "../src/recipe.ts";
-import { popFrame } from "../src/recipe.ts";
+import { popFrame, pushFrame } from "../src/recipe.ts";
 import { z } from "zod";
 
 type MouseEvent = {
