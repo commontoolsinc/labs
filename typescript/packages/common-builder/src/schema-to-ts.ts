@@ -145,3 +145,136 @@ type Decrement = {
 
 // Helper function to safely get decremented depth
 type DecrementDepth<D extends DepthLevel> = Decrement[D] & DepthLevel;
+
+// Same as above, but ignoreing asCell, so we never get cells. This is used for
+// calles of lifted functions and handlers, since they can pass either cells or
+// values.
+
+export type SchemaWithoutCell<
+  T extends JSONSchema,
+  Root extends JSONSchema = T,
+  Depth extends DepthLevel = 9,
+> =
+  // If we're out of depth, short-circuit
+  Depth extends 0 ? unknown
+    // Handle asCell attribute - but DON'T wrap in Cell, just use the inner type
+    : T extends { asCell: true }
+      ? SchemaWithoutCell<Omit<T, "asCell">, Root, Depth>
+    // Handle $ref to root
+    : T extends { $ref: "#" }
+      ? SchemaWithoutCell<Root, Root, DecrementDepth<Depth>>
+    // Handle other $ref (placeholder - would need a schema registry for other refs)
+    : T extends { $ref: string } ? any
+    // Handle enum values
+    : T extends { enum: infer E extends readonly any[] } ? E[number]
+    // Handle oneOf
+    : T extends { oneOf: infer U extends readonly any[] }
+      ? FromUnionWithoutCell<U, Root, Depth>
+    // Handle anyOf
+    : T extends { anyOf: infer U extends readonly any[] }
+      ? FromUnionWithoutCell<U, Root, Depth>
+    // Handle allOf (merge all types)
+    : T extends { allOf: infer U extends readonly any[] }
+      ? MergeAllOfWithoutCell<U, Root, Depth>
+    // Handle different primitive types
+    : T extends { type: "string" } ? string
+    : T extends { type: "number" | "integer" } ? number
+    : T extends { type: "boolean" } ? boolean
+    : T extends { type: "null" } ? null
+    // Handle array type
+    : T extends { type: "array" }
+      ? T extends { items: infer I }
+        ? I extends JSONSchema
+          ? SchemaWithoutCell<I, Root, DecrementDepth<Depth>>[]
+        : any[]
+      : any[] // No items specified, allow any items
+    // Handle object type
+    : T extends { type: "object" }
+      ? T extends { properties: infer P }
+        ? P extends Record<string, JSONSchema>
+          ? ObjectFromPropertiesWithoutCell<
+            P,
+            T extends { required: readonly string[] } ? T["required"] : never,
+            Root,
+            Depth,
+            T extends
+              { additionalProperties: infer AP extends boolean | JSONSchema }
+              ? AP
+              : true
+          >
+        : Record<string, unknown>
+        // Object without properties - check additionalProperties
+      : T extends { additionalProperties: infer AP }
+        ? AP extends false ? Record<string | number | symbol, never> // Empty object
+        : AP extends true ? Record<string | number | symbol, unknown>
+        : AP extends JSONSchema ? Record<
+            string | number | symbol,
+            SchemaWithoutCell<AP, Root, DecrementDepth<Depth>>
+          >
+        : Record<string | number | symbol, unknown>
+        // Default for object with no properties and no additionalProperties specified
+      : Record<string, unknown>
+    // Default case
+    : any;
+
+// Helper types for SchemaWithoutCell
+type FromUnionWithoutCell<
+  T extends readonly any[],
+  Root extends JSONSchema,
+  Depth extends DepthLevel,
+> = T extends [infer F, ...infer R extends readonly any[]]
+  ? F extends JSONSchema ?
+      | SchemaWithoutCell<F, Root, DecrementDepth<Depth>>
+      | FromUnionWithoutCell<R, Root, Depth>
+  : never
+  : never;
+
+type MergeAllOfWithoutCell<
+  T extends readonly any[],
+  Root extends JSONSchema,
+  Depth extends DepthLevel,
+> = T extends [infer F, ...infer R extends readonly any[]]
+  ? F extends JSONSchema
+    ? SchemaWithoutCell<F, Root, Depth> & MergeAllOfWithoutCell<R, Root, Depth>
+  : never
+  : Record<string | number | symbol, never>;
+
+type ObjectFromPropertiesWithoutCell<
+  P extends Record<string, JSONSchema>,
+  R extends readonly string[] | never,
+  Root extends JSONSchema,
+  Depth extends DepthLevel,
+  AP extends boolean | JSONSchema = true,
+> =
+  // Required properties
+  & {
+    [
+      K in keyof P as K extends string
+        ? R extends readonly any[] ? K extends R[number] ? K
+          : never
+        : never
+        : never
+    ]: SchemaWithoutCell<P[K], Root, DecrementDepth<Depth>>;
+  }
+  & {
+    // Optional properties
+    [
+      K in keyof P as K extends string
+        ? R extends readonly any[] ? K extends R[number] ? never
+          : K
+        : K
+        : never
+    ]?: SchemaWithoutCell<P[K], Root, DecrementDepth<Depth>>;
+  }
+  & (
+    AP extends false
+      // Additional properties off => empty
+      ? Record<string | number | symbol, never>
+      : AP extends true
+      // Additional properties on => unknown
+        ? { [key: string]: unknown }
+      : AP extends JSONSchema
+      // Additional properties is another schema => map them
+        ? { [key: string]: SchemaWithoutCell<AP, Root, DecrementDepth<Depth>> }
+      : Record<string | number | symbol, never>
+  );

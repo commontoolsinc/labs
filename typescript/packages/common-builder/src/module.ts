@@ -17,7 +17,7 @@ import {
   traverseValue,
 } from "./utils.ts";
 import { getTopFrame } from "./recipe.ts";
-import { Schema } from "./schema-to-ts.ts";
+import { Schema, SchemaWithoutCell } from "./schema-to-ts.ts";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
@@ -53,7 +53,7 @@ export function lift<
   argumentSchema: T,
   resultSchema: R,
   implementation: (input: Schema<T>) => Schema<R>,
-): ModuleFactory<Schema<T>, Schema<R>>;
+): ModuleFactory<SchemaWithoutCell<T>, SchemaWithoutCell<R>>;
 export function lift<T extends z.ZodTypeAny, R extends z.ZodTypeAny>(
   argumentSchema: T,
   resultSchema: R,
@@ -108,7 +108,7 @@ export function handler<
   eventSchema: E,
   stateSchema: T,
   handler: (event: Schema<E>, props: Schema<T>) => any,
-): HandlerFactory<Schema<T>, Schema<E>>;
+): HandlerFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
 export function handler<E, T>(
   eventSchema: JSONSchema,
   stateSchema: JSONSchema,
