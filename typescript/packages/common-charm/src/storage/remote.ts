@@ -3,7 +3,6 @@ import { log } from "../storage.ts";
 import { type StorageProvider, type StorageValue } from "./base.ts";
 import type { Entity, JSONValue, MemorySpace, Protocol } from "@commontools/memory/interface";
 import * as Memory from "@commontools/memory/consumer";
-import { Identity } from "@commontools/identity";
 import { assert } from "@commontools/memory/fact";
 import * as Changes from "@commontools/memory/changes";
 export * from "@commontools/memory/interface";

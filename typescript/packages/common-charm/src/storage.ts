@@ -239,6 +239,7 @@ class StorageImpl implements Storage {
   // TODO(seefeld,gozala): Should just be one again.
   private _getStorageProviderForSpace(space: Space): StorageProvider {
     if (!space) throw new Error("No space set");
+    if (!this.signer) throw new Error("No signer set");
 
     let provider = this.storageProviders.get(space);
 
