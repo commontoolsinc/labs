@@ -25,7 +25,14 @@ const Auth = z.object({
 });
 type Auth = z.infer<typeof Auth>;
 
-const Recipe = z.object({}).describe("fake gmail");
+const Recipe = z
+  .object({
+    settings: z.object({
+      labels: z.string().default("INBOX").describe("comma separated list of labels"),
+      limit: z.number().default(10).describe("number of emails to import"),
+    }),
+  })
+  .describe("fake gmail");
 
 const ResultSchema = {
   type: "object",
@@ -47,7 +54,7 @@ const ResultSchema = {
         },
       },
     },
-    updater: { asCell: true, type: "action" },
+    googleUpdater: { asCell: true, type: "action" },
     auth: {
       type: "object",
       properties: {
@@ -62,11 +69,18 @@ const ResultSchema = {
   },
 };
 
-const EventSchema = z.object({
-  auth: { asCell: true },
-});
+const updateLimit = handler<{ detail: { value: string } }, { limit: number }>(
+  ({ detail }, state) => {
+    state.limit = parseInt(detail?.value ?? "10") || 0;
+  },
+);
 
-const updater = handler<{}, { emails: Email[]; auth: Auth }>((_event, state) => {
+const googleUpdater = handler<
+  {},
+  { emails: Email[]; auth: Auth; settings: { labels: string; limit: number } }
+>((_event, state) => {
+  console.log("googleUpdater!");
+
   if (!state.auth.token) {
     console.log("no token");
     return;
@@ -77,9 +91,18 @@ const updater = handler<{}, { emails: Email[]; auth: Auth }>((_event, state) => 
   }
 
   // Get the set of existing email IDs for efficient lookup
-  const existingEmailIds = new Set(state.emails.map((email) => email.id));
+  const existingEmailIds = new Set((state.emails || []).map((email) => email.id));
 
-  fetchInboxEmails(state.auth.token).then((emails) => {
+  console.log("existing email ids", existingEmailIds);
+
+  const labels = state.settings.labels
+    .split(",")
+    .map((label) => label.trim())
+    .filter(Boolean);
+
+  console.log("labels", labels);
+
+  fetchEmail(state.auth.token, state.settings.limit, labels).then((emails) => {
     // Filter out any duplicates by ID
     const newEmails = emails.messages.filter((email) => !existingEmailIds.has(email.id));
 
@@ -115,7 +138,7 @@ function getHeader(headers: any[], name: string): string {
   return header ? header.value : "";
 }
 
-export async function fetchInboxEmails(
+export async function fetchEmail(
   accessToken: string,
   maxResults: number = 10,
   labelIds: string[] = ["INBOX"],
@@ -189,7 +212,13 @@ export async function fetchInboxEmails(
   return { messages: detailedMessages };
 }
 
-export default recipe(Recipe, ResultSchema, () => {
+const updateLabels = handler<{ detail: { value: string } }, { labels: string }>(
+  ({ detail }, state) => {
+    state.labels = detail?.value ?? "INBOX";
+  },
+);
+
+export default recipe(Recipe, ResultSchema, ({ settings }) => {
   const auth = cell<Auth>({
     token: "",
     tokenType: "",
@@ -210,21 +239,47 @@ export default recipe(Recipe, ResultSchema, () => {
     [UI]: (
       <div>
         <h1>Gmail Importer</h1>
+        <common-hstack>
+          <label>Import Limit</label>
+          <common-input
+            value={settings.limit}
+            placeholder="count of emails to import"
+            oncommon-input={updateLimit({ limit: settings.limit })}
+          />
+        </common-hstack>
+        <common-hstack>
+          <label>Import Labels</label>
+          <common-input
+            value={settings.labels}
+            placeholder="comma separated list of labels"
+            oncommon-input={updateLabels({ labels: settings.labels })}
+          />
+        </common-hstack>
         <common-google-oauth $authCell={auth} auth={auth} />
         <div>
-          {emails.map((email) => (
-            <div>
-              <h3>{email.subject}</h3>
-              <p>
-                <em>{email.date}</em> {email.plainText}
-              </p>
-            </div>
-          ))}
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Subject</th>
+                <th>Label</th>
+              </tr>
+            </thead>
+            <tbody>
+              {emails.map((email) => (
+                <tr>
+                  <td>&nbsp;{email.date}&nbsp;</td>
+                  <td>&nbsp;{email.subject}&nbsp;</td>
+                  <td>&nbsp;{derive(email, (email) => email.labelIds.join(", "))}&nbsp;</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     ),
     emails,
     auth,
-    updater: updater({ emails, auth }),
+    googleUpdater: googleUpdater({ emails, auth, settings }),
   };
 });

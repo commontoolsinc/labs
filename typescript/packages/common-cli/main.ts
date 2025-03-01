@@ -14,13 +14,14 @@ async function updateOnce(charm: Cell<Charm>) {
   console.log(Date.now(), "updating once", getEntityId(charm));
   // const authKey = charm.key("auth");
   const auth = charm.key("auth");
-  const updater = charm.key("updater");
+  const googleUpdater = charm.key("googleUpdater");
 
-  if (updater && auth) {
-    console.log("updater flow!");
+  if (googleUpdater && auth) {
+    console.log("googleUpdater flow!");
     // const auth = manager.getArgument(charm).key("auth");
     // FIXME(ja): the space should be included in the authCellId
     const { token, expiresAt } = auth.get();
+
     if (token && expiresAt && expiresAt < Date.now()) {
       console.log("token expired, refreshing");
 
@@ -38,21 +39,33 @@ async function updateOnce(charm: Cell<Charm>) {
         return;
       }
       await storage.synced();
+      console.log("refreshed token");
+    } else {
+      if (token) {
+        console.log("calling googleUpdater flow!");
+        googleUpdater.send({});
+      }
     }
-
-    updater.send({});
   }
 }
 
-const watchCharm = (charm: Cell<Charm>) => {
-  const auth = charm.key("auth");
-  const updater = charm.key("updater");
+const watchedCharms = new Map<string, Cell<Charm>>();
 
-  if (updater && auth) {
+const watchCharm = (charm: Cell<Charm>) => {
+  const id = getEntityId(charm)!["/"];
+  if (watchedCharms.has(id)) {
+    return;
+  }
+  watchedCharms.set(id, charm);
+
+  const auth = charm.key("auth");
+  const googleUpdater = charm.key("googleUpdater");
+
+  if (googleUpdater && auth) {
     updateOnce(charm);
     setInterval(() => {
       updateOnce(charm);
-    }, 1000 * 60);
+    }, 1000 * 30);
   }
 };
 
@@ -95,56 +108,15 @@ async function main() {
     await storage.syncCell(charm, true);
     watchCharm(charm);
   } else if (space) {
-    // FIXME(ja): is syncCell actually 'ensureIsLoaded'
-    // const charm = await storage.syncCellById(space, "cron", true);
-    // watchCharm(charm);
+    manager.getCharms().sink((charms) => {
+      charms.forEach(async (charm) => {
+        await manager.get(getEntityId(charm)!["/"]); // FIXME(ja): this runs the charm - we need to do this to get the schema!
+        watchCharm(charm);
+      });
+    });
+
     console.log("implement watchSpace");
   }
-
-  // FIXME(ja): we need to keep checking this incase the token state changes
-  // }
-
-  // if (recipeFile) {
-  //   try {
-  //     const recipeSrc = await Deno.readTextFile(recipeFile);
-  //     const recipe = await compileRecipe(recipeSrc, "recipe", []);
-  //     const charm = await manager.runPersistent(recipe, undefined, cause);
-  //     await manager.syncRecipe(charm);
-  //     manager.add([charm]);
-  //     console.log("charm:", `${toolshedUrl}/${space}/${getEntityId(charm)}`);
-
-  //     const charmWithSchema = await manager.get(charm);
-  //     if (!charmWithSchema) {
-  //       console.error("charm not found");
-  //       return;
-  //     }
-  //     charmWithSchema.sink((value) => {
-  //       console.log("running charm:", getEntityId(charm), value);
-  //     });
-  //     const updater = charmWithSchema.get()?.updater;
-  //     if (isStream(updater)) {
-  //       console.log("running updater");
-  //       const randomId = Math.random().toString(36).substring(2, 15);
-  //       updater.send({
-  //         emails: [
-  //           {
-  //             id: randomId,
-  //             threadId: randomId,
-  //             labelIds: ["INBOX"],
-  //             snippet: "test",
-  //             subject: "test",
-  //             from: "test",
-  //             date: "test",
-  //             to: "test",
-  //             plainText: "test",
-  //           },
-  //         ],
-  //       });
-  //     }
-  //   } catch (error) {
-  //     console.error("Error loading and compiling recipe:", error);
-  //   }
-  // }
 
   return new Promise(() => {
     // This promise never resolves, keeping the program alive
