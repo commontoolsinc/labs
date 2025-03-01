@@ -355,17 +355,13 @@ describe("Schema-to-TS Type Conversion", () => {
       },
     );
 
-    // TODO(seefeld): Passing data into the handler should use OpaqueRef, but
-    // we're going to merge that soon.
-    /*
-    // Runtime test with actual data
-    const preferences = getDoc({ notifyOnChange: true }).asCell();
-
+    // Note that preferences here isn't a cell, since inputs don't have to match
+    // the cell/not-cell structure, just the types!
     eventHandler({
       count: 5,
       history: ["previous_event"],
-      preferences: preferences,
-    });*/
+      preferences: { notifyOnChange: true },
+    });
 
     // We're not testing actual handler execution here since that would require a runner setup,
     // but the types should be correctly inferred
