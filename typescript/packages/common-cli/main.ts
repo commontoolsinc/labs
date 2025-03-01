@@ -49,6 +49,8 @@ async function updateOnce(charm: Cell<Charm>) {
   }
 }
 
+const manager = new CharmManager(space ?? "common-cli");
+
 const watchedCharms = new Map<string, Cell<Charm>>();
 
 const watchCharm = (charm: Cell<Charm>) => {
@@ -62,16 +64,21 @@ const watchCharm = (charm: Cell<Charm>) => {
   const googleUpdater = charm.key("googleUpdater");
 
   if (googleUpdater && auth) {
-    updateOnce(charm);
-    setInterval(() => {
-      updateOnce(charm);
-    }, 1000 * 30);
+    manager.get(id).then((c) => {
+      if (!c) {
+        console.error("charm not found");
+        return;
+      }
+      updateOnce(c);
+      setInterval(() => {
+        updateOnce(c);
+      }, 1000 * 30);
+    });
   }
 };
 
 async function main() {
   console.log("starting common-cli");
-  const manager = new CharmManager(space ?? "common-cli");
 
   let charm: Cell<Charm> | undefined;
 
@@ -84,7 +91,7 @@ async function main() {
 
     charmId = getEntityId(charm)!["/"];
     console.log("new charm:", `${toolshedUrl}${space}/${charmId}`);
-    charm = await manager.get(charmId); // FIXME(ja): load with schema
+    charm = await manager.get(charmId, false);
 
     if (!charm) {
       console.error("newly created charm not found!!");
@@ -99,7 +106,7 @@ async function main() {
     await storage.synced();
     watchCharm(charm);
   } else if (charmId) {
-    charm = await manager.get(charmId);
+    charm = await manager.get(charmId, false);
     if (!charm) {
       console.error("charm not found");
       return;
@@ -110,7 +117,7 @@ async function main() {
   } else if (space) {
     manager.getCharms().sink((charms) => {
       charms.forEach(async (charm) => {
-        await manager.get(getEntityId(charm)!["/"]); // FIXME(ja): this runs the charm - we need to do this to get the schema!
+        await manager.get(getEntityId(charm)!["/"], false);
         watchCharm(charm);
       });
     });
