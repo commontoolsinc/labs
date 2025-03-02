@@ -6,6 +6,7 @@ import {
   getValueAtPath,
   type JSONSchema,
   type OpaqueRef,
+  type Schema,
   setValueAtPath,
   toOpaqueRef,
 } from "@commontools/builder";
@@ -84,6 +85,22 @@ export type DocImpl<T> = {
     schema?: JSONSchema,
     rootSchema?: JSONSchema,
   ): Cell<DeepKeyLookup<Q, Path>>;
+
+  /**
+   * Get as simple cell with schema-inferred type.
+   *
+   * @param path - Path to follow.
+   * @param log - Reactivity log.
+   * @param schema - JSON Schema to validate against.
+   * @param rootSchema - Root schema for recursive validation.
+   * @returns Simple cell with inferred type.
+   */
+  asCell<S extends JSONSchema, Path extends PropertyKey[] = []>(
+    path: Path | undefined,
+    log: ReactivityLog | undefined,
+    schema: S,
+    rootSchema?: JSONSchema,
+  ): Cell<Schema<S>>;
 
   /**
    * Send a value, log writes.
