@@ -33,21 +33,22 @@ export type Schema<
     // Handle array type
     : T extends { type: "array" }
       ? T extends { items: infer I }
-        ? I extends JSONSchema ? Schema<I, Root, DecrementDepth<Depth>>[]
-        : any[]
-      : any[] // No items specified, allow any items
+        ? I extends JSONSchema ? Array<Schema<I, Root, DecrementDepth<Depth>>>
+        : unknown[]
+      : unknown[] // No items specified, allow any items
     // Handle object type
     : T extends { type: "object" }
       ? T extends { properties: infer P }
         ? P extends Record<string, JSONSchema> ? ObjectFromProperties<
             P,
-            T extends { required: readonly string[] } ? T["required"] : never,
+            T extends { required: readonly string[] } ? T["required"] : [],
             Root,
             Depth,
             T extends
               { additionalProperties: infer AP extends boolean | JSONSchema }
               ? AP
-              : true
+              : true,
+            GetDefaultKeys<T>
           >
         : Record<string, unknown>
         // Object without properties - check additionalProperties
@@ -85,6 +86,12 @@ type MergeAllOf<
   : never
   : Record<string | number | symbol, never>; // empty object
 
+// Get keys from the default object
+type GetDefaultKeys<T extends JSONSchema> = T extends { default: infer D }
+  ? D extends Record<string, any> ? keyof D & string
+  : never
+  : never;
+
 // Helper type for building object types from properties
 type ObjectFromProperties<
   P extends Record<string, JSONSchema>,
@@ -92,36 +99,27 @@ type ObjectFromProperties<
   Root extends JSONSchema,
   Depth extends DepthLevel,
   AP extends boolean | JSONSchema = true,
+  DK extends string = never,
 > =
-  // Required properties
+  // Required properties (either explicitly required or has a default value)
   & {
     [
-      K in keyof P as K extends string
-        ? R extends readonly any[] ? K extends R[number] ? K
-          : never
-        : never
+      K in keyof P as K extends string ? K extends R[number] | DK ? K : never
         : never
     ]: Schema<P[K], Root, DecrementDepth<Depth>>;
   }
+  // Optional properties (not required and no default)
   & {
-    // Optional properties
     [
-      K in keyof P as K extends string
-        ? R extends readonly any[] ? K extends R[number] ? never
-          : K
-        : K
+      K in keyof P as K extends string ? K extends R[number] | DK ? never : K
         : never
     ]?: Schema<P[K], Root, DecrementDepth<Depth>>;
   }
+  // Additional properties
   & (
-    AP extends false
-      // Additional properties off => empty
-      ? Record<string | number | symbol, never>
-      : AP extends true
-      // Additional properties on => unknown
-        ? { [key: string]: unknown }
+    AP extends false ? Record<string | number | symbol, never>
+      : AP extends true ? { [key: string]: unknown }
       : AP extends JSONSchema
-      // Additional properties is another schema => map them
         ? { [key: string]: Schema<AP, Root, DecrementDepth<Depth>> }
       : Record<string | number | symbol, never>
   );
@@ -186,21 +184,22 @@ export type SchemaWithoutCell<
       ? T extends { items: infer I }
         ? I extends JSONSchema
           ? SchemaWithoutCell<I, Root, DecrementDepth<Depth>>[]
-        : any[]
-      : any[] // No items specified, allow any items
+        : unknown[]
+      : unknown[] // No items specified, allow any items
     // Handle object type
     : T extends { type: "object" }
       ? T extends { properties: infer P }
         ? P extends Record<string, JSONSchema>
           ? ObjectFromPropertiesWithoutCell<
             P,
-            T extends { required: readonly string[] } ? T["required"] : never,
+            T extends { required: readonly string[] } ? T["required"] : [],
             Root,
             Depth,
             T extends
               { additionalProperties: infer AP extends boolean | JSONSchema }
               ? AP
-              : true
+              : true,
+            GetDefaultKeys<T>
           >
         : Record<string, unknown>
         // Object without properties - check additionalProperties
@@ -245,27 +244,23 @@ type ObjectFromPropertiesWithoutCell<
   Root extends JSONSchema,
   Depth extends DepthLevel,
   AP extends boolean | JSONSchema = true,
+  DK extends string = never,
 > =
-  // Required properties
+  // Required properties (either explicitly required or has a default value)
   & {
     [
-      K in keyof P as K extends string
-        ? R extends readonly any[] ? K extends R[number] ? K
-          : never
-        : never
+      K in keyof P as K extends string ? K extends R[number] | DK ? K : never
         : never
     ]: SchemaWithoutCell<P[K], Root, DecrementDepth<Depth>>;
   }
+  // Optional properties (not required and no default)
   & {
-    // Optional properties
     [
-      K in keyof P as K extends string
-        ? R extends readonly any[] ? K extends R[number] ? never
-          : K
-        : K
+      K in keyof P as K extends string ? K extends R[number] | DK ? never : K
         : never
     ]?: SchemaWithoutCell<P[K], Root, DecrementDepth<Depth>>;
   }
+  // Additional properties
   & (
     AP extends false
       // Additional properties off => empty
