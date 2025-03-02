@@ -383,8 +383,10 @@ describe("asCell with schema", () => {
           properties: {
             value: { type: "number" },
           },
+          required: ["value"],
         },
       },
+      required: ["name", "age", "tags", "nested"],
     } satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
@@ -418,6 +420,7 @@ describe("asCell with schema", () => {
           asCell: true,
         },
       },
+      required: ["id", "metadata"],
     } satisfies JSONSchema;
 
     const value = c.asCell([], undefined, schema).get();
@@ -464,6 +467,7 @@ describe("asCell with schema", () => {
           items: { $ref: "#" },
         },
       },
+      required: ["name", "children"],
     } satisfies JSONSchema;
 
     const value = c.asCell([], undefined, schema).get();
@@ -510,14 +514,17 @@ describe("asCell with schema", () => {
                   asCell: true,
                 },
               },
+              required: ["name", "settings"],
             },
             metadata: {
               type: "object",
               asCell: true,
             },
           },
+          required: ["profile", "metadata"],
         },
       },
+      required: ["user"],
     } satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
@@ -580,7 +587,8 @@ describe("asCell with schema", () => {
           },
         },
       },
-    } satisfies JSONSchema;
+      required: ["id", "metadata"],
+    } as const satisfies JSONSchema;
 
     // Create a schema that marks metadata as a reference
     const referenceSchema = {
@@ -597,7 +605,7 @@ describe("asCell with schema", () => {
         },
       },
       required: ["id", "metadata"],
-    } satisfies JSONSchema;
+    } as const satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, initialSchema);
     const value = cell.get();
@@ -647,6 +655,7 @@ describe("asCell with schema", () => {
           },
         },
       },
+      required: ["id", "context"],
     } satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
@@ -688,6 +697,7 @@ describe("asCell with schema", () => {
           additionalProperties: { asCell: true },
         },
       },
+      required: ["context"],
     } satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
@@ -729,6 +739,7 @@ describe("asCell with schema", () => {
           additionalProperties: { asCell: true },
         },
       },
+      required: ["context"],
     } satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
@@ -774,6 +785,7 @@ describe("asCell with schema", () => {
           additionalProperties: { asCell: true },
         },
       },
+      required: ["context"],
     } satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
@@ -840,6 +852,7 @@ describe("asCell with schema", () => {
           additionalProperties: { asCell: true },
         },
       },
+      required: ["context"],
     } satisfies JSONSchema;
 
     const log = { reads: [], writes: [] } as ReactivityLog;
@@ -887,9 +900,11 @@ describe("asCell with schema", () => {
               name: { type: "string" },
               value: { type: "number" },
             },
+            required: ["name", "value"],
           },
         },
       },
+      required: ["items"],
     } satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);

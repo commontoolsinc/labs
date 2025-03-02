@@ -66,6 +66,109 @@ export function resolveSchema(
   return resolvedSchema;
 }
 
+/**
+ * Process a default value from a schema, transforming it based on the schema structure
+ * to account for asCell and other schema features.
+ */
+function processDefaultValue(
+  doc: DocImpl<any>,
+  path: PropertyKey[] = [],
+  defaultValue: any,
+  schema?: JSONSchema,
+  log?: ReactivityLog,
+  rootSchema: JSONSchema | undefined = schema,
+): any {
+  if (!schema) return defaultValue;
+
+  // If schema indicates this should be a cell
+  if (schema.asCell) {
+    // Create a cell with the schema (including the default)
+    const resolvedSchema = { ...resolveSchema(schema, rootSchema, true) };
+
+    // Merge default values for object schemas
+    // TODO(seefeld): What's the right thing to do for arrays?
+    if (
+      resolvedSchema.type === "object" &&
+      typeof resolvedSchema.default === "object"
+    ) resolvedSchema.default = { ...resolvedSchema.default, ...defaultValue };
+    else resolvedSchema.default = defaultValue;
+
+    return createCell(
+      doc,
+      path,
+      log,
+      resolvedSchema,
+      rootSchema,
+    );
+  }
+
+  // Handle object type defaults
+  if (
+    schema.type === "object" && typeof defaultValue === "object" &&
+    defaultValue !== null
+  ) {
+    const result: Record<string, any> = {};
+    const processedKeys = new Set<string>();
+
+    // Process properties defined in both the schema and default value
+    if (schema.properties) {
+      for (const [key, propSchema] of Object.entries(schema.properties)) {
+        if (key in defaultValue) {
+          result[key] = processDefaultValue(
+            doc,
+            [...path, key],
+            defaultValue[key],
+            propSchema,
+            log,
+            rootSchema,
+          );
+          processedKeys.add(key);
+        }
+      }
+    }
+
+    // Handle additional properties in the default value with additionalProperties schema
+    if (schema.additionalProperties) {
+      const additionalPropertiesSchema =
+        typeof schema.additionalProperties === "object"
+          ? schema.additionalProperties
+          : undefined;
+
+      for (const key in defaultValue) {
+        if (!processedKeys.has(key)) {
+          result[key] = processDefaultValue(
+            doc,
+            [...path, key],
+            defaultValue[key],
+            additionalPropertiesSchema,
+            log,
+            rootSchema,
+          );
+        }
+      }
+    }
+
+    return result;
+  }
+
+  // Handle array type defaults
+  if (schema.type === "array" && Array.isArray(defaultValue) && schema.items) {
+    return defaultValue.map((item, i) =>
+      processDefaultValue(
+        doc,
+        [...path, i],
+        item,
+        schema.items,
+        log,
+        rootSchema,
+      )
+    );
+  }
+
+  // For primitive types, return as is
+  return defaultValue;
+}
+
 export function validateAndTransform(
   doc: DocImpl<any>,
   path: PropertyKey[] = [],
@@ -133,6 +236,18 @@ export function validateAndTransform(
   const ref = followLinks({ cell: doc, path }, [], log);
   const value = ref.cell.getAtPath(ref.path);
   log?.reads.push({ cell: ref.cell, path: ref.path });
+
+  // Check for undefined value and return processed default if available
+  if (value === undefined && resolvedSchema?.default !== undefined) {
+    return processDefaultValue(
+      doc,
+      path,
+      resolvedSchema.default,
+      resolvedSchema,
+      log,
+      rootSchema,
+    );
+  }
 
   // TODO(seefeld): The behavior when one of the options is very permissive (e.g. no type
   // or an object that allows any props) is not well defined.
@@ -295,6 +410,16 @@ export function validateAndTransform(
             rootSchema,
             seen,
           );
+        } else if (propSchema.default !== undefined) {
+          // Process default value for missing properties that have defaults
+          result[key] = processDefaultValue(
+            doc,
+            [...path, key],
+            propSchema.default,
+            propSchema,
+            log,
+            rootSchema,
+          );
         }
       }
     }
@@ -340,7 +465,16 @@ export function validateAndTransform(
     );
   }
 
-  // For primitive types, just return the value
-  // TODO(seefeld): Should we validate/coerce types here?
+  // For primitive types, return as is
+  if (value === undefined && resolvedSchema.default !== undefined) {
+    return processDefaultValue(
+      doc,
+      path,
+      resolvedSchema.default,
+      resolvedSchema,
+      log,
+      rootSchema,
+    );
+  }
   return value;
 }
