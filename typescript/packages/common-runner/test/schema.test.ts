@@ -1083,18 +1083,20 @@ describe("Schema Support", () => {
                 },
               },
             },
-            default: [
-              {
-                id: 1,
-                title: "First Item",
-                metadata: { createdAt: "2023-01-01" },
-              },
-              {
-                id: 2,
-                metadata: { createdAt: "2023-01-02" },
-              },
-            ],
           },
+        },
+        default: {
+          items: [
+            {
+              id: 1,
+              title: "First Item",
+              metadata: { createdAt: "2023-01-01" },
+            },
+            {
+              id: 2,
+              metadata: { createdAt: "2023-01-02" },
+            },
+          ],
         },
       };
 
@@ -1111,11 +1113,12 @@ describe("Schema Support", () => {
       const cell2 = c2.asCell([], undefined, schema);
       const value2 = cell2.get();
 
-      expect(value.items[0].title).toBe("First Item");
-      expect(value.items[1].title).toBe("Default Title");
+      expect(value2.items?.length).toBe(2);
+      expect(value2.items[0].title).toBe("First Item");
+      expect(value2.items[1].title).toBe("Default Title");
 
-      expect(isCell(value.items[0].metadata)).toBe(true);
-      expect(isCell(value.items[1].metadata)).toBe(true);
+      expect(isCell(value2.items[0].metadata)).toBe(true);
+      expect(isCell(value2.items[1].metadata)).toBe(true);
 
       expect(value2.items[0].metadata.get()).toEqual({
         createdAt: "2023-01-01",
