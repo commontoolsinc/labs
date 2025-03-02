@@ -1,4 +1,11 @@
-import { JSONSchema, Module, NAME, Recipe, TYPE, UI } from "@commontools/builder";
+import {
+  JSONSchema,
+  Module,
+  NAME,
+  Recipe,
+  TYPE,
+  UI,
+} from "@commontools/builder";
 import {
   type Cell,
   createRef,
@@ -46,13 +53,11 @@ export class CharmManager {
   private space: Space;
   private charmsDoc: DocImpl<DocLink[]>;
   private charms: Cell<Cell<Charm>[]>;
-  private blobbyServerUrl: string | undefined; // FIXME(ja): this shouldn't be here
 
-  constructor(private spaceId: string, blobbyServerUrl?: string) {
+  constructor(private spaceId: string) {
     this.space = getSpace(this.spaceId);
     this.charmsDoc = getDoc<DocLink[]>([], "charms", this.space);
     this.charms = this.charmsDoc.asCell([], undefined, charmListSchema);
-    this.blobbyServerUrl = blobbyServerUrl;
   }
 
   getReplica(): string | undefined {
@@ -83,7 +88,10 @@ export class CharmManager {
     await idle();
   }
 
-  async get(id: string | Cell<Charm>, runIt: boolean = true): Promise<Cell<Charm> | undefined> {
+  async get(
+    id: string | Cell<Charm>,
+    runIt: boolean = true,
+  ): Promise<Cell<Charm> | undefined> {
     // Load the charm from storage.
     let charm: Cell<Charm> | undefined;
     if (isCell(id)) {
@@ -113,7 +121,7 @@ export class CharmManager {
           },
         };
         if (hasUI && !resultSchema.properties![UI]) {
-          resultSchema.properties![UI] = { type: "object" }; // TODO: vdom schema
+          resultSchema.properties![UI] = { type: "object" }; // TODO(seefeld): make this the vdom schema
         }
         if (hasName && !resultSchema.properties![NAME]) {
           resultSchema.properties![NAME] = { type: "string" };
@@ -139,7 +147,11 @@ export class CharmManager {
     path: string[] = [],
     schema?: JSONSchema,
   ): Promise<Cell<T>> {
-    return (await storage.syncCellById(this.space, id)).asCell(path, undefined, schema);
+    return (await storage.syncCellById(this.space, id)).asCell(
+      path,
+      undefined,
+      schema,
+    );
   }
 
   // Return Cell with argument content according to the schema of the charm.
@@ -158,7 +170,9 @@ export class CharmManager {
     const id = getEntityId(idOrCharm);
     if (!id) return false;
 
-    const newCharms = this.charms.get().filter((charm) => getEntityId(charm)?.["/"] !== id?.["/"]);
+    const newCharms = this.charms.get().filter((charm) =>
+      getEntityId(charm)?.["/"] !== id?.["/"]
+    );
     if (newCharms.length !== this.charms.get().length) {
       this.charms.set(newCharms);
       await idle();
@@ -168,7 +182,11 @@ export class CharmManager {
     return false;
   }
 
-  async runPersistent(recipe: Recipe | Module, inputs?: any, cause?: any): Promise<Cell<Charm>> {
+  async runPersistent(
+    recipe: Recipe | Module,
+    inputs?: any,
+    cause?: any,
+  ): Promise<Cell<Charm>> {
     await idle();
 
     // Fill in missing parameters from other charms. It's a simple match on
@@ -224,7 +242,10 @@ export class CharmManager {
 
     await syncAllMentionedCells(inputs);
 
-    const doc = await storage.syncCellById(this.space, createRef({ recipe, inputs }, cause));
+    const doc = await storage.syncCellById(
+      this.space,
+      createRef({ recipe, inputs }, cause),
+    );
     const resultDoc = run(recipe, inputs, doc);
 
     // FIXME(ja): should we add / sync explicitly here?
@@ -237,7 +258,10 @@ export class CharmManager {
   syncRecipe(charm: Cell<Charm>): Promise<string> {
     const recipeId = charm.getSourceCell()?.get()?.[TYPE];
 
-    return Promise.all([this.syncRecipeCells(recipeId), this.syncRecipeBlobby(recipeId)]).then(
+    return Promise.all([
+      this.syncRecipeCells(recipeId),
+      this.syncRecipeBlobby(recipeId),
+    ]).then(
       () => recipeId,
     );
   }
@@ -249,7 +273,7 @@ export class CharmManager {
 
   // FIXME(ja): blobby seems to be using toString not toJSON
   async syncRecipeBlobby(recipeId: string) {
-    await syncRecipeBlobby(recipeId, this.blobbyServerUrl);
+    await syncRecipeBlobby(recipeId);
   }
 
   async sync(entity: Cell<any>, waitForStorage: boolean = false) {

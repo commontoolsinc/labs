@@ -8,8 +8,6 @@ import {
 } from "@commontools/runner";
 import { buildRecipe } from "./localBuild.ts";
 
-// FIXME(jake): This needs to be settable by environment variable...
-// If this is hardcoded, then it is not possible to develop spellbook locally.
 let BLOBBY_SERVER_URL = "/api/storage/blobby";
 
 export function setBobbyServerUrl(url: string) {
@@ -18,7 +16,7 @@ export function setBobbyServerUrl(url: string) {
 
 const recipesKnownToStorage = new Set<string>();
 
-// FIXME(Jake): this really really really needs to be revisited
+// FIXME(JA): this really really really needs to be revisited
 export async function syncRecipeBlobby(id: string) {
   if (getRecipe(id)) {
     if (recipesKnownToStorage.has(id)) return;
