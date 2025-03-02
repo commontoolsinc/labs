@@ -29,3 +29,4 @@ export * as style from "./style.ts";
 export * as CommonAudioRecorder from "./common-audio-recorder.ts";
 export * as CommonForm from "./common-form.ts";
 export * as CommonTable from "./common-table.ts";
+export * as CommonGoogleOauth from "./common-google-oauth.ts";

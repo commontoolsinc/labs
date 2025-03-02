@@ -5,9 +5,15 @@ import * as Path from "jsr:@std/path";
 const EnvSchema = z.object({
   ENV: z.string().default("development"),
   PORT: z.coerce.number().default(8000),
-  LOG_LEVEL: z
-    .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
-    .default("info"),
+  LOG_LEVEL: z.enum([
+    "fatal",
+    "error",
+    "warn",
+    "info",
+    "debug",
+    "trace",
+    "silent",
+  ]).default("info"),
   CACHE_DIR: z.string().default("./cache"),
 
   // ===========================================================================
@@ -68,6 +74,9 @@ const EnvSchema = z.object({
   // ===========================================================================
   SENTRY_DSN: z.string().default(""),
   // ===========================================================================
+
+  GOOGLE_CLIENT_ID: z.string().default(""),
+  GOOGLE_CLIENT_SECRET: z.string().default(""),
 });
 
 export type env = z.infer<typeof EnvSchema>;

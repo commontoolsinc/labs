@@ -8,10 +8,11 @@ import {
 } from "@commontools/runner";
 import { buildRecipe } from "./localBuild.ts";
 
-// FIXME(jake): This needs to be settable by environment variable...
-// If this is hardcoded, then it is not possible to develop spellbook locally.
-export const BLOBBY_SERVER_URL =
-  "https://toolshed.saga-castor.ts.net/api/storage/blobby";
+let BLOBBY_SERVER_URL = "/api/storage/blobby";
+
+export function setBobbyServerUrl(url: string) {
+  BLOBBY_SERVER_URL = new URL("/api/storage/blobby", url).toString();
+}
 
 const recipesKnownToStorage = new Set<string>();
 
