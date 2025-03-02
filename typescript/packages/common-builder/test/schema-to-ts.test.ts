@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Schema } from "../src/schema-to-ts.ts";
 import { handler, lift } from "../src/module.ts";
-import { type Frame } from "../src/types.ts";
-import { popFrame, pushFrame } from "../src/recipe.ts";
+import { type Frame, type Opaque, type OpaqueRef } from "../src/types.ts";
+import { popFrame, pushFrame, recipe } from "../src/recipe.ts";
 import { Cell, getDoc, getImmutableCell, isCell } from "@commontools/runner";
 
 // Helper function to check type compatibility at compile time
@@ -365,6 +365,113 @@ describe("Schema-to-TS Type Conversion", () => {
 
     // We're not testing actual handler execution here since that would require a runner setup,
     // but the types should be correctly inferred
+  });
+
+  it("should correctly infer types when using recipe with JSON schema", () => {
+    // Define input and output schemas
+    const inputSchema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        count: { type: "number" },
+        options: {
+          type: "object",
+          properties: {
+            enabled: { type: "boolean" },
+            tags: {
+              type: "array",
+              items: { type: "string" },
+            },
+          },
+          required: ["enabled"],
+        },
+      },
+      required: ["name"],
+    } as const;
+
+    const outputSchema = {
+      type: "object",
+      properties: {
+        result: { type: "string" },
+        processedCount: { type: "number" },
+        status: {
+          type: "object",
+          properties: {
+            success: { type: "boolean" },
+            timestamp: { type: "number" },
+          },
+          required: ["success"],
+        },
+      },
+      required: ["result", "status"],
+    } as const;
+
+    // Type aliases to verify the schema inference
+    type ExpectedInput = {
+      name: string;
+      count?: number;
+      options?: {
+        enabled: boolean;
+        tags?: string[];
+      };
+    };
+
+    type ExpectedOutput = {
+      result: string;
+      processedCount?: number;
+      status: {
+        success: boolean;
+      };
+    };
+
+    // Create a recipe using JSON schemas
+    const processRecipe = recipe(
+      inputSchema,
+      outputSchema,
+      (input) => {
+        // These lines verify that input has the correct type according to inputSchema
+        const name = input.name;
+        const count = input.count;
+        const enabled = input.options.enabled;
+
+        // Return a value that should match the output schema type
+        return {
+          result: `Processed ${name}`,
+          processedCount: count,
+          status: {
+            success: enabled,
+          },
+        };
+      },
+    );
+
+    // Verify types statically
+    type InferredInput = Parameters<typeof processRecipe>[0];
+    type InferredOutput = ReturnType<typeof processRecipe>;
+
+    expectType<ExpectedInput, Schema<typeof inputSchema>>();
+    expectType<ExpectedOutput, Schema<typeof outputSchema>>();
+
+    // Verify that the recipe function parameter matches our expected input type
+    expectType<ExpectedInput, InferredInput>();
+
+    // Test the actual nested OpaqueRef structure that recipe creates
+    type DeepOpaqueOutput = OpaqueRef<{
+      result: string;
+      processedCount: OpaqueRef<number>;
+      status: {
+        success: OpaqueRef<boolean>;
+      };
+    }>;
+    expectType<DeepOpaqueOutput, InferredOutput>();
+
+    // Uncomment for debugging - shows what the actual structure is
+    // This should help us see what the real type looks like
+    // type Debug = ReturnType<typeof processRecipe>;
+
+    // Since recipe returns an OpaqueRef rather than the actual value,
+    // we can't directly test the output type here.
+    // Instead, we verify that the Schema type correctly maps the JSONSchema
   });
 
   // Runtime tests to verify the Schema type works with actual data
