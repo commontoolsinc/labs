@@ -10,20 +10,20 @@ import { Context } from "@hono/hono";
 
 // Types
 export interface TokenData {
-  token: string;
-  tokenType: string;
-  scope: string;
-  expiresIn: number;
-  refreshToken: string;
-  expiresAt: number;
+  token?: string;
+  tokenType?: string;
+  scope?: string[];
+  expiresIn?: number;
+  refreshToken?: string;
+  expiresAt?: number;
 }
 
 export interface OAuth2Tokens {
   accessToken: string;
   refreshToken?: string;
-  expiresIn: number;
+  expiresIn?: number;
   tokenType: string;
-  scope: string;
+  scope?: string[];
   expiresAt?: number;
 }
 
@@ -175,14 +175,11 @@ export async function getAuthCellAndStorage(docLink: DocLink | string) {
 
 // Persist encrypted tokens to the auth cell
 export async function persistTokens(
-  tokens: OAuth2Tokens,
+  oauthToken: OAuth2Tokens,
   authCellDocLink: string | DocLink,
 ) {
   try {
-    console.log("authCellDocLink", authCellDocLink);
     const { authCell, storage } = await getAuthCellAndStorage(authCellDocLink);
-
-    console.log("authCellzzz", authCell);
 
     if (!authCell) {
       throw new Error("Auth cell not found");
@@ -190,12 +187,14 @@ export async function persistTokens(
 
     // Prepare token data to store
     const tokenData: TokenData = {
-      token: tokens.accessToken,
-      tokenType: tokens.tokenType,
-      scope: tokens.scope,
-      expiresIn: tokens.expiresIn,
-      refreshToken: tokens.refreshToken || "",
-      expiresAt: Date.now() + tokens.expiresIn * 1000,
+      token: oauthToken.accessToken,
+      tokenType: oauthToken.tokenType,
+      scope: oauthToken.scope,
+      expiresIn: oauthToken.expiresIn,
+      refreshToken: oauthToken.refreshToken,
+      expiresAt: oauthToken.expiresIn
+        ? Date.now() + oauthToken.expiresIn * 1000
+        : undefined,
     };
 
     // Set the new tokens to the auth cell
@@ -274,7 +273,7 @@ export function createLoginErrorResponse(c: any, errorMessage: string) {
 export function createRefreshSuccessResponse(
   c: any,
   message: string,
-  tokenInfo: { expiresAt: number; hasRefreshToken: boolean },
+  tokenInfo: { expiresAt?: number; hasRefreshToken: boolean },
 ) {
   return c.json(
     {

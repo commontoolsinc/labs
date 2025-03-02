@@ -152,7 +152,9 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
     logger.info(
       {
         accessTokenPrefix: tokens.accessToken.substring(0, 21) + "...",
-        expiresAt: tokens.expiresAt,
+        expiresAt: tokens.expiresIn
+          ? Date.now() + tokens.expiresIn * 1000
+          : undefined,
         hasRefreshToken: !!tokens.refreshToken,
       },
       "Received OAuth tokens",
@@ -162,6 +164,7 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
     const tokenData = await persistTokens(tokens, decodedState);
 
     // Fetch user info to demonstrate token usage
+    // TODO(ja): should we store the some of the user info?
     const userInfo = await fetchUserInfo(tokens.accessToken);
 
     // Prepare and return the success response
@@ -205,9 +208,9 @@ export const refresh: AppRouteHandler<RefreshRoute> = async (c) => {
 
     try {
       // Get current token data from auth cell
-      const tokenData = await getTokensFromAuthCell(payload.authCellId);
+      const currentToken = await getTokensFromAuthCell(payload.authCellId);
 
-      if (!tokenData.refreshToken) {
+      if (!currentToken.refreshToken) {
         logger.error("No refresh token found in auth cell");
         return createRefreshErrorResponse(c, "No refresh token found");
       }
@@ -220,24 +223,31 @@ export const refresh: AppRouteHandler<RefreshRoute> = async (c) => {
       const client = createOAuthClient(redirectUri);
 
       // Refresh the token
-      const tokens = await client.refreshToken.refresh(tokenData.refreshToken);
+      const newToken = await client.refreshToken.refresh(
+        currentToken.refreshToken,
+      );
 
       logger.info(
         {
-          accessTokenPrefix: tokens.accessToken.substring(0, 21) + "...",
-          expiresAt: tokens.expiresAt,
-          hasRefreshToken: !!tokens.refreshToken,
+          accessTokenPrefix: newToken.accessToken.substring(0, 21) + "...",
+          expiresAt: newToken.expiresIn
+            ? Date.now() + newToken.expiresIn * 1000
+            : undefined,
+          hasRefreshToken: !!newToken.refreshToken,
         },
         "Refreshed OAuth tokens",
       );
 
       // Keep existing refresh token if a new one wasn't provided
-      if (!tokens.refreshToken) {
-        tokens.refreshToken = tokenData.refreshToken;
+      if (!newToken.refreshToken) {
+        newToken.refreshToken = currentToken.refreshToken;
       }
 
       // Update tokens in auth cell
-      const updatedTokenData = await persistTokens(tokens, payload.authCellId);
+      const updatedTokenData = await persistTokens(
+        newToken,
+        payload.authCellId,
+      );
 
       // Return success response
       return createRefreshSuccessResponse(
