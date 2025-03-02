@@ -27,7 +27,6 @@ export async function syncRecipeBlobby(id: string) {
     return;
   }
 
-  console.log("Syncing recipe", id, BLOBBY_SERVER_URL);
   const response = await fetch(`${BLOBBY_SERVER_URL}/spell-${id}`);
   let src: string;
   let spec: string;
