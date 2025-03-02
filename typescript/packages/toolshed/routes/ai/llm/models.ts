@@ -46,13 +46,20 @@ const addModel = ({
   capabilities,
   providerOptions,
 }: {
-  provider: typeof anthropic | typeof groq | typeof openai | typeof vertex | typeof cerebras;
+  provider:
+    | typeof anthropic
+    | typeof groq
+    | typeof openai
+    | typeof vertex
+    | typeof cerebras;
   name: string;
   aliases: string[];
   capabilities: Capabilities;
   providerOptions?: Record<string, any>;
 }) => {
-  let modelName = name.includes(":") ? name.split(":").slice(1).join(":") : name;
+  let modelName = name.includes(":")
+    ? name.split(":").slice(1).join(":")
+    : name;
 
   // AWS includes colons in their model names, so we need to special case it.
   if (name.includes("us.amazon")) {
@@ -63,7 +70,9 @@ const addModel = ({
     modelName = modelName.split("-thinking")[0];
   }
 
-  const model = providerOptions ? provider(modelName, providerOptions) : provider(modelName);
+  const model = providerOptions
+    ? provider(modelName, providerOptions)
+    : provider(modelName);
 
   const config: ModelConfig = {
     model: model as unknown as string,
@@ -130,7 +139,10 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
   addModel({
     provider: anthropicProvider,
     name: "anthropic:claude-3-7-sonnet-20250219-thinking",
-    aliases: ["anthropic:claude-3-7-sonnet-thinking-latest", "claude-3-7-sonnet-thinking"],
+    aliases: [
+      "anthropic:claude-3-7-sonnet-thinking-latest",
+      "claude-3-7-sonnet-thinking",
+    ],
     capabilities: {
       contextWindow: 200_000,
       maxOutputTokens: 64000,
