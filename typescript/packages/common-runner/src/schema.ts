@@ -82,22 +82,11 @@ function processDefaultValue(
 
   // If schema indicates this should be a cell
   if (schema.asCell) {
-    // Create a cell with the schema (including the default)
-    const resolvedSchema = { ...resolveSchema(schema, rootSchema, true) };
-
-    // Merge default values for object schemas
-    // TODO(seefeld): What's the right thing to do for arrays?
-    if (
-      resolvedSchema.type === "object" &&
-      typeof resolvedSchema.default === "object"
-    ) resolvedSchema.default = { ...resolvedSchema.default, ...defaultValue };
-    else resolvedSchema.default = defaultValue;
-
     return createCell(
       doc,
       path,
       log,
-      resolvedSchema,
+      mergeDefaults(resolveSchema(schema, rootSchema, true), defaultValue),
       rootSchema,
     );
   }
@@ -109,6 +98,10 @@ function processDefaultValue(
   ) {
     const result: Record<string, any> = {};
     const processedKeys = new Set<string>();
+    const schemaDefaults: Record<string, any> =
+      typeof schema.default === "object" && schema.default !== null
+        ? schema.default
+        : {};
 
     // Process properties defined in both the schema and default value
     if (schema.properties) {
@@ -123,6 +116,13 @@ function processDefaultValue(
             rootSchema,
           );
           processedKeys.add(key);
+        } else if (key in schemaDefaults) {
+          result[key] = processDefaultValue(
+            doc,
+            [...path, key],
+            schemaDefaults[key],
+            propSchema,
+          );
         }
       }
     }
@@ -136,6 +136,7 @@ function processDefaultValue(
 
       for (const key in defaultValue) {
         if (!processedKeys.has(key)) {
+          processedKeys.add(key);
           result[key] = processDefaultValue(
             doc,
             [...path, key],
@@ -167,6 +168,23 @@ function processDefaultValue(
 
   // For primitive types, return as is
   return defaultValue;
+}
+
+function mergeDefaults(
+  schema: JSONSchema | undefined,
+  defaultValue: any,
+): any {
+  const result = { ...schema };
+
+  // TODO(seefeld): What's the right thing to do for arrays?
+  if (
+    result.type === "object" &&
+    typeof result.default === "object" &&
+    typeof defaultValue === "object"
+  ) result.default = { ...result.default, ...defaultValue };
+  else result.default = defaultValue;
+
+  return result;
 }
 
 export function validateAndTransform(
