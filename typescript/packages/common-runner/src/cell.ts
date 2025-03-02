@@ -1,4 +1,4 @@
-import { isStreamAlias } from "@commontools/builder";
+import { isStreamAlias, TYPE } from "@commontools/builder";
 import { getTopFrame, type JSONSchema } from "@commontools/builder";
 import {
   type DeepKeyLookup,
@@ -87,10 +87,23 @@ export interface Cell<T> {
   getAsDocLink(): DocLink;
   getSourceCell<T>(
     schema?: JSONSchema,
-  ): Cell<T>;
+  ): Cell<
+    & T
+    // Add default types for TYPE and `argument`. A more specific type in T will
+    // take precedence.
+    & { [TYPE]: string | undefined }
+    & ("argument" extends keyof T ? unknown : { argument: any })
+  >;
   getSourceCell<S extends JSONSchema = JSONSchema>(
     schema: S,
-  ): Cell<Schema<S>>;
+  ): Cell<
+    & Schema<S>
+    // Add default types for TYPE and `argument`. A more specific type in
+    // `schema` will take precedence.
+    & { [TYPE]: string | undefined }
+    & ("argument" extends keyof Schema<S> ? unknown
+      : { argument: any })
+  >;
   toJSON(): { cell: { "/": string } | undefined; path: PropertyKey[] };
   value: T;
   docLink: DocLink;
