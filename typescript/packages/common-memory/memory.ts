@@ -144,7 +144,7 @@ export const open = async (
     if (options.store.protocol === "file:") {
       await FS.ensureDir(options.store);
     }
-    return { ok: await new Memory(options) };
+    return { ok: new Memory(options) };
   } catch (cause) {
     return { error: Error.connection(options.store, cause as SystemError) };
   }
