@@ -219,7 +219,7 @@ export function toJSONWithAliases(
 export function createJsonSchema(
   defaultValues: any,
   referenceValues: any,
-): JSONSchema {
+): JSONSchemaWritable {
   function analyzeType(value: any, defaultValue: any): JSONSchema {
     if (isAlias(value)) {
       const path = value.$alias.path;
