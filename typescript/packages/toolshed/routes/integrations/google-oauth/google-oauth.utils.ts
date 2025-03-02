@@ -6,7 +6,7 @@ import {
   getCellFromDocLink,
   getSpace,
 } from "@commontools/runner";
-import { Context } from "@hono/hono/context";
+import { Context } from "@hono/hono";
 
 // Types
 export interface TokenData {
