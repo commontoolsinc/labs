@@ -107,7 +107,7 @@ export class CharmManager {
 
     // Make sure we have the recipe so we can run it!
     const recipeId = await this.syncRecipe(charm);
-    const recipe = getRecipe(recipeId);
+    const recipe = recipeId ? getRecipe(recipeId) : undefined;
 
     let resultSchema: JSONSchema | undefined = recipe?.resultSchema;
 
@@ -258,8 +258,9 @@ export class CharmManager {
   }
 
   // FIXME(JA): this really really really needs to be revisited
-  syncRecipe(charm: Cell<Charm>): Promise<string> {
+  syncRecipe(charm: Cell<Charm>): Promise<string | undefined> {
     const recipeId = charm.getSourceCell()?.get()?.[TYPE];
+    if (!recipeId) return Promise.resolve(undefined);
 
     return Promise.all([
       this.syncRecipeCells(recipeId),
