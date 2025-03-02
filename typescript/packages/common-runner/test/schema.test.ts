@@ -1107,10 +1107,20 @@ describe("Schema Support", () => {
       expect(isCell(value.items[0].metadata)).toBe(true);
       expect(isCell(value.items[1].metadata)).toBe(true);
 
-      expect(value.items[0].metadata.get()).toEqual({
+      const c2 = getDoc();
+      const cell2 = c2.asCell([], undefined, schema);
+      const value2 = cell2.get();
+
+      expect(value.items[0].title).toBe("First Item");
+      expect(value.items[1].title).toBe("Default Title");
+
+      expect(isCell(value.items[0].metadata)).toBe(true);
+      expect(isCell(value.items[1].metadata)).toBe(true);
+
+      expect(value2.items[0].metadata.get()).toEqual({
         createdAt: "2023-01-01",
       });
-      expect(value.items[1].metadata.get()).toEqual({
+      expect(value2.items[1].metadata.get()).toEqual({
         createdAt: "2023-01-01",
       });
     });
