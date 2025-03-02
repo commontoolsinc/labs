@@ -56,7 +56,7 @@ const adder = handler({}, inputSchema, (_, state) => {
 
 export default recipe(inputSchema, outputSchema, ({ values }) => {
   derive(values, (values) => {
-    console.log("values#", values.length);
+    console.log("values#", values?.length);
   });
   return {
     [NAME]: "Simple Value",
