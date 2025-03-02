@@ -61,9 +61,13 @@ export const callback = createRoute({
   request: {
     query: z.object({
       code: z.string().optional().describe("Authorization code from Google"),
-      state: z.string().optional().describe("State parameter containing the authCellId"),
+      state: z.string().optional().describe(
+        "State parameter containing the authCellId",
+      ),
       scope: z.string().optional().describe("Granted scopes"),
-      error: z.string().optional().describe("Error message if authorization failed"),
+      error: z.string().optional().describe(
+        "Error message if authorization failed",
+      ),
     }),
   },
   responses: {
@@ -115,7 +119,9 @@ export const refresh = createRoute({
             .object({
               authCellId: z
                 .string()
-                .describe("The authentication cell ID containing the refresh token"),
+                .describe(
+                  "The authentication cell ID containing the refresh token",
+                ),
             })
             .openapi({
               example: {

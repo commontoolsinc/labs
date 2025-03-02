@@ -1,7 +1,11 @@
 import { OAuth2Client } from "jsr:@cmd-johnson/oauth2-client@^2.0.0";
 import env from "@/env.ts";
 import { storage } from "@commontools/charm";
-import { getCellFromDocLink, getSpace, type DocLink } from "@commontools/runner";
+import {
+  type DocLink,
+  getCellFromDocLink,
+  getSpace,
+} from "@commontools/runner";
 import { Context } from "@hono/hono/context";
 
 // Types
@@ -61,7 +65,9 @@ export const getBaseUrl = (url: string): string => {
   try {
     const parsedUrl = new URL(url);
     const origin = parsedUrl.origin;
-    return origin.startsWith("http://localhost") ? origin : origin.replace("http://", "https://");
+    return origin.startsWith("http://localhost")
+      ? origin
+      : origin.replace("http://", "https://");
   } catch (error) {
     // Fallback for development/testing
     return "http://localhost:8000";
@@ -91,11 +97,15 @@ export function generateCallbackHtml(result: Record<string, unknown>): string {
     </head>
     <body>
       <h1 class="${result.success ? "success" : "error"}">
-        ${result.success ? "Authentication Successful!" : "Authentication Failed"}
+        ${
+    result.success ? "Authentication Successful!" : "Authentication Failed"
+  }
       </h1>
       <p>${
-        result.success ? "You can close this window now." : result.error || "An error occurred"
-      }</p>
+    result.success
+      ? "You can close this window now."
+      : result.error || "An error occurred"
+  }</p>
       <script>
         // Send message to opener and close window
         if (window.opener) {
@@ -116,11 +126,14 @@ export function generateCallbackHtml(result: Record<string, unknown>): string {
 // Helper function to fetch user info using the access token
 export async function fetchUserInfo(accessToken: string): Promise<UserInfo> {
   try {
-    const response = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
+    const response = await fetch(
+      "https://www.googleapis.com/oauth2/v2/userinfo",
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
       },
-    });
+    );
 
     if (!response.ok) {
       throw new Error(`Failed to fetch user info: ${response.status}`);
@@ -137,12 +150,18 @@ export async function fetchUserInfo(accessToken: string): Promise<UserInfo> {
 export async function getAuthCellAndStorage(docLink: DocLink | string) {
   try {
     // Parse string to docLink if needed
-    const parsedDocLink = typeof docLink === "string" ? JSON.parse(docLink) : docLink;
+    const parsedDocLink = typeof docLink === "string"
+      ? JSON.parse(docLink)
+      : docLink;
 
     storage.setRemoteStorage(new URL("http://localhost:8000"));
 
     // FIXME(ja): the space should be inferred from the doclink - but it isn't there yet
-    const authCell = getCellFromDocLink(getSpace(parsedDocLink.space), parsedDocLink, undefined);
+    const authCell = getCellFromDocLink(
+      getSpace(parsedDocLink.space),
+      parsedDocLink,
+      undefined,
+    );
 
     // make sure the cell is live!
     await storage.syncCell(authCell, true);
@@ -155,7 +174,10 @@ export async function getAuthCellAndStorage(docLink: DocLink | string) {
 }
 
 // Persist encrypted tokens to the auth cell
-export async function persistTokens(tokens: OAuth2Tokens, authCellDocLink: string | DocLink) {
+export async function persistTokens(
+  tokens: OAuth2Tokens,
+  authCellDocLink: string | DocLink,
+) {
   try {
     console.log("authCellDocLink", authCellDocLink);
     const { authCell, storage } = await getAuthCellAndStorage(authCellDocLink);
@@ -227,7 +249,9 @@ export function createErrorResponse(c: Context, message: string, status = 400) {
 }
 
 // Create a callback response
-export function createCallbackResponse(result: Record<string, unknown>): Response {
+export function createCallbackResponse(
+  result: Record<string, unknown>,
+): Response {
   return new Response(generateCallbackHtml(result), {
     headers: {
       "Content-Type": "text/html",
@@ -262,6 +286,10 @@ export function createRefreshSuccessResponse(
   ) as any;
 }
 
-export function createRefreshErrorResponse(c: any, errorMessage: string, status = 400) {
+export function createRefreshErrorResponse(
+  c: any,
+  errorMessage: string,
+  status = 400,
+) {
   return c.json({ error: errorMessage }, status) as any;
 }

@@ -1,20 +1,24 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
-import type { LoginRoute, CallbackRoute, RefreshRoute } from "./google-oauth.routes.ts";
+import type {
+  CallbackRoute,
+  LoginRoute,
+  RefreshRoute,
+} from "./google-oauth.routes.ts";
 import {
-  createOAuthClient,
-  getBaseUrl,
+  type CallbackResult,
+  codeVerifiers,
   createCallbackResponse,
   createErrorResponse,
-  createLoginSuccessResponse,
   createLoginErrorResponse,
-  createRefreshSuccessResponse,
+  createLoginSuccessResponse,
+  createOAuthClient,
   createRefreshErrorResponse,
+  createRefreshSuccessResponse,
   fetchUserInfo,
+  formatTokenInfo,
+  getBaseUrl,
   getTokensFromAuthCell,
   persistTokens,
-  formatTokenInfo,
-  codeVerifiers,
-  type CallbackResult,
 } from "./google-oauth.utils.ts";
 
 /**
@@ -35,7 +39,9 @@ export const login: AppRouteHandler<LoginRoute> = async (c) => {
 
     // Encode the auth cell ID as state parameter
     const authIdParam = btoa(JSON.stringify(payload.authCellId));
-    const redirectUri = `${getBaseUrl(c.req.url)}/api/integrations/google-oauth/callback`;
+    const redirectUri = `${
+      getBaseUrl(c.req.url)
+    }/api/integrations/google-oauth/callback`;
 
     logger.debug({ redirectUri }, "Created redirect URI");
 
@@ -89,7 +95,9 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
 
     // Validate required parameters
     if (!code || !state) {
-      const errorMsg = !code ? "No authorization code received" : "No state parameter received";
+      const errorMsg = !code
+        ? "No authorization code received"
+        : "No state parameter received";
       logger.error(errorMsg);
       const callbackResult: CallbackResult = {
         success: false,
@@ -131,9 +139,12 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
     const client = createOAuthClient(redirectUri);
 
     // Exchange authorization code for tokens
-    const tokens = await client.code.getToken(new URL(`${redirectUri}?code=${code}`), {
-      codeVerifier,
-    });
+    const tokens = await client.code.getToken(
+      new URL(`${redirectUri}?code=${code}`),
+      {
+        codeVerifier,
+      },
+    );
 
     // Clean up the code verifier
     codeVerifiers.delete(state);

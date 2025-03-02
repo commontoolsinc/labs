@@ -1,7 +1,7 @@
 // Load .env file
 import { parseArgs } from "jsr:@std/cli/parse-args";
-import { CharmManager, storage, setBobbyServerUrl } from "@commontools/charm";
-import { getEntityId, isStream, Cell } from "@commontools/runner";
+import { CharmManager, setBobbyServerUrl, storage } from "@commontools/charm";
+import { Cell, getEntityId, isStream } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
 
 /**
@@ -11,9 +11,13 @@ function showHelp() {
   console.log("Usage: deno run main.ts [options]");
   console.log("");
   console.log("Options:");
-  console.log("  --space=<space>       Space to watch (default: common-knowledge)");
+  console.log(
+    "  --space=<space>       Space to watch (default: common-knowledge)",
+  );
   console.log("  --charmId=<id>        Specific charm ID to watch");
-  console.log("  --interval=<seconds>  Update interval in seconds (default: 30)");
+  console.log(
+    "  --interval=<seconds>  Update interval in seconds (default: 30)",
+  );
   console.log("  --help                Show this help message");
   console.log("  --version             Show version information");
   Deno.exit(0);
@@ -31,7 +35,8 @@ const { space, charmId, interval } = flags;
 
 // Configuration
 const CHECK_INTERVAL = parseInt(interval as string) * 1000;
-const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ?? "https://toolshed.saga-castor.ts.net/";
+const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
+  "https://toolshed.saga-castor.ts.net/";
 
 // Initialize storage and Bobby server
 storage.setRemoteStorage(new URL(toolshedUrl));
@@ -90,7 +95,10 @@ async function refreshAuthToken(auth: Cell<any>, charm: Cell<Charm>) {
   authCellId.space = space as string;
   log(charm, `token expired, refreshing: ${authCellId}`);
 
-  const refresh_url = new URL("/api/integrations/google-oauth/refresh", toolshedUrl);
+  const refresh_url = new URL(
+    "/api/integrations/google-oauth/refresh",
+    toolshedUrl,
+  );
   const refresh_response = await fetch(refresh_url, {
     method: "POST",
     body: JSON.stringify({ authCellId }),
@@ -149,7 +157,9 @@ async function watchCharm(charmId: string | undefined) {
 }
 
 function getId(charmId: string | Cell<Charm> | undefined): string | undefined {
-  const realCharmId = typeof charmId === "string" ? charmId : getEntityId(charmId)?.["/"];
+  const realCharmId = typeof charmId === "string"
+    ? charmId
+    : getEntityId(charmId)?.["/"];
   if (!realCharmId) {
     log(undefined, "charmId not found", JSON.stringify(charmId));
     return undefined;
