@@ -22,6 +22,7 @@ import {
 import { storage } from "./storage.ts";
 import { syncRecipeBlobby } from "./syncRecipe.ts";
 import { getSpace, Space } from "@commontools/runner";
+import { Signer } from "@commontools/identity";
 
 export type Charm = {
   [NAME]?: string;
@@ -54,10 +55,15 @@ export class CharmManager {
   private charmsDoc: DocImpl<DocLink[]>;
   private charms: Cell<Cell<Charm>[]>;
 
-  constructor(private spaceId: string) {
+  constructor(
+    private spaceId: string,
+    private signer: Signer,
+  ) {
     this.space = getSpace(this.spaceId);
     this.charmsDoc = getDoc<DocLink[]>([], "charms", this.space);
     this.charms = this.charmsDoc.asCell([], undefined, charmListSchema);
+
+    storage.setRemoteStorage;
   }
 
   getReplica(): string | undefined {

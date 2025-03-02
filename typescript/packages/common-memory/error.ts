@@ -1,4 +1,5 @@
 import type {
+  AuthorizationError,
   Conflict,
   ConflictError,
   ConnectionError,
@@ -11,8 +12,12 @@ import type {
   TransactionError,
 } from "./interface.ts";
 import { MemorySpace } from "./interface.ts";
-import { refer } from "./util.ts";
+import { refer } from "merkle-reference";
 
+export const unauthorized = (
+  message: string,
+  cause?: Error,
+): AuthorizationError => new TheAuthorizationError(message, cause);
 export const conflict = (
   transaction: Transaction,
   info: Conflict,
@@ -137,6 +142,23 @@ export class TheConnectionError extends Error implements ConnectionError {
         message: this.cause.message,
         stack: this.cause.stack ?? "",
       },
+    };
+  }
+}
+
+export class TheAuthorizationError extends Error implements AuthorizationError {
+  override name = "AuthorizationError" as const;
+  constructor(message: string, cause?: Error) {
+    super(message);
+    this.cause = cause;
+  }
+
+  toJSON() {
+    return {
+      name: this.name,
+      message: this.message,
+      stack: this.stack,
+      cause: this.cause,
     };
   }
 }

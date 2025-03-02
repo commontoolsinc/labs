@@ -1,8 +1,8 @@
 import type {
-  ChangesBuilder,
+  Changes,
+  DID,
   MemorySpace,
   Meta,
-  Principal,
   Transaction,
 } from "./interface.ts";
 export const create = <Space extends MemorySpace>({
@@ -11,14 +11,21 @@ export const create = <Space extends MemorySpace>({
   changes,
   meta,
 }: {
-  issuer: Principal;
+  issuer: DID;
   subject: Space;
-  changes: ChangesBuilder;
+  changes: Changes;
   meta?: Meta;
-}): Transaction<Space> => ({
-  cmd: "/memory/transact",
-  iss: issuer,
-  sub: subject,
-  args: { changes },
-  ...(meta ? { meta } : undefined),
-});
+}): Transaction<Space> => {
+  const iat = (Date.now() / 1000) | 0;
+  const exp = iat + 60 * 60; // expires in an hour
+  return {
+    cmd: "/memory/transact",
+    iss: issuer,
+    sub: subject,
+    args: { changes },
+    ...(meta ? { meta } : undefined),
+    prf: [],
+    iat,
+    exp,
+  };
+};

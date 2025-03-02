@@ -1,6 +1,5 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
 import * as Memory from "../memory.ts";
-import * as Space from "../space.ts";
 import * as Fact from "../fact.ts";
 import * as Transaction from "../transaction.ts";
 import * as Changes from "../changes.ts";
@@ -398,6 +397,7 @@ test("list from non-existent replica", memory, async (session) => {
         _: {},
       },
     },
+    prf: [],
   });
   assertEquals(result, { ok: { [space]: {} } }, "empty list from new replica");
 });

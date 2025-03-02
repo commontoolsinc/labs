@@ -4,8 +4,10 @@ import { storage } from "../src/storage.ts";
 import { StorageProvider } from "../src/storage/base.ts";
 import { InMemoryStorageProvider } from "../src/storage/memory.ts";
 import { createRef, DocImpl, getDoc, getSpace } from "@commontools/runner";
+import { Identity } from "@commontools/identity";
 
 storage.setRemoteStorage(new URL("memory://"));
+storage.setSigner(await Identity.fromPassphrase("test operator"));
 
 describe("Storage", () => {
   let storage2: StorageProvider;
