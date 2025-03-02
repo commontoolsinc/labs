@@ -14,7 +14,6 @@ const updaterSchema = {
   properties: {
     newValues: { type: "array", items: { type: "string" } },
   },
-  required: ["newValues"],
 } as const satisfies JSONSchema;
 
 const inputSchema = {
@@ -23,7 +22,6 @@ const inputSchema = {
     values: { type: "array", items: { type: "string" }, asCell: true },
   },
   default: { values: [] },
-  required: ["values"],
 } as const satisfies JSONSchema;
 
 const outputSchema = {
