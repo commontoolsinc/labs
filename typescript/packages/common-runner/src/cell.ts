@@ -124,44 +124,71 @@ export interface Stream<T> {
   [isStreamMarker]: true;
 }
 
-export function getCellFromEntityId<
-  T = never,
-  S extends JSONSchema | undefined = JSONSchema,
->(
+export function getCellFromEntityId<T>(
+  space: Space,
+  entityId: EntityId,
+  path?: PropertyKey[],
+  schema?: JSONSchema,
+  log?: ReactivityLog,
+): Cell<T>;
+export function getCellFromEntityId<S extends JSONSchema = JSONSchema>(
+  space: Space,
+  entityId: EntityId,
+  path: PropertyKey[],
+  schema: S,
+  log?: ReactivityLog,
+): Cell<Schema<S>>;
+export function getCellFromEntityId(
   space: Space,
   entityId: EntityId,
   path: PropertyKey[] = [],
-  schema?: S,
+  schema?: JSONSchema,
   log?: ReactivityLog,
-): Cell<TypeOrSchema<T, S>> {
+): Cell<any> {
   const doc = getDocByEntityId(space, entityId, true)!;
   return createCell(doc, path, log, schema);
 }
 
-export function getCellFromDocLink<
-  T = never,
-  S extends JSONSchema | undefined = JSONSchema,
->(
+export function getCellFromDocLink<T>(
+  space: Space,
+  docLink: DocLink,
+  schema?: JSONSchema,
+  log?: ReactivityLog,
+): Cell<T>;
+export function getCellFromDocLink<S extends JSONSchema = JSONSchema>(
+  space: Space,
+  docLink: DocLink,
+  schema: S,
+  log?: ReactivityLog,
+): Cell<Schema<S>>;
+export function getCellFromDocLink(
   space: Space, // TODO(seefeld): Read from DocLink once it's defined there
   docLink: DocLink,
-  schema?: S,
+  schema?: JSONSchema,
   log?: ReactivityLog,
-): Cell<TypeOrSchema<T, S>> {
+): Cell<any> {
   const doc = isDoc(docLink.cell)
     ? docLink.cell
     : getDocByEntityId(space, getEntityId(docLink.cell)!, true)!;
   return createCell(doc, docLink.path, log, schema);
 }
 
-export function getImmutableCell<
-  T = never,
-  S extends JSONSchema | undefined = JSONSchema,
->(
+export function getImmutableCell<T>(
   data: T,
-  schema?: S,
+  schema?: JSONSchema,
   log?: ReactivityLog,
-): Cell<TypeOrSchema<T, S>> {
-  const doc = getDoc<T>(data);
+): Cell<T>;
+export function getImmutableCell<S extends JSONSchema = JSONSchema>(
+  data: any,
+  schema: S,
+  log?: ReactivityLog,
+): Cell<Schema<S>>;
+export function getImmutableCell(
+  data: any,
+  schema?: JSONSchema,
+  log?: ReactivityLog,
+): Cell<any> {
+  const doc = getDoc<any>(data);
   doc.freeze();
   return createCell(doc, [], log, schema);
 }
