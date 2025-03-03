@@ -11,13 +11,9 @@ function showHelp() {
   console.log("Usage: deno run main.ts [options]");
   console.log("");
   console.log("Options:");
-  console.log(
-    "  --space=<space>       Space to watch (default: common-knowledge)",
-  );
+  console.log("  --space=<space>       Space to watch (default: common-knowledge)");
   console.log("  --charmId=<id>        Specific charm ID to watch");
-  console.log(
-    "  --interval=<seconds>  Update interval in seconds (default: 30)",
-  );
+  console.log("  --interval=<seconds>  Update interval in seconds (default: 30)");
   console.log("  --help                Show this help message");
   console.log("  --version             Show version information");
   Deno.exit(0);
@@ -35,8 +31,7 @@ const { space, charmId, interval } = flags;
 
 // Configuration
 const CHECK_INTERVAL = parseInt(interval as string) * 1000;
-const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
-  "https://toolshed.saga-castor.ts.net/";
+const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ?? "https://toolshed.saga-castor.ts.net/";
 
 // Initialize storage and Bobby server
 storage.setRemoteStorage(new URL(toolshedUrl));
@@ -95,10 +90,7 @@ async function refreshAuthToken(auth: Cell<any>, charm: Cell<Charm>) {
   authCellId.space = space as string;
   log(charm, `token expired, refreshing: ${authCellId}`);
 
-  const refresh_url = new URL(
-    "/api/integrations/google-oauth/refresh",
-    toolshedUrl,
-  );
+  const refresh_url = new URL("/api/integrations/google-oauth/refresh", toolshedUrl);
   const refresh_response = await fetch(refresh_url, {
     method: "POST",
     body: JSON.stringify({ authCellId }),
@@ -114,7 +106,7 @@ async function refreshAuthToken(auth: Cell<any>, charm: Cell<Charm>) {
   log(charm, "refreshed token");
 }
 
-const isGoogleUpdaterCharm = async (charmId: string): Promise<boolean> => {
+const notGoogleUpdaterCharm = async (charmId: string): Promise<boolean> => {
   const charm = await manager.get(charmId, false);
   if (!charm) {
     log(charmId, "charm not found");
@@ -122,7 +114,7 @@ const isGoogleUpdaterCharm = async (charmId: string): Promise<boolean> => {
   }
   const googleUpdater = charm.key("googleUpdater");
   const auth = charm.key("auth");
-  return !!(isStream(googleUpdater) && auth);
+  return !(isStream(googleUpdater) && auth);
 };
 
 /**
@@ -134,7 +126,7 @@ function isIgnoredCharm(charmId: string): Promise<boolean> {
   }
   checkedCharms.set(charmId, true);
 
-  return isGoogleUpdaterCharm(charmId);
+  return notGoogleUpdaterCharm(charmId);
 }
 
 async function watchCharm(charmId: string | undefined) {
@@ -157,9 +149,7 @@ async function watchCharm(charmId: string | undefined) {
 }
 
 function getId(charmId: string | Cell<Charm> | undefined): string | undefined {
-  const realCharmId = typeof charmId === "string"
-    ? charmId
-    : getEntityId(charmId)?.["/"];
+  const realCharmId = typeof charmId === "string" ? charmId : getEntityId(charmId)?.["/"];
   if (!realCharmId) {
     log(undefined, "charmId not found", JSON.stringify(charmId));
     return undefined;
