@@ -6,50 +6,68 @@ import {
   JSONSchema,
   NAME,
   recipe,
+  schema,
   UI,
 } from "@commontools/builder";
 
-const inputSchema: JSONSchema = {
+const updaterSchema = {
+  type: "object",
+  properties: {
+    newValues: { type: "array", items: { type: "string" } },
+  },
+  title: "Update Values",
+  description: "Append `newValues` to the list.",
+  example: { newValues: ["foo", "bar"] },
+  default: { newValues: [] },
+} as const satisfies JSONSchema;
+
+// Different way to define the same schema, using 'schema' helper function,
+// let's as leave off `as const as JSONSchema`.
+const inputSchema = schema({
+  type: "object",
+  properties: {
+    values: { type: "array", items: { type: "string" }, asCell: true },
+  },
+  default: { values: [] },
+});
+
+const outputSchema = {
   type: "object",
   properties: {
     values: { type: "array", items: { type: "string" } },
+    updater: {
+      asStream: true,
+      ...updaterSchema,
+    },
   },
-};
+} as const satisfies JSONSchema;
 
-const outputSchema: JSONSchema = {
-  type: "object",
-  properties: {
-    values: { type: "array", items: { type: "string" } },
-    updater: { asCell: true, type: "action" },
-  },
-};
-
-const updater = handler<{ newValues: string[] }, { values: string[] }>(
+const updater = handler(
+  updaterSchema,
+  inputSchema,
   (event, state) => {
-    if (!state.values) state.values = [];
     console.log("updating values", event);
-    event?.newValues?.forEach((value) => {
+    event.newValues.forEach((value) => {
       console.log("adding value", value);
       state.values.push(value);
     });
   },
 );
 
-const adder = handler<{}, { values: string[] }>((_, state) => {
+const adder = handler({}, inputSchema, (_, state) => {
   console.log("adding a value");
-  if (!state.values) state.values = [];
   state.values.push(Math.random().toString(36).substring(2, 15));
 });
 
 export default recipe(inputSchema, outputSchema, ({ values }) => {
-  /*derive(values, (values) => {
-    console.log("values#", values.length);
-  });*/
+  derive(values, (values) => {
+    console.log("values#", values?.length);
+  });
   return {
     [NAME]: "Simple Value",
     [UI]: (
       <div>
-        <button onclick={adder({ values })}>Add Value</button>
+        <button type="button" onClick={adder({ values })}>Add Value</button>
         <div>
           {values.map((value, index) => (
             <div>

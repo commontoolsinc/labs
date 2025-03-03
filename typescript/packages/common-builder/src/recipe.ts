@@ -4,6 +4,7 @@ import {
   isOpaqueRef,
   isShadowRef,
   type JSONSchema,
+  type JSONSchemaWritable,
   makeOpaqueRef,
   type Module,
   type Node,
@@ -27,6 +28,7 @@ import {
   toJSONWithAliases,
   traverseValue,
 } from "./utils.ts";
+import { SchemaWithoutCell } from "./schema-to-ts.ts";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
@@ -71,6 +73,21 @@ export function recipe<T, R>(
   resultSchema: JSONSchema,
   fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
 ): RecipeFactory<T, R>;
+export function recipe<S extends JSONSchema>(
+  argumentSchema: S,
+  fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => any,
+): RecipeFactory<SchemaWithoutCell<S>, ReturnType<typeof fn>>;
+export function recipe<S extends JSONSchema, R>(
+  argumentSchema: S,
+  fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => Opaque<R>,
+): RecipeFactory<SchemaWithoutCell<S>, R>;
+export function recipe<S extends JSONSchema, RS extends JSONSchema>(
+  argumentSchema: S,
+  resultSchema: RS,
+  fn: (
+    input: OpaqueRef<Required<SchemaWithoutCell<S>>>,
+  ) => Opaque<SchemaWithoutCell<RS>>,
+): RecipeFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
 export function recipe<T, R>(
   argumentSchema: string | JSONSchema | z.ZodTypeAny,
   resultSchema:
@@ -246,15 +263,15 @@ function factoryFromRecipe<T, R>(
     if (external) setValueAtPath(initial, paths.get(cell)!, external);
   });
 
-  let argumentSchema: JSONSchema;
+  let argumentSchema: JSONSchemaWritable;
 
   if (typeof argumentSchemaArg === "string") {
     // TODO(seefeld): initial is likely not needed anymore
-    // TODO(seefeld): But we need a new one for the result
+    // TODO(seefeld): But we need a derived schema for the result
     argumentSchema = createJsonSchema(defaults, {});
     argumentSchema.description = argumentSchemaArg;
 
-    delete argumentSchema.properties?.[UI]; // TODO(seefeld): This should be a schema for views
+    delete (argumentSchema.properties as any)?.[UI]; // TODO(seefeld): This should be a schema for views
     if (argumentSchema.properties?.internal?.properties) {
       for (
         const key of Object.keys(
@@ -269,7 +286,7 @@ function factoryFromRecipe<T, R>(
   } else if (argumentSchemaArg instanceof z.ZodType) {
     argumentSchema = zodToJsonSchema(argumentSchemaArg) as JSONSchema;
   } else {
-    argumentSchema = argumentSchemaArg as unknown as JSONSchema;
+    argumentSchema = argumentSchemaArg;
   }
 
   const resultSchema: JSONSchema = resultSchemaArg instanceof z.ZodType
@@ -277,7 +294,7 @@ function factoryFromRecipe<T, R>(
     : (resultSchemaArg ?? ({} as JSONSchema));
 
   const serializedNodes = Array.from(nodes).map((node) => {
-    const module = toJSONWithAliases(node.module, paths) as Module;
+    const module = toJSONWithAliases(node.module, paths) as unknown as Module;
     const inputs = toJSONWithAliases(node.inputs, paths)!;
     const outputs = toJSONWithAliases(node.outputs, paths)!;
     return { module, inputs, outputs } satisfies Node;
