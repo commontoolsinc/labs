@@ -22,7 +22,7 @@ export default function Shell() {
     <div className="flex flex-col shell h-full bg-gray-50 border-2 border-black">
       <ShellHeader replicaName={replicaName} charmId={charmId} />
 
-      <div className="relative h-full">
+      <div className="relative h-full overflow-y-auto">
         <Outlet />
       </div>
 
