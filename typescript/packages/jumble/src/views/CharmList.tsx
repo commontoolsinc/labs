@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { CommonCard } from "@/components/common/CommonCard.tsx";
 import { useParams } from "react-router-dom";
 import { render } from "@commontools/html";
-import { Cell } from "@commontools/runner";
+import { Cell, getCellFromDocLink } from "@commontools/runner";
 import ShapeLogo from "@/assets/ShapeLogo.tsx";
 import { MdOutlineStar } from "react-icons/md";
 import { useSyncedStatus } from "@/hooks/use-synced-status.ts";
@@ -18,6 +18,108 @@ export interface CommonDataEvent extends CustomEvent {
     data: any[];
   };
 }
+
+interface ParallaxLayerProps {
+  id: string;
+  translateFactor: number;
+  x: number;
+  y: number;
+}
+function ParallaxPreview({ content }: { content: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mousePositionRef = useRef({ x: 0, y: 0 });
+  const animationFrameIdRef = useRef<number | null>(null);
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!containerRef.current) return;
+
+    const rect = containerRef.current.getBoundingClientRect();
+    // Calculate position relative to container center
+    const x = ((e.clientX - rect.left) / rect.width - 0.5) * 2; // -1 to 1
+    const y = ((e.clientY - rect.top) / rect.height - 0.5) * 2; // -1 to 1
+
+    mousePositionRef.current = { x, y };
+  };
+
+  const handleMouseLeave = () => {
+    // Reset position when mouse leaves
+    mousePositionRef.current = { x: 0, y: 0 };
+  };
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    // Find SVG layers once the content is rendered
+    const container = containerRef.current;
+
+    const animate = () => {
+      const svg = container.querySelector("svg");
+      if (!svg) {
+        animationFrameIdRef.current = requestAnimationFrame(animate);
+        return;
+      }
+
+      const layers: ParallaxLayerProps[] = [
+        {
+          id: "bg",
+          translateFactor: 10,
+          x: mousePositionRef.current.x,
+          y: mousePositionRef.current.y,
+        },
+        {
+          id: "main",
+          translateFactor: 20,
+          x: mousePositionRef.current.x,
+          y: mousePositionRef.current.y,
+        },
+        {
+          id: "fg",
+          translateFactor: 30,
+          x: mousePositionRef.current.x,
+          y: mousePositionRef.current.y,
+        },
+      ];
+
+      layers.forEach((layer) => {
+        const element = svg.getElementById(layer.id);
+        if (element) {
+          const translateX = layer.x * layer.translateFactor;
+          const translateY = layer.y * layer.translateFactor;
+          element.style.transform =
+            `translate(${translateX}px, ${translateY}px)`;
+          element.style.transition =
+            mousePositionRef.current.x === 0 && mousePositionRef.current.y === 0
+              ? "transform 0.5s ease-out"
+              : "none"; // Remove transition for smoother animation
+        }
+      });
+
+      // Continue animation loop
+      animationFrameIdRef.current = requestAnimationFrame(animate);
+    };
+
+    // Start animation loop
+    animationFrameIdRef.current = requestAnimationFrame(animate);
+
+    // Cleanup animation frame on unmount
+    return () => {
+      if (animationFrameIdRef.current) {
+        cancelAnimationFrame(animationFrameIdRef.current);
+      }
+    };
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      className="w-full bg-gray-50 rounded border border-gray-100 min-h-[192px] overflow-hidden relative"
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      dangerouslySetInnerHTML={{ __html: content }}
+    />
+  );
+}
+
 function CharmPreview(
   { charm, replicaName }: { charm: Cell<Charm>; replicaName: string },
 ) {
@@ -53,6 +155,10 @@ function CharmPreview(
     }
   }, [charm, isIntersecting]);
 
+  const link = charm.getAsDocLink();
+  link.path = ["$PREVIEW"];
+  const preview = getCellFromDocLink({ uri: replicaName }, link);
+
   return (
     <CommonCard className="p-2 group relative" details>
       <button
@@ -85,11 +191,25 @@ function CharmPreview(
             {(charm.get()[NAME] || "Unnamed Charm") +
               ` (#${charmId(charm)!.slice(-4)})`}
           </h3>
-          <div
-            ref={previewRef}
-            className="w-full bg-gray-50 rounded border border-gray-100 min-h-[192px] pointer-events-none select-none"
-          >
-          </div>
+          {preview.get()
+            ? (
+              <>
+                <ParallaxPreview content={String(preview.get())} />
+                <style>
+                  {`
+                    svg { max-width: 100%; height: auto; }
+                    #fg, #main, #bg { transform-origin: center center; }
+                  `}
+                </style>
+              </>
+            )
+            : (
+              <div
+                ref={previewRef}
+                className="w-full bg-gray-50 rounded border border-gray-100 min-h-[192px] pointer-events-none select-none"
+              >
+              </div>
+            )}
         </div>
       </NavLink>
     </CommonCard>

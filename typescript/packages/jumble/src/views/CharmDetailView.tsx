@@ -197,7 +197,7 @@ function useSuggestions(charm: Cell<Charm> | null) {
 
     const loadSuggestions = async () => {
       setLoadingSuggestions(true);
-      const iframeRecipe = getIframeRecipe(charm);
+      const iframeRecipe = await getIframeRecipe(charm);
       if (!iframeRecipe) {
         console.error("No iframe recipe found in charm");
         return;

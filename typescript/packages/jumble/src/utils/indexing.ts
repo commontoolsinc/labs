@@ -1,9 +1,11 @@
-import { CharmManager } from "@commontools/charm";
+import { CharmManager, getRecipeFrom } from "@commontools/charm";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext.tsx";
 import { charmId } from "./charms.ts";
 import { llm } from "./llm.ts";
-import { Cell } from "@commontools/runner";
+import { Cell, getCellFromDocLink } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
+import { getIframeRecipe } from "../../../common-charm/src/iframe/recipe.ts";
+import { UI } from "../../../common-builder/src/types.ts";
 interface IndexingContext {
   startJob: (name: string) => string;
   stopJob: (jobId: string) => void;
@@ -36,7 +38,7 @@ function saveToMemory(
   });
 }
 
-async function indexCharm(
+async function annotateCharmWithDescription(
   charm: Cell<Charm>,
   jobId: string,
   context: IndexingContext,
@@ -69,6 +71,93 @@ async function indexCharm(
     );
 
     await new Promise((resolve) => setTimeout(resolve, 200)); // Simulate work
+    context.addJobMessage(jobId, `✓ Indexed charm ${charmId(charm)}`);
+  } catch (error) {
+    context.addJobMessage(
+      jobId,
+      `Failed to index charm ${charm.entityId}: ${error}`,
+    );
+    console.error(error);
+  }
+}
+
+function extractSvgFromResponse(response: string): string {
+  // Regular expression to match SVG content
+  const svgRegex = /<svg[\s\S]*?<\/svg>/i;
+  const match = response.match(svgRegex);
+
+  if (match && match[0]) {
+    return match[0];
+  }
+
+  // Check for code block with SVG
+  const codeBlockRegex = /```(?:html|svg)?\s*((?:<svg[\s\S]*?<\/svg>))```/i;
+  const codeMatch = response.match(codeBlockRegex);
+
+  if (codeMatch && codeMatch[1]) {
+    return codeMatch[1];
+  }
+
+  // Return original response if no SVG found
+  return response;
+}
+
+async function annotateCharmWithPreviewImage(
+  charm: Cell<Charm>,
+  jobId: string,
+  context: IndexingContext,
+  replica: string,
+): Promise<void> {
+  try {
+    // Simulate indexing work for this example
+    context.addJobMessage(jobId, `Indexing charm ${charmId(charm)}...`);
+    console.log("indexing", charm);
+    const stringified = JSON.stringify(charm.asSchema({}).get());
+
+    let src: string | undefined = "";
+    try {
+      const { iframe, recipeId } = await getIframeRecipe(charm);
+      if (iframe === undefined) {
+        throw new Error("iframe is undefined");
+      }
+      src = iframe.src;
+    } catch (error) {
+      console.error(error);
+      const recipe = await getRecipeFrom(charm);
+      src = recipe?.src;
+    }
+    const data = {
+      argument: charm.getSourceCell()?.["argument"] ?? {},
+      UI: charm.get()[UI],
+    };
+
+    const response = await llm.sendRequest({
+      model: "anthropic:claude-3-7-sonnet-latest",
+      messages: [
+        {
+          role: "user",
+          content: `analyse this source code then extract an SVG "preview" of it
+
+            the preview should split into 3 layers, 'fg', 'main' and 'bg' (use exact IDs) which will parallax in 3D in the final render
+
+            we want to get the spirit of the charm, don't adhere to closely to the literal markup, be creative.
+
+            ${src}
+
+            this sourcecode will be rendered using this data:
+
+            ${JSON.stringify(data)}`,
+        },
+      ],
+    });
+    context.addJobMessage(jobId, response);
+    console.log(stringified, response);
+
+    const link = charm.getAsDocLink();
+    link.path = ["$PREVIEW"];
+    const preview = getCellFromDocLink({ uri: replica }, link);
+    preview.set(extractSvgFromResponse(response));
+
     context.addJobMessage(jobId, `✓ Indexed charm ${charmId(charm)}`);
   } catch (error) {
     context.addJobMessage(
@@ -112,7 +201,12 @@ export async function startCharmIndexing(
 
       await Promise.all(
         batch.map((charm) =>
-          indexCharm(charm, jobId, context, charmManager.getReplica()!)
+          annotateCharmWithPreviewImage(
+            charm,
+            jobId,
+            context,
+            charmManager.getReplica()!,
+          )
         ),
       );
 

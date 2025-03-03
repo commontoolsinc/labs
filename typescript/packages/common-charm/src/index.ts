@@ -9,5 +9,5 @@ export {
   extend,
   saveNewRecipeVersion,
 } from "./iterate.ts";
-export { getIframeRecipe, type IFrameRecipe } from "./iframe/recipe.ts";
+export { getIframeRecipe, type IFrameRecipe, getRecipeFrom } from "./iframe/recipe.ts";
 export { storage } from "./storage.ts";
