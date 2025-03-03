@@ -984,21 +984,6 @@ describe("Schema Support", () => {
     });
 
     it("should handle nested default values with asCell", () => {
-      const c = getDoc({
-        user: {
-          name: "John",
-          // settings is not defined
-        },
-      });
-
-      const c2 = getDoc({
-        user: {
-          name: "John",
-          // settings is set, but theme is not
-          settings: { notifications: false },
-        },
-      });
-
       const schema: JSONSchema = {
         type: "object",
         properties: {
@@ -1031,6 +1016,13 @@ describe("Schema Support", () => {
         },
       };
 
+      const c = getDoc({
+        user: {
+          name: "John",
+          // settings is not defined
+        },
+      });
+
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
 
@@ -1042,6 +1034,14 @@ describe("Schema Support", () => {
       expect(isCell(settings.theme)).toBe(true);
       expect(isCell(settings.theme.get())).toBe(false);
       expect(settings.theme.get()).toEqual({ mode: "light", color: "red" });
+
+      const c2 = getDoc({
+        user: {
+          name: "John",
+          // settings is set, but theme is not
+          settings: { notifications: false },
+        },
+      });
 
       const cell2 = c2.asCell([], undefined, schema);
       const value2 = cell2.get();
@@ -1056,14 +1056,6 @@ describe("Schema Support", () => {
     });
 
     it("should handle default values with asCell in arrays", () => {
-      const c = getDoc({
-        items: [
-          { id: 1, title: "First Item" },
-          // Second item has missing properties
-          { id: 2 },
-        ],
-      });
-
       const schema: JSONSchema = {
         type: "object",
         properties: {
@@ -1083,23 +1075,29 @@ describe("Schema Support", () => {
                 },
               },
             },
+            default: [
+              {
+                id: 1,
+                title: "First Item",
+                metadata: { createdAt: "2023-01-01" },
+              },
+              {
+                id: 2,
+                metadata: { createdAt: "2023-01-02" },
+              },
+            ],
           },
         },
-        default: {
-          items: [
-            {
-              id: 1,
-              title: "First Item",
-              metadata: { createdAt: "2023-01-01" },
-            },
-            {
-              id: 2,
-              metadata: { createdAt: "2023-01-02" },
-            },
-          ],
-        },
+        default: {},
       };
 
+      const c = getDoc({
+        items: [
+          { id: 1, title: "First Item" },
+          // Second item has missing properties
+          { id: 2 },
+        ],
+      });
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
 
@@ -1124,18 +1122,11 @@ describe("Schema Support", () => {
         createdAt: "2023-01-01",
       });
       expect(value2.items[1].metadata.get()).toEqual({
-        createdAt: "2023-01-01",
+        createdAt: "2023-01-02",
       });
     });
 
     it("should handle default values with additionalProperties", () => {
-      const c = getDoc({
-        config: {
-          knownProp: "value",
-          // Other properties are missing
-        },
-      });
-
       const schema = {
         type: "object",
         properties: {
@@ -1163,10 +1154,11 @@ describe("Schema Support", () => {
         required: ["config"],
       } as const satisfies JSONSchema;
 
+      const c = getDoc();
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
 
-      expect(value.config.knownProp).toBe("value"); // Uses the actual value, not the default
+      expect(value.config.knownProp).toBe("default");
 
       // These come from the default and should be processed as cells because of asCell in additionalProperties
       expect(isCell(value.config.feature1)).toBe(true);
@@ -1180,18 +1172,9 @@ describe("Schema Support", () => {
         enabled: false,
         value: "feature2",
       });
-
-      // Verify the cells can be updated
-      value.config.feature1.set({ enabled: false, value: "updated" });
-      expect(value.config.feature1.get()).toEqual({
-        enabled: false,
-        value: "updated",
-      });
     });
 
     it("should handle default at the root level with asCell", () => {
-      const c = getDoc(undefined);
-
       const schema: JSONSchema = {
         type: "object",
         properties: {
@@ -1210,12 +1193,14 @@ describe("Schema Support", () => {
         asCell: true,
       };
 
+      const c = getDoc(undefined);
       const cell = c.asCell([], undefined, schema);
 
       // The whole document should be a cell containing the default
       expect(isCell(cell)).toBe(true);
-      const value = cell.get();
-      expect(isCell(value)).toBe(false);
+      const cellValue = cell.get();
+      expect(isCell(cellValue)).toBe(true);
+      const value = cellValue.get();
       expect(value).toEqual({
         name: "Default User",
         settings: { theme: "light" },
@@ -1223,10 +1208,52 @@ describe("Schema Support", () => {
 
       // Verify it can be updated
       cell.set({ name: "Updated User", settings: { theme: "dark" } });
-      expect(cell.get()).toEqual({
+      expect(cell.get().get()).toEqual({
         name: "Updated User",
         settings: { theme: "dark" },
       });
+    });
+
+    it("should make immutable cells if they provide the default value", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          name: { type: "string", default: "Default Name", asCell: true },
+        },
+        default: {},
+      };
+
+      const c = getDoc();
+      const cell = c.asCell([], undefined, schema);
+      const value = cell.get();
+      expect(isCell(value.name)).toBe(true);
+      expect(value.name.get()).toBe("Default Name");
+
+      cell.set({ name: "Updated Name" });
+
+      // Expect the cell to be immutable
+      expect(value.name.get()).toBe("Default Name");
+    });
+
+    it("should make mutable cells if parent provides the default value", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          name: { type: "string", default: "Default Name", asCell: true },
+        },
+        default: { name: "First default name" },
+      };
+
+      const c = getDoc();
+      const cell = c.asCell([], undefined, schema);
+      const value = cell.get();
+      expect(isCell(value.name)).toBe(true);
+      expect(value.name.get()).toBe("First default name");
+
+      cell.set({ name: "Updated Name" });
+
+      // Expect the cell to be immutable
+      expect(value.name.get()).toBe("Updated Name");
     });
   });
 });
