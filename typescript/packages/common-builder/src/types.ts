@@ -111,6 +111,7 @@ export type JSONSchema = {
   readonly description?: string;
   readonly default?: Readonly<JSONValue>;
   readonly title?: string;
+  readonly example?: Readonly<JSONValue>;
   readonly required?: readonly string[];
   readonly enum?: readonly string[];
   readonly items?: Readonly<JSONSchema>;

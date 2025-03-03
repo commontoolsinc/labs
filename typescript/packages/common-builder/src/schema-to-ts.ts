@@ -1,6 +1,8 @@
 import type { JSONSchema } from "./types.ts";
 import type { Cell } from "@commontools/runner";
 
+export const schema = <T extends JSONSchema>(schema: T) => schema;
+
 export type Schema<
   T extends JSONSchema,
   Root extends JSONSchema = T,

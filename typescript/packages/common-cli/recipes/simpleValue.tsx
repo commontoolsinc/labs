@@ -6,6 +6,7 @@ import {
   JSONSchema,
   NAME,
   recipe,
+  schema,
   UI,
 } from "@commontools/builder";
 
@@ -14,15 +15,21 @@ const updaterSchema = {
   properties: {
     newValues: { type: "array", items: { type: "string" } },
   },
+  title: "Update Values",
+  description: "Append `newValues` to the list.",
+  example: { newValues: ["foo", "bar"] },
+  default: { newValues: [] },
 } as const satisfies JSONSchema;
 
-const inputSchema = {
+// Different way to define the same schema, using 'schema' helper function,
+// let's as leave off `as const as JSONSchema`.
+const inputSchema = schema({
   type: "object",
   properties: {
     values: { type: "array", items: { type: "string" }, asCell: true },
   },
   default: { values: [] },
-} as const satisfies JSONSchema;
+});
 
 const outputSchema = {
   type: "object",
@@ -40,7 +47,7 @@ const updater = handler(
   inputSchema,
   (event, state) => {
     console.log("updating values", event);
-    event?.newValues?.forEach((value) => {
+    event.newValues.forEach((value) => {
       console.log("adding value", value);
       state.values.push(value);
     });
