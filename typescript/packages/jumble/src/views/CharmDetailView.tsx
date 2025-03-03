@@ -588,12 +588,12 @@ const Suggestions = () => {
               type="button"
               key={index}
               onClick={() => handleSuggestion(suggestion)}
-              className="p-2 text-left text-sm border border-gray-300 hover:border-black hover:bg-gray-50 shadow-sm transition-all duration-100 ease-in-out cursor-pointer flex-shrink-0 min-w-40 max-w-56"
+              className="p-2 text-left text-sm border border-gray-300 hover:border-black hover:bg-gray-50 shadow-sm transition-all duration-100 ease-in-out cursor-pointer flex-shrink-0 min-w-40 max-w-96"
             >
               <span className="font-medium text-xs uppercase text-gray-500 block">
                 {suggestion.type}
               </span>
-              <p className="text-xs line-clamp-2">{suggestion.prompt}</p>
+              <p className="text-xs">{suggestion.prompt}</p>
             </button>
           ))}
         </div>
