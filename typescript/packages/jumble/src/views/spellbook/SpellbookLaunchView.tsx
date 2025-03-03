@@ -38,8 +38,8 @@ export default function SpellbookLaunchView() {
             prompt: "",
             options: {
               format: "json",
-              validate: true,
-              maxExamples: 25,
+              validate: false,
+              maxExamples: 5,
             },
           }),
         });
