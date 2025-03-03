@@ -59,7 +59,7 @@ const useCharmOperationContext = () => {
 // =================== Custom Hooks ===================
 
 // Hook for managing bottom sheet functionality
-function useBottomSheet(initialHeight = 420) {
+function useBottomSheet(initialHeight = 585) {
   const [sheetHeight, setSheetHeight] = useState<number>(initialHeight);
   const [isResizing, setIsResizing] = useState(false);
   const resizeStartY = useRef<number | null>(null);
