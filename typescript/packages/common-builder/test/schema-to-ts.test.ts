@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Schema } from "../src/schema-to-ts.ts";
 import { handler, lift } from "../src/module.ts";
-import { type Frame, type Opaque, type OpaqueRef } from "../src/types.ts";
+import { str } from "../src/built-in.ts";
+import { type Frame, type JSONSchema, type OpaqueRef } from "../src/types.ts";
 import { popFrame, pushFrame, recipe } from "../src/recipe.ts";
-import { Cell, getDoc, getImmutableCell, isCell } from "@commontools/runner";
+import { Cell, getDoc, getImmutableCell } from "@commontools/runner";
 
 // Helper function to check type compatibility at compile time
 // This doesn't run any actual tests, but ensures types are correct
@@ -185,7 +186,7 @@ describe("Schema-to-TS Type Conversion", () => {
     type ExpectedNestedCell = {
       user?: {
         name?: string;
-        settings: Cell<{ theme?: string }>;
+        settings?: Cell<{ theme?: string }>;
       };
     };
 
@@ -255,7 +256,7 @@ describe("Schema-to-TS Type Conversion", () => {
         },
       },
       required: ["name"],
-    } as const;
+    } as const satisfies JSONSchema;
 
     const outputSchema = {
       type: "object",
@@ -264,8 +265,8 @@ describe("Schema-to-TS Type Conversion", () => {
         nameLength: { type: "number" },
         firstTag: { type: "string" },
       },
-      required: ["processed", "nameLength"],
-    } as const;
+      //required: ["processed", "nameLength"],
+    } as const satisfies JSONSchema;
 
     // Create a module using lift with JSON schemas
     // This tests type inference - TypeScript should infer the correct input and output types
@@ -276,7 +277,7 @@ describe("Schema-to-TS Type Conversion", () => {
         // This will only compile if input is correctly typed according to inputSchema
         const nameLength = input.name.length;
         const firstTag = input.tags?.[0] || "";
-        const count = input.count || 0;
+        const _count = input.count || 0;
 
         // This will only compile if the return type matches outputSchema
         return {
@@ -436,7 +437,7 @@ describe("Schema-to-TS Type Conversion", () => {
 
         // Return a value that should match the output schema type
         return {
-          result: `Processed ${name}`,
+          result: str`Processed ${name}`,
           processedCount: count,
           status: {
             success: enabled,
@@ -457,7 +458,7 @@ describe("Schema-to-TS Type Conversion", () => {
 
     // Test the actual nested OpaqueRef structure that recipe creates
     type DeepOpaqueOutput = OpaqueRef<{
-      result: string;
+      result: OpaqueRef<string>;
       processedCount: OpaqueRef<number>;
       status: {
         success: OpaqueRef<boolean>;

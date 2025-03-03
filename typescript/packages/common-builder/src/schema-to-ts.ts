@@ -98,7 +98,7 @@ type ObjectFromProperties<
   R extends readonly string[] | never,
   Root extends JSONSchema,
   Depth extends DepthLevel,
-  AP extends boolean | JSONSchema = true,
+  AP extends boolean | JSONSchema = false,
   DK extends string = never,
 > =
   // Required properties (either explicitly required or has a default value)
@@ -243,7 +243,7 @@ type ObjectFromPropertiesWithoutCell<
   R extends readonly string[] | never,
   Root extends JSONSchema,
   Depth extends DepthLevel,
-  AP extends boolean | JSONSchema = true,
+  AP extends boolean | JSONSchema = false,
   DK extends string = never,
 > =
   // Required properties (either explicitly required or has a default value)
