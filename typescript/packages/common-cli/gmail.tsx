@@ -1,5 +1,5 @@
 import { h } from "@commontools/html";
-import { recipe, handler, UI, NAME, cell, derive } from "@commontools/builder";
+import { cell, derive, handler, NAME, recipe, UI } from "@commontools/builder";
 import { z } from "zod";
 
 const Email = z.object({
@@ -28,7 +28,9 @@ type Auth = z.infer<typeof Auth>;
 const Recipe = z
   .object({
     settings: z.object({
-      labels: z.string().default("INBOX").describe("comma separated list of labels"),
+      labels: z.string().default("INBOX").describe(
+        "comma separated list of labels",
+      ),
       limit: z.number().default(10).describe("number of emails to import"),
     }),
   })
@@ -91,7 +93,9 @@ const googleUpdater = handler<
   }
 
   // Get the set of existing email IDs for efficient lookup
-  const existingEmailIds = new Set((state.emails || []).map((email) => email.id));
+  const existingEmailIds = new Set(
+    (state.emails || []).map((email) => email.id),
+  );
 
   console.log("existing email ids", existingEmailIds);
 
@@ -104,7 +108,9 @@ const googleUpdater = handler<
 
   fetchEmail(state.auth.token, state.settings.limit, labels).then((emails) => {
     // Filter out any duplicates by ID
-    const newEmails = emails.messages.filter((email) => !existingEmailIds.has(email.id));
+    const newEmails = emails.messages.filter((email) =>
+      !existingEmailIds.has(email.id)
+    );
 
     if (newEmails.length > 0) {
       console.log(`Adding ${newEmails.length} new emails`);
@@ -134,7 +140,9 @@ function extractEmailAddress(header: string): string {
 
 // Helper function to extract header value from message headers
 function getHeader(headers: any[], name: string): string {
-  const header = headers.find((h) => h.name.toLowerCase() === name.toLowerCase());
+  const header = headers.find((h) =>
+    h.name.toLowerCase() === name.toLowerCase()
+  );
   return header ? header.value : "";
 }
 
@@ -145,9 +153,11 @@ export async function fetchEmail(
 ) {
   // First, get the list of message IDs from the inbox
   const listResponse = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=${labelIds.join(
-      ",",
-    )}&maxResults=${maxResults}`,
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=${
+      labelIds.join(
+        ",",
+      )
+    }&maxResults=${maxResults}`,
     {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -184,7 +194,9 @@ export async function fetchEmail(
 
       // Extract plain text content if available
       let plainText = "";
-      if (messageData.payload.parts && Array.isArray(messageData.payload.parts)) {
+      if (
+        messageData.payload.parts && Array.isArray(messageData.payload.parts)
+      ) {
         const textPart = messageData.payload.parts.find(
           (part: any) => part.mimeType === "text/plain",
         );
@@ -270,7 +282,12 @@ export default recipe(Recipe, ResultSchema, ({ settings }) => {
                 <tr>
                   <td>&nbsp;{email.date}&nbsp;</td>
                   <td>&nbsp;{email.subject}&nbsp;</td>
-                  <td>&nbsp;{derive(email, (email) => email.labelIds.join(", "))}&nbsp;</td>
+                  <td>
+                    &nbsp;{derive(
+                      email,
+                      (email) => email.labelIds.join(", "),
+                    )}&nbsp;
+                  </td>
                 </tr>
               ))}
             </tbody>

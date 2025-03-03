@@ -79,7 +79,7 @@ function updateOnce(charm: Cell<Charm>) {
 
   const { token, expiresAt } = auth.get();
 
-  if (token && expiresAt && expiresAt < Date.now()) {
+  if (token && expiresAt && Date.now() > expiresAt) {
     refreshAuthToken(auth, charm);
   } else if (token) {
     log(charm, "calling googleUpdater in charm");
@@ -114,7 +114,7 @@ async function refreshAuthToken(auth: Cell<any>, charm: Cell<Charm>) {
   log(charm, "refreshed token");
 }
 
-const notGoogleUpdaterCharm = async (charmId: string): Promise<boolean> => {
+const isGoogleUpdaterCharm = async (charmId: string): Promise<boolean> => {
   const charm = await manager.get(charmId, false);
   if (!charm) {
     log(charmId, "charm not found");
@@ -122,37 +122,37 @@ const notGoogleUpdaterCharm = async (charmId: string): Promise<boolean> => {
   }
   const googleUpdater = charm.key("googleUpdater");
   const auth = charm.key("auth");
-  return !(isStream(googleUpdater) && auth);
+  return !!(isStream(googleUpdater) && auth);
 };
 
 /**
  * Sets up watching for a charm and schedules periodic updates
  */
-function ignoreCharm(charmId: string): Promise<boolean> {
+function isIgnoredCharm(charmId: string): Promise<boolean> {
   if (checkedCharms.has(charmId)) {
     return Promise.resolve(true);
   }
   checkedCharms.set(charmId, true);
 
-  return notGoogleUpdaterCharm(charmId);
+  return isGoogleUpdaterCharm(charmId);
 }
 
 async function watchCharm(charmId: string | undefined) {
-  if (!charmId || (await ignoreCharm(charmId))) {
+  if (!charmId || (await isIgnoredCharm(charmId))) {
     return;
   }
-  const charm = await manager.get(charmId, true);
-  if (!charm) {
+  const runningCharm = await manager.get(charmId, true);
+  if (!runningCharm) {
     log(charmId, "charm not found");
     return;
   }
 
   // Initial update
-  updateOnce(charm);
+  updateOnce(runningCharm);
 
   // Schedule periodic updates
   setInterval(() => {
-    updateOnce(charm);
+    updateOnce(runningCharm);
   }, CHECK_INTERVAL);
 }
 
