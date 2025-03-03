@@ -477,7 +477,7 @@ const Variants = () => {
         {charm && (
           <div
             onClick={() => setSelectedVariant(charm)}
-            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${
+            className={`variant-item min-w-48 h-32 border-2 cursor-pointer flex-shrink-0 ${
               selectedVariant === charm ? "border-blue-500" : "border-black"
             }`}
           >
@@ -509,13 +509,13 @@ const Variants = () => {
           <div
             key={idx}
             onClick={() => setSelectedVariant(variant)}
-            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${
+            className={`variant-item min-w-48 h-32 border-2 cursor-pointer flex-shrink-0 ${
               selectedVariant === variant ? "border-blue-500" : "border-black"
             }`}
           >
             <div className="h-full flex flex-col overflow-hidden">
               <div className="bg-gray-100 text-xs font-bold p-1 border-b border-gray-300">
-                {variantModels[idx]?.split(":")[0] || "Model"}
+                {(variantModels[idx]?.split(":")[1] || "Model").substring(0, 24)}
               </div>
               <div
                 className="flex-grow overflow-hidden relative"
