@@ -308,6 +308,16 @@ export function findAllAliasedCells(
   return cells;
 }
 
+export function resolveLinkToValue(
+  doc: DocImpl<any>,
+  path: PropertyKey[],
+  log?: ReactivityLog,
+  seen: DocLink[] = [],
+): DocLink {
+  const ref = resolvePath(doc, path, log, seen);
+  return followLinks(ref, seen, log);
+}
+
 export function resolvePath(
   doc: DocImpl<any>,
   path: PropertyKey[],
@@ -320,6 +330,8 @@ export function resolvePath(
   //
   // If the path points to a redirect itself, we don't want to follow it: Other
   // functions like followLwill do that. We just want to skip the interim ones.
+  //
+  // All taken links are logged, but not the final one.
   //
   // Let's look at a few examples:
   //
@@ -349,7 +361,9 @@ export function resolvePath(
   return ref;
 }
 
-// Follows links and returns the last one.
+// Follows links and returns the last one, which is pointing to a value. It'll
+// log all taken links, so not the returned one, and thus nothing if the ref
+// already pointed to a value.
 export function followLinks(
   ref: DocLink,
   seen: DocLink[] = [],
@@ -398,7 +412,6 @@ export function followLinks(
   return ref;
 }
 
-// Follows cell references and returns the last one
 // Follows cell references and returns the last one
 export function followCellReferences(
   reference: DocLink,

@@ -13,7 +13,7 @@ import {
   getDocLinkOrValue,
   type QueryResult,
 } from "./query-result-proxy.ts";
-import { followLinks, prepareForSaving, resolvePath } from "./utils.ts";
+import { prepareForSaving, resolveLinkToValue, resolvePath } from "./utils.ts";
 import { queueEvent, type ReactivityLog, subscribe } from "./scheduler.ts";
 import { type EntityId, getDocByEntityId, getEntityId } from "./cell-map.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
@@ -203,7 +203,7 @@ export function createCell<T>(
   // Resolve the path to check whether it's a stream. We're not logging this right now.
   // The corner case where during it's lifetime this changes from non-stream to stream
   // or vice versa will not be detected.
-  const ref = followLinks(resolvePath(doc, path));
+  const ref = resolveLinkToValue(doc, path);
   if (isStreamAlias(ref.cell.getAtPath(ref.path))) {
     return createStreamCell(ref.cell, ref.path) as unknown as Cell<T>;
   } else return createRegularCell(doc, path, log, schema, rootSchema);

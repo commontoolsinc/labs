@@ -10,9 +10,8 @@ import {
 } from "./doc.ts";
 import { queueEvent, type ReactivityLog } from "./scheduler.ts";
 import {
-  followAliases,
-  followCellReferences,
   normalizeToDocLinks,
+  resolveLinkToValue,
   setNestedValue,
 } from "./utils.ts";
 
@@ -62,64 +61,17 @@ export function createQueryResultProxy<T>(
   valuePath: PropertyKey[],
   log?: ReactivityLog,
 ): T {
+  // Resolve path and follow links to actual value.
+  ({ cell: valueCell, path: valuePath } = resolveLinkToValue(
+    valueCell,
+    valuePath,
+    log,
+  ));
+
   log?.reads.push({ cell: valueCell, path: valuePath });
+  const target = valueCell.getAtPath(valuePath) as any;
 
-  // Follow path, following aliases and cells, so might end up on different cell
-  let target = valueCell.get() as any;
-  const keys = [...valuePath];
-  valuePath = [];
-  while (keys.length) {
-    const key = keys.shift()!;
-    if (isQueryResultForDereferencing(target)) {
-      const ref = target[getDocLink];
-      valueCell = ref.cell;
-      valuePath = [...ref.path];
-      log?.reads.push({ cell: valueCell, path: valuePath });
-      target = ref.cell.getAtPath(ref.path);
-    } else if (isAlias(target)) {
-      const ref = followAliases(target, valueCell, log);
-      valueCell = ref.cell;
-      valuePath = [...ref.path];
-      log?.reads.push({ cell: valueCell, path: valuePath });
-      target = ref.cell.getAtPath(ref.path);
-    } else if (isDoc(target)) {
-      valueCell = target;
-      valuePath = [];
-      log?.reads.push({ cell: valueCell, path: valuePath });
-      target = target.get();
-    } else if (isDocLink(target)) {
-      const ref = followCellReferences(target, log);
-      valueCell = ref.cell;
-      valuePath = [...ref.path];
-      log?.reads.push({ cell: valueCell, path: valuePath });
-      target = ref.cell.getAtPath(ref.path);
-    }
-    valuePath.push(key);
-    if (typeof target === "object" && target !== null) {
-      target = target[key as keyof typeof target];
-    } else {
-      target = undefined;
-    }
-  }
-
-  if (valuePath.length > 30) {
-    console.warn("Query result with long path [2]", JSON.stringify(valuePath));
-  }
-
-  // Now target is the end of the path. It might still be a cell, alias or cell
-  // reference, so we follow these as well.
-  if (isQueryResult(target)) {
-    const ref = target[getDocLink];
-    return createQueryResultProxy(ref.cell, ref.path, log);
-  } else if (isDoc(target)) {
-    return createQueryResultProxy(target, [], log);
-  } else if (isAlias(target)) {
-    const ref = followAliases(target, valueCell, log);
-    return createQueryResultProxy(ref.cell, ref.path, log);
-  } else if (isDocLink(target)) {
-    const ref = followCellReferences(target, log);
-    return createQueryResultProxy(ref.cell, ref.path, log);
-  } else if (typeof target !== "object" || target === null) return target;
+  if (typeof target !== "object" || target === null) return target;
 
   return new Proxy(target as object, {
     get: (target, prop, receiver) => {
