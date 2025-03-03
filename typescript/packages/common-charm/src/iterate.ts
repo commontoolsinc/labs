@@ -4,12 +4,12 @@ import { createJsonSchema, JSONSchema } from "@commontools/builder";
 
 import { tsToExports } from "./localBuild.ts";
 import { Charm, CharmManager } from "./charm.ts";
-import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
+import { buildFullRecipe, getIframeRecipe, getRecipeFrom } from "./iframe/recipe.ts";
 import { buildPrompt } from "./iframe/prompt.ts";
 
 const llmUrl = typeof globalThis.location !== "undefined"
   ? globalThis.location.protocol + "//" + globalThis.location.host +
-    "/api/ai/llm"
+  "/api/ai/llm"
   : "//api/ai/llm";
 
 const llm = new LLMClient(llmUrl);
@@ -55,7 +55,7 @@ export async function iterate(
   const { iframe } = getIframeRecipe(charm);
   if (!iframe) {
     console.error(
-      "FIXME, no compatible iframe found in charm, what should we do?",
+      "Cannot iterate on a non-iframe. Must extend instead.",
     );
     return;
   }
@@ -71,6 +71,20 @@ export async function iterate(
   });
 
   return saveNewRecipeVersion(charmManager, charm, newIFrameSrc, newSpec);
+}
+
+export async function extend(
+  charmManager: CharmManager,
+  charm: Cell<Charm> | null,
+  value: string,
+  model?: string,
+): Promise<EntityId | undefined> {
+  if (!charm) {
+    console.error("FIXME, no charm, what should we do?");
+    return;
+  }
+
+  return await castRecipeOnCell(charmManager, charm, value);
 }
 
 export const saveNewRecipeVersion = async (
@@ -102,6 +116,28 @@ export const saveNewRecipeVersion = async (
     recipeId ? [recipeId] : undefined,
   );
 };
+
+export async function castRecipeOnCell(
+  charmManager: CharmManager,
+  cell: Cell<any>,
+  newSpec: string,
+): Promise<EntityId | undefined> {
+  const schema = cell.schema || {};
+  schema.description = newSpec;
+  console.log("schema", schema);
+
+  const newIFrameSrc = await genSrc({ newSpec, schema });
+  const name = newIFrameSrc.match(/<title>(.*?)<\/title>/)?.[1] ?? newSpec;
+  const newRecipeSrc = buildFullRecipe({
+    src: newIFrameSrc,
+    spec: newSpec,
+    argumentSchema: schema,
+    resultSchema: {},
+    name,
+  });
+
+  return await compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, cell);
+}
 
 export async function castNewRecipe(
   charmManager: CharmManager,

@@ -6,6 +6,7 @@ export {
   compileAndRunRecipe,
   compileRecipe,
   iterate,
+  extend,
   saveNewRecipeVersion,
 } from "./iterate.ts";
 export { getIframeRecipe, type IFrameRecipe } from "./iframe/recipe.ts";
