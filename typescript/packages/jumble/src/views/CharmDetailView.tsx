@@ -1,17 +1,5 @@
-import {
-  Charm,
-  getIframeRecipe,
-  IFrameRecipe,
-  saveNewRecipeVersion,
-} from "@commontools/charm";
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { Charm, getIframeRecipe, IFrameRecipe, saveNewRecipeVersion } from "@commontools/charm";
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { LoadingSpinner } from "@/components/Loader.tsx";
@@ -58,16 +46,12 @@ interface CharmOperationContextType {
   handleCancelVariants: () => void;
 }
 
-const CharmOperationContext = createContext<CharmOperationContextType | null>(
-  null,
-);
+const CharmOperationContext = createContext<CharmOperationContextType | null>(null);
 
 const useCharmOperationContext = () => {
   const context = useContext(CharmOperationContext);
   if (!context) {
-    throw new Error(
-      "useCharmOperationContext must be used within a CharmOperationProvider",
-    );
+    throw new Error("useCharmOperationContext must be used within a CharmOperationProvider");
   }
   return context;
 };
@@ -75,7 +59,7 @@ const useCharmOperationContext = () => {
 // =================== Custom Hooks ===================
 
 // Hook for managing bottom sheet functionality
-function useBottomSheet(initialHeight = 420) {
+function useBottomSheet(initialHeight = 585) {
   const [sheetHeight, setSheetHeight] = useState<number>(initialHeight);
   const [isResizing, setIsResizing] = useState(false);
   const resizeStartY = useRef<number | null>(null);
@@ -185,9 +169,7 @@ function useTabNavigation() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] = useState<Tab>(
-    (location.hash.slice(1) as Tab) || "iterate",
-  );
+  const [activeTab, setActiveTab] = useState<Tab>((location.hash.slice(1) as Tab) || "iterate");
 
   useEffect(() => {
     setActiveTab((location.hash.slice(1) as Tab) || "iterate");
@@ -245,10 +227,7 @@ function useSuggestions(charm: Cell<Charm> | null) {
 }
 
 // Hook for code editing
-function useCodeEditor(
-  charm: Cell<Charm> | null,
-  iframeRecipe: IFrameRecipe | null,
-) {
+function useCodeEditor(charm: Cell<Charm> | null, iframeRecipe: IFrameRecipe | null) {
   const { charmManager } = useCharmManager();
   const [workingSrc, setWorkingSrc] = useState<string | undefined>(undefined);
 
@@ -283,16 +262,12 @@ function useCharmOperation() {
 
   // Shared state
   const [input, setInput] = useState("");
-  const [selectedModel, setSelectedModel] = useState(
-    "anthropic:claude-3-7-sonnet-latest",
-  );
+  const [selectedModel, setSelectedModel] = useState("anthropic:claude-3-7-sonnet-latest");
   const [operationType, setOperationType] = useState<OperationType>("iterate");
   const [showVariants, setShowVariants] = useState(true);
   const [loading, setLoading] = useState(false);
   const [variants, setVariants] = useState<Cell<Charm>[]>([]);
-  const [selectedVariant, setSelectedVariant] = useState<Cell<Charm> | null>(
-    null,
-  );
+  const [selectedVariant, setSelectedVariant] = useState<Cell<Charm> | null>(null);
   const [expectedVariantCount, setExpectedVariantCount] = useState(0);
 
   // Function that performs the selected operation (iterate or extend)
@@ -305,23 +280,9 @@ function useCharmOperation() {
       model: string,
     ) => {
       if (operationType === "iterate") {
-        return await iterateCharm(
-          charmManager,
-          charmId,
-          replicaName,
-          input,
-          replace,
-          model,
-        );
+        return await iterateCharm(charmManager, charmId, replicaName, input, replace, model);
       } else {
-        return await extendCharm(
-          charmManager,
-          charmId,
-          replicaName,
-          input,
-          replace,
-          model,
-        );
+        return await extendCharm(charmManager, charmId, replicaName, input, replace, model);
       }
     },
     [operationType, charmManager],
@@ -338,13 +299,7 @@ function useCharmOperation() {
 
       try {
         const variantPromises = variantModels.map((model) =>
-          performOperation(
-            charmId(charm)!,
-            replicaName!,
-            input,
-            false,
-            model,
-          )
+          performOperation(charmId(charm)!, replicaName!, input, false, model),
         );
 
         // Handle promises as they complete
@@ -522,7 +477,7 @@ const Variants = () => {
         {charm && (
           <div
             onClick={() => setSelectedVariant(charm)}
-            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${
+            className={`variant-item min-w-48 h-32 border-2 cursor-pointer flex-shrink-0 ${
               selectedVariant === charm ? "border-blue-500" : "border-black"
             }`}
           >
@@ -554,13 +509,13 @@ const Variants = () => {
           <div
             key={idx}
             onClick={() => setSelectedVariant(variant)}
-            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${
+            className={`variant-item min-w-48 h-32 border-2 cursor-pointer flex-shrink-0 ${
               selectedVariant === variant ? "border-blue-500" : "border-black"
             }`}
           >
             <div className="h-full flex flex-col overflow-hidden">
               <div className="bg-gray-100 text-xs font-bold p-1 border-b border-gray-300">
-                {variantModels[idx]?.split(":")[0] || "Model"}
+                {(variantModels[idx]?.split(":")[1] || "Model").substring(0, 24)}
               </div>
               <div
                 className="flex-grow overflow-hidden relative"
@@ -583,21 +538,12 @@ const Variants = () => {
         ))}
 
         {/* Loading placeholders */}
-        {Array.from({ length: expectedVariantCount - variants.length }).map((
-          _,
-          idx,
-        ) => (
+        {Array.from({ length: expectedVariantCount - variants.length }).map((_, idx) => (
           <div
             key={`loading-${idx}`}
             className="variant-item min-w-36 h-24 border-2 border-dashed border-gray-300 flex items-center justify-center flex-shrink-0"
           >
-            <DitheredCube
-              animationSpeed={2}
-              width={24}
-              height={24}
-              animate
-              cameraZoom={12}
-            />
+            <DitheredCube animationSpeed={2} width={24} height={24} animate cameraZoom={12} />
           </div>
         ))}
       </div>
@@ -610,12 +556,8 @@ const Suggestions = () => {
   const { charmId: paramCharmId } = useParams();
   const { currentFocus: charm } = useCharm(paramCharmId);
   const { suggestions, loadingSuggestions } = useSuggestions(charm);
-  const {
-    setInput,
-    setShowVariants,
-    handlePerformOperation,
-    setOperationType,
-  } = useCharmOperationContext();
+  const { setInput, setShowVariants, handlePerformOperation, setOperationType } =
+    useCharmOperationContext();
 
   const handleSuggestion = (suggestion: CharmSuggestion) => {
     setInput(suggestion.prompt);
@@ -635,35 +577,27 @@ const Suggestions = () => {
   return (
     <div className="suggestions-container mb-4">
       <h3 className="text-sm font-bold mb-2">Suggestions</h3>
-      {loadingSuggestions
-        ? (
-          <div className="flex items-center justify-center p-4">
-            <DitheredCube
-              animationSpeed={2}
-              width={24}
-              height={24}
-              animate
-              cameraZoom={12}
-            />
-          </div>
-        )
-        : (
-          <div className="flex overflow-x-auto pb-2 gap-3">
-            {suggestions.map((suggestion, index) => (
-              <button
-                type="button"
-                key={index}
-                onClick={() => handleSuggestion(suggestion)}
-                className="p-2 text-left text-sm border border-gray-300 hover:border-black hover:bg-gray-50 shadow-sm transition-all duration-100 ease-in-out cursor-pointer flex-shrink-0 min-w-40 max-w-56"
-              >
-                <span className="font-medium text-xs uppercase text-gray-500 block">
-                  {suggestion.type}
-                </span>
-                <p className="text-xs line-clamp-2">{suggestion.prompt}</p>
-              </button>
-            ))}
-          </div>
-        )}
+      {loadingSuggestions ? (
+        <div className="flex items-center justify-center p-4">
+          <DitheredCube animationSpeed={2} width={24} height={24} animate cameraZoom={12} />
+        </div>
+      ) : (
+        <div className="flex overflow-x-auto pb-2 gap-3">
+          {suggestions.map((suggestion, index) => (
+            <button
+              type="button"
+              key={index}
+              onClick={() => handleSuggestion(suggestion)}
+              className="p-2 text-left text-sm border border-gray-300 hover:border-black hover:bg-gray-50 shadow-sm transition-all duration-100 ease-in-out cursor-pointer flex-shrink-0 min-w-40 max-w-96"
+            >
+              <span className="font-medium text-xs uppercase text-gray-500 block">
+                {suggestion.type}
+              </span>
+              <p className="text-xs">{suggestion.prompt}</p>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -712,9 +646,9 @@ const OperationTab = () => {
         </div>
 
         <textarea
-          placeholder={operationType === "iterate"
-            ? "Tweak your charm"
-            : "Add new features to your charm"}
+          placeholder={
+            operationType === "iterate" ? "Tweak your charm" : "Add new features to your charm"
+          }
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
@@ -745,12 +679,8 @@ const OperationTab = () => {
             onChange={(e) => setSelectedModel(e.target.value)}
             className="p-1 border-2 border-black bg-white text-xs"
           >
-            <option value="anthropic:claude-3-7-sonnet-latest">
-              Claude 3.7 ✨
-            </option>
-            <option value="anthropic:claude-3-5-sonnet-latest">
-              Claude 3.5 ✨
-            </option>
+            <option value="anthropic:claude-3-7-sonnet-latest">Claude 3.7 ✨</option>
+            <option value="anthropic:claude-3-5-sonnet-latest">Claude 3.5 ✨</option>
             <option value="groq:llama-3.3-70b-versatile">Llama 3.3 🔥</option>
             <option value="openai:o3-mini-low-latest">o3-mini-low</option>
             <option value="openai:o3-mini-medium-latest">o3-mini-medium</option>
@@ -765,31 +695,17 @@ const OperationTab = () => {
             disabled={loading || !input}
             className="px-4 py-2 border-2 text-sm border-white bg-black text-white flex items-center gap-2 disabled:opacity-50"
           >
-            {loading
-              ? (
-                <>
-                  <DitheredCube
-                    animationSpeed={2}
-                    width={16}
-                    height={16}
-                    animate
-                    cameraZoom={12}
-                  />
-                  <span>
-                    {operationType === "iterate"
-                      ? "Iterating..."
-                      : "Extending..."}
-                  </span>
-                </>
-              )
-              : (
-                <span className="text-xs">
-                  {operationType === "iterate" ? "Iterate" : "Extend"}{" "}
-                  <span className="hidden md:inline text-gray-400 font-bold italic">
-                    (⌘ + enter)
-                  </span>
-                </span>
-              )}
+            {loading ? (
+              <>
+                <DitheredCube animationSpeed={2} width={16} height={16} animate cameraZoom={12} />
+                <span>{operationType === "iterate" ? "Iterating..." : "Extending..."}</span>
+              </>
+            ) : (
+              <span className="text-xs">
+                {operationType === "iterate" ? "Iterate" : "Extend"}{" "}
+                <span className="hidden md:inline text-gray-400 font-bold italic">(⌘ + enter)</span>
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -807,11 +723,10 @@ const OperationTab = () => {
 const CodeTab = () => {
   const { charmId: paramCharmId } = useParams();
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
-  const { workingSrc, setWorkingSrc, hasUnsavedChanges, saveChanges } =
-    useCodeEditor(
-      charm,
-      iframeRecipe,
-    );
+  const { workingSrc, setWorkingSrc, hasUnsavedChanges, saveChanges } = useCodeEditor(
+    charm,
+    iframeRecipe,
+  );
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -877,8 +792,7 @@ const BottomSheet = ({
 }: {
   children: (activeTab: Tab, isResizing: boolean) => React.ReactNode;
 }) => {
-  const { sheetHeight, isResizing, handleResizeStart, handleTouchResizeStart } =
-    useBottomSheet();
+  const { sheetHeight, isResizing, handleResizeStart, handleTouchResizeStart } = useBottomSheet();
   const { activeTab, handleTabChange } = useTabNavigation();
 
   return (
@@ -901,9 +815,7 @@ const BottomSheet = ({
           type="button"
           onClick={() => handleTabChange("iterate")}
           className={`px-4 py-2 flex-1 text-center ${
-            activeTab === "iterate"
-              ? "bg-gray-100 font-bold border-b-2 border-black"
-              : ""
+            activeTab === "iterate" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
           }`}
         >
           Operation
@@ -912,9 +824,7 @@ const BottomSheet = ({
           type="button"
           onClick={() => handleTabChange("code")}
           className={`px-4 py-2 flex-1 text-center ${
-            activeTab === "code"
-              ? "bg-gray-100 font-bold border-b-2 border-black"
-              : ""
+            activeTab === "code" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
           }`}
         >
           Edit Code
@@ -923,9 +833,7 @@ const BottomSheet = ({
           type="button"
           onClick={() => handleTabChange("data")}
           className={`px-4 py-2 flex-1 text-center ${
-            activeTab === "data"
-              ? "bg-gray-100 font-bold border-b-2 border-black"
-              : ""
+            activeTab === "data" ? "bg-gray-100 font-bold border-b-2 border-black" : ""
           }`}
         >
           View Data
@@ -933,9 +841,7 @@ const BottomSheet = ({
       </div>
 
       {/* Tab Content */}
-      <div className="tab-content flex-grow overflow-hidden">
-        {children(activeTab, isResizing)}
-      </div>
+      <div className="tab-content flex-grow overflow-hidden">{children(activeTab, isResizing)}</div>
     </div>
   );
 };
