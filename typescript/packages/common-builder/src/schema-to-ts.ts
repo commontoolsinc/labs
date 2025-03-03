@@ -1,5 +1,5 @@
 import type { JSONSchema } from "./types.ts";
-import type { Cell } from "@commontools/runner";
+import type { Cell, Stream } from "@commontools/runner";
 
 export const schema = <T extends JSONSchema>(schema: T) => schema;
 
@@ -12,6 +12,9 @@ export type Schema<
   Depth extends 0 ? unknown
     // Handle asCell attribute - wrap the result in Cell<T>
     : T extends { asCell: true } ? Cell<Schema<Omit<T, "asCell">, Root, Depth>>
+    // Handle asStream attribute - wrap the result in Stream<T>
+    : T extends { asStream: true }
+      ? Stream<Schema<Omit<T, "asStream">, Root, Depth>>
     // Handle $ref to root
     : T extends { $ref: "#" } ? Schema<Root, Root, DecrementDepth<Depth>>
     // Handle other $ref (placeholder - would need a schema registry for other refs)
@@ -160,6 +163,9 @@ export type SchemaWithoutCell<
     // Handle asCell attribute - but DON'T wrap in Cell, just use the inner type
     : T extends { asCell: true }
       ? SchemaWithoutCell<Omit<T, "asCell">, Root, Depth>
+    // Handle asStream attribute - but DON'T wrap in Stream, just use the inner type
+    : T extends { asStream: true }
+      ? SchemaWithoutCell<Omit<T, "asStream">, Root, Depth>
     // Handle $ref to root
     : T extends { $ref: "#" }
       ? SchemaWithoutCell<Root, Root, DecrementDepth<Depth>>

@@ -117,6 +117,7 @@ export type JSONSchema = {
   readonly items?: Readonly<JSONSchema>;
   readonly $ref?: string;
   readonly asCell?: boolean;
+  readonly asStream?: boolean;
   readonly anyOf?: readonly JSONSchema[];
   readonly additionalProperties?: Readonly<JSONSchema> | boolean;
 };

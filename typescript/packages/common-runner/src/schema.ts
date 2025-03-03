@@ -1,6 +1,6 @@
 import { isAlias, JSONSchema } from "@commontools/builder";
 import { type DocImpl, type DocLink, getDoc, isDocLink } from "./doc.ts";
-import { createCell, isCell } from "./cell.ts";
+import { createCell, getImmutableCell, isCell } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followLinks, resolvePath } from "./utils.ts";
 
@@ -51,6 +51,12 @@ export function resolveSchema(
     delete (resolvedSchema as any).asCell;
   }
 
+  // Same for asStream
+  if (schema.asStream && resolvedSchema?.asStream && filterAsCell) {
+    resolvedSchema = { ...resolvedSchema };
+    delete (resolvedSchema as any).asStream;
+  }
+
   // Return no schema if all it said is that this was a reference or an
   // object without properties.
   if (
@@ -68,7 +74,7 @@ export function resolveSchema(
 
 /**
  * Process a default value from a schema, transforming it based on the schema
- * structure to account for asCell and other schema features.
+ * structure to account for asCell/asStream and other schema features.
  *
  * For `required` objects and arrays assume {} and [] as default value.
  */
@@ -109,6 +115,15 @@ function processDefaultValue(
         rootSchema,
       );
     }
+  }
+
+  if (schema.asStream) {
+    console.warn(
+      "Created asStream as a default value, but this is likely unintentional",
+    );
+    // This can receive events, but at first nothing will be bound to it.
+    // Normally these get created by a handler call.
+    return getImmutableCell({ $stream: true }, resolvedSchema, log);
   }
 
   // Handle object type defaults
@@ -255,9 +270,11 @@ export function validateAndTransform(
   if (
     typeof schema === "object" &&
     schema !== null &&
-    (schema!.asCell ||
+    ((schema!.asCell || schema!.asStream) ||
       (Array.isArray(resolvedSchema?.anyOf) &&
-        resolvedSchema.anyOf.every((option) => option.asCell)))
+        resolvedSchema.anyOf.every((
+          option,
+        ) => (option.asCell || option.asStream))))
   ) {
     // The reference should reflect the current _value_. So if it's a reference,
     // read the reference and return a cell based on it.
@@ -318,7 +335,9 @@ export function validateAndTransform(
     const options = resolvedSchema.anyOf
       .map((option) => {
         const resolved = resolveSchema(option, rootSchema);
+        // Copy `asCell` over, necessary for $ref case.
         if (option.asCell) return { ...resolved, asCell: true };
+        if (option.asStream) return { ...resolved, asStream: true };
         else return resolved;
       })
       .filter((option) => option !== undefined);
@@ -358,7 +377,7 @@ export function validateAndTransform(
         option.type === "object"
       );
       const numAsCells = objectCandidates.filter((option) =>
-        option.asCell
+        option.asCell || option.asStream
       ).length;
 
       // If there are more than two asCell branches, merge them
@@ -369,6 +388,7 @@ export function validateAndTransform(
             (option.anyOf ?? [option]).map((branch) => {
               const {
                 asCell: _filteredOut,
+                asStream: _filteredOut2,
                 ...rest
               } = branch as any;
               return rest;
@@ -464,7 +484,7 @@ export function validateAndTransform(
       for (
         const [key, propSchema] of Object.entries(resolvedSchema.properties)
       ) {
-        if (propSchema.asCell || key in value) {
+        if (propSchema.asCell || propSchema.asStream || key in value) {
           result[key] = validateAndTransform(
             doc,
             [...path, key],

@@ -36,7 +36,7 @@ const outputSchema = {
   properties: {
     values: { type: "array", items: { type: "string" } },
     updater: {
-      asCell: true, // TODO(seefeld): Should be asStream
+      asStream: true,
       ...updaterSchema,
     },
   },

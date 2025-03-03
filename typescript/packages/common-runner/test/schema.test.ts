@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { DocLink, getDoc } from "../src/doc.ts";
-import { isCell } from "../src/cell.ts";
+import { isCell, isStream } from "../src/cell.ts";
 import type { JSONSchema } from "@commontools/builder";
 import { idle } from "../src/scheduler.ts";
 import { getSpace } from "../src/space.ts";
@@ -876,6 +876,7 @@ describe("Schema Support", () => {
           expect(isCell(result.props)).toBe(false);
           expect(isCell(result.props.style)).toBe(true);
           expect(result.props.style.get().color).toBe("red");
+          expect(result.children.length).toBe(3);
           expect(isCell(result.children[0])).toBe(true);
           expect(result.children[0].get().value).toBe("single");
           expect(isCell(result.children[1])).toBe(false);
@@ -1254,6 +1255,126 @@ describe("Schema Support", () => {
 
       // Expect the cell to be immutable
       expect(value.name.get()).toBe("Updated Name");
+    });
+  });
+
+  describe("Stream Support", () => {
+    it("should create a stream for properties marked with asStream", () => {
+      const c = getDoc({
+        name: "Test Doc",
+        events: { $stream: true },
+      });
+
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          events: {
+            type: "object",
+            asStream: true,
+          },
+        },
+      };
+
+      const cell = c.asCell([], undefined, schema);
+      const value = cell.get();
+
+      expect(value.name).toBe("Test Doc");
+      expect(isStream(value.events)).toBe(true);
+
+      // Verify it's a stream, i.e. no get functio
+      expect(value.events.get).toBe(undefined);
+    });
+
+    it("should handle nested streams in objects", () => {
+      const c = getDoc({
+        user: {
+          profile: {
+            name: "John",
+            notifications: { $stream: true },
+          },
+        },
+      });
+
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          user: {
+            type: "object",
+            properties: {
+              profile: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  notifications: {
+                    type: "object",
+                    asStream: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+
+      const cell = c.asCell([], undefined, schema);
+      const value = cell.get();
+
+      expect(value.user.profile.name).toBe("John");
+      expect(isStream(value.user.profile.notifications)).toBe(true);
+    });
+
+    it("should not create a stream when property is missing", () => {
+      const c = getDoc({
+        name: "Test Doc",
+        // Missing events property
+      });
+
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          events: {
+            type: "object",
+            asStream: true,
+          },
+        },
+      };
+
+      const cell = c.asCell([], undefined, schema);
+      const value = cell.get();
+
+      expect(value.name).toBe("Test Doc");
+      expect(isStream(value.events)).toBe(false);
+    });
+
+    it("should behave correctly when both asCell and asStream are in the schema", () => {
+      const c = getDoc({
+        cellData: { value: 42 },
+        streamData: { $stream: true },
+      });
+
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          cellData: {
+            type: "object",
+            asCell: true,
+          },
+          streamData: {
+            type: "object",
+            asStream: true,
+          },
+        },
+      };
+
+      const cell = c.asCell([], undefined, schema);
+      const value = cell.get();
+
+      expect(isCell(value.cellData)).toBe(true);
+      expect(value.cellData.get().value).toBe(42);
+
+      expect(isStream(value.streamData)).toBe(true);
     });
   });
 });
