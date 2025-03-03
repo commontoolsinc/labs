@@ -1,5 +1,4 @@
 import * as Path from "@std/path";
-export { refer } from "npm:merkle-reference";
 
 /**
  * Returns file URL for the current working directory.

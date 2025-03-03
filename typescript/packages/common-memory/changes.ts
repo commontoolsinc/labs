@@ -2,7 +2,7 @@ import {
   AssertFact,
   Assertion,
   Cause,
-  ChangesBuilder,
+  Changes,
   ClaimFact,
   Fact,
   FactSelection,
@@ -11,7 +11,7 @@ import {
 } from "./interface.ts";
 
 export const from = <T extends Statement>(statements: Iterable<T>) => {
-  const changes = {} as ChangesBuilder;
+  const changes = {} as Changes;
   for (const statement of statements) {
     const at = [statement.of, statement.the];
     if (statement.cause) {
@@ -25,8 +25,7 @@ export const from = <T extends Statement>(statements: Iterable<T>) => {
   return changes as T extends Assertion<infer The, infer Of, infer Is>
     ? { [of in Of]: { [the in The]: { [cause: Cause]: { is: Is } } } }
     : T extends Fact<infer The, infer Of, infer Is> ? FactSelection<The, Of, Is>
-    : T extends Statement<infer The, infer Of, infer Is>
-      ? ChangesBuilder<The, Of, Is>
+    : T extends Statement<infer The, infer Of, infer Is> ? Changes<The, Of, Is>
     : never;
 };
 
