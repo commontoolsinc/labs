@@ -4,12 +4,12 @@ import { createJsonSchema, JSONSchema } from "@commontools/builder";
 
 import { tsToExports } from "./localBuild.ts";
 import { Charm, CharmManager } from "./charm.ts";
-import { buildFullRecipe, getIframeRecipe, getRecipeFrom } from "./iframe/recipe.ts";
+import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt } from "./iframe/prompt.ts";
 
 const llmUrl = typeof globalThis.location !== "undefined"
   ? globalThis.location.protocol + "//" + globalThis.location.host +
-  "/api/ai/llm"
+    "/api/ai/llm"
   : "//api/ai/llm";
 
 const llm = new LLMClient(llmUrl);
@@ -122,8 +122,7 @@ export async function castRecipeOnCell(
   cell: Cell<any>,
   newSpec: string,
 ): Promise<EntityId | undefined> {
-  const schema = cell.schema || {};
-  schema.description = newSpec;
+  const schema = { ...cell.schema, description: newSpec };
   console.log("schema", schema);
 
   const newIFrameSrc = await genSrc({ newSpec, schema });
