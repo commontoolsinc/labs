@@ -1,5 +1,5 @@
 import { isAlias, JSONSchema } from "@commontools/builder";
-import { type DocImpl, type DocLink, isDocLink } from "./doc.ts";
+import { type DocImpl, type DocLink, getDoc, isDocLink } from "./doc.ts";
 import { createCell, isCell } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followLinks, resolvePath } from "./utils.ts";
@@ -67,8 +67,10 @@ export function resolveSchema(
 }
 
 /**
- * Process a default value from a schema, transforming it based on the schema structure
- * to account for asCell and other schema features.
+ * Process a default value from a schema, transforming it based on the schema
+ * structure to account for asCell and other schema features.
+ *
+ * For `required` objects and arrays assume {} and [] as default value.
  */
 function processDefaultValue(
   doc: DocImpl<any>,
@@ -80,32 +82,48 @@ function processDefaultValue(
 ): any {
   if (!schema) return defaultValue;
 
+  const resolvedSchema = resolveSchema(schema, rootSchema, true);
+
   // If schema indicates this should be a cell
   if (schema.asCell) {
-    return createCell(
-      doc,
-      path,
-      log,
-      mergeDefaults(resolveSchema(schema, rootSchema, true), defaultValue),
-      rootSchema,
-    );
+    // If the cell itself has a default value, make it it's own (immutablle)
+    // doc, to emulate the behavior of .get() returning a different underlying
+    // document when the value is changed. A classic example is
+    // `currentlySelected` with a default of `null`.
+    if (!defaultValue && resolvedSchema?.default !== undefined) {
+      const doc = getDoc(resolvedSchema.default);
+      doc.freeze();
+      return createCell(
+        doc,
+        [],
+        log,
+        resolvedSchema,
+        rootSchema,
+      );
+    } else {
+      return createCell(
+        doc,
+        path,
+        log,
+        mergeDefaults(resolvedSchema, defaultValue),
+        rootSchema,
+      );
+    }
   }
 
   // Handle object type defaults
   if (
-    schema.type === "object" && typeof defaultValue === "object" &&
+    resolvedSchema?.type === "object" && typeof defaultValue === "object" &&
     defaultValue !== null
   ) {
     const result: Record<string, any> = {};
     const processedKeys = new Set<string>();
-    const schemaDefaults: Record<string, any> =
-      typeof schema.default === "object" && schema.default !== null
-        ? schema.default
-        : {};
 
     // Process properties defined in both the schema and default value
-    if (schema.properties) {
-      for (const [key, propSchema] of Object.entries(schema.properties)) {
+    if (resolvedSchema?.properties) {
+      for (
+        const [key, propSchema] of Object.entries(resolvedSchema.properties)
+      ) {
         if (key in defaultValue) {
           result[key] = processDefaultValue(
             doc,
@@ -116,22 +134,46 @@ function processDefaultValue(
             rootSchema,
           );
           processedKeys.add(key);
-        } else if (key in schemaDefaults) {
+        } else if (propSchema.asCell) {
+          // asCell are always created, it's their value that can be `undefined`
           result[key] = processDefaultValue(
             doc,
             [...path, key],
-            schemaDefaults[key],
+            undefined,
             propSchema,
+            log,
+            rootSchema,
+          );
+        } else if (propSchema.default !== undefined) {
+          result[key] = processDefaultValue(
+            doc,
+            [...path, key],
+            propSchema.default,
+            propSchema,
+            log,
+            rootSchema,
+          );
+        } else if (
+          resolvedSchema?.required?.includes(key) &&
+          (propSchema.type === "object" || propSchema.type === "array")
+        ) {
+          result[key] = processDefaultValue(
+            doc,
+            [...path, key],
+            propSchema.type === "object" ? {} : [],
+            propSchema,
+            log,
+            rootSchema,
           );
         }
       }
     }
 
     // Handle additional properties in the default value with additionalProperties schema
-    if (schema.additionalProperties) {
+    if (resolvedSchema.additionalProperties) {
       const additionalPropertiesSchema =
-        typeof schema.additionalProperties === "object"
-          ? schema.additionalProperties
+        typeof resolvedSchema.additionalProperties === "object"
+          ? resolvedSchema.additionalProperties
           : undefined;
 
       for (const key in defaultValue) {
@@ -153,13 +195,16 @@ function processDefaultValue(
   }
 
   // Handle array type defaults
-  if (schema.type === "array" && Array.isArray(defaultValue) && schema.items) {
+  if (
+    resolvedSchema?.type === "array" && Array.isArray(defaultValue) &&
+    resolvedSchema.items
+  ) {
     return defaultValue.map((item, i) =>
       processDefaultValue(
         doc,
         [...path, i],
         item,
-        schema.items,
+        resolvedSchema.items,
         log,
         rootSchema,
       )
@@ -252,7 +297,7 @@ export function validateAndTransform(
   // below we might still create a new Cell and it should point to the top of
   // this set of links.
   const ref = followLinks({ cell: doc, path }, [], log);
-  const value = ref.cell.getAtPath(ref.path);
+  let value = ref.cell.getAtPath(ref.path);
   log?.reads.push({ cell: ref.cell, path: ref.path });
 
   // Check for undefined value and return processed default if available
@@ -410,7 +455,7 @@ export function validateAndTransform(
   }
 
   if (resolvedSchema.type === "object") {
-    if (typeof value !== "object" || value === null) return {};
+    if (typeof value !== "object" || value === null) value = {};
 
     const result: Record<string, any> = {};
 
