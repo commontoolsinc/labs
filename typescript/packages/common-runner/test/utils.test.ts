@@ -1,7 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  compactifyPaths,
   extractDefaultValues,
   followAliases,
   followCellReferences,
@@ -296,55 +295,6 @@ describe("followAliases", () => {
     cellB.send({ alias: { $alias: { cell: cellA, path: ["alias"] } } });
     const binding = { $alias: { path: ["alias"] } };
     expect(() => followAliases(binding, cellA)).toThrow("Alias cycle detected");
-  });
-});
-
-describe("compactifyPaths", () => {
-  it("should compactify paths", () => {
-    const testCell = getDoc({});
-    const paths = [
-      { cell: testCell, path: ["a", "b"] },
-      { cell: testCell, path: ["a"] },
-      { cell: testCell, path: ["c"] },
-    ];
-    const result = compactifyPaths(paths);
-    expect(result).toEqual([
-      { cell: testCell, path: ["a"] },
-      { cell: testCell, path: ["c"] },
-    ]);
-  });
-
-  it("should remove duplicate paths", () => {
-    const testCell = getDoc({});
-    const paths = [
-      { cell: testCell, path: ["a", "b"] },
-      { cell: testCell, path: ["a", "b"] },
-    ];
-    const result = compactifyPaths(paths);
-    expect(result).toEqual([{ cell: testCell, path: ["a", "b"] }]);
-  });
-
-  it("should not compactify across cells", () => {
-    const cellA = getDoc({});
-    const cellB = getDoc({});
-    const paths = [
-      { cell: cellA, path: ["a", "b"] },
-      { cell: cellB, path: ["a", "b"] },
-    ];
-    const result = compactifyPaths(paths);
-    expect(result).toEqual(paths);
-  });
-
-  it("empty paths should trump all other ones", () => {
-    const cellA = getDoc({});
-    const paths = [
-      { cell: cellA, path: ["a", "b"] },
-      { cell: cellA, path: ["c"] },
-      { cell: cellA, path: ["d"] },
-      { cell: cellA, path: [] },
-    ];
-    const result = compactifyPaths(paths);
-    expect(result).toEqual([{ cell: cellA, path: [] }]);
   });
 });
 

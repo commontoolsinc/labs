@@ -1,5 +1,4 @@
 import type { DocImpl, DocLink } from "./doc.ts";
-import { compactifyPaths, pathAffected } from "./utils.ts";
 import type { Cancel } from "./cancel.ts";
 
 export type Action = (log: ReactivityLog) => any;
@@ -303,4 +302,43 @@ function topologicalSort(
   }
 
   return result;
+}
+
+// Remove longer paths already covered by shorter paths
+export function compactifyPaths(entries: DocLink[]): DocLink[] {
+  // First group by cell via a Map
+  const cellToPaths = new Map<DocImpl<any>, PropertyKey[][]>();
+  for (const { cell, path } of entries) {
+    const paths = cellToPaths.get(cell) || [];
+    paths.push(path.map((key) => key.toString())); // Normalize to strings as keys
+    cellToPaths.set(cell, paths);
+  }
+
+  // For each cell, sort the paths by length, then only return those that don't
+  // have a prefix earlier in the list
+  const result: DocLink[] = [];
+  for (const [cell, paths] of cellToPaths.entries()) {
+    paths.sort((a, b) => a.length - b.length);
+    for (let i = 0; i < paths.length; i++) {
+      const earlier = paths.slice(0, i);
+      if (
+        earlier.some((path) =>
+          path.every((key, index) => key === paths[i][index])
+        )
+      ) {
+        continue;
+      }
+      result.push({ cell, path: paths[i] });
+    }
+  }
+  return result;
+}
+
+function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
+  changedPath = changedPath.map((key) => key.toString()); // Normalize to strings as keys
+  return (
+    (changedPath.length <= path.length &&
+      changedPath.every((key, index) => key === path[index])) ||
+    path.every((key, index) => key === changedPath[index])
+  );
 }
