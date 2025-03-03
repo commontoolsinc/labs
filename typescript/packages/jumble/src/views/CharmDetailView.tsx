@@ -541,7 +541,7 @@ const Variants = () => {
         {Array.from({ length: expectedVariantCount - variants.length }).map((_, idx) => (
           <div
             key={`loading-${idx}`}
-            className="variant-item min-w-36 h-24 border-2 border-dashed border-gray-300 flex items-center justify-center flex-shrink-0"
+            className="variant-item min-w-48 h-32 border-2 border-dashed border-gray-300 flex items-center justify-center flex-shrink-0"
           >
             <DitheredCube animationSpeed={2} width={24} height={24} animate cameraZoom={12} />
           </div>
