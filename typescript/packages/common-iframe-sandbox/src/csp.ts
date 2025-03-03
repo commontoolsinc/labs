@@ -6,7 +6,7 @@ const SCRIPT_CDNS = [
 // In Chromium browsers, "'self'" selects the top frame origin from
 // null origins. In Firefox this does not apply. Instead, use
 // the top frame origin explicitly.
-export const HOST_ORIGIN = new URL(window.location.href).origin;
+export const HOST_ORIGIN = new URL(globalThis.location.href).origin;
 
 // This CSP directive uses 'unsafe-inline' to allow
 // origin-less styles and scripts to be used, defeating

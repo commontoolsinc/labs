@@ -1,4 +1,5 @@
 import { Identity } from "./identity.ts";
+import { KeyPairRaw } from "./interface.ts";
 import { once } from "./utils.ts";
 
 const DEFAULT_DB_NAME = "common-key-store";
@@ -15,8 +16,8 @@ export class KeyStore {
   }
 
   // Get the `name` keypair.
-  async get(name: string): Promise<Identity | undefined> {
-    let result = await this.db.get(name);
+  async get(name: string): Promise<Identity | void> {
+    const result = await this.db.get(name);
     if (result) {
       return Identity.deserialize(result);
     }
@@ -29,14 +30,14 @@ export class KeyStore {
   }
 
   // Clear the key store's table.
-  async clear(): Promise<any> {
+  clear(): Promise<any> {
     return this.db.clear();
   }
 
   // Opens a new instance of `KeyStore`.
   // If no `name` provided, `KeyStore.DEFAULT_DB_NAME` is used.
   static async open(name = KeyStore.DEFAULT_DB_NAME): Promise<KeyStore> {
-    let db = await DB.open(name, DB_VERSION, (e: IDBVersionChangeEvent) => {
+    const db = await DB.open(name, DB_VERSION, (e: IDBVersionChangeEvent) => {
       const { newVersion, oldVersion: _ } = e;
       if (newVersion !== DB_VERSION) {
         throw new Error("common-identity: Invalid DB version.");
@@ -44,7 +45,7 @@ export class KeyStore {
       if (!e.target) {
         throw new Error("common-identity: No target on change event.");
       }
-      let db: IDBDatabase = (e.target as IDBRequest).result;
+      const db: IDBDatabase = (e.target as IDBRequest).result;
       db.createObjectStore(DEFAULT_STORE_NAME);
     });
     return new KeyStore(db);
@@ -57,18 +58,18 @@ class DB {
     this.db = db;
   }
 
-  async get(key: string) {
-    let store = this.getStore(DEFAULT_STORE_NAME, "readonly");
+  get(key: string): Promise<KeyPairRaw | void> {
+    const store = this.getStore(DEFAULT_STORE_NAME, "readonly");
     return asyncWrap(store.get(key));
   }
 
-  async set(key: string, value: any) {
-    let store = this.getStore(DEFAULT_STORE_NAME, "readwrite");
-    return asyncWrap(store.put(value, key));
+  set(key: string, value: any): Promise<void> {
+    const store = this.getStore(DEFAULT_STORE_NAME, "readwrite");
+    return asyncWrap(store.put(value, key)).then(() => undefined);
   }
 
   async clear() {
-    let store = this.getStore(DEFAULT_STORE_NAME, "readwrite");
+    const store = this.getStore(DEFAULT_STORE_NAME, "readwrite");
     return await asyncWrap(store.clear());
   }
 
@@ -77,7 +78,7 @@ class DB {
     dbVersion: number,
     onUpgrade: (e: IDBVersionChangeEvent) => any,
   ) {
-    let req = window.indexedDB.open(dbName, dbVersion);
+    const req = globalThis.indexedDB.open(dbName, dbVersion);
     once(req, "upgradeneeded", onUpgrade);
     return new DB(await asyncWrap(req));
   }
@@ -86,7 +87,7 @@ class DB {
     storeName: string,
     mode: "readonly" | "readwrite",
   ): IDBObjectStore {
-    let tx = this.db.transaction(storeName, mode);
+    const tx = this.db.transaction(storeName, mode);
     return tx.objectStore(storeName);
   }
 }

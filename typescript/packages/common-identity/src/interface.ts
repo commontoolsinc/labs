@@ -24,9 +24,9 @@ export type InsecureCryptoKeyPair = {
 export type KeyPairRaw = CryptoKeyPair | InsecureCryptoKeyPair;
 
 export function isCryptoKeyPair(input: any): input is CryptoKeyPair {
-  return !!(window.CryptoKey && typeof input === "object" &&
-    input.privateKey instanceof window.CryptoKey &&
-    input.publicKey instanceof window.CryptoKey);
+  return !!(globalThis.CryptoKey && typeof input === "object" &&
+    input.privateKey instanceof globalThis.CryptoKey &&
+    input.publicKey instanceof globalThis.CryptoKey);
 }
 
 export function isInsecureCryptoKeyPair(input: any): input is CryptoKeyPair {

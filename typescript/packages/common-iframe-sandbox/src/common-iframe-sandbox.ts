@@ -5,7 +5,6 @@ import * as IPC from "./ipc.ts";
 import { getIframeContextHandler } from "./context.ts";
 import OuterFrame from "./outer-frame.ts";
 
-// TODO this should probably be randomly generated
 let FRAME_IDS = 0;
 
 // @summary A sandboxed iframe to execute arbitrary scripts.
@@ -14,12 +13,19 @@ let FRAME_IDS = 0;
 // @prop context - Cell context.
 // @event {CustomEvent} error - An error from the iframe.
 // @event {CustomEvent} load - The iframe was successfully loaded.
-@customElement("common-iframe-sandbox")
 export class CommonIframeSandboxElement extends LitElement {
-  @property({ type: String })
-  accessor src = "";
-  @property({ type: Object })
-  accessor context: object;
+  static override properties = {
+    src: { type: String, attribute: false },
+    context: { type: Object, attribute: false },
+  };
+  declare src: string;
+  declare context?: object;
+
+  constructor() {
+    super();
+    this.src = "";
+    this.context = undefined;
+  }
 
   // Static id for this component for its lifetime.
   private frameId: number = ++FRAME_IDS;
@@ -148,7 +154,7 @@ export class CommonIframeSandboxElement extends LitElement {
           console.warn("common-iframe-sandbox: Already subscribed to `${key}`");
           return;
         }
-        let receipt = IframeHandler.subscribe(
+        const receipt = IframeHandler.subscribe(
           this.context,
           key,
           (key, value) => this.notifySubscribers(key, value),
@@ -159,7 +165,7 @@ export class CommonIframeSandboxElement extends LitElement {
 
       case IPC.GuestMessageType.Unsubscribe: {
         const key = message.data;
-        let receipt = this.subscriptions.get(key);
+        const receipt = this.subscriptions.get(key);
         if (!receipt) {
           return;
         }
@@ -170,8 +176,8 @@ export class CommonIframeSandboxElement extends LitElement {
 
       case IPC.GuestMessageType.LLMRequest: {
         const payload = message.data;
-        let promise = IframeHandler.onLLMRequest(this.context, payload);
-        let instanceId = this.instanceId;
+        const promise = IframeHandler.onLLMRequest(this.context, payload);
+        const instanceId = this.instanceId;
         promise.then((result: object) => {
           if (this.instanceId !== instanceId) {
             // Inner frame was reloaded. This LLM response was
@@ -250,12 +256,12 @@ export class CommonIframeSandboxElement extends LitElement {
 
   override connectedCallback() {
     super.connectedCallback();
-    window.addEventListener("message", this.boundOnMessage);
+    globalThis.addEventListener("message", this.boundOnMessage);
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    window.removeEventListener("message", this.boundOnMessage);
+    globalThis.removeEventListener("message", this.boundOnMessage);
   }
 
   override willUpdate(changedProperties: PropertyValues<this>) {
@@ -277,3 +283,5 @@ export class CommonIframeSandboxElement extends LitElement {
     `;
   }
 }
+
+customElements.define("common-iframe-sandbox", CommonIframeSandboxElement);

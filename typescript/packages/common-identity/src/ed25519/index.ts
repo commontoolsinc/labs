@@ -57,12 +57,12 @@ export class Ed25519Signer implements Signer {
   }
 
   static async generateMnemonic(): Promise<[Ed25519Signer, string]> {
-    let mnemonic = bip39.generateMnemonic(wordlist, 256);
+    const mnemonic = bip39.generateMnemonic(wordlist, 256);
     return [await Ed25519Signer.fromMnemonic(mnemonic), mnemonic];
   }
 
   static async fromMnemonic(mnemonic: string): Promise<Ed25519Signer> {
-    let bytes = bip39.mnemonicToEntropy(mnemonic, wordlist);
+    const bytes = bip39.mnemonicToEntropy(mnemonic, wordlist);
     return await Ed25519Signer.fromRaw(bytes);
   }
 
