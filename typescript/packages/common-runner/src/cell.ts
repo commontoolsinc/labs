@@ -15,7 +15,7 @@ import {
 } from "./query-result-proxy.ts";
 import { prepareForSaving, resolveLinkToValue, resolvePath } from "./utils.ts";
 import { queueEvent, type ReactivityLog, subscribe } from "./scheduler.ts";
-import { type EntityId, getDocByEntityId, getEntityId } from "./cell-map.ts";
+import { type EntityId, getDocByEntityId, getEntityId } from "./doc-map.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import { validateAndTransform } from "./schema.ts";
 import { type Schema } from "@commontools/builder";

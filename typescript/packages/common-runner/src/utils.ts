@@ -16,7 +16,7 @@ import {
 } from "./query-result-proxy.ts";
 import { isCell } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { createRef } from "./cell-map.ts";
+import { createRef } from "./doc-map.ts";
 
 export function extractDefaultValues(schema: any): any {
   if (typeof schema !== "object" || schema === null) return undefined;
