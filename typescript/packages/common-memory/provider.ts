@@ -146,6 +146,8 @@ class MemoryProviderSession<
   perform<Ability extends string>(
     command: ProviderCommandFor<Ability, MemoryProtocol>,
   ) {
+    console.log("respond", command);
+
     this.controller?.enqueue(command as ProviderCommand<MemoryProtocol>);
     return { ok: {} };
   }
@@ -175,7 +177,11 @@ class MemoryProviderSession<
   async invoke(
     { invocation, authorization }: UCAN<ConsumerCommandInvocation<Protocol>>,
   ) {
+    console.log("Invoke", invocation, authorization);
+
     const { error } = await Access.claim(invocation, authorization);
+    console.log({ error });
+
     if (error) {
       return this.perform({
         the: "task/return",

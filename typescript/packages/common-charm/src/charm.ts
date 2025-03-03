@@ -22,7 +22,7 @@ import {
 import { storage } from "./storage.ts";
 import { syncRecipeBlobby } from "./syncRecipe.ts";
 import { getSpace, Space } from "@commontools/runner";
-import { Signer } from "@commontools/identity";
+import { DID, Identity, Signer } from "@commontools/identity";
 
 export type Charm = {
   [NAME]?: string;
@@ -55,6 +55,15 @@ export class CharmManager {
   private charmsDoc: DocImpl<DocLink[]>;
   private charms: Cell<Cell<Charm>[]>;
 
+  static async open(
+    { space, signer }: { space: DID; signer?: Signer },
+  ) {
+    return new this(
+      space,
+      signer ?? await Identity.fromPassphrase("charm manager"),
+    );
+  }
+
   constructor(
     private spaceId: string,
     private signer: Signer,
@@ -63,7 +72,7 @@ export class CharmManager {
     this.charmsDoc = getDoc<DocLink[]>([], "charms", this.space);
     this.charms = this.charmsDoc.asCell([], undefined, charmListSchema);
 
-    storage.setRemoteStorage;
+    storage.setSigner(signer);
   }
 
   getReplica(): string | undefined {

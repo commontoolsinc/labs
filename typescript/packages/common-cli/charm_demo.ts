@@ -8,12 +8,10 @@
 import { Charm, CharmManager } from "../common-charm/src/charm.ts";
 import { Cell } from "../common-runner/src/cell.ts";
 import { DocImpl, getDoc } from "../common-runner/src/doc.ts";
-import { EntityId } from "../common-runner/src/cell-map.ts";
 import { storage } from "../common-charm/src/storage.ts";
 import { getSpace, Space } from "../common-runner/src/space.ts";
 import { Identity } from "../common-identity/src/index.ts";
 
-const replica = "ellyse7";
 const TOOLSHED_API_URL = "https://toolshed.saga-castor.ts.net/";
 
 // simple log function
@@ -43,13 +41,16 @@ function createCell(space: Space): Cell<Charm> {
 }
 
 async function main() {
-  const signer = await Identity.fromPassphrase("charm manager");
+  const authority = await Identity.fromPassphrase("charm manager");
   // create a charm manager to start things off
-  const charmManager = new CharmManager(replica, signer);
+  const charmManager = await CharmManager.open({
+    space: authority.did(),
+    signer: authority,
+  });
   log(charmManager, "charmManager");
 
   // let's try to create a cell
-  const space: Space = getSpace(replica);
+  const space: Space = getSpace(authority.did());
   const cell: Cell<Charm> = createCell(space);
   log(cell.get(), "cell value from Cell.get()");
 

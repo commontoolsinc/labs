@@ -1,10 +1,16 @@
 import type { Cancel, EntityId } from "@commontools/runner";
 import { log } from "../storage.ts";
 import { type StorageProvider, type StorageValue } from "./base.ts";
-import type { Entity, JSONValue, MemorySpace, Protocol } from "@commontools/memory/interface";
+import type {
+  Entity,
+  JSONValue,
+  MemorySpace,
+  Protocol,
+} from "@commontools/memory/interface";
 import * as Memory from "@commontools/memory/consumer";
 import { assert } from "@commontools/memory/fact";
 import * as Changes from "@commontools/memory/changes";
+import * as JSON from "@commontools/memory/json";
 export * from "@commontools/memory/interface";
 
 /**
@@ -97,7 +103,9 @@ export class RemoteStorageProvider implements StorageProvider {
       return `of:${source.toJSON()["/"]}`;
     } else {
       throw Object.assign(
-        new TypeError(`💣 Got entity ID that is neither merkle reference nor {'/'}`),
+        new TypeError(
+          `💣 Got entity ID that is neither merkle reference nor {'/'}`,
+        ),
         {
           cause: source,
         },
@@ -105,7 +113,10 @@ export class RemoteStorageProvider implements StorageProvider {
     }
   }
 
-  sink<T = any>(entityId: EntityId, callback: (value: StorageValue<T>) => void): Cancel {
+  sink<T = any>(
+    entityId: EntityId,
+    callback: (value: StorageValue<T>) => void,
+  ): Cancel {
     const { the } = this;
     const of = RemoteStorageProvider.toEntity(entityId);
     const local = this.mount(this.workspace);
@@ -114,7 +125,9 @@ export class RemoteStorageProvider implements StorageProvider {
     const subscriber = callback as unknown as Subscriber;
     let query = local.remote.get(of);
     if (!query) {
-      query = new Query(local.memory.query({ select: { [of]: { [the]: {} } } }));
+      query = new Query(
+        local.memory.query({ select: { [of]: { [the]: {} } } }),
+      );
       local.remote.set(of, query);
     }
 
@@ -130,7 +143,10 @@ export class RemoteStorageProvider implements StorageProvider {
       query.subscribe(RemoteStorageProvider.sync);
     } else {
       const query = local.memory.query({ select: { [of]: { [the]: {} } } });
-      local.remote.set(of, new Query(query, new Set([RemoteStorageProvider.sync])));
+      local.remote.set(
+        of,
+        new Query(query, new Set([RemoteStorageProvider.sync])),
+      );
 
       await query.promise;
     }

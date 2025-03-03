@@ -9,7 +9,8 @@
     "./transaction": "./transaction.ts",
     "./changes": "./changes.ts",
     "./commit": "./commit.ts",
-    "./principal": "./principal.ts"
+    "./principal": "./principal.ts",
+    "./json": "./json.ts"
   },
   "dependencies": {
     "merkle-reference": "^2.0.1",

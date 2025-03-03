@@ -2,6 +2,7 @@
 import { parse } from "https://deno.land/std@0.224.0/flags/mod.ts";
 import { CharmManager, compileRecipe, storage } from "@commontools/charm";
 import { getEntityId, isStream } from "@commontools/runner";
+import { Identity } from "@commontools/identity";
 
 const { space, charmId, recipeFile, cause } = parse(Deno.args);
 
@@ -12,7 +13,11 @@ storage.setRemoteStorage(
 );
 
 async function main() {
-  const manager = new CharmManager(space ?? "common-cli");
+  const identity = await Identity.fromPassphrase("common-cli");
+  const manager = await CharmManager.open({
+    space: space ?? identity.did(),
+    signer: identity,
+  });
   const charms = await manager.getCharms();
 
   charms.sink((charms) => {
