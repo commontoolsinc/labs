@@ -55,7 +55,7 @@ export default function SpellbookLaunchView() {
 
         // Run the recipe with the initial data
         const charm = await charmManager.runPersistent(recipe, initialData);
-        const charmIdString = charm.entityId?.toJSON?.()["/"];
+        const charmIdString = charm?.entityId?.["/"] as string;
         await charmManager.add([charm]);
 
         if (charmIdString) {
@@ -82,9 +82,7 @@ export default function SpellbookLaunchView() {
     <div className="flex items-center justify-center h-screen">
       <div className="text-center">
         <h1 className="text-2xl font-bold mb-4">Launching Spell...</h1>
-        <p className="text-gray-600">
-          Please wait while we prepare your spell.
-        </p>
+        <p className="text-gray-600">Please wait while we prepare your spell.</p>
       </div>
     </div>
   );
