@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { DocLink, getDoc } from "../src/doc.ts";
-import { isCell, isStream } from "../src/cell.ts";
+import { type Cell, isCell, isStream } from "../src/cell.ts";
 import type { JSONSchema } from "@commontools/builder";
 import { idle } from "../src/scheduler.ts";
 import { getSpace } from "../src/space.ts";
@@ -40,9 +40,12 @@ describe("Schema Support", () => {
           kind: { type: "string" },
           tag: { type: "string" },
         },
-      } as JSONSchema;
+      } as const satisfies JSONSchema;
 
-      expect(mappingCell.asCell([], undefined, schema).get()).toEqual({
+      // Let type inference work through the schema
+      const result = mappingCell.asCell([], undefined, schema).get();
+
+      expect(result).toEqual({
         id: 1,
         changes: ["2025-01-06"],
         kind: "user",
@@ -51,32 +54,34 @@ describe("Schema Support", () => {
     });
 
     it("should support nested sinks via asCell", async () => {
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           value: { type: "string" },
           current: {
             type: "object",
             properties: { label: { type: "string" } },
+            required: ["label"],
             asCell: true,
           },
         },
-      } as const;
+        required: ["value", "current"],
+      } as const satisfies JSONSchema;
 
       const c = getDoc({
         value: "root",
         current: getDoc({ label: "first" }).asCell().getAsDocLink(),
       }).asCell([], undefined, schema);
 
-      const rootValues: any[] = [];
-      const currentValues: any[] = [];
-      const currentByKeyValues: any[] = [];
-      const currentByGetValues: any[] = [];
+      const rootValues: string[] = [];
+      const currentValues: string[] = [];
+      const currentByKeyValues: string[] = [];
+      const currentByGetValues: string[] = [];
 
       // Nested traversal of data
       c.sink((value) => {
         rootValues.push(value.value);
-        const cancel = value.current.sink((value: { label: string }) => {
+        const cancel = value.current.sink((value) => {
           currentValues.push(value.label);
         });
         return () => {
@@ -88,15 +93,14 @@ describe("Schema Support", () => {
       // Querying for a value tied to the currently selected sub-document
       c.key("current")
         .key("label")
-        .sink((value: string) => {
+        .sink((value) => {
           currentByKeyValues.push(value);
         });
 
-      // .get() the currently selected cell. This should not change when
-      // the currently selected cell changes!
+      // .get() the currently selected cell
       c.key("current")
         .get()
-        .sink((value: { label: string }) => {
+        .sink((value) => {
           currentByGetValues.push(value.label);
         });
 
@@ -150,17 +154,19 @@ describe("Schema Support", () => {
       // the previous example, but the updating happens behind an alias,
       // typically by another actor.
 
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           value: { type: "string" },
           current: {
             type: "object",
             properties: { label: { type: "string" } },
+            required: ["label"],
             asCell: true,
           },
         },
-      } as const;
+        required: ["value", "current"],
+      } as const satisfies JSONSchema;
 
       // Construct an alias that also has a path to the actual data
       const initialDoc = getDoc(
@@ -344,14 +350,14 @@ describe("Schema Support", () => {
         bool: true,
       });
 
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           str: { type: "string" },
           num: { type: "number" },
           bool: { type: "boolean" },
         },
-      };
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
@@ -371,7 +377,7 @@ describe("Schema Support", () => {
         },
       });
 
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           user: {
@@ -383,9 +389,11 @@ describe("Schema Support", () => {
                 asCell: true,
               },
             },
+            required: ["name", "settings"],
           },
         },
-      };
+        required: ["user"],
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
@@ -399,7 +407,7 @@ describe("Schema Support", () => {
         items: [1, 2, 3],
       });
 
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           items: {
@@ -407,7 +415,7 @@ describe("Schema Support", () => {
             items: { type: "number" },
           },
         },
-      };
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
@@ -435,7 +443,7 @@ describe("Schema Support", () => {
             asCell: true,
           },
         },
-      } as JSONSchema;
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
@@ -444,9 +452,9 @@ describe("Schema Support", () => {
       expect(isCell(value.metadata)).toBe(true);
 
       // The metadata cell should behave like a normal cell
-      const metadataValue = value.metadata.get();
-      expect(metadataValue.createdAt).toBe("2025-01-06");
-      expect(metadataValue.type).toBe("user");
+      const metadataValue = value.metadata?.get();
+      expect(metadataValue?.createdAt).toBe("2025-01-06");
+      expect(metadataValue?.type).toBe("user");
     });
 
     it("Should support a reference at the root", () => {
@@ -462,7 +470,8 @@ describe("Schema Support", () => {
           nested: { $ref: "#", asCell: true },
         },
         asCell: true,
-      } as JSONSchema;
+        required: ["id", "nested"],
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
@@ -484,7 +493,7 @@ describe("Schema Support", () => {
         ],
       });
 
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           name: { type: "string" },
@@ -493,7 +502,8 @@ describe("Schema Support", () => {
             items: { $ref: "#" },
           },
         },
-      };
+        required: ["name", "children"],
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
@@ -515,7 +525,7 @@ describe("Schema Support", () => {
         },
       });
 
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           user: {
@@ -530,11 +540,14 @@ describe("Schema Support", () => {
                     asCell: true,
                   },
                 },
+                required: ["name", "metadata"],
               },
             },
+            required: ["profile"],
           },
         },
-      };
+        required: ["user"],
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const userCell = cell.key("user");
@@ -549,14 +562,14 @@ describe("Schema Support", () => {
   describe("AnyOf Support", () => {
     it("should select the correct candidate for primitive types (number)", () => {
       const c = getDoc({ value: 42 });
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           value: {
             anyOf: [{ type: "string" }, { type: "number" }],
           },
         },
-      };
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const result = cell.get();
@@ -565,14 +578,14 @@ describe("Schema Support", () => {
 
     it("should select the correct candidate for primitive types (string)", () => {
       const c = getDoc({ value: "hello" });
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           value: {
             anyOf: [{ type: "number" }, { type: "string" }],
           },
         },
-      };
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const result = cell.get();
@@ -581,17 +594,26 @@ describe("Schema Support", () => {
 
     it("should merge object candidates in anyOf", () => {
       const c = getDoc({ item: { a: 100, b: "merged" } });
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           item: {
             anyOf: [
-              { type: "object", properties: { a: { type: "number" } } },
-              { type: "object", properties: { b: { type: "string" } } },
+              {
+                type: "object",
+                properties: { a: { type: "number" } },
+                required: ["a"],
+              },
+              {
+                type: "object",
+                properties: { b: { type: "string" } },
+                required: ["b"],
+              },
             ],
           },
         },
-      };
+        required: ["item"],
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const result = cell.get();
@@ -601,14 +623,14 @@ describe("Schema Support", () => {
 
     it("should return undefined if no anyOf candidate matches for primitive types", () => {
       const c = getDoc({ value: true });
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           value: {
             anyOf: [{ type: "number" }, { type: "string" }],
           },
         },
-      };
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const result = cell.get();
@@ -617,14 +639,14 @@ describe("Schema Support", () => {
 
     it("should return undefined when value is an object but no anyOf candidate is an object", () => {
       const c = getDoc({ value: { a: 1 } });
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           value: {
             anyOf: [{ type: "number" }, { type: "string" }],
           },
         },
-      };
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const result = cell.get();
@@ -633,7 +655,7 @@ describe("Schema Support", () => {
 
     it("should handle anyOf in array items", () => {
       const c = getDoc({ arr: [42, "test", true] });
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           arr: {
@@ -643,7 +665,8 @@ describe("Schema Support", () => {
             },
           },
         },
-      };
+        required: ["arr"],
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const result = cell.get();
@@ -655,18 +678,22 @@ describe("Schema Support", () => {
     it("should select the correct candidate when mixing object and array candidates", () => {
       // Case 1: When the value is an object, the object candidate should be used.
       const cObject = getDoc({ mixed: { foo: "bar" } });
-      const schemaObject: JSONSchema = {
+      const schemaObject = {
         type: "object",
         properties: {
           mixed: {
             anyOf: [
-              { type: "object", properties: { foo: { type: "string" } } },
+              {
+                type: "object",
+                properties: { foo: { type: "string" } },
+                required: ["foo"],
+              },
               // Array candidate; this should be ignored for object inputs.
               { type: "array", items: { type: "string" } },
             ],
           },
         },
-      };
+      } as const satisfies JSONSchema;
 
       const cellObject = cObject.asCell([], undefined, schemaObject);
       const resultObject = cellObject.get();
@@ -675,7 +702,7 @@ describe("Schema Support", () => {
 
       // Case 2: When the value is an array, the array candidate should be used.
       const cArray = getDoc({ mixed: ["bar", "baz"] });
-      const schemaArray: JSONSchema = {
+      const schemaArray = {
         type: "object",
         properties: {
           mixed: {
@@ -686,7 +713,7 @@ describe("Schema Support", () => {
             ],
           },
         },
-      };
+      } as const satisfies JSONSchema;
 
       const cellArray = cArray.asCell([], undefined, schemaArray);
       const resultArray = cellArray.get();
@@ -701,7 +728,7 @@ describe("Schema Support", () => {
         const c = getDoc({
           data: [1, 2, 3],
         });
-        const schema: JSONSchema = {
+        const schema = {
           type: "object",
           properties: {
             data: {
@@ -711,7 +738,7 @@ describe("Schema Support", () => {
               ],
             },
           },
-        };
+        } as const satisfies JSONSchema;
 
         const cell = c.asCell([], undefined, schema);
         const result = cell.get();
@@ -722,7 +749,7 @@ describe("Schema Support", () => {
         const c = getDoc({
           data: ["hello", 42, true],
         });
-        const schema: JSONSchema = {
+        const schema = {
           type: "object",
           properties: {
             data: {
@@ -732,7 +759,7 @@ describe("Schema Support", () => {
               ],
             },
           },
-        };
+        } as const satisfies JSONSchema;
 
         const cell = c.asCell([], undefined, schema);
         const result = cell.get();
@@ -748,7 +775,7 @@ describe("Schema Support", () => {
             { not: "matching", should: "be ignored" },
           ],
         });
-        const schema: JSONSchema = {
+        const schema = {
           type: "object",
           properties: {
             data: {
@@ -773,7 +800,7 @@ describe("Schema Support", () => {
               },
             },
           },
-        };
+        } as const satisfies JSONSchema;
 
         const cell = c.asCell([], undefined, schema);
         const result = cell.get();
@@ -788,7 +815,7 @@ describe("Schema Support", () => {
         const c = getDoc({
           data: { key: "value" },
         });
-        const schema: JSONSchema = {
+        const schema = {
           type: "object",
           properties: {
             data: {
@@ -798,7 +825,7 @@ describe("Schema Support", () => {
               ],
             },
           },
-        };
+        } as const satisfies JSONSchema;
 
         const cell = c.asCell([], undefined, schema);
         const result = cell.get();
@@ -842,7 +869,7 @@ describe("Schema Support", () => {
           ],
         });
 
-        const schema: JSONSchema = {
+        const schema = {
           type: "object",
           properties: {
             type: { type: "string" },
@@ -860,12 +887,13 @@ describe("Schema Support", () => {
                   { type: "string", asCell: true },
                   { type: "number", asCell: true },
                   { type: "boolean", asCell: true },
-                  { type: "array", items: { $ref: "#", asCell: true } },
+                  { type: "array", items: { $ref: "#" } },
                 ],
               },
             },
           },
-        };
+          required: ["type", "name", "value", "props", "children"],
+        } as const satisfies JSONSchema;
 
         for (const doc of [plain, withLinks]) {
           const cell = doc.asCell([], undefined, schema);
@@ -878,14 +906,18 @@ describe("Schema Support", () => {
           expect(result.props.style.get().color).toBe("red");
           expect(result.children.length).toBe(3);
           expect(isCell(result.children[0])).toBe(true);
-          expect(result.children[0].get().value).toBe("single");
+          expect((result.children[0] as Cell<any>).get().value).toBe("single");
           expect(isCell(result.children[1])).toBe(false);
           expect(isCell(result.children[1][0])).toBe(true);
-          expect(result.children[1][0].get().value).toBe("hello");
+          expect((result.children[1][0] as Cell<any>).get().value).toBe(
+            "hello",
+          );
           expect(isCell(result.children[1][1])).toBe(true);
-          expect(result.children[1][1].get().value).toBe("world");
+          expect((result.children[1][1] as Cell<any>).get().value).toBe(
+            "world",
+          );
           expect(isCell(result.children[2])).toBe(true);
-          expect(result.children[2].get()).toBe("or just text");
+          expect((result.children[2] as Cell<any>).get()).toBe("or just text");
         }
       });
     });
@@ -898,13 +930,13 @@ describe("Schema Support", () => {
         // age is not defined
       });
 
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           name: { type: "string" },
           age: { type: "number", default: 30 },
         },
-      };
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
@@ -919,7 +951,7 @@ describe("Schema Support", () => {
         // profile is not defined
       });
 
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           name: { type: "string" },
@@ -933,7 +965,8 @@ describe("Schema Support", () => {
             asCell: true,
           },
         },
-      };
+        required: ["name", "profile"],
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
@@ -959,7 +992,7 @@ describe("Schema Support", () => {
         // tags is not defined
       });
 
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           name: { type: "string" },
@@ -970,7 +1003,8 @@ describe("Schema Support", () => {
             asCell: true,
           },
         },
-      };
+        required: ["name", "tags"],
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
@@ -985,7 +1019,7 @@ describe("Schema Support", () => {
     });
 
     it("should handle nested default values with asCell", () => {
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           user: {
@@ -1013,9 +1047,11 @@ describe("Schema Support", () => {
                 asCell: true,
               },
             },
+            required: ["name", "settings"],
           },
         },
-      };
+        required: ["user"],
+      } as const satisfies JSONSchema;
 
       const c = getDoc({
         user: {
@@ -1057,7 +1093,7 @@ describe("Schema Support", () => {
     });
 
     it("should handle default values with asCell in arrays", () => {
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           items: {
@@ -1090,7 +1126,7 @@ describe("Schema Support", () => {
           },
         },
         default: {},
-      };
+      } as const satisfies JSONSchema;
 
       const c = getDoc({
         items: [
@@ -1176,7 +1212,7 @@ describe("Schema Support", () => {
     });
 
     it("should handle default at the root level with asCell", () => {
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           name: { type: "string" },
@@ -1192,7 +1228,7 @@ describe("Schema Support", () => {
           settings: { theme: "light" },
         },
         asCell: true,
-      };
+      } as const satisfies JSONSchema;
 
       const c = getDoc(undefined);
       const cell = c.asCell([], undefined, schema);
@@ -1216,34 +1252,34 @@ describe("Schema Support", () => {
     });
 
     it("should make immutable cells if they provide the default value", () => {
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           name: { type: "string", default: "Default Name", asCell: true },
         },
         default: {},
-      };
+      } as const satisfies JSONSchema;
 
       const c = getDoc();
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
       expect(isCell(value.name)).toBe(true);
-      expect(value.name.get()).toBe("Default Name");
+      expect(value?.name?.get()).toBe("Default Name");
 
       cell.set({ name: "Updated Name" });
 
       // Expect the cell to be immutable
-      expect(value.name.get()).toBe("Default Name");
+      expect(value?.name?.get()).toBe("Default Name");
     });
 
     it("should make mutable cells if parent provides the default value", () => {
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           name: { type: "string", default: "Default Name", asCell: true },
         },
         default: { name: "First default name" },
-      };
+      } as const satisfies JSONSchema;
 
       const c = getDoc();
       const cell = c.asCell([], undefined, schema);
@@ -1265,7 +1301,7 @@ describe("Schema Support", () => {
         events: { $stream: true },
       });
 
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           name: { type: "string" },
@@ -1274,7 +1310,7 @@ describe("Schema Support", () => {
             asStream: true,
           },
         },
-      };
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
@@ -1283,7 +1319,7 @@ describe("Schema Support", () => {
       expect(isStream(value.events)).toBe(true);
 
       // Verify it's a stream, i.e. no get functio
-      expect(value.events.get).toBe(undefined);
+      expect((value as any).events.get).toBe(undefined);
     });
 
     it("should handle nested streams in objects", () => {
@@ -1296,7 +1332,7 @@ describe("Schema Support", () => {
         },
       });
 
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           user: {
@@ -1315,13 +1351,13 @@ describe("Schema Support", () => {
             },
           },
         },
-      };
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
 
-      expect(value.user.profile.name).toBe("John");
-      expect(isStream(value.user.profile.notifications)).toBe(true);
+      expect(value?.user?.profile?.name).toBe("John");
+      expect(isStream(value?.user?.profile?.notifications)).toBe(true);
     });
 
     it("should not create a stream when property is missing", () => {
@@ -1330,7 +1366,7 @@ describe("Schema Support", () => {
         // Missing events property
       });
 
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           name: { type: "string" },
@@ -1339,7 +1375,7 @@ describe("Schema Support", () => {
             asStream: true,
           },
         },
-      };
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
@@ -1354,7 +1390,7 @@ describe("Schema Support", () => {
         streamData: { $stream: true },
       });
 
-      const schema: JSONSchema = {
+      const schema = {
         type: "object",
         properties: {
           cellData: {
@@ -1366,13 +1402,13 @@ describe("Schema Support", () => {
             asStream: true,
           },
         },
-      };
+      } as const satisfies JSONSchema;
 
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
 
       expect(isCell(value.cellData)).toBe(true);
-      expect(value.cellData.get().value).toBe(42);
+      expect(value?.cellData?.get()?.value).toBe(42);
 
       expect(isStream(value.streamData)).toBe(true);
     });
