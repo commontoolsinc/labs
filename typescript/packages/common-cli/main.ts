@@ -8,7 +8,7 @@ import {
 } from "@commontools/charm";
 import { getEntityId, isStream } from "@commontools/runner";
 
-const { space, charmId, recipeFile, cause } = parse(Deno.args);
+let { space, charmId, recipeFile, cause } = parse(Deno.args);
 
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
@@ -17,7 +17,10 @@ storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
 
 async function main() {
-  const manager = new CharmManager(space ?? "common-cli");
+  if (!space) space = "common-cli";
+  console.log("params:", { space, charmId, recipeFile, cause });
+
+  const manager = new CharmManager(space);
   const charms = await manager.getCharms();
 
   charms.sink((charms) => {
