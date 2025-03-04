@@ -706,6 +706,28 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       },
     },
     {
+      id: "unpin-charm",
+      type: "action",
+      title: "Unpin Charm",
+      group: "View",
+      predicate: !!deps.focusedCharmId,
+      handler: async () => {
+        if (!deps.focusedCharmId || !deps.focusedReplicaId) {
+          deps.setOpen(false);
+          return;
+        }
+
+        const charm = await deps.charmManager.get(deps.focusedCharmId);
+        if (!charm) {
+          console.error("Failed to load charm", deps.focusedCharmId);
+          return;
+        }
+
+        await deps.charmManager.unpin(charm);
+        deps.setOpen(false);
+      },
+    },
+    {
       id: "view-detail",
       type: "action",
       title: "View Detail",
