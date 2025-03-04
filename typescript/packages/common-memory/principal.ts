@@ -25,7 +25,9 @@ export const fromDID = <ID extends DIDKey>(
   id: ID | DID | string,
 ): Result<ED25519Verifier<ID>, SyntaxError> => {
   if (!id.startsWith(DID_PREFIX)) {
-    throw new RangeError(`Invalid DID "${id}", must start with 'did:'`);
+    return {
+      error: new SyntaxError(`Invalid DID "${id}", must start with 'did:'`),
+    };
   } else if (id.startsWith(DID_KEY_PREFIX)) {
     return fromDIDKey(id as ID);
   } else {
