@@ -27,6 +27,8 @@ import { Space } from "./space.ts";
  * This abstracts away the paths behind an interface that e.g. the UX code or
  * modules that prefer cell interfaces can use.
  *
+ * These methods are available in the system and in spell code:
+ *
  * @method get Returns the current value of the cell.
  * @returns {T}
  *
@@ -35,35 +37,69 @@ import { Space } from "./space.ts";
  * @param {T} value - The new value to set.
  * @returns {void}
  *
+ * @method update Updates multiple properties of an object cell at once.
+ * @param {Partial<T>} values - The properties to update.
+ * @returns {void}
+ *
+ * @method push Adds an item to the end of an array cell.
+ * @param {U | DocImpl<U> | DocLink} value - The value to add, where U is the
+ * array element type.
+ * @returns {void}
+ *
+ * @method equals Compares two cells for equality.
+ * @param {Cell<any>} other - The cell to compare with.
+ * @returns {boolean}
+ *
  * @method key Returns a new cell for the specified key path.
  * @param {K} valueKey - The key to access in the cell's value.
  * @returns {Cell<T[K]>}
+ *
+ * Everything below is only available in the system, not in spell code:
+ *
+ * @method asSchema Creates a new cell with a specific schema.
+ * @param {JSONSchema} schema - The schema to apply.
+ * @returns {Cell<T>} - A cell with the specified schema.
+ *
+ * @method withLog Creates a new cell with a specific reactivity log.
+ * @param {ReactivityLog} log - The log to use.
+ * @returns {Cell<T>}
  *
  * @method sink Adds a callback that is called immediately and on cell changes.
  * @param {function} callback - The callback to be called when the cell changes.
  * @returns {function} - A function to Cleanup the callback.
  *
- * @method getAsProxy Returns a value proxy for the cell.
- * @param {Path} path - The path to follow.
+ * @method getAsQueryResult Returns a query result for the cell.
+ * @param {Path} path - The optional path to follow.
+ * @param {ReactivityLog} log - Optional reactivity log.
  * @returns {QueryResult<DeepKeyLookup<T, Path>>}
  *
- * @method getAsCellReference Returns a cell reference for the cell.
+ * @method getAsDocLink Returns a document link for the cell.
  * @returns {DocLink}
  *
- * @method toJSON Returns a JSON pointer to the cell (not the contents!).
- * @returns {{"/": string}}
+ * @method getSourceCell Returns the source cell with optional schema.
+ * @param {JSONSchema} schema - Optional schema to apply.
+ * @returns {Cell<T & {[TYPE]: string | undefined} & {argument: any}>}
+ *
+ * @method toJSON Returns a serializable doclink (not the contents) to the cell.
+ * @returns {{cell: {"/": string} | undefined, path: PropertyKey[]}}
  *
  * @method value Returns the current value of the cell.
  * @returns {T}
  *
- * @method entityId Returns the current entity ID of the cell.
+ * @property docLink The document link representing this cell.
+ * @returns {DocLink}
+ *
+ * @property entityId Returns the current entity ID of the cell.
  * @returns {EntityId | undefined}
+ *
+ * @property schema Optional schema for the cell.
+ * @returns {JSONSchema | undefined}
  */
 export interface Cell<T> {
   get(): T;
   set(value: T): void;
   send(value: T): void;
-  update(value: Partial<T>): void;
+  update(values: Partial<T>): void;
   push(
     value:
       | (T extends Array<infer U> ? U : any)
@@ -248,7 +284,6 @@ function createRegularCell<T>(
   const self = {
     get: () => validateAndTransform(doc, path, schema, log, rootSchema),
     set: (newValue: T) => {
-      // TODO(seefeld): This doesn't respect aliases on write. Should it?
       const ref = resolvePath(doc, path, log);
       if (
         prepareForSaving(
@@ -267,21 +302,18 @@ function createRegularCell<T>(
       }
     },
     send: (newValue: T) => self.set(newValue),
-    update: (value: Partial<T>) => {
-      // TODO(seefeld): This doesn't respect aliases on write. Should it?
-      const ref = resolvePath(doc, path, log);
-      const previousValue = ref.cell.getAtPath(ref.path);
-      if (typeof previousValue !== "object" || previousValue === null) {
-        throw new Error("Can't update non-object value");
+    update: (values: Partial<T>) => {
+      if (typeof values !== "object" || values === null) {
+        throw new Error("Can't update with non-object value");
       }
-      const newValue = {
-        ...previousValue,
-        ...value,
-      };
-      ref.cell.setAtPath(ref.path, newValue, log);
+      for (const [key, value] of Object.entries(values)) {
+        self.key(key as keyof T).set(value as T[keyof T]);
+      }
     },
     push: (value: any) => {
-      const ref = resolvePath(doc, path, log);
+      // Follow aliases and references, since we want to get to an assumed
+      // existing array.
+      const ref = resolveLinkToValue(doc, path, log);
       const array = ref.cell.getAtPath(ref.path) ?? [];
       if (!Array.isArray(array)) {
         throw new Error("Can't push into non-array value");
