@@ -11,8 +11,8 @@ import { type ReactivityLog } from "../scheduler.ts";
  *
  * Returns the streamed result as `result`. `pending` is true while a request is pending.
  *
- * @param url - A cell containing the URL to stream data from.
- * @returns { pending: boolean, result: any, error: any } - As individual cells, representing `pending` state, streamed `result`, and any `error`.
+ * @param url - A doc containing the URL to stream data from.
+ * @returns { pending: boolean, result: any, error: any } - As individual docs, representing `pending` state, streamed `result`, and any `error`.
  */
 export function streamData(
   inputsCell: DocImpl<{
@@ -53,7 +53,7 @@ export function streamData(
   result.sourceCell = parentDoc;
   error.sourceCell = parentDoc;
 
-  // Since we'll only write into the cells above, we only have to call this once
+  // Since we'll only write into the docs above, we only have to call this once
   // here, instead of in the action.
   sendResult({ pending, result, error });
 

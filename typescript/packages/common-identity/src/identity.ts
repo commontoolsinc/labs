@@ -62,14 +62,14 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
   static async generateMnemonic<ID extends DIDKey>(): Promise<
     [Identity<ID>, string]
   > {
-    let [signer, mnemonic] = await Ed25519Signer.generateMnemonic<ID>();
+    const [signer, mnemonic] = await Ed25519Signer.generateMnemonic<ID>();
     return [new Identity(signer), mnemonic];
   }
 
   static async fromMnemonic<ID extends DIDKey>(
     mnemonic: string,
   ): Promise<Identity<ID>> {
-    let signer = await Ed25519Signer.fromMnemonic<ID>(mnemonic);
+    const signer = await Ed25519Signer.fromMnemonic<ID>(mnemonic);
     return new Identity(signer);
   }
 

@@ -1,0 +1,16 @@
+{
+  "name": "@commontools/deno-web-test",
+  "tasks": {
+    "test": "deno run --allow-env --allow-read --allow-write --allow-run --allow-net ./cli.ts test/*.test.ts"
+  },
+  "exports": {
+    ".": "./mod.ts",
+    "./cli": "./cli.ts"
+  },
+  "imports": {
+    "@astral/astral": "jsr:@astral/astral",
+    "esbuild": "npm:esbuild",
+    "@luca/esbuild-deno-loader": "jsr:@luca/esbuild-deno-loader",
+    "@std/http": "jsr:@std/http"
+  }
+}

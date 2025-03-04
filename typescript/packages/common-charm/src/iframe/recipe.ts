@@ -14,7 +14,7 @@ export const buildFullRecipe = (iframe: IFrameRecipe) => {
   return `import { h } from "@commontools/html";
   import { recipe, UI, NAME } from "@commontools/builder";
   import type { JSONSchema } from "@commontools/builder";
-  
+
   type IFrameRecipe = {
     src: string,
     argumentSchema: JSONSchema,
@@ -22,12 +22,11 @@ export const buildFullRecipe = (iframe: IFrameRecipe) => {
     spec: string,
     name: string,
   }
-  
-  const inst: IFrameRecipe = /* IFRAME-V0 */ ${
-    JSON.stringify(iframe, null, 2)
-  } /* IFRAME-V0 */
-  
-  
+
+  const inst: IFrameRecipe = /* IFRAME-V0 */ ${JSON.stringify(iframe, null, 2)
+    } /* IFRAME-V0 */
+
+
   const runIframeRecipe = ({ argumentSchema, resultSchema, src, name }: IFrameRecipe) =>
   recipe(argumentSchema, resultSchema, (data) => ({
     [NAME]: name,
@@ -36,7 +35,7 @@ export const buildFullRecipe = (iframe: IFrameRecipe) => {
     ),
     // FIXME: add resultSchema to the result
   }));
-  
+
   export default runIframeRecipe(inst);
   `;
 };
@@ -73,4 +72,22 @@ export const getIframeRecipe = (charm: Cell<Charm>) => {
   }
 
   return { recipeId, iframe: parseIframeRecipe(src) };
+};
+
+export const getRecipeFrom = (charm: Cell<Charm>) => {
+  const recipeId = charm.getSourceCell(processSchema)?.get()?.[TYPE];
+  if (!recipeId) {
+    throw new Error("No recipeId found");
+  }
+
+  const recipe = getRecipe(recipeId);
+  if (!recipe) {
+    throw new Error("No recipe found for recipeId");
+  }
+  const src = getRecipeSrc(recipeId);
+  if (!src) {
+    throw new Error("No source found for recipeId");
+  }
+
+  return { recipeId, recipe, src };
 };

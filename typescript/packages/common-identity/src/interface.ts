@@ -84,10 +84,10 @@ export type KeyPairRaw = CryptoKeyPair | InsecureCryptoKeyPair;
 
 export function isCryptoKeyPair(input: any): input is CryptoKeyPair {
   return !!(
-    window.CryptoKey &&
+    globalThis.CryptoKey &&
     typeof input === "object" &&
-    input.privateKey instanceof window.CryptoKey &&
-    input.publicKey instanceof window.CryptoKey
+    input.privateKey instanceof globalThis.CryptoKey &&
+    input.publicKey instanceof globalThis.CryptoKey
   );
 }
 

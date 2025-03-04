@@ -8,6 +8,7 @@ import {
   isShadowRef,
   isStatic,
   type JSONSchema,
+  type JSONSchemaWritable,
   type JSONValue,
   makeOpaqueRef,
   markAsStatic,
@@ -218,7 +219,7 @@ export function toJSONWithAliases(
 export function createJsonSchema(
   defaultValues: any,
   referenceValues: any,
-): JSONSchema {
+): JSONSchemaWritable {
   function analyzeType(value: any, defaultValue: any): JSONSchema {
     if (isAlias(value)) {
       const path = value.$alias.path;
@@ -229,7 +230,7 @@ export function createJsonSchema(
     }
 
     const type = typeof (value ?? defaultValue);
-    const schema: JSONSchema = {};
+    const schema: JSONSchemaWritable = {};
 
     switch (type) {
       case "object":
@@ -264,7 +265,7 @@ export function createJsonSchema(
               ...Object.keys(defaultValue ?? {}),
             ])
           ) {
-            schema.properties[key] = analyzeType(
+            (schema.properties as any)[key] = analyzeType(
               value?.[key],
               defaultValue?.[key],
             );

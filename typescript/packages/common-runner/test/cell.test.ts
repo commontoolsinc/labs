@@ -1,12 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { getDoc, isDoc, isDocLink } from "../src/doc.ts";
+import { type DocImpl, getDoc, isDoc, isDocLink } from "../src/doc.ts";
 import { isCell } from "../src/cell.ts";
 import { isQueryResult } from "../src/query-result-proxy.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { JSONSchema } from "@commontools/builder";
 import { addEventHandler, idle } from "../src/scheduler.ts";
-import { compactifyPaths } from "../src/utils.ts";
 import { getSpace } from "../src/space.ts";
 
 describe("Cell", () => {
@@ -383,8 +382,10 @@ describe("asCell with schema", () => {
           properties: {
             value: { type: "number" },
           },
+          required: ["value"],
         },
       },
+      required: ["name", "age", "tags", "nested"],
     } satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
@@ -418,6 +419,7 @@ describe("asCell with schema", () => {
           asCell: true,
         },
       },
+      required: ["id", "metadata"],
     } satisfies JSONSchema;
 
     const value = c.asCell([], undefined, schema).get();
@@ -464,6 +466,7 @@ describe("asCell with schema", () => {
           items: { $ref: "#" },
         },
       },
+      required: ["name", "children"],
     } satisfies JSONSchema;
 
     const value = c.asCell([], undefined, schema).get();
@@ -510,14 +513,17 @@ describe("asCell with schema", () => {
                   asCell: true,
                 },
               },
+              required: ["name", "settings"],
             },
             metadata: {
               type: "object",
               asCell: true,
             },
           },
+          required: ["profile", "metadata"],
         },
       },
+      required: ["user"],
     } satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
@@ -580,7 +586,8 @@ describe("asCell with schema", () => {
           },
         },
       },
-    } satisfies JSONSchema;
+      required: ["id", "metadata"],
+    } as const satisfies JSONSchema;
 
     // Create a schema that marks metadata as a reference
     const referenceSchema = {
@@ -589,10 +596,15 @@ describe("asCell with schema", () => {
         id: { type: "number" },
         metadata: {
           type: "object",
+          properties: {
+            createdAt: { type: "string" },
+            type: { type: "string" },
+          },
           asCell: true,
         },
       },
-    } satisfies JSONSchema;
+      required: ["id", "metadata"],
+    } as const satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, initialSchema);
     const value = cell.get();
@@ -642,6 +654,7 @@ describe("asCell with schema", () => {
           },
         },
       },
+      required: ["id", "context"],
     } satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
@@ -683,6 +696,7 @@ describe("asCell with schema", () => {
           additionalProperties: { asCell: true },
         },
       },
+      required: ["context"],
     } satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
@@ -724,6 +738,7 @@ describe("asCell with schema", () => {
           additionalProperties: { asCell: true },
         },
       },
+      required: ["context"],
     } satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
@@ -769,6 +784,7 @@ describe("asCell with schema", () => {
           additionalProperties: { asCell: true },
         },
       },
+      required: ["context"],
     } satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
@@ -835,6 +851,7 @@ describe("asCell with schema", () => {
           additionalProperties: { asCell: true },
         },
       },
+      required: ["context"],
     } satisfies JSONSchema;
 
     const log = { reads: [], writes: [] } as ReactivityLog;
@@ -845,14 +862,12 @@ describe("asCell with schema", () => {
     expect(isCell(value.context.nested)).toBe(true);
     expect(value.context.nested.get().value).toBe(42);
 
-    // All references in the chain should be read
-    const reads = compactifyPaths(log.reads);
-
-    expect(reads.length).toBe(4);
-    expect(reads[0].cell).toBe(c);
-    expect(reads[1].cell).toBe(ref3.cell);
-    expect(reads[2].cell).toBe(ref2.cell);
-    expect(reads[3].cell).toBe(ref1.cell);
+    const readDocs = new Set<DocImpl<any>>(log.reads.map((r) => r.cell));
+    expect(readDocs.size).toBe(4);
+    expect(readDocs.has(c)).toBe(true);
+    expect(readDocs.has(ref3.cell)).toBe(true);
+    expect(readDocs.has(ref2.cell)).toBe(true);
+    expect(readDocs.has(ref1.cell)).toBe(true);
 
     // Changes to the original cell should propagate through the chain
     innerCell.send({ value: 100 });
@@ -882,9 +897,11 @@ describe("asCell with schema", () => {
               name: { type: "string" },
               value: { type: "number" },
             },
+            required: ["name", "value"],
           },
         },
       },
+      required: ["items"],
     } satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);

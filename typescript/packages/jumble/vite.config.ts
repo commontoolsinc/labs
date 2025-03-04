@@ -4,6 +4,7 @@ import deno from "../deno-vite-plugin/src/index.ts";
 import tailwindcss from "@tailwindcss/vite";
 import * as path from "@std/path";
 
+console.log("TOOLSHED_API_URL", Deno.env.get("TOOLSHED_API_URL"));
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [deno(), react(), tailwindcss()],
@@ -14,6 +15,10 @@ export default defineConfig({
       "bens-macbook-pro.saga-castor.ts.net",
     ],
     proxy: {
+      "/api/integrations": {
+        target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
+        changeOrigin: true,
+      },
       "/api/ai/spell/": {
         target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
         changeOrigin: true,

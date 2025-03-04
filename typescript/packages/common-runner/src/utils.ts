@@ -16,7 +16,7 @@ import {
 } from "./query-result-proxy.ts";
 import { isCell } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { createRef } from "./cell-map.ts";
+import { createRef } from "./doc-map.ts";
 
 export function extractDefaultValues(schema: any): any {
   if (typeof schema !== "object" || schema === null) return undefined;
@@ -81,19 +81,19 @@ export function mergeObjects(...objects: any[]): any {
 // Sends a value to a binding. If the binding is an array or object, it'll
 // traverse the binding and the value in parallel accordingly. If the binding is
 // an alias, it will follow all aliases and send the value to the last aliased
-// cell. If the binding is a literal, we verify that it matches the value and
+// doc. If the binding is a literal, we verify that it matches the value and
 // throw an error otherwise.
 export function sendValueToBinding(
-  cell: DocImpl<any>,
+  doc: DocImpl<any>,
   binding: any,
   value: any,
   log?: ReactivityLog,
 ) {
   if (isAlias(binding)) {
-    const ref = followAliases(binding, cell, log);
+    const ref = followAliases(binding, doc, log);
     if (!isDocLink(value) && !isDoc(value) && !isAlias(value)) {
       normalizeToDocLinks(
-        cell,
+        doc,
         value,
         ref.cell.getAtPath(ref.path),
         log,
@@ -104,12 +104,12 @@ export function sendValueToBinding(
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value)) {
       for (let i = 0; i < Math.min(binding.length, value.length); i++) {
-        sendValueToBinding(cell, binding[i], value[i], log);
+        sendValueToBinding(doc, binding[i], value[i], log);
       }
     }
   } else if (typeof binding === "object" && binding !== null) {
     for (const key of Object.keys(binding)) {
-      if (key in value) sendValueToBinding(cell, binding[key], value[key], log);
+      if (key in value) sendValueToBinding(doc, binding[key], value[key], log);
     }
   } else {
     if (binding !== value) {
@@ -119,17 +119,17 @@ export function sendValueToBinding(
 }
 
 // Sets a value at a path, following aliases and recursing into objects. Returns
-// success, meaning no frozen cells were in the way. That is, also returns true
+// success, meaning no frozen docs were in the way. That is, also returns true
 // if there was no change.
 export function setNestedValue(
-  currentCell: DocImpl<any>,
+  doc: DocImpl<any>,
   path: PropertyKey[],
   value: any,
   log?: ReactivityLog,
 ): boolean {
-  const destValue = currentCell.getAtPath(path);
+  const destValue = doc.getAtPath(path);
   if (isAlias(destValue)) {
-    const ref = followAliases(destValue, currentCell, log);
+    const ref = followAliases(destValue, doc, log);
     return setNestedValue(ref.cell, ref.path, value, log);
   }
 
@@ -149,20 +149,20 @@ export function setNestedValue(
     for (const key in value) {
       if (key in destValue) {
         success &&= setNestedValue(
-          currentCell,
+          doc,
           [...path, key],
           value[key],
           log,
         );
       } else {
-        if (currentCell.isFrozen()) success = false;
-        else currentCell.setAtPath([...path, key], value[key], log);
+        if (doc.isFrozen()) success = false;
+        else doc.setAtPath([...path, key], value[key], log);
       }
     }
     for (const key in destValue) {
       if (!(key in value)) {
-        if (currentCell.isFrozen()) success = false;
-        else currentCell.setAtPath([...path, key], undefined, log);
+        if (doc.isFrozen()) success = false;
+        else doc.setAtPath([...path, key], undefined, log);
       }
     }
 
@@ -171,13 +171,13 @@ export function setNestedValue(
     if (
       value.cell !== destValue.cell || !arrayEqual(value.path, destValue.path)
     ) {
-      currentCell.setAtPath(path, value, log);
+      doc.setAtPath(path, value, log);
     }
     return true;
   } else if (!Object.is(destValue, value)) {
     // Use Object.is for comparison to handle NaN and -0 correctly
-    if (currentCell.isFrozen()) return false;
-    currentCell.setAtPath(path, value, log);
+    if (doc.isFrozen()) return false;
+    doc.setAtPath(path, value, log);
     return true;
   }
 
@@ -186,8 +186,8 @@ export function setNestedValue(
 
 /**
  * Unwraps one level of aliases, and
- * - binds top-level aliases to passed cell
- * - reduces wrapping count of closure cells by one
+ * - binds top-level aliases to passed doc
+ * - reduces wrapping count of closure docs by one
  *
  * This is used for arguments to nodes (which can be recipes, e.g. for map) and
  * for the recipe in recipe nodes.
@@ -197,16 +197,16 @@ export function setNestedValue(
  *   = Nested two layers deep, an argment for a nested recipe
  * - { $alias: { path: ["a"] } }
  *   = One layer deep, e.g. a recipe that will be passed to `run`
- * - { $alias: { cell: <cell>, path: ["a"] } }
+ * - { $alias: { cell: <doc>, path: ["a"] } }
  *   = Unwrapped, executing the recipe
  *
  * @param binding - The binding to unwrap.
- * @param cell - The cell to bind to.
+ * @param doc - The doc to bind to.
  * @returns The unwrapped binding.
  */
-export function unwrapOneLevelAndBindtoCell<T>(
+export function unwrapOneLevelAndBindtoDoc<T>(
   binding: T,
-  cell: DocImpl<any>,
+  doc: DocImpl<any>,
 ): T {
   function convert(binding: any, processStatic = false): any {
     if (isStatic(binding) && !processStatic) {
@@ -214,8 +214,8 @@ export function unwrapOneLevelAndBindtoCell<T>(
     } else if (isAlias(binding)) {
       if (typeof binding.$alias.cell === "number") {
         if (binding.$alias.cell === 1) {
-          // Moved to the next-to-top level. Don't assign a cell, so that on
-          // next unwrap, the right cell be assigned.
+          // Moved to the next-to-top level. Don't assign a doc, so that on
+          // next unwrap, the right doc be assigned.
           return { $alias: { path: binding.$alias.path } };
         } else {
           return {
@@ -228,15 +228,15 @@ export function unwrapOneLevelAndBindtoCell<T>(
         }
       } else {
         return {
-          // Bind to passed cell, if there isn't already one
+          // Bind to passed doc, if there isn't already one
           $alias: {
-            cell: binding.$alias.cell ?? cell,
+            cell: binding.$alias.cell ?? doc,
             path: binding.$alias.path,
           },
         };
       }
     } else if (isDoc(binding)) {
-      return binding; // Don't enter cells
+      return binding; // Don't enter docs
     } else if (Array.isArray(binding)) {
       return binding.map((value) => convert(value));
     } else if (typeof binding === "object" && binding !== null) {
@@ -277,23 +277,23 @@ export function unsafe_createParentBindings(
   }
 }
 
-// Traverses binding and returns all cells reacheable through aliases.
-export function findAllAliasedCells(
+// Traverses binding and returns all docs reacheable through aliases.
+export function findAllAliasedDocs(
   binding: any,
-  cell: DocImpl<any>,
+  doc: DocImpl<any>,
 ): DocLink[] {
-  const cells: DocLink[] = [];
-  function find(binding: any, origCell: DocImpl<any>) {
+  const docs: DocLink[] = [];
+  function find(binding: any, origDoc: DocImpl<any>) {
     if (isAlias(binding)) {
-      // Numbered cells are yet to be unwrapped nested recipes. Ignore them.
+      // Numbered docs are yet to be unwrapped nested recipes. Ignore them.
       if (typeof binding.$alias.cell === "number") return;
-      const cell = binding.$alias.cell ?? origCell;
+      const doc = binding.$alias.cell ?? origDoc;
       const path = binding.$alias.path;
-      if (cells.find((c) => c.cell === cell && c.path === path)) return;
-      cells.push({ cell, path });
-      find(cell.getAtPath(path), cell);
+      if (docs.find((c) => c.cell === doc && c.path === path)) return;
+      docs.push({ cell: doc, path });
+      find(doc.getAtPath(path), doc);
     } else if (Array.isArray(binding)) {
-      for (const value of binding) find(value, origCell);
+      for (const value of binding) find(value, origDoc);
     } else if (
       typeof binding === "object" &&
       binding !== null &&
@@ -301,11 +301,21 @@ export function findAllAliasedCells(
       !isDoc(binding) &&
       !isCell(binding)
     ) {
-      for (const value of Object.values(binding)) find(value, origCell);
+      for (const value of Object.values(binding)) find(value, origDoc);
     }
   }
-  find(binding, cell);
-  return cells;
+  find(binding, doc);
+  return docs;
+}
+
+export function resolveLinkToValue(
+  doc: DocImpl<any>,
+  path: PropertyKey[],
+  log?: ReactivityLog,
+  seen: DocLink[] = [],
+): DocLink {
+  const ref = resolvePath(doc, path, log, seen);
+  return followLinks(ref, seen, log);
 }
 
 export function resolvePath(
@@ -320,6 +330,8 @@ export function resolvePath(
   //
   // If the path points to a redirect itself, we don't want to follow it: Other
   // functions like followLwill do that. We just want to skip the interim ones.
+  //
+  // All taken links are logged, but not the final one.
   //
   // Let's look at a few examples:
   //
@@ -349,7 +361,9 @@ export function resolvePath(
   return ref;
 }
 
-// Follows links and returns the last one.
+// Follows links and returns the last one, which is pointing to a value. It'll
+// log all taken links, so not the returned one, and thus nothing if the ref
+// already pointed to a value.
 export function followLinks(
   ref: DocLink,
   seen: DocLink[] = [],
@@ -399,7 +413,6 @@ export function followLinks(
 }
 
 // Follows cell references and returns the last one
-// Follows cell references and returns the last one
 export function followCellReferences(
   reference: DocLink,
   log?: ReactivityLog,
@@ -441,78 +454,39 @@ export function followAliases(
   return result!;
 }
 
-// Remove longer paths already covered by shorter paths
-export function compactifyPaths(entries: DocLink[]): DocLink[] {
-  // First group by cell via a Map
-  const cellToPaths = new Map<DocImpl<any>, PropertyKey[][]>();
-  for (const { cell, path } of entries) {
-    const paths = cellToPaths.get(cell) || [];
-    paths.push(path.map((key) => key.toString())); // Normalize to strings as keys
-    cellToPaths.set(cell, paths);
-  }
-
-  // For each cell, sort the paths by length, then only return those that don't
-  // have a prefix earlier in the list
-  const result: DocLink[] = [];
-  for (const [cell, paths] of cellToPaths.entries()) {
-    paths.sort((a, b) => a.length - b.length);
-    for (let i = 0; i < paths.length; i++) {
-      const earlier = paths.slice(0, i);
-      if (
-        earlier.some((path) =>
-          path.every((key, index) => key === paths[i][index])
-        )
-      ) {
-        continue;
-      }
-      result.push({ cell, path: paths[i] });
-    }
-  }
-  return result;
-}
-
-export function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
-  changedPath = changedPath.map((key) => key.toString()); // Normalize to strings as keys
-  return (
-    (changedPath.length <= path.length &&
-      changedPath.every((key, index) => key === path[index])) ||
-    path.every((key, index) => key === changedPath[index])
-  );
-}
-
 /**
- * Ensures that all elements of an array are cells. If not, i.e. they are static
- * data, turn them into cell references. Also unwraps proxies.
+ * Ensures that all elements of an array are docs. If not, i.e. they are static
+ * data, turn them into doc links. Also unwraps proxies.
  *
  * Use e.g. when running a recipe and getting static data as input.
  *
  * @param value - The value to traverse and make sure all arrays are arrays of
- * cells. NOTE: The passed value is mutated.
+ * docs. NOTE: The passed value is mutated.
  * @returns The (potentially unwrapped) input value
  */
-export function staticDataToNestedCells(
-  parentCell: DocImpl<any>,
+export function staticDataToNestedDocs(
+  parentDoc: DocImpl<any>,
   value: any,
   log?: ReactivityLog,
   cause?: any,
 ): any {
   value = maybeUnwrapProxy(value);
   value = deepCopy(value);
-  normalizeToDocLinks(parentCell, value, undefined, log, cause);
+  normalizeToDocLinks(parentDoc, value, undefined, log, cause);
   return value;
 }
 
 /**
- * Ensures that all elements of an array are cells. If not, i.e. they are static
- * data, turn them into cells. "Is a cell" means it's either a cell, a cell
- * reference or an alias.
+ * Ensures that all elements of an array are docs. If not, i.e. they are static
+ * data, turn them into doc links. "Is a doc" means it's either a doc, a doc
+ * link or an alias.
  *
- * Pass the previous value to reuse cells from previous transitions. It does so
+ * Pass the previous value to reuse docs from previous transitions. It does so
  * if the values match, but only on arrays (as for objects we don't (yet?) do
  * this behind the scenes translation).
  *
  * @param value - The value to traverse and make sure all arrays are arrays of
- * cells.
+ * docs.
  * @returns Whether the value was changed.
  */
 export function normalizeToDocLinks(

@@ -1,6 +1,6 @@
 export function random(length: number): Uint8Array {
   const buffer = new Uint8Array(length);
-  window.crypto.getRandomValues(buffer);
+  globalThis.crypto.getRandomValues(buffer);
   return buffer;
 }
 
@@ -33,7 +33,7 @@ export async function hash(input: Uint8Array): Promise<Uint8Array> {
 // Used to test if ed25519 keys can be stored in IndexedDB.
 export function clone<T>(obj: T): Promise<T> {
   return new Promise((resolve, reject) => {
-    let { port1, port2 } = new MessageChannel();
+    const { port1, port2 } = new MessageChannel();
     port1.onmessage = (msg) => resolve(msg.data);
     port1.onmessageerror = (e) => reject(e);
     port2.postMessage(obj);

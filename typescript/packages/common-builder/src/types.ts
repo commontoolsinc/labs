@@ -99,7 +99,7 @@ export type JSONValue =
   | { [key: string]: JSONValue };
 
 export type JSONSchema = {
-  type?:
+  readonly type?:
     | "object"
     | "array"
     | "string"
@@ -107,18 +107,28 @@ export type JSONSchema = {
     | "number"
     | "boolean"
     | "null";
-  properties?: { [key: string]: JSONSchema };
-  description?: string;
-  default?: JSONValue;
-  title?: string;
-  required?: string[];
-  enum?: string[];
-  items?: JSONSchema;
-  $ref?: string;
-  asCell?: boolean;
-  anyOf?: JSONSchema[];
-  additionalProperties?: JSONSchema | boolean;
+  readonly properties?: Readonly<Record<string, JSONSchema>>;
+  readonly description?: string;
+  readonly default?: Readonly<JSONValue>;
+  readonly title?: string;
+  readonly example?: Readonly<JSONValue>;
+  readonly required?: readonly string[];
+  readonly enum?: readonly string[];
+  readonly items?: Readonly<JSONSchema>;
+  readonly $ref?: string;
+  readonly asCell?: boolean;
+  readonly asStream?: boolean;
+  readonly anyOf?: readonly JSONSchema[];
+  readonly additionalProperties?: Readonly<JSONSchema> | boolean;
 };
+
+type Writable<T> = {
+  -readonly [P in keyof T]: T[P] extends ReadonlyArray<infer U> ? Writable<U>[]
+    : T[P] extends Readonly<infer U> ? Writable<U>
+    : T[P];
+};
+
+export type JSONSchemaWritable = Writable<JSONSchema>;
 
 export type Alias = {
   $alias: { cell?: any; path: PropertyKey[] };

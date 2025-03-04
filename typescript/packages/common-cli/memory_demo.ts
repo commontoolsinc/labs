@@ -1,7 +1,7 @@
 import { MemorySpace } from "@commontools/memory";
 import { RemoteStorageProvider } from "../common-charm/src/storage/remote.ts";
 import { StorageProvider } from "../common-charm/src/storage/base.ts";
-import { EntityId } from "../common-runner/src/cell-map.ts";
+import { EntityId } from "../common-runner/src/doc-map.ts";
 import { Identity } from "../common-identity/src/index.ts";
 
 // i'm running common memory locally, so connect to it directly

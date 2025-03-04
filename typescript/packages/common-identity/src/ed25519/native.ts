@@ -37,9 +37,9 @@ export const isNativeEd25519Supported = (() => {
     if (isSupported !== null) {
       return isSupported;
     }
-    let dummyKey = new Uint8Array(32);
+    const dummyKey = new Uint8Array(32);
     try {
-      let key = await window.crypto.subtle.importKey(
+      const key = await globalThis.crypto.subtle.importKey(
         "raw",
         dummyKey,
         ED25519_ALG,
@@ -87,7 +87,7 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
   async sign<T>(payload: AsBytes<T>): Promise<Result<Signature<T>, Error>> {
     try {
       const signature = new Uint8Array(
-        await window.crypto.subtle.sign(
+        await globalThis.crypto.subtle.sign(
           ED25519_ALG,
           this.keypair.privateKey,
           payload,
@@ -105,7 +105,7 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
   ): Promise<NativeEd25519Signer<ID>> {
     const pkcs8Private = ed25519RawToPkcs8(rawPrivateKey);
     const rawPublic = await ed25519.getPublicKeyAsync(rawPrivateKey);
-    const privateKey = await window.crypto.subtle.importKey(
+    const privateKey = await globalThis.crypto.subtle.importKey(
       "pkcs8",
       pkcs8Private,
       ED25519_ALG,
@@ -113,7 +113,7 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
       ["sign"],
     );
     // Set the public key to be extractable for DID generation.
-    const publicKey = await window.crypto.subtle.importKey(
+    const publicKey = await globalThis.crypto.subtle.importKey(
       "raw",
       rawPublic,
       ED25519_ALG,
@@ -129,10 +129,14 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
   static async generate<ID extends DIDKey>(): Promise<NativeEd25519Signer<ID>> {
     // This notably sets only the public key as extractable, ideal as we need
     // access to the public key for DID generation.
-    let keypair = await window.crypto.subtle.generateKey(ED25519_ALG, false, [
-      "sign",
-      "verify",
-    ]);
+    let keypair = await globalThis.crypto.subtle.generateKey(
+      ED25519_ALG,
+      false,
+      [
+        "sign",
+        "verify",
+      ],
+    );
     let did = await didFromPublicKey(keypair.publicKey);
     return new NativeEd25519Signer(keypair, did as ID);
   }
@@ -159,7 +163,7 @@ export class NativeEd25519Verifier<ID extends DIDKey> implements Verifier<ID> {
     { signature, payload }: { payload: Uint8Array; signature: Uint8Array },
   ) {
     if (
-      await window.crypto.subtle.verify(
+      await globalThis.crypto.subtle.verify(
         ED25519_ALG,
         this.publicKey,
         signature,
@@ -184,7 +188,7 @@ export class NativeEd25519Verifier<ID extends DIDKey> implements Verifier<ID> {
   ): Promise<NativeEd25519Verifier<ID>> {
     let did = bytesToDid(new Uint8Array(rawPublicKey)) as ID;
     // Set the public key to be extractable for DID generation.
-    const publicKey = await window.crypto.subtle.importKey(
+    const publicKey = await globalThis.crypto.subtle.importKey(
       "raw",
       rawPublicKey,
       ED25519_ALG,
@@ -229,6 +233,6 @@ function ed25519RawToPkcs8(rawSignerKey: Uint8Array): Uint8Array {
 }
 
 async function didFromPublicKey(publicKey: CryptoKey): Promise<DIDKey> {
-  let rawPublicKey = await window.crypto.subtle.exportKey("raw", publicKey);
+  let rawPublicKey = await globalThis.crypto.subtle.exportKey("raw", publicKey);
   return bytesToDid(new Uint8Array(rawPublicKey));
 }

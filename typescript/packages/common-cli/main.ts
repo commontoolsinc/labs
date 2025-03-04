@@ -1,16 +1,21 @@
 // Load .env file
 import { parse } from "https://deno.land/std@0.224.0/flags/mod.ts";
-import { CharmManager, compileRecipe, storage } from "@commontools/charm";
+import {
+  CharmManager,
+  compileRecipe,
+  setBobbyServerUrl,
+  storage,
+} from "@commontools/charm";
 import { getEntityId, isStream } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 
 const { space, charmId, recipeFile, cause } = parse(Deno.args);
 
-storage.setRemoteStorage(
-  new URL(
-    Deno.env.get("TOOLSHED_API_URL") ?? "https://toolshed.saga-castor.ts.net/",
-  ),
-);
+const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
+  "https://toolshed.saga-castor.ts.net/";
+
+storage.setRemoteStorage(new URL(toolshedUrl));
+setBobbyServerUrl(toolshedUrl);
 
 async function main() {
   const identity = await Identity.fromPassphrase("common-cli");

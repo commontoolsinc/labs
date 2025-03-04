@@ -5,7 +5,7 @@ import { BaseStorageProvider, type StorageValue } from "./base.ts";
 /**
  * In-memory storage provider. Just for testing.
  *
- * It doesn't make much sense,  since it's just a copy of the in memory cells.
+ * It doesn't make much sense,  since it's just a copy of the in memory docs.
  * But for testing we can create multiple instances that share the memory.
  */
 const spaceStorageMap = new Map<string, Map<string, StorageValue>>();

@@ -58,6 +58,7 @@ export {
   unsafe_parentRecipe,
   type UnsafeBinding,
 } from "./types.ts";
+export { type Schema, schema } from "./schema-to-ts.ts";
 
 // This should be a separate package, but for now it's easier to keep it here.
 export {

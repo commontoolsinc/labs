@@ -19,7 +19,7 @@ import { useCharm } from "@/hooks/use-charm.ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
-import { iterateCharm } from "@/utils/charm-operations.ts";
+import { extendCharm, iterateCharm } from "@/utils/charm-operations.ts";
 import { charmId } from "@/utils/charms.ts";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import {
@@ -30,6 +30,7 @@ import { Cell } from "@commontools/runner";
 import { createPath, createPathWithHash } from "@/routes.ts";
 
 type Tab = "iterate" | "code" | "data";
+type OperationType = "iterate" | "extend";
 
 const variantModels = [
   "anthropic:claude-3-5-sonnet-latest",
@@ -39,11 +40,13 @@ const variantModels = [
 ] as const;
 
 // =================== Context for Shared State ===================
-interface IterationContextType {
-  iterationInput: string;
-  setIterationInput: (input: string) => void;
+interface CharmOperationContextType {
+  input: string;
+  setInput: (input: string) => void;
   selectedModel: string;
   setSelectedModel: (model: string) => void;
+  operationType: OperationType;
+  setOperationType: (type: OperationType) => void;
   showVariants: boolean;
   setShowVariants: (show: boolean) => void;
   loading: boolean;
@@ -51,17 +54,19 @@ interface IterationContextType {
   selectedVariant: Cell<Charm> | null;
   setSelectedVariant: (variant: Cell<Charm> | null) => void;
   expectedVariantCount: number;
-  handleIterate: () => void;
+  handlePerformOperation: () => void;
   handleCancelVariants: () => void;
 }
 
-const IterationContext = createContext<IterationContextType | null>(null);
+const CharmOperationContext = createContext<CharmOperationContextType | null>(
+  null,
+);
 
-const useIterationContext = () => {
-  const context = useContext(IterationContext);
+const useCharmOperationContext = () => {
+  const context = useContext(CharmOperationContext);
   if (!context) {
     throw new Error(
-      "useIterationContext must be used within an IterationProvider",
+      "useCharmOperationContext must be used within a CharmOperationProvider",
     );
   }
   return context;
@@ -70,7 +75,7 @@ const useIterationContext = () => {
 // =================== Custom Hooks ===================
 
 // Hook for managing bottom sheet functionality
-function useBottomSheet(initialHeight = 420) {
+function useBottomSheet(initialHeight = 585) {
   const [sheetHeight, setSheetHeight] = useState<number>(initialHeight);
   const [isResizing, setIsResizing] = useState(false);
   const resizeStartY = useRef<number | null>(null);
@@ -269,6 +274,173 @@ function useCodeEditor(
   };
 }
 
+// Hook for charm operations (iterate or extend)
+function useCharmOperation() {
+  const { charmId: paramCharmId, replicaName } = useParams();
+  const { currentFocus: charm } = useCharm(paramCharmId);
+  const { charmManager } = useCharmManager();
+  const navigate = useNavigate();
+
+  // Shared state
+  const [input, setInput] = useState("");
+  const [selectedModel, setSelectedModel] = useState(
+    "anthropic:claude-3-7-sonnet-latest",
+  );
+  const [operationType, setOperationType] = useState<OperationType>("iterate");
+  const [showVariants, setShowVariants] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [variants, setVariants] = useState<
+    Array<{ charm: Cell<Charm>; model: string }>
+  >([]);
+  const [selectedVariant, setSelectedVariant] = useState<Cell<Charm> | null>(
+    null,
+  );
+  const [expectedVariantCount, setExpectedVariantCount] = useState(0);
+
+  // Function that performs the selected operation (iterate or extend)
+  const performOperation = useCallback(
+    async (
+      charmId: string,
+      replicaName: string,
+      input: string,
+      replace: boolean,
+      model: string,
+    ) => {
+      if (operationType === "iterate") {
+        return await iterateCharm(
+          charmManager,
+          charmId,
+          replicaName,
+          input,
+          replace,
+          model,
+        );
+      } else {
+        return await extendCharm(
+          charmManager,
+          charmId,
+          replicaName,
+          input,
+          replace,
+          model,
+        );
+      }
+    },
+    [operationType, charmManager],
+  );
+
+  // Handle performing the operation
+  const handlePerformOperation = useCallback(async () => {
+    if (!input || !charm || !paramCharmId || !replicaName) return;
+    setLoading(true);
+
+    const handleVariants = () => {
+      setVariants([]);
+      setSelectedVariant(charm);
+
+      try {
+        // For each model, start generating a variant
+        variantModels.forEach(async (model) => {
+          try {
+            const path = await performOperation(
+              charmId(charm)!,
+              replicaName!,
+              input,
+              false,
+              model,
+            );
+            if (path) {
+              const id = path.split("/").pop()!;
+              const newCharm = await charmManager.get(id);
+              if (newCharm) {
+                // Store the variant with its model information
+                setVariants((prev) => [...prev, { charm: newCharm, model }]);
+                // Set the first completed variant as selected if none selected
+                setSelectedVariant((current) =>
+                  current === charm ? newCharm : current
+                );
+              }
+            }
+          } catch (error) {
+            console.error(`Variant ${model} generation error:`, error);
+          }
+        });
+      } catch (error) {
+        console.error("Variants error:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (showVariants) {
+      setExpectedVariantCount(variantModels.length);
+      setVariants([]);
+      handleVariants();
+    } else {
+      try {
+        const newPath = await performOperation(
+          charmId(charm)!,
+          replicaName!,
+          input,
+          false,
+          selectedModel,
+        );
+        if (newPath) {
+          navigate(
+            createPathWithHash(
+              "charmDetail",
+              {
+                charmId: paramCharmId,
+                replicaName,
+              },
+              "iterate",
+            ),
+          );
+        }
+      } catch (error) {
+        console.error(`${operationType} error:`, error);
+      } finally {
+        setLoading(false);
+      }
+    }
+  }, [
+    input,
+    charm,
+    paramCharmId,
+    replicaName,
+    showVariants,
+    selectedModel,
+    performOperation,
+    charmManager,
+    navigate,
+    operationType,
+  ]);
+
+  const handleCancelVariants = useCallback(() => {
+    setVariants([]);
+    setSelectedVariant(null);
+    setExpectedVariantCount(0);
+  }, []);
+
+  return {
+    input,
+    setInput,
+    selectedModel,
+    setSelectedModel,
+    operationType,
+    setOperationType,
+    showVariants,
+    setShowVariants,
+    loading,
+    variants,
+    selectedVariant,
+    setSelectedVariant,
+    expectedVariantCount,
+    handlePerformOperation,
+    handleCancelVariants,
+  };
+}
+
 // =================== Components ===================
 
 // Improved Variants Component with proper previews
@@ -279,7 +451,7 @@ const Variants = () => {
     selectedVariant,
     setSelectedVariant,
     handleCancelVariants,
-  } = useIterationContext();
+  } = useCharmOperationContext();
 
   const { charmId: paramCharmId, replicaName } = useParams();
 
@@ -347,7 +519,7 @@ const Variants = () => {
         {charm && (
           <div
             onClick={() => setSelectedVariant(charm)}
-            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${
+            className={`variant-item min-w-48 h-32 border-2 cursor-pointer flex-shrink-0 ${
               selectedVariant === charm ? "border-blue-500" : "border-black"
             }`}
           >
@@ -375,56 +547,67 @@ const Variants = () => {
           </div>
         )}
 
-        {variants.map((variant, idx) => (
-          <div
-            key={idx}
-            onClick={() => setSelectedVariant(variant)}
-            className={`variant-item min-w-36 h-24 border-2 cursor-pointer flex-shrink-0 ${
-              selectedVariant === variant ? "border-blue-500" : "border-black"
-            }`}
-          >
-            <div className="h-full flex flex-col overflow-hidden">
-              <div className="bg-gray-100 text-xs font-bold p-1 border-b border-gray-300">
-                {variantModels[idx]?.split(":")[0] || "Model"}
-              </div>
-              <div
-                className="flex-grow overflow-hidden relative"
-                style={{ width: "100%", height: "100%" }}
-              >
+        {/* Display variants in the order of the variantModels array */}
+        {variantModels.map((model, modelIdx) => {
+          // Find the variant for this model, if it exists
+          const variantForModel = variants.find((v) => v.model === model);
+
+          return (
+            <div
+              key={modelIdx}
+              onClick={() =>
+                variantForModel && setSelectedVariant(variantForModel.charm)}
+              className={`variant-item min-w-48 h-32 border-2 cursor-pointer flex-shrink-0 ${
+                variantForModel && selectedVariant === variantForModel.charm
+                  ? "border-blue-500"
+                  : variantForModel
+                  ? "border-black"
+                  : "border-dashed border-gray-300"
+              }`}
+            >
+              <div className="h-full flex flex-col overflow-hidden">
+                <div className="bg-gray-100 text-xs font-bold p-1 border-b border-gray-300">
+                  {(model.split(":")[1] || "Model").substring(0, 24)}
+                </div>
                 <div
-                  className="absolute inset-0 pointer-events-none"
-                  style={{
-                    transform: "scale(0.3)",
-                    transformOrigin: "top left",
-                    width: "333%",
-                    height: "333%",
-                  }}
+                  className="flex-grow overflow-hidden relative"
+                  style={{ width: "100%", height: "100%" }}
                 >
-                  <CharmRenderer className="w-full h-full" charm={variant} />
+                  {variantForModel
+                    ? (
+                      <div
+                        className="absolute inset-0 pointer-events-none"
+                        style={{
+                          transform: "scale(0.3)",
+                          transformOrigin: "top left",
+                          width: "333%",
+                          height: "333%",
+                        }}
+                      >
+                        <CharmRenderer
+                          className="w-full h-full"
+                          charm={variantForModel.charm}
+                        />
+                      </div>
+                    )
+                    : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <DitheredCube
+                          animationSpeed={2}
+                          width={24}
+                          height={24}
+                          animate
+                          cameraZoom={12}
+                        />
+                      </div>
+                    )}
                 </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
 
-        {/* Loading placeholders */}
-        {Array.from({ length: expectedVariantCount - variants.length }).map((
-          _,
-          idx,
-        ) => (
-          <div
-            key={`loading-${idx}`}
-            className="variant-item min-w-36 h-24 border-2 border-dashed border-gray-300 flex items-center justify-center flex-shrink-0"
-          >
-            <DitheredCube
-              animationSpeed={2}
-              width={24}
-              height={24}
-              animate
-              cameraZoom={12}
-            />
-          </div>
-        ))}
+        {/* Remove the additional loading placeholders section that was here */}
       </div>
     </div>
   );
@@ -435,14 +618,26 @@ const Suggestions = () => {
   const { charmId: paramCharmId } = useParams();
   const { currentFocus: charm } = useCharm(paramCharmId);
   const { suggestions, loadingSuggestions } = useSuggestions(charm);
-  const { setIterationInput, setShowVariants, handleIterate } =
-    useIterationContext();
+  const {
+    setInput,
+    setShowVariants,
+    handlePerformOperation,
+    setOperationType,
+  } = useCharmOperationContext();
 
   const handleSuggestion = (suggestion: CharmSuggestion) => {
-    setIterationInput(suggestion.prompt);
+    setInput(suggestion.prompt);
+
+    // Set the operation type based on suggestion type if possible
+    if (suggestion.type.toLowerCase().includes("extend")) {
+      setOperationType("extend");
+    } else {
+      setOperationType("iterate");
+    }
+
     setShowVariants(true);
-    // Use a micro-delay to ensure state updates before iteration
-    setTimeout(() => handleIterate(), 0);
+    // Use a micro-delay to ensure state updates before operation
+    setTimeout(() => handlePerformOperation(), 0);
   };
 
   return (
@@ -467,12 +662,12 @@ const Suggestions = () => {
                 type="button"
                 key={index}
                 onClick={() => handleSuggestion(suggestion)}
-                className="p-2 text-left text-sm border border-gray-300 hover:border-black hover:bg-gray-50 shadow-sm transition-all duration-100 ease-in-out cursor-pointer flex-shrink-0 min-w-40 max-w-56"
+                className="p-2 text-left text-sm border border-gray-300 hover:border-black hover:bg-gray-50 shadow-sm transition-all duration-100 ease-in-out cursor-pointer flex-shrink-0 min-w-40 max-w-96"
               >
                 <span className="font-medium text-xs uppercase text-gray-500 block">
                   {suggestion.type}
                 </span>
-                <p className="text-xs line-clamp-2">{suggestion.prompt}</p>
+                <p className="text-xs">{suggestion.prompt}</p>
               </button>
             ))}
           </div>
@@ -481,30 +676,59 @@ const Suggestions = () => {
   );
 };
 
-// Iterate Tab Component
-const IterateTab = () => {
+// Operation Tab Component (formerly IterateTab)
+const OperationTab = () => {
   const {
-    iterationInput,
-    setIterationInput,
+    input,
+    setInput,
     selectedModel,
     setSelectedModel,
+    operationType,
+    setOperationType,
     showVariants,
     setShowVariants,
     loading,
-    handleIterate,
-  } = useIterationContext();
+    handlePerformOperation,
+  } = useCharmOperationContext();
 
   return (
     <div className="flex flex-col p-4">
       <div className="flex flex-col gap-3">
+        <div className="flex mb-2">
+          <button
+            type="button"
+            onClick={() => setOperationType("iterate")}
+            className={`flex-1 py-2 text-center border-2 ${
+              operationType === "iterate"
+                ? "border-black bg-black text-white"
+                : "border-gray-300 bg-white hover:border-gray-400"
+            }`}
+          >
+            Iterate
+          </button>
+          <button
+            type="button"
+            onClick={() => setOperationType("extend")}
+            className={`flex-1 py-2 text-center border-2 border-l-0 ${
+              operationType === "extend"
+                ? "border-black bg-black text-white"
+                : "border-gray-300 bg-white hover:border-gray-400"
+            }`}
+          >
+            Extend
+          </button>
+        </div>
+
         <textarea
-          placeholder="Tweak your charm"
-          value={iterationInput}
-          onChange={(e) => setIterationInput(e.target.value)}
+          placeholder={operationType === "iterate"
+            ? "Tweak your charm"
+            : "Add new features to your charm"}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
-              handleIterate();
+              handlePerformOperation();
             }
           }}
           className="w-full h-24 p-2 border-2 border-black resize-none"
@@ -545,8 +769,8 @@ const IterateTab = () => {
 
           <button
             type="button"
-            onClick={handleIterate}
-            disabled={loading || !iterationInput}
+            onClick={handlePerformOperation}
+            disabled={loading || !input}
             className="px-4 py-2 border-2 text-sm border-white bg-black text-white flex items-center gap-2 disabled:opacity-50"
           >
             {loading
@@ -559,12 +783,16 @@ const IterateTab = () => {
                     animate
                     cameraZoom={12}
                   />
-                  <span>Iterating...</span>
+                  <span>
+                    {operationType === "iterate"
+                      ? "Iterating..."
+                      : "Extending..."}
+                  </span>
                 </>
               )
               : (
                 <span className="text-xs">
-                  Iterate{" "}
+                  {operationType === "iterate" ? "Iterate" : "Extend"}{" "}
                   <span className="hidden md:inline text-gray-400 font-bold italic">
                     (⌘ + enter)
                   </span>
@@ -651,7 +879,6 @@ const DataTab = () => {
     </div>
   );
 };
-
 // Bottom Sheet Component
 const BottomSheet = ({
   children,
@@ -687,7 +914,7 @@ const BottomSheet = ({
               : ""
           }`}
         >
-          Iteration
+          Operation
         </button>
         <button
           type="button"
@@ -730,136 +957,7 @@ function CharmDetailView() {
   }
 
   const { currentFocus: charm } = useCharm(paramCharmId);
-  const { charmManager } = useCharmManager();
-  const navigate = useNavigate();
-
-  // Iteration state
-  const [iterationInput, setIterationInput] = useState("");
-  const [selectedModel, setSelectedModel] = useState(
-    "anthropic:claude-3-7-sonnet-latest",
-  );
-  const [showVariants, setShowVariants] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [variants, setVariants] = useState<Cell<Charm>[]>([]);
-  const [selectedVariant, setSelectedVariant] = useState<Cell<Charm> | null>(
-    null,
-  );
-  const [expectedVariantCount, setExpectedVariantCount] = useState(0);
-
-  // Handle iteration
-  const handleIterate = useCallback(async () => {
-    if (!iterationInput || !charm) return;
-    setLoading(true);
-
-    const handleVariants = () => {
-      setVariants([]);
-      setSelectedVariant(charm);
-
-      try {
-        const variantPromises = variantModels.map((model) =>
-          iterateCharm(
-            charmManager,
-            charmId(charm)!,
-            replicaName!,
-            iterationInput,
-            false,
-            model,
-          )
-        );
-
-        // Instead of waiting for all promises, handle them as they complete
-        let first = true;
-        variantPromises.forEach(async (promise) => {
-          try {
-            const path = await promise;
-            if (path) {
-              const id = path.split("/").pop()!;
-              const newCharm = await charmManager.get(id);
-              if (newCharm) {
-                setVariants((prev) => [...prev, newCharm]);
-                // Set the first completed variant as selected if none selected
-                if (first) {
-                  setSelectedVariant(newCharm);
-                  first = false;
-                }
-              }
-            }
-          } catch (error) {
-            console.error("Variant generation error:", error);
-          }
-        });
-      } catch (error) {
-        console.error("Variants error:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (showVariants) {
-      setExpectedVariantCount(variantModels.length);
-      setVariants([]);
-      handleVariants();
-    } else {
-      try {
-        const newPath = await iterateCharm(
-          charmManager,
-          charmId(charm)!,
-          replicaName!,
-          iterationInput,
-          false,
-          selectedModel,
-        );
-        if (newPath) {
-          navigate(
-            createPathWithHash(
-              "charmDetail",
-              {
-                charmId: paramCharmId,
-                replicaName,
-              },
-              "iterate",
-            ),
-          );
-        }
-      } catch (error) {
-        console.error("Iteration error:", error);
-      } finally {
-        setLoading(false);
-      }
-    }
-  }, [
-    showVariants,
-    paramCharmId,
-    iterationInput,
-    selectedModel,
-    charmManager,
-    charm,
-    replicaName,
-    navigate,
-  ]);
-
-  const handleCancelVariants = useCallback(() => {
-    setVariants([]);
-    setSelectedVariant(null);
-    setExpectedVariantCount(0);
-  }, []);
-
-  // Iteration context value
-  const iterationContextValue = {
-    iterationInput,
-    setIterationInput,
-    selectedModel,
-    setSelectedModel,
-    showVariants,
-    setShowVariants,
-    loading,
-    variants,
-    selectedVariant,
-    setSelectedVariant,
-    expectedVariantCount,
-    handleIterate,
-    handleCancelVariants,
-  };
+  const operationContextValue = useCharmOperation();
 
   if (!charm) {
     return (
@@ -870,14 +968,14 @@ function CharmDetailView() {
   }
 
   return (
-    <IterationContext.Provider value={iterationContextValue}>
+    <CharmOperationContext.Provider value={operationContextValue}>
       <div className="detail-view h-full flex flex-col">
         {/* Main Content Area */}
         <div className="flex-grow overflow-hidden relative">
-          {loading && (
+          {operationContextValue.loading && (
             <div
               className="absolute inset-0 backdrop-blur-sm bg-white/60 flex flex-col items-center justify-center z-10 transition-opacity duration-300 ease-in-out"
-              style={{ opacity: loading ? 1 : 0 }}
+              style={{ opacity: operationContextValue.loading ? 1 : 0 }}
             >
               <div className="text-lg font-bold">thinking</div>
               <LoadingSpinner
@@ -893,7 +991,7 @@ function CharmDetailView() {
           <CharmRenderer
             key="main"
             className="w-full h-full"
-            charm={selectedVariant || charm}
+            charm={operationContextValue.selectedVariant || charm}
           />
         </div>
 
@@ -903,7 +1001,7 @@ function CharmDetailView() {
             <>
               {/* Apply pointer-events-none when resizing */}
               <div className={isResizing ? "pointer-events-none" : ""}>
-                {activeTab === "iterate" && <IterateTab />}
+                {activeTab === "iterate" && <OperationTab />}
                 {activeTab === "code" && <CodeTab />}
                 {activeTab === "data" && <DataTab />}
               </div>
@@ -911,7 +1009,7 @@ function CharmDetailView() {
           )}
         </BottomSheet>
       </div>
-    </IterationContext.Provider>
+    </CharmOperationContext.Provider>
   );
 }
 

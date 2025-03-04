@@ -1,6 +1,7 @@
 {
   "tasks": {
     "start": "deno run --allow-read --allow-env --allow-net main.ts",
+    "google-importer": "deno run --allow-read --allow-env --allow-net google-importer.ts",
     "memtest": "deno run --allow-read --allow-env --allow-net memory_test.ts",
     "test": "deno test",
     "charmtest": "deno run --allow-read --allow-env --allow-net charm_test.ts"

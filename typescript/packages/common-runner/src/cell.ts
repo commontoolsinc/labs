@@ -1,4 +1,4 @@
-import { isStreamAlias } from "@commontools/builder";
+import { isStreamAlias, TYPE } from "@commontools/builder";
 import { getTopFrame, type JSONSchema } from "@commontools/builder";
 import {
   type DeepKeyLookup,
@@ -13,11 +13,12 @@ import {
   getDocLinkOrValue,
   type QueryResult,
 } from "./query-result-proxy.ts";
-import { followLinks, prepareForSaving, resolvePath } from "./utils.ts";
+import { prepareForSaving, resolveLinkToValue, resolvePath } from "./utils.ts";
 import { queueEvent, type ReactivityLog, subscribe } from "./scheduler.ts";
-import { type EntityId, getDocByEntityId, getEntityId } from "./cell-map.ts";
+import { type EntityId, getDocByEntityId, getEntityId } from "./doc-map.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import { validateAndTransform } from "./schema.ts";
+import { type Schema } from "@commontools/builder";
 import { Space } from "./space.ts";
 
 /**
@@ -25,6 +26,8 @@ import { Space } from "./space.ts";
  *
  * This abstracts away the paths behind an interface that e.g. the UX code or
  * modules that prefer cell interfaces can use.
+ *
+ * These methods are available in the system and in spell code:
  *
  * @method get Returns the current value of the cell.
  * @returns {T}
@@ -34,35 +37,69 @@ import { Space } from "./space.ts";
  * @param {T} value - The new value to set.
  * @returns {void}
  *
+ * @method update Updates multiple properties of an object cell at once.
+ * @param {Partial<T>} values - The properties to update.
+ * @returns {void}
+ *
+ * @method push Adds an item to the end of an array cell.
+ * @param {U | DocImpl<U> | DocLink} value - The value to add, where U is the
+ * array element type.
+ * @returns {void}
+ *
+ * @method equals Compares two cells for equality.
+ * @param {Cell<any>} other - The cell to compare with.
+ * @returns {boolean}
+ *
  * @method key Returns a new cell for the specified key path.
  * @param {K} valueKey - The key to access in the cell's value.
  * @returns {Cell<T[K]>}
+ *
+ * Everything below is only available in the system, not in spell code:
+ *
+ * @method asSchema Creates a new cell with a specific schema.
+ * @param {JSONSchema} schema - The schema to apply.
+ * @returns {Cell<T>} - A cell with the specified schema.
+ *
+ * @method withLog Creates a new cell with a specific reactivity log.
+ * @param {ReactivityLog} log - The log to use.
+ * @returns {Cell<T>}
  *
  * @method sink Adds a callback that is called immediately and on cell changes.
  * @param {function} callback - The callback to be called when the cell changes.
  * @returns {function} - A function to Cleanup the callback.
  *
- * @method getAsProxy Returns a value proxy for the cell.
- * @param {Path} path - The path to follow.
+ * @method getAsQueryResult Returns a query result for the cell.
+ * @param {Path} path - The optional path to follow.
+ * @param {ReactivityLog} log - Optional reactivity log.
  * @returns {QueryResult<DeepKeyLookup<T, Path>>}
  *
- * @method getAsCellReference Returns a cell reference for the cell.
+ * @method getAsDocLink Returns a document link for the cell.
  * @returns {DocLink}
  *
- * @method toJSON Returns a JSON pointer to the cell (not the contents!).
- * @returns {{"/": string}}
+ * @method getSourceCell Returns the source cell with optional schema.
+ * @param {JSONSchema} schema - Optional schema to apply.
+ * @returns {Cell<T & {[TYPE]: string | undefined} & {argument: any}>}
+ *
+ * @method toJSON Returns a serializable doclink (not the contents) to the cell.
+ * @returns {{cell: {"/": string} | undefined, path: PropertyKey[]}}
  *
  * @method value Returns the current value of the cell.
  * @returns {T}
  *
- * @method entityId Returns the current entity ID of the cell.
+ * @property docLink The document link representing this cell.
+ * @returns {DocLink}
+ *
+ * @property entityId Returns the current entity ID of the cell.
  * @returns {EntityId | undefined}
+ *
+ * @property schema Optional schema for the cell.
+ * @returns {JSONSchema | undefined}
  */
 export interface Cell<T> {
   get(): T;
   set(value: T): void;
   send(value: T): void;
-  update(value: Partial<T>): void;
+  update(values: Partial<T>): void;
   push(
     value:
       | (T extends Array<infer U> ? U : any)
@@ -72,14 +109,37 @@ export interface Cell<T> {
   equals(other: Cell<any>): boolean;
   sink(callback: (value: T) => Cancel | undefined | void): Cancel;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
-  asSchema(schema?: JSONSchema): Cell<T>;
+  asSchema<T>(
+    schema?: JSONSchema,
+  ): Cell<T>;
+  asSchema<S extends JSONSchema = JSONSchema>(
+    schema: S,
+  ): Cell<Schema<S>>;
   withLog(log: ReactivityLog): Cell<T>;
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Path,
     log?: ReactivityLog,
   ): QueryResult<DeepKeyLookup<T, Path>>;
   getAsDocLink(): DocLink;
-  getSourceCell<T = any>(schema?: JSONSchema): Cell<T> | undefined;
+  getSourceCell<T>(
+    schema?: JSONSchema,
+  ): Cell<
+    & T
+    // Add default types for TYPE and `argument`. A more specific type in T will
+    // take precedence.
+    & { [TYPE]: string | undefined }
+    & ("argument" extends keyof T ? unknown : { argument: any })
+  >;
+  getSourceCell<S extends JSONSchema = JSONSchema>(
+    schema: S,
+  ): Cell<
+    & Schema<S>
+    // Add default types for TYPE and `argument`. A more specific type in
+    // `schema` will take precedence.
+    & { [TYPE]: string | undefined }
+    & ("argument" extends keyof Schema<S> ? unknown
+      : { argument: any })
+  >;
   toJSON(): { cell: { "/": string } | undefined; path: PropertyKey[] };
   value: T;
   docLink: DocLink;
@@ -88,6 +148,11 @@ export interface Cell<T> {
   copyTrap: boolean;
   schema?: JSONSchema;
 }
+
+type TypeOrSchema<T, S extends JSONSchema | undefined = JSONSchema> = T extends
+  never ? S extends JSONSchema ? Schema<S>
+  : any
+  : T;
 
 export interface Stream<T> {
   send(event: T): void;
@@ -98,20 +163,46 @@ export interface Stream<T> {
 export function getCellFromEntityId<T>(
   space: Space,
   entityId: EntityId,
+  path?: PropertyKey[],
+  schema?: JSONSchema,
+  log?: ReactivityLog,
+): Cell<T>;
+export function getCellFromEntityId<S extends JSONSchema = JSONSchema>(
+  space: Space,
+  entityId: EntityId,
+  path: PropertyKey[],
+  schema: S,
+  log?: ReactivityLog,
+): Cell<Schema<S>>;
+export function getCellFromEntityId(
+  space: Space,
+  entityId: EntityId,
   path: PropertyKey[] = [],
   schema?: JSONSchema,
   log?: ReactivityLog,
-): Cell<T> {
+): Cell<any> {
   const doc = getDocByEntityId(space, entityId, true)!;
   return createCell(doc, path, log, schema);
 }
 
 export function getCellFromDocLink<T>(
+  space: Space,
+  docLink: DocLink,
+  schema?: JSONSchema,
+  log?: ReactivityLog,
+): Cell<T>;
+export function getCellFromDocLink<S extends JSONSchema = JSONSchema>(
+  space: Space,
+  docLink: DocLink,
+  schema: S,
+  log?: ReactivityLog,
+): Cell<Schema<S>>;
+export function getCellFromDocLink(
   space: Space, // TODO(seefeld): Read from DocLink once it's defined there
   docLink: DocLink,
   schema?: JSONSchema,
   log?: ReactivityLog,
-): Cell<T> {
+): Cell<any> {
   const doc = isDoc(docLink.cell)
     ? docLink.cell
     : getDocByEntityId(space, getEntityId(docLink.cell)!, true)!;
@@ -122,8 +213,18 @@ export function getImmutableCell<T>(
   data: T,
   schema?: JSONSchema,
   log?: ReactivityLog,
-): Cell<T> {
-  const doc = getDoc<T>(data);
+): Cell<T>;
+export function getImmutableCell<S extends JSONSchema = JSONSchema>(
+  data: any,
+  schema: S,
+  log?: ReactivityLog,
+): Cell<Schema<S>>;
+export function getImmutableCell(
+  data: any,
+  schema?: JSONSchema,
+  log?: ReactivityLog,
+): Cell<any> {
+  const doc = getDoc<any>(data);
   doc.freeze();
   return createCell(doc, [], log, schema);
 }
@@ -138,7 +239,7 @@ export function createCell<T>(
   // Resolve the path to check whether it's a stream. We're not logging this right now.
   // The corner case where during it's lifetime this changes from non-stream to stream
   // or vice versa will not be detected.
-  const ref = followLinks(resolvePath(doc, path));
+  const ref = resolveLinkToValue(doc, path);
   if (isStreamAlias(ref.cell.getAtPath(ref.path))) {
     return createStreamCell(ref.cell, ref.path) as unknown as Cell<T>;
   } else return createRegularCell(doc, path, log, schema, rootSchema);
@@ -180,10 +281,9 @@ function createRegularCell<T>(
   schema?: JSONSchema,
   rootSchema?: JSONSchema,
 ): Cell<T> {
-  const self: Cell<T> = {
+  const self = {
     get: () => validateAndTransform(doc, path, schema, log, rootSchema),
     set: (newValue: T) => {
-      // TODO(seefeld): This doesn't respect aliases on write. Should it?
       const ref = resolvePath(doc, path, log);
       if (
         prepareForSaving(
@@ -202,21 +302,18 @@ function createRegularCell<T>(
       }
     },
     send: (newValue: T) => self.set(newValue),
-    update: (value: Partial<T>) => {
-      // TODO(seefeld): This doesn't respect aliases on write. Should it?
-      const ref = resolvePath(doc, path, log);
-      const previousValue = ref.cell.getAtPath(ref.path);
-      if (typeof previousValue !== "object" || previousValue === null) {
-        throw new Error("Can't update non-object value");
+    update: (values: Partial<T>) => {
+      if (typeof values !== "object" || values === null) {
+        throw new Error("Can't update with non-object value");
       }
-      const newValue = {
-        ...previousValue,
-        ...value,
-      };
-      ref.cell.setAtPath(ref.path, newValue, log);
+      for (const [key, value] of Object.entries(values)) {
+        self.key(key as keyof T).set(value as T[keyof T]);
+      }
     },
     push: (value: any) => {
-      const ref = resolvePath(doc, path, log);
+      // Follow aliases and references, since we want to get to an assumed
+      // existing array.
+      const ref = resolveLinkToValue(doc, path, log);
       const array = ref.cell.getAtPath(ref.path) ?? [];
       if (!Array.isArray(array)) {
         throw new Error("Can't push into non-array value");
@@ -275,8 +372,8 @@ function createRegularCell<T>(
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
     getAsDocLink: () => ({ cell: doc, path }) satisfies DocLink,
-    getSourceCell: <T = any>(schema?: JSONSchema) =>
-      doc.sourceCell?.asCell([], log, schema) as Cell<T> | undefined,
+    getSourceCell: (schema?: JSONSchema) =>
+      doc.sourceCell?.asCell([], log, schema) as Cell<any>,
     toJSON: () =>
       // TODO(seefeld): Should this include the schema, as cells are defiined by doclink & schema?
       ({ cell: doc.toJSON(), path }) satisfies {
@@ -299,7 +396,7 @@ function createRegularCell<T>(
       );
     },
     schema,
-  };
+  } as Cell<T>;
 
   return self;
 }

@@ -30,7 +30,7 @@ export {
   type EntityId,
   getDocByEntityId,
   getEntityId,
-} from "./cell-map.ts";
+} from "./doc-map.ts";
 export {
   addRecipe,
   allRecipesByName,

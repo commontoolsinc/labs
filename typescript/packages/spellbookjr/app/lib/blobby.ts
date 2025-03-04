@@ -1,8 +1,6 @@
 const BLOBBY_BASE_URL =
   process.env.BLOBBY_BASE_URL || "https://toolshed.commontools.dev/api/storage/blobby";
 
-const SNAP_BASE_URL = process.env.SNAP_BASE_URL || "https://paas.saga-castor.ts.net/snap";
-
 export const getAllBlobs = async () => {
   const response = await fetch(`${BLOBBY_BASE_URL}?all=true&prefix=spell-`, {
     cache: "no-store",
@@ -53,8 +51,4 @@ export const getBlobByHash = async (hash: string) => {
     console.error("Parse error:", error);
     throw new Error("Invalid blob data");
   }
-};
-
-export const getBlobScreenshotUrl = (hash: string) => {
-  return `${SNAP_BASE_URL}/screenshot/${hash}/png`;
 };

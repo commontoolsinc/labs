@@ -12,18 +12,18 @@ import { type ReactivityLog } from "../scheduler.ts";
  * Returns the complete result as `result` and the incremental result as
  * `partial`. `pending` is true while a request is pending.
  *
- * @param prompt - A cell to store the prompt message - if you only have a single message
+ * @param prompt - A doc to store the prompt message - if you only have a single message
  * @param messages - list of messages to send to the LLM. - alternating user and assistant messages.
  *  - if you end with an assistant message, the LLM will continue from there.
  *  - if both prompt and messages are empty, no LLM call will be made,
  *    result and partial will be undefined.
- * @param model - A cell to store the model to use.
- * @param system - A cell to store the system message.
- * @param stop - A cell to store (optional) stop sequence.
- * @param max_tokens - A cell to store the maximum number of tokens to generate.
+ * @param model - A doc to store the model to use.
+ * @param system - A doc to store the system message.
+ * @param stop - A doc to store (optional) stop sequence.
+ * @param max_tokens - A doc to store the maximum number of tokens to generate.
  *
  * @returns { pending: boolean, result?: string, partial?: string } - As individual
- *   cells, representing `pending` state, final `result` and incrementally
+ *   docs, representing `pending` state, final `result` and incrementally
  *   updating `partial` result.
  */
 export function llm(
@@ -114,7 +114,7 @@ export function llm(
 
     // Return if the same request is being made again, either concurrently (same
     // as previousCallHash) or when rehydrated from storage (same as the
-    // contents of the requestHash cell).
+    // contents of the requestHash doc).
     if (hash === previousCallHash || hash === requestHash.get()) return;
     previousCallHash = hash;
 

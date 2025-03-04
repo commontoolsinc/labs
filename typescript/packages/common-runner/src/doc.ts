@@ -6,6 +6,7 @@ import {
   getValueAtPath,
   type JSONSchema,
   type OpaqueRef,
+  type Schema,
   setValueAtPath,
   toOpaqueRef,
 } from "@commontools/builder";
@@ -19,7 +20,7 @@ import {
   type EntityId,
   getDocByEntityId,
   setDocByEntityId,
-} from "./cell-map.ts";
+} from "./doc-map.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { type Cancel } from "./cancel.ts";
 import { arrayEqual } from "./utils.ts";
@@ -84,6 +85,22 @@ export type DocImpl<T> = {
     schema?: JSONSchema,
     rootSchema?: JSONSchema,
   ): Cell<DeepKeyLookup<Q, Path>>;
+
+  /**
+   * Get as simple cell with schema-inferred type.
+   *
+   * @param path - Path to follow.
+   * @param log - Reactivity log.
+   * @param schema - JSON Schema to validate against.
+   * @param rootSchema - Root schema for recursive validation.
+   * @returns Simple cell with inferred type.
+   */
+  asCell<S extends JSONSchema, Path extends PropertyKey[] = []>(
+    path: Path | undefined,
+    log: ReactivityLog | undefined,
+    schema: S,
+    rootSchema?: JSONSchema,
+  ): Cell<Schema<S>>;
 
   /**
    * Send a value, log writes.
