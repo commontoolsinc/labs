@@ -284,7 +284,6 @@ function createRegularCell<T>(
   const self = {
     get: () => validateAndTransform(doc, path, schema, log, rootSchema),
     set: (newValue: T) => {
-      // TODO(seefeld): This doesn't respect aliases on write. Should it?
       const ref = resolvePath(doc, path, log);
       if (
         prepareForSaving(
@@ -312,7 +311,9 @@ function createRegularCell<T>(
       }
     },
     push: (value: any) => {
-      const ref = resolvePath(doc, path, log);
+      // Follow aliases and references, since we want to get to an assumed
+      // existing array.
+      const ref = resolveLinkToValue(doc, path, log);
       const array = ref.cell.getAtPath(ref.path) ?? [];
       if (!Array.isArray(array)) {
         throw new Error("Can't push into non-array value");
