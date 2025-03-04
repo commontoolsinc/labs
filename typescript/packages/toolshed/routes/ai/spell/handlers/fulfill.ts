@@ -1,12 +1,19 @@
-import { getAllBlobs, getBlob } from "@/routes/ai/spell/behavior/effects.ts";
-import { generateText } from "@/lib/llm.ts";
-import { performSearch } from "@/routes/ai/spell/behavior/search.ts";
-import { checkSchemaMatch } from "@/lib/schema-match.ts";
+import * as HttpStatusCodes from "stoker/http-status-codes";
+import { z } from "zod";
+import { getAllBlobs } from "@/routes/ai/spell/behavior/effects.ts";
+
+import type { AppRouteHandler } from "@/lib/types.ts";
+import type { FulfillSchemaRoute } from "@/routes/ai/spell/spell.routes.ts";
+import { Spell } from "@/routes/ai/spell/spell.ts";
+import { performSearch } from "../behavior/search.ts";
 import { Logger } from "@/lib/prefixed-logger.ts";
-import {
-  ProcessSchemaRequest,
-  ProcessSchemaResponse,
-} from "@/routes/ai/spell/spell.handlers.ts";
+import { candidates } from "@/routes/ai/spell/caster.ts";
+import { CasterSchemaRoute } from "@/routes/ai/spell/spell.routes.ts";
+import { processSpellSearch } from "@/routes/ai/spell/behavior/spell-search.ts";
+import { captureException } from "@sentry/deno";
+import { areSchemaCompatible } from "@/routes/ai/spell/schema-compatibility.ts";
+
+import { generateText } from "@/lib/llm.ts";
 import {
   decomposeSchema,
   findExactMatches,
@@ -14,6 +21,65 @@ import {
   reassembleFragments,
   SchemaFragment,
 } from "@/routes/ai/spell/schema.ts";
+import { extractJSON } from "@/routes/ai/spell/json.ts";
+
+export const FulfillSchemaRequestSchema = z.object({
+  schema: z.record(
+    z
+      .string()
+      .or(
+        z.number().or(z.boolean().or(z.array(z.any()).or(z.record(z.any())))),
+      ),
+  ).openapi({
+    example: {
+      title: { type: "string" },
+      url: { type: "string" },
+    },
+  }),
+  tags: z.array(z.string()).optional(),
+  many: z.boolean().optional(),
+  prompt: z.string().optional(),
+  options: z
+    .object({
+      format: z.enum(["json", "yaml"]).optional(),
+      validate: z.boolean().optional(),
+      maxExamples: z.number().default(5).optional(),
+      exact: z.boolean().optional(),
+    })
+    .optional(),
+});
+
+export const FulfillSchemaResponseSchema = z.object({
+  result: z.union([z.record(z.any()), z.array(z.record(z.any()))]),
+  metadata: z.object({
+    processingTime: z.number(),
+    schemaFormat: z.string(),
+    fragments: z.array(
+      z.object({
+        matches: z.array(
+          z.object({
+            key: z.string(),
+            data: z.record(z.any()),
+            similarity: z.number(),
+          }),
+        ),
+        path: z.array(z.string()),
+        schema: z.record(z.any()),
+      }),
+    ),
+    reassembledExample: z.record(z.any()),
+    tagMatchInfo: z.object({
+      usedTags: z.any(),
+      matchRanks: z.array(z.object({
+        path: z.any(),
+        matches: z.any(),
+      })),
+    }),
+  }),
+});
+
+export type FulfillSchemaRequest = z.infer<typeof FulfillSchemaRequestSchema>;
+export type FulfillSchemaResponse = z.infer<typeof FulfillSchemaResponseSchema>;
 
 function calculateTagRank(
   data: Record<string, unknown>,
@@ -34,10 +100,10 @@ function calculateTagRank(
 }
 
 export async function processSchema(
-  body: ProcessSchemaRequest,
+  body: FulfillSchemaRequest,
   logger: Logger,
   startTime: number,
-): Promise<ProcessSchemaResponse> {
+): Promise<FulfillSchemaResponse> {
   const tags = body.tags || [];
   logger.info(
     { schema: body.schema, many: body.many, options: body.options, tags },
@@ -162,28 +228,6 @@ export async function processSchema(
   );
 
   let result: Record<string, unknown> | Array<Record<string, unknown>>;
-  function extractJSON(
-    text: string,
-  ): Record<string, unknown> | Array<Record<string, unknown>> {
-    try {
-      // Try to extract from markdown code block first
-      const markdownMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-      if (markdownMatch) {
-        return JSON.parse(markdownMatch[1].trim());
-      }
-
-      // If not in markdown, try to find JSON-like content
-      const jsonMatch = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0].trim());
-      }
-
-      // If no special formatting, try parsing the original text
-      return JSON.parse(text.trim());
-    } catch (error) {
-      return {};
-    }
-  }
 
   try {
     logger.debug("Parsing LLM response");
@@ -318,3 +362,26 @@ Respond with ${
     many ? "an array of valid JSON objects" : "a single valid JSON object"
   }.`;
 }
+
+export const fulfill: AppRouteHandler<FulfillSchemaRoute> = async (c) => {
+  const logger: Logger = c.get("logger");
+  const body = (await c.req.json()) as FulfillSchemaRequest;
+  const startTime = performance.now();
+
+  try {
+    const response = await processSchema(body, logger, startTime);
+
+    logger.info(
+      { processingTime: response.metadata.processingTime },
+      "Request completed",
+    );
+    return c.json(response, HttpStatusCodes.OK);
+  } catch (error) {
+    logger.error({ error }, "Error processing schema");
+    captureException(error);
+    return c.json(
+      { error: "Failed to process schema" },
+      HttpStatusCodes.INTERNAL_SERVER_ERROR,
+    );
+  }
+};
