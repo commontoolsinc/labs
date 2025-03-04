@@ -1,9 +1,12 @@
-import * as JSON from "./json.ts";
-
 /**
  * Takes a WebSocket and turns it into a transform stream.
  */
-export const from = <In, Out>(socket: WebSocket): TransformStream<Out, In> => {
+export const from = <
+  In extends string | Uint8Array | Blob,
+  Out extends string | Uint8Array | Blob,
+>(
+  socket: WebSocket,
+): TransformStream<Out, In> => {
   let ready = false;
   const open = opened(socket);
 
@@ -12,8 +15,7 @@ export const from = <In, Out>(socket: WebSocket): TransformStream<Out, In> => {
       start(controller) {
         socket.onmessage = (event) => {
           try {
-            const input = JSON.parse(event.data) as In;
-            controller.enqueue(input);
+            controller.enqueue(event.data);
           } catch (error) {
             controller.error(error);
           }
@@ -41,7 +43,7 @@ export const from = <In, Out>(socket: WebSocket): TransformStream<Out, In> => {
           ready = true;
         }
 
-        socket.send(JSON.stringify(data));
+        socket.send(data);
       },
       close() {
         socket.onclose = null;

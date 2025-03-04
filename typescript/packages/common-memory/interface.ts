@@ -247,19 +247,23 @@ export type Provider<Protocol extends {}> = {
   perform(command: ProviderCommand<Protocol>): AwaitResult<Unit, SystemError>;
 };
 
-export interface ConsumerSession<Protocol extends Proto>
+export interface ConsumerSession<TheProtocol extends Proto>
   extends
     TransformStream<
       ProviderCommand<Protocol>,
       UCAN<ConsumerCommandInvocation<Protocol>>
-    > {}
+    > {
+}
 
-export interface ProviderSession<Protocol extends Proto>
+export interface ProviderChannel<Protocol extends Proto>
   extends
     TransformStream<
       UCAN<ConsumerCommandInvocation<Protocol>>,
       ProviderCommand<Protocol>
     > {
+}
+export interface ProviderSession<Protocol extends Proto>
+  extends ProviderChannel<Protocol> {
   close(): CloseResult;
 }
 

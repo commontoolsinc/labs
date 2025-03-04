@@ -1,5 +1,4 @@
 import * as Memory from "./memory.ts";
-import * as JSON from "./json.ts";
 import type {
   AsyncResult,
   Await,
@@ -39,7 +38,6 @@ export * as Memory from "./memory.ts";
 export * as Subscription from "./subscription.ts";
 import { refer } from "./reference.ts";
 import * as Access from "./access.ts";
-export { JSON };
 
 export const open = async (
   options: Memory.Options,
@@ -281,8 +279,7 @@ export const fetch = async (session: Session, request: Request) => {
 
 export const patch = async (session: Session, request: Request) => {
   try {
-    const bytes = new Uint8Array(await request.arrayBuffer());
-    const transaction = JSON.decode(bytes) as Transaction;
+    const transaction = await request.json() as Transaction;
     const result = await session.memory.transact(transaction);
     const body = JSON.stringify(result);
     const status = result.ok
@@ -300,7 +297,7 @@ export const patch = async (session: Session, request: Request) => {
   } catch (cause) {
     const error = cause as Partial<Error>;
     return new Response(
-      JSON.encode({
+      JSON.stringify({
         error: {
           name: error?.name ?? "Error",
           message: error?.message ?? "Unable to parse request body",
@@ -319,8 +316,7 @@ export const patch = async (session: Session, request: Request) => {
 
 export const post = async (session: Session, request: Request) => {
   try {
-    const bytes = new Uint8Array(await request.arrayBuffer());
-    const selector = JSON.decode(bytes) as Query;
+    const selector = await request.json() as Query;
     const result = await session.memory.query(selector);
     const body = JSON.stringify(result);
     const status = result.ok ? 200 : 404;
@@ -334,7 +330,7 @@ export const post = async (session: Session, request: Request) => {
   } catch (cause) {
     const error = cause as Partial<Error>;
     return new Response(
-      JSON.encode({
+      JSON.stringify({
         error: {
           name: error?.name ?? "Error",
           message: error?.message ?? "Unable to parse request body",

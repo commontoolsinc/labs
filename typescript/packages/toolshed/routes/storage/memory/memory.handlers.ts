@@ -1,6 +1,7 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type * as Routes from "./memory.routes.ts";
 import { Memory, memory } from "../memory.ts";
+import * as Codec from "@commontools/memory/codec";
 
 export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {
   try {
@@ -52,7 +53,11 @@ export const query: AppRouteHandler<typeof Routes.query> = async (c) => {
 
 export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
   const { socket, response } = Deno.upgradeWebSocket(c.req.raw);
-  const session = Memory.Socket.from(socket);
-  session.readable.pipeThrough(memory.session()).pipeTo(session.writable);
+  const { readable, writable } = Memory.Socket.from<string, string>(socket);
+  readable
+    .pipeThrough(Codec.UCAN.fromStringStream())
+    .pipeThrough(memory.session())
+    .pipeThrough(Codec.Receipt.toStringStream())
+    .pipeTo(writable);
   return response;
 };

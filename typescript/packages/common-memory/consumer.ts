@@ -20,8 +20,8 @@ import {
   MemorySpace,
   Proto,
   Protocol,
+  ProviderChannel,
   ProviderCommand,
-  ProviderSession,
   Query,
   QueryError,
   Reference,
@@ -42,6 +42,8 @@ import * as ChangesBuilder from "./changes.ts";
 import * as Fact from "./fact.ts";
 import * as Access from "./access.ts";
 import * as Subscription from "./subscription.ts";
+import { toStringStream } from "./ucan.ts";
+import { fromStringStream } from "./receipt.ts";
 
 export * from "./interface.ts";
 export { ChangesBuilder };
@@ -56,13 +58,23 @@ export const connect = ({
   as: Signer;
   clock?: Clock;
   ttl?: Seconds;
-}) =>
-  open({
+}) => {
+  const { readable, writable } = Socket.from<string, string>(
+    new WebSocket(address),
+  );
+  const invocations = toStringStream();
+  invocations.readable.pipeTo(writable);
+
+  return open({
     as,
     clock,
     ttl,
-    session: Socket.from(new WebSocket(address)) as ProviderSession<Protocol>,
+    session: {
+      writable: invocations.writable,
+      readable: readable.pipeThrough(fromStringStream()),
+    },
   });
+};
 
 export const open = ({
   as,
@@ -71,12 +83,14 @@ export const open = ({
   ttl,
 }: {
   as: Signer;
-  session: ProviderSession<Protocol>;
+  session: ProviderChannel<Protocol>;
   clock?: Clock;
   ttl?: Seconds;
 }) => {
   const consumer = create({ as, clock, ttl });
-  session.readable.pipeThrough(consumer).pipeTo(session.writable);
+  session.readable.pipeThrough(consumer).pipeTo(
+    session.writable as WritableStream<Protocol>,
+  );
   return consumer;
 };
 
@@ -87,15 +101,10 @@ export const create = (
 class MemoryConsumerSession<
   Space extends MemorySpace,
   MemoryProtocol extends Protocol<Space>,
-> extends TransformStream implements
-  // <
-  //   // ProviderCommand<Protocol>,
-  //   InferProtocol<Protocol>,
-  //   // UCAN<ConsumerCommandInvocation<Protocol>>
-  //   unknown
-  // >
-  ConsumerSession<MemoryProtocol>,
-  MemorySession<Space> {
+> extends TransformStream<
+  ProviderCommand<Protocol>,
+  UCAN<ConsumerCommandInvocation<Protocol>>
+> implements MemorySession<Space> {
   static clock: Clock = {
     now(): UTCUnixTimestampInSeconds {
       return (Date.now() / 1000) | 0;
@@ -114,6 +123,7 @@ class MemoryConsumerSession<
     InvocationURL<Reference<Invocation>>,
     Job<Abilities<MemoryProtocol>, MemoryProtocol>
   > = new Map();
+
   constructor(
     public as: Signer,
     public clock: Clock = MemoryConsumerSession.clock,
@@ -126,7 +136,7 @@ class MemoryConsumerSession<
       >;
     super({
       start: (control) => {
-        controller = control;
+        controller = control as typeof this.controller;
       },
       transform: (command) =>
         this.receive(command as ProviderCommand<MemoryProtocol>),
@@ -140,7 +150,6 @@ class MemoryConsumerSession<
   receive(command: ProviderCommand<MemoryProtocol>) {
     const id = command.of;
     if (command.the === "task/return") {
-      command;
       const invocation = this.invocations.get(id);
       this.invocations.delete(id);
       invocation?.return(command.is as {});

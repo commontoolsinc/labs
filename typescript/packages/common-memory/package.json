@@ -10,11 +10,10 @@
     "./changes": "./changes.ts",
     "./commit": "./commit.ts",
     "./principal": "./principal.ts",
-    "./json": "./json.ts"
+    "./codec": "./codec.ts"
   },
   "dependencies": {
     "merkle-reference": "^2.0.1",
-    "multiformats": "^13.3.2",
-    "@ipld/dag-json": "^10.2.3"
+    "multiformats": "^13.3.2"
   }
 }

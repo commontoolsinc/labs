@@ -16,7 +16,7 @@
     "./changes": "./changes.ts",
     "./consumer": "./consumer.ts",
     "./principal": "./principal.ts",
-    "./json": "./json.ts"
+    "./codec": "./codec.ts"
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
@@ -27,7 +27,6 @@
     "@std/encoding": "jsr:@std/encoding@^1.0.5",
     "@std/path": "jsr:@std/path@^1.0.8",
     "@commontools/identity": "../common-identity/src/index.ts",
-    "multiformats": "npm:multiformats@^13.3.2",
-    "@ipld/dag-json": "npm:@ipld/dag-json@^10.2.3"
+    "multiformats": "npm:multiformats@^13.3.2"
   }
 }

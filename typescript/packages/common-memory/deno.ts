@@ -1,6 +1,8 @@
 import * as Provider from "./provider.ts";
 import * as Socket from "./socket.ts";
 import * as Path from "jsr:@std/path";
+import * as UCAN from "./ucan.ts";
+import * as Receipt from "./receipt.ts";
 
 const storePath = (Deno.env.get("STORE") ?? "memory").replace(/\/?$/, "/");
 const STORE = new URL(storePath, Path.toFileUrl(`${Deno.cwd()}/`));
@@ -22,9 +24,14 @@ from ${STORE}`);
   handler: (request: Request) => {
     if (request.headers.get("upgrade") === "websocket") {
       const { socket, response } = Deno.upgradeWebSocket(request);
-      const consumer = Socket.from(socket);
+      const consumer = Socket.from<string, string>(socket);
       const session = provider.session();
-      consumer.readable.pipeThrough(session).pipeTo(consumer.writable);
+      consumer
+        .readable
+        .pipeThrough(UCAN.fromStringStream())
+        .pipeThrough(session)
+        .pipeThrough(Receipt.toStringStream())
+        .pipeTo(consumer.writable);
       return response;
     } else {
       return provider.fetch(request);
