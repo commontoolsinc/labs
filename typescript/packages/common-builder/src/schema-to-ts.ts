@@ -52,7 +52,7 @@ export type Schema<
             T extends
               { additionalProperties: infer AP extends boolean | JSONSchema }
               ? AP
-              : true,
+              : false,
             GetDefaultKeys<T>
           >
         : Record<string, unknown>
@@ -122,7 +122,9 @@ type ObjectFromProperties<
   }
   // Additional properties
   & (
-    AP extends false ? Record<string | number | symbol, never>
+    AP extends false
+      // Additional properties off => no-op instead of empty record
+      ? Record<never, never>
       : AP extends true ? { [key: string]: unknown }
       : AP extends JSONSchema
         ? { [key: string]: Schema<AP, Root, DecrementDepth<Depth>> }
@@ -206,7 +208,7 @@ export type SchemaWithoutCell<
             T extends
               { additionalProperties: infer AP extends boolean | JSONSchema }
               ? AP
-              : true,
+              : false,
             GetDefaultKeys<T>
           >
         : Record<string, unknown>
@@ -271,8 +273,8 @@ type ObjectFromPropertiesWithoutCell<
   // Additional properties
   & (
     AP extends false
-      // Additional properties off => empty
-      ? Record<string | number | symbol, never>
+      // Additional properties off => no-op instead of empty record
+      ? Record<never, never>
       : AP extends true
       // Additional properties on => unknown
         ? { [key: string]: unknown }
