@@ -7,9 +7,9 @@ Deno.test("KeyStore can store and recover keys", async () => {
   await store.clear();
 
   const key = await Identity.generate();
-  const did = key.verifier().did();
+  const did = key.verifier.did();
   await store.set("key", key);
   const recovered = await store.get("key");
 
-  assert(recovered && did === recovered.verifier().did());
+  assert(recovered && did === recovered.verifier.did());
 });
