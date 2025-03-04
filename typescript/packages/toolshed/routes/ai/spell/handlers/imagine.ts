@@ -22,7 +22,7 @@ export const ImagineDataRequestSchema = z.object({
         url: { type: "string" },
       },
     }),
-  model: z.string().default("claude-3-7-sonnet").describe(
+  model: z.string().default("google:gemini-2.0-flash").describe(
     "The LLM to use for data generation",
   ).openapi({ example: "claude-3-7-sonnet" }),
   prompt: z.string().optional().describe(
