@@ -80,7 +80,7 @@ export interface AuthorizationError extends Error {
 export type Call<
   Ability extends The = The,
   Of extends DID = DID,
-  Args extends {} = {},
+  Args extends NonNullable<unknown> = NonNullable<unknown>,
 > = {
   cmd: Ability;
   sub: Of;
@@ -91,7 +91,7 @@ export type Call<
 export type Command<
   Ability extends The = The,
   Of extends DID = DID,
-  In extends {} = {},
+  In extends NonNullable<unknown> = NonNullable<unknown>,
 > = {
   cmd: Ability;
   sub: Of;
@@ -103,7 +103,7 @@ export type Command<
 export type Invocation<
   Ability extends The = The,
   Of extends DID = DID,
-  In extends {} = {},
+  In extends NonNullable<unknown> = NonNullable<unknown>,
 > = {
   iss: DID;
   aud?: DID;
@@ -161,7 +161,7 @@ export type Protocol<Space extends MemorySpace = MemorySpace> = {
 
 export type Proto = {
   [Subject: DID]: {
-    [Namespace: string]: {};
+    [Namespace: string]: NonNullable<unknown>;
   };
 };
 
@@ -175,8 +175,8 @@ export type InferProtoMethods<
   Prefix extends string = "",
 > = {
   [Name in keyof Methods & string]: Methods[Name] extends (
-    input: infer In extends {},
-  ) => Task<infer Out extends {}, infer Effect> ?
+    input: infer In extends NonNullable<unknown>,
+  ) => Task<infer Out extends NonNullable<unknown>, infer Effect> ?
       | {
         [The in `${Prefix}/${Name}`]: Method<
           Protocol,
@@ -195,8 +195,8 @@ export type InferProtoMethods<
 export type Method<
   Protocol,
   Ability extends The,
-  In extends {},
-  Out extends {},
+  In extends NonNullable<unknown>,
+  Out extends NonNullable<unknown>,
   Effect,
 > = {
   The: Ability;
@@ -243,7 +243,7 @@ type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends
   (k: infer I) => void ? I
   : never;
 
-export type Provider<Protocol extends {}> = {
+export type Provider<Protocol extends NonNullable<unknown>> = {
   perform(command: ProviderCommand<Protocol>): AwaitResult<Unit, SystemError>;
 };
 
@@ -341,7 +341,7 @@ export type ConsumerResultFor<Ability, Protocol extends Proto> = MethodFor<
 
 export interface InvocationView<
   Source extends Invocation,
-  Return extends {},
+  Return extends NonNullable<unknown>,
   Effect,
 > extends Invocation<Source["cmd"], Source["sub"], Source["args"]> {
   return(result: Await<Return>): void;
@@ -353,8 +353,8 @@ export interface InvocationView<
 export type Task<Return, Command = never> = Iterable<Command, Return>;
 
 export type Job<
-  Command extends {} = {},
-  Return extends {} | null = {} | null,
+  Command extends NonNullable<unknown> = NonNullable<unknown>,
+  Return extends NonNullable<unknown> | null = NonNullable<unknown> | null,
   Effect = unknown,
 > = {
   invoke: Command;
@@ -378,7 +378,7 @@ export type SessionTask<Space extends MemorySpace> =
   | UnwatchTask<Space>
   | WatchTask<Space>;
 
-export type Receipt<Command extends {}, Result extends {} | null, Effect> =
+export type Receipt<Command extends NonNullable<unknown>, Result extends NonNullable<unknown> | null, Effect> =
   | {
     the: "task/return";
     of: InvocationURL<Reference<Command>>;
@@ -391,13 +391,13 @@ export type Receipt<Command extends {}, Result extends {} | null, Effect> =
       is: Effect;
     });
 
-export type Effect<Of extends {}, Command> = {
+export type Effect<Of extends NonNullable<unknown>, Command> = {
   of: Reference<Of>;
   run: Command;
   is?: undefined;
 };
 
-export type Return<Of extends {}, Result extends {} | null> = {
+export type Return<Of extends NonNullable<unknown>, Result extends NonNullable<unknown> | null> = {
   of: Reference<Of>;
   is: Result;
   run?: undefined;
@@ -730,7 +730,7 @@ export type Selection<Space extends MemorySpace = MemorySpace> = {
   [space in Space]: FactSelection;
 };
 
-export type Unit = {};
+export type Unit = NonNullable<unknown>;
 
 /**
  * Generic type used to annotate underlying type with a context of the replica.

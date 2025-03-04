@@ -42,7 +42,7 @@ describe("recipes with HTML", () => {
           <div>
             <h1>{title}</h1>
             <ul>
-              {items.map((item) => <li>{item.title}</li>)}
+              {items.map((item, i) => <li key={i.toString()}>{item.title}</li>)}
             </ul>
           </div>
         ),

@@ -3,20 +3,20 @@ import { Receipt } from "./interface.ts";
 /**
  * Formats receipt to a string representation.
  */
-export const toString = <Command extends {}, Result extends {}, Effect>(
+export const toString = <Command extends NonNullable<unknown>, Result extends NonNullable<unknown>, Effect>(
   receipt: Receipt<Command, Result, Effect>,
 ) => JSON.stringify(receipt);
 
 /**
  * Parses receipt from a string representation.
  */
-export const fromString = <Command extends {}, Result extends {}, Effect>(
+export const fromString = <Command extends NonNullable<unknown>, Result extends NonNullable<unknown>, Effect>(
   source: string,
 ): Receipt<Command, Result, Effect> => JSON.parse(source);
 
 export const fromStringStream = <
-  Command extends {},
-  Result extends {},
+  Command extends NonNullable<unknown>,
+  Result extends NonNullable<unknown>,
   Effect,
 >() =>
   new TransformStream<string, Receipt<Command, Result, Effect>>({
@@ -26,8 +26,8 @@ export const fromStringStream = <
   });
 
 export const toStringStream = <
-  Command extends {},
-  Result extends {},
+  Command extends NonNullable<unknown>,
+  Result extends NonNullable<unknown>,
   Effect,
 >() =>
   new TransformStream<Receipt<Command, Result, Effect>, string>({

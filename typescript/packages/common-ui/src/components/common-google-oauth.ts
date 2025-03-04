@@ -47,7 +47,7 @@ export class CommonGoogleOauthElement extends LitElement {
       // Create a message listener for the OAuth callback
       const messageListener = (event: MessageEvent) => {
         // Verify origin for security
-        if (event.origin !== window.location.origin) return;
+        if (event.origin !== globalThis.location.origin) return;
 
         if (event.data && event.data.type === "oauth-callback") {
           console.log("Received OAuth callback data:", event.data);
@@ -56,14 +56,14 @@ export class CommonGoogleOauthElement extends LitElement {
             ? "Authentication successful!"
             : `Authentication failed: ${event.data.result.error || "Unknown error"}`;
           this.isLoading = false;
-          window.removeEventListener("message", messageListener);
+          globalThis.removeEventListener("message", messageListener);
         }
       };
 
-      window.addEventListener("message", messageListener);
+      globalThis.addEventListener("message", messageListener);
 
       // Open the OAuth window
-      const authWindow = window.open(resp.url, "_blank", "width=800,height=600,left=200,top=200");
+      const authWindow = globalThis.open(resp.url, "_blank", "width=800,height=600,left=200,top=200");
 
       // Check for window closure
       if (authWindow) {
@@ -74,7 +74,7 @@ export class CommonGoogleOauthElement extends LitElement {
               this.authStatus = "OAuth window closed. Authentication may not have completed.";
               this.isLoading = false;
             }
-            window.removeEventListener("message", messageListener);
+            globalThis.removeEventListener("message", messageListener);
           }
         }, 500);
       }
