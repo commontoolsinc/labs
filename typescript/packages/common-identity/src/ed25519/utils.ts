@@ -43,7 +43,7 @@ export function ed25519RawToPkcs8(rawPrivateKey: Uint8Array): Uint8Array {
 
 // Convert public key bytes into a `did:key:z...`.
 export function bytesToDid(publicKey: Uint8Array): DIDKey {
-  let bytes = new Uint8Array(ED25519_PUB_KEY_TAGGED_SIZE);
+  const bytes = new Uint8Array(ED25519_PUB_KEY_TAGGED_SIZE);
   varint.encodeTo(ED25519_CODE, bytes);
   bytes.set(publicKey, ED25519_PUB_KEY_TAG_SIZE);
   return `did:key:${base58btc.encode(bytes)}`;

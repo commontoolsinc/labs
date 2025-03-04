@@ -145,11 +145,9 @@ function testBothImpls(
   fn: (signer: SignerClass, verifier: VerifierClass) => void | Promise<void>,
 ) {
   Deno.test(`(native) ${name}`, async () => {
-    // @ts-expect-error
     return await fn(NativeEd25519Signer, NativeEd25519Verifier);
   });
   Deno.test(`(noble) ${name}`, async () => {
-    // @ts-expect-error
     return await fn(NobleEd25519Signer, NobleEd25519Verifier);
   });
 }
