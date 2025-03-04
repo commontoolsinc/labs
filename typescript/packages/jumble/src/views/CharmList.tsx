@@ -171,9 +171,13 @@ const CharmTable = (
   };
 
   return (
-    <div className="relative">
-      <div className="overflow-x-auto shadow-md sm:rounded-lg">
-        <table className="w-full text-sm text-left text-gray-500">
+    <div className="
+      border border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.5)] rounded-[4px] transition-all
+      transition-[border,box-shadow,transform] duration-100 ease-in-out
+      group relative
+    ">
+      <div className="overflow-hidden w-full rounded-[4px]">
+        <table className="w-full text-sm text-left text-gray-500 rounded-[4px]">
           <thead className="text-xs text-gray-700 uppercase bg-gray-50">
             <tr>
               <th scope="col" className="px-6 py-3">Name</th>
@@ -287,7 +291,7 @@ export default function CharmList() {
 
   return (
     <div className="p-2">
-      <h1>Pinned</h1>
+      <h1 className="text-2xl font-bold">Pinned</h1>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-8">
         {replicaName &&
           pinned.map((charm) => (
@@ -298,7 +302,7 @@ export default function CharmList() {
             />
           ))}
       </div>
-      <h1>All Charms</h1>
+      <h1 className="text-2xl font-bold">All Charms</h1>
       <div className="p-8">
         {replicaName && (
           <CharmTable
