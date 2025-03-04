@@ -1,7 +1,7 @@
 {
   "name": "@commontools/deno-web-test",
   "tasks": {
-    "test": "deno run --allow-env --allow-read --allow-write --allow-run --allow-net ./cli.ts test/*.test.ts"
+    "test": "deno test --allow-env --allow-read --allow-write --allow-run --allow-net test/*.test.ts"
   },
   "exports": {
     ".": "./mod.ts",
