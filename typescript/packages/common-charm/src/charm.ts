@@ -45,6 +45,31 @@ export const processSchema = {
   required: [TYPE],
 } as const satisfies JSONSchema;
 
+/**
+ * Helper to consistently compare entity IDs between cells
+ */
+function isSameEntity(
+  a: Cell<Charm> | string | EntityId,
+  b: Cell<Charm> | string | EntityId,
+): boolean {
+  const idA = getEntityId(a);
+  const idB = getEntityId(b);
+  return idA && idB ? idA["/"] === idB["/"] : false;
+}
+
+/**
+ * Filters an array of charms by removing any that match the target entity
+ */
+function filterOutEntity(
+  list: Cell<Cell<Charm>[]>,
+  target: Cell<Charm> | string | EntityId,
+): Cell<Charm>[] {
+  const targetId = getEntityId(target);
+  if (!targetId) return list.get();
+
+  return list.get().filter((charm) => !isSameEntity(charm, targetId));
+}
+
 export class CharmManager {
   private space: Space;
   private charmsDoc: DocImpl<DocLink[]>;
@@ -71,15 +96,24 @@ export class CharmManager {
 
   async pin(charm: Cell<Charm>) {
     await storage.syncCell(this.pinned);
-    this.pinnedCharms.push(charm);
-    await idle();
+    // Check if already pinned
+    if (!filterOutEntity(this.pinnedCharms, charm).some((c) => isSameEntity(c, charm))) {
+      this.pinnedCharms.push(charm);
+      await idle();
+    }
   }
 
   async unpin(charm: Cell<Charm>) {
-    // probably wrong, should compare ids
     await storage.syncCell(this.pinned);
-    this.pinnedCharms.set(this.pinnedCharms.get().filter((c) => c != charm));
-    await idle();
+    const newPinnedCharms = filterOutEntity(this.pinnedCharms, charm);
+
+    if (newPinnedCharms.length !== this.pinnedCharms.get().length) {
+      this.pinnedCharms.set(newPinnedCharms);
+      await idle();
+      return true;
+    }
+
+    return false;
   }
 
   getPinned(): Cell<Cell<Charm>[]> {
@@ -181,13 +215,14 @@ export class CharmManager {
   // note: removing a charm doesn't clean up the charm's cells
   async remove(idOrCharm: string | EntityId | Cell<Charm>) {
     await storage.syncCell(this.charmsDoc);
-    // bf: horrible code, this indicates inconsistent data structures somewhere
     const id = getEntityId(idOrCharm);
     if (!id) return false;
 
-    const newCharms = this.charms.get().filter((charm) => getEntityId(charm)?.["/"] !== id?.["/"]);
+    const newCharms = filterOutEntity(this.charms, id);
+
     if (newCharms.length !== this.charms.get().length) {
       this.charms.set(newCharms);
+
       await idle();
       return true;
     }
