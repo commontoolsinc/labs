@@ -9,7 +9,6 @@ const members: string[] = manifest.workspace;
 const DISABLED = [
   "common-html", // Disabled until we get tests and jsx in tests passing
   "deno-vite-plugin", // Do not test vendored code
-  "deno-web-test", // Need some tests here
   "toolshed", // Requires extra configuration to run (e.g. redis)
 ];
 

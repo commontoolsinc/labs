@@ -1,5 +1,5 @@
 import * as path from "@std/path";
-import { Config } from "./interface.ts";
+import { Config, getConfig } from "./config.ts";
 import { exists } from "@std/fs/exists";
 
 export class Manifest {
@@ -30,22 +30,7 @@ export class Manifest {
 
   static async create(projectDir: string, tests: string[]): Promise<Manifest> {
     const serverDir = await Deno.makeTempDir();
-    const config = await Manifest.getConfig(projectDir);
+    const config = await getConfig(projectDir);
     return new Manifest(projectDir, tests, serverDir, config);
-  }
-
-  static async getConfig(projectDir: string): Promise<Config> {
-    const configPath = path.join(projectDir, "deno-web-test.config.ts");
-    
-    if (await exists(configPath, { isFile: true })) {
-      // Try to evaluate it
-      try {
-        const config = (await import(configPath)).default;
-        return config as Config;
-      } catch (e) {
-        console.error(`Unable to execute deno-web-test.config.ts`);
-      }
-    }
-    return {} as Config;
   }
 }

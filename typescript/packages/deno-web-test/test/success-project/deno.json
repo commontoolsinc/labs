@@ -1,0 +1,13 @@
+{
+  "name": "deno-web-test-success-project",
+  "tasks": {
+    "test": "<@see deno-web-test/test/utils.ts#runDenoWebTest>"
+  },
+  "exports": {
+    ".": "./mod.ts"
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert",
+    "@std/testing": "jsr:@std/testing"
+  }
+}

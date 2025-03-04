@@ -1,14 +1,16 @@
-import { Browser, launch, Page } from "jsr:@astral/astral";
+import { Browser, ConsoleEvent, launch, Page } from "jsr:@astral/astral";
 import { Manifest } from "./manifest.ts";
 import { tsToJs, wait } from "./utils.ts";
 import { TestResult } from "./interface.ts";
+import { extractAstralConfig } from "./config.ts";
 
-export class BrowserController {
+export class BrowserController extends EventTarget {
   private manifest: Manifest;
   private page: Page | null;
   private browser: Browser | null;
 
   constructor(manifest: Manifest) {
+    super();
     this.manifest = manifest;
     this.browser = null;
     this.page = null;
@@ -23,8 +25,18 @@ export class BrowserController {
     if (this.page) {
       await this.page.goto(testUrl);
     } else {
-      this.browser = await launch(config.astral ?? {});
+      this.browser = await launch(extractAstralConfig(config));
       this.page = await this.browser.newPage(testUrl);
+      this.page.addEventListener("console", (e) => {
+        // Not sure why this event needs reconstructed in order
+        // to re-fire, rather than just passing it into `dispatchEvent`.
+        this.dispatchEvent(
+          new ConsoleEvent({
+            type: e.detail.type,
+            text: e.detail.text,
+          }),
+        );
+      });
     }
     await this.waitUntilReady();
   }

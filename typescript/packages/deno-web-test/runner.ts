@@ -13,8 +13,9 @@ export class Runner {
   constructor(manifest: Manifest) {
     this.manifest = manifest;
     this.reporter = new Reporter();
-    this.browser = new BrowserController(manifest);
     this.results = [];
+    this.browser = new BrowserController(manifest);
+    this.browser.addEventListener("console", (e) => this.onConsole(e));
   }
 
   // Runs all tests in the browser. Return value
@@ -56,5 +57,21 @@ export class Runner {
     this.reporter.onRunEnd(summary);
     await this.browser.close();
     return summary.failed.length === 0;
+  }
+
+  onConsole(e: ConsoleEvent) {
+    if (this.manifest.config.pipeConsole) {
+      switch (e.detail.type) {
+        case "log":
+          console.log(`deno-web-test: ${e.detail.text}`);
+          break;
+        case "warn":
+          console.warn(`deno-web-test: ${e.detail.text}`);
+          break;
+        case "error":
+          console.error(`deno-web-test: ${e.detail.text}`);
+          break;
+      }
+    }
   }
 }

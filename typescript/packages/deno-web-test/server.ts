@@ -13,9 +13,9 @@ export class TestServer {
     this.manifest = manifest;
   }
 
-  async start(port: number) {
+  start(port: number) {
     this.server = Deno.serve(
-      { port, hostname: "127.0.0.1" },
+      { port, hostname: "127.0.0.1", onListen({ path }) {} },
       (req: Request) =>
         serveDir(req, {
           fsRoot: this.manifest.serverDir,
