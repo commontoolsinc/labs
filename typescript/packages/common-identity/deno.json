@@ -1,5 +1,8 @@
 {
   "name": "@commontools/identity",
+  "tasks": {
+    "test": "deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts test/*.test.ts"
+  },
   "exports": "./src/index.ts",
   "imports": {
     "@scure/bip39": "npm:@scure/bip39@^1.5.4"

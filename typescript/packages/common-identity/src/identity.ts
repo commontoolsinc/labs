@@ -46,12 +46,12 @@ export class Identity implements Signer {
   }
 
   static async generateMnemonic(): Promise<[Identity, string]> {
-    let [signer, mnemonic] = await Ed25519Signer.generateMnemonic();
+    const [signer, mnemonic] = await Ed25519Signer.generateMnemonic();
     return [new Identity(signer), mnemonic];
   }
 
   static async fromMnemonic(mnemonic: string): Promise<Identity> {
-    let signer = await Ed25519Signer.fromMnemonic(mnemonic);
+    const signer = await Ed25519Signer.fromMnemonic(mnemonic);
     return new Identity(signer);
   }
 

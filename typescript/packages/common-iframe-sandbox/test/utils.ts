@@ -1,31 +1,44 @@
-import { setIframeContextHandler } from "../lib/src/index.js";
+import { CommonIframeSandboxElement } from "../src/common-iframe-sandbox.ts";
+import { setIframeContextHandler } from "../src/index.ts";
+
+type Callback = (key: string, value: any) => void;
+interface Context {
+  [name: string]: any;
+}
 
 export class ContextShim {
+  data: Context;
+  callbacks: [number, string, Callback][];
+  receiptIds: number;
+
   constructor(object = {}) {
     this.data = object;
     this.callbacks = [];
     this.receiptIds = 0;
   }
-  set(key, value) {
+  set(key: string, value: any) {
     this.data[key] = value;
     for (let i = 0; i < this.callbacks.length; i++) {
-      let [_, callback_key, callback] = this.callbacks[i];
+      const [_, callback_key, callback] = this.callbacks[i];
       if (key === callback_key) {
         callback(key, value);
       }
     }
   }
-  get(key) {
+
+  get(key: string): any {
     return this.data[key];
   }
-  subscribe(key, callback) {
-    let id = this.receiptIds++;
+
+  subscribe(key: string, callback: Callback): number {
+    const id = this.receiptIds++;
     this.callbacks.push([id, key, callback]);
     return id;
   }
-  unsubscribe(receipt) {
+
+  unsubscribe(receipt: number) {
     for (let i = 0; i < this.callbacks.length; i++) {
-      let [id, ...rest] = this.callbacks[i];
+      const [id, ...rest] = this.callbacks[i];
       if (id === receipt) {
         this.callbacks.splice(i, 1);
         return;
@@ -48,52 +61,57 @@ export function setIframeTestHandler() {
     unsubscribe(context, receipt) {
       context.unsubscribe(receipt);
     },
+    onLLMRequest(context, payload) {
+      // Not implemented
+      return Promise.resolve({});
+    },
   });
 }
 
-export function assert(condition) {
+export function assert(condition: boolean) {
   if (!condition) {
     throw new Error(`${condition} is not truthy.`);
   }
 }
 
-export function assertEquals(a, b) {
+export function assertEquals(a: any, b: any) {
   if (a !== b) {
     throw new Error(`${a} does not equal ${b}.`);
   }
 }
 
 const FIXTURE_ID = "common-iframe-csp-fixture-container";
-export function render(src, context = {}) {
+export function render(src: string, context = {}): Promise<HTMLElement> {
   return new Promise((resolve) => {
     const parent = document.createElement("div");
-    parent.id = FIXTURE_ID;
+    parent.id = `${FIXTURE_ID}-${(Math.random() * 1_000_000).toFixed(0)}`;
     const iframe = document.createElement("common-iframe-sandbox");
+    // @ts-ignore This is a lit property.
     iframe.context = context;
     iframe.addEventListener("load", (_) => {
       resolve(iframe);
     });
     parent.appendChild(iframe);
     document.body.appendChild(parent);
+    // @ts-ignore This is a lit property.
     iframe.src = src;
   });
 }
 
-export function cleanup() {
-  const parent = document.querySelector(`#${FIXTURE_ID}`);
-  document.body.removeChild(parent);
-}
-
-export function invertPromise(promise) {
+export function invertPromise(promise: Promise<any>): Promise<any> {
   return new Promise((resolve, reject) => promise.then(reject, resolve));
 }
 
-export function waitForEvent(element, eventName, timeout = 1000) {
+export function waitForEvent(
+  element: HTMLElement,
+  eventName: string,
+  timeout = 1000,
+): Promise<Event> {
   return new Promise((resolve, reject) => {
-    let timer = setTimeout(() => {
+    const timer = setTimeout(() => {
       reject(`Timeout reached waiting for ${eventName}`);
     }, timeout);
-    let handler = (e) => {
+    const handler = (e: Event) => {
       element.removeEventListener(eventName, handler);
       clearTimeout(timer);
       resolve(e);
@@ -102,12 +120,16 @@ export function waitForEvent(element, eventName, timeout = 1000) {
   });
 }
 
-export async function waitForCondition(condition, tries = 10, timeout = 100) {
+export async function waitForCondition(
+  condition: () => boolean,
+  tries = 10,
+  timeout = 100,
+) {
   while (tries-- > 0) {
     if (condition()) {
       return;
     }
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, timeout));
   }
   throw new Error("waitForCondition tries exhausted");
 }

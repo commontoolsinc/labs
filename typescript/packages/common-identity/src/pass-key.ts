@@ -2,7 +2,7 @@ import { Identity } from "./identity.ts";
 import { bufferSourceToArrayBuffer, random } from "./utils.ts";
 
 const RP = "Common Tools";
-const RP_ID = new URL(window.location.href).host;
+const RP_ID = new URL(globalThis.location.href).host;
 const PRF_SALT = new TextEncoder().encode("PRF_SALT");
 const TIMEOUT = 60_000;
 
@@ -41,7 +41,7 @@ export class PassKey {
   // PRF output, a 32-byte hash, which is used as ed25519 key material.
   // Note: Root keys can only be created from PassKeys obtained via PassKey.get()
   async createRootKey(): Promise<Identity> {
-    let seed = this.prf();
+    const seed = this.prf();
     if (!seed) {
       throw new Error(
         "common-identity: No PRF found. This PassKey appears to have just been created - root keys can only be generated from PassKeys obtained via PassKey.get()",
@@ -55,8 +55,8 @@ export class PassKey {
   private prf(): Uint8Array | null {
     // PRF results are only available when calling `get()`,
     // not during key creation.
-    let extResults = this.getCredentials().getClientExtensionResults();
-    let prf = extResults?.prf?.results?.first;
+    const extResults = this.getCredentials().getClientExtensionResults();
+    const prf = extResults?.prf?.results?.first;
     if (prf) {
       return new Uint8Array(bufferSourceToArrayBuffer(prf));
     } else {
@@ -83,7 +83,7 @@ export class PassKey {
       displayName,
     };
 
-    let publicKey: PublicKeyCredentialCreationOptions = {
+    const publicKey: PublicKeyCredentialCreationOptions = {
       challenge,
       rp: { id: RP_ID, name: RP },
       user,
@@ -105,13 +105,13 @@ export class PassKey {
       timeout: TIMEOUT,
     };
 
-    let result = (await navigator.credentials.create({ publicKey })) as
+    const result = (await navigator.credentials.create({ publicKey })) as
       | PublicKeyCredential
       | null;
     if (!result) {
       throw new Error("common-identity: Could not create passkey");
     }
-    let extResults = result.getClientExtensionResults();
+    const extResults = result.getClientExtensionResults();
     if (!extResults?.prf?.enabled) {
       throw new Error("common-identity: prf extension not supported.");
     }
@@ -127,7 +127,7 @@ export class PassKey {
     allowCredentials = [],
   }: PassKeyGetOptions = {}): Promise<PassKey> {
     // Select any credential available with the same `RP_ID`.
-    let credential = (await navigator.credentials.get({
+    const credential = (await navigator.credentials.get({
       publicKey: {
         allowCredentials,
         challenge: random(32),
@@ -145,8 +145,8 @@ export class PassKey {
 
     // PRF results are only available when calling `get()`,
     // not during key creation.
-    let extResults = credential.getClientExtensionResults();
-    let prf = extResults?.prf?.results?.first;
+    const extResults = credential.getClientExtensionResults();
+    const prf = extResults?.prf?.results?.first;
     if (!prf) {
       throw new Error("common-identity: prf extension not supported.");
     }

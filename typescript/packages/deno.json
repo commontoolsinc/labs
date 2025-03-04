@@ -13,6 +13,7 @@
     "./jumble",
     "./llm-client",
     "./deno-vite-plugin",
+    "./deno-web-test",
     "./toolshed"
   ],
   "tasks": {
@@ -45,8 +46,6 @@
   },
   "imports": {
     "ai": "npm:ai@^4.1.5",
-    "esbuild": "npm:esbuild",
-    "@luca/esbuild-deno-loader": "jsr:@luca/esbuild-deno-loader",
     "@cfworker/json-schema": "npm:@cfworker/json-schema@^4.1.0",
     "@codemirror/lang-javascript": "npm:@codemirror/lang-javascript@^6.2.2",
     "@codemirror/lang-markdown": "npm:@codemirror/lang-markdown@^6.3.2",
