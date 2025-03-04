@@ -9,7 +9,7 @@ const manifest = await Manifest.create(Deno.cwd(), [...Deno.args]);
 await buildTestDir(manifest);
 
 const server = new TestServer(manifest);
-await server.start(manifest.port);
+server.start(manifest.port);
 
 const runner = new Runner(manifest);
 const success = await runner.run();
