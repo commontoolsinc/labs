@@ -1,6 +1,7 @@
 import { JSONSchema, TYPE } from "@commontools/builder";
 import { Charm, processSchema } from "../charm.ts";
 import { Cell, getRecipe, getRecipeSrc } from "@commontools/runner";
+import { syncRecipeBlobby } from "../syncRecipe.ts";
 
 export type IFrameRecipe = {
   src: string;
@@ -53,13 +54,14 @@ function parseIframeRecipe(source: string): IFrameRecipe | undefined {
   return JSON.parse(match[1]) as IFrameRecipe;
 }
 
-export const getIframeRecipe = (charm: Cell<Charm>) => {
+export const getIframeRecipe = async (charm: Cell<Charm>) => {
   const recipeId = charm.getSourceCell(processSchema)?.get()?.[TYPE];
   if (!recipeId) {
     console.error("FIXME, no recipeId, what should we do?");
     return {};
   }
 
+  await syncRecipeBlobby(recipeId);
   const recipe = getRecipe(recipeId);
   if (!recipe) {
     console.error("FIXME, no recipe, what should we do?");
@@ -74,12 +76,13 @@ export const getIframeRecipe = (charm: Cell<Charm>) => {
   return { recipeId, iframe: parseIframeRecipe(src) };
 };
 
-export const getRecipeFrom = (charm: Cell<Charm>) => {
+export const getRecipeFrom = async (charm: Cell<Charm>) => {
   const recipeId = charm.getSourceCell(processSchema)?.get()?.[TYPE];
   if (!recipeId) {
     throw new Error("No recipeId found");
   }
 
+  await syncRecipeBlobby(recipeId);
   const recipe = getRecipe(recipeId);
   if (!recipe) {
     throw new Error("No recipe found for recipeId");

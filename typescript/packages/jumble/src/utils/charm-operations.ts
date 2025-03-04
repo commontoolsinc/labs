@@ -18,7 +18,7 @@ export async function fixItCharm(
   error: Error,
   model = "anthropic:claude-3-7-sonnet-20250219-thinking",
 ): Promise<string | undefined> {
-  const iframeRecipe = getIframeRecipe(charm);
+  const iframeRecipe = await getIframeRecipe(charm);
   if (!iframeRecipe?.iframe) {
     throw new Error("No iframe recipe found in charm");
   }

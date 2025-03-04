@@ -52,7 +52,7 @@ export async function iterate(
     return;
   }
 
-  const { iframe } = getIframeRecipe(charm);
+  const { iframe } = await getIframeRecipe(charm);
   if (!iframe) {
     console.error(
       "Cannot iterate on a non-iframe. Must extend instead.",
@@ -93,7 +93,7 @@ export const saveNewRecipeVersion = async (
   newIFrameSrc: string,
   newSpec: string,
 ) => {
-  const { recipeId, iframe } = getIframeRecipe(charm);
+  const { recipeId, iframe } = await getIframeRecipe(charm);
 
   if (!recipeId || !iframe) {
     console.error("FIXME, no recipeId or iframe, what should we do?");
