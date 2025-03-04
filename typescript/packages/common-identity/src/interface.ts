@@ -29,7 +29,7 @@ export interface Signature<Payload> extends Uint8Array {
   valueOf(): this & Signature<Payload>;
 }
 
-export type Unit = {};
+export type Unit = NonNullable<unknown>;
 
 export type Await<T> = PromiseLike<T> | T;
 export type AwaitResult<T extends Unit = Unit, E extends Error = Error> = Await<

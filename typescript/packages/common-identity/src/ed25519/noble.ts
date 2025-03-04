@@ -52,12 +52,12 @@ export class NobleEd25519Signer<ID extends DIDKey> implements Signer<ID> {
   }
 
   static async generate<ID extends DIDKey>(): Promise<NobleEd25519Signer<ID>> {
-    let privateKey = ed25519.utils.randomPrivateKey();
+    const privateKey = ed25519.utils.randomPrivateKey();
     return await NobleEd25519Signer.fromRaw(privateKey);
   }
 
-  static async deserialize<ID extends DIDKey>(keypair: InsecureCryptoKeyPair) {
-    return new NobleEd25519Signer<ID>(keypair);
+  static deserialize<ID extends DIDKey>(keypair: InsecureCryptoKeyPair) {
+    return Promise.resolve(new NobleEd25519Signer<ID>(keypair));
   }
 }
 
@@ -86,13 +86,13 @@ export class NobleEd25519Verifier<ID extends DIDKey> implements Verifier<ID> {
   static async fromDid<ID extends DIDKey>(
     did: ID,
   ): Promise<NobleEd25519Verifier<ID>> {
-    let bytes = didToBytes(did);
+    const bytes = didToBytes(did);
     return await NobleEd25519Verifier.fromRaw(bytes);
   }
 
-  static async fromRaw<ID extends DIDKey>(
+  static fromRaw<ID extends DIDKey>(
     rawPublicKey: Uint8Array,
   ): Promise<NobleEd25519Verifier<ID>> {
-    return new NobleEd25519Verifier(rawPublicKey);
+    return Promise.resolve(new NobleEd25519Verifier(rawPublicKey));
   }
 }

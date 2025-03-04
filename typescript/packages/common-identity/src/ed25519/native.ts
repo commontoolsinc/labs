@@ -122,14 +122,14 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
         "verify",
       ],
     );
-    let did = bytesToDid(new Uint8Array(rawPublic));
+    const did = bytesToDid(new Uint8Array(rawPublic));
     return new NativeEd25519Signer({ publicKey, privateKey }, did as ID);
   }
 
   static async generate<ID extends DIDKey>(): Promise<NativeEd25519Signer<ID>> {
     // This notably sets only the public key as extractable, ideal as we need
     // access to the public key for DID generation.
-    let keypair = await globalThis.crypto.subtle.generateKey(
+    const keypair = await globalThis.crypto.subtle.generateKey(
       ED25519_ALG,
       false,
       [
@@ -137,12 +137,12 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
         "verify",
       ],
     );
-    let did = await didFromPublicKey(keypair.publicKey);
+    const did = await didFromPublicKey(keypair.publicKey);
     return new NativeEd25519Signer(keypair, did as ID);
   }
 
   static async deserialize<ID extends DIDKey>(keypair: CryptoKeyPair) {
-    let did = await didFromPublicKey(keypair.publicKey);
+    const did = await didFromPublicKey(keypair.publicKey);
     return new NativeEd25519Signer(keypair, did as ID);
   }
 }
@@ -179,14 +179,14 @@ export class NativeEd25519Verifier<ID extends DIDKey> implements Verifier<ID> {
   static async fromDid<ID extends DIDKey>(
     did: ID,
   ): Promise<NativeEd25519Verifier<ID>> {
-    let bytes = didToBytes(did);
+    const bytes = didToBytes(did);
     return await NativeEd25519Verifier.fromRaw(bytes);
   }
 
   static async fromRaw<ID extends DIDKey>(
     rawPublicKey: Uint8Array,
   ): Promise<NativeEd25519Verifier<ID>> {
-    let did = bytesToDid(new Uint8Array(rawPublicKey)) as ID;
+    const did = bytesToDid(new Uint8Array(rawPublicKey)) as ID;
     // Set the public key to be extractable for DID generation.
     const publicKey = await globalThis.crypto.subtle.importKey(
       "raw",
@@ -233,6 +233,6 @@ function ed25519RawToPkcs8(rawSignerKey: Uint8Array): Uint8Array {
 }
 
 async function didFromPublicKey(publicKey: CryptoKey): Promise<DIDKey> {
-  let rawPublicKey = await globalThis.crypto.subtle.exportKey("raw", publicKey);
+  const rawPublicKey = await globalThis.crypto.subtle.exportKey("raw", publicKey);
   return bytesToDid(new Uint8Array(rawPublicKey));
 }
