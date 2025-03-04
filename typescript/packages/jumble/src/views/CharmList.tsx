@@ -118,19 +118,21 @@ const HoverPreview = (
 
   return (
     <div
-      className="fixed z-50 w-128 shadow-xl pointer-events-none"
+      className="fixed z-50 w-128 pointer-events-none
+      border border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.5)] rounded-[4px]
+    "
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
         transform: "translate(25%, 25%)",
       }}
     >
-      <CommonCard className="p-2 shadow-xl bg-white">
+      <CommonCard className="p-2 shadow-xl bg-white rounded-[4px]">
         <h3 className="text-xl font-semibold text-gray-800 mb-4">
           {name + ` (#${id!.slice(-4)})`}
         </h3>
         <div className="w-full bg-gray-50 rounded border border-gray-100 min-h-[256px] pointer-events-none select-none">
-          <CharmRenderer className="h-full" charm={charm} />
+          <CharmRenderer className="h-full rounded-[4px]" charm={charm} />
         </div>
       </CommonCard>
     </div>
