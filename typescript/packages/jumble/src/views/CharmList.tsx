@@ -12,6 +12,7 @@ import { Cell } from "@commontools/runner";
 import ShapeLogo from "@/assets/ShapeLogo.tsx";
 import { MdOutlineStar } from "react-icons/md";
 import { useSyncedStatus } from "@/hooks/use-synced-status.ts";
+import { CharmRenderer } from "@/components/CharmRunner.tsx";
 
 export interface CommonDataEvent extends CustomEvent {
   detail: {
@@ -96,9 +97,163 @@ function CharmPreview(
   );
 }
 
+interface HoverPreviewProps {
+  hoveredCharm: string | null;
+  charms: Cell<Charm>[];
+  position: { x: number; y: number };
+  replicaName: string;
+}
+const HoverPreview = (
+  { hoveredCharm, charms, position, replicaName }: HoverPreviewProps,
+) => {
+  // Find the charm that matches the hoveredCharm ID
+  const charm = hoveredCharm
+    ? charms.find((c) => charmId(c) === hoveredCharm)
+    : null;
+
+  if (!charm || !hoveredCharm) return null;
+
+  const id = charmId(charm);
+  const name = charm.get()[NAME] || "Unnamed Charm";
+
+  return (
+    <div
+      className="fixed z-50 w-128 shadow-xl pointer-events-none"
+      style={{
+        left: `${position.x}px`,
+        top: `${position.y}px`,
+        transform: "translate(25%, 25%)",
+      }}
+    >
+      <CommonCard className="p-2 shadow-xl bg-white">
+        <h3 className="text-xl font-semibold text-gray-800 mb-4">
+          {name + ` (#${id!.slice(-4)})`}
+        </h3>
+        <div className="w-full bg-gray-50 rounded border border-gray-100 min-h-[256px] pointer-events-none select-none">
+          <CharmRenderer className="h-full" charm={charm} />
+        </div>
+      </CommonCard>
+    </div>
+  );
+};
+
+interface CharmTableProps {
+  charms: Cell<Charm>[];
+  replicaName: string;
+  charmManager: any;
+}
+
+const CharmTable = (
+  { charms, replicaName, charmManager }: CharmTableProps,
+) => {
+  const [hoveredCharm, setHoveredCharm] = useState<string | null>(null);
+  const [previewPosition, setPreviewPosition] = useState({ x: 0, y: 0 });
+  // Use a ref to cache the last hovered charm to prevent thrashing
+  const hoveredCharmRef = useRef<string | null>(null);
+
+  const handleMouseMove = (e: React.MouseEvent, id: string) => {
+    // Only update state if the hovered charm has changed
+    if (hoveredCharmRef.current !== id) {
+      hoveredCharmRef.current = id;
+      setHoveredCharm(id);
+    }
+
+    // Position the preview card relative to the cursor
+    setPreviewPosition({
+      x: e.clientX + 20, // offset to the right of cursor
+      y: e.clientY - 100, // offset above the cursor
+    });
+  };
+
+  const handleMouseLeave = () => {
+    hoveredCharmRef.current = null;
+    setHoveredCharm(null);
+  };
+
+  return (
+    <div className="relative">
+      <div className="overflow-x-auto shadow-md sm:rounded-lg">
+        <table className="w-full text-sm text-left text-gray-500">
+          <thead className="text-xs text-gray-700 uppercase bg-gray-50">
+            <tr>
+              <th scope="col" className="px-6 py-3">Name</th>
+              <th scope="col" className="px-6 py-3">ID</th>
+              <th scope="col" className="px-6 py-3">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {charms.map((charm) => {
+              const id = charmId(charm);
+              const name = charm.get()[NAME] || "Unnamed Charm";
+
+              return (
+                <tr
+                  key={id}
+                  className="bg-white border-b hover:bg-gray-50 relative"
+                  onMouseMove={(e) => handleMouseMove(e, id!)}
+                  onMouseLeave={handleMouseLeave}
+                >
+                  <td className="px-6 py-4 font-medium text-gray-900">
+                    <NavLink to={`/${replicaName}/${id}`}>
+                      {name}
+                    </NavLink>
+                  </td>
+                  <td className="px-6 py-4">
+                    <NavLink to={`/${replicaName}/${id}`}>
+                      #{id?.slice(-4)}
+                    </NavLink>
+                  </td>
+                  <td className="px-6 py-4">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (
+                          globalThis.confirm(
+                            "Are you sure you want to remove this charm?",
+                          )
+                        ) {
+                          charmManager.remove({ "/": id! });
+                        }
+                      }}
+                      className="text-gray-400 hover:text-red-500 transition-colors"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                      </svg>
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {hoveredCharm && (
+        <HoverPreview
+          hoveredCharm={hoveredCharm}
+          charms={charms}
+          position={previewPosition}
+          replicaName={replicaName}
+        />
+      )}
+    </div>
+  );
+};
+
 export default function CharmList() {
   const { replicaName } = useParams<{ replicaName: string }>();
   const { charmManager } = useCharmManager();
+  const [pinned] = useCell(charmManager.getPinned());
   const [charms] = useCell(charmManager.getCharms());
   const { isSyncing } = useSyncedStatus(charmManager);
 
@@ -131,15 +286,28 @@ export default function CharmList() {
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-8">
-      {replicaName &&
-        charms.map((charm) => (
-          <CharmPreview
-            key={charmId(charm)}
-            charm={charm}
+    <div className="p-2">
+      <h1>Pinned</h1>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-8">
+        {replicaName &&
+          pinned.map((charm) => (
+            <CharmPreview
+              key={charmId(charm)}
+              charm={charm}
+              replicaName={replicaName}
+            />
+          ))}
+      </div>
+      <h1>All Charms</h1>
+      <div className="p-8">
+        {replicaName && (
+          <CharmTable
+            charms={charms}
             replicaName={replicaName}
+            charmManager={charmManager}
           />
-        ))}
+        )}
+      </div>
     </div>
   );
 }

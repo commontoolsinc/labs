@@ -1,11 +1,4 @@
-import {
-  JSONSchema,
-  Module,
-  NAME,
-  Recipe,
-  TYPE,
-  UI,
-} from "@commontools/builder";
+import { JSONSchema, Module, NAME, Recipe, TYPE, UI } from "@commontools/builder";
 import {
   type Cell,
   createRef,
@@ -55,12 +48,17 @@ export const processSchema = {
 export class CharmManager {
   private space: Space;
   private charmsDoc: DocImpl<DocLink[]>;
+  private pinned: DocImpl<DocLink[]>;
+
   private charms: Cell<Cell<Charm>[]>;
+  private pinnedCharms: Cell<Cell<Charm>[]>;
 
   constructor(private spaceId: string) {
     this.space = getSpace(this.spaceId);
     this.charmsDoc = getDoc<DocLink[]>([], "charms", this.space);
+    this.pinned = getDoc<DocLink[]>([], "pinned-charms", this.space);
     this.charms = this.charmsDoc.asCell([], undefined, charmListSchema);
+    this.pinnedCharms = this.pinned.asCell([], undefined, charmListSchema);
   }
 
   getReplica(): string | undefined {
@@ -69,6 +67,24 @@ export class CharmManager {
 
   async synced(): Promise<void> {
     return await storage.synced();
+  }
+
+  async pin(charm: Cell<Charm>) {
+    await storage.syncCell(this.pinned);
+    this.pinnedCharms.push(charm);
+    await idle();
+  }
+
+  async unpin(charm: Cell<Charm>) {
+    // probably wrong, should compare ids
+    await storage.syncCell(this.pinned);
+    this.pinnedCharms.set(this.pinnedCharms.get().filter((c) => c != charm));
+    await idle();
+  }
+
+  getPinned(): Cell<Cell<Charm>[]> {
+    storage.syncCell(this.pinned);
+    return this.pinnedCharms;
   }
 
   getCharms(): Cell<Cell<Charm>[]> {
@@ -150,11 +166,7 @@ export class CharmManager {
     path: string[] = [],
     schema?: JSONSchema,
   ): Promise<Cell<T>> {
-    return (await storage.syncCellById(this.space, id)).asCell(
-      path,
-      undefined,
-      schema,
-    );
+    return (await storage.syncCellById(this.space, id)).asCell(path, undefined, schema);
   }
 
   // Return Cell with argument content according to the schema of the charm.
@@ -163,9 +175,7 @@ export class CharmManager {
     const recipeId = source?.get()?.[TYPE];
     const recipe = getRecipe(recipeId);
     const argumentSchema = recipe?.argumentSchema;
-    return source?.key("argument").asSchema(argumentSchema!) as
-      | Cell<T>
-      | undefined;
+    return source?.key("argument").asSchema(argumentSchema!) as Cell<T> | undefined;
   }
 
   // note: removing a charm doesn't clean up the charm's cells
@@ -175,9 +185,7 @@ export class CharmManager {
     const id = getEntityId(idOrCharm);
     if (!id) return false;
 
-    const newCharms = this.charms.get().filter((charm) =>
-      getEntityId(charm)?.["/"] !== id?.["/"]
-    );
+    const newCharms = this.charms.get().filter((charm) => getEntityId(charm)?.["/"] !== id?.["/"]);
     if (newCharms.length !== this.charms.get().length) {
       this.charms.set(newCharms);
       await idle();
@@ -187,11 +195,7 @@ export class CharmManager {
     return false;
   }
 
-  async runPersistent(
-    recipe: Recipe | Module,
-    inputs?: any,
-    cause?: any,
-  ): Promise<Cell<Charm>> {
+  async runPersistent(recipe: Recipe | Module, inputs?: any, cause?: any): Promise<Cell<Charm>> {
     await idle();
 
     // Fill in missing parameters from other charms. It's a simple match on
@@ -247,10 +251,7 @@ export class CharmManager {
 
     await syncAllMentionedCells(inputs);
 
-    const doc = await storage.syncCellById(
-      this.space,
-      createRef({ recipe, inputs }, cause),
-    );
+    const doc = await storage.syncCellById(this.space, createRef({ recipe, inputs }, cause));
     const resultDoc = run(recipe, inputs, doc);
 
     // FIXME(ja): should we add / sync explicitly here?
@@ -264,10 +265,7 @@ export class CharmManager {
     const recipeId = charm.getSourceCell()?.get()?.[TYPE];
     if (!recipeId) return Promise.resolve(undefined);
 
-    return Promise.all([
-      this.syncRecipeCells(recipeId),
-      this.syncRecipeBlobby(recipeId),
-    ]).then(
+    return Promise.all([this.syncRecipeCells(recipeId), this.syncRecipeBlobby(recipeId)]).then(
       () => recipeId,
     );
   }
