@@ -152,7 +152,7 @@ class MemoryConsumerSession<
     if (command.the === "task/return") {
       const invocation = this.invocations.get(id);
       this.invocations.delete(id);
-      invocation?.return(command.is as {});
+      invocation?.return(command.is as NonNullable<unknown>);
     } // If it is an effect it can be for one specific subscription, yet we may
     // have other subscriptions that will be affected. There for we simply
     // pass effect to each one and they can detect if it concerns them.
@@ -301,7 +301,7 @@ class ConsumerInvocation<Ability extends The, Protocol extends Proto> {
     this.promise = new Promise<ConsumerResultFor<Ability, Protocol>>(
       (resolve) => (receive = resolve),
     );
-    this.return = receive as typeof receive & {};
+    this.return = receive as typeof receive & NonNullable<unknown>;
   }
 
   refer() {

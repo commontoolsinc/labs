@@ -78,7 +78,7 @@ const updateLimit = handler<{ detail: { value: string } }, { limit: number }>(
 );
 
 const googleUpdater = handler<
-  {},
+  NonNullable<unknown>,
   { emails: Email[]; auth: Auth; settings: { labels: string; limit: number } }
 >((_event, state) => {
   console.log("googleUpdater!");

@@ -73,11 +73,11 @@ export class ArenaClient {
     return response.json();
   }
 
-  async getChannel(slug: string): Promise<Channel> {
+  getChannel(slug: string): Promise<Channel> {
     return this.fetch<Channel>(`/channels/${slug}`);
   }
 
-  async getChannelContents(
+  getChannelContents(
     slug: string,
     params: { page?: number; per?: number } = {},
   ): Promise<Channel["contents"]> {
@@ -91,7 +91,7 @@ export class ArenaClient {
     );
   }
 
-  async createChannel(
+  createChannel(
     params: { title: string; status?: Channel["status"] },
   ): Promise<Channel> {
     return this.fetch<Channel>("/channels", {
@@ -100,7 +100,7 @@ export class ArenaClient {
     });
   }
 
-  async updateChannel(
+  updateChannel(
     slug: string,
     params: {
       title?: string;
@@ -123,7 +123,7 @@ export class ArenaClient {
     });
   }
 
-  async getCollaborators(slug: string): Promise<User[]> {
+  getCollaborators(slug: string): Promise<User[]> {
     return this.fetch<User[]>(`/channels/${slug}/collaborators`);
   }
 }

@@ -1,6 +1,6 @@
 import { fromJSON, refer } from "merkle-reference";
 
-export interface Entity<T extends null | {}> {
+export interface Entity<T extends null | NonNullable<unknown>> {
   "@": ToString<Entity<T>>;
 }
 
@@ -9,16 +9,16 @@ export interface Entity<T extends null | {}> {
  */
 export type ToString<T> = string & { toString(): ToString<T> };
 
-export const entity = <T extends null | {}>(
-  description: {} | null,
+export const entity = <T extends null | NonNullable<unknown>>(
+  description: NonNullable<unknown> | null,
 ): Entity<T> => {
   return { "@": refer(description).toJSON()["/"] };
 };
 
-export const toString = <T extends null | {}>(entity: Entity<T>): string =>
+export const toString = <T extends null | NonNullable<unknown>>(entity: Entity<T>): string =>
   `@${entity["@"]}`;
 
-export const fromString = <T extends null | {}>(
+export const fromString = <T extends null | NonNullable<unknown>>(
   source: string | ToString<Entity<T>>,
 ): Entity<T> => {
   if (!source.startsWith("@")) {
@@ -37,7 +37,7 @@ export const fromString = <T extends null | {}>(
 /**
  * Asserts type of the `source` to be an `Entity`.
  */
-export const is = <T extends null | {}>(
+export const is = <T extends null | NonNullable<unknown>>(
   source: unknown | Entity<T>,
 ): source is Entity<T> =>
   source != null && typeof (source as { ["@"]?: string })["@"] === "string";
