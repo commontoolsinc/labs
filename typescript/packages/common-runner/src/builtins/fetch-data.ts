@@ -9,10 +9,10 @@ import { refer } from "merkle-reference";
  *
  * Returns the fetched result as `result`. `pending` is true while a request is pending.
  *
- * @param url - A cell containing the URL to fetch data from.
+ * @param url - A doc containing the URL to fetch data from.
  * @param mode - The mode to use for fetching data. Either `text` or `json`
  *   default to `json` results.
- * @returns { pending: boolean, result: any, error: any } - As individual cells, representing `pending` state, final `result`, and any `error`.
+ * @returns { pending: boolean, result: any, error: any } - As individual docs, representing `pending` state, final `result`, and any `error`.
  */
 export function fetchData(
   inputsCell: DocImpl<{

@@ -1,5 +1,4 @@
 import type { DocImpl, DocLink } from "./doc.ts";
-import { compactifyPaths, pathAffected } from "./utils.ts";
 import type { Cancel } from "./cancel.ts";
 
 export type Action = (log: ReactivityLog) => any;
@@ -22,7 +21,7 @@ const MAX_ITERATIONS_PER_RUN = 100;
 /**
  * Reactivity log.
  *
- * Used to log reads and writes to cells. Used by scheduler to keep track of
+ * Used to log reads and writes to docs. Used by scheduler to keep track of
  * dependencies and to topologically sort pending actions before executing them.
  */
 export type ReactivityLog = {
@@ -32,7 +31,7 @@ export type ReactivityLog = {
 
 export function schedule(action: Action, log: ReactivityLog): Cancel {
   const reads = setDependencies(action, log);
-  reads.forEach(({ cell }) => dirty.add(cell));
+  reads.forEach(({ cell: doc }) => dirty.add(doc));
 
   queueExecution();
   pending.add(action);
@@ -81,7 +80,7 @@ export async function run(action: Action): Promise<any> {
       }
 
       // Note: By adding the listeners after the call we avoid triggering a re-run
-      // of the action if it changed a r/w cell. Note that this also means that
+      // of the action if it changed a r/w doc. Note that this also means that
       // those actions can't loop on themselves.
       subscribe(action, log);
       running = undefined;
@@ -160,18 +159,18 @@ async function execute() {
   // In case a directly invoked `run` is still running, wait for it to finish.
   if (running) await running;
 
-  // Process next event from the event queue. Will mark more cells as dirty.
+  // Process next event from the event queue. Will mark more docs as dirty.
   eventQueue.shift()?.();
 
   const order = topologicalSort(pending, dependencies, dirty);
 
-  // Clear pending and dirty sets, and cancel all listeners for cells on already
+  // Clear pending and dirty sets, and cancel all listeners for docs on already
   // scheduled actions.
   pending.clear();
   dirty.clear();
   for (const fn of order) cancels.get(fn)?.forEach((cancel) => cancel());
 
-  // Now run all functions. This will create new listeners to mark cells dirty
+  // Now run all functions. This will create new listeners to mark docs dirty
   // and schedule the next run.
   for (const fn of order) {
     loopCounter.set(fn, (loopCounter.get(fn) || 0) + 1);
@@ -210,7 +209,7 @@ function topologicalSort(
       // Actions with no dependencies are always relevant. Note that they must
       // be manually added to `pending`, which happens only once on `schedule`.
       relevantActions.add(action);
-    } else if (reads.some(({ cell }) => dirty.has(cell))) {
+    } else if (reads.some(({ cell: doc }) => dirty.has(doc))) {
       relevantActions.add(action);
     }
   }
@@ -303,4 +302,43 @@ function topologicalSort(
   }
 
   return result;
+}
+
+// Remove longer paths already covered by shorter paths
+export function compactifyPaths(entries: DocLink[]): DocLink[] {
+  // First group by doc via a Map
+  const docToPaths = new Map<DocImpl<any>, PropertyKey[][]>();
+  for (const { cell: doc, path } of entries) {
+    const paths = docToPaths.get(doc) || [];
+    paths.push(path.map((key) => key.toString())); // Normalize to strings as keys
+    docToPaths.set(doc, paths);
+  }
+
+  // For each cell, sort the paths by length, then only return those that don't
+  // have a prefix earlier in the list
+  const result: DocLink[] = [];
+  for (const [doc, paths] of docToPaths.entries()) {
+    paths.sort((a, b) => a.length - b.length);
+    for (let i = 0; i < paths.length; i++) {
+      const earlier = paths.slice(0, i);
+      if (
+        earlier.some((path) =>
+          path.every((key, index) => key === paths[i][index])
+        )
+      ) {
+        continue;
+      }
+      result.push({ cell: doc, path: paths[i] });
+    }
+  }
+  return result;
+}
+
+function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
+  changedPath = changedPath.map((key) => key.toString()); // Normalize to strings as keys
+  return (
+    (changedPath.length <= path.length &&
+      changedPath.every((key, index) => key === path[index])) ||
+    path.every((key, index) => key === changedPath[index])
+  );
 }

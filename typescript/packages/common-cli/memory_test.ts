@@ -1,7 +1,7 @@
 import { MemorySpace } from "@commontools/memory";
 import { RemoteStorageProvider } from "../common-charm/src/storage/remote.ts";
 import { StorageProvider } from "../common-charm/src/storage/base.ts";
-import { EntityId } from "../common-runner/src/cell-map.ts";
+import { EntityId } from "../common-runner/src/doc-map.ts";
 
 // some config stuff, hardcoded, ofcourse
 const replica = "ellyse5";
@@ -79,10 +79,11 @@ async function main() {
   // now lets try to store a batch of values
   console.log("storing all entities");
   const result = await storageProvider.send(people_batch);
-  if (result.ok)
+  if (result.ok) {
     console.log("sent entities successfully");
-  else
+  } else {
     console.log("got error: " + JSON.stringify(result.error, null, 2));
+  }
 }
 
 main();

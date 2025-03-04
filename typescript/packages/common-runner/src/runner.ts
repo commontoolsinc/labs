@@ -27,13 +27,13 @@ import {
   containsOpaqueRef,
   deepCopy,
   extractDefaultValues,
-  findAllAliasedCells,
+  findAllAliasedDocs,
   followAliases,
   mergeObjects,
   sendValueToBinding,
-  staticDataToNestedCells,
+  staticDataToNestedDocs,
   unsafe_noteParentOnRecipes,
-  unwrapOneLevelAndBindtoCell,
+  unwrapOneLevelAndBindtoDoc,
 } from "./utils.ts";
 import { getModuleByRef } from "./module.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
@@ -62,9 +62,8 @@ export const cancels = new WeakMap<DocImpl<any>, Cancel>();
  *
  * @param recipeFactory - Function that takes the argument and returns a recipe.
  * @param argument - The argument to pass to the recipe. Can be static data
- * and/or cell references, including cell value proxies and regular cells.
- * @param resultCell - Optional cell to run the recipe into. If not given, a new
- * cell is created.
+ * and/or cell references, including cell value proxies, docs and regular cells.
+ * @param resultDoc - Doc to run the recipe off.
  * @returns The result cell.
  */
 export function run<T, R>(
@@ -110,7 +109,7 @@ export function run<T, R = any>(
     if (!recipeOrModule) throw new Error(`Unknown recipe: ${recipeId}`);
   } else if (!recipeOrModule) {
     console.warn(
-      "No recipe provided and no recipe found in process cell. Not running.",
+      "No recipe provided and no recipe found in process doc. Not running.",
     );
     return resultCell;
   }
@@ -143,7 +142,7 @@ export function run<T, R = any>(
 
   if (cancels.has(resultCell)) {
     // If it's already running and no new recipe or argument are given,
-    // we are just returning the result cell
+    // we are just returning the result doc
     if (argument === undefined && recipeId === processCell.get()?.[TYPE]) {
       return resultCell;
     }
@@ -162,10 +161,10 @@ export function run<T, R = any>(
   // Walk the recipe's schema and extract all default values
   const defaults = extractDefaultValues(recipe.argumentSchema);
 
-  // If the bindings are a cell or cell reference, convert them to an object
-  // where each property is a cell reference.
+  // If the bindings are a cell, doc or doc link, convert them to an object
+  // where each property is a doc link.
   // TODO(seefeld): If new keys are added after first load, this won't work.
-
+  // TODO(seefeld): Note why we need this. Is it still needed?
   if (
     isDoc(argument) ||
     isDocLink(argument) ||
@@ -203,8 +202,8 @@ export function run<T, R = any>(
     ...processCell.get()?.internal,
   };
 
-  // Ensure static data is converted to cell references, e.g. for arrays
-  argument = staticDataToNestedCells(
+  // Ensure static data is converted to doc link, e.g. for arrays
+  argument = staticDataToNestedDocs(
     processCell,
     argument,
     undefined,
@@ -221,9 +220,9 @@ export function run<T, R = any>(
     resultRef: { cell: resultCell, path: [] },
   });
 
-  // Send "query" to results to the result cell
+  // Send "query" to results to the result doc
   resultCell.send(
-    unwrapOneLevelAndBindtoCell<R>(recipe.result as R, processCell),
+    unwrapOneLevelAndBindtoDoc<R>(recipe.result as R, processCell),
   );
 
   // [unsafe closures:] For recipes from closures, add a materialize factory
@@ -233,14 +232,19 @@ export function run<T, R = any>(
   }
 
   for (const node of recipe.nodes) {
-    // Generate causal IDs for all cells read and written to by this node, if
+    // Generate causal IDs for all docs read and written to by this node, if
     // they don't have any yet.
     [node.inputs, node.outputs].forEach((bindings) =>
-      findAllAliasedCells(bindings, processCell).forEach(({ cell, path }) => {
-        if (!cell.entityId && processCell.entityId) {
-          cell.generateEntityId({ cell: processCell, path }, processCell.space);
-        }
-      })
+      findAllAliasedDocs(bindings, processCell).forEach(
+        ({ cell: doc, path }) => {
+          if (!doc.entityId && processCell.entityId) {
+            doc.generateEntityId(
+              { cell: processCell, path },
+              processCell.space,
+            );
+          }
+        },
+      )
     );
     instantiateNode(
       node.module,
@@ -263,7 +267,7 @@ export function run<T, R = any>(
  * A better strategy would be to schedule based on effects and unregister the
  * effects driving execution, e.g. the UI.
  *
- * @param resultCell - The result cell to stop.
+ * @param resultCell - The result doc to stop.
  */
 export function stop(resultCell: DocImpl<any>) {
   cancels.get(resultCell)?.();
@@ -346,18 +350,18 @@ function instantiateJavaScriptNode(
   addCancel: AddCancel,
   recipe: Recipe,
 ) {
-  const inputs = unwrapOneLevelAndBindtoCell(
+  const inputs = unwrapOneLevelAndBindtoDoc(
     inputBindings as { [key: string]: any },
     processCell,
   );
 
-  // TODO(seefeld): This isn't correct, as module can write into passed cells. We
-  // should look at the schema to find out what cells are read and
+  // TODO(seefeld): This isn't correct, as module can write into passed docs. We
+  // should look at the schema to find out what docs are read and
   // written.
-  const reads = findAllAliasedCells(inputs, processCell);
+  const reads = findAllAliasedDocs(inputs, processCell);
 
-  const outputs = unwrapOneLevelAndBindtoCell(outputBindings, processCell);
-  const writes = findAllAliasedCells(outputs, processCell);
+  const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
+  const writes = findAllAliasedDocs(outputs, processCell);
 
   let fn = (
     typeof module.implementation === "string"
@@ -372,17 +376,17 @@ function instantiateJavaScriptNode(
   // Check if any of the read cells is a stream alias
   let streamRef: DocLink | undefined = undefined;
   for (const key in inputs) {
-    let cell = processCell;
+    let doc = processCell;
     let path: PropertyKey[] = [key];
     let value = inputs[key];
     while (isAlias(value)) {
       const ref = followAliases(value, processCell);
-      cell = ref.cell;
+      doc = ref.cell;
       path = ref.path;
-      value = cell.getAtPath(path);
+      value = doc.getAtPath(path);
     }
     if (isStreamAlias(value)) {
-      streamRef = { cell, path };
+      streamRef = { cell: doc, path };
       break;
     }
   }
@@ -521,11 +525,11 @@ function instantiateRawNode(
   // Built-ins can define their own scheduling logic, so they'll
   // implement parts of the above themselves.
 
-  const mappedInputBindings = unwrapOneLevelAndBindtoCell(
+  const mappedInputBindings = unwrapOneLevelAndBindtoDoc(
     inputBindings,
     processCell,
   );
-  const mappedOutputBindings = unwrapOneLevelAndBindtoCell(
+  const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
     outputBindings,
     processCell,
   );
@@ -534,8 +538,8 @@ function instantiateRawNode(
   // note the parent recipe on the closure recipes.
   unsafe_noteParentOnRecipes(recipe, mappedInputBindings);
 
-  const inputCells = findAllAliasedCells(mappedInputBindings, processCell);
-  const outputCells = findAllAliasedCells(mappedOutputBindings, processCell);
+  const inputCells = findAllAliasedDocs(mappedInputBindings, processCell);
+  const outputCells = findAllAliasedDocs(mappedOutputBindings, processCell);
 
   const action = module.implementation(
     getDoc(mappedInputBindings),
@@ -556,12 +560,12 @@ function instantiatePassthroughNode(
   processCell: DocImpl<any>,
   addCancel: AddCancel,
 ) {
-  const inputs = unwrapOneLevelAndBindtoCell(inputBindings, processCell);
+  const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
   const inputsCell = getDoc(inputs);
-  const reads = findAllAliasedCells(inputs, processCell);
+  const reads = findAllAliasedDocs(inputs, processCell);
 
-  const outputs = unwrapOneLevelAndBindtoCell(outputBindings, processCell);
-  const writes = findAllAliasedCells(outputs, processCell);
+  const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
+  const writes = findAllAliasedDocs(outputs, processCell);
 
   const action: Action = (log: ReactivityLog) => {
     const inputsProxy = inputsCell.getAsQueryResult([], log);
@@ -579,11 +583,11 @@ function instantiateRecipeNode(
   addCancel: AddCancel,
 ) {
   if (!isRecipe(module.implementation)) throw new Error(`Invalid recipe`);
-  const recipe = unwrapOneLevelAndBindtoCell(
+  const recipe = unwrapOneLevelAndBindtoDoc(
     module.implementation,
     processCell,
   );
-  const inputs = unwrapOneLevelAndBindtoCell(inputBindings, processCell);
+  const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
   const resultCell = getDoc(
     undefined,
     {

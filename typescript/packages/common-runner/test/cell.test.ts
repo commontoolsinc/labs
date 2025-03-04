@@ -1,12 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { getDoc, isDoc, isDocLink } from "../src/doc.ts";
+import { type DocImpl, getDoc, isDoc, isDocLink } from "../src/doc.ts";
 import { isCell } from "../src/cell.ts";
 import { isQueryResult } from "../src/query-result-proxy.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { JSONSchema } from "@commontools/builder";
 import { addEventHandler, idle } from "../src/scheduler.ts";
-import { compactifyPaths } from "../src/utils.ts";
 import { getSpace } from "../src/space.ts";
 
 describe("Cell", () => {
@@ -863,14 +862,12 @@ describe("asCell with schema", () => {
     expect(isCell(value.context.nested)).toBe(true);
     expect(value.context.nested.get().value).toBe(42);
 
-    // All references in the chain should be read
-    const reads = compactifyPaths(log.reads);
-
-    expect(reads.length).toBe(4);
-    expect(reads[0].cell).toBe(c);
-    expect(reads[1].cell).toBe(ref3.cell);
-    expect(reads[2].cell).toBe(ref2.cell);
-    expect(reads[3].cell).toBe(ref1.cell);
+    const readDocs = new Set<DocImpl<any>>(log.reads.map((r) => r.cell));
+    expect(readDocs.size).toBe(4);
+    expect(readDocs.has(c)).toBe(true);
+    expect(readDocs.has(ref3.cell)).toBe(true);
+    expect(readDocs.has(ref2.cell)).toBe(true);
+    expect(readDocs.has(ref1.cell)).toBe(true);
 
     // Changes to the original cell should propagate through the chain
     innerCell.send({ value: 100 });

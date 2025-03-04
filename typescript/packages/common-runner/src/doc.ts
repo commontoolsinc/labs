@@ -20,7 +20,7 @@ import {
   type EntityId,
   getDocByEntityId,
   setDocByEntityId,
-} from "./cell-map.ts";
+} from "./doc-map.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { type Cancel } from "./cancel.ts";
 import { arrayEqual } from "./utils.ts";

@@ -5,7 +5,7 @@ import {
   type EntityId,
   getDocByEntityId,
   getEntityId,
-} from "../src/cell-map.ts";
+} from "../src/doc-map.ts";
 import { getDoc } from "../src/doc.ts";
 import { refer } from "merkle-reference";
 import { getSpace } from "../src/space.ts";
