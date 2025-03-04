@@ -14,8 +14,8 @@ import { captureException } from "@sentry/deno";
 import { areSchemaCompatible } from "@/routes/ai/spell/schema-compatibility.ts";
 
 export const ReuseRequestSchema = z.object({
-  charmId: z.string().describe('The ID of the charm to reuse data from'),
-  replica: z.string().describe('The space the charm is stored in'),
+  charmId: z.string().describe("The ID of the charm to reuse data from"),
+  replica: z.string().describe("The space the charm is stored in"),
 });
 
 export const ReuseResponseSchema = z.object({
