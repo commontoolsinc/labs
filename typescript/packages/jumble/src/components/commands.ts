@@ -112,9 +112,9 @@ export interface SelectOption {
 export const castSpellAsCharm = async (
   charmManager: CharmManager,
   recipeKey: string,
-  blobId: string,
+  argument: Cell<any>,
 ) => {
-  if (recipeKey && blobId) {
+  if (recipeKey && argument) {
     console.log("Syncing...");
     const recipeId = recipeKey.replace("spell-", "");
     await charmManager.syncRecipeBlobby(recipeId);
@@ -122,10 +122,11 @@ export const castSpellAsCharm = async (
     const recipe = getRecipe(recipeId);
     if (!recipe) return;
 
-    console.log("Syncing blob...");
-    const cell = await charmManager.getCellById({ "/": blobId }, ["argument"]);
     console.log("Casting...");
-    const charm: Cell<Charm> = await charmManager.runPersistent(recipe, cell);
+    const charm: Cell<Charm> = await charmManager.runPersistent(
+      recipe,
+      argument,
+    );
     charmManager.add([charm]);
     return charm.entityId;
   }
@@ -495,17 +496,17 @@ async function handleUseDataInSpell(deps: CommandContext) {
           }
 
           const charm = await deps.charmManager.get(deps.focusedCharmId);
-          const sourceCell = charm?.getSourceCell();
-
-          const sourceId = getEntityId(sourceCell)?.["/"];
-          if (!sourceId) {
-            throw new Error("No source ID found");
+          if (!charm) throw new Error("No current charm found");
+          const argument = deps.charmManager.getArgument(charm);
+          if (!argument) {
+            throw new Error("No sourceCell/argument found for current charm");
           }
+
           deps.setLoading(true);
           const newCharm = await castSpellAsCharm(
             deps.charmManager,
             selectedSpell.id,
-            sourceId,
+            argument,
           );
 
           if (!newCharm) {
@@ -578,10 +579,18 @@ async function handleUseSpellOnOtherData(deps: CommandContext) {
           }
 
           deps.setLoading(true);
+
+          console.log("Syncing blob...");
+          // TODO(ben,seefeld): We might want spellcaster to return docId/path
+          // pairs and use those directly instead of hardcoding `argument` here.
+          const argument = await deps.charmManager.getCellById({
+            "/": selectedCell.id,
+          }, ["argument"]);
+
           const newCharm = await castSpellAsCharm(
             deps.charmManager,
             spellId,
-            selectedCell.id,
+            argument,
           );
           if (!newCharm) throw new Error("Failed to cast spell");
 

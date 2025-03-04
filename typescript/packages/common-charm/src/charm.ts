@@ -158,12 +158,14 @@ export class CharmManager {
   }
 
   // Return Cell with argument content according to the schema of the charm.
-  getArgument<T = any>(charm: Cell<Charm | T>): T {
+  getArgument<T = any>(charm: Cell<Charm | T>): Cell<T> | undefined {
     const source = charm.getSourceCell(processSchema);
     const recipeId = source?.get()?.[TYPE];
     const recipe = getRecipe(recipeId);
     const argumentSchema = recipe?.argumentSchema;
-    return source?.key("argument").asSchema(argumentSchema!) as T;
+    return source?.key("argument").asSchema(argumentSchema!) as
+      | Cell<T>
+      | undefined;
   }
 
   // note: removing a charm doesn't clean up the charm's cells
