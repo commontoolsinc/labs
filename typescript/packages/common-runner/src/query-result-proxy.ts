@@ -271,9 +271,9 @@ function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
 }
 
 /**
- * Get cell reference or return values as is if not a cell value proxy.
+ * Get doc link or return values as is if not a cell value proxy.
  *
- * @param {any} value - The value to get the cell reference or value from.
+ * @param {any} value - The value to get the doc link or value from.
  * @returns {DocLink | any}
  */
 export function getDocLinkOrValue(value: any): DocLink {
@@ -282,9 +282,9 @@ export function getDocLinkOrValue(value: any): DocLink {
 }
 
 /**
- * Get cell reference or throw if not a cell value proxy.
+ * Get doc link or throw if not a cell value proxy.
  *
- * @param {any} value - The value to get the cell reference from.
+ * @param {any} value - The value to get the doc link from.
  * @returns {DocLink}
  * @throws {Error} If the value is not a cell value proxy.
  */
@@ -294,7 +294,7 @@ export function getDocLinkOrThrow(value: any): DocLink {
 }
 
 /**
- * Check if value is a cell proxy.
+ * Check if value is a cell value proxy.
  *
  * @param {any} value - The value to check.
  * @returns {boolean}
@@ -307,8 +307,8 @@ export function isQueryResult(value: any): value is QueryResult<any> {
 const getDocLink = Symbol("isQueryResultProxy");
 
 /**
- * Check if value is a cell proxy. Return as type that allows dereferencing, but
- * not using the proxy.
+ * Check if value is a cell value proxy. Return as type that allows
+ * dereferencing, but not using the proxy.
  *
  * @param {any} value - The value to check.
  * @returns {boolean}

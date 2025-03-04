@@ -8,7 +8,7 @@ import {
   normalizeToDocLinks,
   sendValueToBinding,
   setNestedValue,
-  unwrapOneLevelAndBindtoCell,
+  unwrapOneLevelAndBindtoDoc,
 } from "../src/utils.ts";
 import { DocLink, getDoc, isDocLink } from "../src/doc.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
@@ -229,7 +229,7 @@ describe("mapBindingToCell", () => {
       z: 3,
     };
 
-    const result = unwrapOneLevelAndBindtoCell(binding, testCell);
+    const result = unwrapOneLevelAndBindtoDoc(binding, testCell);
     expect(result).toEqual({
       x: { $alias: { cell: testCell, path: ["a"] } },
       y: { $alias: { cell: testCell, path: ["b", "c"] } },
