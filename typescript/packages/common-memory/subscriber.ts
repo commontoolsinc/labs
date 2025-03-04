@@ -5,13 +5,24 @@ import {
   SubscriberCommand,
   SubscriptionCommand,
 } from "./interface.ts";
+import { Receipt, UCAN } from "./codec.ts";
 import * as Socket from "./socket.ts";
 
 /**
  * Takes a WebSocket and creates Subscriber.
  */
-export const fromWebSocket = (socket: WebSocket): ConsumerSession<Protocol> =>
-  Socket.from(socket);
+export const fromWebSocket = (socket: WebSocket): ConsumerSession<Protocol> => {
+  const { readable, writable } = Socket.from<string, string>(socket);
+  const receipt = Receipt.toStringStream();
+  receipt.readable.pipeTo(writable);
+
+  return {
+    readable: readable.pipeThrough(UCAN.fromStringStream()) as ConsumerSession<
+      Protocol
+    >["readable"],
+    writable: receipt.writable,
+  };
+};
 
 export const create = () => new SubscriberChannel();
 

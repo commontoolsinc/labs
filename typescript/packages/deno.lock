@@ -72,7 +72,6 @@
     "npm:@hono/sentry@^1.2.0": "1.2.0_hono@4.7.0",
     "npm:@hono/zod-openapi@~0.18.3": "0.18.4_hono@4.7.0_zod@3.24.1",
     "npm:@hono/zod-validator@~0.4.2": "0.4.2_hono@4.7.0_zod@3.24.1",
-    "npm:@ipld/dag-json@^10.2.3": "10.2.3",
     "npm:@lit/react@^1.0.7": "1.0.7_@types+react@18.3.18",
     "npm:@noble/ed25519@^2.2.3": "2.2.3",
     "npm:@opentelemetry/api@^1.9.0": "1.9.0",
@@ -1393,13 +1392,6 @@
       "dependencies": [
         "hono",
         "zod"
-      ]
-    },
-    "@ipld/dag-json@10.2.3": {
-      "integrity": "sha512-itacv1j1hvYgLox2B42Msn70QLzcr0MEo5yGIENuw2SM/lQzq9bmBiMky+kDsIrsqqblKTXcHBZnnmK7D4a6ZQ==",
-      "dependencies": [
-        "cborg",
-        "multiformats"
       ]
     },
     "@isaacs/cliui@8.0.2": {
@@ -3464,9 +3456,6 @@
     },
     "caniuse-lite@1.0.30001700": {
       "integrity": "sha512-2S6XIXwaE7K7erT8dY+kLQcpa5ms63XlRkMkReXjle+kf6c5g38vyMl+Z5y8dSxOFDhcFe+nxnn261PLxBSQsQ=="
-    },
-    "cborg@4.2.8": {
-      "integrity": "sha512-z9M+TZCWQbf89Gl8ulpYThM9fqmkjBDdMiq+wS72OAK2zqDaXNquoAWFDrAKHQAukVtPspmadB9chuFC0ut7ew=="
     },
     "ccount@2.0.1": {
       "integrity": "sha512-eyrF0jiFpY+3drT6383f1qhkbGsLSifNAjA61IUjZjmLCWjItY6LB9ft9YhoDgwfmclB2zhu51Lc7+95b8NRAg=="
@@ -7257,13 +7246,11 @@
           "jsr:@std/encoding@^1.0.5",
           "jsr:@std/fs@^1.0.10",
           "jsr:@std/path@^1.0.8",
-          "npm:@ipld/dag-json@^10.2.3",
           "npm:merkle-reference@^2.0.1",
           "npm:multiformats@^13.3.2"
         ],
         "packageJson": {
           "dependencies": [
-            "npm:@ipld/dag-json@^10.2.3",
             "npm:merkle-reference@^2.0.1",
             "npm:multiformats@^13.3.2"
           ]
