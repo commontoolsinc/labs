@@ -200,7 +200,7 @@ const CharmTable = (
                   </td>
                   <td className="px-6 py-4">
                     <NavLink to={`/${replicaName}/${id}`}>
-                      #{id?.slice(-4)}
+                      #{id}
                     </NavLink>
                   </td>
                   <td className="px-6 py-4">
