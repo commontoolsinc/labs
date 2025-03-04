@@ -1,5 +1,5 @@
 // Load .env file
-import { parse } from "https://deno.land/std@0.224.0/flags/mod.ts";
+import { parseArgs } from "https://deno.land/std@0.224.0/cli/parse_args.ts";
 import {
   CharmManager,
   compileRecipe,
@@ -9,7 +9,10 @@ import {
 import { getEntityId, isStream } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 
-let { space, charmId, recipeFile, cause } = parse(Deno.args);
+const { space, charmId, recipeFile, cause } = parseArgs(Deno.args, {
+  string: ["space", "charmId", "recipeFile", "cause"],
+  default: {},
+});
 
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
@@ -18,10 +21,10 @@ storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
 
 async function main() {
-  console.log("params:", { space, charmId, recipeFile, cause });
   const identity = await Identity.fromPassphrase("common-cli");
+  console.log("params:", { space, identity, charmId, recipeFile, cause });
   const manager = await CharmManager.open({
-    space: space ?? identity.did(),
+    space: (space as `did:key:${string}`) ?? identity.did(),
     signer: identity,
   });
   const charms = await manager.getCharms();
