@@ -16,7 +16,7 @@ import {
 } from "./query-result-proxy.ts";
 import { isCell } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { createRef } from "./doc-map.ts";
+import { createRef, getDocByEntityId } from "./doc-map.ts";
 
 export function extractDefaultValues(schema: any): any {
   if (typeof schema !== "object" || schema === null) return undefined;
@@ -556,10 +556,20 @@ export function normalizeToDocLinks(
           // transition from a previous run, but only if the value didn't
           // change as well.
         } else {
-          value[i] = { cell: getDoc(value[i]), path: [] } satisfies DocLink;
-          value[i].cell.entityId = itemId;
-          value[i].cell.space = parentDoc.space;
-          value[i].cell.sourceCell = parentDoc;
+          const previousDoc = getDocByEntityId(parentDoc.space!, itemId, false);
+          if (previousDoc) {
+            // TODO(seefeld): We should instead accumulate the changes and send
+            // them back as a whole. Do that together with no longer changing
+            // data inline?
+            previousDoc.send(value[i]);
+            value[i] = previousDoc;
+          } else {
+            value[i] = { cell: getDoc(value[i]), path: [] } satisfies DocLink;
+            // Have to do it manually, since we're not specifying the cause, but the entityId directly.
+            value[i].cell.entityId = itemId;
+            value[i].cell.space = parentDoc.space;
+            value[i].cell.sourceCell = parentDoc;
+          }
 
           preceedingItemId = itemId;
           log?.writes.push(value[i]);
