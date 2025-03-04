@@ -17,6 +17,7 @@ import type {
   CommitData,
   ConflictError,
   ConnectionError,
+  DIDKey,
   Entity,
   Fact,
   JSONValue,
@@ -181,7 +182,17 @@ const readAddress = (
     : base;
   const { ok: principal, error } = parseDID(did);
   if (error) {
-    return { error };
+    // return { error };
+    // ℹ️ We suppress error for now as we don't want to break clients that
+    // use non did identifiers. We will make things stricter in the next
+    // iteration
+    console.error(error);
+    return {
+      ok: {
+        address: url.protocol === "file:" ? url : null,
+        subject: did as DIDKey,
+      },
+    };
   }
 
   return {
@@ -233,7 +244,7 @@ export const open = async <Subject extends MemorySpace>({
     const session = new Space(subject as Subject, database);
     return { ok: session };
   } catch (cause) {
-    throw Error.connection(url, cause as SqliteError);
+    return { error: Error.connection(url, cause as SqliteError) };
   }
 };
 

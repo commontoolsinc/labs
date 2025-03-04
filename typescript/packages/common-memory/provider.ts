@@ -180,7 +180,6 @@ class MemoryProviderSession<
     console.log("Invoke", invocation, authorization);
 
     const { error } = await Access.claim(invocation, authorization);
-    console.log({ error });
 
     if (error) {
       return this.perform({

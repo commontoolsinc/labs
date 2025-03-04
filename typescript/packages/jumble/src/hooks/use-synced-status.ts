@@ -1,15 +1,18 @@
-import { CharmManager } from "@commontools/charm";
 import { useEffect, useState } from "react";
+import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 
-export function useSyncedStatus(charmManager: CharmManager, intervalMs = 5000) {
+export function useSyncedStatus(
+  intervalMs = 5000,
+) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+  const { charmManager } = useCharmManager();
   useEffect(() => {
     let isMounted = true;
     let isCheckingSync = false;
 
     const checkSyncStatus = async () => {
-      if (!isMounted || isCheckingSync) return;
+      if (!isMounted || isCheckingSync || !charmManager) return;
 
       isCheckingSync = true;
       setIsSyncing(true);
