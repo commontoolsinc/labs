@@ -109,9 +109,7 @@ const Bytes = z
       bytes: z.string().describe("Base64 encoded binary"),
     }),
   })
-  .transform<Uint8Array>((source) =>
-    JSON.decode<Uint8Array>(JSON.encode(source) as Uint8Array)
-  )
+  .transform(Codec.Bytes.fromJSON)
   .describe("Bytes in DAG-JSON format");
 
 const Signature = Bytes.describe("Signature");
