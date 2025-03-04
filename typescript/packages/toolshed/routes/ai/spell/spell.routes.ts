@@ -4,18 +4,28 @@ import { jsonContent } from "stoker/openapi/helpers";
 import {
   CasterRequestSchema,
   CasterResponseSchema,
-  ProcessSchemaRequestSchema,
-  ProcessSchemaResponseSchema,
-  RecastRequestSchema,
-  RecastResponseSchema,
-  ReuseRequestSchema,
-  ReuseResponseSchema,
   SearchSchemaRequestSchema,
   SearchSchemaResponseSchema,
   SpellSearchRequestSchema,
   SpellSearchResponseSchema,
-} from "./spell.handlers.ts";
+} from "@/routes/ai/spell/spell.handlers.ts";
 import { z } from "zod";
+import {
+  FulfillSchemaRequestSchema,
+  FulfillSchemaResponseSchema,
+} from "@/routes/ai/spell/handlers/fulfill.ts";
+import {
+  ImagineDataRequestSchema,
+  ImagineDataResponseSchema,
+} from "@/routes/ai/spell/handlers/imagine.ts";
+import {
+  RecastRequestSchema,
+  RecastResponseSchema,
+} from "@/routes/ai/spell/handlers/recast.ts";
+import {
+  ReuseRequestSchema,
+  ReuseResponseSchema,
+} from "@/routes/ai/spell/handlers/reuse.ts";
 
 const tags = ["Spellcaster"];
 
@@ -24,6 +34,8 @@ const ErrorResponseSchema = z.object({
 });
 
 export const fulfill = createRoute({
+  description:
+    "Search blobs to find real data fragments that can be stitched together to fulfill the passed schema. Extremely slow.",
   path: "/api/ai/spell/fulfill",
   method: "post",
   tags,
@@ -31,14 +43,14 @@ export const fulfill = createRoute({
     body: {
       content: {
         "application/json": {
-          schema: ProcessSchemaRequestSchema,
+          schema: FulfillSchemaRequestSchema,
         },
       },
     },
   },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(
-      ProcessSchemaResponseSchema,
+      FulfillSchemaResponseSchema,
       "The processed schema result",
     ),
     [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(
@@ -48,9 +60,39 @@ export const fulfill = createRoute({
   },
 });
 
-export type ProcessSchemaRoute = typeof fulfill;
+export type FulfillSchemaRoute = typeof fulfill;
+
+export const imagine = createRoute({
+  description:
+    "Hallucinate JSON data that conforms to a JSON schema, using an LLM.",
+  path: "/api/ai/spell/imagine",
+  method: "post",
+  tags,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: ImagineDataRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      ImagineDataResponseSchema,
+      "The processed schema result",
+    ),
+    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(
+      ErrorResponseSchema,
+      "An error occurred",
+    ),
+  },
+});
+
+export type ImagineDataRoute = typeof imagine;
 
 export const search = createRoute({
+  description: "OBSELETE: will be removed.",
   path: "/api/ai/spell/smart-search",
   method: "post",
   tags,
@@ -78,6 +120,7 @@ export const search = createRoute({
 export type SearchSchemaRoute = typeof search;
 
 export const caster = createRoute({
+  description: "OBSELETE: will be removed.",
   path: "/ai/spell/caster",
   method: "post",
   tags,
@@ -105,6 +148,7 @@ export const caster = createRoute({
 export type CasterSchemaRoute = typeof caster;
 
 export const spellSearch = createRoute({
+  description: "OBSELETE: will be removed.",
   path: "/api/ai/spell/search",
   method: "post",
   tags,
@@ -132,6 +176,8 @@ export const spellSearch = createRoute({
 export type SpellSearchRoute = typeof spellSearch;
 
 export const recast = createRoute({
+  description:
+    "Cast the spell of a given charm on a (compatible) candidate cell.",
   path: "/api/ai/spell/recast",
   method: "post",
   tags,
@@ -157,6 +203,7 @@ export const recast = createRoute({
 });
 
 export const reuse = createRoute({
+  description: "Cast a compatible spell using this charm's data.",
   path: "/api/ai/spell/reuse",
   method: "post",
   tags,

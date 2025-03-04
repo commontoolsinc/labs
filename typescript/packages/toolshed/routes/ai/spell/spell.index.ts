@@ -6,6 +6,10 @@ import { createRouter } from "@/lib/create-app.ts";
 import { cors } from "@hono/hono/cors";
 import * as handlers from "./spell.handlers.ts";
 import * as routes from "./spell.routes.ts";
+import { fulfill } from "./handlers/fulfill.ts";
+import { imagine } from "./handlers/imagine.ts";
+import { recast } from "./handlers/recast.ts";
+import { reuse } from "./handlers/reuse.ts";
 
 const router = createRouter();
 
@@ -22,9 +26,9 @@ router.use(
 );
 
 const Router = router
-  .openapi(routes.recast, handlers.recast)
-  .openapi(routes.reuse, handlers.reuse)
-  .openapi(routes.fulfill, handlers.fulfill)
-  .openapi(routes.spellSearch, handlers.spellSearch);
+  .openapi(routes.recast, recast)
+  .openapi(routes.reuse, reuse)
+  .openapi(routes.imagine, imagine)
+  .openapi(routes.fulfill, fulfill);
 
 export default Router;
