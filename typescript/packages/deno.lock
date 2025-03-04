@@ -7251,7 +7251,8 @@
         ],
         "packageJson": {
           "dependencies": [
-            "npm:merkle-reference@^2.0.1"
+            "npm:merkle-reference@^2.0.1",
+            "npm:multiformats@^13.3.2"
           ]
         }
       },
