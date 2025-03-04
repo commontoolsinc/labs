@@ -24,7 +24,7 @@ async function main() {
   const identity = await Identity.fromPassphrase("common-cli");
   console.log("params:", { space, identity, charmId, recipeFile, cause });
   const manager = await CharmManager.open({
-    space: space ?? identity.did(),
+    space: (space as `did:key:${string}`) ?? identity.did(),
     signer: identity,
   });
   const charms = await manager.getCharms();
