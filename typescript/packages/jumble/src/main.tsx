@@ -26,6 +26,11 @@ import SpellbookLaunchView from "./views/spellbook/SpellbookLaunchView.tsx";
 import { ActionManagerProvider } from "./contexts/ActionManagerContext.tsx";
 import { ROUTES } from "./routes.ts";
 
+const ReplicaRedirect = () => {
+  const savedReplica = localStorage.getItem("replica");
+  return <Navigate to={savedReplica || ROUTES.defaultReplica} replace />;
+};
+
 setupIframe();
 
 createRoot(document.getElementById("root")!).render(
@@ -37,10 +42,10 @@ createRoot(document.getElementById("root")!).render(
             <LanguageModelProvider>
               <Router>
                 <Routes>
-                  {/* Redirect root to common-knowledge */}
+                  {/* Redirect root to saved replica or default */}
                   <Route
                     path={ROUTES.root}
-                    element={<Navigate to={ROUTES.defaultReplica} replace />}
+                    element={<ReplicaRedirect />}
                   />
 
                   <Route

@@ -17,28 +17,20 @@ export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = (
   { children },
 ) => {
   const { replicaName } = useParams<{ replicaName: string }>();
-  const [effectiveReplica, setEffectiveReplica] = React.useState<string>(
-    () => localStorage.getItem("lastReplica") || "common-knowledge",
-  );
   const { user } = useAuthentication();
 
-  React.useEffect(() => {
+  const charmManager = useMemo(() => {
     console.log("CharmManagerProvider", replicaName);
 
     if (replicaName) {
-      // When a replica is provided in the URL, use it and save it as the last visited
-      setEffectiveReplica(replicaName);
       localStorage.setItem("lastReplica", replicaName);
     }
-  }, [replicaName]);
-
-  const charmManager = useMemo(() => {
-    return user ? new CharmManager(effectiveReplica, user) : null;
-  }, [effectiveReplica, user]);
+    return user && replicaName ? new CharmManager(replicaName, user) : null;
+  }, [replicaName, user]);
 
   return (
     <CharmManagerContext.Provider
-      value={{ charmManager, currentReplica: effectiveReplica }}
+      value={{ charmManager, currentReplica: replicaName || "" }}
     >
       {children}
     </CharmManagerContext.Provider>
