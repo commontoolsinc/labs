@@ -1,4 +1,11 @@
-import { JSONSchema, Module, NAME, Recipe, TYPE, UI } from "@commontools/builder";
+import {
+  JSONSchema,
+  Module,
+  NAME,
+  Recipe,
+  TYPE,
+  UI,
+} from "@commontools/builder";
 import {
   type Cell,
   createRef,
@@ -97,7 +104,11 @@ export class CharmManager {
   async pin(charm: Cell<Charm>) {
     await storage.syncCell(this.pinned);
     // Check if already pinned
-    if (!filterOutEntity(this.pinnedCharms, charm).some((c) => isSameEntity(c, charm))) {
+    if (
+      !filterOutEntity(this.pinnedCharms, charm).some((c) =>
+        isSameEntity(c, charm)
+      )
+    ) {
       this.pinnedCharms.push(charm);
       await idle();
     }
@@ -159,11 +170,16 @@ export class CharmManager {
     const recipeId = await this.syncRecipe(charm);
     const recipe = recipeId ? getRecipe(recipeId) : undefined;
 
+    if (!recipe || charm.get() === undefined) {
+      console.warn(`Not a charm: ${JSON.stringify(getEntityId(charm))}`);
+    }
+
     let resultSchema: JSONSchema | undefined = recipe?.resultSchema;
 
     // Unless there is a non-object schema, add UI and NAME properties if present
     if (!resultSchema || resultSchema.type === "object") {
-      const { [UI]: hasUI, [NAME]: hasName } = charm.getAsDocLink().cell!.get();
+      const { [UI]: hasUI, [NAME]: hasName } =
+        charm.getAsDocLink().cell.get() ?? {};
       if (hasUI || hasName) {
         // Copy the original schema, so we can modify properties without
         // affecting other uses of the same spell.
@@ -200,7 +216,11 @@ export class CharmManager {
     path: string[] = [],
     schema?: JSONSchema,
   ): Promise<Cell<T>> {
-    return (await storage.syncCellById(this.space, id)).asCell(path, undefined, schema);
+    return (await storage.syncCellById(this.space, id)).asCell(
+      path,
+      undefined,
+      schema,
+    );
   }
 
   // Return Cell with argument content according to the schema of the charm.
@@ -209,7 +229,9 @@ export class CharmManager {
     const recipeId = source?.get()?.[TYPE];
     const recipe = getRecipe(recipeId);
     const argumentSchema = recipe?.argumentSchema;
-    return source?.key("argument").asSchema(argumentSchema!) as Cell<T> | undefined;
+    return source?.key("argument").asSchema(argumentSchema!) as
+      | Cell<T>
+      | undefined;
   }
 
   // note: removing a charm doesn't clean up the charm's cells
@@ -230,7 +252,11 @@ export class CharmManager {
     return false;
   }
 
-  async runPersistent(recipe: Recipe | Module, inputs?: any, cause?: any): Promise<Cell<Charm>> {
+  async runPersistent(
+    recipe: Recipe | Module,
+    inputs?: any,
+    cause?: any,
+  ): Promise<Cell<Charm>> {
     await idle();
 
     // Fill in missing parameters from other charms. It's a simple match on
@@ -286,7 +312,10 @@ export class CharmManager {
 
     await syncAllMentionedCells(inputs);
 
-    const doc = await storage.syncCellById(this.space, createRef({ recipe, inputs }, cause));
+    const doc = await storage.syncCellById(
+      this.space,
+      createRef({ recipe, inputs }, cause),
+    );
     const resultDoc = run(recipe, inputs, doc);
 
     // FIXME(ja): should we add / sync explicitly here?
@@ -300,7 +329,10 @@ export class CharmManager {
     const recipeId = charm.getSourceCell()?.get()?.[TYPE];
     if (!recipeId) return Promise.resolve(undefined);
 
-    return Promise.all([this.syncRecipeCells(recipeId), this.syncRecipeBlobby(recipeId)]).then(
+    return Promise.all([
+      this.syncRecipeCells(recipeId),
+      this.syncRecipeBlobby(recipeId),
+    ]).then(
       () => recipeId,
     );
   }
