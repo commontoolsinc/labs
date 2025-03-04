@@ -9,7 +9,7 @@ import {
 import { getEntityId, isStream } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 
-const { space, charmId, recipeFile, cause } = parse(Deno.args);
+let { space, charmId, recipeFile, cause } = parse(Deno.args);
 
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
@@ -18,6 +18,7 @@ storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
 
 async function main() {
+  console.log("params:", { space, charmId, recipeFile, cause });
   const identity = await Identity.fromPassphrase("common-cli");
   const manager = await CharmManager.open({
     space: space ?? identity.did(),

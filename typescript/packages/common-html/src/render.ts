@@ -248,7 +248,7 @@ const cleanEventProp = (key: string) => {
   if (!key.startsWith("on")) {
     return null;
   }
-  return key.slice(2);
+  return key.slice(2).toLowerCase();
 };
 
 /** Attach an event listener, returning a function to cancel the listener */

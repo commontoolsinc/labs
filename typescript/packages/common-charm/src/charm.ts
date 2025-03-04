@@ -185,11 +185,16 @@ export class CharmManager {
     const recipeId = await this.syncRecipe(charm);
     const recipe = recipeId ? getRecipe(recipeId) : undefined;
 
+    if (!recipe || charm.get() === undefined) {
+      console.warn(`Not a charm: ${JSON.stringify(getEntityId(charm))}`);
+    }
+
     let resultSchema: JSONSchema | undefined = recipe?.resultSchema;
 
     // Unless there is a non-object schema, add UI and NAME properties if present
     if (!resultSchema || resultSchema.type === "object") {
-      const { [UI]: hasUI, [NAME]: hasName } = charm.getAsDocLink().cell!.get();
+      const { [UI]: hasUI, [NAME]: hasName } =
+        charm.getAsDocLink().cell.get() ?? {};
       if (hasUI || hasName) {
         // Copy the original schema, so we can modify properties without
         // affecting other uses of the same spell.
