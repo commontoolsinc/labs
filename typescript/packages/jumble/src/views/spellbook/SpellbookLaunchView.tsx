@@ -25,8 +25,8 @@ export default function SpellbookLaunchView() {
         }
 
         // Get AI suggestions for initial data
-        const fulfillUrl = `/api/ai/spell/fulfill`;
-        const response = await fetch(fulfillUrl, {
+        const imagineUrl = `/api/ai/spell/imagine`;
+        const response = await fetch(imagineUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -34,23 +34,25 @@ export default function SpellbookLaunchView() {
           },
           body: JSON.stringify({
             schema: recipe.argumentSchema?.properties,
-            many: false,
-            prompt: "",
+            prompt: "", // TODO(bf): we can pass something to make this more personal
             options: {
-              format: "json",
-              validate: false,
-              maxExamples: 5,
+              many: false,
             },
           }),
         });
 
         let initialData = {};
         if (response.ok) {
-          const spellCasterFulfillResponse = await response.json();
-          // TODO(jake): If there's no good initialData from spellcaster above,
-          // what happens? Can/should we generate fake json data to fill the charm?
-          initialData = spellCasterFulfillResponse.result;
-          console.log("AI response:", spellCasterFulfillResponse);
+          const compatibleData = await response.json();
+          initialData = compatibleData.result;
+          console.log("AI response:", compatibleData);
+        } else {
+          console.error(
+            `Failed to get AI suggestions: ${response.status} ${response.statusText}`,
+          );
+          throw new Error(
+            `Failed to get AI suggestions: ${response.status} ${response.statusText}`,
+          );
         }
 
         // Run the recipe with the initial data
@@ -82,7 +84,9 @@ export default function SpellbookLaunchView() {
     <div className="flex items-center justify-center h-screen">
       <div className="text-center">
         <h1 className="text-2xl font-bold mb-4">Launching Spell...</h1>
-        <p className="text-gray-600">Please wait while we prepare your spell.</p>
+        <p className="text-gray-600">
+          Please wait while we prepare your spell.
+        </p>
       </div>
     </div>
   );
