@@ -2,9 +2,9 @@ import { Identity } from "./identity.ts";
 import { bufferSourceToArrayBuffer, random } from "./utils.ts";
 
 const RP = "Common Tools";
-const RP_ID = new URL(globalThis.location.href).host;
 const PRF_SALT = new TextEncoder().encode("PRF_SALT");
 const TIMEOUT = 60_000;
+const RP_ID = () => new URL(globalThis.location.href).host;
 
 // These are algorithms to use, in order of preference.
 // We prefer ED25519 for security and size, though support
@@ -85,7 +85,7 @@ export class PassKey {
 
     const publicKey: PublicKeyCredentialCreationOptions = {
       challenge,
-      rp: { id: RP_ID, name: RP },
+      rp: { id: RP_ID(), name: RP },
       user,
       attestation: "none", // default
       authenticatorSelection: {
@@ -131,7 +131,7 @@ export class PassKey {
       publicKey: {
         allowCredentials,
         challenge: random(32),
-        rpId: RP_ID,
+        rpId: RP_ID(),
         userVerification: userVerification ?? "preferred",
         extensions: { prf: { eval: { first: PRF_SALT } } },
         timeout: TIMEOUT,

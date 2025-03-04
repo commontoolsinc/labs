@@ -1,4 +1,5 @@
 export * from "./interface.ts";
+export * as Type from "./interface.ts";
 export * as Memory from "./memory.ts";
 export * as Space from "./space.ts";
 export * as Subscription from "./subscription.ts";
@@ -10,3 +11,4 @@ export * as Fact from "./fact.ts";
 export * as ChangesBuilder from "./changes.ts";
 export * as TransactionBuilder from "./transaction.ts";
 export * as CommitBuilder from "./commit.ts";
+export * as Principal from "./principal.ts";

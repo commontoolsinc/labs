@@ -4,12 +4,12 @@ import * as Changes from "../changes.ts";
 import * as Commit from "../commit.ts";
 import * as Transaction from "../transaction.ts";
 import * as Fact from "../fact.ts";
-import { createTemporaryDirectory, refer } from "../util.ts";
+import { createTemporaryDirectory } from "../util.ts";
+import { refer } from "merkle-reference";
 
+import { alice, space } from "./principal.ts";
 const the = "application/json";
 const doc = `of:${refer({ hello: "world" })}` as const;
-const space = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
-const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
 
 const test = (
   title: string,
@@ -39,14 +39,16 @@ const test = (
   }
 };
 
+const DB = new URL(`memory:${space.did()}`);
+
 test(
   "querying non existing memory returns no facts",
-  new URL(`memory:${space}`),
+  new URL(`memory:${space.did()}`),
   async (session) => {
     const result = await Space.query(session, {
       cmd: "/memory/query",
-      iss: alice,
-      sub: space,
+      iss: alice.did(),
+      sub: space.did(),
       args: {
         select: {
           [doc]: {
@@ -54,13 +56,14 @@ test(
           },
         },
       },
+      prf: [],
     });
 
     assertEquals(
       result,
       {
         ok: {
-          [space]: {
+          [space.did()]: {
             [doc]: {
               ["application/json"]: {},
             },
@@ -72,7 +75,7 @@ test(
   },
 );
 
-test("create new memory", new URL(`memory:${space}`), async (session) => {
+test("create new memory", DB, async (session) => {
   const v1 = Fact.assert({
     the: "application/json",
     of: doc,
@@ -80,13 +83,13 @@ test("create new memory", new URL(`memory:${space}`), async (session) => {
   });
 
   const tr1 = Transaction.create({
-    issuer: alice,
-    subject: space,
+    issuer: alice.did(),
+    subject: space.did(),
     changes: Changes.from([v1]),
   });
 
   const result = await Space.transact(session, tr1);
-  const c1 = Commit.create({ space, transaction: tr1 });
+  const c1 = Commit.create({ space: space.did(), transaction: tr1 });
 
   assertEquals(result, {
     ok: Changes.from([c1]),
@@ -94,8 +97,8 @@ test("create new memory", new URL(`memory:${space}`), async (session) => {
 
   const read = Space.query(session, {
     cmd: "/memory/query",
-    iss: alice,
-    sub: space,
+    iss: alice.did(),
+    sub: space.did(),
     args: {
       select: {
         [doc]: {
@@ -105,21 +108,22 @@ test("create new memory", new URL(`memory:${space}`), async (session) => {
         },
       },
     },
+    prf: [],
   });
 
   assertEquals(read, {
     ok: {
-      [space]: Changes.from([v1]),
+      [space.did()]: Changes.from([v1]),
     },
   });
 });
 
-test("explicit empty creation", new URL(`memory:${space}`), async (session) => {
+test("explicit empty creation", DB, async (session) => {
   assertEquals(
     await Space.query(session, {
       cmd: "/memory/query",
-      iss: alice,
-      sub: space,
+      iss: alice.did(),
+      sub: space.did(),
       args: {
         select: {
           [doc]: {
@@ -127,10 +131,11 @@ test("explicit empty creation", new URL(`memory:${space}`), async (session) => {
           },
         },
       },
+      prf: [],
     }),
     {
       ok: {
-        [space]: {
+        [space.did()]: {
           [doc]: {
             [the]: {},
           },
@@ -146,8 +151,8 @@ test("explicit empty creation", new URL(`memory:${space}`), async (session) => {
   });
 
   const transaction = Transaction.create({
-    issuer: alice,
-    subject: space,
+    issuer: alice.did(),
+    subject: space.did(),
     changes: Changes.from([assertion]),
   });
 
@@ -157,8 +162,8 @@ test("explicit empty creation", new URL(`memory:${space}`), async (session) => {
   assertEquals(
     await Space.query(session, {
       cmd: "/memory/query",
-      iss: alice,
-      sub: space,
+      iss: alice.did(),
+      sub: space.did(),
       args: {
         select: {
           [doc]: {
@@ -166,20 +171,21 @@ test("explicit empty creation", new URL(`memory:${space}`), async (session) => {
           },
         },
       },
+      prf: [],
     }),
     {
       ok: {
-        [space]: Changes.from([assertion]),
+        [space.did()]: Changes.from([assertion]),
       },
     },
   );
 });
 
-test("explicit {}", new URL(`memory:${space}`), async (session) => {
+test("explicit {}", DB, async (session) => {
   const v1 = Fact.assert({ the, of: doc, is: {} });
   const create = Transaction.create({
-    subject: space,
-    issuer: alice,
+    subject: space.did(),
+    issuer: alice.did(),
     changes: Changes.from([v1]),
   });
 
@@ -187,7 +193,7 @@ test("explicit {}", new URL(`memory:${space}`), async (session) => {
 
   assert(init.ok);
 
-  const c1 = Commit.create({ space, transaction: create });
+  const c1 = Commit.create({ space: space.did(), transaction: create });
 
   assertEquals(init, {
     ok: Changes.from([c1]),
@@ -201,28 +207,32 @@ test("explicit {}", new URL(`memory:${space}`), async (session) => {
   });
 
   const update = Transaction.create({
-    issuer: alice,
-    subject: space,
+    issuer: alice.did(),
+    subject: space.did(),
     changes: Changes.from([v2]),
   });
 
-  const c2 = Commit.create({ space, transaction: update, cause: c1 });
+  const c2 = Commit.create({
+    space: space.did(),
+    transaction: update,
+    cause: c1,
+  });
 
   assertEquals(await Space.transact(session, update), {
     ok: Changes.from([c2]),
   });
 });
 
-test("updates memory", new URL(`memory:${space}`), async (session) => {
+test("updates memory", DB, async (session) => {
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
   const init = Transaction.create({
-    issuer: alice,
-    subject: space,
+    issuer: alice.did(),
+    subject: space.did(),
     changes: Changes.from([v1]),
   });
 
   const create = await Space.transact(session, init);
-  const c1 = Commit.create({ space, transaction: init });
+  const c1 = Commit.create({ space: space.did(), transaction: init });
 
   assertEquals(create, {
     ok: Changes.from([c1]),
@@ -236,13 +246,17 @@ test("updates memory", new URL(`memory:${space}`), async (session) => {
   });
 
   const change = Transaction.create({
-    issuer: alice,
-    subject: space,
+    issuer: alice.did(),
+    subject: space.did(),
     changes: Changes.from([v2]),
   });
 
   const update = await Space.transact(session, change);
-  const c2 = Commit.create({ space, transaction: change, cause: c1 });
+  const c2 = Commit.create({
+    space: space.did(),
+    transaction: change,
+    cause: c1,
+  });
 
   assertEquals(
     update,
@@ -253,148 +267,136 @@ test("updates memory", new URL(`memory:${space}`), async (session) => {
   );
 });
 
-test(
-  "fails updating non-existing memory",
-  new URL(`memory:${space}`),
-  async (session) => {
-    const v1 = Fact.assert({
-      the,
-      of: doc,
-      is: { v: 1 },
-    });
+test("fails updating non-existing memory", DB, async (session) => {
+  const v1 = Fact.assert({
+    the,
+    of: doc,
+    is: { v: 1 },
+  });
 
-    const v2 = Fact.assert({
-      the,
-      of: doc,
-      is: { v: 2 },
-      cause: v1,
-    });
+  const v2 = Fact.assert({
+    the,
+    of: doc,
+    is: { v: 2 },
+    cause: v1,
+  });
 
-    const tr = Transaction.create({
-      issuer: alice,
-      subject: space,
-      changes: Changes.from([v2]),
-    });
+  const tr = Transaction.create({
+    issuer: alice.did(),
+    subject: space.did(),
+    changes: Changes.from([v2]),
+  });
 
-    const result = await Space.transact(session, tr);
+  const result = await Space.transact(session, tr);
 
-    assert(result.error, "Update should fail if document does not exists");
-    assert(result.error.name === "ConflictError");
-    assertEquals(result.error.conflict, {
-      space,
-      the,
-      of: doc,
-      expected: refer(v1),
-      actual: null,
-    });
-  },
-);
+  assert(result.error, "Update should fail if document does not exists");
+  assert(result.error.name === "ConflictError");
+  assertEquals(result.error.conflict, {
+    space: space.did(),
+    the,
+    of: doc,
+    expected: refer(v1),
+    actual: null,
+  });
+});
 
-test(
-  "create memory fails if already exists",
-  new URL(`memory:${space}`),
-  async (session) => {
-    const base = refer(Fact.unclaimed({ the, of: doc }));
-    const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
+test("create memory fails if already exists", DB, async (session) => {
+  const base = refer(Fact.unclaimed({ the, of: doc }));
+  const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
 
-    const create = Transaction.create({
-      issuer: alice,
-      subject: space,
-      changes: Changes.from([v1]),
-    });
+  const create = Transaction.create({
+    issuer: alice.did(),
+    subject: space.did(),
+    changes: Changes.from([v1]),
+  });
 
-    const init = await Space.transact(session, create);
+  const init = await Space.transact(session, create);
 
-    assert(init.ok, "Document created");
+  assert(init.ok, "Document created");
 
-    const r1 = Fact.assert({ the, of: doc, is: { r: 1 } });
+  const r1 = Fact.assert({ the, of: doc, is: { r: 1 } });
 
-    const createRace = Transaction.create({
-      issuer: alice,
-      subject: space,
-      changes: Changes.from([r1]),
-    });
+  const createRace = Transaction.create({
+    issuer: alice.did(),
+    subject: space.did(),
+    changes: Changes.from([r1]),
+  });
 
-    const conflict = await Space.transact(session, createRace);
+  const conflict = await Space.transact(session, createRace);
 
-    assert(conflict.error, "Create fail when already exists");
-    assert(conflict.error.name === "ConflictError");
-    assertEquals(conflict.error.conflict, {
-      space,
-      the,
-      of: doc,
-      expected: null,
-      actual: v1,
-    });
-  },
-);
+  assert(conflict.error, "Create fail when already exists");
+  assert(conflict.error.name === "ConflictError");
+  assertEquals(conflict.error.conflict, {
+    space: space.did(),
+    the,
+    of: doc,
+    expected: null,
+    actual: v1,
+  });
+});
 
-test(
-  "update does not confuse the/of",
-  new URL(`memory:${space}`),
-  async (session) => {
-    const initial = Fact.assert({ the, of: doc, is: { v: 1 } });
+test("update does not confuse the/of", DB, async (session) => {
+  const initial = Fact.assert({ the, of: doc, is: { v: 1 } });
 
-    const initialize = Transaction.create({
-      issuer: alice,
-      subject: space,
-      changes: Changes.from([initial]),
-    });
+  const initialize = Transaction.create({
+    issuer: alice.did(),
+    subject: space.did(),
+    changes: Changes.from([initial]),
+  });
 
-    const create = await Space.transact(session, initialize);
-    assert(create.ok);
+  const create = await Space.transact(session, initialize);
+  assert(create.ok);
 
-    const malformed = Fact.assert({
-      the,
-      of: `of:${refer({ doc: 2 })}`,
-      is: { a: true },
-      cause: refer(initial),
-    });
+  const malformed = Fact.assert({
+    the,
+    of: `of:${refer({ doc: 2 })}`,
+    is: { a: true },
+    cause: refer(initial),
+  });
 
-    const change = Transaction.create({
-      issuer: alice,
-      subject: space,
-      changes: Changes.from([malformed]),
-    });
+  const change = Transaction.create({
+    issuer: alice.did(),
+    subject: space.did(),
+    changes: Changes.from([malformed]),
+  });
 
-    const update = await Space.transact(session, change);
-    assert(update.error);
-    assert(update.error.name === "ConflictError");
-    assertEquals(update.error.conflict, {
-      space,
-      the,
-      of: malformed.of,
-      expected: refer(initial),
-      actual: null,
-    });
-  },
-);
+  const update = await Space.transact(session, change);
+  assert(update.error);
+  assert(update.error.name === "ConflictError");
+  assertEquals(update.error.conflict, {
+    space: space.did(),
+    the,
+    of: malformed.of,
+    expected: refer(initial),
+    actual: null,
+  });
+});
 
-test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
+test("concurrent update fails", DB, async (session) => {
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
   const t1 = Transaction.create({
-    issuer: alice,
-    subject: space,
+    issuer: alice.did(),
+    subject: space.did(),
     changes: Changes.from([v1]),
   });
 
   const r1 = await Space.transact(session, t1);
   assert(r1.ok);
-  const c1 = Commit.create({ space, transaction: t1 });
+  const c1 = Commit.create({ space: space.did(), transaction: t1 });
   assertEquals(r1, { ok: Changes.from([c1]) });
 
   const v2 = Fact.assert({ the, of: doc, is: { v: 2 }, cause: v1 });
 
   const t2 = Transaction.create({
-    issuer: alice,
-    subject: space,
+    issuer: alice.did(),
+    subject: space.did(),
     changes: Changes.from([v2]),
   });
 
   const r2 = await Space.transact(session, t2);
   assert(r2.ok);
 
-  const c2 = Commit.create({ space, transaction: t2, cause: c1 });
+  const c2 = Commit.create({ space: space.did(), transaction: t2, cause: c1 });
   assertEquals(r2, { ok: Changes.from([c2]) });
 
   const fork = Fact.assert({
@@ -405,8 +407,8 @@ test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
   });
 
   const t3 = Transaction.create({
-    issuer: alice,
-    subject: space,
+    issuer: alice.did(),
+    subject: space.did(),
     changes: Changes.from([fork]),
   });
 
@@ -416,7 +418,7 @@ test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
   assert(r3.error.name === "ConflictError");
 
   assertEquals(r3.error.conflict, {
-    space,
+    space: space.did(),
     the,
     of: doc,
     expected: refer(v1),
@@ -424,87 +426,83 @@ test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
   });
 });
 
-test(
-  "concurrent identical memory creation succeeds",
-  new URL(`memory:${space}`),
-  async (session) => {
-    const v1 = Fact.assert({ the, of: doc, is: { this: doc } });
+test("concurrent identical memory creation succeeds", DB, async (session) => {
+  const v1 = Fact.assert({ the, of: doc, is: { this: doc } });
 
-    const init = Transaction.create({
-      issuer: alice,
-      subject: space,
-      changes: Changes.from([v1]),
-    });
-    const result = await Space.transact(session, init);
-    const c1 = Commit.create({ space, transaction: init });
+  const init = Transaction.create({
+    issuer: alice.did(),
+    subject: space.did(),
+    changes: Changes.from([v1]),
+  });
+  const result = await Space.transact(session, init);
+  const c1 = Commit.create({ space: space.did(), transaction: init });
 
-    assertEquals(result, {
-      ok: Changes.from([c1]),
-    });
+  assertEquals(result, {
+    ok: Changes.from([c1]),
+  });
 
-    const update = await Space.transact(session, init);
-    const c2 = Commit.create({ space, transaction: init, cause: c1 });
+  const update = await Space.transact(session, init);
+  const c2 = Commit.create({
+    space: space.did(),
+    transaction: init,
+    cause: c1,
+  });
 
-    assertEquals(update, {
-      ok: Changes.from([c2]),
-    });
-  },
-);
+  assertEquals(update, {
+    ok: Changes.from([c2]),
+  });
+});
 
-test(
-  "concurrent identical memory updates succeed",
-  new URL(`memory:${space}`),
-  async (session) => {
-    const v1 = Fact.assert({
-      the,
-      of: doc,
-      is: { v: 1 },
-    });
+test("concurrent identical memory updates succeed", DB, async (session) => {
+  const v1 = Fact.assert({
+    the,
+    of: doc,
+    is: { v: 1 },
+  });
 
-    const t1 = Transaction.create({
-      issuer: alice,
-      subject: space,
-      changes: Changes.from([v1]),
-    });
-    const r1 = await Space.transact(session, t1);
+  const t1 = Transaction.create({
+    issuer: alice.did(),
+    subject: space.did(),
+    changes: Changes.from([v1]),
+  });
+  const r1 = await Space.transact(session, t1);
 
-    assert(r1.ok);
+  assert(r1.ok);
 
-    const c1 = Commit.create({ space, transaction: t1 });
-    assertEquals(r1, {
-      ok: Changes.from([c1]),
-    });
+  const c1 = Commit.create({ space: space.did(), transaction: t1 });
+  assertEquals(r1, {
+    ok: Changes.from([c1]),
+  });
 
-    const v2 = Fact.assert({ the, of: doc, is: { v: 2 }, cause: v1 });
+  const v2 = Fact.assert({ the, of: doc, is: { v: 2 }, cause: v1 });
 
-    const t2 = Transaction.create({
-      issuer: alice,
-      subject: space,
-      changes: Changes.from([v2]),
-    });
+  const t2 = Transaction.create({
+    issuer: alice.did(),
+    subject: space.did(),
+    changes: Changes.from([v2]),
+  });
 
-    const r2 = await Space.transact(session, t2);
-    assert(r2.ok);
-    const c2 = Commit.create({ space, transaction: t2, cause: c1 });
+  const r2 = await Space.transact(session, t2);
+  assert(r2.ok);
+  const c2 = Commit.create({ space: space.did(), transaction: t2, cause: c1 });
 
-    assertEquals(r2, {
-      ok: Changes.from([c2]),
-    });
+  assertEquals(r2, {
+    ok: Changes.from([c2]),
+  });
 
-    const r3 = await Space.transact(session, t2);
-    const c3 = Commit.create({ space, transaction: t2, cause: c2 });
+  const r3 = await Space.transact(session, t2);
+  const c3 = Commit.create({ space: space.did(), transaction: t2, cause: c2 });
 
-    assertEquals(r3, {
-      ok: Changes.from([c3]),
-    });
-  },
-);
+  assertEquals(r3, {
+    ok: Changes.from([c3]),
+  });
+});
 
-test("retract unclaimed", new URL(`memory:${space}`), async (session) => {
+test("retract unclaimed", DB, async (session) => {
   const v0 = Fact.unclaimed({ the, of: doc });
   const retract = Transaction.create({
-    issuer: alice,
-    subject: space,
+    issuer: alice.did(),
+    subject: space.did(),
     changes: {
       [doc]: {
         [the]: {
@@ -515,7 +513,7 @@ test("retract unclaimed", new URL(`memory:${space}`), async (session) => {
   });
 
   const retraction = await Space.transact(session, retract);
-  const commit = Commit.create({ space, transaction: retract });
+  const commit = Commit.create({ space: space.did(), transaction: retract });
 
   assertEquals(retraction, {
     ok: Changes.from([commit]),
@@ -523,8 +521,8 @@ test("retract unclaimed", new URL(`memory:${space}`), async (session) => {
 
   const includeRetracted = await session.query({
     cmd: "/memory/query",
-    iss: alice,
-    sub: space,
+    iss: alice.did(),
+    sub: space.did(),
     args: {
       select: {
         [doc]: {
@@ -532,11 +530,12 @@ test("retract unclaimed", new URL(`memory:${space}`), async (session) => {
         },
       },
     },
+    prf: [],
   });
 
   assertEquals(includeRetracted, {
     ok: {
-      [space]: {
+      [space.did()]: {
         [doc]: {
           [the]: {
             [refer(v0).toString()]: {},
@@ -548,8 +547,8 @@ test("retract unclaimed", new URL(`memory:${space}`), async (session) => {
 
   const withoutRetracted = await session.query({
     cmd: "/memory/query",
-    iss: alice,
-    sub: space,
+    iss: alice.did(),
+    sub: space.did(),
     args: {
       select: {
         [doc]: {
@@ -559,11 +558,12 @@ test("retract unclaimed", new URL(`memory:${space}`), async (session) => {
         },
       },
     },
+    prf: [],
   });
 
   assertEquals(withoutRetracted, {
     ok: {
-      [space]: {
+      [space.did()]: {
         [doc]: {
           [the]: {},
         },
@@ -572,25 +572,25 @@ test("retract unclaimed", new URL(`memory:${space}`), async (session) => {
   });
 });
 
-test("retract document", new URL(`memory:${space}`), async (session) => {
+test("retract document", DB, async (session) => {
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
   const t1 = Transaction.create({
-    issuer: alice,
-    subject: space,
+    issuer: alice.did(),
+    subject: space.did(),
     changes: Changes.from([v1]),
   });
   const create = await Space.transact(session, t1);
 
   assert(create.ok, "Document created");
 
-  const c1 = Commit.create({ space, transaction: t1 });
+  const c1 = Commit.create({ space: space.did(), transaction: t1 });
   assertEquals(create, { ok: Changes.from([c1]) });
 
   assertEquals(
     await session.query({
       cmd: "/memory/query",
-      iss: alice,
-      sub: space,
+      iss: alice.did(),
+      sub: space.did(),
       args: {
         select: {
           [doc]: {
@@ -598,10 +598,11 @@ test("retract document", new URL(`memory:${space}`), async (session) => {
           },
         },
       },
+      prf: [],
     }),
     {
       ok: {
-        [space]: Changes.from([v1]),
+        [space.did()]: Changes.from([v1]),
       },
     },
   );
@@ -609,21 +610,25 @@ test("retract document", new URL(`memory:${space}`), async (session) => {
   const v2 = Fact.retract(v1);
 
   const retract = Transaction.create({
-    issuer: alice,
-    subject: space,
+    issuer: alice.did(),
+    subject: space.did(),
     changes: Changes.from([v2]),
   });
 
   const drop = session.transact(retract);
-  const c2 = Commit.create({ space, transaction: retract, cause: c1 });
+  const c2 = Commit.create({
+    space: space.did(),
+    transaction: retract,
+    cause: c1,
+  });
 
   assertEquals(drop, { ok: Changes.from([c2]) });
 
   assertEquals(
     await session.query({
       cmd: "/memory/query",
-      iss: alice,
-      sub: space,
+      iss: alice.did(),
+      sub: space.did(),
       args: {
         select: {
           [doc]: {
@@ -631,9 +636,10 @@ test("retract document", new URL(`memory:${space}`), async (session) => {
           },
         },
       },
+      prf: [],
     }),
     {
-      ok: { [space]: Changes.from([v2]) },
+      ok: { [space.did()]: Changes.from([v2]) },
     },
     "once retracted `is` no longer included",
   );
@@ -641,27 +647,27 @@ test("retract document", new URL(`memory:${space}`), async (session) => {
 
 test(
   "fails to retract if expected version is out of date",
-  new URL(`memory:${space}`),
+  DB,
   async (session) => {
     const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
     const v2 = Fact.assert({ the, of: doc, is: { v: 2 }, cause: v1 });
     const v3 = Fact.assert({ the, of: doc, is: { v: 3 }, cause: v2 });
 
     const t1 = Transaction.create({
-      issuer: alice,
-      subject: space,
+      issuer: alice.did(),
+      subject: space.did(),
       changes: Changes.from([v1]),
     });
 
     const t2 = Transaction.create({
-      issuer: alice,
-      subject: space,
+      issuer: alice.did(),
+      subject: space.did(),
       changes: Changes.from([v2]),
     });
 
     const t3 = Transaction.create({
-      issuer: alice,
-      subject: space,
+      issuer: alice.did(),
+      subject: space.did(),
       changes: Changes.from([v3]),
     });
 
@@ -673,8 +679,8 @@ test(
 
     const result = session.transact(
       Transaction.create({
-        issuer: alice,
-        subject: space,
+        issuer: alice.did(),
+        subject: space.did(),
         changes: Changes.from([r2]),
       }),
     );
@@ -682,7 +688,7 @@ test(
     assert(result.error, "Retract fails if expected version is out of date");
     assert(result.error.name === "ConflictError");
     assertEquals(result.error.conflict, {
-      space,
+      space: space.did(),
       the,
       of: doc,
       expected: refer(v2),
@@ -692,7 +698,7 @@ test(
     assertMatch(
       result.error.message,
       RegExp(
-        `The application/json of ${doc} in ${space} was expected to be ${
+        `The application/json of ${doc} in ${space.did()} was expected to be ${
           refer(
             v2,
           )
@@ -704,31 +710,38 @@ test(
 
 test(
   "new memory creation fails after retraction",
-  new URL(`memory:${alice}`),
+  new URL(`memory:${alice.did()}`),
   async (session) => {
     const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
     const t1 = Transaction.create({
-      issuer: alice,
-      subject: space,
+      issuer: alice.did(),
+      subject: space.did(),
       changes: Changes.from([v1]),
     });
 
     const create = await Space.transact(session, t1);
 
     assert(create.ok, "Document created");
-    const c1 = Commit.create({ space, transaction: t1 });
+    const c1 = Commit.create({ space: space.did(), transaction: t1 });
     assertEquals(create, { ok: Changes.from([c1]) });
 
     const v2 = Fact.retract(v1);
     const t2 = Transaction.create({
-      issuer: alice,
-      subject: space,
+      issuer: alice.did(),
+      subject: space.did(),
       changes: Changes.from([v2]),
     });
 
     const retract = Space.transact(session, t2);
-    const c2 = Commit.create({ space, transaction: t2, cause: c1 });
+    const c2 = Commit.create({
+      space: space.did(),
+      transaction: t2,
+      cause: c1,
+    });
 
+    assertEquals(retract, {
+      ok: Changes.from([c2]),
+    });
     assertEquals(retract, {
       ok: Changes.from([c2]),
     });
@@ -736,8 +749,8 @@ test(
     const v3 = Fact.assert({ the, of: doc, is: { conflict: true } });
 
     const t3 = Transaction.create({
-      issuer: alice,
-      subject: space,
+      issuer: alice.did(),
+      subject: space.did(),
       changes: Changes.from([v3]),
     });
 
@@ -746,7 +759,7 @@ test(
     assert(conflict.error, "Create fails if cause not specified");
     assert(conflict.error.name === "ConflictError");
     assertEquals(conflict.error.conflict, {
-      space: space,
+      space: space.did(),
       the,
       of: doc,
       expected: null,
@@ -755,7 +768,7 @@ test(
   },
 );
 
-test("batch updates", new URL(`memory:${space}`), async (session) => {
+test("batch updates", DB, async (session) => {
   const hi = `of:${refer({ hi: "world" })}` as const;
   const hola = `of:${refer({ hola: "mundo" })}` as const;
   const ciao = `of:${refer({ ciao: "mondo" })}` as const;
@@ -764,8 +777,8 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
   const hola1 = Fact.assert({ the, of: hola, is: { hola: 1 } });
 
   const tr1 = Transaction.create({
-    issuer: alice,
-    subject: space,
+    issuer: alice.did(),
+    subject: space.did(),
     meta: {
       message: "initialize",
     },
@@ -775,7 +788,7 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
   const init = await session.transact(tr1);
   assert(init.ok);
 
-  const c1 = Commit.create({ space, transaction: tr1 });
+  const c1 = Commit.create({ space: space.did(), transaction: tr1 });
 
   assertEquals(init, {
     ok: Changes.from([c1]),
@@ -784,8 +797,8 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
   assertEquals(
     await session.query({
       cmd: "/memory/query",
-      iss: alice,
-      sub: space,
+      iss: alice.did(),
+      sub: space.did(),
       args: {
         select: {
           [hi]: {
@@ -793,10 +806,11 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
           },
         },
       },
+      prf: [],
     }),
     {
       ok: {
-        [space]: Changes.from([hi1]),
+        [space.did()]: Changes.from([hi1]),
       },
     },
   );
@@ -804,8 +818,8 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
   assertEquals(
     await session.query({
       cmd: "/memory/query",
-      iss: alice,
-      sub: space,
+      iss: alice.did(),
+      sub: space.did(),
       args: {
         select: {
           [hola]: {
@@ -813,10 +827,11 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
           },
         },
       },
+      prf: [],
     }),
     {
       ok: {
-        [space]: Changes.from([hola1]),
+        [space.did()]: Changes.from([hola1]),
       },
     },
   );
@@ -826,8 +841,8 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
   const ciao1 = Fact.assert({ the, of: ciao, is: { ciao: 1 } });
 
   const tr2 = Transaction.create({
-    issuer: alice,
-    subject: space,
+    issuer: alice.did(),
+    subject: space.did(),
     meta: {
       message: "update",
     },
@@ -841,14 +856,14 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
   const update = await session.transact(tr2);
   assert(update.ok);
 
-  const c2 = Commit.create({ space, transaction: tr2, cause: c1 });
+  const c2 = Commit.create({ space: space.did(), transaction: tr2, cause: c1 });
   assertEquals(update, { ok: Changes.from([c2]) });
 
   assertEquals(
     await session.query({
       cmd: "/memory/query",
-      iss: alice,
-      sub: space,
+      iss: alice.did(),
+      sub: space.did(),
       args: {
         select: {
           [hi]: {
@@ -856,49 +871,52 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
           },
         },
       },
+      prf: [],
     }),
     {
-      ok: { [space]: Changes.from([hi2]) },
+      ok: { [space.did()]: Changes.from([hi2]) },
     },
   );
 
   assertEquals(
     await session.query({
       cmd: "/memory/query",
-      iss: alice,
-      sub: space,
+      iss: alice.did(),
+      sub: space.did(),
       args: {
         select: {
           [hola]: {},
         },
       },
+      prf: [],
     }),
     {
-      ok: { [space]: Changes.from([hola1]) },
+      ok: { [space.did()]: Changes.from([hola1]) },
     },
   );
 
   assertEquals(
     await session.query({
       cmd: "/memory/query",
-      iss: alice,
-      sub: space,
+      iss: alice.did(),
+      sub: space.did(),
       args: {
         select: {
           [ciao]: {},
         },
       },
+      prf: [],
     }),
     {
-      ok: { [space]: Changes.from([ciao1]) },
+      ok: { [space.did()]: Changes.from([ciao1]) },
     },
   );
 
   // Fails on mismatched invariant
 
   const tr3 = Transaction.create({
-    issuer: alice,
-    subject: space,
+    issuer: alice.did(),
+    subject: space.did(),
     meta: {
       message: "bad invariant",
     },
@@ -912,7 +930,7 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
   assert(badInvariant.error);
   assert(badInvariant.error.name == "ConflictError");
   assertEquals(badInvariant.error.conflict, {
-    space,
+    space: space.did(),
     the,
     of: hi,
     expected: refer(hi1),
@@ -922,23 +940,27 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
   assertEquals(
     await session.query({
       cmd: "/memory/query",
-      iss: alice,
-      sub: space,
+      iss: alice.did(),
+      sub: space.did(),
       args: {
         select: {
           [ciao]: {},
         },
       },
+      prf: [],
     }),
     {
-      ok: { [space]: Changes.from([ciao1]) },
+      ok: { [space.did()]: Changes.from([ciao1]) },
     },
     "doc3 was not updated",
   );
 });
 
 Deno.test("fail to connect to non-existing replica", async () => {
-  const url = new URL(`./${alice}.sqlite`, await createTemporaryDirectory());
+  const url = new URL(
+    `./${space.did()}.sqlite`,
+    await createTemporaryDirectory(),
+  );
   const session = await Space.connect({ url });
 
   await assert(session.error, "Replica does not exist");
@@ -949,17 +971,10 @@ Deno.test("fail to connect to non-existing replica", async () => {
   }
 });
 
-Deno.test("open creates replica if does not exists", async () => {
-  const url = new URL(`./${alice}.sqlite`, await createTemporaryDirectory());
-
-  try {
-    const open = await Space.open({
-      url,
-    });
-
-    await assert(open.ok, "Opened a repository");
-
-    const session = open.ok as Space.View;
+test(
+  "open creates replica if does not exists",
+  new URL(`./${space.did()}.sqlite`, await createTemporaryDirectory()),
+  async (session) => {
     const v1 = Fact.assert({
       the,
       of: doc,
@@ -967,13 +982,13 @@ Deno.test("open creates replica if does not exists", async () => {
     });
 
     const t1 = Transaction.create({
-      issuer: alice,
-      subject: space,
+      issuer: alice.did(),
+      subject: space.did(),
       changes: Changes.from([v1]),
     });
     const create = await Space.transact(session, t1);
     const c1 = Commit.create({
-      space,
+      space: space.did(),
       transaction: t1,
     });
 
@@ -987,42 +1002,46 @@ Deno.test("open creates replica if does not exists", async () => {
 
     const select = session.query({
       cmd: "/memory/query",
-      iss: alice,
-      sub: space,
+      iss: alice.did(),
+      sub: space.did(),
       args: {
         select: {
           [doc]: {},
         },
       },
+      prf: [],
     });
 
     assertEquals(select, {
-      ok: { [space]: Changes.from([v1]) },
+      ok: { [space.did()]: Changes.from([v1]) },
     });
-  } finally {
-    await Deno.remove(url);
-  }
-});
+  },
+);
 
-test("list empty store", new URL(`memory:${space}`), async (session) => {
+test("list empty store", DB, async (session) => {
   const result = session.query({
     cmd: "/memory/query",
-    iss: alice,
-    sub: space,
+    iss: alice.did(),
+    sub: space.did(),
     args: {
       select: {
         [doc]: {},
       },
     },
+    prf: [],
   });
-  assertEquals(result, { ok: { [space]: { [doc]: {} } } }, "no facts exist");
+  assertEquals(
+    result,
+    { ok: { [space.did()]: { [doc]: {} } } },
+    "no facts exist",
+  );
 });
 
-test("list single fact", new URL(`memory:${space}`), async (session) => {
+test("list single fact", DB, async (session) => {
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
   const tr = Transaction.create({
-    issuer: alice,
-    subject: space,
+    issuer: alice.did(),
+    subject: space.did(),
     changes: Changes.from([v1]),
   });
   const write = await session.transact(tr);
@@ -1030,89 +1049,88 @@ test("list single fact", new URL(`memory:${space}`), async (session) => {
 
   const result = session.query({
     cmd: "/memory/query",
-    iss: alice,
-    sub: space,
+    iss: alice.did(),
+    sub: space.did(),
     args: {
       select: {
         [doc]: {},
       },
     },
+    prf: [],
   });
 
   assertEquals(result, {
-    ok: { [space]: Changes.from([v1]) },
+    ok: { [space.did()]: Changes.from([v1]) },
   });
 });
 
-test(
-  "ony list excludes retracted facts",
-  new URL(`memory:${space}`),
-  async (session) => {
-    const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
-    // Create and then retract a fact
-    const tr = Transaction.create({
-      issuer: alice,
-      subject: space,
-      changes: Changes.from([v1]),
-    });
-    const fact = await session.transact(tr);
+test("ony list excludes retracted facts", DB, async (session) => {
+  const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
+  // Create and then retract a fact
+  const tr = Transaction.create({
+    issuer: alice.did(),
+    subject: space.did(),
+    changes: Changes.from([v1]),
+  });
+  const fact = await session.transact(tr);
 
-    assert(fact.ok);
-    const v2 = Fact.retract(v1);
-    const tr2 = Transaction.create({
-      issuer: alice,
-      subject: space,
-      changes: Changes.from([v2]),
-    });
-    const retract = session.transact(tr2);
-    assert(retract.ok);
+  assert(fact.ok);
+  const v2 = Fact.retract(v1);
+  const tr2 = Transaction.create({
+    issuer: alice.did(),
+    subject: space.did(),
+    changes: Changes.from([v2]),
+  });
+  const retract = session.transact(tr2);
+  assert(retract.ok);
 
-    const result = session.query({
-      cmd: "/memory/query",
-      iss: alice,
-      sub: space,
-      args: {
-        select: {
-          _: {
-            ["application/json"]: {
-              _: {
-                is: {},
-              },
+  const result = session.query({
+    cmd: "/memory/query",
+    iss: alice.did(),
+    sub: space.did(),
+    args: {
+      select: {
+        _: {
+          ["application/json"]: {
+            _: {
+              is: {},
             },
           },
         },
       },
-    });
+    },
+    prf: [],
+  });
 
-    assertEquals(
-      result,
-      {
-        ok: { [space]: {} },
-      },
-      "does not list retracted",
-    );
+  assertEquals(
+    result,
+    {
+      ok: { [space.did()]: {} },
+    },
+    "does not list retracted",
+  );
 
-    const withRetractions = session.query({
-      cmd: "/memory/query",
-      iss: alice,
-      sub: space,
-      args: {
-        select: {
-          _: {
-            ["application/json"]: {
-              _: {},
-            },
+  const withRetractions = session.query({
+    cmd: "/memory/query",
+    iss: alice.did(),
+    sub: space.did(),
+    args: {
+      select: {
+        _: {
+          ["application/json"]: {
+            _: {},
           },
         },
       },
-    });
+    },
+    prf: [],
+  });
 
-    assertEquals(
-      withRetractions,
-      {
-        ok: { [space]: Changes.from([v2]) },
-      },
-      "selects retracted facts",
-    );
-  },
-);
+  assertEquals(
+    withRetractions,
+    {
+      ok: { [space.did()]: Changes.from([v2]) },
+    },
+    "selects retracted facts",
+  );
+});

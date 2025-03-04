@@ -22,6 +22,7 @@ import {
 import { storage } from "./storage.ts";
 import { syncRecipeBlobby } from "./syncRecipe.ts";
 import { getSpace, Space } from "@commontools/runner";
+import { DID, Identity, Signer } from "@commontools/identity";
 
 export type Charm = {
   [NAME]?: string;
@@ -85,11 +86,25 @@ export class CharmManager {
   private charms: Cell<Cell<Charm>[]>;
   private pinnedCharms: Cell<Cell<Charm>[]>;
 
-  constructor(private spaceId: string) {
+  static async open(
+    { space, signer }: { space: DID; signer?: Signer },
+  ) {
+    return new this(
+      space,
+      signer ?? await Identity.fromPassphrase("charm manager"),
+    );
+  }
+
+  constructor(
+    private spaceId: string,
+    private signer: Signer,
+  ) {
     this.space = getSpace(this.spaceId);
     this.charmsDoc = getDoc<DocLink[]>([], "charms", this.space);
     this.pinned = getDoc<DocLink[]>([], "pinned-charms", this.space);
     this.charms = this.charmsDoc.asCell([], undefined, charmListSchema);
+
+    storage.setSigner(signer);
     this.pinnedCharms = this.pinned.asCell([], undefined, charmListSchema);
   }
 

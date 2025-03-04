@@ -7,6 +7,7 @@ import {
   storage,
 } from "@commontools/charm";
 import { getEntityId, isStream } from "@commontools/runner";
+import { Identity } from "@commontools/identity";
 
 let { space, charmId, recipeFile, cause } = parse(Deno.args);
 
@@ -17,10 +18,12 @@ storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
 
 async function main() {
-  if (!space) space = "common-cli";
   console.log("params:", { space, charmId, recipeFile, cause });
-
-  const manager = new CharmManager(space);
+  const identity = await Identity.fromPassphrase("common-cli");
+  const manager = await CharmManager.open({
+    space: space ?? identity.did(),
+    signer: identity,
+  });
   const charms = await manager.getCharms();
 
   charms.sink((charms) => {

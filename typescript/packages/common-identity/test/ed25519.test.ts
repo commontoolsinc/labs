@@ -9,17 +9,25 @@ import {
 } from "../src/ed25519/noble.ts";
 import { assert } from "@std/assert";
 import { bytesEqual } from "./utils.ts";
-import { DID } from "../src/interface.ts";
+import { DID, DIDKey } from "../src/interface.ts";
 import * as ed25519 from "@noble/ed25519";
 
-type SignerImpl = NativeEd25519Signer | NobleEd25519Signer;
-type VerifierImpl = NativeEd25519Verifier | NobleEd25519Verifier;
+type SignerImpl<ID extends DIDKey> =
+  | NativeEd25519Signer<ID>
+  | NobleEd25519Signer<ID>;
+type VerifierImpl<ID extends DIDKey> =
+  | NativeEd25519Verifier<ID>
+  | NobleEd25519Verifier<ID>;
 interface SignerClass {
-  fromRaw(rawPrivateKey: Uint8Array): Promise<SignerImpl>;
+  fromRaw<ID extends DIDKey>(
+    rawPrivateKey: Uint8Array,
+  ): Promise<SignerImpl<ID>>;
 }
 interface VerifierClass {
-  fromDid(did: DID): Promise<VerifierImpl>;
-  fromRaw(rawPrivateKey: Uint8Array): Promise<VerifierImpl>;
+  fromDid<ID extends DIDKey>(did: DID): Promise<VerifierImpl<ID>>;
+  fromRaw<ID extends DIDKey>(
+    rawPrivateKey: Uint8Array,
+  ): Promise<VerifierImpl<ID>>;
 }
 
 const TEST_PRIVATE_KEY = new Uint8Array([
@@ -70,15 +78,33 @@ Deno.test("has same results in both impls when generating from noble", async () 
   const buffer = new Uint8Array(32).fill(10);
   const nobleSig = await noble.sign(buffer);
   const nativeSig = await native.sign(buffer);
-  const nobleVerifier = noble.verifier();
-  const nativeVerifier = native.verifier();
-  assert(bytesEqual(nobleSig, nativeSig));
+  const nobleVerifier = noble.verifier;
+  const nativeVerifier = native.verifier;
+  assert(nobleSig.ok);
+  assert(nativeSig.ok);
+  assert(bytesEqual(nobleSig.ok, nativeSig.ok));
   // Impls verify other impl's sig
-  assert(await nobleVerifier.verify(nativeSig, buffer));
-  assert(await nativeVerifier.verify(nobleSig, buffer));
+  assert(
+    (await nobleVerifier.verify({ signature: nativeSig.ok, payload: buffer }))
+      .ok,
+  );
+  assert(
+    (await nativeVerifier.verify({ signature: nobleSig.ok, payload: buffer }))
+      .ok,
+  );
   // Base case that should fail
-  assert(!await nobleVerifier.verify(nobleSig, new Uint8Array(32).fill(1)));
-  assert(!await nativeVerifier.verify(nativeSig, new Uint8Array(32).fill(1)));
+  assert(
+    (await nobleVerifier.verify({
+      signature: nobleSig.ok,
+      payload: new Uint8Array(32).fill(1),
+    })).error,
+  );
+  assert(
+    (await nativeVerifier.verify({
+      signature: nativeSig.ok,
+      payload: new Uint8Array(32).fill(1),
+    })).error,
+  );
 });
 
 // These tests are run with both Native and Noble implementations.
@@ -87,7 +113,7 @@ testBothImpls(
   "derives DID key",
   async (Signer: SignerClass, _Verifier: VerifierClass) => {
     const signer = await Signer.fromRaw(TEST_PRIVATE_KEY);
-    const verifier = signer.verifier();
+    const { verifier } = signer;
     const did = verifier.did();
     assert(did === TEST_DID);
   },
@@ -119,9 +145,11 @@ function testBothImpls(
   fn: (signer: SignerClass, verifier: VerifierClass) => void | Promise<void>,
 ) {
   Deno.test(`(native) ${name}`, async () => {
+    // @ts-expect-error
     return await fn(NativeEd25519Signer, NativeEd25519Verifier);
   });
   Deno.test(`(noble) ${name}`, async () => {
+    // @ts-expect-error
     return await fn(NobleEd25519Signer, NobleEd25519Verifier);
   });
 }

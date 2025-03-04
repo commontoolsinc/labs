@@ -1,6 +1,16 @@
 import { hc } from "@hono/hono/client";
 import { AppType } from "@/app.ts";
-import { Memory } from "@commontools/memory";
+import { Consumer, Principal } from "@commontools/memory";
+import { Memory, memory } from "@/routes/storage/memory.ts";
+
+// Create a spellbook consumer.
+const spellbook = Consumer.open({
+  // Principal is currently derived from `sha256("spellbook")`
+  as: Principal.ED25519Signer.fromString(
+    `MgCYyua1r3jXdanP3MpwJ+GeHk0astGjkoYr0ZL7tk+yCq+0BZORSYOUUzdrPhWEPuh+bjCyQlFtgel4F+kQds5xG45M=`,
+  ),
+  session: memory.session(),
+});
 
 const client = hc<AppType>("http://localhost:8000/");
 export interface BlobOptions {
@@ -34,31 +44,26 @@ function handleErrorResponse(data: any) {
 export async function getAllMemories(
   replica: string,
 ): Promise<Record<string, any>> {
-  const res = await client.api.storage.memory.$post({
-    json: {
-      cmd: "/memory/query",
-      iss: "did:web:common.tools",
-      sub: replica,
-      args: {
-        select: {
-          _: { // <- any id
-            "application/json": {
-              "_": { // <- any cause
-                "is": {},
-              },
-            },
+  const result = await spellbook.mount(replica as Memory.DID).query({
+    select: {
+      _: {
+        // <- any id
+        "application/json": {
+          _: {
+            // <- any cause
+            is: {},
           },
         },
       },
     },
   });
-  const data = await res.json();
-  if ("error" in data) {
-    handleErrorResponse(data);
+
+  if (result.error) {
+    handleErrorResponse(result);
     return [];
   }
 
-  console.log(data);
+  console.log(result);
   // format
   // {
   //   ok: {
@@ -94,7 +99,7 @@ export async function getAllMemories(
   // }
   //
 
-  const replicaData = Array.isArray(data.ok) ? data.ok[0] : data.ok;
+  const replicaData = Array.isArray(result.ok) ? result.ok[0] : result.ok;
   if (!replicaData || !replicaData[replica]) {
     return {};
   }
@@ -119,31 +124,22 @@ export async function getAllMemories(
   return memoryMap;
 }
 
-export async function getMemory(
-  key: string,
-  replica: string,
-): Promise<any> {
-  const res = await client.api.storage.memory.$post({
-    json: {
-      cmd: "/memory/query",
-      iss: "did:web:common.tools",
-      sub: replica,
-      args: {
-        select: {
-          ["of:" + key]: {
-            "application/json": {
-              "_": { // <- any cause
-                "is": {},
-              },
-            },
+export async function getMemory(key: string, replica: string): Promise<any> {
+  const result = await spellbook.mount(replica as Memory.DID).query({
+    select: {
+      ["of:" + key]: {
+        "application/json": {
+          _: {
+            // <- any cause
+            is: {},
           },
         },
       },
     },
   });
-  const data = await res.json();
-  if ("error" in data) {
-    throw handleErrorResponse(data);
+
+  if (result.error) {
+    throw handleErrorResponse(result);
   }
 
   // format
@@ -164,7 +160,7 @@ export async function getMemory(
   // }
   //
   //
-  const memory = Array.isArray(data.ok) ? data.ok[0] : data.ok;
+  const memory = Array.isArray(result.ok) ? result.ok[0] : result.ok;
   const memoryData = memory[replica]["of:" + key]["application/json"];
   const [, firstValue] = Object.entries(memoryData)[0];
   return (firstValue as any)?.is;

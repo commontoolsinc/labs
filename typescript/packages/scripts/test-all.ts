@@ -7,7 +7,6 @@ const manifest = JSON.parse(await Deno.readTextFile("./deno.json"));
 const members: string[] = manifest.workspace;
 
 const DISABLED = [
-  "common-cli", // Disabled until `memory_test.ts` passes
   "common-html", // Disabled until we get tests and jsx in tests passing
   "deno-vite-plugin", // Do not test vendored code
   "toolshed", // Requires extra configuration to run (e.g. redis)

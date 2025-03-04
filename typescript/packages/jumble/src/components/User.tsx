@@ -11,7 +11,7 @@ export function User() {
       if (!user) {
         return;
       }
-      const did = user.verifier().did();
+      const did = user.verifier.did();
       if (!ignore) {
         setDid(did);
       }

@@ -41,7 +41,7 @@ export function useGlobalActions() {
     let cancel: (() => void) | undefined;
 
     async function getCharm() {
-      if (charmId) {
+      if (charmId && charmManager) {
         const charm = await charmManager.get(charmId);
         cancel = charm?.key(NAME).sink((value) => {
           if (mounted) setCharmName(value ?? null);

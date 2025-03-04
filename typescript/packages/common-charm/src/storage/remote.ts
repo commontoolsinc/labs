@@ -5,11 +5,14 @@ import type {
   Entity,
   JSONValue,
   MemorySpace,
+  Protocol,
+  UCAN,
 } from "@commontools/memory/interface";
 import * as Memory from "@commontools/memory/consumer";
 import { assert } from "@commontools/memory/fact";
 import * as Changes from "@commontools/memory/changes";
 export * from "@commontools/memory/interface";
+import * as Codec from "@commontools/memory/codec";
 
 /**
  * Represents a state of the memory space.
@@ -36,36 +39,36 @@ interface MemoryState<Space extends MemorySpace = MemorySpace> {
  * ed25519 key derived from the sha256 of the "common knowledge".
  */
 const HOME = "did:key:z6Mko2qR9b8mbdPnaEKXvcYwdK7iDnRkh8mEcEP2719aCu6P";
-/**
- * ed25519 key derived from the sha256 of the "common operator".
- */
-const AS = "did:key:z6Mkge3xkXc4ksLsf8CtRxunUxcX6dByT4QdWCVEHbUJ8YVn";
+
 export class RemoteStorageProvider implements StorageProvider {
   connection: WebSocket | null = null;
   address: URL;
   workspace: MemorySpace;
   the: string;
   state: Map<MemorySpace, MemoryState> = new Map();
-  session: Memory.MemorySession;
+  session: Memory.MemorySession<MemorySpace>;
 
   /**
    * queue that holds commands that we read from the session, but could not
    * send because connection was down.
    */
-  queue: Set<Memory.ConsumerCommand<Memory.Protocol>> = new Set();
+  queue: Set<UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>> =
+    new Set();
   writer: WritableStreamDefaultWriter<Memory.ProviderCommand<Memory.Protocol>>;
-  reader: ReadableStreamDefaultReader<Memory.ConsumerCommand<Memory.Protocol>>;
+  reader: ReadableStreamDefaultReader<
+    UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>
+  >;
 
   connectionCount = 0;
 
   constructor({
     address,
-    as = AS,
+    as,
     space = HOME,
     the = "application/json",
   }: {
     address: URL;
-    as?: Memory.Principal;
+    as: Memory.Signer;
     space?: MemorySpace;
     the?: string;
   }) {
@@ -74,6 +77,7 @@ export class RemoteStorageProvider implements StorageProvider {
     this.the = the;
 
     const session = Memory.create({ as });
+
     this.reader = session.readable.getReader();
     this.writer = session.writable.getWriter();
     this.session = session;
@@ -199,6 +203,7 @@ export class RemoteStorageProvider implements StorageProvider {
       local.set(of, fact);
       facts.push(fact);
     }
+    
 
     const result = await memory.transact({ changes: Changes.from(facts) });
 
@@ -233,7 +238,7 @@ export class RemoteStorageProvider implements StorageProvider {
   }
 
   receive(data: string) {
-    return this.writer.write(JSON.parse(data));
+    return this.writer.write(Codec.Receipt.fromString(data));
   }
 
   handleEvent(event: MessageEvent) {
@@ -283,7 +288,7 @@ export class RemoteStorageProvider implements StorageProvider {
     while (this.connection === socket) {
       // First drain the queued commands if we have them.
       for (const command of queue) {
-        socket.send(JSON.stringify(command));
+        socket.send(Codec.UCAN.toString(command));
         queue.delete(command);
       }
 
@@ -299,7 +304,7 @@ export class RemoteStorageProvider implements StorageProvider {
       // Now we make that our socket is still a current connection as we may
       // have lost connection while waiting to read a command.
       if (this.connection === socket) {
-        socket.send(JSON.stringify(command));
+        socket.send(Codec.UCAN.toString(command));
       } // If it is no longer our connection we simply add the command into a
       // queue so it will be send once connection is reopen.
       else {
@@ -391,7 +396,7 @@ export interface Subscriber {
 class Query<Space extends MemorySpace> {
   reader: ReadableStreamDefaultReader;
   constructor(
-    public query: Memory.QueryView<Space>,
+    public query: Memory.QueryView<Space, Protocol<Space>>,
     public subscribers: Set<Subscriber> = new Set(),
   ) {
     this.reader = query.subscribe().getReader();

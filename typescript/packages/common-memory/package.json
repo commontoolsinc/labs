@@ -8,9 +8,12 @@
     "./fact": "./fact.ts",
     "./transaction": "./transaction.ts",
     "./changes": "./changes.ts",
-    "./commit": "./commit.ts"
+    "./commit": "./commit.ts",
+    "./principal": "./principal.ts",
+    "./codec": "./codec.ts"
   },
   "dependencies": {
-    "merkle-reference": "^2.0.1"
+    "merkle-reference": "^2.0.1",
+    "multiformats": "^13.3.2"
   }
 }

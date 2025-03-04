@@ -15,11 +15,13 @@ import {
   Space,
   useCancelGroup,
 } from "@commontools/runner";
+
 import { isStatic, markAsStatic } from "@commontools/builder";
 import { StorageProvider, StorageValue } from "./storage/base.ts";
 import { RemoteStorageProvider } from "./storage/remote.ts";
 import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
 import { InMemoryStorageProvider } from "./storage/memory.ts";
+import { Signer } from "@commontools/identity";
 
 export function log(fn: () => any[]) {
   debug(() => {
@@ -51,6 +53,8 @@ export interface Storage {
    * @param url - URL to set.
    */
   setRemoteStorage(url: URL): void;
+
+  setSigner(signer: Signer): void;
 
   /**
    * Load cell from storage. Will also subscribe to new changes.
@@ -157,6 +161,8 @@ class StorageImpl implements Storage {
   private storageProviders = new Map<Space, StorageProvider>();
   private remoteStorageUrl: URL | undefined;
 
+  private signer: Signer | undefined;
+
   // Map from entity ID to doc, set at stage 2, i.e. already while loading
   private docsById = new Map<string, DocImpl<any>>();
 
@@ -194,6 +200,10 @@ class StorageImpl implements Storage {
 
   setRemoteStorage(url: URL): void {
     this.remoteStorageUrl = url;
+  }
+
+  setSigner(signer: Signer): void {
+    this.signer = signer;
   }
 
   syncCellById<T>(
@@ -240,6 +250,7 @@ class StorageImpl implements Storage {
   // TODO(seefeld,gozala): Should just be one again.
   private _getStorageProviderForSpace(space: Space): StorageProvider {
     if (!space) throw new Error("No space set");
+    if (!this.signer) throw new Error("No signer set");
 
     let provider = this.storageProviders.get(space);
 
@@ -258,6 +269,7 @@ class StorageImpl implements Storage {
         provider = new RemoteStorageProvider({
           address: new URL("/api/storage/memory", this.remoteStorageUrl!),
           space: space.uri as `did:${string}:${string}`,
+          as: this.signer,
         });
       } else if (type === "memory") {
         provider = new InMemoryStorageProvider(space.uri);
@@ -578,7 +590,7 @@ class StorageImpl implements Storage {
         }
       }
       log(
-        () => ["loading", [...loading].map((c) => JSON.stringify(c.entityId))],
+        () => ["loading", [...loading].map((c) => JSON.stringify(c.entityId))]
       );
       log(() => [
         "docIsLoading",

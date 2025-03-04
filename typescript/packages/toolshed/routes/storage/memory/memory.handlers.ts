@@ -1,21 +1,14 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type * as Routes from "./memory.routes.ts";
-import * as Memory from "@commontools/memory";
-import env from "@/env.ts";
-
-const { ok: memory, error } = await Memory.Provider.open({
-  store: new URL(env.MEMORY_URL),
-});
-
-if (error) {
-  throw error;
-}
+import { Memory, memory } from "../memory.ts";
+import * as Codec from "@commontools/memory/codec";
 
 export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {
   try {
-    const transaction = await c.req.valid("json");
-    const result = await memory.transact(transaction as Memory.Transaction);
-
+    const ucan = (await c.req.valid("json")) as Memory.UCAN<
+      Memory.ConsumerInvocationFor<"/memory/transact", Memory.Protocol>
+    >;
+    const result = await memory.invoke(ucan);
     if (result.ok) {
       return c.json(result, 200);
     } else {
@@ -24,6 +17,8 @@ export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {
       const { error } = result;
       if (error.name === "ConflictError") {
         return c.json({ error }, 409);
+      } else if (error.name === "AuthorizationError") {
+        return c.json({ error }, 401);
       } else {
         return c.json({ error }, 503);
       }
@@ -37,12 +32,17 @@ export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {
 
 export const query: AppRouteHandler<typeof Routes.query> = async (c) => {
   try {
-    const query = await c.req.valid("json");
-    const result = await memory.query(query as any); // HACK(bf): temporarily allow any format for space
-    if (result.ok) {
-      return c.json(result, 200);
+    const ucan = (await c.req.valid("json")) as Memory.UCAN<
+      Memory.ConsumerInvocationFor<"/memory/query", Memory.Protocol>
+    >;
+    const { ok, error } = await memory.invoke(ucan);
+
+    if (ok) {
+      return c.json({ ok }, 200);
+    } else if (error.name === "AuthorizationError") {
+      return c.json({ error }, 401);
     } else {
-      return c.json(result, 503);
+      return c.json({ error }, 503);
     }
   } catch (cause) {
     const { message, stack, name } =
@@ -53,7 +53,11 @@ export const query: AppRouteHandler<typeof Routes.query> = async (c) => {
 
 export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
   const { socket, response } = Deno.upgradeWebSocket(c.req.raw);
-  const session = Memory.Socket.from(socket);
-  session.readable.pipeThrough(memory.session()).pipeTo(session.writable);
+  const { readable, writable } = Memory.Socket.from<string, string>(socket);
+  readable
+    .pipeThrough(Codec.UCAN.fromStringStream())
+    .pipeThrough(memory.session())
+    .pipeThrough(Codec.Receipt.toStringStream())
+    .pipeTo(writable);
   return response;
 };

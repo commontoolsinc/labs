@@ -1,13 +1,21 @@
 import * as Memory from "./memory.ts";
 import type {
   AsyncResult,
+  Await,
   CloseResult,
   ConnectionError,
   ConsumerCommand,
+  ConsumerCommandInvocation,
+  ConsumerInvocationFor,
+  ConsumerResultFor,
+  Invocation,
   InvocationURL,
   MemorySession,
+  MemorySpace,
+  Proto,
   Protocol as Protocol,
   ProviderCommand,
+  ProviderCommandFor,
   ProviderSession,
   Query,
   QueryError,
@@ -18,7 +26,7 @@ import type {
   Subscribe,
   Subscriber,
   Transaction,
-  TransactionResult,
+  UCAN,
 } from "./interface.ts";
 import * as Subscription from "./subscription.ts";
 
@@ -27,13 +35,13 @@ export * from "./util.ts";
 export * as Error from "./error.ts";
 export * as Space from "./space.ts";
 export * as Memory from "./memory.ts";
-export * as Subscriber from "./subscriber.ts";
 export * as Subscription from "./subscription.ts";
-import { fromString, refer } from "./reference.ts";
+import { refer } from "./reference.ts";
+import * as Access from "./access.ts";
 
 export const open = async (
   options: Memory.Options,
-): AsyncResult<Provider, ConnectionError> => {
+): AsyncResult<Provider<Protocol>, ConnectionError> => {
   const result = await Memory.open(options);
   if (result.error) {
     return result;
@@ -42,38 +50,47 @@ export const open = async (
   return { ok: new MemoryProvider(result.ok) };
 };
 
-export interface Provider {
+export interface Provider<Protocol extends Proto> {
   fetch(request: Request): Promise<Response>;
 
   session(): ProviderSession<Protocol>;
 
-  close(): CloseResult;
+  invoke<Ability>(
+    ucan: UCAN<ConsumerInvocationFor<Ability, Protocol>>,
+  ): Await<ConsumerResultFor<Ability, Protocol>>;
 
-  transact(transaction: Transaction): TransactionResult;
-  query(source: Query): QueryResult;
+  close(): CloseResult;
 }
 
 interface Session {
   memory: MemorySession;
 }
 
-class MemoryProvider implements Provider {
-  sessions: Set<ProviderSession<Protocol>> = new Set();
+class MemoryProvider<
+  Space extends MemorySpace,
+  MemoryProtocol extends Protocol<Space>,
+> implements Provider<MemoryProtocol> {
+  sessions: Set<ProviderSession<MemoryProtocol>> = new Set();
+  #localSession: MemoryProviderSession<Space, MemoryProtocol> | null = null;
   constructor(public memory: MemorySession) {}
-  subscribe(subscriber: Subscriber) {
-    return subscribe(this, subscriber);
+
+  invoke<Ability>(
+    ucan: UCAN<ConsumerInvocationFor<Ability, MemoryProtocol>>,
+  ): Await<ConsumerResultFor<Ability, MemoryProtocol>> {
+    let session = this.#localSession;
+    if (!session) {
+      session = new MemoryProviderSession(this.memory, null);
+    }
+
+    return session.invoke(
+      ucan as unknown as UCAN<ConsumerCommandInvocation<Protocol>>,
+    );
   }
 
-  transact(source: Transaction) {
-    return transact(this, source);
-  }
-  query(source: Query) {
-    return query(this, source);
-  }
   fetch(request: Request) {
     return fetch(this, request);
   }
-  session(): ProviderSession<Protocol> {
+  session(): ProviderSession<MemoryProtocol> {
     const session = new MemoryProviderSession(this.memory, this.sessions);
     this.sessions.add(session);
     return session;
@@ -90,26 +107,31 @@ class MemoryProvider implements Provider {
   }
 }
 
-class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
-  readable: ReadableStream<ProviderCommand<Protocol>>;
-  writable: WritableStream<ConsumerCommand<Protocol>>;
+class MemoryProviderSession<
+  Space extends MemorySpace,
+  MemoryProtocol extends Protocol<Space>,
+> implements ProviderSession<MemoryProtocol>, Subscriber {
+  readable: ReadableStream<ProviderCommand<MemoryProtocol>>;
+  writable: WritableStream<UCAN<ConsumerCommandInvocation<MemoryProtocol>>>;
   controller:
-    | ReadableStreamDefaultController<ProviderCommand<Protocol>>
+    | ReadableStreamDefaultController<ProviderCommand<MemoryProtocol>>
     | undefined;
 
   channels: Map<InvocationURL<Reference<Subscribe>>, Set<string>> = new Map();
 
   constructor(
     public memory: MemorySession,
-    public sessions: null | Set<ProviderSession<Protocol>>,
+    public sessions: null | Set<ProviderSession<MemoryProtocol>>,
   ) {
-    this.readable = new ReadableStream<ProviderCommand<Protocol>>({
+    this.readable = new ReadableStream<ProviderCommand<MemoryProtocol>>({
       start: (controller) => this.open(controller),
       cancel: () => this.cancel(),
     });
-    this.writable = new WritableStream<ConsumerCommand<Protocol>>({
+    this.writable = new WritableStream<
+      UCAN<ConsumerCommandInvocation<MemoryProtocol>>
+    >({
       write: async (command) => {
-        await this.invoke(command);
+        await this.invoke(command as UCAN<ConsumerCommandInvocation<Protocol>>);
       },
       abort: async () => {
         await this.close();
@@ -119,11 +141,17 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
       },
     });
   }
-  perform(command: ProviderCommand<Protocol>) {
-    this.controller?.enqueue(command);
+  perform<Ability extends string>(
+    command: ProviderCommandFor<Ability, MemoryProtocol>,
+  ) {
+    this.controller?.enqueue(command as ProviderCommand<MemoryProtocol>);
     return { ok: {} };
   }
-  open(controller: ReadableStreamDefaultController<ProviderCommand<Protocol>>) {
+  open(
+    controller: ReadableStreamDefaultController<
+      ProviderCommand<MemoryProtocol>
+    >,
+  ) {
     this.controller = controller;
   }
   cancel() {
@@ -142,16 +170,32 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
     this.sessions?.delete(this);
     this.sessions = null;
   }
-  async invoke(command: ConsumerCommand<Protocol>) {
-    switch (command.cmd) {
+  async invoke(
+    { invocation, authorization }: UCAN<ConsumerCommandInvocation<Protocol>>,
+  ) {
+    const { error } = await Access.claim(invocation, authorization);
+
+    if (error) {
+      return this.perform({
+        the: "task/return",
+        of: `job:${refer(invocation)}` as InvocationURL<
+          Reference<ConsumerCommandInvocation<MemoryProtocol>>
+        >,
+        is: { error },
+      });
+    }
+
+    const of = `job:${refer(invocation)}` as InvocationURL<
+      Reference<ConsumerCommandInvocation<Protocol>>
+    >;
+
+    switch (invocation.cmd) {
       case "/memory/query": {
         return this.perform({
           the: "task/return",
-          of: `job:${refer(command)}` as InvocationURL<
-            Reference<ConsumerCommand<Protocol>>
-          >,
-          is: (await this.memory.query(command)) as Result<
-            Selection,
+          of,
+          is: (await this.memory.query(invocation)) as Result<
+            Selection<Space>,
             QueryError
           >,
         });
@@ -159,23 +203,21 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
       case "/memory/transact": {
         return this.perform({
           the: "task/return",
-          of: `job:${refer(command)}` as InvocationURL<
-            Reference<ConsumerCommand<Protocol>>
-          >,
-          is: await this.memory.transact(command),
+          of,
+          is: await this.memory.transact(invocation),
         });
       }
       case "/memory/query/subscribe": {
-        const id = `job:${refer(command)}` as InvocationURL<Subscribe>;
         this.channels.set(
-          id,
-          new Set(Subscription.channels(command.sub, command.args.select)),
+          of,
+          new Set(
+            Subscription.channels(invocation.sub, invocation.args.select),
+          ),
         );
         return this.memory.subscribe(this);
       }
       case "/memory/query/unsubscribe": {
-        const id = command.args.source;
-        this.channels.delete(id);
+        this.channels.delete(of);
         if (this.channels.size === 0) {
           this.memory.unsubscribe(this);
         }
@@ -183,24 +225,28 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
         // End subscription call
         this.perform({
           the: "task/return",
-          of: command.args.source,
+          of: invocation.args.source,
           is: { ok: {} },
         });
 
         // End unsubscribe call
-        this.perform({
+        return this.perform({
           the: "task/return",
-          of: `job:${refer(command)}` as InvocationURL<
-            Reference<ConsumerCommand<Protocol>>
-          >,
+          of,
           is: { ok: {} },
         });
       }
+      default: {
+        return {
+          error: new RangeError(
+            `Unknown command ${(invocation as Invocation).cmd}`,
+          ),
+        };
+      }
     }
-    return { ok: {} };
   }
 
-  transact(transaction: Transaction) {
+  transact(transaction: Transaction<Space>) {
     for (const [id, channels] of this.channels) {
       if (Subscription.match(transaction, channels)) {
         // Note that we intentionally exit on the first match because we do not
@@ -219,15 +265,6 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
   }
 }
 
-export const transact = ({ memory }: Session, transaction: Transaction) =>
-  memory.transact(transaction);
-
-export const query = ({ memory }: Session, source: Query) =>
-  memory.query(source);
-
-export const subscribe = ({ memory }: Session, subscriber: Subscriber) =>
-  memory.subscribe(subscriber);
-
 export const close = ({ memory }: Session) => memory.close();
 
 export const fetch = async (session: Session, request: Request) => {
@@ -242,7 +279,7 @@ export const fetch = async (session: Session, request: Request) => {
 
 export const patch = async (session: Session, request: Request) => {
   try {
-    const transaction = (await request.json()) as Transaction;
+    const transaction = await request.json() as Transaction;
     const result = await session.memory.transact(transaction);
     const body = JSON.stringify(result);
     const status = result.ok
@@ -279,7 +316,7 @@ export const patch = async (session: Session, request: Request) => {
 
 export const post = async (session: Session, request: Request) => {
   try {
-    const selector = (await request.json()) as Query;
+    const selector = await request.json() as Query;
     const result = await session.memory.query(selector);
     const body = JSON.stringify(result);
     const status = result.ok ? 200 : 404;

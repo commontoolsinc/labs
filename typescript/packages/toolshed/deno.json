@@ -4,7 +4,9 @@
     "test": "deno test -A --env-file=.env.test"
   },
   "fmt": {
-    "exclude": ["./llm_documentation/*"]
+    "exclude": [
+      "./llm_documentation/*"
+    ]
   },
   "imports": {
     "@/": "./",
