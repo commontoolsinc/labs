@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { DocLink, getDoc } from "../src/doc.ts";
-import { type Cell, isCell, isStream } from "../src/cell.ts";
+import { type Cell, getImmutableCell, isCell, isStream } from "../src/cell.ts";
 import type { JSONSchema } from "@commontools/builder";
 import { idle } from "../src/scheduler.ts";
 import { getSpace } from "../src/space.ts";
@@ -693,6 +693,7 @@ describe("Schema Support", () => {
             ],
           },
         },
+        required: ["mixed"],
       } as const satisfies JSONSchema;
 
       const cellObject = cObject.asCell([], undefined, schemaObject);
@@ -1138,27 +1139,27 @@ describe("Schema Support", () => {
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
 
-      expect(value.items[0].title).toBe("First Item");
-      expect(value.items[1].title).toBe("Default Title");
+      expect(value.items?.[0].title).toBe("First Item");
+      expect(value.items?.[1].title).toBe("Default Title");
 
-      expect(isCell(value.items[0].metadata)).toBe(true);
-      expect(isCell(value.items[1].metadata)).toBe(true);
+      expect(isCell(value.items?.[0].metadata)).toBe(true);
+      expect(isCell(value.items?.[1].metadata)).toBe(true);
 
       const c2 = getDoc();
       const cell2 = c2.asCell([], undefined, schema);
       const value2 = cell2.get();
 
       expect(value2.items?.length).toBe(2);
-      expect(value2.items[0].title).toBe("First Item");
-      expect(value2.items[1].title).toBe("Default Title");
+      expect(value2.items?.[0].title).toBe("First Item");
+      expect(value2.items?.[1].title).toBe("Default Title");
 
-      expect(isCell(value2.items[0].metadata)).toBe(true);
-      expect(isCell(value2.items[1].metadata)).toBe(true);
+      expect(isCell(value2.items?.[0].metadata)).toBe(true);
+      expect(isCell(value2.items?.[1].metadata)).toBe(true);
 
-      expect(value2.items[0].metadata.get()).toEqual({
+      expect(value2.items?.[0].metadata?.get()).toEqual({
         createdAt: "2023-01-01",
       });
-      expect(value2.items[1].metadata.get()).toEqual({
+      expect(value2.items?.[1].metadata?.get()).toEqual({
         createdAt: "2023-01-02",
       });
     });
@@ -1244,7 +1245,9 @@ describe("Schema Support", () => {
       });
 
       // Verify it can be updated
-      cell.set({ name: "Updated User", settings: { theme: "dark" } });
+      cell.set(
+        getImmutableCell({ name: "Updated User", settings: { theme: "dark" } }),
+      );
       expect(cell.get().get()).toEqual({
         name: "Updated User",
         settings: { theme: "dark" },
@@ -1266,7 +1269,7 @@ describe("Schema Support", () => {
       expect(isCell(value.name)).toBe(true);
       expect(value?.name?.get()).toBe("Default Name");
 
-      cell.set({ name: "Updated Name" });
+      cell.set(getImmutableCell({ name: "Updated Name" }));
 
       // Expect the cell to be immutable
       expect(value?.name?.get()).toBe("Default Name");
@@ -1287,7 +1290,7 @@ describe("Schema Support", () => {
       expect(isCell(value.name)).toBe(true);
       expect(value.name.get()).toBe("First default name");
 
-      cell.set({ name: "Updated Name" });
+      cell.set({ name: getImmutableCell("Updated Name") });
 
       // Expect the cell to be immutable
       expect(value.name.get()).toBe("Updated Name");
