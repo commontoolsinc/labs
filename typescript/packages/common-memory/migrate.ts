@@ -86,7 +86,7 @@ export const main = (database: string) => {
     unsafeConcurrency: true,
   });
 
-  return migrate(db);
+  return db.transaction(migrate)(db);
 };
 
 main(...Deno.args as [string]);
