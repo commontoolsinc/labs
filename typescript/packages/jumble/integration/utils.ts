@@ -1,4 +1,15 @@
-import { Page } from "@astral/astral";
+import { ElementHandle, Page } from "@astral/astral";
+import * as path from "@std/path";
+
+const COMMON_CLI_PATH = path.join(import.meta.dirname!, "../../common-cli");
+
+export const decode = (() => {
+  const decoder = new TextDecoder();
+  return (buffer: Uint8Array): string => decoder.decode(buffer);
+})();
+
+export const sleep = (ms: number) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 export const login = async (page: Page) => {
   // First, see if any credential data is
@@ -40,11 +51,32 @@ export const login = async (page: Page) => {
   await button!.click();
 };
 
-export const addCharm = async () => {
+export const waitForSelectorWithText = async (
+  page: Page,
+  selector: string,
+  text: string,
+): Promise<ElementHandle> => {
+  const retries = 30;
+  const timeout = 200;
+
+  for (let i = 0; i < retries; i++) {
+    const el = await page.$(selector);
+    if (!el) {
+      await sleep(timeout);
+      continue;
+    }
+    if ((await el.innerText()) === text) {
+      return el;
+    }
+  }
+  throw new Error(`Timed out waiting for "${selector}" to have text "${text}"`);
+};
+
+export const addCharm = async (toolshedUrl: string) => {
   const space = `ci-${Date.now()}-${
     Math.random().toString(36).substring(2, 15)
   }`;
-  const process = new Deno.Command("deno", {
+  const { success, stderr } = await (new Deno.Command(Deno.execPath(), {
     args: [
       "task",
       "start",
@@ -58,16 +90,13 @@ export const addCharm = async () => {
       "true",
     ],
     env: {
-      "TOOLSHED_API_URL": "http://localhost:8000/",
+      "TOOLSHED_API_URL": toolshedUrl,
     },
-    cwd: "../common-cli",
-    stdout: "inherit",
-    stderr: "inherit",
-  });
+    cwd: COMMON_CLI_PATH,
+  })).output();
 
-  const { code } = await process.output();
-  if (code !== 0) {
-    throw new Error(`Failed to add charm: ${code}`);
+  if (!success) {
+    throw new Error(`Failed to add charm: ${decode(stderr)}`);
   }
 
   return {
@@ -76,8 +105,12 @@ export const addCharm = async () => {
   };
 };
 
-export const inspectCharm = async (space: string, charmId: string) => {
-  const process = new Deno.Command("deno", {
+export const inspectCharm = async (
+  toolshedUrl: string,
+  space: string,
+  charmId: string,
+) => {
+  const { success, stdout, stderr } = await (new Deno.Command(Deno.execPath(), {
     args: [
       "task",
       "start",
@@ -89,18 +122,15 @@ export const inspectCharm = async (space: string, charmId: string) => {
       "true",
     ],
     env: {
-      "TOOLSHED_API_URL": "http://localhost:8000/",
+      "TOOLSHED_API_URL": toolshedUrl,
     },
-    cwd: "../common-cli",
-    stdout: "piped",
-    stderr: "inherit",
-  });
+    cwd: COMMON_CLI_PATH,
+  })).output();
 
-  const { code, stdout } = await process.output();
-  if (code !== 0) {
-    console.log(new TextDecoder().decode(stdout));
-    throw new Error(`Failed to inspect charm: ${code}`);
+  if (!success) {
+    console.log(decode(stdout));
+    throw new Error(`Failed to inspect charm: ${decode(stderr)}`);
   }
 
-  return new TextDecoder().decode(stdout);
+  return decode(stdout);
 };
