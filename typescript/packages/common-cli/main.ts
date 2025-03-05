@@ -4,9 +4,8 @@ import {
   CharmManager,
   compileRecipe,
   setBobbyServerUrl,
-  storage,
 } from "@commontools/charm";
-import { getEntityId, isStream } from "@commontools/runner";
+import { storage, getEntityId, isStream } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 
 const { space, charmId, recipeFile, cause, quit } = parseArgs(Deno.args, {
