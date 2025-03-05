@@ -1,5 +1,5 @@
 import { css, html, PropertyValues, ReactiveElement, render } from "lit";
-import { customElement, property } from "lit/decorators.ts";
+import { customElement, property } from "lit/decorators.js";
 import { basicSetup, EditorView } from "codemirror";
 import { Compartment, EditorState, Extension } from "@codemirror/state";
 import { LanguageSupport } from "@codemirror/language";

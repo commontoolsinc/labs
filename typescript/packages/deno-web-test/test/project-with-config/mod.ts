@@ -1,7 +1,7 @@
-export const createEd25519Key = async (): CryptoKey => {
+export const createEd25519Key = (): Promise<CryptoKey> => {
   const dummyKey = new Uint8Array(32);
 
-  return await globalThis.crypto.subtle.importKey(
+  return globalThis.crypto.subtle.importKey(
     "raw",
     dummyKey,
     "ed25519",

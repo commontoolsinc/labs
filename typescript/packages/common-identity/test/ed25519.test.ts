@@ -24,7 +24,7 @@ interface SignerClass {
   ): Promise<SignerImpl<ID>>;
 }
 interface VerifierClass {
-  fromDid<ID extends DIDKey>(did: DID): Promise<VerifierImpl<ID>>;
+  fromDid<ID extends DIDKey>(did: ID): Promise<VerifierImpl<ID>>;
   fromRaw<ID extends DIDKey>(
     rawPrivateKey: Uint8Array,
   ): Promise<VerifierImpl<ID>>;
@@ -126,7 +126,7 @@ testBothImpls(
     Verifier: VerifierClass,
   ) => {
     // @see https://w3c-ccg.github.io/did-method-key/#test-vectors
-    const fixtures: DID[] = [
+    const fixtures: DIDKey[] = [
       "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp",
       "did:key:z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG",
       "did:key:z6MknGc3ocHs3zdPiJbnaaqDi58NGb4pk1Sp9WxWufuXSdxf",

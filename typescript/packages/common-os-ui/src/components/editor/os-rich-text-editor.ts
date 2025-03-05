@@ -5,7 +5,7 @@ import { Node, Schema } from "prosemirror-model";
 import { history } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap } from "prosemirror-commands";
-import { customElement } from "lit/decorators.ts";
+import { customElement } from "lit/decorators.js";
 import { base } from "../../shared/styles.ts";
 import { editorClassPlugin } from "./prosemirror/editor-class-plugin.ts";
 import { updateVerState, verPlugin } from "./prosemirror/ver-plugin.ts";

@@ -1,4 +1,4 @@
-import { OAuth2Client } from "jsr:@cmd-johnson/oauth2-client@^2.0.0";
+import { OAuth2Client } from "@cmd-johnson/oauth2-client";
 import env from "@/env.ts";
 import {
   type DocLink,

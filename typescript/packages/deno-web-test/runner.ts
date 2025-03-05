@@ -1,3 +1,4 @@
+import { ConsoleEvent } from "@astral/astral";
 import { Manifest } from "./manifest.ts";
 import { summarize } from "./utils.ts";
 import { BrowserController } from "./browser.ts";
@@ -15,7 +16,10 @@ export class Runner {
     this.reporter = new Reporter();
     this.results = [];
     this.browser = new BrowserController(manifest);
-    this.browser.addEventListener("console", (e) => this.onConsole(e));
+    this.browser.addEventListener(
+      "console",
+      (e: Event) => this.onConsole(e as ConsoleEvent),
+    );
   }
 
   // Runs all tests in the browser. Return value
@@ -62,14 +66,14 @@ export class Runner {
   onConsole(e: ConsoleEvent) {
     if (this.manifest.config.pipeConsole) {
       switch (e.detail.type) {
+        case "warning":
+          console.warn(`browser: ${e.detail.text}`);
+          break;
         case "log":
-          console.log(`deno-web-test: ${e.detail.text}`);
-          break;
-        case "warn":
-          console.warn(`deno-web-test: ${e.detail.text}`);
-          break;
+        case "info":
+        case "debug":
         case "error":
-          console.error(`deno-web-test: ${e.detail.text}`);
+          console[e.detail.type](`browser: ${e.detail.text}`);
           break;
       }
     }

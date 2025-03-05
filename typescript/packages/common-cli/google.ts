@@ -1,11 +1,11 @@
-import { serve } from "https://deno.land/std@0.216.0/http/server.ts";
-import { open } from "https://deno.land/x/open@v0.0.6/index.ts";
-import { OAuth2Client } from "jsr:@cmd-johnson/oauth2-client@^2.0.0";
+import { open } from "open";
+import { OAuth2Client } from "@cmd-johnson/oauth2-client";
 
 export async function getAccessToken(client: OAuth2Client) {
   let authCode: string | null = null;
   const controller = new AbortController();
-  const server = serve(
+  const server = Deno.serve(
+    { port: 8080, signal: controller.signal },
     (req) => {
       const url = new URL(req.url);
       if (url.searchParams.has("code")) {
@@ -17,7 +17,6 @@ export async function getAccessToken(client: OAuth2Client) {
       }
       return new Response("Waiting for authentication...");
     },
-    { port: 8080, signal: controller.signal },
   );
 
   const { uri, codeVerifier } = await client.code.getAuthorizationUri();

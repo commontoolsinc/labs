@@ -1,5 +1,5 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property } from "lit/decorators.ts";
+import { customElement, property } from "lit/decorators.js";
 import { base } from "../shared/styles.ts";
 
 @customElement("os-icon")

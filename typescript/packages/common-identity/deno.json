@@ -1,7 +1,7 @@
 {
   "name": "@commontools/identity",
   "tasks": {
-    "test": "deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts test/*.test.ts"
+    "test": "deno check . && deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts test/*.test.ts"
   },
   "exports": "./src/index.ts",
   "imports": {

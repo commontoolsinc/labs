@@ -1,5 +1,5 @@
 import { css, html, LitElement } from "lit";
-import { customElement, state } from "lit/decorators.ts";
+import { customElement, state } from "lit/decorators.js";
 
 @customElement("os-common-import")
 export class OsCommonImport extends LitElement {

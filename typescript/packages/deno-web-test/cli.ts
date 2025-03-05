@@ -1,4 +1,4 @@
-import { parseArgs } from "jsr:@std/cli/parse-args";
+import { parseArgs } from "@std/cli/parse-args";
 import { TestServer } from "./server.ts";
 import { Manifest } from "./manifest.ts";
 import { buildTestDir } from "./utils.ts";

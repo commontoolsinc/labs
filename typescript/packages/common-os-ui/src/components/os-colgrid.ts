@@ -1,5 +1,5 @@
 import { css, html } from "lit";
-import { customElement } from "lit/decorators.ts";
+import { customElement } from "lit/decorators.js";
 import { base } from "../shared/styles.ts";
 import {
   breakpointLg,

@@ -1,4 +1,4 @@
-import { Browser, ConsoleEvent, launch, Page } from "jsr:@astral/astral";
+import { Browser, ConsoleEvent, launch, Page } from "@astral/astral";
 import { Manifest } from "./manifest.ts";
 import { tsToJs, wait } from "./utils.ts";
 import { TestResult } from "./interface.ts";

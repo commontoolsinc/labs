@@ -3,7 +3,7 @@ import {
   assertEquals,
   AssertionError,
   assertMatch,
-} from "jsr:@std/assert";
+} from "@std/assert";
 import * as Provider from "../provider.ts";
 import * as Transaction from "../transaction.ts";
 import * as Changes from "../changes.ts";

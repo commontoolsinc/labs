@@ -1,5 +1,5 @@
 import { z } from "zod";
-import * as Path from "jsr:@std/path";
+import * as Path from "@std/path";
 
 // NOTE: This is where we define the environment variable types and defaults.
 const EnvSchema = z.object({

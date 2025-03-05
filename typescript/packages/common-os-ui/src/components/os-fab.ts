@@ -1,5 +1,5 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property, state } from "lit/decorators.ts";
+import { customElement, property, state } from "lit/decorators.js";
 import { base } from "../shared/styles.ts";
 
 @customElement("os-fab")

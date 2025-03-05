@@ -2,11 +2,12 @@
 import { CharmManager, compileRecipe, createStorage } from "@commontools/charm";
 import { getEntityId, idle } from "@commontools/runner";
 import { fetchInboxEmails } from "./gmail.ts";
-import { parse } from "https://deno.land/std/flags/mod.ts";
+import { parseArgs } from "@std/cli/parse-args";
 
 import { getCellFromDocLink } from "@commontools/runner";
 
-const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") || "https://toolshed.saga-castor.ts.net";
+const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ||
+  "https://toolshed.saga-castor.ts.net";
 
 async function main(
   recipeSrc: string,
@@ -20,7 +21,9 @@ async function main(
     url: new URL(TOOLSHED_API_URL),
   });
 
-  const cellId = { "/": "baedreiajxdvqjxmgpfzjix4h6vd4pl77unvet2k3acfvhb6ottafl7gpua" };
+  const cellId = {
+    "/": "baedreiajxdvqjxmgpfzjix4h6vd4pl77unvet2k3acfvhb6ottafl7gpua",
+  };
 
   await storage.syncCell(cellId, true);
   const authCellEntity = {
@@ -74,7 +77,7 @@ async function main(
   // console.log({ emails });
 }
 
-const flags = parse(Deno.args, {
+const flags = parseArgs(Deno.args, {
   string: ["replica", "cause", "data"],
   default: {
     replica: "common-knowledge",
@@ -90,7 +93,9 @@ let jsonData: unknown;
 
 if (!filename) {
   console.error("No typescript recipe file provided");
-  console.error("Usage: deno run -A main.ts <recipe-file> [--replica=name] [--cause=id]");
+  console.error(
+    "Usage: deno run -A main.ts <recipe-file> [--replica=name] [--cause=id]",
+  );
   Deno.exit(1);
 }
 
