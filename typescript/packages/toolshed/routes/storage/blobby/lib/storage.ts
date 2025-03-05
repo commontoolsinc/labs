@@ -2,7 +2,7 @@ import { join } from "@std/path";
 import { ensureDir } from "@std/fs";
 
 export class DiskStorage {
-  constructor(private baseDir: string) {}
+  constructor(public baseDir: string) {}
 
   async init() {
     await ensureDir(this.baseDir);

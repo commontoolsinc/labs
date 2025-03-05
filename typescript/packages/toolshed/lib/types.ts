@@ -5,7 +5,6 @@ import type { RedisClientType } from "redis";
 export interface AppBindings {
   Variables: {
     logger: Logger;
-    blobbyRedis: RedisClientType;
   };
 }
 
