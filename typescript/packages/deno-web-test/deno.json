@@ -8,9 +8,7 @@
     "./cli": "./cli.ts"
   },
   "imports": {
-    "@astral/astral": "jsr:@astral/astral",
     "esbuild": "npm:esbuild",
-    "@luca/esbuild-deno-loader": "jsr:@luca/esbuild-deno-loader",
-    "@std/http": "jsr:@std/http"
+    "@luca/esbuild-deno-loader": "jsr:@luca/esbuild-deno-loader"
   }
 }
