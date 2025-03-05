@@ -35,6 +35,7 @@ const getRedisClient = async () => {
 
   return redisClient;
 };
+getRedisClient();
 
 export const uploadBlobHandler: AppRouteHandler<
   typeof uploadBlob
