@@ -16,7 +16,11 @@ export type Schema<
     : T extends { asStream: true }
       ? Stream<Schema<Omit<T, "asStream">, Root, Depth>>
     // Handle $ref to root
-    : T extends { $ref: "#" } ? Schema<Root, Root, DecrementDepth<Depth>>
+    : T extends { $ref: "#" } ? Schema<
+        Omit<Root, "asCell" | "asStream">,
+        Root,
+        DecrementDepth<Depth>
+      >
     // Handle other $ref (placeholder - would need a schema registry for other refs)
     : T extends { $ref: string } ? any
     // Handle enum values
@@ -162,8 +166,11 @@ export type SchemaWithoutCell<
     : T extends { asStream: true }
       ? SchemaWithoutCell<Omit<T, "asStream">, Root, Depth>
     // Handle $ref to root
-    : T extends { $ref: "#" }
-      ? SchemaWithoutCell<Root, Root, DecrementDepth<Depth>>
+    : T extends { $ref: "#" } ? SchemaWithoutCell<
+        Omit<Root, "asCell" | "asStream">,
+        Root,
+        DecrementDepth<Depth>
+      >
     // Handle other $ref (placeholder - would need a schema registry for other refs)
     : T extends { $ref: string } ? any
     // Handle enum values
