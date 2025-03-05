@@ -910,14 +910,14 @@ describe("Schema Support", () => {
           expect(isCell(result.children[0])).toBe(true);
           expect((result.children[0] as Cell<any>).get().value).toBe("single");
           expect(isCell(result.children[1])).toBe(false);
-          expect(isCell(result.children[1][0])).toBe(true);
-          expect((result.children[1][0] as Cell<any>).get().value).toBe(
-            "hello",
-          );
-          expect(isCell(result.children[1][1])).toBe(true);
-          expect((result.children[1][1] as Cell<any>).get().value).toBe(
-            "world",
-          );
+          expect(Array.isArray(result.children[1])).toBe(true);
+          const child1 = result.children[1] as unknown as Cell<any>[];
+          expect(isCell(child1[0])).toBe(true);
+          expect(child1[0].get().value).toBe("hello");
+          expect(
+            isCell(child1[1]),
+          ).toBe(true);
+          expect(child1[1].get().value).toBe("world");
           expect(isCell(result.children[2])).toBe(true);
           expect((result.children[2] as Cell<any>).get()).toBe("or just text");
         }
