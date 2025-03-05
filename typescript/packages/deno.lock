@@ -7207,6 +7207,7 @@
   },
   "workspace": {
     "dependencies": [
+      "jsr:@astral/astral@*",
       "jsr:@std/assert@1",
       "jsr:@std/crypto@^1.0.3",
       "jsr:@std/dotenv@~0.225.3",
