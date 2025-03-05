@@ -44,22 +44,23 @@ export const PREPARE = `
 BEGIN TRANSACTION;
 
 -- Create table for storing JSON data.
+-- ⚠️ We need make this NOT NULL because SQLite does not uphold uniqueness on NULL
 CREATE TABLE IF NOT EXISTS datum (
-  this    TEXT PRIMARY KEY,     -- Merkle reference for this JSON
-  source  JSON                  -- Source for this JSON
+  this TEXT NOT NULL PRIMARY KEY,     -- Merkle reference for this JSON
+  source JSON                         -- Source for this JSON
 );
 
-INSERT OR IGNORE INTO datum (this, source) VALUES (NULL, NULL);
+-- Create a record for non existing fact.is
+INSERT OR IGNORE INTO datum (this, source) VALUES ('undefined', NULL);
 
-DROP VIEW IF EXISTS maybe_datum;
 
 CREATE TABLE IF NOT EXISTS fact (
-  this    TEXT PRIMARY KEY,     -- Merkle reference for { the, of, is, cause }
-  the     TEXT NOT NULL,        -- Kind of a fact e.g. "application/json"
-  of      TEXT NOT NULL,        -- Entity identifier fact is about
-  'is'    TEXT,                 -- Value entity is claimed to have
-  cause   TEXT,                 -- Causal reference to prior fact
-  since   INTEGER NOT NULL,     -- Lamport clock since when this fact was in effect
+  this    TEXT NOT NULL PRIMARY KEY,  -- Merkle reference for { the, of, is, cause }
+  the     TEXT NOT NULL,              -- Kind of a fact e.g. "application/json"
+  of      TEXT NOT NULL,              -- Entity identifier fact is about
+  'is'    TEXT,                       -- Value entity is claimed to have
+  cause   TEXT,                       -- Causal reference to prior fact
+  since   INTEGER NOT NULL,           -- Lamport clock since when this fact was in effect
   FOREIGN KEY('is') REFERENCES datum(this)
 );
 
@@ -75,22 +76,22 @@ CREATE INDEX IF NOT EXISTS memory_the ON memory (the); -- Index to filter by "th
 CREATE INDEX IF NOT EXISTS memory_of ON memory (of);   -- Index to query by "of" field
 CREATE INDEX IF NOT EXISTS fact_since ON fact (since); -- Index to query by "since" field
 
-DROP VIEW IF EXISTS state;
+-- Create the updated 'state' view
 CREATE VIEW IF NOT EXISTS state AS
 SELECT
-  memory.the as the,
-  memory.of as of,
-  datum.source as 'is',
-  fact.cause as cause,
-  memory.fact as fact,
-  datum.this as proof,
-  fact.since as since
+  memory.the AS the,
+  memory.of AS of,
+  datum.source AS 'is',
+  fact.cause AS cause,
+  memory.fact AS fact,
+  datum.this AS proof,
+  fact.since AS since
 FROM
   memory
 JOIN
   fact ON memory.fact = fact.this
 JOIN
-  datum ON fact.'is' = datum.this OR (fact.'is' IS NULL AND datum.this IS NULL);
+  datum ON datum.this = COALESCE(fact.'is', 'undefined');
 
 COMMIT;
 `;
