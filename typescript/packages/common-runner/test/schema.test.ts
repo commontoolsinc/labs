@@ -617,8 +617,8 @@ describe("Schema Support", () => {
 
       const cell = c.asCell([], undefined, schema);
       const result = cell.get();
-      expect(result.item.a).toBe(100);
-      expect(result.item.b).toBe("merged");
+      expect((result.item as { a: number }).a).toBe(100);
+      expect((result.item as { b: string }).b).toBe("merged");
     });
 
     it("should return undefined if no anyOf candidate matches for primitive types", () => {
