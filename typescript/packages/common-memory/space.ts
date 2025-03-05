@@ -44,23 +44,25 @@ export const PREPARE = `
 BEGIN TRANSACTION;
 
 -- Create table for storing JSON data.
+-- ⚠️ We need make this NOT NULL because SQLite does not uphold uniqueness on NULL
 CREATE TABLE IF NOT EXISTS datum (
-  this    TEXT PRIMARY KEY,     -- Merkle reference for this JSON
-  source  JSON NOT NULL         -- Source for this JSON
+  this TEXT NOT NULL PRIMARY KEY,     -- Merkle reference for this JSON
+  source JSON                         -- Source for this JSON
 );
 
-CREATE VIEW IF NOT EXISTS maybe_datum AS
-SELECT * FROM datum
-UNION ALL
-SELECT NULL AS this, NULL AS source;
+-- We create special record to represent undefined which does not exist in JSON.
+-- This allows us to join fact with datum table and cover retractions where
+-- fact.is is set to NULL
+INSERT OR IGNORE INTO datum (this, source) VALUES ('undefined', NULL);
+
 
 CREATE TABLE IF NOT EXISTS fact (
-  this    TEXT PRIMARY KEY,     -- Merkle reference for { the, of, is, cause }
-  the     TEXT NOT NULL,        -- Kind of a fact e.g. "application/json"
-  of      TEXT NOT NULL,        -- Entity identifier fact is about
-  'is'    TEXT,                 -- Value entity is claimed to have
-  cause   TEXT,                 -- Causal reference to prior fact
-  since   INTEGER NOT NULL,     -- Lamport clock since when this fact was in effect
+  this    TEXT NOT NULL PRIMARY KEY,  -- Merkle reference for { the, of, is, cause }
+  the     TEXT NOT NULL,              -- Kind of a fact e.g. "application/json"
+  of      TEXT NOT NULL,              -- Entity identifier fact is about
+  'is'    TEXT,                       -- Value entity is claimed to have
+  cause   TEXT,                       -- Causal reference to prior fact
+  since   INTEGER NOT NULL,           -- Lamport clock since when this fact was in effect
   FOREIGN KEY('is') REFERENCES datum(this)
 );
 
@@ -74,22 +76,33 @@ CREATE TABLE IF NOT EXISTS memory (
 
 CREATE INDEX IF NOT EXISTS memory_the ON memory (the); -- Index to filter by "the" field
 CREATE INDEX IF NOT EXISTS memory_of ON memory (of);   -- Index to query by "of" field
+CREATE INDEX IF NOT EXISTS fact_since ON fact (since); -- Index to query by "since" field
 
+-- Create the updated 'state' view
 CREATE VIEW IF NOT EXISTS state AS
 SELECT
-  memory.the as the,
-  memory.of as of,
-  maybe_datum.source as 'is',
-  fact.cause as cause,
-  memory.fact as fact,
-  maybe_datum.this as proof,
-  fact.since as since
+  memory.the AS the,
+  memory.of AS of,
+  datum.source AS 'is',
+  fact.cause AS cause,
+  memory.fact AS fact,
+  datum.this AS proof,
+  fact.since AS since
 FROM
   memory
+-- We use inner join because we memory.fact can not be NULL and as foreign
+-- key into fact.this which is also primary key. This guarantees that we will
+-- not have any memory record with corresponding fact record
 JOIN
   fact ON memory.fact = fact.this
+-- We use inner join here because fact.is || 'undefined' is guaranteed to have
+-- corresponding record in datum through a foreign key constraint and inner
+-- joins are generally more efficient that left joins.
+-- ⚠️ Also note that we use COALESCE operator to use 'undefined' in case where
+-- there fact.is NULL (retractions), which is important because SQLite never
+-- matches over fact.is = NULL.
 JOIN
-  maybe_datum ON fact.'is' = maybe_datum.this OR (fact.'is' IS NULL AND maybe_datum.this IS NULL);
+  datum ON datum.this = COALESCE(fact.'is', 'undefined');
 
 COMMIT;
 `;
