@@ -871,7 +871,7 @@ describe("Schema Support", () => {
           ],
         });
 
-        const schema = {
+        const vdomSchema = {
           type: "object",
           properties: {
             type: { type: "string" },
@@ -889,37 +889,39 @@ describe("Schema Support", () => {
                   { type: "string", asCell: true },
                   { type: "number", asCell: true },
                   { type: "boolean", asCell: true },
-                  { type: "array", items: { $ref: "#" } },
+                  { type: "array", items: { $ref: "#", asCell: true } },
                 ],
               },
+              asCell: true,
             },
           },
           required: ["type", "name", "value", "props", "children"],
         } as const satisfies JSONSchema;
 
         for (const doc of [plain, withLinks]) {
-          const cell = doc.asCell([], undefined, schema);
+          const cell = doc.asCell([], undefined, vdomSchema);
           const result = cell.get();
           expect(result.type).toBe("vnode");
           expect(result.name).toBe("div");
-          expect(isCell(result.children)).toBe(false);
           expect(isCell(result.props)).toBe(false);
           expect(isCell(result.props.style)).toBe(true);
           expect(result.props.style.get().color).toBe("red");
-          expect(result.children.length).toBe(3);
-          expect(isCell(result.children[0])).toBe(true);
-          expect((result.children[0] as Cell<any>).get().value).toBe("single");
-          expect(isCell(result.children[1])).toBe(false);
-          expect(Array.isArray(result.children[1])).toBe(true);
-          const child1 = result.children[1] as unknown as Cell<any>[];
+          expect(isCell(result.children)).toBe(true);
+          const children = result.children.get();
+          expect(children.length).toBe(3);
+          expect(isCell(children[0])).toBe(true);
+          expect((children[0] as Cell<any>).get().value).toBe("single");
+          expect(isCell(children[1])).toBe(false);
+          expect(Array.isArray(children[1])).toBe(true);
+          const child1 = children[1] as unknown as Cell<any>[];
           expect(isCell(child1[0])).toBe(true);
           expect(child1[0].get().value).toBe("hello");
           expect(
             isCell(child1[1]),
           ).toBe(true);
           expect(child1[1].get().value).toBe("world");
-          expect(isCell(result.children[2])).toBe(true);
-          expect((result.children[2] as Cell<any>).get()).toBe("or just text");
+          expect(isCell(children[2])).toBe(true);
+          expect((children[2] as Cell<any>).get()).toBe("or just text");
         }
       });
     });
