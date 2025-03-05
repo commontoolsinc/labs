@@ -108,7 +108,9 @@ export interface Cell<T> {
   ): void;
   equals(other: Cell<any>): boolean;
   sink(callback: (value: T) => Cancel | undefined | void): Cancel;
-  key<K extends keyof T>(valueKey: K): Cell<T[K]>;
+  key<K extends T extends Cell<infer S> ? keyof S : keyof T>(
+    valueKey: K,
+  ): T extends Cell<infer S> ? Cell<S[K & keyof S]> : Cell<T[K]>;
   asSchema<T>(
     schema?: JSONSchema,
   ): Cell<T>;
@@ -307,7 +309,8 @@ function createRegularCell<T>(
         throw new Error("Can't update with non-object value");
       }
       for (const [key, value] of Object.entries(values)) {
-        self.key(key as keyof T).set(value as T[keyof T]);
+        // Workaround for type checking, since T can be Cell<> and that's fine.
+        (self.key as any)(key).set(value);
       }
     },
     push: (value: any) => {
@@ -348,9 +351,11 @@ function createRegularCell<T>(
       JSON.stringify(self) === JSON.stringify(other),
     sink: (callback: (value: T) => Cancel | undefined) =>
       subscribeToReferencedDocs(callback, doc, path, schema, rootSchema),
-    key: <K extends keyof T>(key: K) => {
+    key: <K extends T extends Cell<infer S> ? keyof S : keyof T>(
+      valueKey: K,
+    ): T extends Cell<infer S> ? Cell<S[K & keyof S]> : Cell<T[K]> => {
       const currentSchema = schema?.type === "object"
-        ? (schema.properties?.[key as string] ??
+        ? (schema.properties?.[valueKey as string] ??
           (typeof schema.additionalProperties === "object"
             ? schema.additionalProperties
             : undefined))
@@ -359,11 +364,11 @@ function createRegularCell<T>(
         : undefined;
       return createCell(
         doc,
-        [...path, key],
+        [...path, valueKey],
         log,
         currentSchema,
         rootSchema,
-      ) as Cell<T[K]>;
+      ) as T extends Cell<infer S> ? Cell<S[K & keyof S]> : Cell<T[K]>;
     },
     asSchema: (newSchema?: JSONSchema) =>
       createCell(doc, path, log, newSchema, newSchema),
