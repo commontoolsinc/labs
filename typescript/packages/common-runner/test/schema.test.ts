@@ -699,7 +699,8 @@ describe("Schema Support", () => {
       const cellObject = cObject.asCell([], undefined, schemaObject);
       const resultObject = cellObject.get();
       // Since the input is an object, the object candidate is selected.
-      expect(resultObject.mixed.foo).toBe("bar");
+      // TS doesn't infer `foo as string` when mixing objects and arrays, so have to cast.
+      expect((resultObject.mixed as { foo: string }).foo).toBe("bar");
 
       // Case 2: When the value is an array, the array candidate should be used.
       const cArray = getDoc({ mixed: ["bar", "baz"] });

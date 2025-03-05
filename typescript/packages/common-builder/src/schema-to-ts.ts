@@ -22,24 +22,24 @@ export type Schema<
     // Handle enum values
     : T extends { enum: infer E extends readonly any[] } ? E[number]
     // Handle oneOf (not yet supported in schema.ts, so commenting out)
-    // : T extends { oneOf: infer U extends readonly any[] }
-    //   ? U extends readonly [infer F, ...infer R extends any[]]
+    // : T extends { oneOf: infer U extends readonly JSONSchema[] }
+    //   ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
     //     ? F extends JSONSchema ?
     //         | Schema<F, Root, DecrementDepth<Depth>>
     //         | Schema<{ oneOf: R }, Root, Depth>
     //       : never
     //     : never
     // Handle anyOf
-    : T extends { anyOf: infer U extends readonly any[] }
-      ? U extends readonly [infer F, ...infer R extends any[]]
+    : T extends { anyOf: infer U extends readonly JSONSchema[] }
+      ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
         ? F extends JSONSchema ?
             | Schema<F, Root, DecrementDepth<Depth>>
             | Schema<{ anyOf: R }, Root, Depth>
         : never
       : never
     // Handle allOf (merge all types) (not yet supported in schema.ts, so commenting out)
-    // : T extends { allOf: infer U extends readonly any[] }
-    //   ? U extends readonly [infer F, ...infer R extends any[]]
+    // : T extends { allOf: infer U extends readonly JSONSchema[] }
+    //   ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
     //     ? F extends JSONSchema
     //       ? Schema<F, Root, Depth> & Schema<{ allOf: R }, Root, Depth>
     //     : never
@@ -169,24 +169,24 @@ export type SchemaWithoutCell<
     // Handle enum values
     : T extends { enum: infer E extends readonly any[] } ? E[number]
     // Handle oneOf (not yet supported in schema.ts, so commenting out)
-    // : T extends { oneOf: infer U extends readonly any[] }
-    //   ? U extends readonly [infer F, ...infer R extends any[]]
+    // : T extends { oneOf: infer U extends readonly JSONSchema[] }
+    //   ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
     //     ? F extends JSONSchema ?
     //         | SchemaWithoutCell<F, Root, DecrementDepth<Depth>>
     //         | SchemaWithoutCell<{ oneOf: R }, Root, Depth>
     //       : never
     //     : never
     // Handle anyOf
-    : T extends { anyOf: infer U extends readonly any[] }
-      ? U extends readonly [infer F, ...infer R extends any[]]
+    : T extends { anyOf: infer U extends readonly JSONSchema[] }
+      ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
         ? F extends JSONSchema ?
             | SchemaWithoutCell<F, Root, DecrementDepth<Depth>>
             | SchemaWithoutCell<{ anyOf: R }, Root, Depth>
         : never
       : never
     // Handle allOf (merge all types) (not yet supported in schema.ts, so commenting out)
-    // : T extends { allOf: infer U extends readonly any[] }
-    //   ? U extends readonly [infer F, ...infer R extends any[]]
+    // : T extends { allOf: infer U extends readonly JSONSchema[] }
+    //   ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
     //     ? F extends JSONSchema
     //       ?
     //         & SchemaWithoutCell<F, Root, Depth>
