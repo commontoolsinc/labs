@@ -1,4 +1,4 @@
-import { ensureDir } from "https://deno.land/std/fs/mod.ts";
+import { ensureDir } from "@std/fs";
 import { colors, timestamp } from "./cli.ts";
 import env from "@/env.ts";
 

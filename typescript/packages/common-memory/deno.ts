@@ -1,6 +1,6 @@
 import * as Provider from "./provider.ts";
 import * as Socket from "./socket.ts";
-import * as Path from "jsr:@std/path";
+import * as Path from "@std/path";
 import * as UCAN from "./ucan.ts";
 import * as Receipt from "./receipt.ts";
 

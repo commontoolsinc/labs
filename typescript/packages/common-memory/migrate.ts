@@ -2,7 +2,7 @@ import {
   Database,
   SqliteError,
   Transaction as DBTransaction,
-} from "jsr:@db/sqlite";
+} from "@db/sqlite";
 
 const MIGRATIONS = new URL("./migrations/", import.meta.url);
 

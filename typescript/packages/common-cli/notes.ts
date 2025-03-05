@@ -1,5 +1,5 @@
-import { walk } from "https://deno.land/std@0.216.0/fs/walk.ts";
-import { debounce } from "https://deno.land/std@0.216.0/async/debounce.ts";
+import { walk } from "@std/fs";
+import { debounce } from "@std/async/debounce";
 
 export interface NoteChange {
   path: string;

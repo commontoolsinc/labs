@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-run
-import * as path from "jsr:@std/path";
+import * as path from "@std/path";
 
 const decoder = new TextDecoder();
 const workspaceCwd = Deno.cwd();

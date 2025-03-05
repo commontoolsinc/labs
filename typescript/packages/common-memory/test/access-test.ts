@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
+import { assert, assertEquals, assertMatch } from "@std/assert";
 import { alice, bob, mallory, space } from "./principal.ts";
 import * as Access from "../access.ts";
 import { refer } from "../reference.ts";

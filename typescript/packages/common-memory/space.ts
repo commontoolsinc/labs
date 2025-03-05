@@ -2,7 +2,7 @@ import {
   Database,
   SqliteError,
   Transaction as DBTransaction,
-} from "jsr:@db/sqlite";
+} from "@db/sqlite";
 import { fromString, refer } from "./reference.ts";
 import { unclaimed } from "./fact.ts";
 import { from as toChanges, set } from "./changes.ts";

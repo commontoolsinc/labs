@@ -1,9 +1,7 @@
-import { OAuth2Client } from "jsr:@cmd-johnson/oauth2-client@^2.0.0";
-import { serve } from "https://deno.land/std@0.216.0/http/server.ts";
-import { open } from "https://deno.land/x/open@v0.0.6/index.ts";
+import { OAuth2Client } from "@cmd-johnson/oauth2-client";
+import { load } from "@std/dotenv";
 import { getAccessToken } from "./google.ts";
 
-import { load } from "https://deno.land/std@0.216.0/dotenv/mod.ts";
 const env = await load({
   envPath: "./.env",
   // you can also specify multiple possible paths:
