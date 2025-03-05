@@ -32,14 +32,13 @@
     "jsr:@std/expect@1": "1.0.13",
     "jsr:@std/fmt@0.221": "0.221.0",
     "jsr:@std/fmt@1.0.3": "1.0.3",
-    "jsr:@std/fmt@^1.0.5": "1.0.5",
+    "jsr:@std/fmt@^1.0.5": "1.0.6",
     "jsr:@std/fs@*": "1.0.11",
     "jsr:@std/fs@0.221": "0.221.0",
     "jsr:@std/fs@1": "1.0.11",
     "jsr:@std/fs@^1.0.10": "1.0.11",
     "jsr:@std/fs@^1.0.9": "1.0.11",
     "jsr:@std/html@^1.0.3": "1.0.3",
-    "jsr:@std/http@*": "1.0.13",
     "jsr:@std/http@1": "1.0.13",
     "jsr:@std/internal@^1.0.5": "1.0.5",
     "jsr:@std/io@0.225.0": "0.225.0",
@@ -257,8 +256,8 @@
     "@std/fmt@1.0.3": {
       "integrity": "97765c16aa32245ff4e2204ecf7d8562496a3cb8592340a80e7e554e0bb9149f"
     },
-    "@std/fmt@1.0.5": {
-      "integrity": "0cfab43364bc36650d83c425cd6d99910fc20c4576631149f0f987eddede1a4d"
+    "@std/fmt@1.0.6": {
+      "integrity": "a2c56a69a2369876ddb3ad6a500bb6501b5bad47bb3ea16bfb0c18974d2661fc"
     },
     "@std/fs@0.221.0": {
       "integrity": "028044450299de8ed5a716ade4e6d524399f035513b85913794f4e81f07da286",
@@ -7307,9 +7306,7 @@
       },
       "deno-web-test": {
         "dependencies": [
-          "jsr:@astral/astral@*",
           "jsr:@luca/esbuild-deno-loader@*",
-          "jsr:@std/http@*",
           "npm:esbuild@*"
         ]
       },

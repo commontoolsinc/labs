@@ -1,4 +1,4 @@
-name: Unit Tests
+name: Deno Tests
 
 on:
   push:
@@ -9,9 +9,8 @@ on:
       - main
 
 jobs:
-  test:
+  deno:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     defaults:
       run:
         working-directory: ./typescript/packages
@@ -28,6 +27,14 @@ jobs:
             ~/.deno
             ~/.cache/deno
           key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+      - name: Install dependencies 
+        working-directory: typescript/packages
+        # Errors if `deno.lock` file was not
+        # committed with the current change.
+        run: deno install --frozen=true
+      - name: Lint 
+        working-directory: typescript/packages
+        run: deno lint
       # For deno-web-test browser tests
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
       - name: Disable AppArmor
