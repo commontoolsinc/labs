@@ -41,12 +41,15 @@ export const login = async (page: Page) => {
 };
 
 export const addCharm = async () => {
+  const space = `ci-${Date.now()}-${
+    Math.random().toString(36).substring(2, 15)
+  }`;
   const process = new Deno.Command("deno", {
     args: [
       "task",
       "start",
       "--space",
-      "ci",
+      space,
       "--recipeFile",
       "recipes/simpleValue.tsx",
       "--cause",
@@ -69,6 +72,6 @@ export const addCharm = async () => {
 
   return {
     charmId: "baedreic5a2muxtlgvn6u36lmcp3tdoq5sih3nbachysw4srquvga5fjtem",
-    space: "ci",
+    space,
   };
 };
