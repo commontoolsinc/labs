@@ -50,7 +50,9 @@ CREATE TABLE IF NOT EXISTS datum (
   source JSON                         -- Source for this JSON
 );
 
--- Create a record for non existing fact.is
+-- We create special record to represent undefined which does not exist in JSON.
+-- This allows us to join fact with datum table and cover retractions where
+-- fact.is is set to NULL
 INSERT OR IGNORE INTO datum (this, source) VALUES ('undefined', NULL);
 
 
@@ -88,8 +90,17 @@ SELECT
   fact.since AS since
 FROM
   memory
+-- We use inner join because we memory.fact can not be NULL and as foreign
+-- key into fact.this which is also primary key. This guarantees that we will
+-- not have any memory record with corresponding fact record
 JOIN
   fact ON memory.fact = fact.this
+-- We use inner join here because fact.is || 'undefined' is guaranteed to have
+-- corresponding record in datum through a foreign key constraint and inner
+-- joins are generally more efficient that left joins.
+-- ⚠️ Also note that we use COALESCE operator to use 'undefined' in case where
+-- there fact.is NULL (retractions), which is important because SQLite never
+-- matches over fact.is = NULL.
 JOIN
   datum ON datum.this = COALESCE(fact.'is', 'undefined');
 
