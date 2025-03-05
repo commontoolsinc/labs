@@ -116,7 +116,7 @@ describe("Schema Support", () => {
 
       // Now change the currently selected cell
       const second = getDoc({ label: "second" }).asCell();
-      c.key("current").set(second.getAsDocLink());
+      c.key("current").set(second);
 
       await idle();
 
