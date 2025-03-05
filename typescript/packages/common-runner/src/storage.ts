@@ -1,13 +1,11 @@
-import {
-  type DocImpl,
-  type DocLink,
-  isDoc,
-  isDocLink,
-} from "./doc.ts";
+import { type DocImpl, type DocLink, isDoc, isDocLink } from "./doc.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { Cell, isCell } from "./cell.ts";
-import { type EntityId, getDocByEntityId } from "./cell-map.ts";
-import { getDocLinkOrThrow, isQueryResultForDereferencing } from "./query-result-proxy.ts";
+import { type EntityId, getDocByEntityId } from "./doc-map.ts";
+import {
+  getDocLinkOrThrow,
+  isQueryResultForDereferencing,
+} from "./query-result-proxy.ts";
 import { idle } from "./scheduler.ts";
 import { Space } from "./space.ts";
 import { isStatic, markAsStatic } from "@commontools/builder";
@@ -584,7 +582,7 @@ class StorageImpl implements Storage {
         }
       }
       log(
-        () => ["loading", [...loading].map((c) => JSON.stringify(c.entityId))]
+        () => ["loading", [...loading].map((c) => JSON.stringify(c.entityId))],
       );
       log(() => [
         "docIsLoading",
