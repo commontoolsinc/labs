@@ -20,7 +20,9 @@ export default defineConfig({
         changeOrigin: true,
       },
       "/api/ai/spell/": {
-        target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
+        target: Deno.env.get("AI_URL") ??
+          Deno.env.get("TOOLSHED_API_URL") ?? 
+          "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/spellbook": {
@@ -32,23 +34,33 @@ export default defineConfig({
         changeOrigin: true,
       },
       "/api/ai/llm": {
-        target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
+        target: Deno.env.get("AI_URL") ??
+          Deno.env.get("TOOLSHED_API_URL") ?? 
+          "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/ai/img": {
-        target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
+        target: Deno.env.get("AI_URL") ??
+          Deno.env.get("TOOLSHED_API_URL") ?? 
+          "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/ai/voice": {
-        target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
+        target: Deno.env.get("AI_URL") ??
+          Deno.env.get("TOOLSHED_API_URL") ?? 
+          "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/ai/webreader": {
-        target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
+        target: Deno.env.get("AI_URL") ??
+          Deno.env.get("TOOLSHED_API_URL") ?? 
+          "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/storage/blobby": {
-        target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
+        target: Deno.env.get("MEMORY_URL") ??
+          Deno.env.get("TOOLSHED_API_URL") ??
+          "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/storage/memory": {

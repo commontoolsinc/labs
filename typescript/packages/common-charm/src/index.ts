@@ -10,4 +10,3 @@ export {
   saveNewRecipeVersion,
 } from "./iterate.ts";
 export { getIframeRecipe, type IFrameRecipe } from "./iframe/recipe.ts";
-export { storage } from "./storage.ts";

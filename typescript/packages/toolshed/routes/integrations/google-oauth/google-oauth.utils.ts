@@ -1,10 +1,10 @@
 import { OAuth2Client } from "@cmd-johnson/oauth2-client";
 import env from "@/env.ts";
-import { storage } from "@commontools/charm";
 import {
   type DocLink,
   getCellFromDocLink,
   getSpace,
+  storage,
 } from "@commontools/runner";
 import { Context } from "@hono/hono";
 

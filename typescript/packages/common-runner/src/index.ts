@@ -43,3 +43,4 @@ export {
 } from "./recipe-map.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export { getSpace, type Space } from "./space.ts";
+export { storage } from "./storage.ts";

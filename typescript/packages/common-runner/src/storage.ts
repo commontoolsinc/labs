@@ -1,21 +1,15 @@
 import {
-  type AddCancel,
-  type Cancel,
-  Cell,
   type DocImpl,
   type DocLink,
-  type EntityId,
-  getDocByEntityId,
-  getDocLinkOrThrow,
-  idle,
-  isCell,
   isDoc,
   isDocLink,
-  isQueryResultForDereferencing,
-  Space,
-  useCancelGroup,
-} from "@commontools/runner";
-
+} from "./doc.ts";
+import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
+import { Cell, isCell } from "./cell.ts";
+import { type EntityId, getDocByEntityId } from "./cell-map.ts";
+import { getDocLinkOrThrow, isQueryResultForDereferencing } from "./query-result-proxy.ts";
+import { idle } from "./scheduler.ts";
+import { Space } from "./space.ts";
 import { isStatic, markAsStatic } from "@commontools/builder";
 import { StorageProvider, StorageValue } from "./storage/base.ts";
 import { RemoteStorageProvider } from "./storage/remote.ts";
