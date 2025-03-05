@@ -46,13 +46,12 @@ BEGIN TRANSACTION;
 -- Create table for storing JSON data.
 CREATE TABLE IF NOT EXISTS datum (
   this    TEXT PRIMARY KEY,     -- Merkle reference for this JSON
-  source  JSON NOT NULL         -- Source for this JSON
+  source  JSON                  -- Source for this JSON
 );
 
-CREATE VIEW IF NOT EXISTS maybe_datum AS
-SELECT * FROM datum
-UNION ALL
-SELECT NULL AS this, NULL AS source;
+INSERT OR IGNORE INTO datum (this, source) VALUES (NULL, NULL);
+
+DROP VIEW IF EXISTS maybe_datum;
 
 CREATE TABLE IF NOT EXISTS fact (
   this    TEXT PRIMARY KEY,     -- Merkle reference for { the, of, is, cause }
@@ -74,22 +73,24 @@ CREATE TABLE IF NOT EXISTS memory (
 
 CREATE INDEX IF NOT EXISTS memory_the ON memory (the); -- Index to filter by "the" field
 CREATE INDEX IF NOT EXISTS memory_of ON memory (of);   -- Index to query by "of" field
+CREATE INDEX IF NOT EXISTS fact_since ON fact (since); -- Index to query by "since" field
 
+DROP VIEW IF EXISTS state;
 CREATE VIEW IF NOT EXISTS state AS
 SELECT
   memory.the as the,
   memory.of as of,
-  maybe_datum.source as 'is',
+  datum.source as 'is',
   fact.cause as cause,
   memory.fact as fact,
-  maybe_datum.this as proof,
+  datum.this as proof,
   fact.since as since
 FROM
   memory
 JOIN
   fact ON memory.fact = fact.this
 JOIN
-  maybe_datum ON fact.'is' = maybe_datum.this OR (fact.'is' IS NULL AND maybe_datum.this IS NULL);
+  datum ON fact.'is' = datum.this OR (fact.'is' IS NULL AND datum.this IS NULL);
 
 COMMIT;
 `;
