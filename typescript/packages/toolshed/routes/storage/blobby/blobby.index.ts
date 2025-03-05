@@ -5,9 +5,6 @@
 import { createRouter } from "@/lib/create-app.ts";
 import * as handlers from "./blobby.handlers.ts";
 import * as routes from "./blobby.routes.ts";
-import env from "@/env.ts";
-import { createClient } from "redis";
-import type { RedisClientType } from "redis";
 import { cors } from "@hono/hono/cors";
 
 const router = createRouter();
