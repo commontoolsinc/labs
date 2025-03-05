@@ -1,4 +1,15 @@
-import { Page } from "@astral/astral";
+import { ElementHandle, Page } from "@astral/astral";
+import * as path from "@std/path";
+
+const COMMON_CLI_PATH = path.join(import.meta.dirname!, "../../common-cli");
+
+export const decode = (() => {
+  const decoder = new TextDecoder();
+  return (buffer: Uint8Array): string => decoder.decode(buffer);
+})();
+
+export const sleep = (ms: number) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 export const login = async (page: Page) => {
   // First, see if any credential data is
@@ -38,4 +49,88 @@ export const login = async (page: Page) => {
   // Click the only button, "login"
   button = await page.$("button");
   await button!.click();
+};
+
+export const waitForSelectorWithText = async (
+  page: Page,
+  selector: string,
+  text: string,
+): Promise<ElementHandle> => {
+  const retries = 30;
+  const timeout = 200;
+
+  for (let i = 0; i < retries; i++) {
+    const el = await page.$(selector);
+    if (!el) {
+      await sleep(timeout);
+      continue;
+    }
+    if ((await el.innerText()) === text) {
+      return el;
+    }
+  }
+  throw new Error(`Timed out waiting for "${selector}" to have text "${text}"`);
+};
+
+export const addCharm = async (toolshedUrl: string) => {
+  const space = `ci-${Date.now()}-${
+    Math.random().toString(36).substring(2, 15)
+  }`;
+  const { success, stderr } = await (new Deno.Command(Deno.execPath(), {
+    args: [
+      "task",
+      "start",
+      "--space",
+      space,
+      "--recipeFile",
+      "recipes/simpleValue.tsx",
+      "--cause",
+      "ci",
+      "--quit",
+      "true",
+    ],
+    env: {
+      "TOOLSHED_API_URL": toolshedUrl,
+    },
+    cwd: COMMON_CLI_PATH,
+  })).output();
+
+  if (!success) {
+    throw new Error(`Failed to add charm: ${decode(stderr)}`);
+  }
+
+  return {
+    charmId: "baedreic5a2muxtlgvn6u36lmcp3tdoq5sih3nbachysw4srquvga5fjtem",
+    space,
+  };
+};
+
+export const inspectCharm = async (
+  toolshedUrl: string,
+  space: string,
+  charmId: string,
+) => {
+  const { success, stdout, stderr } = await (new Deno.Command(Deno.execPath(), {
+    args: [
+      "task",
+      "start",
+      "--space",
+      space,
+      "--charmId",
+      charmId,
+      "--quit",
+      "true",
+    ],
+    env: {
+      "TOOLSHED_API_URL": toolshedUrl,
+    },
+    cwd: COMMON_CLI_PATH,
+  })).output();
+
+  if (!success) {
+    console.log(decode(stdout));
+    throw new Error(`Failed to inspect charm: ${decode(stderr)}`);
+  }
+
+  return decode(stdout);
 };
