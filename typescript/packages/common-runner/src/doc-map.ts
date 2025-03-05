@@ -192,5 +192,10 @@ export const setDocByEntityId = (
   entityId: EntityId,
   doc: DocImpl<any>,
 ) => {
+  // throw if doc already exists
+  if (entityIdToDocMap.get(space, JSON.stringify(entityId))) {
+    throw new Error("Doc already exists");
+  }
+
   entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
 };
