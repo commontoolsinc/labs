@@ -50,35 +50,47 @@ CREATE TABLE IF NOT EXISTS datum (
   source JSON                         -- Source for this JSON
 );
 
--- We create special record to represent undefined which does not exist in JSON.
--- This allows us to join fact with datum table and cover retractions where
--- fact.is is set to NULL
+-- We create special record to represent "undefined" which does not a valid
+-- JSON data type. We need this record to join fact.is on datum.this
 INSERT OR IGNORE INTO datum (this, source) VALUES ('undefined', NULL);
 
-
+-- Fact table holds complete history of assertions and retractions. It has
+-- n:1 mapping with datum table implying that we could have multiple entity
+-- assertions with a same JSON value. Claimed n:1 mapping is guaranteed through
+-- a foreign key constraint.
 CREATE TABLE IF NOT EXISTS fact (
   this    TEXT NOT NULL PRIMARY KEY,  -- Merkle reference for { the, of, is, cause }
   the     TEXT NOT NULL,              -- Kind of a fact e.g. "application/json"
   of      TEXT NOT NULL,              -- Entity identifier fact is about
-  'is'    TEXT,                       -- Value entity is claimed to have
-  cause   TEXT,                       -- Causal reference to prior fact
+  'is'    TEXT NOT NULL,              -- Merkle reference of asserted value or "undefined" if retraction 
+  cause   TEXT,                       -- Causal reference to prior fact (It is NULL for a first assertion)
   since   INTEGER NOT NULL,           -- Lamport clock since when this fact was in effect
   FOREIGN KEY('is') REFERENCES datum(this)
 );
+-- Index via "since" field to allow for efficient time queries
+CREATE INDEX IF NOT EXISTS fact_since ON fact (since); -- Index to query by "since" field
 
+-- Memory table holds latest assertion / retraction for each entity. In theory
+-- it has n:1 mapping with fact table, but in practice it is 1:1 mapping because
+-- initial cause is derived from {the, of} seed and there for it is practically
+-- guaranteed to be unique if we disregard astronomically tiny chance of hash
+-- collision. Claimed n:1 mapping is guaranteed through a foreign key constraint.
 CREATE TABLE IF NOT EXISTS memory (
   the     TEXT NOT NULL,        -- Kind of a fact e.g. "application/json"
   of      TEXT NOT NULL,        -- Entity identifier fact is about
-  fact    TEXT NOT NULL,          -- Link to the fact,
+  fact    TEXT NOT NULL,        -- Reference to the fact
   FOREIGN KEY(fact) REFERENCES fact(this),
   PRIMARY KEY (the, of)         -- Ensure that we have only one fact per entity
 );
 
-CREATE INDEX IF NOT EXISTS memory_the ON memory (the); -- Index to filter by "the" field
-CREATE INDEX IF NOT EXISTS memory_of ON memory (of);   -- Index to query by "of" field
-CREATE INDEX IF NOT EXISTS fact_since ON fact (since); -- Index to query by "since" field
+-- Index so we can efficiently search by "the" field.
+CREATE INDEX IF NOT EXISTS memory_the ON memory (the);
+-- Index so we can efficiently search by "of" field.
+CREATE INDEX IF NOT EXISTS memory_of ON memory (of);
 
--- Create the updated 'state' view
+-- State view is effectively a memory table with all the foreign keys resolved
+-- Note we use a view because we have 1:n:m relation among memory:fact:datum
+-- in order to deduplicate data.
 CREATE VIEW IF NOT EXISTS state AS
 SELECT
   memory.the AS the,
@@ -90,19 +102,15 @@ SELECT
   fact.since AS since
 FROM
   memory
--- We use inner join because we memory.fact can not be NULL and as foreign
--- key into fact.this which is also primary key. This guarantees that we will
--- not have any memory record with corresponding fact record
 JOIN
+  -- We use inner join because we have 1:n mapping between memory:fact tables
+  -- guaranteed through foreign key constraint.
   fact ON memory.fact = fact.this
--- We use inner join here because fact.is || 'undefined' is guaranteed to have
--- corresponding record in datum through a foreign key constraint and inner
--- joins are generally more efficient that left joins.
--- ⚠️ Also note that we use COALESCE operator to use 'undefined' in case where
--- there fact.is NULL (retractions), which is important because SQLite never
--- matches over fact.is = NULL.
+  -- We use inner join here because we have 1:n mapping between fact:datum
+  -- tables guaranteed through a foreign key constraint. We also prefer inner
+  -- join because it's generally more efficient that outer join.
 JOIN
-  datum ON datum.this = COALESCE(fact.'is', 'undefined');
+  datum ON datum.this = fact.'is';
 
 COMMIT;
 `;
@@ -119,9 +127,9 @@ const IMPORT_MEMORY =
 const SWAP = `UPDATE memory
   SET fact = :fact
 WHERE
-  fact = :cause
-  AND the = :the
-  AND of = :of;
+  the = :the
+  AND of = :of
+  AND fact = :cause;
 `;
 
 const EXPORT = `SELECT
@@ -348,16 +356,28 @@ const select = <Space extends MemorySpace>(
   return selection;
 };
 
+/**
+ * Imports datum into the `datum` table. If `datum` is undefined we return
+ * special `"undefined"` for which `datum` table will have row with `NULL`
+ * source. If `datum` already contains row for matching `datum` insert is
+ * ignored because existing record will parse to same `datum` since primary
+ * key is merkle-reference for it or an "undefined" for the `undefined`.
+ */
 const importDatum = <Space extends MemorySpace>(
   session: Session<Space>,
-  source: Assertion,
-): Reference<JSONValue> => {
-  const is = refer(source.is);
-  session.store.run(IMPORT_DATUM, {
-    this: is.toString(),
-    source: JSON.stringify(source.is),
-  });
-  return is;
+  datum: JSONValue | undefined,
+): string => {
+  if (datum === undefined) {
+    return "undefined";
+  } else {
+    const is = refer(datum).toString();
+    session.store.run(IMPORT_DATUM, {
+      this: is,
+      source: JSON.stringify(datum),
+    });
+
+    return is;
+  }
 };
 
 const iterate = function* (
@@ -380,12 +400,20 @@ const iterate = function* (
   }
 };
 
+/**
+ * Performs memory update with compare and swap (CAS) semantics. It will import
+ * new data into `datum`, `fact` tables and update `memory` table to point to
+ * new fact. All the updates occur in a single transaction to guarantee that
+ * either all changes are made or no changes are. Function can also be passed
+ * `Claim` in which case provided invariant is upheld, meaning no updates will
+ * take place but error will be raised if claimed memory state is not current.
+ */
 const swap = <Space extends MemorySpace>(
   session: Session<Space>,
   source: Retract | Assert | Claim,
   { since, transaction }: { since: number; transaction: Transaction<Space> },
 ) => {
-  const [{ the, of }, expect] = source.assert
+  const [{ the, of, is }, expect] = source.assert
     ? [source.assert, source.assert.cause]
     : source.retract
     ? [source.retract, source.retract.cause]
@@ -403,40 +431,40 @@ const swap = <Space extends MemorySpace>(
     ? refer(source.retract).toString()
     : source.claim.fact.toString();
 
-  // If this is an assertion we need to import asserted data and then insert
-  // fact referencing it. If it is retraction we don't have data to import
-  // but we do still need to create fact record.
+  // If this is an assertion we need to import asserted datum and then insert
+  // fact referencing it.
   if (source.assert || source.retract) {
-    // First we import JSON value in the `is` field into the `datum` table and
-    // then we import the fact into the `factor` table. If `datum` already exists
-    // we ignore as we key those by the merkle reference. Same is true for the
-    // `factor` table where we key by the merkle reference of the fact so if
-    // conflicting record exists it is the same record and we ignore.
+    // First we import datum and and then use it's primary key as `is` field
+    // in the `fact` table upholding foreign key constraint.
     session.store.run(IMPORT_FACT, {
       this: fact,
       the,
       of,
-      is: source.assert ? importDatum(session, source.assert).toString() : null,
+      is: importDatum(session, is),
       cause,
       since,
     });
   }
 
-  // Now if referenced cause is for an implicit fact, we will not have a record
-  // for it in the memory table to update in the next step. We also can not
-  // create such record as we don't have corresponding records in the `fact`
-  // or `datum` tables. Therefore instead we try to create a record for the
-  // desired update. If conflicting record exists this will be ignored, but that
-  // is fine as update in the next step will update it to the desired state.
+  // First assertion has a causal reference to the `type Unclaimed = { the, of }`
+  // implicit fact for which no record in the memory table exists which is why
+  // we simply insert into the memory table. However such memory record may
+  // already exist in which case insert will be ignored. This can happen if
+  // say we had assertions `a, b, c, a` last `a` will not not create any new
+  // records and will be ignored. You may be wondering why do insert with an
+  // ignore as opposed to do insert in if clause and update in the else block,
+  // that is because we may also have assertions in this order `a, b, c, c`
+  // where second `c` insert is redundant yet we do not want to fail transaction,
+  // therefor we insert or ignore here to ensure fact record exists and then
+  // use update afterwards to update to desired state from expected `cause` state.
   if (expected == null) {
     session.store.run(IMPORT_MEMORY, { the, of, fact });
   }
 
-  // Here we finally perform a memory swap. Note that update is conditional and
-  // will only update if current record has the same `cause` reference. If that
-  // is not the case 0 records will be updated indicating a conflict handled
-  // below. Note that passing `the` and `of` is required, if omitted we may
-  // update another memory which has passed `cause`.
+  // Finally we perform a memory swap, using conditional update so it only
+  // updates memory if the `cause` references expected state. We use return
+  // value to figure out whether update took place, if it is `0` no records
+  // were updated indicating potential conflict which we handle below.
   const updated = session.store.run(SWAP, { fact, cause, the, of });
 
   // If no records were updated it implies that there was no record with
@@ -448,7 +476,7 @@ const swap = <Space extends MemorySpace>(
   if (updated === 0) {
     const { fact: actual } = recall(session, { the, of });
 
-    // If actual state matches desired state it is either was inserted by the
+    // If actual state matches desired state it either was inserted by the
     // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
     // it as a conflict as current state is the asserted one.
     if (refer(actual).toString() !== fact) {
