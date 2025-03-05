@@ -1,6 +1,6 @@
 import { launch } from "@astral/astral";
 import { assert } from "@std/assert";
-import { addCharm, login } from "./utils.ts";
+import { addCharm, inspectCharm, login } from "./utils.ts";
 
 const FRONTEND_URL = "http://localhost:5173/";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -54,6 +54,11 @@ async function main() {
       (await el2!.innerText()) === "Simple Value: 2",
       "Title changed",
     );
+
+    console.log("Inspecting charm to verify updates propagated from browser.");
+    const charm = await inspectCharm(space, charmId);
+    console.log("Charm:", charm);
+    assert(charm.includes("Simple Value: 2"), "Charm updates propagated.");
   } finally {
     if (browser) {
       await browser.close();

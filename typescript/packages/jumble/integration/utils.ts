@@ -75,3 +75,32 @@ export const addCharm = async () => {
     space,
   };
 };
+
+export const inspectCharm = async (space: string, charmId: string) => {
+  const process = new Deno.Command("deno", {
+    args: [
+      "task",
+      "start",
+      "--space",
+      space,
+      "--charmId",
+      charmId,
+      "--quit",
+      "true",
+    ],
+    env: {
+      "TOOLSHED_API_URL": "http://localhost:8000/",
+    },
+    cwd: "../common-cli",
+    stdout: "piped",
+    stderr: "inherit",
+  });
+
+  const { code, stdout } = await process.output();
+  if (code !== 0) {
+    console.log(new TextDecoder().decode(stdout));
+    throw new Error(`Failed to inspect charm: ${code}`);
+  }
+
+  return new TextDecoder().decode(stdout);
+};

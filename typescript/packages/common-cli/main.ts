@@ -37,16 +37,28 @@ async function main() {
     signer: identity,
   });
   const charms = manager.getCharms();
-
   charms.sink((charms) => {
     console.log(
-      "charms:",
-      charms.map((c) => c.toJSON().cell?.["/"]),
+      "all charms:",
+      charms.map((c) => getEntityId(c)?.["/"]),
     );
   });
 
   if (charmId) {
     const charm = await manager.get(charmId);
+    if (quit) {
+      if (!charm) {
+        console.error("charm not found:", charmId);
+        Deno.exit(1);
+      }
+      console.log("charm:", charmId);
+      console.log("charm:", JSON.stringify(charm.get(), null, 2));
+      console.log(
+        "sourceCell:",
+        JSON.stringify(charm.getSourceCell().get(), null, 2),
+      );
+      Deno.exit(0);
+    }
     charm?.sink((value) => {
       console.log("charm:", charmId, value);
     });

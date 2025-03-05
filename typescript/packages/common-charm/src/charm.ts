@@ -186,6 +186,9 @@ export class CharmManager {
     const recipe = recipeId ? getRecipe(recipeId) : undefined;
 
     if (!recipe || charm.get() === undefined) {
+      console.warn("recipeId", recipeId);
+      console.warn("recipe", recipe);
+      console.warn("charm", charm.get());
       console.warn(`Not a charm: ${JSON.stringify(getEntityId(charm))}`);
     }
 
