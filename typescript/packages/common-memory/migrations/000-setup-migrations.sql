@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS migration (
+  id INTEGER PRIMARY KEY NOT NULL,
+  title TEXT NOT NULL,
+  time TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+INSERT OR IGNORE INTO migration (id, title)
+VALUES (0, '000-setup-migrations.sql');

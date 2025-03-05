@@ -17,6 +17,14 @@ deno task start
 It will print out service URL endpoint and `file:` URL for the directory where
 memory will be persisted in `.sqlite` files.
 
+## Database Migrations
+
+You can upgrade database to latest version by running following command from the package root
+
+```sh
+deno task migrate ./path/to/db.sqlite
+```
+
 ## Data Model
 
 Memory records are represented as a discrete facts in the shape of
