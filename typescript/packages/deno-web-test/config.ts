@@ -7,8 +7,6 @@ import { exists } from "@std/fs/exists";
 export type Config = {
   // Whether the test runner should run headlessly. Default: true.
   headless?: boolean;
-  // Whether devtools should be enabled. Default: false.
-  devtools?: boolean;
   // What browser to run.
   product?: "chrome" | "firefox";
   // Arguments to be passed into the browser.
@@ -25,12 +23,10 @@ export const applyDefaults = (config: object): Config => {
 };
 
 export const extractAstralConfig = (config: Config): LaunchOptions => {
-  const astralConfig = {};
-  for (const prop of ["headless", "devtools", "product", "args"]) {
-    if (prop in config) {
-      astralConfig[prop] = config[prop];
-    }
-  }
+  const astralConfig: LaunchOptions = {};
+  if ("headless" in config) astralConfig.headless = config.headless;
+  if ("product" in config) astralConfig.product = config.product;
+  if ("args" in config) astralConfig.args = config.args;
   return astralConfig;
 };
 
