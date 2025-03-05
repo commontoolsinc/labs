@@ -14,7 +14,7 @@ import {
   isQueryResultForDereferencing,
   Space,
   useCancelGroup,
-} from "@commontools/runner";
+} from "./index.ts";
 
 import { isStatic, markAsStatic } from "@commontools/builder";
 import { StorageProvider, StorageValue } from "./storage/base.ts";

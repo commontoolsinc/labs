@@ -19,9 +19,8 @@ import {
   isCell,
   run,
 } from "@commontools/runner";
-import { storage } from "./storage.ts";
 import { syncRecipeBlobby } from "./syncRecipe.ts";
-import { getSpace, Space } from "@commontools/runner";
+import { storage, getSpace, Space } from "@commontools/runner";
 import { DID, Identity, Signer } from "@commontools/identity";
 
 export type Charm = {

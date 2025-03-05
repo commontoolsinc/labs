@@ -9,7 +9,7 @@ import { Charm, CharmManager } from "../common-charm/src/charm.ts";
 import { Cell } from "../common-runner/src/cell.ts";
 import { DocImpl, getDoc } from "../common-runner/src/doc.ts";
 import { EntityId } from "../common-runner/src/doc-map.ts";
-import { storage } from "../common-charm/src/storage.ts";
+import { storage } from "../common-runner/src/storage.ts";
 import { getSpace, Space } from "../common-runner/src/space.ts";
 import { Identity } from "../common-identity/src/index.ts";
 
