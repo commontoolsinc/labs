@@ -12,30 +12,7 @@ import {
   getUserBlobs,
   removeBlobFromUser,
 } from "./lib/redis.ts";
-import { createClient, type RedisClientType } from "redis";
-import { DiskStorage } from "@/routes/storage/blobby/lib/storage.ts";
-import env from "@/env.ts";
-
-const DATA_DIR = `${env.CACHE_DIR}/blobby`;
-
-export const storage = new DiskStorage(DATA_DIR);
-await storage.init();
-
-let redisClient: RedisClientType | null = null;
-
-const getRedisClient = async () => {
-  if (!redisClient) {
-    redisClient = createClient({
-      url: env.BLOBBY_REDIS_URL,
-    });
-  }
-  if (!redisClient.isOpen) {
-    await redisClient.connect();
-  }
-
-  return redisClient;
-};
-getRedisClient();
+import { getRedisClient, storage } from "./utils.ts";
 
 export const uploadBlobHandler: AppRouteHandler<
   typeof uploadBlob
