@@ -21,15 +21,29 @@ export type Schema<
     : T extends { $ref: string } ? any
     // Handle enum values
     : T extends { enum: infer E extends readonly any[] } ? E[number]
-    // Handle oneOf
-    : T extends { oneOf: infer U extends readonly any[] }
-      ? FromUnion<U, Root, Depth>
+    // Handle oneOf (not yet supported in schema.ts, so commenting out)
+    // : T extends { oneOf: infer U extends readonly any[] }
+    //   ? U extends readonly [infer F, ...infer R extends any[]]
+    //     ? F extends JSONSchema ?
+    //         | Schema<F, Root, DecrementDepth<Depth>>
+    //         | Schema<{ oneOf: R }, Root, Depth>
+    //       : never
+    //     : never
     // Handle anyOf
     : T extends { anyOf: infer U extends readonly any[] }
-      ? FromUnion<U, Root, Depth>
-    // Handle allOf (merge all types)
-    : T extends { allOf: infer U extends readonly any[] }
-      ? MergeAllOf<U, Root, Depth>
+      ? U extends readonly [infer F, ...infer R extends any[]]
+        ? F extends JSONSchema ?
+            | Schema<F, Root, DecrementDepth<Depth>>
+            | Schema<{ anyOf: R }, Root, Depth>
+        : never
+      : never
+    // Handle allOf (merge all types) (not yet supported in schema.ts, so commenting out)
+    // : T extends { allOf: infer U extends readonly any[] }
+    //   ? U extends readonly [infer F, ...infer R extends any[]]
+    //     ? F extends JSONSchema
+    //       ? Schema<F, Root, Depth> & Schema<{ allOf: R }, Root, Depth>
+    //     : never
+    //   : Record<string | number | symbol, never>
     // Handle different primitive types
     : T extends { type: "string" } ? string
     : T extends { type: "number" | "integer" } ? number
@@ -69,27 +83,6 @@ export type Schema<
       : Record<string, unknown>
     // Default case
     : any;
-
-// Helper type to handle oneOf and anyOf with recursion limit
-type FromUnion<
-  T extends readonly any[],
-  Root extends JSONSchema,
-  Depth extends DepthLevel,
-> = T extends [infer F, ...infer R extends readonly any[]]
-  ? F extends JSONSchema
-    ? Schema<F, Root, DecrementDepth<Depth>> | FromUnion<R, Root, Depth>
-  : never
-  : never;
-
-// Helper type to handle allOf and merges all types together, with recursion limit
-type MergeAllOf<
-  T extends readonly any[],
-  Root extends JSONSchema,
-  Depth extends DepthLevel,
-> = T extends [infer F, ...infer R extends readonly any[]]
-  ? F extends JSONSchema ? Schema<F, Root, Depth> & MergeAllOf<R, Root, Depth>
-  : never
-  : Record<string | number | symbol, never>; // empty object
 
 // Get keys from the default object
 type GetDefaultKeys<T extends JSONSchema> = T extends { default: infer D }
@@ -175,15 +168,31 @@ export type SchemaWithoutCell<
     : T extends { $ref: string } ? any
     // Handle enum values
     : T extends { enum: infer E extends readonly any[] } ? E[number]
-    // Handle oneOf
-    : T extends { oneOf: infer U extends readonly any[] }
-      ? FromUnionWithoutCell<U, Root, Depth>
+    // Handle oneOf (not yet supported in schema.ts, so commenting out)
+    // : T extends { oneOf: infer U extends readonly any[] }
+    //   ? U extends readonly [infer F, ...infer R extends any[]]
+    //     ? F extends JSONSchema ?
+    //         | SchemaWithoutCell<F, Root, DecrementDepth<Depth>>
+    //         | SchemaWithoutCell<{ oneOf: R }, Root, Depth>
+    //       : never
+    //     : never
     // Handle anyOf
     : T extends { anyOf: infer U extends readonly any[] }
-      ? FromUnionWithoutCell<U, Root, Depth>
-    // Handle allOf (merge all types)
-    : T extends { allOf: infer U extends readonly any[] }
-      ? MergeAllOfWithoutCell<U, Root, Depth>
+      ? U extends readonly [infer F, ...infer R extends any[]]
+        ? F extends JSONSchema ?
+            | SchemaWithoutCell<F, Root, DecrementDepth<Depth>>
+            | SchemaWithoutCell<{ anyOf: R }, Root, Depth>
+        : never
+      : never
+    // Handle allOf (merge all types) (not yet supported in schema.ts, so commenting out)
+    // : T extends { allOf: infer U extends readonly any[] }
+    //   ? U extends readonly [infer F, ...infer R extends any[]]
+    //     ? F extends JSONSchema
+    //       ?
+    //         & SchemaWithoutCell<F, Root, Depth>
+    //         & MergeAllOfWithoutCell<{ allOf: R }, Root, Depth>
+    //     : never
+    //   : Record<string | number | symbol, never>
     // Handle different primitive types
     : T extends { type: "string" } ? string
     : T extends { type: "number" | "integer" } ? number
@@ -225,28 +234,6 @@ export type SchemaWithoutCell<
       : Record<string, unknown>
     // Default case
     : any;
-
-// Helper types for SchemaWithoutCell
-type FromUnionWithoutCell<
-  T extends readonly any[],
-  Root extends JSONSchema,
-  Depth extends DepthLevel,
-> = T extends [infer F, ...infer R extends readonly any[]]
-  ? F extends JSONSchema ?
-      | SchemaWithoutCell<F, Root, DecrementDepth<Depth>>
-      | FromUnionWithoutCell<R, Root, Depth>
-  : never
-  : never;
-
-type MergeAllOfWithoutCell<
-  T extends readonly any[],
-  Root extends JSONSchema,
-  Depth extends DepthLevel,
-> = T extends [infer F, ...infer R extends readonly any[]]
-  ? F extends JSONSchema
-    ? SchemaWithoutCell<F, Root, Depth> & MergeAllOfWithoutCell<R, Root, Depth>
-  : never
-  : Record<string | number | symbol, never>;
 
 type ObjectFromPropertiesWithoutCell<
   P extends Record<string, JSONSchema>,
