@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
+import { assert, assertEquals, assertMatch } from "@std/assert";
 import * as Space from "../space.ts";
 import * as Changes from "../changes.ts";
 import * as Commit from "../commit.ts";

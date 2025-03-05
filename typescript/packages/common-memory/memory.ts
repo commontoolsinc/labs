@@ -1,6 +1,6 @@
 import * as Space from "./space.ts";
 import * as Error from "./error.ts";
-import * as FS from "jsr:@std/fs";
+import * as FS from "@std/fs";
 import {
   AsyncResult,
   ConnectionError,

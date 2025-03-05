@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
+import { assert, assertEquals, assertMatch } from "@std/assert";
 import * as Memory from "../memory.ts";
 import * as Fact from "../fact.ts";
 import * as Transaction from "../transaction.ts";
