@@ -12,7 +12,7 @@ import {
   getUserBlobs,
   removeBlobFromUser,
 } from "./lib/redis.ts";
-import type { RedisClientType } from "redis";
+import { createClient, type RedisClientType } from "redis";
 import { DiskStorage } from "@/routes/storage/blobby/lib/storage.ts";
 import env from "@/env.ts";
 
@@ -21,11 +21,25 @@ const DATA_DIR = `${env.CACHE_DIR}/blobby`;
 export const storage = new DiskStorage(DATA_DIR);
 await storage.init();
 
+let redisClient: RedisClientType | null = null;
+
+const getRedisClient = async () => {
+  if (!redisClient) {
+    redisClient = createClient({
+      url: env.BLOBBY_REDIS_URL,
+    });
+  }
+  if (!redisClient.isOpen) {
+    await redisClient.connect();
+  }
+
+  return redisClient;
+};
+
 export const uploadBlobHandler: AppRouteHandler<
   typeof uploadBlob
 > = async (c) => {
-  const redis = c.get("blobbyRedis");
-  if (!redis) throw new Error("Redis client not found in context");
+  const redis = await getRedisClient();
   const logger = c.get("logger");
   const key = c.req.param("key");
   const content = await c.req.json();
@@ -90,8 +104,7 @@ export const getBlobPathHandler: AppRouteHandler<
 export const listBlobsHandler: AppRouteHandler<typeof listBlobs> = async (
   c,
 ) => {
-  const redis: RedisClientType = c.get("blobbyRedis");
-  if (!redis) throw new Error("Redis client not found in context");
+  const redis = await getRedisClient();
   const logger = c.get("logger");
   const showAll = c.req.query("all") === "true";
   const showAllWithData = c.req.query("allWithData") !== undefined;
@@ -174,8 +187,7 @@ export const listBlobsHandler: AppRouteHandler<typeof listBlobs> = async (
 export const deleteBlobHandler: AppRouteHandler<typeof deleteBlob> = async (
   c,
 ) => {
-  const redis = c.get("blobbyRedis");
-  if (!redis) throw new Error("Redis client not found in context");
+  const redis = await getRedisClient();
   const logger = c.get("logger");
   const key = c.req.param("key");
 
