@@ -3,7 +3,8 @@
     "dev": "deno run -A --node-modules-dir=auto npm:vite",
     "build": "deno run -A --node-modules-dir=auto npm:vite build",
     "preview": "deno run -A --node-modules-dir=auto npm:vite preview",
-    "test": "echo 'No tests to run.'"
+    "test": "echo 'No tests to run.'",
+    "integration": "deno run -A ./integration/smoke-test.ts"
   },
   "imports": {
     "@/": "./src/",
