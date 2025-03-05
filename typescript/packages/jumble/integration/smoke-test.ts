@@ -29,6 +29,7 @@ async function main() {
   await page.goto(`${FRONTEND_URL}${space}/${charmId}`);
   console.log(`Waiting for charm to render`);
 
+  await sleep(5000);
   await page.waitForSelector("a[aria-current='charm-title']");
   const el = await page.$("a[aria-current='charm-title']");
   console.log(await el?.innerText());
@@ -44,7 +45,7 @@ async function main() {
   await button.click();
 
   // FIXME(ja): sleep to let changes propagate to remote storage
-  await sleep(1000);
+  await sleep(5000);
 
   console.log("Checking if title changed");
   const el2 = await page.$("a[aria-current='charm-title']");
