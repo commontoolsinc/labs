@@ -8,6 +8,7 @@ import {
   recipe,
   schema,
   UI,
+  str,
 } from "@commontools/builder";
 
 const updaterSchema = {
@@ -64,7 +65,7 @@ export default recipe(inputSchema, outputSchema, ({ values }) => {
     console.log("values#", values?.length);
   });
   return {
-    [NAME]: "Simple Value",
+    [NAME]: str`Simple Value: ${values.length}`,
     [UI]: (
       <div>
         <button type="button" onClick={adder({ values })}>Add Value</button>

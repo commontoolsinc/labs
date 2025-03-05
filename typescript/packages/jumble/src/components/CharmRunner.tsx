@@ -168,7 +168,12 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
           </div>
         )
         : null}
-      <div className={className + " overflow-clip"} ref={containerRef}></div>
+      <div
+        className={className + " overflow-clip"}
+        ref={containerRef}
+        aria-label="charm-content"
+      >
+      </div>
     </>
   );
 }

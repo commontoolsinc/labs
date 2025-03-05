@@ -9,9 +9,10 @@ import {
 import { getEntityId, isStream } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 
-const { space, charmId, recipeFile, cause } = parseArgs(Deno.args, {
+const { space, charmId, recipeFile, cause, quit } = parseArgs(Deno.args, {
   string: ["space", "charmId", "recipeFile", "cause"],
-  default: {},
+  boolean: ["quit"],
+  default: { quit: false },
 });
 
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
@@ -22,12 +23,20 @@ setBobbyServerUrl(toolshedUrl);
 
 async function main() {
   const identity = await Identity.fromPassphrase("common-cli");
-  console.log("params:", { space, identity, charmId, recipeFile, cause });
+  console.log("params:", {
+    space,
+    identity,
+    charmId,
+    recipeFile,
+    cause,
+    quit,
+    toolshedUrl,
+  });
   const manager = await CharmManager.open({
     space: (space as `did:key:${string}`) ?? identity.did(),
     signer: identity,
   });
-  const charms = await manager.getCharms();
+  const charms = manager.getCharms();
 
   charms.sink((charms) => {
     console.log(
@@ -59,8 +68,16 @@ async function main() {
         console.log("running updater");
         updater.send({ newValues: ["test"] });
       }
+      if (quit) {
+        await storage.synced();
+        Deno.exit(0);
+      }
     } catch (error) {
       console.error("Error loading and compiling recipe:", error);
+      if (quit) {
+        await storage.synced();
+        Deno.exit(1);
+      }
     }
   }
 

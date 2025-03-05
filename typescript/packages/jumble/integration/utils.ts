@@ -39,3 +39,36 @@ export const login = async (page: Page) => {
   button = await page.$("button");
   await button!.click();
 };
+
+export const addCharm = async () => {
+  const process = new Deno.Command("deno", {
+    args: [
+      "task",
+      "start",
+      "--space",
+      "ci",
+      "--recipeFile",
+      "recipes/simpleValue.tsx",
+      "--cause",
+      "ci",
+      "--quit",
+      "true",
+    ],
+    env: {
+      "TOOLSHED_API_URL": "http://localhost:8000/",
+    },
+    cwd: "../common-cli",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+
+  const { code } = await process.output();
+  if (code !== 0) {
+    throw new Error(`Failed to add charm: ${code}`);
+  }
+
+  return {
+    charmId: "baedreic5a2muxtlgvn6u36lmcp3tdoq5sih3nbachysw4srquvga5fjtem",
+    space: "ci",
+  };
+};
