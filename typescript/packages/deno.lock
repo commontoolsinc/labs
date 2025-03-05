@@ -7229,12 +7229,6 @@
       "npm:zod@^3.24.1"
     ],
     "members": {
-      "common-cli": {
-        "dependencies": [
-          "jsr:@cmd-johnson/oauth2-client@2",
-          "jsr:@std/dotenv@~0.225.3"
-        ]
-      },
       "common-identity": {
         "dependencies": [
           "npm:@scure/bip39@^1.5.4"

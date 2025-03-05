@@ -1,9 +1,9 @@
 import { css, html, LitElement, PropertyValues } from "lit";
-import { customElement, property } from "lit/decorators.ts";
+import { customElement, property } from "lit/decorators.js";
 import { base } from "../shared/styles.ts";
 import { createRect, positionMenu, Rect } from "../shared/position.ts";
 import * as completion from "./editor/completion.ts";
-import { classMap } from "lit/directives/class-map.ts";
+import { classMap } from "lit/directives/class-map.js";
 import { clamp } from "../shared/number.ts";
 
 /** Completion clicked */
