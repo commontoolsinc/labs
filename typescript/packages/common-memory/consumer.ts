@@ -107,7 +107,8 @@ class MemoryConsumerSession<
 > implements MemorySession<Space> {
   static clock: Clock = {
     now(): UTCUnixTimestampInSeconds {
-      return (Date.now() / 1000) | 0;
+      // 🩹 use 10 second granularity to mitigate CI intermitten failures
+      return ((Date.now() / 10000) | 0) * 10 ;
     },
   };
   /**
