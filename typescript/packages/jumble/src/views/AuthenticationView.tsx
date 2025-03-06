@@ -92,6 +92,7 @@ function SuccessRegistration({
               <p className="mb-2">Your Secret Recovery Phrase:</p>
               <div className="relative">
                 <textarea
+                  aria-label="mnemonic"
                   readOnly
                   value={mnemonic}
                   rows={3}
@@ -99,6 +100,7 @@ function SuccessRegistration({
                 />
                 <button
                   type="button"
+                  aria-label="copy-mnemonic"
                   onClick={copyToClipboard}
                   className={`absolute right-2 top-1/2 transform -translate-y-1/2 ${
                     copied ? "text-green-500" : ""
@@ -115,7 +117,12 @@ function SuccessRegistration({
             </div>
           )
         )}
-      <button type="button" className={BTN_PRIMARY} onClick={onLogin}>
+      <button
+        type="button"
+        className={BTN_PRIMARY}
+        onClick={onLogin}
+        aria-label="continue-login"
+      >
         <LuLock className="w-5 h-5" /> Continue to Login
       </button>
     </div>
@@ -292,6 +299,7 @@ export function AuthenticationView() {
                     <button
                       type="button"
                       className={BTN_PRIMARY}
+                      aria-label="unlock-with-last-key"
                       onClick={async () => {
                         if (storedCredential.method === AUTH_METHOD_PASSKEY) {
                           await handleLogin(AUTH_METHOD_PASSKEY);
@@ -308,6 +316,7 @@ export function AuthenticationView() {
                     </button>
                     <button
                       type="button"
+                      aria-label="login-new-method"
                       className={LIST_ITEM}
                       onClick={() => setFlow("login")}
                     >
@@ -315,6 +324,7 @@ export function AuthenticationView() {
                     </button>
                     <button
                       type="button"
+                      aria-label="register"
                       className={LIST_ITEM}
                       onClick={() => setFlow("register")}
                     >
@@ -323,6 +333,7 @@ export function AuthenticationView() {
                     <button
                       type="button"
                       className={LIST_ITEM}
+                      aria-label="clear-credentials"
                       onClick={() => {
                         clearStoredCredential();
                         setStoredCredential(null);
@@ -337,6 +348,7 @@ export function AuthenticationView() {
                     <button
                       type="button"
                       className={BTN_PRIMARY}
+                      aria-label="register"
                       onClick={() => setFlow("register")}
                     >
                       <LuCirclePlus className="w-5 h-5" /> Register
@@ -344,6 +356,7 @@ export function AuthenticationView() {
                     <button
                       type="button"
                       className={BTN_PRIMARY}
+                      aria-label="login"
                       onClick={() => setFlow("login")}
                     >
                       <LuLock className="w-5 h-5" /> Login
@@ -363,6 +376,7 @@ export function AuthenticationView() {
                   key={m}
                   type="button"
                   className={LIST_ITEM}
+                  aria-label={"method-" + m}
                   onClick={async () => await handleMethodSelect(m)}
                 >
                   {m === AUTH_METHOD_PASSKEY
@@ -381,6 +395,7 @@ export function AuthenticationView() {
               <button
                 type="button"
                 className={BTN_PRIMARY}
+                aria-label="back"
                 onClick={() => setFlow(null)}
               >
                 <LuArrowLeft className="w-5 h-5" /> Back
@@ -395,6 +410,7 @@ export function AuthenticationView() {
                   <button
                     type="button"
                     className={BTN_PRIMARY}
+                    aria-label="register-with-passphrase"
                     onClick={() => handleRegister(AUTH_METHOD_PASSPHRASE)}
                   >
                     <LuKeyRound className="w-5 h-5" /> Register with Passphrase
@@ -418,9 +434,14 @@ export function AuthenticationView() {
                       name={AUTH_METHOD_PASSPHRASE}
                       className="w-full p-2 pr-10 border-2 border-black"
                       placeholder="Enter your passphrase"
+                      aria-label="enter-passphrase"
                       autoComplete="current-password"
                     />
-                    <button type="submit" className={BTN_PRIMARY}>
+                    <button
+                      type="submit"
+                      className={BTN_PRIMARY}
+                      aria-label="login"
+                    >
                       <LuLock className="w-5 h-5" /> Login
                     </button>
                   </form>
@@ -428,6 +449,7 @@ export function AuthenticationView() {
               <button
                 type="button"
                 className={BTN_PRIMARY}
+                aria-label="back"
                 onClick={() => setFlow(null)}
               >
                 <LuArrowLeft className="w-5 h-5" /> Back
