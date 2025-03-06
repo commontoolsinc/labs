@@ -16,7 +16,8 @@ export const create = <Space extends MemorySpace>({
   changes: Changes;
   meta?: Meta;
 }): Transaction<Space> => {
-  const iat = (Date.now() / 1000) | 0;
+  // 🩹 Roundup to 10sec frequency to avoid CI intermittent failures
+  const iat = ((Date.now() / 10000) | 0) * 10;
   const exp = iat + 60 * 60; // expires in an hour
   return {
     cmd: "/memory/transact",
