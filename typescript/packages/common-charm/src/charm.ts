@@ -18,9 +18,9 @@ import {
   idle,
   isCell,
   run,
+  syncRecipeBlobby,
 } from "@commontools/runner";
-import { syncRecipeBlobby } from "./syncRecipe.ts";
-import { storage, getSpace, Space } from "@commontools/runner";
+import { getSpace, Space, storage } from "@commontools/runner";
 import { DID, Identity, Signer } from "@commontools/identity";
 
 export type Charm = {

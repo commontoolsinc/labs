@@ -1,11 +1,12 @@
 // Load .env file
 import { parseArgs } from "@std/cli/parse-args";
+import { CharmManager, compileRecipe } from "@commontools/charm";
 import {
-  CharmManager,
-  compileRecipe,
+  getEntityId,
+  isStream,
   setBobbyServerUrl,
-} from "@commontools/charm";
-import { storage, getEntityId, isStream } from "@commontools/runner";
+  storage,
+} from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 
 const { space, charmId, recipeFile, cause, quit } = parseArgs(Deno.args, {

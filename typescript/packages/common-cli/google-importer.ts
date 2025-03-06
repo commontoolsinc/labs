@@ -1,7 +1,13 @@
 // Load .env file
 import { parseArgs } from "@std/cli/parse-args";
-import { CharmManager, setBobbyServerUrl, storage } from "@commontools/charm";
-import { Cell, getEntityId, isStream } from "@commontools/runner";
+import { CharmManager } from "@commontools/charm";
+import {
+  Cell,
+  getEntityId,
+  isStream,
+  setBobbyServerUrl,
+  storage,
+} from "@commontools/runner";
 import { Charm } from "@commontools/charm";
 
 /**
