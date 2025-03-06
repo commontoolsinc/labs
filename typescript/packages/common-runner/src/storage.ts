@@ -155,14 +155,16 @@ class StorageImpl implements Storage {
 
   private signer: Signer | undefined;
 
-  // Map from entity ID to doc, set at stage 2, i.e. already while loading
-  private docsById = new Map<string, DocImpl<any>>();
+  // Any doc here is being synced or in the process of spinning up syncing.
+  // See also docIsLoading, which is a promise while the document is loading,
+  // and is deleted after it is loaded.
+  private docIsSyncing = new Set<DocImpl<any>>();
 
   // Map from doc to promise of loading doc, set at stage 2. Resolves when
   // doc and all it's dependencies are loaded.
   private docIsLoading = new Map<DocImpl<any>, Promise<DocImpl<any>>>();
 
-  // Resolves for the promises above. Only called by batch processor.
+  // Resolves for the promisxes above. Only called by batch processor.
   private loadingPromises = new Map<DocImpl<any>, Promise<DocImpl<any>>>();
   private loadingResolves = new Map<DocImpl<any>, () => void>();
 
@@ -234,7 +236,6 @@ class StorageImpl implements Storage {
         provider.destroy()
       ),
     );
-    this.docsById.clear();
     this.docIsLoading.clear();
     this.cancel();
   }
@@ -285,34 +286,29 @@ class StorageImpl implements Storage {
   }
 
   private _ensureIsSynced<T>(
-    subject: DocImpl<T> | Cell<any>,
+    doc: DocImpl<T> | Cell<any>,
     expectedInStorage: boolean = false,
   ): DocImpl<T> {
-    if (isCell(subject)) subject = subject.getAsDocLink().cell;
-    if (!isDoc(subject)) {
-      throw new Error("Invalid subject: " + JSON.stringify(subject));
+    if (isCell(doc)) doc = doc.getAsDocLink().cell;
+    if (!isDoc(doc)) {
+      throw new Error("Invalid subject: " + JSON.stringify(doc));
     }
-    if (!subject.entityId) throw new Error("Doc has no entity ID");
+    if (!doc.entityId) throw new Error("Doc has no entity ID");
 
-    const doc = this.docsById.get(JSON.stringify(subject.entityId)) ??
-      subject;
     const entityId = JSON.stringify(doc.entityId);
 
     // If the doc is ephemeral, we don't need to load it from storage. We still
     // add it to the map of known docs, so that we don't try to keep loading
     // it.
-    if (doc.ephemeral) {
-      this.docsById.set(entityId, doc);
-      return doc;
-    }
+    if (doc.ephemeral) return doc;
 
     // If the doc is already loaded or loading, return immediately.
-    if (this.docsById.has(entityId)) return doc;
+    if (this.docIsSyncing.has(doc)) return doc;
 
     // Important that we set this _before_ the doc is loaded, as we can already
     // populate the doc when loading dependencies and thus avoid circular
     // references.
-    this.docsById.set(entityId, doc);
+    this.docIsSyncing.add(doc);
 
     // Start loading the doc and safe the promise for processBatch to await for
     const loadingPromise = this._getStorageProviderForSpace(doc.space)
@@ -606,9 +602,7 @@ class StorageImpl implements Storage {
       // TODO(seefeld): For frozen docs, show a warning if content is different.
       // But also, we should serialize the fact that it is frozen to begin with...
       if (!storageJobs.has(doc) && !doc.isFrozen()) {
-        if (source) {
-          doc.sourceCell = this.docsById.get(JSON.stringify(source))!;
-        }
+        if (source) doc.sourceCell = source;
 
         log(
           () => [

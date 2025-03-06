@@ -183,7 +183,6 @@ export function getDocByEntityId<T = any>(
   if (typeof entityId === "string") entityId = JSON.parse(entityId) as EntityId;
   doc = createDoc<T>(undefined as T, entityId, space);
   doc.sourceCell = sourceIfCreated;
-  setDocByEntityId(space, entityId, doc);
   return doc;
 }
 
@@ -192,5 +191,10 @@ export const setDocByEntityId = (
   entityId: EntityId,
   doc: DocImpl<any>,
 ) => {
+  // throw if doc already exists
+  if (entityIdToDocMap.get(space, JSON.stringify(entityId))) {
+    throw new Error("Doc already exists");
+  }
+
   entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
 };

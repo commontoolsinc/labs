@@ -3,7 +3,13 @@ import { expect } from "@std/expect";
 import { storage } from "../src/storage.ts";
 import { StorageProvider } from "../src/storage/base.ts";
 import { InMemoryStorageProvider } from "../src/storage/memory.ts";
-import { createRef, DocImpl, getDoc, getSpace } from "@commontools/runner";
+import {
+  createRef,
+  DocImpl,
+  DocLink,
+  getDoc,
+  getSpace,
+} from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 
 storage.setRemoteStorage(new URL("memory://"));
@@ -11,13 +17,14 @@ storage.setSigner(await Identity.fromPassphrase("test operator"));
 
 describe("Storage", () => {
   let storage2: StorageProvider;
-  let testCell: DocImpl<any>;
+  let testDoc: DocImpl<any>;
+  let n = 0;
 
   beforeEach(() => {
     storage2 = new InMemoryStorageProvider("test");
-    testCell = getDoc<string>(
+    testDoc = getDoc<string>(
       undefined as unknown as string,
-      "storage test cell",
+      `storage test cell ${n++}`,
       getSpace("test"),
     );
   });
@@ -27,20 +34,20 @@ describe("Storage", () => {
     await storage2?.destroy();
   });
 
-  describe("persistCell", () => {
-    it("should persist a cell", async () => {
+  describe("persistDoc", () => {
+    it("should persist a doc", async () => {
       const testValue = { data: "test" };
-      testCell.send(testValue);
+      testDoc.send(testValue);
 
-      await storage.syncCell(testCell);
+      await storage.syncCell(testDoc);
 
-      await storage2.sync(testCell.entityId!);
-      const value = storage2.get(testCell.entityId!);
+      await storage2.sync(testDoc.entityId!);
+      const value = storage2.get(testDoc.entityId!);
       expect(value?.value).toEqual(testValue);
     });
 
     it("should persist a cells and referenced cell references within it", async () => {
-      const refCell = getDoc(
+      const refDoc = getDoc(
         "hello",
         "should persist a cells and referenced cell references within it",
         getSpace("test"),
@@ -48,21 +55,22 @@ describe("Storage", () => {
 
       const testValue = {
         data: "test",
-        ref: { cell: refCell, path: [] },
+        ref: { cell: refDoc, path: [] },
       };
-      testCell.send(testValue);
+      testDoc.send(testValue);
 
-      console.log("syncing testCell");
-      await storage.syncCell(testCell);
-      console.log("synced testCell");
+      console.log("syncing testDoc");
+      await storage.syncCell(testDoc);
+      console.log("synced testDoc");
 
-      await storage2.sync(refCell.entityId!);
-      const value = storage2.get(refCell.entityId!);
+      await storage2.sync(refDoc.entityId!);
+      const value = storage2.get(refDoc.entityId!);
+      console.log("synced refDoc", value, refDoc.entityId);
       expect(value?.value).toEqual("hello");
     });
 
     it("should persist a cells and referenced cells within it", async () => {
-      const refCell = getDoc(
+      const refDoc = getDoc(
         "hello",
         "should persist a cells and referenced cells 1",
         getSpace("test"),
@@ -70,62 +78,62 @@ describe("Storage", () => {
 
       const testValue = {
         data: "test",
-        otherCell: refCell,
+        otherDoc: refDoc,
       };
-      testCell.send(testValue);
+      testDoc.send(testValue);
 
-      await storage.syncCell(testCell);
+      await storage.syncCell(testDoc);
 
-      await storage2.sync(refCell.entityId!);
-      const value = storage2.get(refCell.entityId!);
+      await storage2.sync(refDoc.entityId!);
+      const value = storage2.get(refDoc.entityId!);
       expect(value?.value).toEqual("hello");
     });
   });
 
-  describe("cell updates", () => {
-    it("should persist cell updates", async () => {
-      await storage.syncCell(testCell);
+  describe("doc updates", () => {
+    it("should persist doc updates", async () => {
+      await storage.syncCell(testDoc);
 
-      testCell.send("value 1");
-      testCell.send("value 2");
+      testDoc.send("value 1");
+      testDoc.send("value 2");
 
       await storage.synced();
 
-      await storage2.sync(testCell.entityId!);
-      const value = storage2.get(testCell.entityId!);
+      await storage2.sync(testDoc.entityId!);
+      const value = storage2.get(testDoc.entityId!);
       expect(value?.value).toBe("value 2");
     });
   });
 
-  describe("syncCell", () => {
-    it("should wait for a cell to appear", async () => {
+  describe("syncDoc", () => {
+    it("should wait for a doc to appear", async () => {
       let synced = false;
-      storage2.sync(testCell.entityId!, true).then(() => (synced = true));
+      storage2.sync(testDoc.entityId!, true).then(() => (synced = true));
       expect(synced).toBe(false);
 
-      testCell.send("test");
-      await storage.syncCell(testCell);
+      testDoc.send("test");
+      await storage.syncCell(testDoc);
       expect(synced).toBe(true);
     });
 
-    it("should wait for a undefined cell to appear", async () => {
+    it("should wait for a undefined doc to appear", async () => {
       let synced = false;
-      storage2.sync(testCell.entityId!, true).then(() => (synced = true));
+      storage2.sync(testDoc.entityId!, true).then(() => (synced = true));
       expect(synced).toBe(false);
 
-      await storage.syncCell(testCell);
+      await storage.syncCell(testDoc);
       expect(synced).toBe(true);
     });
   });
 
-  describe("ephemeral cells", () => {
+  describe("ephemeral docs", () => {
     it("should not be loaded from storage", async () => {
-      const ephemeralCell = getDoc("transient", "ephemeral", getSpace("test"));
-      ephemeralCell.ephemeral = true;
-      await storage.syncCell(ephemeralCell);
+      const ephemeralDoc = getDoc("transient", "ephemeral", getSpace("test"));
+      ephemeralDoc.ephemeral = true;
+      await storage.syncCell(ephemeralDoc);
 
-      await storage2.sync(ephemeralCell.entityId!);
-      const value = storage2.get(ephemeralCell.entityId!);
+      await storage2.sync(ephemeralDoc.entityId!);
+      const value = storage2.get(ephemeralDoc.entityId!);
       expect(value).toBeUndefined();
     });
   });
