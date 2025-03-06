@@ -1,36 +1,40 @@
-import {
-  assert,
-  assertEquals,
-  AssertionError,
-  assertMatch,
-} from "@std/assert";
+import { assert, assertEquals, AssertionError, assertMatch } from "@std/assert";
 import * as Provider from "../provider.ts";
-import * as Transaction from "../transaction.ts";
+import * as Consumer from "../consumer.ts";
 import * as Changes from "../changes.ts";
 import * as Fact from "../fact.ts";
 import { refer } from "../reference.ts";
 
-const space = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
+import { alice, space } from "./principal.ts";
+
 const url = new URL(`./${space}.sqlite`, import.meta.url);
 
 const main = async () => {
   const result = await Provider.open({ store: url });
   const provider = result.ok!;
 
-  const tr = generateTransaction(2000);
+  const consumer = Consumer.open({
+    as: alice,
+    session: provider.session(),
+  });
+
+  const changes = generateChanges(2000);
 
   Deno.writeFileSync(
     `debug.json`,
-    new TextEncoder().encode(JSON.stringify(tr, null, 2)),
+    new TextEncoder().encode(JSON.stringify({ changes }, null, 2)),
   );
 
+  const home = consumer.mount(space.did());
+
   const start = Date.now();
-  const transaction = await provider.transact(tr as Provider.Transaction);
+
+  const transaction = await home.transact({ changes });
   console.log("end transaction", Date.now() - start);
   console.log(transaction);
 };
 
-const generateTransaction = (count: number) => {
+const generateChanges = (count: number) => {
   const events = Array.from({ length: count }, (_, i) => ({
     title: `Event ${i}`,
     description: `Description ${i}`,
@@ -98,11 +102,7 @@ const generateTransaction = (count: number) => {
     ...assertions,
   ];
 
-  return Transaction.create({
-    issuer: "did:key:z6Mkge3xkXc4ksLsf8CtRxunUxcX6dByT4QdWCVEHbUJ8YVn",
-    subject: "did:key:z6Mkge3xkXc4ksLsf8CtRxunUxcX6dByT4QdWCVEHbUJ8YVn",
-    changes: Changes.from(facts),
-  });
+  return Changes.from(facts);
 };
 
 main();
