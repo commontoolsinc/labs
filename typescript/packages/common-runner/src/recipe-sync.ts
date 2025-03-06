@@ -6,7 +6,7 @@ import {
   getRecipeSpec,
   getRecipeSrc,
 } from "@commontools/runner";
-import { buildRecipe } from "./localBuild.ts";
+import { buildRecipe } from "../../common-charm/src/localBuild.ts";
 
 let BLOBBY_SERVER_URL = "/api/storage/blobby";
 
@@ -52,7 +52,7 @@ export async function syncRecipeBlobby(id: string) {
   recipesKnownToStorage.add(recipeId);
 }
 
-export async function saveRecipe(
+async function saveRecipe(
   id: string,
   src: string,
   spec?: string,
