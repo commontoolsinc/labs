@@ -97,6 +97,7 @@ import { Space } from "./space.ts";
  */
 export interface Cell<T> {
   get(): T;
+  setRaw(value: T): void;
   set(value: T): void;
   send(value: T): void;
   update(values: Partial<T>): void;
@@ -288,6 +289,10 @@ function createRegularCell<T>(
 ): Cell<T> {
   const self = {
     get: () => validateAndTransform(doc, path, schema, log, rootSchema),
+    setRaw: (newValue: T) => {
+      const ref = resolvePath(doc, path, log);
+      ref.cell.setAtPath(ref.path, newValue, log);
+    },
     set: (newValue: T) => {
       const ref = resolvePath(doc, path, log);
       if (
