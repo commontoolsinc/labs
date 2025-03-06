@@ -1,4 +1,4 @@
-import * as Clock from './clock'
+import * as Clock from './clock.ts'
 
 /**
  * Default TTL is 1 hour.
