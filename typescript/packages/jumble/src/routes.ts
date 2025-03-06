@@ -6,6 +6,7 @@ export const ROUTES = {
   defaultReplica: "/common-knowledge",
   replicaRoot: "/:replicaName",
   charmShow: "/:replicaName/:charmId",
+  stackedCharms: "/:replicaName/stack/:charmIds",
   charmDetail: "/:replicaName/:charmId/detail",
   spellbookIndex: "/spellbook",
   spellbookDetail: "/spellbook/:spellId",
