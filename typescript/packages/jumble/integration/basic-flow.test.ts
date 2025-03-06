@@ -10,17 +10,22 @@ import {
 } from "@std/testing/bdd";
 import {
   addCharm,
+  assertAndSnapshot,
   inspectCharm,
   login,
   sleep,
   waitForSelectorWithText,
 } from "./utils.ts";
+import { join } from "@std/path";
 
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
   "http://localhost:8000/";
 const FRONTEND_URL = Deno.env.get("FRONTEND_URL") ?? "http://localhost:5173/";
 const HEADLESS = true;
+const RECORD_SNAPSHOTS = false;
 
+const SNAPSHOTS_DIR = join(Deno.cwd(), "test_snapshots");
+console.log("SNAPSHOTS_DIR=", SNAPSHOTS_DIR);
 console.log(`TOOLSHED_API_URL=${TOOLSHED_API_URL}`);
 console.log(`FRONTEND_URL=${FRONTEND_URL}`);
 
@@ -48,23 +53,35 @@ describe("integration", () => {
   });
 
   it("renders a new charm", async () => {
-    assert(page);
-    assert(testCharm);
-    const anchor = await page.waitForSelector("nav a");
-    assert(
-      (await anchor.innerText()) === "common-knowledge",
+    assertAndSnapshot(page, "Page should be defined");
+    assertAndSnapshot(testCharm, "Test charm should be defined");
+
+    const anchor = await page!.waitForSelector("nav a");
+    const innerText = await anchor.innerText();
+    assertAndSnapshot(
+      innerText === "common-knowledge",
       "Logged in and Common Knowledge title renders",
+      page,
+      "logged_in_state",
     );
 
-    await page.goto(`${FRONTEND_URL}${testCharm.space}/${testCharm.charmId}`);
+    await page!.goto(
+      `${FRONTEND_URL}${testCharm!.space}/${testCharm!.charmId}`,
+    );
     console.log(`Waiting for charm to render`);
 
     await waitForSelectorWithText(
-      page,
+      page!,
       "a[aria-current='charm-title']",
       "Simple Value: 1",
     );
     console.log("Charm rendered.");
+    await assertAndSnapshot(
+      true,
+      "Charm rendered successfully",
+      page,
+      "charm_rendered",
+    );
 
     console.log("Clicking button");
     // Sometimes clicking this button throws:
@@ -72,33 +89,45 @@ describe("integration", () => {
     // As if the reference was invalidated by a spurious re-render between
     // getting an element handle, and clicking it.
     await sleep(1000);
-    const button = await page.waitForSelector(
+    const button = await page!.waitForSelector(
       "div[aria-label='charm-content'] button",
     );
     await button.click();
+    await assertAndSnapshot(true, "Button clicked", page, "button_clicked");
 
     console.log("Checking if title changed");
     await waitForSelectorWithText(
-      page,
+      page!,
       "a[aria-current='charm-title']",
       "Simple Value: 2",
     );
     console.log("Title changed");
+    await assertAndSnapshot(
+      true,
+      "Title changed successfully",
+      page,
+      "title_changed",
+    );
 
     console.log("Inspecting charm to verify updates propagated from browser.");
     const charm = await inspectCharm(
       TOOLSHED_API_URL,
-      testCharm.space,
-      testCharm.charmId,
+      testCharm!.space,
+      testCharm!.charmId,
     );
     console.log("Charm:", charm);
-    assert(charm.includes("Simple Value: 2"), "Charm updates propagated.");
+    assertAndSnapshot(
+      charm.includes("Simple Value: 2"),
+      "Charm updates propagated.",
+      page,
+      "updates_propagated",
+    );
   });
 
   // Placeholder test ensuring browser can be used
   // across multiple tests (replace when we have more integration tests!)
   it("[placeholder]", () => {
-    assert(page);
-    assert(testCharm);
+    assertAndSnapshot(page, "Page should be defined");
+    assertAndSnapshot(testCharm, "Test charm should be defined");
   });
 });
