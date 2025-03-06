@@ -1018,8 +1018,8 @@ test(
   },
 );
 
-test("list empty store", DB, (session) => {
-  const result = session.query({
+test("list empty store", DB, async (session) => {
+  const result = await session.query({
     cmd: "/memory/query",
     iss: alice.did(),
     sub: space.did(),
