@@ -203,7 +203,6 @@ export class RemoteStorageProvider implements StorageProvider {
       local.set(of, fact);
       facts.push(fact);
     }
-    
 
     const result = await memory.transact({ changes: Changes.from(facts) });
 
@@ -263,7 +262,9 @@ export class RemoteStorageProvider implements StorageProvider {
       connection.removeEventListener("error", this);
     }
 
-    const socket = new WebSocket(this.address.href);
+    const webSocketUrl = new URL(this.address.href);
+    webSocketUrl.searchParams.set("space", this.workspace);
+    const socket = new WebSocket(webSocketUrl.href);
     this.connection = socket;
     socket.addEventListener("message", this);
     socket.addEventListener("open", this);
