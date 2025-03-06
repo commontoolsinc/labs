@@ -188,6 +188,8 @@ class StorageImpl implements Storage {
   ) => (this.currentBatchResolve = r));
   private lastBatchTime: number = 0;
   private lastBatchDebounceCount: number = 0;
+  private debounceTimeout: number | null = null;
+  private batchStartTime: number = 0;
 
   private cancel: Cancel;
   private addCancel: AddCancel;
@@ -669,35 +671,42 @@ class StorageImpl implements Storage {
 
     if (!this.currentBatchProcessing) {
       this.currentBatchProcessing = true;
+      const now = Date.now();
 
-      const task = () =>
+      // Check if we're processing batches too rapidly
+      const timeSinceLastBatch = now - this.lastBatchTime;
+      const needsDebounce = timeSinceLastBatch < 100;
+
+      const executeTask = () => {
+        this.batchStartTime = Date.now();
         this._processCurrentBatch().then(() => {
           this.currentBatchProcessing = false;
+          this.lastBatchTime = Date.now(); // Record when batch finished
 
-          // Trigger processing of next batch, if we got new ones while
-          // applying operations or after resolving the current batch promise
-          if (this.currentBatch.length > 0) this._addToBatch([]);
+          // If more items accumulated during processing, schedule the next batch
+          if (this.currentBatch.length > 0) {
+            // Pass empty array to signal this is a continuation
+            this._addToBatch([]);
+          }
         });
+      };
 
-      const now = Date.now();
-      if (now - this.lastBatchTime < 100) {
+      if (needsDebounce) {
+        // Increase debounce count (capped at 17)
         if (this.lastBatchDebounceCount < 17) this.lastBatchDebounceCount++;
 
-        // First 10 have no delay, then it's 50, 100, 200, 400, ..., 1600
-        // + random to next interval so not all tabs debounce synchronously
+        // First 10 have no delay, then exponential: 50, 100, 200, 400, ..., 1600
         const exp = Math.max(0, this.lastBatchDebounceCount - 10) ** 2;
         const delay = 50 * exp * (1 + Math.random());
 
         if (delay > 1000) console.warn(`debouncing by ${delay}ms`);
 
-        setTimeout(() => {
-          this.lastBatchTime = Date.now();
-          task();
-        }, delay);
+        // Set timeout to execute the batch after delay
+        this.debounceTimeout = setTimeout(executeTask, delay);
       } else {
-        this.lastBatchTime = now;
+        // Reset counter if we're not debouncing
         this.lastBatchDebounceCount = 0;
-        queueMicrotask(task);
+        queueMicrotask(executeTask);
       }
     }
 
