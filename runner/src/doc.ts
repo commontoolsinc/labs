@@ -210,6 +210,20 @@ export type DocImpl<T> = {
    * Internal only: Trap for copy operations.
    */
   copyTrap: boolean;
+
+  /**
+   * Register schema usage for a specific path in the document.
+   * Used for validating data against schemas and maintaining schema references.
+   *
+   * @param path - Path where schema is applied
+   * @param schema - JSON Schema to apply
+   * @param rootSchema - Optional root schema for recursive validation
+   */
+  registerSchemaUse(
+    path: PropertyKey[],
+    schema: JSONSchema,
+    rootSchema?: JSONSchema,
+  ): void;
 };
 
 /**
@@ -253,6 +267,11 @@ export function createDoc<T>(
   let readOnly = false;
   let sourceCell: DocImpl<any> | undefined;
   let ephemeral = false;
+  // Track schema usage per path - store multiple schemas per path
+  const schemaRegistry = new Map<
+    string,
+    Array<{ schema: JSONSchema; rootSchema?: JSONSchema }>
+  >();
 
   const self: DocImpl<T> = {
     get: () => value as T,
@@ -346,6 +365,24 @@ export function createDoc<T>(
     [isDocMarker]: true,
     get copyTrap(): boolean {
       throw new Error("Copy trap: Don't copy cells, create references instead");
+    },
+    registerSchemaUse(
+      path: PropertyKey[],
+      schema: JSONSchema,
+      rootSchema?: JSONSchema,
+    ): void {
+      // Create a consistent key by normalizing the path components
+      // Convert numbers to strings to ensure '0' and 0 are treated the same
+      const normalizedPath = path.map((key) => String(key));
+      // Use JSON.stringify to create a unique representation of the path
+      const pathKey = JSON.stringify(normalizedPath);
+
+      // Get existing schemas for this path or create new array
+      const schemas = schemaRegistry.get(pathKey) || [];
+      // Add the new schema registration
+      schemas.push({ schema, rootSchema });
+      // Store the updated array
+      schemaRegistry.set(pathKey, schemas);
     },
   };
 
