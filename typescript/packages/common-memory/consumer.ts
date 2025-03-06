@@ -44,7 +44,7 @@ import * as Access from "./access.ts";
 import * as Subscription from "./subscription.ts";
 import { toStringStream } from "./ucan.ts";
 import { fromStringStream } from "./receipt.ts";
-
+import * as Settings from "./settings.ts";
 export * from "./interface.ts";
 export { ChangesBuilder };
 
@@ -105,16 +105,6 @@ class MemoryConsumerSession<
   ProviderCommand<Protocol>,
   UCAN<ConsumerCommandInvocation<Protocol>>
 > implements MemorySession<Space> {
-  static clock: Clock = {
-    now(): UTCUnixTimestampInSeconds {
-      // 🩹 use 10 second granularity to mitigate CI intermitten failures
-      return ((Date.now() / 10000) | 0) * 10 ;
-    },
-  };
-  /**
-   * Default TTL is 1 hour.
-   */
-  static ttl = 60 * 60;
   controller:
     | TransformStreamDefaultController<
       UCAN<ConsumerCommandInvocation<MemoryProtocol>>
@@ -127,8 +117,8 @@ class MemoryConsumerSession<
 
   constructor(
     public as: Signer,
-    public clock: Clock = MemoryConsumerSession.clock,
-    public ttl: Seconds = MemoryConsumerSession.ttl,
+    public clock: Clock = Settings.clock,
+    public ttl: Seconds = Settings.ttl,
   ) {
     let controller:
       | undefined
