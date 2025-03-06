@@ -1,4 +1,5 @@
 #!/bin/bash
 cd labs
-git pull origin main
+git fetch origin main
+git reset --hard origin/main
 sudo systemctl restart toolshed@*
