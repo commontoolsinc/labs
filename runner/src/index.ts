@@ -42,7 +42,21 @@ export {
   getRecipeSpec,
   getRecipeSrc,
 } from "./recipe-map.ts";
+export {
+  addSchema,
+  getRootSchema,
+  getRootSchemaId,
+  getSchema,
+  getSchemaId,
+} from "./schema-map.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export { getSpace, type Space } from "./space.ts";
 export { storage } from "./storage.ts";
 export { setBobbyServerUrl, syncRecipeBlobby } from "./recipe-sync.ts";
+export { saveSchema, syncSchemaBlobby } from "./schema-sync.ts";
+export {
+  getBlobbyServerUrl,
+  loadFromBlobby,
+  saveToBlobby,
+  setBlobbyServerUrl,
+} from "./blobby-storage.ts";
