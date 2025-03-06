@@ -26,7 +26,7 @@ export const setupIframe = () =>
     },
     write(context: any, key: string, value: any) {
       if (isCell(context)) {
-        context.key(key).set(value);
+        context.key(key).setRaw(value);
       } else {
         context[key] = value;
       }
