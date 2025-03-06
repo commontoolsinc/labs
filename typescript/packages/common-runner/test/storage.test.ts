@@ -18,12 +18,13 @@ storage.setSigner(await Identity.fromPassphrase("test operator"));
 describe("Storage", () => {
   let storage2: StorageProvider;
   let testDoc: DocImpl<any>;
+  let n = 0;
 
   beforeEach(() => {
     storage2 = new InMemoryStorageProvider("test");
     testDoc = getDoc<string>(
       undefined as unknown as string,
-      "storage test cell",
+      `storage test cell ${n++}`,
       getSpace("test"),
     );
   });
@@ -64,6 +65,7 @@ describe("Storage", () => {
 
       await storage2.sync(refDoc.entityId!);
       const value = storage2.get(refDoc.entityId!);
+      console.log("synced refDoc", value, refDoc.entityId);
       expect(value?.value).toEqual("hello");
     });
 
