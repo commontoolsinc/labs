@@ -29,7 +29,7 @@ import type {
   UCAN,
 } from "./interface.ts";
 import * as Subscription from "./subscription.ts";
-
+import { backoff } from "./error.ts";
 export * from "./interface.ts";
 export * from "./util.ts";
 export * as Error from "./error.ts";
@@ -119,6 +119,11 @@ class MemoryProviderSession<
 
   channels: Map<InvocationURL<Reference<Subscribe>>, Set<string>> = new Map();
 
+  // Rate limiting properties
+  lastRequestTime: number = 0;
+  rateLimitThreshold: number = 100; // Milliseconds between requests
+  debounceCount: number = 0;
+
   constructor(
     public memory: MemorySession,
     public sessions: null | Set<ProviderSession<MemoryProtocol>>,
@@ -131,7 +136,7 @@ class MemoryProviderSession<
       UCAN<ConsumerCommandInvocation<MemoryProtocol>>
     >({
       write: async (command) => {
-        await this.invoke(command as UCAN<ConsumerCommandInvocation<Protocol>>);
+        await this.processWithRateLimit(command);
       },
       abort: async () => {
         await this.close();
@@ -169,6 +174,60 @@ class MemoryProviderSession<
     this.controller = undefined;
     this.sessions?.delete(this);
     this.sessions = null;
+  }
+
+  /**
+   * Process a command with rate limiting.
+   * Rejects requests that come too quickly with an error,
+   * using same logic as storage.ts for calculating backoff.
+   */
+  async processWithRateLimit(
+    command: UCAN<ConsumerCommandInvocation<MemoryProtocol>>,
+  ): Promise<void> {
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+
+    // Calculate the dynamic threshold based on debounce count
+    // First 10 requests have base threshold, then exponential increase
+    const exp = Math.max(0, this.debounceCount - 10) ** 2;
+    // Randomness here and in storage.ts are unlikely to align 🫣
+    const dynamicBackoff = 50 * exp * (1 + Math.random());
+    const currentThreshold = this.rateLimitThreshold + dynamicBackoff;
+
+    // Check if the request is coming too quickly
+    if (timeSinceLastRequest < currentThreshold) {
+      // Increase debounce count (capped at 17 like in storage.ts)
+      if (this.debounceCount < 17) this.debounceCount++;
+
+      // Recalculate with new debounce count for the error message
+      const newExp = Math.max(0, this.debounceCount - 10) ** 2;
+      const newBackoff = 50 * newExp * (1 + Math.random());
+      const suggestedWait = Math.round(this.rateLimitThreshold + newBackoff);
+
+      // Return a rate limit error through the command pipeline
+      const invocation = command.invocation;
+      const of = `job:${refer(invocation)}` as InvocationURL<
+        Reference<ConsumerCommandInvocation<Protocol>>
+      >;
+
+      this.perform({
+        the: "task/return",
+        of,
+        is: {
+          error: backoff(
+            `Rate limit exceeded. Please wait at least ${suggestedWait}ms between requests.`,
+          ),
+        },
+      });
+      return;
+    } else {
+      // Reset counter if we're not rate limiting
+      this.debounceCount = 0;
+    }
+
+    // Update the last request time and process the command
+    this.lastRequestTime = now;
+    await this.invoke(command as UCAN<ConsumerCommandInvocation<Protocol>>);
   }
   async invoke(
     { invocation, authorization }: UCAN<ConsumerCommandInvocation<Protocol>>,

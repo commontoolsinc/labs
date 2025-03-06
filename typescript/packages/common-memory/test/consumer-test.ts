@@ -38,6 +38,9 @@ const test = (
     const provider = open.ok;
     const session = provider.session();
 
+    // Disable rate limiting for testing
+    (session as any).rateLimitThreshold = 0;
+
     try {
       await run(session);
     } finally {

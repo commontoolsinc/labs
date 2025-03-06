@@ -838,6 +838,12 @@ export interface TransactionError extends Error {
   transaction: Transaction;
 }
 
+export interface RateLimitError {
+  name: "RateLimitError";
+  message: string;
+  stack?: string;
+}
+
 export interface QueryError extends Error {
   name: "QueryError";
   cause: SystemError;
