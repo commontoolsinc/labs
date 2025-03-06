@@ -12,7 +12,17 @@ export const sleep = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 export const login = async (page: Page) => {
-  // First, see if any credential data is
+  // Wait a second :(
+  // See if #user-avatar is rendered
+  // Check if we're already logged in
+  await sleep(1000);
+  const avatar = await page.$("#user-avatar");
+  if (avatar) {
+    console.log("Already logged in");
+    return;
+  }
+
+  // If not logged in, see if any credential data is
   // persisting. If so, destroy local data.
   let buttons = await page.$$("button");
   for (const button of buttons) {
@@ -20,6 +30,9 @@ export const login = async (page: Page) => {
       await button.click();
     }
   }
+
+  // Try log in
+  console.log("Logging in");
 
   // Click the first button, "register"
   let button = await page.$("button");

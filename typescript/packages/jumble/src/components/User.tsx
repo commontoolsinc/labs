@@ -43,6 +43,7 @@ export function User() {
   };
   return (
     <div
+      id="user-avatar"
       onClick={clearAuthentication}
       style={styles}
       className="relative group flex max-w-xs items-center rounded-full bg-gray-800 text-sm focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-gray-800 focus:outline-hidden cursor-pointer"
