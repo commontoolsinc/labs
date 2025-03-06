@@ -37,8 +37,7 @@ describe("cell-map", () => {
     });
 
     it("should return the entity ID for a cell", () => {
-      const c = getDoc({});
-      c.generateEntityId(undefined, getSpace("test"));
+      const c = getDoc({}, undefined, getSpace("test"));
       const id = getEntityId(c);
 
       expect(getEntityId(c)).toEqual(id);
@@ -48,8 +47,7 @@ describe("cell-map", () => {
     });
 
     it("should return a different entity ID for reference with paths", () => {
-      const c = getDoc({ foo: { bar: 42 } });
-      c.generateEntityId(undefined, getSpace("test"));
+      const c = getDoc({ foo: { bar: 42 } }, undefined, getSpace("test"));
       const id = getEntityId(c);
 
       expect(getEntityId(c.getAsQueryResult())).toEqual(id);
@@ -68,10 +66,9 @@ describe("cell-map", () => {
 
   describe("getCellByEntityId and setCellByEntityId", () => {
     it("should set and get a cell by entity ID", () => {
-      const c = getDoc({ value: 42 });
-      c.generateEntityId(undefined, getSpace("test"));
+      const c = getDoc({ value: 42 }, undefined, getSpace("test"));
 
-      const retrievedCell = getDocByEntityId(c.space!, c.entityId!);
+      const retrievedCell = getDocByEntityId(c.space, c.entityId!);
 
       expect(retrievedCell).toBe(c);
     });

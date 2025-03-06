@@ -15,13 +15,25 @@ import {
   schedule,
   unschedule,
 } from "../src/scheduler.ts";
-
+import { getSpace } from "../src/space.ts";
 describe("scheduler", () => {
   it("should run actions when cells change", async () => {
     let runCount = 0;
-    const a = getDoc(1);
-    const b = getDoc(2);
-    const c = getDoc(0);
+    const a = getDoc(
+      1,
+      "should run actions when cells change 1",
+      getSpace("test"),
+    );
+    const b = getDoc(
+      2,
+      "should run actions when cells change 2",
+      getSpace("test"),
+    );
+    const c = getDoc(
+      0,
+      "should run actions when cells change 3",
+      getSpace("test"),
+    );
     const adder: Action = (log) => {
       runCount++;
       c.asCell([], log).send(
@@ -39,9 +51,21 @@ describe("scheduler", () => {
 
   it("schedule shouldn't run immediately", async () => {
     let runCount = 0;
-    const a = getDoc(1);
-    const b = getDoc(2);
-    const c = getDoc(0);
+    const a = getDoc(
+      1,
+      "should schedule shouldn't run immediately 1",
+      getSpace("test"),
+    );
+    const b = getDoc(
+      2,
+      "should schedule shouldn't run immediately 2",
+      getSpace("test"),
+    );
+    const c = getDoc(
+      0,
+      "should schedule shouldn't run immediately 3",
+      getSpace("test"),
+    );
     const adder: Action = (log) => {
       runCount++;
       c.asCell([], log).send(
@@ -65,9 +89,9 @@ describe("scheduler", () => {
 
   it("should remove actions", async () => {
     let runCount = 0;
-    const a = getDoc(1);
-    const b = getDoc(2);
-    const c = getDoc(0);
+    const a = getDoc(1, "should remove actions 1", getSpace("test"));
+    const b = getDoc(2, "should remove actions 2", getSpace("test"));
+    const c = getDoc(0, "should remove actions 3", getSpace("test"));
     const adder: Action = (log) => {
       runCount++;
       c.asCell([], log).send(
@@ -92,9 +116,21 @@ describe("scheduler", () => {
 
   it("scheduler should return a cancel function", async () => {
     let runCount = 0;
-    const a = getDoc(1);
-    const b = getDoc(2);
-    const c = getDoc(0);
+    const a = getDoc(
+      1,
+      "scheduler should return a cancel function 1",
+      getSpace("test"),
+    );
+    const b = getDoc(
+      2,
+      "scheduler should return a cancel function 2",
+      getSpace("test"),
+    );
+    const c = getDoc(
+      0,
+      "scheduler should return a cancel function 3",
+      getSpace("test"),
+    );
     const adder: Action = (log) => {
       runCount++;
       c.asCell([], log).send(
@@ -123,11 +159,31 @@ describe("scheduler", () => {
 
   it("should run actions in topological order", async () => {
     const runs: string[] = [];
-    const a = getDoc(1);
-    const b = getDoc(2);
-    const c = getDoc(0);
-    const d = getDoc(1);
-    const e = getDoc(0);
+    const a = getDoc(
+      1,
+      "should run actions in topological order 1",
+      getSpace("test"),
+    );
+    const b = getDoc(
+      2,
+      "should run actions in topological order 2",
+      getSpace("test"),
+    );
+    const c = getDoc(
+      0,
+      "should run actions in topological order 3",
+      getSpace("test"),
+    );
+    const d = getDoc(
+      1,
+      "should run actions in topological order 4",
+      getSpace("test"),
+    );
+    const e = getDoc(
+      0,
+      "should run actions in topological order 5",
+      getSpace("test"),
+    );
     const adder1: Action = (log) => {
       runs.push("adder1");
       c.asCell([], log).send(
@@ -161,11 +217,31 @@ describe("scheduler", () => {
 
   it("should stop eventually when encountering infinite loops", async () => {
     let maxRuns = 120; // More than the limit in scheduler
-    const a = getDoc(1);
-    const b = getDoc(2);
-    const c = getDoc(0);
-    const d = getDoc(1);
-    const e = getDoc(0);
+    const a = getDoc(
+      1,
+      "should stop eventually when encountering infinite loops 1",
+      getSpace("test"),
+    );
+    const b = getDoc(
+      2,
+      "should stop eventually when encountering infinite loops 2",
+      getSpace("test"),
+    );
+    const c = getDoc(
+      0,
+      "should stop eventually when encountering infinite loops 3",
+      getSpace("test"),
+    );
+    const d = getDoc(
+      1,
+      "should stop eventually when encountering infinite loops 4",
+      getSpace("test"),
+    );
+    const e = getDoc(
+      0,
+      "should stop eventually when encountering infinite loops 5",
+      getSpace("test"),
+    );
     const adder1: Action = (log) => {
       c.asCell([], log).send(
         a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
@@ -200,8 +276,16 @@ describe("scheduler", () => {
   });
 
   it("should not loop on r/w changes on its own output", async () => {
-    const counter = getDoc(0);
-    const by = getDoc(1);
+    const counter = getDoc(
+      0,
+      "should not loop on r/w changes on its own output 1",
+      getSpace("test"),
+    );
+    const by = getDoc(
+      1,
+      "should not loop on r/w changes on its own output 2",
+      getSpace("test"),
+    );
     const inc: Action = (log) =>
       counter
         .asCell([], log)
@@ -236,8 +320,16 @@ describe("scheduler", () => {
 
 describe("event handling", () => {
   it("should queue and process events", async () => {
-    const eventCell = getDoc(0);
-    const eventResultCell = getDoc(0);
+    const eventCell = getDoc(
+      0,
+      "should queue and process events 1",
+      getSpace("test"),
+    );
+    const eventResultCell = getDoc(
+      0,
+      "should queue and process events 2",
+      getSpace("test"),
+    );
     let eventCount = 0;
 
     const eventHandler: EventHandler = (event) => {
@@ -258,7 +350,11 @@ describe("event handling", () => {
   });
 
   it("should remove event handlers", async () => {
-    const eventCell = getDoc(0);
+    const eventCell = getDoc(
+      0,
+      "should remove event handlers 1",
+      getSpace("test"),
+    );
     let eventCount = 0;
 
     const eventHandler: EventHandler = (event) => {
@@ -287,7 +383,11 @@ describe("event handling", () => {
   });
 
   it("should handle events with nested paths", async () => {
-    const parentCell = getDoc({ child: { value: 0 } });
+    const parentCell = getDoc(
+      { child: { value: 0 } },
+      "should handle events with nested paths 1",
+      getSpace("test"),
+    );
     let eventCount = 0;
 
     const eventHandler: EventHandler = () => {
@@ -306,7 +406,11 @@ describe("event handling", () => {
   });
 
   it("should process events in order", async () => {
-    const eventCell = getDoc(0);
+    const eventCell = getDoc(
+      0,
+      "should process events in order 1",
+      getSpace("test"),
+    );
     const events: number[] = [];
 
     const eventHandler: EventHandler = (event) => {
@@ -325,8 +429,16 @@ describe("event handling", () => {
   });
 
   it("should trigger recomputation of dependent cells", async () => {
-    const eventCell = getDoc(0);
-    const eventResultCell = getDoc(0);
+    const eventCell = getDoc(
+      0,
+      "should trigger recomputation of dependent cells 1",
+      getSpace("test"),
+    );
+    const eventResultCell = getDoc(
+      0,
+      "should trigger recomputation of dependent cells 2",
+      getSpace("test"),
+    );
     let eventCount = 0;
     let actionCount = 0;
     let lastEventSeen = 0;
@@ -366,7 +478,7 @@ describe("event handling", () => {
 
 describe("compactifyPaths", () => {
   it("should compactify paths", () => {
-    const testCell = getDoc({});
+    const testCell = getDoc({}, "should compactify paths 1", getSpace("test"));
     const paths = [
       { cell: testCell, path: ["a", "b"] },
       { cell: testCell, path: ["a"] },
@@ -380,7 +492,11 @@ describe("compactifyPaths", () => {
   });
 
   it("should remove duplicate paths", () => {
-    const testCell = getDoc({});
+    const testCell = getDoc(
+      {},
+      "should remove duplicate paths 1",
+      getSpace("test"),
+    );
     const paths = [
       { cell: testCell, path: ["a", "b"] },
       { cell: testCell, path: ["a", "b"] },
@@ -390,8 +506,16 @@ describe("compactifyPaths", () => {
   });
 
   it("should not compactify across cells", () => {
-    const cellA = getDoc({});
-    const cellB = getDoc({});
+    const cellA = getDoc(
+      {},
+      "should not compactify across cells 1",
+      getSpace("test"),
+    );
+    const cellB = getDoc(
+      {},
+      "should not compactify across cells 2",
+      getSpace("test"),
+    );
     const paths = [
       { cell: cellA, path: ["a", "b"] },
       { cell: cellB, path: ["a", "b"] },
@@ -401,7 +525,11 @@ describe("compactifyPaths", () => {
   });
 
   it("empty paths should trump all other ones", () => {
-    const cellA = getDoc({});
+    const cellA = getDoc(
+      {},
+      "should remove duplicate paths 1",
+      getSpace("test"),
+    );
     const paths = [
       { cell: cellA, path: ["a", "b"] },
       { cell: cellA, path: ["c"] },

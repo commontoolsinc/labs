@@ -162,7 +162,7 @@ export function createQueryResultProxy<T>(
               normalizeToDocLinks(valueCell, result, undefined, log, cause);
 
               const resultCell = getDoc<any[]>(
-                undefined,
+                undefined as unknown as any[],
                 cause,
                 valueCell.space,
               );
@@ -324,10 +324,3 @@ export type QueryResultInternals = {
 };
 
 export type QueryResult<T> = T & QueryResultInternals;
-
-/**
- * this is a helper created for the spell-style recipe prototype...
- */
-export function doc<T = any>(value: any) {
-  return getDoc<T>(value).getAsQueryResult();
-}

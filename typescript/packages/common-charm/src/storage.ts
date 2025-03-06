@@ -1,13 +1,21 @@
-import { type DocImpl, type DocLink, isDoc, isDocLink } from "./doc.ts";
-import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
-import { Cell, isCell } from "./cell.ts";
-import { type EntityId, getDocByEntityId } from "./doc-map.ts";
 import {
+  type AddCancel,
+  type Cancel,
+  Cell,
+  type DocImpl,
+  type DocLink,
+  type EntityId,
+  getDocByEntityId,
   getDocLinkOrThrow,
+  idle,
+  isCell,
+  isDoc,
+  isDocLink,
   isQueryResultForDereferencing,
-} from "./query-result-proxy.ts";
-import { idle } from "./scheduler.ts";
-import { Space } from "./space.ts";
+  Space,
+  useCancelGroup,
+} from "@commontools/runner";
+
 import { isStatic, markAsStatic } from "@commontools/builder";
 import { StorageProvider, StorageValue } from "./storage/base.ts";
 import { RemoteStorageProvider } from "./storage/remote.ts";
@@ -383,7 +391,9 @@ class StorageImpl implements Storage {
     };
 
     // Add source doc as dependent doc
-    if (doc.sourceCell) dependencies.add(this._ensureIsSynced(doc.sourceCell));
+    if (doc.sourceCell) {
+      dependencies.add(this._ensureIsSynced(doc.sourceCell));
+    }
 
     // Convert all doc references to ids and remember as dependent docs
     const value: StorageValue = {

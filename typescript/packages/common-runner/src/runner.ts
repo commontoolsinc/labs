@@ -232,20 +232,6 @@ export function run<T, R = any>(
   }
 
   for (const node of recipe.nodes) {
-    // Generate causal IDs for all docs read and written to by this node, if
-    // they don't have any yet.
-    [node.inputs, node.outputs].forEach((bindings) =>
-      findAllAliasedDocs(bindings, processCell).forEach(
-        ({ cell: doc, path }) => {
-          if (!doc.entityId && processCell.entityId) {
-            doc.generateEntityId(
-              { cell: processCell, path },
-              processCell.space,
-            );
-          }
-        },
-      )
-    );
     instantiateNode(
       node.module,
       node.inputs,
@@ -452,7 +438,7 @@ function instantiateJavaScriptNode(
   } else {
     // Schedule the action to run when the inputs change
 
-    const inputsCell = getDoc(inputs);
+    const inputsCell = getDoc(inputs, { immutable: inputs }, processCell.space);
     inputsCell.freeze(); // Freezes the bindings, not aliased cells.
 
     let resultCell: DocImpl<any> | undefined;
@@ -542,7 +528,11 @@ function instantiateRawNode(
   const outputCells = findAllAliasedDocs(mappedOutputBindings, processCell);
 
   const action = module.implementation(
-    getDoc(mappedInputBindings),
+    getDoc(
+      mappedInputBindings,
+      { immutable: mappedInputBindings },
+      processCell.space,
+    ),
     (result: any) =>
       sendValueToBinding(processCell, mappedOutputBindings, result),
     addCancel,
@@ -561,7 +551,7 @@ function instantiatePassthroughNode(
   addCancel: AddCancel,
 ) {
   const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
-  const inputsCell = getDoc(inputs);
+  const inputsCell = getDoc(inputs, { immutable: inputs }, processCell.space);
   const reads = findAllAliasedDocs(inputs, processCell);
 
   const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);

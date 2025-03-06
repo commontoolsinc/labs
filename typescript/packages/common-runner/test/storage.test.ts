@@ -15,8 +15,11 @@ describe("Storage", () => {
 
   beforeEach(() => {
     storage2 = new InMemoryStorageProvider("test");
-    testCell = getDoc<string>();
-    testCell.generateEntityId(undefined, getSpace("test"));
+    testCell = getDoc<string>(
+      undefined as unknown as string,
+      "storage test cell",
+      getSpace("test"),
+    );
   });
 
   afterEach(async () => {
@@ -37,8 +40,11 @@ describe("Storage", () => {
     });
 
     it("should persist a cells and referenced cell references within it", async () => {
-      const refCell = getDoc("hello");
-      refCell.generateEntityId(undefined, getSpace("test"));
+      const refCell = getDoc(
+        "hello",
+        "should persist a cells and referenced cell references within it",
+        getSpace("test"),
+      );
 
       const testValue = {
         data: "test",
@@ -56,8 +62,11 @@ describe("Storage", () => {
     });
 
     it("should persist a cells and referenced cells within it", async () => {
-      const refCell = getDoc("hello");
-      refCell.generateEntityId(undefined, getSpace("test"));
+      const refCell = getDoc(
+        "hello",
+        "should persist a cells and referenced cells 1",
+        getSpace("test"),
+      );
 
       const testValue = {
         data: "test",
@@ -69,27 +78,6 @@ describe("Storage", () => {
 
       await storage2.sync(refCell.entityId!);
       const value = storage2.get(refCell.entityId!);
-      expect(value?.value).toEqual("hello");
-    });
-
-    it("should generate causal IDs for cells that don't have them yet", async () => {
-      const testValue = {
-        data: "test",
-        ref: { cell: getDoc("hello"), path: [] },
-      };
-      testCell.send(testValue);
-
-      await storage.syncCell(testCell);
-
-      const refId = createRef(
-        { value: "hello" },
-        {
-          cell: testCell.entityId?.toJSON?.(),
-          path: ["ref"],
-        },
-      );
-      await storage2.sync(refId);
-      const value = storage2.get(refId);
       expect(value?.value).toEqual("hello");
     });
   });
@@ -110,18 +98,6 @@ describe("Storage", () => {
   });
 
   describe("syncCell", () => {
-    it("should only load a cell once", async () => {
-      const cell1 = await storage.syncCell(testCell);
-      expect(cell1).toBe(testCell);
-
-      // Even when passing in a new cell with the same entityId, it should be
-      // the same cell.
-      const cell2 = getDoc();
-      cell2.entityId = testCell.entityId;
-      const cell3 = await storage.syncCell(cell2);
-      expect(cell3).toBe(cell1);
-    });
-
     it("should wait for a cell to appear", async () => {
       let synced = false;
       storage2.sync(testCell.entityId!, true).then(() => (synced = true));

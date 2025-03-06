@@ -145,17 +145,6 @@ export type DocImpl<T> = {
   isFrozen(): boolean;
 
   /**
-   * Generate entity ID. This is delayed, so that content can be added before
-   * the id is generated.
-   *
-   * The id is a function of the cell's value at the point of call and the cause
-   * of generation. If no cause is provided, a random event is assumed.
-   *
-   * @param cause - Causal event that preceeds entity generation.
-   */
-  generateEntityId(cause?: any, space?: Space): void;
-
-  /**
    * Convert the entity ID to a JSON pointer.
    *
    * This is _not_ a JSON representation of the contents. Use `.get()` or the
@@ -177,14 +166,14 @@ export type DocImpl<T> = {
    * The space this doc belongs to.
    * Required when entityId is set.
    */
-  space?: Space;
+  space: Space;
 
   /**
    * Get current entity ID.
    *
    * @returns Entity ID.
    */
-  entityId?: EntityId | undefined;
+  entityId: EntityId;
 
   /**
    * Get and set the source cell, that is the cell that populates this cell.
@@ -246,24 +235,24 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
     : any
   : any;
 
-export function getDoc<T>(value?: T, cause?: any, space?: Space): DocImpl<T> {
+export function getDoc<T>(value: T, cause: any, space: Space): DocImpl<T> {
+  // If cause is provided, generate ID and return pre-existing cell if any.
+  const entityId = generateEntityId(value, cause);
+  const existing = getDocByEntityId(space, entityId, false);
+  if (existing) return existing;
+
+  return createDoc(value, entityId, space);
+}
+
+export function createDoc<T>(
+  value: T,
+  entityId: EntityId,
+  space: Space,
+): DocImpl<T> {
   const callbacks = new Set<(value: T, path: PropertyKey[]) => void>();
   let readOnly = false;
-  let entityId: EntityId | undefined;
   let sourceCell: DocImpl<any> | undefined;
   let ephemeral = false;
-  let docSpace = space;
-
-  // If cause is provided, generate ID and return pre-existing cell if any.
-  if (cause && space) {
-    entityId = generateEntityId(value, cause);
-    const existing = getDocByEntityId(space, entityId, false);
-    if (existing) return existing;
-  }
-
-  if (cause && !space) {
-    throw new Error("Space is required when cause is provided");
-  }
 
   const self: DocImpl<T> = {
     get: () => value as T,
@@ -312,14 +301,6 @@ export function getDoc<T>(value?: T, cause?: any, space?: Space): DocImpl<T> {
       proxied, e.g. for aliases. TODO: Consider changing proxy here. */
     },
     isFrozen: () => readOnly,
-    generateEntityId: (cause?: any, space?: Space): void => {
-      if (space) docSpace = space;
-      if (!docSpace) {
-        throw new Error("Space is required when generating entity ID");
-      }
-      entityId = generateEntityId(value, cause);
-      setDocByEntityId(docSpace, entityId, self);
-    },
     // This is the id and not the contents, because we .toJSON is called when
     // writing a structure to this that might contain a reference to this cell,
     // and we want to serialize that as am IPLD link to this cell.
@@ -330,21 +311,17 @@ export function getDoc<T>(value?: T, cause?: any, space?: Space): DocImpl<T> {
     get value(): T {
       return value as T;
     },
-    get entityId(): EntityId | undefined {
+    get entityId(): EntityId {
       return entityId;
     },
     set entityId(id: EntityId) {
-      if (entityId) throw new Error("Entity ID already set");
-      entityId = id;
-      if (docSpace) setDocByEntityId(docSpace, id, self);
+      throw new Error("Can't set entity ID directly, use getDocByEntityId");
     },
-    get space(): Space | undefined {
-      return docSpace;
+    get space(): Space {
+      return space;
     },
     set space(newSpace: Space) {
-      if (docSpace) throw new Error("Space already set");
-      docSpace = newSpace;
-      if (entityId) setDocByEntityId(docSpace, entityId, self);
+      throw new Error("Can't set space directly, use getDocByEntityId");
     },
     get sourceCell(): DocImpl<any> | undefined {
       return sourceCell;
@@ -372,9 +349,7 @@ export function getDoc<T>(value?: T, cause?: any, space?: Space): DocImpl<T> {
     },
   };
 
-  if (entityId && docSpace) {
-    setDocByEntityId(docSpace, entityId, self);
-  }
+  setDocByEntityId(space, entityId, self);
 
   return self;
 }
