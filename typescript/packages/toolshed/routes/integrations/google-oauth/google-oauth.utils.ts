@@ -7,7 +7,7 @@ import {
   storage,
 } from "@commontools/runner";
 import { Context } from "@hono/hono";
-
+import { Identity, Signer } from "@commontools/identity";
 // Types
 export interface TokenData {
   token?: string;
@@ -146,6 +146,8 @@ export async function fetchUserInfo(accessToken: string): Promise<UserInfo> {
   }
 }
 
+let signer: Signer | undefined;
+
 // Helper function to get auth cell and storage
 export async function getAuthCellAndStorage(docLink: DocLink | string) {
   try {
@@ -153,6 +155,11 @@ export async function getAuthCellAndStorage(docLink: DocLink | string) {
     const parsedDocLink = typeof docLink === "string"
       ? JSON.parse(docLink)
       : docLink;
+
+    if (!signer) {
+      signer = await Identity.fromPassphrase("toolshed");
+      storage.setSigner(signer);
+    }
 
     storage.setRemoteStorage(new URL("http://localhost:8000"));
 
