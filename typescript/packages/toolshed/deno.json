@@ -1,12 +1,11 @@
 {
   "tasks": {
     "dev": "deno run -A --watch --env-file=.env index.ts",
+    "production": "deno run -A --env-file=.env index.ts",
     "test": "deno test -A --env-file=.env.test"
   },
   "fmt": {
-    "exclude": [
-      "./llm_documentation/*"
-    ]
+    "exclude": ["./llm_documentation/*"]
   },
   "imports": {
     "@/": "./",

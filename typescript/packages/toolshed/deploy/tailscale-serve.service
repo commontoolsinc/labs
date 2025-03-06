@@ -1,0 +1,15 @@
+# /etc/systemd/system/tailscale-serve.service
+
+[Unit]
+Description=Tailscale Serve Proxy
+After=network.target
+
+[Service]
+# Running as root so that binding to port 443 is allowed.
+User=root
+ExecStart=/usr/bin/tailscale serve --https=443 localhost:8080
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

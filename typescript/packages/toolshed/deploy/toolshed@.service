@@ -1,0 +1,15 @@
+# /etc/systemd/system/toolshed@.service
+[Unit]
+Description=Toolshed Deno Service instance on port %I
+After=network.target
+
+[Service]
+User=jake
+WorkingDirectory=/home/jake/labs/typescript/packages/toolshed
+Environment="PORT=%I"
+ExecStart=/bin/sh -c "/home/jake/.deno/bin/deno task production"
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

@@ -13,4 +13,4 @@ Sentry.init({
   tracesSampleRate: 1.0,
 });
 
-Deno.serve(app.fetch);
+Deno.serve({ port }, app.fetch);
