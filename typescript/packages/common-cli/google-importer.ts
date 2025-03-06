@@ -3,48 +3,50 @@ import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, setBobbyServerUrl, storage } from "@commontools/charm";
 import { Cell, getEntityId, isStream } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
+import { Identity } from "@commontools/identity";
 
 /**
  * Display usage information
  */
 function showHelp() {
-  console.log("Usage: deno run main.ts [options]");
+  console.log("Usage: deno run google-importer.ts [options]");
   console.log("");
   console.log("Options:");
   console.log(
-    "  --space=<space>       Space to watch (default: common-knowledge)",
+    "  --space=<space>       Space to update (default: common-knowledge)",
   );
-  console.log("  --charmId=<id>        Specific charm ID to watch");
+  console.log("  --charmId=<id>        Specific charm ID to update");
   console.log(
     "  --interval=<seconds>  Update interval in seconds (default: 30)",
   );
   console.log("  --help                Show this help message");
-  console.log("  --version             Show version information");
   Deno.exit(0);
 }
 
 // Parse command line arguments
 const flags = parseArgs(Deno.args, {
   string: ["space", "charmId", "interval"],
-  boolean: ["help", "version"],
+  boolean: ["help"],
   default: { interval: "30" },
 });
 
-// Show help or version if requested
-const { space, charmId, interval } = flags;
+const { space, charmId, interval, help } = flags;
+
+if (help) {
+  showHelp();
+  Deno.exit(0);
+}
 
 // Configuration
 const CHECK_INTERVAL = parseInt(interval as string) * 1000;
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
 
+let manager: CharmManager | undefined;
+const checkedCharms = new Map<string, boolean>();
 // Initialize storage and Bobby server
 storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
-
-// Create charm manager
-const manager = new CharmManager(space as string);
-const checkedCharms = new Map<string, boolean>();
 
 /**
  * Custom logger that includes timestamp and charm ID (last 10 chars) when available
@@ -177,8 +179,11 @@ function watchSpace(spaceName: string) {
   charms.sink((charms) => charms.map(getId).forEach(watchCharm));
 }
 
-function main() {
+async function main() {
   log(undefined, "Starting Google Updater");
+
+  const identity = await Identity.fromPassphrase("common-cli");
+  manager = new CharmManager(space as string, identity);
 
   if (charmId) {
     watchCharm(charmId as string);
