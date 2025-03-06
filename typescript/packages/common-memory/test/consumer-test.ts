@@ -1,9 +1,4 @@
-import {
-  assert,
-  assertEquals,
-  assertMatch,
-  assertObjectMatch,
-} from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import * as Fact from "../fact.ts";
 import * as Transaction from "../transaction.ts";
 import * as Changes from "../changes.ts";
@@ -12,6 +7,17 @@ import * as Provider from "../provider.ts";
 import * as Consumer from "../consumer.ts";
 import { refer } from "merkle-reference";
 import { alice, bob, space } from "./principal.ts";
+import { UTCUnixTimestampInSeconds } from "../interface.ts";
+
+class Clock {
+  private timestamp: UTCUnixTimestampInSeconds;
+  constructor() {
+    this.timestamp = (Date.now() / 1000) | 0;
+  }
+  now(): UTCUnixTimestampInSeconds {
+    return this.timestamp;
+  }
+}
 
 const doc = `of:${refer({ hello: "world" })}` as const;
 const the = "application/json";
@@ -51,7 +57,9 @@ const test = (
 const store = new URL(`memory://`);
 
 test("query empty memory", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space.did());
+  const clock = new Clock();
+  const memory = Consumer.open({ as: alice, session, clock })
+    .mount(space.did());
   const query = memory.query({
     select: {},
   });
@@ -66,7 +74,8 @@ test("query empty memory", store, async (session) => {
 });
 
 test("create new memory", store, async (session) => {
-  const consumer = Consumer.open({ as: alice, session });
+  const clock = new Clock();
+  const consumer = Consumer.open({ as: alice, session, clock });
   const memory = consumer.mount(space.did());
 
   const v1 = Fact.assert({
@@ -84,6 +93,7 @@ test("create new memory", store, async (session) => {
       issuer: alice.did(),
       subject: space.did(),
       changes: Changes.from([v1]),
+      clock,
     }),
   });
 
@@ -114,8 +124,10 @@ test("create new memory", store, async (session) => {
 });
 
 test("create memory fails if already exists", store, async (session) => {
+  const clock = new Clock();
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
-  const memory = Consumer.open({ as: alice, session }).mount(space.did());
+  const memory = Consumer.open({ as: alice, session, clock })
+    .mount(space.did());
 
   const create = await memory.transact({
     changes: Changes.from([v1]),
@@ -141,7 +153,9 @@ test("create memory fails if already exists", store, async (session) => {
 });
 
 test("list empty memory", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space.did());
+  const clock = new Clock();
+  const memory = Consumer.open({ as: alice, session, clock })
+    .mount(space.did());
   const result = await memory.query({
     select: { _: { [the]: {} } },
   });
@@ -150,7 +164,9 @@ test("list empty memory", store, async (session) => {
 });
 
 test("list single fact", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space.did());
+  const clock = new Clock();
+  const memory = Consumer.open({ as: alice, session, clock })
+    .mount(space.did());
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
   // First create a fact
   await memory.transact({
@@ -167,7 +183,9 @@ test("list single fact", store, async (session) => {
 });
 
 test("list multiple facts", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space.did());
+  const clock = new Clock();
+  const memory = Consumer.open({ as: alice, session, clock })
+    .mount(space.did());
   const doc2 = `of:${refer({ doc: 2 })}` as const;
 
   const facts = [
@@ -192,7 +210,9 @@ test("list multiple facts", store, async (session) => {
 });
 
 test("list excludes retracted facts", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space.did());
+  const clock = new Clock();
+  const memory = Consumer.open({ as: alice, session, clock })
+    .mount(space.did());
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
   // First create and then retract a fact
   await memory.transact({ changes: Changes.from([v1]) });
@@ -220,7 +240,9 @@ test("list excludes retracted facts", store, async (session) => {
 });
 
 test("list different fact types", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space.did());
+  const clock = new Clock();
+  const memory = Consumer.open({ as: alice, session, clock })
+    .mount(space.did());
   const json = Fact.assert({ the, of: doc, is: { v: 1 } });
   const text = Fact.assert({ the: "text/plain", of: doc, is: "Hello" });
 
@@ -251,7 +273,8 @@ test("list different fact types", store, async (session) => {
 });
 
 test("list facts from different memory spaces", store, async (session) => {
-  const consumer = Consumer.open({ as: alice, session });
+  const clock = new Clock();
+  const consumer = Consumer.open({ as: alice, session, clock });
   const aliceSpace = consumer.mount(alice.did());
   const bobSpace = consumer.mount(bob.did());
 
@@ -285,7 +308,9 @@ test("list facts from different memory spaces", store, async (session) => {
 });
 
 test("subscribe receives unclaimed state", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space.did());
+  const clock = new Clock();
+  const memory = Consumer.open({ as: alice, session, clock })
+    .mount(space.did());
 
   const { ok: query } = await memory.query({
     select: { [doc]: { [the]: {} } },
@@ -315,7 +340,9 @@ test("subscribe receives unclaimed state", store, async (session) => {
 });
 
 test("subscribe receives unclaimed state", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space.did());
+  const clock = new Clock();
+  const memory = Consumer.open({ as: alice, session, clock })
+    .mount(space.did());
 
   const { ok: query } = await memory.query({
     select: { [doc]: { [the]: {} } },
@@ -343,7 +370,9 @@ test("subscribe receives unclaimed state", store, async (session) => {
 });
 
 test("subscription receives retraction", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space.did());
+  const clock = new Clock();
+  const memory = Consumer.open({ as: alice, session, clock })
+    .mount(space.did());
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
 
   await memory.transact({ changes: Changes.from([v1]) });
@@ -365,7 +394,9 @@ test("subscription receives retraction", store, async (session) => {
 });
 
 test("cancel subscription", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space.did());
+  const clock = new Clock();
+  const memory = Consumer.open({ as: alice, session, clock })
+    .mount(space.did());
   const doc2 = `of:${refer({ doc: 2 })}` as const;
 
   const selector = { [doc]: { [the]: {} } };
@@ -379,6 +410,7 @@ test("cancel subscription", store, async (session) => {
     issuer: alice.did(),
     subject: space.did(),
     changes: Changes.from([v2]),
+    clock,
   });
 
   const r1 = await memory.transact({ changes: Changes.from([v2]) });
@@ -430,7 +462,9 @@ test("cancel subscription", store, async (session) => {
 });
 
 test("several subscriptions receive single update", store, async (session) => {
-  const memory = Consumer.open({ as: alice, session }).mount(space.did());
+  const clock = new Clock();
+  const memory = Consumer.open({ as: alice, session, clock })
+    .mount(space.did());
   const doc1 = `of:${refer({ doc: 1 })}` as const;
   const doc2 = `of:${refer({ doc: 2 })}` as const;
 
