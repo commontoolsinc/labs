@@ -9,48 +9,50 @@ import {
   storage,
 } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
+import { Identity } from "@commontools/identity";
 
 /**
  * Display usage information
  */
 function showHelp() {
-  console.log("Usage: deno run main.ts [options]");
+  console.log("Usage: deno run google-importer.ts [options]");
   console.log("");
   console.log("Options:");
   console.log(
-    "  --space=<space>       Space to watch (default: common-knowledge)",
+    "  --space=<space>       Space to update (default: common-knowledge)",
   );
-  console.log("  --charmId=<id>        Specific charm ID to watch");
+  console.log("  --charmId=<id>        Specific charm ID to update");
   console.log(
     "  --interval=<seconds>  Update interval in seconds (default: 30)",
   );
   console.log("  --help                Show this help message");
-  console.log("  --version             Show version information");
   Deno.exit(0);
 }
 
 // Parse command line arguments
 const flags = parseArgs(Deno.args, {
   string: ["space", "charmId", "interval"],
-  boolean: ["help", "version"],
+  boolean: ["help"],
   default: { interval: "30" },
 });
 
-// Show help or version if requested
-const { space, charmId, interval } = flags;
+const { space, charmId, interval, help } = flags;
+
+if (help) {
+  showHelp();
+  Deno.exit(0);
+}
 
 // Configuration
 const CHECK_INTERVAL = parseInt(interval as string) * 1000;
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
 
+let manager: CharmManager | undefined;
+const checkedCharms = new Map<string, boolean>();
 // Initialize storage and Bobby server
 storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
-
-// Create charm manager
-const manager = new CharmManager(space as string);
-const checkedCharms = new Map<string, boolean>();
 
 /**
  * Custom logger that includes timestamp and charm ID (last 10 chars) when available
@@ -120,36 +122,34 @@ async function refreshAuthToken(auth: Cell<any>, charm: Cell<Charm>) {
   log(charm, "refreshed token");
 }
 
-const notGoogleUpdaterCharm = async (charmId: string): Promise<boolean> => {
-  const charm = await manager.get(charmId, false);
-  if (!charm) {
-    log(charmId, "charm not found");
-    return true;
-  }
+const isGoogleUpdaterCharm = (charm: Cell<Charm>): boolean => {
   const googleUpdater = charm.key("googleUpdater");
   const auth = charm.key("auth");
-  return !(isStream(googleUpdater) && auth);
+  return !!(isStream(googleUpdater) && auth);
 };
 
 /**
  * Sets up watching for a charm and schedules periodic updates
  */
-function isIgnoredCharm(charmId: string): Promise<boolean> {
-  if (checkedCharms.has(charmId)) {
-    return Promise.resolve(true);
+function isIgnoredCharm(charm: Cell<Charm>): boolean {
+  const charmId = getEntityId(charm)?.["/"];
+  if (!charmId || checkedCharms.has(charmId)) {
+    return true;
   }
+
   checkedCharms.set(charmId, true);
 
-  return notGoogleUpdaterCharm(charmId);
+  return !isGoogleUpdaterCharm(charm);
 }
 
-async function watchCharm(charmId: string | undefined) {
-  if (!charmId || (await isIgnoredCharm(charmId))) {
+async function watchCharm(charm: Cell<Charm>) {
+  if (isIgnoredCharm(charm)) {
     return;
   }
-  const runningCharm = await manager.get(charmId, true);
+
+  const runningCharm = await manager?.get(charm, true);
   if (!runningCharm) {
-    log(charmId, "charm not found");
+    log(charm, "charm not found");
     return;
   }
 
@@ -162,32 +162,32 @@ async function watchCharm(charmId: string | undefined) {
   }, CHECK_INTERVAL);
 }
 
-function getId(charmId: string | Cell<Charm> | undefined): string | undefined {
-  const realCharmId = typeof charmId === "string"
-    ? charmId
-    : getEntityId(charmId)?.["/"];
-  if (!realCharmId) {
-    log(undefined, "charmId not found", JSON.stringify(charmId));
-    return undefined;
-  }
-  return realCharmId;
-}
-
 /**
  * Watches all charms in a space
  */
 function watchSpace(spaceName: string) {
   log(undefined, `Watching all charms in space: ${spaceName}`);
 
-  const charms = manager.getCharms();
-  charms.sink((charms) => charms.map(getId).forEach(watchCharm));
+  const charms = manager?.getCharms();
+  charms?.sink((charms) => {
+    log(undefined, `Checking ${charms.length} charms in space: ${spaceName}`);
+    charms.forEach(watchCharm);
+  });
 }
 
-function main() {
+async function main() {
   log(undefined, "Starting Google Updater");
 
+  const identity = await Identity.fromPassphrase("common-cli");
+  manager = new CharmManager(space as string, identity);
+
   if (charmId) {
-    watchCharm(charmId as string);
+    const charm = await manager?.get(charmId as string, false);
+    if (charm) {
+      watchCharm(charm);
+    } else {
+      log(charmId, "charm not found");
+    }
   } else {
     watchSpace(space as string);
   }
