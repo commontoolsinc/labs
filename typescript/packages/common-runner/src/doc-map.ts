@@ -1,5 +1,11 @@
 import { isOpaqueRef } from "@commontools/builder";
-import { type DocImpl, type DocLink, getDoc, isDoc, isDocLink } from "./doc.ts";
+import {
+  createDoc,
+  type DocImpl,
+  type DocLink,
+  isDoc,
+  isDocLink,
+} from "./doc.ts";
 import {
   getDocLinkOrThrow,
   isQueryResultForDereferencing,
@@ -167,16 +173,16 @@ export function getDocByEntityId<T = any>(
   space: Space,
   entityId: EntityId | string,
   createIfNotFound = true,
+  sourceIfCreated?: DocImpl<any>,
 ): DocImpl<T> | undefined {
   const id = typeof entityId === "string" ? entityId : JSON.stringify(entityId);
   let doc = entityIdToDocMap.get(space, id);
   if (doc) return doc;
   if (!createIfNotFound) return undefined;
 
-  doc = getDoc<T>();
   if (typeof entityId === "string") entityId = JSON.parse(entityId) as EntityId;
-  doc.entityId = entityId;
-  doc.space = space;
+  doc = createDoc<T>(undefined as T, entityId, space);
+  doc.sourceCell = sourceIfCreated;
   setDocByEntityId(space, entityId, doc);
   return doc;
 }

@@ -5,7 +5,7 @@ import { handler, lift } from "../src/module.ts";
 import { str } from "../src/built-in.ts";
 import { type Frame, type JSONSchema, type OpaqueRef } from "../src/types.ts";
 import { popFrame, pushFrame, recipe } from "../src/recipe.ts";
-import { Cell, getDoc, getImmutableCell } from "@commontools/runner";
+import { Cell, getDoc, getImmutableCell, getSpace } from "@commontools/runner";
 
 // Helper function to check type compatibility at compile time
 // This doesn't run any actual tests, but ensures types are correct
@@ -503,7 +503,11 @@ describe("Schema-to-TS Type Conversion", () => {
     type User = Schema<typeof schema>;
 
     // Create a cell with data matching the schema
-    const settingsCell = getDoc({ theme: "dark", notifications: true });
+    const settingsCell = getDoc(
+      { theme: "dark", notifications: true },
+      "settings-cell",
+      getSpace("test"),
+    ).asCell();
 
     // This is just to verify the type works at runtime
     // We're not actually testing the Schema type itself, just that it's compatible
@@ -511,10 +515,10 @@ describe("Schema-to-TS Type Conversion", () => {
       name: "John",
       age: 30,
       tags: ["developer", "typescript"],
-      settings: settingsCell.asCell(),
+      settings: settingsCell,
     };
 
-    const userCell = getImmutableCell(userData, schema);
+    const userCell = getImmutableCell(getSpace("test"), userData, schema);
     const user = userCell.get();
 
     expect(user.name).toBe("John");

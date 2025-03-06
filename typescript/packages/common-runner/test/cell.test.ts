@@ -10,43 +10,71 @@ import { getSpace } from "../src/space.ts";
 
 describe("Cell", () => {
   it("should create a cell with initial value", () => {
-    const c = getDoc(10);
+    const c = getDoc(
+      10,
+      "should create a cell with initial value",
+      getSpace("test"),
+    );
     expect(c.get()).toBe(10);
   });
 
   it("should update cell value using send", () => {
-    const c = getDoc(10);
+    const c = getDoc(
+      10,
+      "should update cell value using send",
+      getSpace("test"),
+    );
     c.send(20);
     expect(c.get()).toBe(20);
   });
 
   it("should create a proxy for the cell", () => {
-    const c = getDoc({ x: 1, y: 2 });
+    const c = getDoc(
+      { x: 1, y: 2 },
+      "should create a proxy for the cell",
+      getSpace("test"),
+    );
     const proxy = c.getAsQueryResult();
     expect(proxy.x).toBe(1);
     expect(proxy.y).toBe(2);
   });
 
   it("should update cell value through proxy", () => {
-    const c = getDoc({ x: 1, y: 2 });
+    const c = getDoc(
+      { x: 1, y: 2 },
+      "should update cell value through proxy",
+      getSpace("test"),
+    );
     const proxy = c.getAsQueryResult();
     proxy.x = 10;
     expect(c.get()).toEqual({ x: 10, y: 2 });
   });
 
   it("should get value at path", () => {
-    const c = getDoc({ a: { b: { c: 42 } } });
+    const c = getDoc(
+      { a: { b: { c: 42 } } },
+      "should get value at path",
+      getSpace("test"),
+    );
     expect(c.getAtPath(["a", "b", "c"])).toBe(42);
   });
 
   it("should set value at path", () => {
-    const c = getDoc({ a: { b: { c: 42 } } });
+    const c = getDoc(
+      { a: { b: { c: 42 } } },
+      "should set value at path",
+      getSpace("test"),
+    );
     c.setAtPath(["a", "b", "c"], 100);
     expect(c.get()).toEqual({ a: { b: { c: 100 } } });
   });
 
   it("should call updates callback when value changes", () => {
-    const c = getDoc(0);
+    const c = getDoc(
+      0,
+      "should call updates callback when value changes",
+      getSpace("test"),
+    );
     const values: number[] = [];
     const unsink = c.updates((value) => values.push(value));
     c.send(1);
@@ -60,20 +88,24 @@ describe("Cell", () => {
 
 describe("Cell utility functions", () => {
   it("should identify a cell", () => {
-    const c = getDoc(10);
+    const c = getDoc(10, "should identify a cell", getSpace("test"));
     expect(isDoc(c)).toBe(true);
     expect(isDoc({})).toBe(false);
   });
 
   it("should identify a cell reference", () => {
-    const c = getDoc(10);
+    const c = getDoc(10, "should identify a cell reference", getSpace("test"));
     const ref = { cell: c, path: ["x"] };
     expect(isDocLink(ref)).toBe(true);
     expect(isDocLink({})).toBe(false);
   });
 
   it("should identify a cell proxy", () => {
-    const c = getDoc({ x: 1 });
+    const c = getDoc(
+      { x: 1 },
+      "should identify a cell proxy",
+      getSpace("test"),
+    );
     const proxy = c.getAsQueryResult();
     expect(isQueryResult(proxy)).toBe(true);
     expect(isQueryResult({})).toBe(false);
@@ -82,40 +114,68 @@ describe("Cell utility functions", () => {
 
 describe("createProxy", () => {
   it("should create a proxy for nested objects", () => {
-    const c = getDoc({ a: { b: { c: 42 } } });
+    const c = getDoc(
+      { a: { b: { c: 42 } } },
+      "should create a proxy for nested objects",
+      getSpace("test"),
+    );
     const proxy = c.getAsQueryResult();
     expect(proxy.a.b.c).toBe(42);
   });
 
   it("should support regular assigments", () => {
-    const c = getDoc({ x: 1 });
+    const c = getDoc(
+      { x: 1 },
+      "should support regular assigments",
+      getSpace("test"),
+    );
     const proxy = c.getAsQueryResult();
     proxy.x = 2;
     expect(c.get()).toStrictEqual({ x: 2 });
   });
 
   it("should handle $alias in objects", () => {
-    const c = getDoc({ x: { $alias: { path: ["y"] } }, y: 42 });
+    const c = getDoc(
+      { x: { $alias: { path: ["y"] } }, y: 42 },
+      "should handle $alias in objects",
+      getSpace("test"),
+    );
     const proxy = c.getAsQueryResult();
     expect(proxy.x).toBe(42);
   });
 
   it("should handle aliases when writing", () => {
-    const c = getDoc<any>({ x: { $alias: { path: ["y"] } }, y: 42 });
+    const c = getDoc(
+      { x: { $alias: { path: ["y"] } }, y: 42 },
+      "should handle aliases when writing",
+      getSpace("test"),
+    );
     const proxy = c.getAsQueryResult();
     proxy.x = 100;
     expect(c.get().y).toBe(100);
   });
 
   it("should handle nested cells", () => {
-    const innerCell = getDoc(42);
-    const outerCell = getDoc({ x: innerCell });
+    const innerCell = getDoc(
+      42,
+      "should handle nested cells",
+      getSpace("test"),
+    );
+    const outerCell = getDoc(
+      { x: innerCell },
+      "should handle nested cells",
+      getSpace("test"),
+    );
     const proxy = outerCell.getAsQueryResult();
     expect(proxy.x).toBe(42);
   });
 
   it("should handle cell references", () => {
-    const c = getDoc<any>({ x: 42 });
+    const c = getDoc(
+      { x: 42 },
+      "should handle cell references",
+      getSpace("test"),
+    );
     const ref = { cell: c, path: ["x"] };
     const proxy = c.getAsQueryResult();
     proxy.y = ref;
@@ -123,7 +183,11 @@ describe("createProxy", () => {
   });
 
   it("should handle infinite loops in cell references", () => {
-    const c = getDoc<any>({ x: 42 });
+    const c = getDoc(
+      { x: 42 },
+      "should handle infinite loops in cell references",
+      getSpace("test"),
+    );
     const ref = { cell: c, path: ["x"] };
     const proxy = c.getAsQueryResult();
     proxy.x = ref;
@@ -717,7 +781,11 @@ describe("asCell with schema", () => {
 
   it("should handle references in underlying cell", () => {
     // Create a cell with a reference
-    const innerCell = getDoc({ value: 42 });
+    const innerCell = getDoc(
+      { value: 42 },
+      "should handle references in underlying cell",
+      getSpace("test"),
+    );
 
     // Create a cell that uses that reference
     const c = getDoc(
@@ -1021,10 +1089,18 @@ describe("asCell with schema", () => {
   });
 
   it("should push values that are already cells reusing the reference", () => {
-    const c = getDoc<{ items: { value: number }[] }>({ items: [] });
+    const c = getDoc<{ items: { value: number }[] }>(
+      { items: [] },
+      "should push values that are already cells reusing the reference",
+      getSpace("test"),
+    );
     const arrayCell = c.asCell().key("items");
 
-    const d = getDoc<{ value: number }>({ value: 1 });
+    const d = getDoc<{ value: number }>(
+      { value: 1 },
+      "should push values that are already cells reusing the reference",
+      getSpace("test"),
+    );
 
     arrayCell.push(d);
     arrayCell.push(d.asCell());
@@ -1040,7 +1116,11 @@ describe("asCell with schema", () => {
   });
 
   it("should handle push method on non-array values", () => {
-    const c = getDoc({ value: "not an array" });
+    const c = getDoc(
+      { value: "not an array" },
+      "should handle push method on non-array values",
+      getSpace("test"),
+    );
     const cell = c.asCell(["value"]);
 
     expect(() => cell.push(42)).toThrow();

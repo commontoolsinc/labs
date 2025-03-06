@@ -10,7 +10,6 @@ export function ifElse(
   parentDoc: DocImpl<any>,
 ): Action {
   const result = getDoc<any>(undefined, { ifElse: cause }, parentDoc.space);
-  result.generateEntityId({ ifElse: cause });
   sendResult(result);
 
   return (log: ReactivityLog) => {

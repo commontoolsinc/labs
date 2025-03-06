@@ -212,21 +212,24 @@ export function getCellFromDocLink(
 }
 
 export function getImmutableCell<T>(
+  space: Space,
   data: T,
   schema?: JSONSchema,
   log?: ReactivityLog,
 ): Cell<T>;
 export function getImmutableCell<S extends JSONSchema = JSONSchema>(
+  space: Space,
   data: any,
   schema: S,
   log?: ReactivityLog,
 ): Cell<Schema<S>>;
 export function getImmutableCell(
+  space: Space,
   data: any,
   schema?: JSONSchema,
   log?: ReactivityLog,
 ): Cell<any> {
-  const doc = getDoc<any>(data);
+  const doc = getDoc<any>(data, { immutable: data }, space);
   doc.freeze();
   return createCell(doc, [], log, schema);
 }

@@ -315,7 +315,7 @@ class StorageImpl implements Storage {
     this.docsById.set(entityId, doc);
 
     // Start loading the doc and safe the promise for processBatch to await for
-    const loadingPromise = this._getStorageProviderForSpace(doc.space!)
+    const loadingPromise = this._getStorageProviderForSpace(doc.space)
       .sync(doc.entityId!, expectedInStorage)
       .then(() => doc);
     this.loadingPromises.set(doc, loadingPromise);
@@ -364,16 +364,6 @@ class StorageImpl implements Storage {
 
       // If it's a doc link, convert it to a doc link with an id
       if (isDocLink(value)) {
-        // Generate a causal ID for the doc if it doesn't have one yet
-        if (!value.cell.entityId) {
-          value.cell.generateEntityId(
-            {
-              cell: doc.entityId?.toJSON ? doc.entityId.toJSON() : doc.entityId,
-              path,
-            },
-            doc.space!,
-          );
-        }
         dependencies.add(this._ensureIsSynced(value.cell));
         return { ...value, cell: value.cell.toJSON() /* = the id */ };
       } else if (isStatic(value) && !processStatic) {
@@ -393,14 +383,7 @@ class StorageImpl implements Storage {
     };
 
     // Add source doc as dependent doc
-    if (doc.sourceCell) {
-      // If there is a source doc, make sure it has an entity ID.
-      // It's always the causal child of the result doc.
-      if (!doc.sourceCell.entityId) {
-        doc.sourceCell.generateEntityId(doc.entityId!);
-      }
-      dependencies.add(this._ensureIsSynced(doc.sourceCell));
-    }
+    if (doc.sourceCell) dependencies.add(this._ensureIsSynced(doc.sourceCell));
 
     // Convert all doc references to ids and remember as dependent docs
     const value: StorageValue = {
@@ -455,7 +438,7 @@ class StorageImpl implements Storage {
           // something that came from storage, the id is known in storage and so
           // we have to wait for it to load. Hence true as second parameter.
           const dependency = this._ensureIsSyncedById(
-            doc.space!,
+            doc.space,
             value.cell,
             true,
           );
@@ -482,7 +465,7 @@ class StorageImpl implements Storage {
     };
 
     if (source) {
-      const sourceDoc = this._ensureIsSyncedById(doc.space!, source, true);
+      const sourceDoc = this._ensureIsSyncedById(doc.space, source, true);
       dependencies.add(sourceDoc);
       newValue.source = sourceDoc;
     }
@@ -540,7 +523,7 @@ class StorageImpl implements Storage {
         // After first load, we set up sync: If storage doesn't know about the
         // doc, we need to persist the current value. If it does, we need to
         // update the doc value.
-        const value = this._getStorageProviderForSpace(doc.space!).get(
+        const value = this._getStorageProviderForSpace(doc.space).get(
           doc.entityId!,
         );
         if (value === undefined) this._batchForStorage(doc);
@@ -644,7 +627,7 @@ class StorageImpl implements Storage {
       { entityId: EntityId; value: any }[]
     >();
     storageJobs.forEach((value, doc) => {
-      const space = doc.space!;
+      const space = doc.space;
       if (!storageJobsBySpace.has(space)) storageJobsBySpace.set(space, []);
       storageJobsBySpace.get(space)!.push({ entityId: doc.entityId!, value });
     });
@@ -746,7 +729,7 @@ class StorageImpl implements Storage {
 
     // Subscribe to storage updates, send results to doc
     this.addCancel(
-      this._getStorageProviderForSpace(doc.space!).sink(
+      this._getStorageProviderForSpace(doc.space).sink(
         doc.entityId!,
         (value) => this._batchForDoc(doc, value.value, value.source),
       ),

@@ -12,7 +12,7 @@ import {
 } from "../src/utils.ts";
 import { DocLink, getDoc, isDocLink } from "../src/doc.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
-
+import { getSpace } from "../src/space.ts";
 describe("extractDefaultValues", () => {
   it("should extract default values from a schema", () => {
     const schema = {
@@ -76,7 +76,11 @@ describe("mergeObjects", () => {
   });
 
   it("should treat cell aliases and references as values", () => {
-    const testCell = getDoc();
+    const testCell = getDoc(
+      undefined,
+      "should treat cell aliases and references as values 1",
+      getSpace("test"),
+    );
     const obj1 = { a: { $alias: { path: [] } } };
     const obj2 = { a: 2, b: { c: { cell: testCell, path: [] } } };
     const obj3 = {
@@ -94,13 +98,21 @@ describe("mergeObjects", () => {
 
 describe("sendValueToBinding", () => {
   it("should send value to a simple binding", () => {
-    const testCell = getDoc({ value: 0 });
+    const testCell = getDoc(
+      { value: 0 },
+      "should send value to a simple binding 1",
+      getSpace("test"),
+    );
     sendValueToBinding(testCell, { $alias: { path: ["value"] } }, 42);
     expect(testCell.getAsQueryResult()).toEqual({ value: 42 });
   });
 
   it("should handle array bindings", () => {
-    const testCell = getDoc({ arr: [0, 0, 0] });
+    const testCell = getDoc(
+      { arr: [0, 0, 0] },
+      "should handle array bindings 1",
+      getSpace("test"),
+    );
     sendValueToBinding(
       testCell,
       [{ $alias: { path: ["arr", 0] } }, { $alias: { path: ["arr", 2] } }],
@@ -110,15 +122,19 @@ describe("sendValueToBinding", () => {
   });
 
   it("should handle bindings with multiple levels", () => {
-    const testCell = getDoc({
-      user: {
-        name: {
-          first: "John",
-          last: "Doe",
+    const testCell = getDoc(
+      {
+        user: {
+          name: {
+            first: "John",
+            last: "Doe",
+          },
+          age: 30,
         },
-        age: 30,
       },
-    });
+      "should handle bindings with multiple levels 1",
+      getSpace("test"),
+    );
 
     const binding = {
       person: {
@@ -156,21 +172,33 @@ describe("sendValueToBinding", () => {
 
 describe("setNestedValue", () => {
   it("should set a value at a path", () => {
-    const testCell = getDoc({ a: 1, b: { c: 2 } });
+    const testCell = getDoc(
+      { a: 1, b: { c: 2 } },
+      "should set a value at a path 1",
+      getSpace("test"),
+    );
     const success = setNestedValue(testCell, ["b", "c"], 3);
     expect(success).toBe(true);
     expect(testCell.get()).toEqual({ a: 1, b: { c: 3 } });
   });
 
   it("should delete no longer used fields when setting a nested value", () => {
-    const testCell = getDoc({ a: 1, b: { c: 2, d: 3 } });
+    const testCell = getDoc(
+      { a: 1, b: { c: 2, d: 3 } },
+      "should delete no longer used fields 1",
+      getSpace("test"),
+    );
     const success = setNestedValue(testCell, ["b"], { c: 4 });
     expect(success).toBe(true);
     expect(testCell.get()).toEqual({ a: 1, b: { c: 4 } });
   });
 
   it("should log no changes when setting a nested value that is already set", () => {
-    const testCell = getDoc({ a: 1, b: { c: 2 } });
+    const testCell = getDoc(
+      { a: 1, b: { c: 2 } },
+      "should log no changes 1",
+      getSpace("test"),
+    );
     const log: ReactivityLog = { reads: [], writes: [] };
     const success = setNestedValue(testCell, [], { a: 1, b: { c: 2 } }, log);
     expect(success).toBe(true); // No changes is still a success
@@ -179,7 +207,11 @@ describe("setNestedValue", () => {
   });
 
   it("should log minimal changes when setting a nested value", () => {
-    const testCell = getDoc({ a: 1, b: { c: 2 } });
+    const testCell = getDoc(
+      { a: 1, b: { c: 2 } },
+      "should log minimal changes 1",
+      getSpace("test"),
+    );
     const log: ReactivityLog = { reads: [], writes: [] };
     const success = setNestedValue(testCell, [], { a: 1, b: { c: 3 } }, log);
     expect(success).toBe(true);
@@ -189,7 +221,11 @@ describe("setNestedValue", () => {
   });
 
   it("should fail when setting a nested value on a frozen cell", () => {
-    const testCell = getDoc({ a: 1, b: { c: 2 } });
+    const testCell = getDoc(
+      { a: 1, b: { c: 2 } },
+      "should fail when setting a nested value on a frozen cell 1",
+      getSpace("test"),
+    );
     testCell.freeze();
     const log: ReactivityLog = { reads: [], writes: [] };
     const success = setNestedValue(testCell, [], { a: 1, b: { c: 3 } }, log);
@@ -197,21 +233,33 @@ describe("setNestedValue", () => {
   });
 
   it("should correctly update with shorter arrays", () => {
-    const testCell = getDoc({ a: [1, 2, 3] });
+    const testCell = getDoc(
+      { a: [1, 2, 3] },
+      "should correctly update with shorter arrays 1",
+      getSpace("test"),
+    );
     const success = setNestedValue(testCell, ["a"], [1, 2]);
     expect(success).toBe(true);
     expect(testCell.getAsQueryResult()).toEqual({ a: [1, 2] });
   });
 
   it("should correctly update with a longer arrays", () => {
-    const testCell = getDoc({ a: [1, 2, 3] });
+    const testCell = getDoc(
+      { a: [1, 2, 3] },
+      "should correctly update with a longer arrays 1",
+      getSpace("test"),
+    );
     const success = setNestedValue(testCell, ["a"], [1, 2, 3, 4]);
     expect(success).toBe(true);
     expect(testCell.getAsQueryResult()).toEqual({ a: [1, 2, 3, 4] });
   });
 
   it("should overwrite an object with an array", () => {
-    const testCell = getDoc({ a: { b: 1 } });
+    const testCell = getDoc(
+      { a: { b: 1 } },
+      "should overwrite an object with an array 1",
+      getSpace("test"),
+    );
     const success = setNestedValue(testCell, ["a"], [1, 2, 3]);
     expect(success).toBeTruthy();
     expect(testCell.get()).toHaveProperty("a");
@@ -222,7 +270,11 @@ describe("setNestedValue", () => {
 
 describe("mapBindingToCell", () => {
   it("should map bindings to cell aliases", () => {
-    const testCell = getDoc({ a: 1, b: { c: 2 } });
+    const testCell = getDoc(
+      { a: 1, b: { c: 2 } },
+      "should map bindings to cell aliases 1",
+      getSpace("test"),
+    );
     const binding = {
       x: { $alias: { path: ["a"] } },
       y: { $alias: { path: ["b", "c"] } },
@@ -240,25 +292,45 @@ describe("mapBindingToCell", () => {
 
 describe("followCellReferences", () => {
   it("should follow a simple cell reference", () => {
-    const testCell = getDoc({ value: 42 });
+    const testCell = getDoc(
+      { value: 42 },
+      "should follow a simple cell reference 1",
+      getSpace("test"),
+    );
     const reference: DocLink = { cell: testCell, path: ["value"] };
     const result = followCellReferences(reference);
     expect(result.cell.getAtPath(result.path)).toBe(42);
   });
 
   it("should follow nested cell references", () => {
-    const innerCell = getDoc({ inner: 10 });
-    const outerCell = getDoc({
-      outer: { cell: innerCell, path: ["inner"] },
-    });
+    const innerCell = getDoc(
+      { inner: 10 },
+      "should follow nested cell references 1",
+      getSpace("test"),
+    );
+    const outerCell = getDoc(
+      {
+        outer: { cell: innerCell, path: ["inner"] },
+      },
+      "should follow nested cell references 2",
+      getSpace("test"),
+    );
     const reference: DocLink = { cell: outerCell, path: ["outer"] };
     const result = followCellReferences(reference);
     expect(result.cell.getAtPath(result.path)).toBe(10);
   });
 
   it("should throw an error on circular references", () => {
-    const cellA = getDoc({});
-    const cellB = getDoc({});
+    const cellA = getDoc(
+      {},
+      "should throw an error on circular references 1",
+      getSpace("test"),
+    );
+    const cellB = getDoc(
+      {},
+      "should throw an error on circular references 2",
+      getSpace("test"),
+    );
     cellA.send({ ref: { cell: cellB, path: ["ref"] } });
     cellB.send({ ref: { cell: cellA, path: ["ref"] } });
     const reference: DocLink = { cell: cellA, path: ["ref"] };
@@ -270,17 +342,29 @@ describe("followCellReferences", () => {
 
 describe("followAliases", () => {
   it("should follow a simple alias", () => {
-    const testCell = getDoc({ value: 42 });
+    const testCell = getDoc(
+      { value: 42 },
+      "should follow a simple alias 1",
+      getSpace("test"),
+    );
     const binding = { $alias: { path: ["value"] } };
     const result = followAliases(binding, testCell);
     expect(result.cell.getAtPath(result.path)).toBe(42);
   });
 
   it("should follow nested aliases", () => {
-    const innerCell = getDoc({ inner: 10 });
-    const outerCell = getDoc({
-      outer: { $alias: { cell: innerCell, path: ["inner"] } },
-    });
+    const innerCell = getDoc(
+      { inner: 10 },
+      "should follow nested aliases 1",
+      getSpace("test"),
+    );
+    const outerCell = getDoc(
+      {
+        outer: { $alias: { cell: innerCell, path: ["inner"] } },
+      },
+      "should follow nested aliases 2",
+      getSpace("test"),
+    );
     const binding = { $alias: { path: ["outer"] } };
     const result = followAliases(binding, outerCell);
     expect(result.cell).toEqual(innerCell);
@@ -289,8 +373,16 @@ describe("followAliases", () => {
   });
 
   it("should throw an error on circular aliases", () => {
-    const cellA = getDoc({});
-    const cellB = getDoc({});
+    const cellA = getDoc(
+      {},
+      "should throw an error on circular aliases 1",
+      getSpace("test"),
+    );
+    const cellB = getDoc(
+      {},
+      "should throw an error on circular aliases 2",
+      getSpace("test"),
+    );
     cellA.send({ alias: { $alias: { cell: cellB, path: ["alias"] } } });
     cellB.send({ alias: { $alias: { cell: cellA, path: ["alias"] } } });
     const binding = { $alias: { path: ["alias"] } };
@@ -301,7 +393,14 @@ describe("followAliases", () => {
 describe("makeArrayElementsAllCells", () => {
   it("should convert non-cell array elements to cell references", () => {
     const input = [1, 2, 3];
-    normalizeToDocLinks(getDoc(), input);
+    normalizeToDocLinks(
+      getDoc(
+        undefined,
+        "should convert non-cell array elements 1",
+        getSpace("test"),
+      ),
+      input,
+    );
 
     expect(input.length).toBe(3);
     input.forEach((item) => {
@@ -310,12 +409,30 @@ describe("makeArrayElementsAllCells", () => {
   });
 
   it("should not modify existing cell references, cells, or aliases", () => {
-    const cellRef = { cell: getDoc(42), path: [] };
-    const cellInstance = getDoc(43);
+    const cellRef = {
+      cell: getDoc(
+        42,
+        "should not modify existing cell references 1",
+        getSpace("test"),
+      ),
+      path: [],
+    };
+    const cellInstance = getDoc(
+      43,
+      "should not modify existing cell references 2",
+      getSpace("test"),
+    );
     const alias = { $alias: { path: ["some", "path"] } };
     const input = [cellRef, cellInstance, alias];
 
-    normalizeToDocLinks(getDoc(), input);
+    normalizeToDocLinks(
+      getDoc(
+        undefined,
+        "should not modify existing cell references 3",
+        getSpace("test"),
+      ),
+      input,
+    );
 
     expect(input[0]).toBe(cellRef);
     expect(input[1]).toBe(cellInstance);
@@ -324,7 +441,14 @@ describe("makeArrayElementsAllCells", () => {
 
   it("should handle nested arrays", () => {
     const input = [1, [2, 3], 4];
-    normalizeToDocLinks(getDoc(), input);
+    normalizeToDocLinks(
+      getDoc(
+        undefined,
+        "should handle nested arrays 1",
+        getSpace("test"),
+      ),
+      input,
+    );
 
     expect(isDocLink(input[0])).toBe(true);
     expect(isDocLink(input[1])).toBe(true);
@@ -340,7 +464,14 @@ describe("makeArrayElementsAllCells", () => {
 
   it("should handle objects with array properties", () => {
     const input = { arr: [1, 2, 3], nested: { arr: [4, 5] } };
-    const changed = normalizeToDocLinks(getDoc(), input);
+    const changed = normalizeToDocLinks(
+      getDoc(
+        undefined,
+        "should handle objects with array properties 1",
+        getSpace("test"),
+      ),
+      input,
+    );
 
     expect(changed).toBe(true);
     input.arr.forEach((item) => {
@@ -353,16 +484,35 @@ describe("makeArrayElementsAllCells", () => {
 
   it("should not modify non-array, non-object values", () => {
     const input = 42;
-    normalizeToDocLinks(getDoc(), input);
+    normalizeToDocLinks(
+      getDoc(
+        undefined,
+        "should not modify non-array 1",
+        getSpace("test"),
+      ),
+      input,
+    );
     expect(input).toBe(42);
   });
 
   it("should reuse cell references if value hasn't changed", () => {
-    const previousCell = getDoc(42);
+    const previousCell = getDoc(
+      42,
+      "should reuse cell references 1",
+      getSpace("test"),
+    );
     const previousInput = [{ cell: previousCell, path: [] }];
     const newInput = [42];
 
-    const changed = normalizeToDocLinks(getDoc(), newInput, previousInput);
+    const changed = normalizeToDocLinks(
+      getDoc(
+        undefined,
+        "should reuse cell references 2",
+        getSpace("test"),
+      ),
+      newInput,
+      previousInput,
+    );
 
     expect(changed).toBe(false);
     expect(newInput[0]).toBe(previousInput[0]);
@@ -371,11 +521,23 @@ describe("makeArrayElementsAllCells", () => {
   });
 
   it("should create new cell reference if value has changed", () => {
-    const previousCell = getDoc(42);
+    const previousCell = getDoc(
+      42,
+      "should create new cell reference 1",
+      getSpace("test"),
+    );
     const previousInput = [{ cell: previousCell, path: [] }];
     const newInput = [43];
 
-    const changed = normalizeToDocLinks(getDoc(), newInput, previousInput);
+    const changed = normalizeToDocLinks(
+      getDoc(
+        undefined,
+        "should create new cell reference 2",
+        getSpace("test"),
+      ),
+      newInput,
+      previousInput,
+    );
 
     expect(changed).toBe(true);
     expect(
@@ -389,17 +551,32 @@ describe("makeArrayElementsAllCells", () => {
   it("should handle nested objects and arrays", () => {
     const previousInput = {
       arr: [
-        { cell: getDoc(1), path: [] } satisfies DocLink,
-        { cell: getDoc(2), path: [] } satisfies DocLink,
+        {
+          cell: getDoc(1, "should handle nested objects 1", getSpace("test")),
+          path: [],
+        } satisfies DocLink,
+        {
+          cell: getDoc(2, "should handle nested objects 2", getSpace("test")),
+          path: [],
+        } satisfies DocLink,
       ],
-      nested: { value: { cell: getDoc(3), path: [] } satisfies DocLink },
+      nested: {
+        value: {
+          cell: getDoc(3, "should handle nested objects 3", getSpace("test")),
+          path: [],
+        } satisfies DocLink,
+      },
     };
     const newInput = {
       arr: [1, 3],
       nested: { value: 3 },
     };
 
-    const changed = normalizeToDocLinks(getDoc(), newInput, previousInput);
+    const changed = normalizeToDocLinks(
+      getDoc(undefined, "should handle nested objects 4", getSpace("test")),
+      newInput,
+      previousInput,
+    );
 
     expect(changed).toBe(true);
     expect(isDocLink(newInput.arr[0])).toBe(true);
@@ -413,23 +590,51 @@ describe("makeArrayElementsAllCells", () => {
   });
 
   it("should detect changes in cell references", () => {
-    const cell1 = getDoc(1);
-    const cell2 = getDoc(2);
+    const cell1 = getDoc(
+      1,
+      "should detect changes in cell references 1",
+      getSpace("test"),
+    );
+    const cell2 = getDoc(
+      2,
+      "should detect changes in cell references 2",
+      getSpace("test"),
+    );
     const previousInput = { cell: cell1, path: ["a"] };
     const newInput = { cell: cell2, path: ["b"] };
 
-    const changed = normalizeToDocLinks(getDoc(), newInput, previousInput);
+    const changed = normalizeToDocLinks(
+      getDoc(
+        undefined,
+        "should detect changes in cell references 3",
+        getSpace("test"),
+      ),
+      newInput,
+      previousInput,
+    );
 
     expect(changed).toBe(true);
   });
 
   it("should detect changes in aliases", () => {
-    const cell1 = getDoc(1);
-    const cell2 = getDoc(2);
+    const cell1 = getDoc(
+      1,
+      "should detect changes in aliases 1",
+      getSpace("test"),
+    );
+    const cell2 = getDoc(
+      2,
+      "should detect changes in aliases 2",
+      getSpace("test"),
+    );
     const previousInput = { $alias: { cell: cell1, path: ["a"] } };
     const newInput = { $alias: { cell: cell2, path: ["b"] } };
 
-    const changed = normalizeToDocLinks(getDoc(), newInput, previousInput);
+    const changed = normalizeToDocLinks(
+      getDoc(undefined, "should detect changes in aliases 3", getSpace("test")),
+      newInput,
+      previousInput,
+    );
 
     expect(changed).toBe(true);
   });
@@ -438,7 +643,15 @@ describe("makeArrayElementsAllCells", () => {
     const previousInput = { foo: null };
     const newInput = { foo: null };
 
-    const changed = normalizeToDocLinks(getDoc(), newInput, previousInput);
+    const changed = normalizeToDocLinks(
+      getDoc(
+        undefined,
+        "should handle null and undefined values 1",
+        getSpace("test"),
+      ),
+      newInput,
+      previousInput,
+    );
 
     expect(changed).toBe(false);
   });
@@ -447,7 +660,15 @@ describe("makeArrayElementsAllCells", () => {
     const previousInput = { foo: "bar" };
     const newInput = { foo: "baz" };
 
-    const changed = normalizeToDocLinks(getDoc(), newInput, previousInput);
+    const changed = normalizeToDocLinks(
+      getDoc(
+        undefined,
+        "should detect non-array changes property changes 1",
+        getSpace("test"),
+      ),
+      newInput,
+      previousInput,
+    );
 
     expect(changed).toBe(true);
   });
@@ -456,7 +677,15 @@ describe("makeArrayElementsAllCells", () => {
     const previousInput = { foo: "bar" };
     const newInput = { foo: "bar", baz: "qux" };
 
-    const changed = normalizeToDocLinks(getDoc(), newInput, previousInput);
+    const changed = normalizeToDocLinks(
+      getDoc(
+        undefined,
+        "should detect non-array changes new props 1",
+        getSpace("test"),
+      ),
+      newInput,
+      previousInput,
+    );
 
     expect(changed).toBe(true);
   });
@@ -465,7 +694,15 @@ describe("makeArrayElementsAllCells", () => {
     const previousInput = { foo: "bar", baz: "qux" };
     const newInput = { foo: "bar" };
 
-    const changed = normalizeToDocLinks(getDoc(), newInput, previousInput);
+    const changed = normalizeToDocLinks(
+      getDoc(
+        undefined,
+        "should detect non-array changes missing props 1",
+        getSpace("test"),
+      ),
+      newInput,
+      previousInput,
+    );
 
     expect(changed).toBe(true);
   });

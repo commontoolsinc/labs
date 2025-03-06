@@ -274,8 +274,16 @@ describe("Recipe Runner", () => {
   });
 
   it("should execute recipes returned by handlers", async () => {
-    const counter = getDoc({ value: 0 });
-    const nested = getDoc({ a: { b: { c: 0 } } });
+    const counter = getDoc(
+      { value: 0 },
+      "should execute recipes returned by handlers 1",
+      getSpace("test"),
+    );
+    const nested = getDoc(
+      { a: { b: { c: 0 } } },
+      "should execute recipes returned by handlers 2",
+      getSpace("test"),
+    );
 
     const values: [number, number, number][] = [];
 
@@ -331,8 +339,16 @@ describe("Recipe Runner", () => {
   });
 
   it("should handle recipes returned by lifted functions", async () => {
-    const x = getDoc(2);
-    const y = getDoc(3);
+    const x = getDoc(
+      2,
+      "should handle recipes returned by lifted functions 1",
+      getSpace("test"),
+    );
+    const y = getDoc(
+      3,
+      "should handle recipes returned by lifted functions 2",
+      getSpace("test"),
+    );
 
     const runCounts = {
       multiply: 0,
@@ -458,7 +474,11 @@ describe("Recipe Runner", () => {
       return { result };
     });
 
-    const settingsCell = getDoc({ value: 5 });
+    const settingsCell = getDoc(
+      { value: 5 },
+      "should handle schema with cell references 1",
+      getSpace("test"),
+    );
     const result = run(
       multiplyRecipe,
       {
@@ -522,8 +542,16 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const item1 = getDoc({ value: 1 });
-    const item2 = getDoc({ value: 2 });
+    const item1 = getDoc(
+      { value: 1 },
+      "should handle nested cell references in schema 1",
+      getSpace("test"),
+    );
+    const item2 = getDoc(
+      { value: 2 },
+      "should handle nested cell references in schema 2",
+      getSpace("test"),
+    );
     const result = run(
       sumRecipe,
       { data: { items: [item1, item2] } },
@@ -569,8 +597,16 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const value1 = getDoc(5);
-    const value2 = getDoc(7);
+    const value1 = getDoc(
+      5,
+      "should handle dynamic cell references with schema 1",
+      getSpace("test"),
+    );
+    const value2 = getDoc(
+      7,
+      "should handle dynamic cell references with schema 2",
+      getSpace("test"),
+    );
     const result = run(
       dynamicRecipe,
       {
