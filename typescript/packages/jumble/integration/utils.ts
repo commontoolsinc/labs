@@ -11,7 +11,7 @@ export const decode = (() => {
   return (buffer: Uint8Array): string => decoder.decode(buffer);
 })();
 
-const RECORD_SNAPSHOTS = true;
+const RECORD_SNAPSHOTS = false;
 const SNAPSHOTS_DIR = join(Deno.cwd(), "test_snapshots");
 console.log("SNAPSHOTS_DIR=", SNAPSHOTS_DIR);
 
