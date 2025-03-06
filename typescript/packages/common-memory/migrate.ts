@@ -1,4 +1,4 @@
-import { Database } from "jsr:@db/sqlite";
+import { Database } from "@db/sqlite";
 
 const MIGRATIONS = new URL("./migrations/", import.meta.url);
 
