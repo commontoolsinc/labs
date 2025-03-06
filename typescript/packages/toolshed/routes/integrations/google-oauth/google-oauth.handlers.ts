@@ -259,7 +259,7 @@ export const refresh: AppRouteHandler<RefreshRoute> = async (c) => {
       logger.error({ error }, "Failed to refresh token");
       return createRefreshErrorResponse(
         c,
-        "Failed to refresh token. The refresh token may be invalid or expired.",
+        `Failed to refresh token. The refresh token may be invalid or expired: ${error}`,
         401,
       );
     }
