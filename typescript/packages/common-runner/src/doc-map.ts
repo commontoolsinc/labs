@@ -183,7 +183,6 @@ export function getDocByEntityId<T = any>(
   if (typeof entityId === "string") entityId = JSON.parse(entityId) as EntityId;
   doc = createDoc<T>(undefined as T, entityId, space);
   doc.sourceCell = sourceIfCreated;
-  setDocByEntityId(space, entityId, doc);
   return doc;
 }
 
