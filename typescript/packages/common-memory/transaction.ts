@@ -4,20 +4,26 @@ import type {
   MemorySpace,
   Meta,
   Transaction,
+  Clock,
+  Seconds
 } from "./interface.ts";
+import * as Settings from "./settings.ts"
 export const create = <Space extends MemorySpace>({
   issuer,
   subject,
   changes,
   meta,
+  clock = Settings.clock,
+  ttl = Settings.ttl,
 }: {
   issuer: DID;
   subject: Space;
   changes: Changes;
   meta?: Meta;
+  clock?: Clock
+  ttl?: Seconds
 }): Transaction<Space> => {
-  const iat = (Date.now() / 1000) | 0;
-  const exp = iat + 60 * 60; // expires in an hour
+  const iat = clock.now()
   return {
     cmd: "/memory/transact",
     iss: issuer,
@@ -26,6 +32,6 @@ export const create = <Space extends MemorySpace>({
     ...(meta ? { meta } : undefined),
     prf: [],
     iat,
-    exp,
+    exp: iat + ttl
   };
 };
