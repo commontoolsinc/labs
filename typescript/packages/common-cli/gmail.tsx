@@ -22,6 +22,11 @@ const Auth = z.object({
   expiresIn: z.number(),
   expiresAt: z.number(),
   refreshToken: z.string(),
+  user: z.object({
+    email: z.string(),
+    name: z.string(),
+    picture: z.string(),
+  }),
 });
 type Auth = z.infer<typeof Auth>;
 
@@ -106,19 +111,20 @@ const googleUpdater = handler<
 
   console.log("labels", labels);
 
-  fetchEmail(state.auth.token, state.settings.limit, labels).then((emails) => {
-    // Filter out any duplicates by ID
-    const newEmails = emails.messages.filter((email) =>
-      !existingEmailIds.has(email.id)
-    );
+  fetchEmail(state.auth.token, state.settings.limit, labels, existingEmailIds)
+    .then((emails) => {
+      // Filter out any duplicates by ID
+      const newEmails = emails.messages.filter((email) =>
+        !existingEmailIds.has(email.id)
+      );
 
-    if (newEmails.length > 0) {
-      console.log(`Adding ${newEmails.length} new emails`);
-      state.emails.push(...newEmails);
-    } else {
-      console.log("No new emails found");
-    }
-  });
+      if (newEmails.length > 0) {
+        console.log(`Adding ${newEmails.length} new emails`);
+        state.emails.push(...newEmails);
+      } else {
+        console.log("No new emails found");
+      }
+    });
 });
 
 // Helper function to decode base64 encoded email parts
@@ -150,6 +156,7 @@ export async function fetchEmail(
   accessToken: string,
   maxResults: number = 10,
   labelIds: string[] = ["INBOX"],
+  existingEmailIds: Set<string>,
 ) {
   // First, get the list of message IDs from the inbox
   const listResponse = await fetch(
@@ -173,52 +180,54 @@ export async function fetchEmail(
 
   // Fetch full details for each message
   const detailedMessages = await Promise.all(
-    listData.messages.map(async (message: { id: string }) => {
-      const messageResponse = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${message.id}?format=full`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
+    listData.messages
+      .filter((message: { id: string }) => !existingEmailIds.has(message.id))
+      .map(async (message: { id: string }) => {
+        const messageResponse = await fetch(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${message.id}?format=full`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
           },
-        },
-      );
-
-      const messageData = await messageResponse.json();
-
-      // Extract email details from the message data
-      const headers = messageData.payload.headers;
-      const subject = getHeader(headers, "Subject");
-      const from = getHeader(headers, "From");
-      const to = getHeader(headers, "To");
-      const date = getHeader(headers, "Date");
-
-      // Extract plain text content if available
-      let plainText = "";
-      if (
-        messageData.payload.parts && Array.isArray(messageData.payload.parts)
-      ) {
-        const textPart = messageData.payload.parts.find(
-          (part: any) => part.mimeType === "text/plain",
         );
-        if (textPart && textPart.body && textPart.body.data) {
-          plainText = decodeBase64(textPart.body.data);
-        }
-      } else if (messageData.payload.body && messageData.payload.body.data) {
-        plainText = decodeBase64(messageData.payload.body.data);
-      }
 
-      return {
-        id: messageData.id,
-        threadId: messageData.threadId,
-        labelIds: messageData.labelIds || ["INBOX"],
-        snippet: messageData.snippet || "",
-        subject,
-        from: extractEmailAddress(from),
-        date,
-        to: extractEmailAddress(to),
-        plainText,
-      };
-    }),
+        const messageData = await messageResponse.json();
+
+        // Extract email details from the message data
+        const headers = messageData.payload.headers;
+        const subject = getHeader(headers, "Subject");
+        const from = getHeader(headers, "From");
+        const to = getHeader(headers, "To");
+        const date = getHeader(headers, "Date");
+
+        // Extract plain text content if available
+        let plainText = "";
+        if (
+          messageData.payload.parts && Array.isArray(messageData.payload.parts)
+        ) {
+          const textPart = messageData.payload.parts.find(
+            (part: any) => part.mimeType === "text/plain",
+          );
+          if (textPart && textPart.body && textPart.body.data) {
+            plainText = decodeBase64(textPart.body.data);
+          }
+        } else if (messageData.payload.body && messageData.payload.body.data) {
+          plainText = decodeBase64(messageData.payload.body.data);
+        }
+
+        return {
+          id: messageData.id,
+          threadId: messageData.threadId,
+          labelIds: messageData.labelIds || ["INBOX"],
+          snippet: messageData.snippet || "",
+          subject,
+          from: extractEmailAddress(from),
+          date,
+          to: extractEmailAddress(to),
+          plainText,
+        };
+      }),
   );
 
   return { messages: detailedMessages };
@@ -238,6 +247,11 @@ export default recipe(Recipe, ResultSchema, ({ settings }) => {
     expiresIn: 0,
     expiresAt: 0,
     refreshToken: "",
+    user: {
+      email: "",
+      name: "",
+      picture: "",
+    },
   });
 
   const emails = cell<Email[]>([]);
