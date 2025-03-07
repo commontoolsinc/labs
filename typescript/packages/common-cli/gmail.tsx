@@ -1,45 +1,97 @@
 import { h } from "@commontools/html";
-import { cell, derive, handler, NAME, recipe, UI } from "@commontools/builder";
-import { z } from "zod";
+import {
+  cell,
+  derive,
+  handler,
+  JSONSchema,
+  NAME,
+  recipe,
+  Schema,
+  UI,
+} from "@commontools/builder";
 
-const Email = z.object({
-  id: z.string(),
-  threadId: z.string(),
-  labelIds: z.array(z.string()),
-  snippet: z.string(),
-  subject: z.string(),
-  from: z.string(),
-  date: z.string(),
-  to: z.string(),
-  plainText: z.string(),
-});
-type Email = z.infer<typeof Email>;
+const EmailSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    threadId: { type: "string" },
+    labelIds: { type: "array", items: { type: "string" } },
+    snippet: { type: "string" },
+    subject: { type: "string" },
+    from: { type: "string" },
+    date: { type: "string" },
+    to: { type: "string" },
+    plainText: { type: "string" },
+  },
+  required: [
+    "id",
+    "threadId",
+    "labelIds",
+    "snippet",
+    "subject",
+    "from",
+    "date",
+    "to",
+    "plainText",
+  ],
+} as const as JSONSchema;
+type Email = Schema<typeof EmailSchema>;
 
-const Auth = z.object({
-  token: z.string(),
-  tokenType: z.string(),
-  scope: z.array(z.string()),
-  expiresIn: z.number(),
-  expiresAt: z.number(),
-  refreshToken: z.string(),
-  user: z.object({
-    email: z.string(),
-    name: z.string(),
-    picture: z.string(),
-  }),
-});
-type Auth = z.infer<typeof Auth>;
+const AuthSchema = {
+  type: "object",
+  properties: {
+    token: { type: "string" },
+    tokenType: { type: "string" },
+    scope: { type: "array", items: { type: "string" } },
+    expiresIn: { type: "number" },
+    expiresAt: { type: "number" },
+    refreshToken: { type: "string" },
+    user: {
+      type: "object",
+      properties: {
+        email: { type: "string" },
+        name: { type: "string" },
+        picture: { type: "string" },
+      },
+      required: ["email", "name", "picture"],
+    },
+  },
+  required: [
+    "token",
+    "tokenType",
+    "scope",
+    "expiresIn",
+    "expiresAt",
+    "refreshToken",
+    "user",
+  ],
+} as const satisfies JSONSchema;
+type Auth = Schema<typeof AuthSchema>;
 
-const Recipe = z
-  .object({
-    settings: z.object({
-      labels: z.string().default("INBOX").describe(
-        "comma separated list of labels",
-      ),
-      limit: z.number().default(10).describe("number of emails to import"),
-    }),
-  })
-  .describe("fake gmail");
+const Recipe = {
+  type: "object",
+  properties: {
+    settings: {
+      type: "object",
+      properties: {
+        labels: {
+          type: "string",
+          description: "comma separated list of labels",
+          default: "INBOX",
+        },
+        limit: {
+          type: "number",
+          description: "number of emails to import",
+          default: 10,
+        },
+      },
+      required: ["labels", "limit"],
+    },
+  },
+  required: ["settings"],
+  default: { settings: { labels: "INBOX", limit: 10 } },
+  description: "fake gmail",
+} as const satisfies JSONSchema;
 
 const ResultSchema = {
   type: "object",
@@ -61,7 +113,7 @@ const ResultSchema = {
         },
       },
     },
-    googleUpdater: { asCell: true, type: "action" },
+    googleUpdater: { asStream: true, type: "object", properties: {} },
     auth: {
       type: "object",
       properties: {
@@ -74,7 +126,7 @@ const ResultSchema = {
       },
     },
   },
-};
+} as const satisfies JSONSchema;
 
 const updateLimit = handler<{ detail: { value: string } }, { limit: number }>(
   ({ detail }, state) => {
