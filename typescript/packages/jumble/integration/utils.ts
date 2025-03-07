@@ -15,7 +15,8 @@ const RECORD_SNAPSHOTS = false;
 const SNAPSHOTS_DIR = join(Deno.cwd(), "test_snapshots");
 console.log("SNAPSHOTS_DIR=", SNAPSHOTS_DIR);
 
-async function captureDetails(page: Page, snapshotName: string) {
+export async function snapshot(page: Page | undefined, snapshotName: string) {
+  console.log(snapshotName);
   if (RECORD_SNAPSHOTS && page && snapshotName) {
     ensureDirSync(SNAPSHOTS_DIR);
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -27,22 +28,7 @@ async function captureDetails(page: Page, snapshotName: string) {
     const html = await page.content();
     Deno.writeTextFileSync(`${SNAPSHOTS_DIR}/${filePrefix}.html`, html);
 
-    console.log(`Snapshot saved: ${filePrefix}`);
-  }
-}
-// Helper function to assert, take screenshot and snapshot HTML
-export function assertAndSnapshot(
-  condition: unknown,
-  message: string,
-  page?: Page | void,
-  snapshotName?: string,
-): asserts condition is
-  & NonNullable<unknown>
-  & (boolean | number | string | object) {
-  assert(condition, message);
-
-  if (RECORD_SNAPSHOTS && page && snapshotName) {
-    captureDetails(page, snapshotName);
+    console.log(`→ Snapshot saved: ${filePrefix}`);
   }
 }
 
@@ -53,12 +39,8 @@ export async function tryClick(
   el?: ElementHandle | null,
   page?: Page,
 ): Promise<void> {
-  assertAndSnapshot(
-    el,
-    "Element does not exist or is not clickable",
-    page,
-    "try_click_element",
-  );
+  await snapshot(page, "try_click_element");
+  assert(el, "Element does not exist or is not clickable");
 
   await el.click();
 }

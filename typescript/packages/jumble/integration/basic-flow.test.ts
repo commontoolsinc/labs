@@ -9,12 +9,13 @@ import {
 } from "@std/testing/bdd";
 import {
   addCharm,
-  assertAndSnapshot,
   inspectCharm,
   login,
   sleep,
+  snapshot,
   waitForSelectorWithText,
 } from "./utils.ts";
+import { assert } from "@std/assert";
 
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
   "http://localhost:8000/";
@@ -48,34 +49,30 @@ describe("integration", () => {
   });
 
   it("renders a new charm", async () => {
-    assertAndSnapshot(page, "Page should be defined");
-    assertAndSnapshot(testCharm, "Test charm should be defined");
+    assert(page, "Page should be defined");
+    assert(testCharm, "Test charm should be defined");
 
     const anchor = await page!.waitForSelector("nav a");
     const innerText = await anchor.innerText();
-    assertAndSnapshot(
+    assert(
       innerText === "common-knowledge",
       "Logged in and Common Knowledge title renders",
-      page,
-      "logged_in_state",
     );
 
     await page!.goto(
       `${FRONTEND_URL}${testCharm!.space}/${testCharm!.charmId}`,
     );
-    console.log(`Waiting for charm to render`);
+    await snapshot(page, "Waiting for charm to render");
 
     await waitForSelectorWithText(
       page!,
       "a[aria-current='charm-title']",
       "Simple Value: 1",
     );
-    console.log("Charm rendered.");
-    await assertAndSnapshot(
+    await snapshot(page, "Charm rendered.");
+    assert(
       true,
       "Charm rendered successfully",
-      page,
-      "charm_rendered",
     );
 
     console.log("Clicking button");
@@ -88,7 +85,7 @@ describe("integration", () => {
       "div[aria-label='charm-content'] button",
     );
     await button.click();
-    await assertAndSnapshot(true, "Button clicked", page, "button_clicked");
+    assert(true, "Button clicked");
 
     console.log("Checking if title changed");
     await waitForSelectorWithText(
@@ -96,13 +93,12 @@ describe("integration", () => {
       "a[aria-current='charm-title']",
       "Simple Value: 2",
     );
-    console.log("Title changed");
-    await assertAndSnapshot(
+    assert(
       true,
       "Title changed successfully",
-      page,
-      "title_changed",
     );
+
+    await snapshot(page, "Title changed");
 
     console.log("Inspecting charm to verify updates propagated from browser.");
     const charm = await inspectCharm(
@@ -111,18 +107,16 @@ describe("integration", () => {
       testCharm!.charmId,
     );
     console.log("Charm:", charm);
-    assertAndSnapshot(
+    assert(
       charm.includes("Simple Value: 2"),
       "Charm updates propagated.",
-      page,
-      "updates_propagated",
     );
   });
 
   // Placeholder test ensuring browser can be used
   // across multiple tests (replace when we have more integration tests!)
   it("[placeholder]", () => {
-    assertAndSnapshot(page, "Page should be defined");
-    assertAndSnapshot(testCharm, "Test charm should be defined");
+    assert(page, "Page should be defined");
+    assert(testCharm, "Test charm should be defined");
   });
 });
