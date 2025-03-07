@@ -86,17 +86,13 @@ describe("integration", () => {
       "div[aria-label='charm-content'] button",
     );
     await button.click();
-    assert(true, "Button clicked");
+    await snapshot(page, "Button clicked");
 
     console.log("Checking if title changed");
     await waitForSelectorWithText(
       page,
       "a[aria-current='charm-title']",
       "Simple Value: 2",
-    );
-    assert(
-      true,
-      "Title changed successfully",
     );
 
     await snapshot(page, "Title changed");
@@ -107,6 +103,7 @@ describe("integration", () => {
       testCharm.space,
       testCharm.charmId,
     );
+
     console.log("Charm:", charm);
     assert(
       charm.includes("Simple Value: 2"),
