@@ -114,7 +114,9 @@ export interface Cell<T> {
   sink(callback: (value: T) => Cancel | undefined | void): Cancel;
   key<K extends T extends Cell<infer S> ? keyof S : keyof T>(
     valueKey: K,
-  ): T extends Cell<infer S> ? Cell<S[K & keyof S]> : Cell<T[K]>;
+  ): Cell<
+    T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
+  >;
   setRaw(value: T): void;
   asSchema<T>(
     schema?: JSONSchema,
@@ -165,6 +167,28 @@ export interface Stream<T> {
   send(event: T): void;
   sink(callback: (event: T) => Cancel | undefined | void): Cancel;
   [isStreamMarker]: true;
+}
+
+export function getCell<T>(
+  space: Space,
+  cause: any,
+  schema?: JSONSchema,
+  log?: ReactivityLog,
+): Cell<T>;
+export function getCell<S extends JSONSchema = JSONSchema>(
+  space: Space,
+  cause: any,
+  schema: S,
+  log?: ReactivityLog,
+): Cell<Schema<S>>;
+export function getCell(
+  space: Space,
+  cause: any,
+  schema?: JSONSchema,
+  log?: ReactivityLog,
+): Cell<any> {
+  const doc = getDoc<any>(undefined as any, cause, space);
+  return createCell(doc, [], log, schema);
 }
 
 export function getCellFromEntityId<T>(
