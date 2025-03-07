@@ -110,9 +110,6 @@ export class CommonGoogleOauthElement extends LitElement {
 
   handleLogout() {
     console.warn("FIXME(ja): handle logout");
-    // this.auth.send({})
-    // this.auth.send({});
-    // this.authStatus = "Logged out successfully";
   }
 
   override render() {
@@ -120,7 +117,7 @@ export class CommonGoogleOauthElement extends LitElement {
       <div class="oauth-wrapper">
         <div class="profile-section">
           ${
-      this.auth.user
+      this.auth.user?.email && this.auth.token
         ? html`
             <img class="profile-picture" src="${this.auth.user.picture}" alt="User profile picture" />
             <div class="user-info">
@@ -128,7 +125,7 @@ export class CommonGoogleOauthElement extends LitElement {
               <p class="user-email">${this.auth.user.email}</p>
             </div>
           `
-        : "Logged in, but no user info"
+        : ""
     }
         </div>
 
