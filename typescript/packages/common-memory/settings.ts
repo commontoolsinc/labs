@@ -16,8 +16,8 @@ export const clock = Clock.default.with(10);
  * Rate limiting configuration
  */
 export const rateLimiting: RateLimitingOptions = {
-  baseThreshold: 100,
-  requestLimit: 10,
+  baseThreshold: 300,
+  requestLimit: 30,
   backoffFactor: 50,
   maxDebounceCount: 17,
 };
