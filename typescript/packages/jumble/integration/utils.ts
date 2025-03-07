@@ -15,15 +15,7 @@ const RECORD_SNAPSHOTS = false;
 const SNAPSHOTS_DIR = join(Deno.cwd(), "test_snapshots");
 console.log("SNAPSHOTS_DIR=", SNAPSHOTS_DIR);
 
-// Helper function to assert, take screenshot and snapshot HTML
-export async function assertAndSnapshot(
-  condition: unknown,
-  message: string,
-  page?: Page | void,
-  snapshotName?: string,
-): Promise<void> {
-  assert(condition, message);
-
+async function captureDetails(page: Page, snapshotName: string) {
   if (RECORD_SNAPSHOTS && page && snapshotName) {
     ensureDirSync(SNAPSHOTS_DIR);
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -38,6 +30,21 @@ export async function assertAndSnapshot(
     console.log(`Snapshot saved: ${filePrefix}`);
   }
 }
+// Helper function to assert, take screenshot and snapshot HTML
+export function assertAndSnapshot(
+  condition: unknown,
+  message: string,
+  page?: Page | void,
+  snapshotName?: string,
+): asserts condition is
+  & NonNullable<unknown>
+  & (boolean | number | string | object) {
+  assert(condition, message);
+
+  if (RECORD_SNAPSHOTS && page && snapshotName) {
+    captureDetails(page, snapshotName);
+  }
+}
 
 export const sleep = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -46,14 +53,14 @@ export async function tryClick(
   el?: ElementHandle | null,
   page?: Page,
 ): Promise<void> {
-  await assertAndSnapshot(
-    el !== null && el !== undefined,
+  assertAndSnapshot(
+    el,
     "Element does not exist or is not clickable",
     page,
     "try_click_element",
   );
 
-  await el!.click();
+  await el.click();
 }
 
 export const login = async (page: Page) => {
