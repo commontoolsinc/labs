@@ -8,7 +8,13 @@ import {
 import { NavigateFunction } from "react-router-dom";
 import { charmId } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
-import { Cell, EntityId, getEntityId, getRecipe } from "@commontools/runner";
+import {
+  Cell,
+  EntityId,
+  getEntityId,
+  getRecipe,
+  isStream,
+} from "@commontools/runner";
 import { extendCharm, iterateCharm } from "@/utils/charm-operations.ts";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext.tsx";
 import { startCharmIndexing } from "@/utils/indexing.ts";
@@ -133,6 +139,85 @@ export const castSpellAsCharm = async (
   console.log("Failed to cast");
   return null;
 };
+
+async function handleExecuteCharmAction(deps: CommandContext) {
+  deps.setLoading(true);
+  try {
+    if (!deps.focusedCharmId || !deps.focusedReplicaId) {
+      throw new Error("No charm is focused");
+    }
+
+    const charm = await deps.charmManager.get(deps.focusedCharmId);
+    if (!charm) {
+      throw new Error("Failed to load charm");
+    }
+
+    const entries = Object.entries(charm.get());
+    // Filter entries to find stream objects (which have .send and .sink functions)
+    const actions = entries.filter(([_, value]) => isStream(value));
+
+    if (actions.length === 0) {
+      deps.setOpen(false);
+      return;
+    }
+
+    // Create options for the select menu with key as the action name
+    const actionOptions = actions.map(([key, value]) => ({
+      id: key,
+      title: key,
+      value: { key, stream: value },
+    }));
+
+    // Show selection menu for actions
+    deps.setMode({
+      type: "select",
+      command: {
+        id: "charm-action-select",
+        type: "select",
+        title: "Select Action to Execute",
+        handler: (selectedAction) => {
+          // Prompt for input parameters for the action
+          deps.setMode({
+            type: "input",
+            command: {
+              id: "action-params",
+              type: "input",
+              title: `Input for ${selectedAction.key}`,
+              placeholder: "Enter input data",
+              handler: (input) => {
+                try {
+                  // Execute the action by calling .send with the user input
+                  selectedAction.stream.send(input);
+                  console.log(
+                    `Executed action ${selectedAction.key} with input:`,
+                    input,
+                  );
+                  deps.setOpen(false);
+                } catch (error) {
+                  console.error(
+                    `Error executing action ${selectedAction.key}:`,
+                    error,
+                  );
+                  deps.setOpen(false);
+                }
+              },
+            },
+            placeholder: "Enter input data",
+          });
+        },
+      },
+      options: actionOptions,
+    });
+  } catch (error) {
+    console.error("Error fetching charm actions:", error);
+    deps.addJobMessage(
+      deps.startJob("Action Error"),
+      `Error: ${error.message}`,
+    );
+  } finally {
+    deps.setLoading(false);
+  }
+}
 
 // Command handlers
 async function handleNewCharm(deps: CommandContext, input: string | undefined) {
@@ -624,7 +709,14 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       group: "Navigation",
       handler: () => handleSearchCharms(deps),
     },
-    // Create a new Spellcaster menu that contains all spell-related commands
+    {
+      id: "execute-charm-action",
+      type: "action",
+      title: "Execute Charm Action",
+      group: "Action",
+      predicate: !!deps.focusedCharmId,
+      handler: () => handleExecuteCharmAction(deps),
+    },
     {
       id: "spellcaster-menu",
       type: "menu",
