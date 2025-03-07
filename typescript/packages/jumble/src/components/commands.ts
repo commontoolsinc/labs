@@ -156,8 +156,6 @@ async function handleExecuteCharmAction(deps: CommandContext) {
     // Filter entries to find stream objects (which have .send and .sink functions)
     const actions = entries.filter(([_, value]) => isStream(value));
 
-    debugger;
-
     if (actions.length === 0) {
       deps.setOpen(false);
       return;
