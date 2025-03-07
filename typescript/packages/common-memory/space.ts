@@ -8,6 +8,12 @@ import { unclaimed } from "./fact.ts";
 import { from as toChanges, set } from "./changes.ts";
 import { create as createCommit, the as COMMIT_THE } from "./commit.ts";
 import { fromDID as parseDID } from "./principal.ts";
+import {
+  addMemoryAttributes,
+  recordResult,
+  traceAsync,
+  traceSync,
+} from "./telemetry.ts";
 import type {
   Assert,
   Assertion,
@@ -163,15 +169,36 @@ class Space<Subject extends MemorySpace = MemorySpace>
   constructor(public subject: Subject, public store: Database) {}
 
   transact(transaction: Transaction<Subject>) {
-    return transact(this, transaction);
+    return traceSync("space.instance.transact", (span) => {
+      addMemoryAttributes(span, {
+        operation: "transact",
+        space: this.subject,
+      });
+
+      return transact(this, transaction);
+    });
   }
 
   query(source: Query<Subject>) {
-    return query(this, source);
+    return traceSync("space.instance.query", (span) => {
+      addMemoryAttributes(span, {
+        operation: "query",
+        space: this.subject,
+      });
+
+      return query(this, source);
+    });
   }
 
   close() {
-    return close(this);
+    return traceSync("space.instance.close", (span) => {
+      addMemoryAttributes(span, {
+        operation: "close",
+        space: this.subject,
+      });
+
+      return close(this);
+    });
   }
 }
 
@@ -196,32 +223,39 @@ export type { Space as View };
 const readAddress = (
   url: URL,
 ): Result<{ subject: MemorySpace; address: URL | null }, SyntaxError> => {
-  const { pathname } = url;
-  const base = pathname.split("/").pop() as string;
-  const did = base.endsWith(".sqlite")
-    ? base.slice(0, -".sqlite".length)
-    : base;
-  const { ok: principal, error } = parseDID(did);
-  if (error) {
-    // return { error };
-    // ℹ️ We suppress error for now as we don't want to break clients that
-    // use non did identifiers. We will make things stricter in the next
-    // iteration
-    console.error(error);
+  return traceSync("space.readAddress", (span) => {
+    span.setAttribute("space.url", url.toString());
+
+    const { pathname } = url;
+    const base = pathname.split("/").pop() as string;
+    const did = base.endsWith(".sqlite")
+      ? base.slice(0, -".sqlite".length)
+      : base;
+    span.setAttribute("space.did_candidate", did);
+
+    const { ok: principal, error } = parseDID(did);
+    if (error) {
+      // ℹ️ We suppress error for now as we don't want to break clients that
+      // use non did identifiers. We will make things stricter in the next
+      // iteration
+      console.error(error);
+      span.setAttribute("space.did_parse_error", true);
+      return {
+        ok: {
+          address: url.protocol === "file:" ? url : null,
+          subject: did as DIDKey,
+        },
+      };
+    }
+
+    span.setAttribute("space.did_parsed", true);
     return {
       ok: {
         address: url.protocol === "file:" ? url : null,
-        subject: did as DIDKey,
+        subject: principal.did(),
       },
     };
-  }
-
-  return {
-    ok: {
-      address: url.protocol === "file:" ? url : null,
-      subject: principal.did(),
-    },
-  };
+  });
 };
 
 /**
@@ -231,53 +265,70 @@ const readAddress = (
 export const connect = async <Subject extends MemorySpace>({
   url,
 }: Options): AsyncResult<Space<Subject>, ToJSON<ConnectionError>> => {
-  try {
-    const result = readAddress(url);
-    if (result.error) {
-      throw result.error;
-    }
-    const { address, subject } = result.ok;
+  return await traceAsync("space.connect", async (span) => {
+    addMemoryAttributes(span, { operation: "connect" });
+    span.setAttribute("space.url", url.toString());
 
-    const database = await new Database(address ?? ":memory:", {
-      create: false,
-    });
-    database.exec(PREPARE);
-    const session = new Space(subject as Subject, database);
-    return { ok: session };
-  } catch (cause) {
-    return { error: Error.connection(url, cause as SqliteError) };
-  }
+    try {
+      const result = readAddress(url);
+      if (result.error) {
+        throw result.error;
+      }
+      const { address, subject } = result.ok;
+      span.setAttribute("space.subject", subject);
+
+      const database = await new Database(address ?? ":memory:", {
+        create: false,
+      });
+      database.exec(PREPARE);
+      const session = new Space(subject as Subject, database);
+      return { ok: session };
+    } catch (cause) {
+      return { error: Error.connection(url, cause as SqliteError) };
+    }
+  });
 };
 
 export const open = async <Subject extends MemorySpace>({
   url,
 }: Options): AsyncResult<Space<Subject>, ConnectionError> => {
-  try {
-    const result = readAddress(url);
-    if (result.error) {
-      throw result.error;
+  return await traceAsync("space.open", async (span) => {
+    addMemoryAttributes(span, { operation: "open" });
+    span.setAttribute("space.url", url.toString());
+
+    try {
+      const result = readAddress(url);
+      if (result.error) {
+        throw result.error;
+      }
+      const { address, subject } = result.ok;
+      span.setAttribute("space.subject", subject);
+
+      const database = await new Database(address ?? ":memory:", {
+        create: true,
+      });
+      database.exec(PREPARE);
+      const session = new Space(subject as Subject, database);
+      return { ok: session };
+    } catch (cause) {
+      return { error: Error.connection(url, cause as SqliteError) };
     }
-    const { address, subject } = result.ok;
-    const database = await new Database(address ?? ":memory:", {
-      create: true,
-    });
-    database.exec(PREPARE);
-    const session = new Space(subject as Subject, database);
-    return { ok: session };
-  } catch (cause) {
-    return { error: Error.connection(url, cause as SqliteError) };
-  }
+  });
 };
 
 export const close = <Space extends MemorySpace>({
   store,
 }: Session<Space>): Result<Unit, SystemError> => {
-  try {
-    store.close();
-    return { ok: {} };
-  } catch (cause) {
-    return { error: cause as SqliteError };
-  }
+  return traceSync("space.close", (span) => {
+    addMemoryAttributes(span, { operation: "close" });
+
+    try {
+      store.close();
+      return { ok: {} };
+    } catch (cause) {
+      return { error: cause as SqliteError };
+    }
+  });
 };
 
 type StateRow = {
@@ -551,27 +602,58 @@ const execute = <
 export const transact = <Space extends MemorySpace>(
   session: Session<Space>,
   transaction: Transaction<Space>,
-) => execute(session.store.transaction(commit), session, transaction);
+) => {
+  return traceSync("space.transact", (span) => {
+    addMemoryAttributes(span, {
+      operation: "transact",
+      space: session.subject,
+    });
+    if (transaction.args?.changes) {
+      span.setAttribute("memory.has_changes", true);
+    }
+
+    return execute(session.store.transaction(commit), session, transaction);
+  });
+};
 
 export const query = <Space extends MemorySpace>(
   session: Session<Space>,
   command: Query<Space>,
 ): Result<Selection<Space>, QueryError> => {
-  try {
-    return {
-      ok: {
-        [command.sub]: session.store.transaction(select)(session, command.args),
-      } as Selection<Space>,
-    };
-  } catch (error) {
-    return {
-      error: Error.query(
-        command.sub,
-        command.args.select,
-        error as SqliteError,
-      ),
-    };
-  }
+  return traceSync("space.query", (span) => {
+    addMemoryAttributes(span, {
+      operation: "query",
+      space: session.subject,
+    });
+
+    if (command.args?.select) {
+      span.setAttribute("query.has_selector", true);
+    }
+    if (command.args?.since !== undefined) {
+      span.setAttribute("query.since", command.args.since);
+    }
+
+    try {
+      const result = session.store.transaction(select)(session, command.args);
+
+      const entities = Object.keys(result || {}).length;
+      span.setAttribute("query.result_entity_count", entities);
+
+      return {
+        ok: {
+          [command.sub]: result,
+        } as Selection<Space>,
+      };
+    } catch (error) {
+      return {
+        error: Error.query(
+          command.sub,
+          command.args.select,
+          error as SqliteError,
+        ),
+      };
+    }
+  });
 };
 
 const SelectAll = "_";
