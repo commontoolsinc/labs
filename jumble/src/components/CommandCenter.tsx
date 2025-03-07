@@ -94,9 +94,12 @@ export function CommandCenter() {
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
   // TODO(bf): matchesRoute?
-  const match = useMatch("/:replicaName/:charmId?/*");
-  const focusedCharmId = match?.params.charmId ?? null;
-  const focusedReplicaId = match?.params.replicaName ?? null;
+  const replicaMatch = useMatch("/:replicaName/:charmId?/*");
+  const stackMatch = useMatch("/:replicaName/stack/:charmIds/*");
+  const focusedCharmId = stackMatch?.params.charmIds ??
+    replicaMatch?.params.charmId ?? null;
+  const focusedReplicaId = stackMatch?.params.replicaName ??
+    replicaMatch?.params.replicaName ?? null;
 
   const allCommands = useMemo(
     () =>
