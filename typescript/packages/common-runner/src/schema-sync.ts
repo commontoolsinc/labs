@@ -1,11 +1,5 @@
 import type { JSONSchema } from "@commontools/builder";
-import {
-  addSchema,
-  getRootSchema,
-  getRootSchemaId,
-  getSchema,
-  getSchemaId,
-} from "./schema-map.ts";
+import { addSchema, getSchema, getSchemaId } from "./schema-map.ts";
 import {
   createItemsKnownToStorageSet,
   loadFromBlobby,
@@ -42,13 +36,13 @@ export async function syncSchemaBlobby(id: string): Promise<boolean> {
   let rootSchemaObj: JSONSchema | undefined;
   if (rootSchemaId) {
     // Try to get the root schema locally first
-    rootSchemaObj = getSchema(rootSchemaId);
+    rootSchemaObj = getSchema(rootSchemaId)?.schema;
 
     // If not available locally, try to load it from Blobby
     if (!rootSchemaObj) {
       const success = await syncSchemaBlobby(rootSchemaId);
       if (success) {
-        rootSchemaObj = getSchema(rootSchemaId);
+        rootSchemaObj = getSchema(rootSchemaId)?.schema;
       }
     }
   }
@@ -76,39 +70,35 @@ export async function saveSchema(
   rootSchema?: JSONSchema,
 ): Promise<string | null> {
   // Generate ID for the schema (or get existing if already registered)
-  let schemaId = getSchemaId(schema);
+  const schemaId = addSchema(schema, rootSchema);
 
-  if (!schemaId) {
-    // Register the schema locally
-    schemaId = addSchema(schema, rootSchema);
-  }
+  // Load it from the map, this normalizes the rootSchema, in particular it sets
+  // it to undefined if it's the same as the schema
+  ({ schema, rootSchema } = getSchema(schemaId)!);
 
   // If already saved to Blobby, just return the ID
-  if (schemasKnownToStorage.has(schemaId)) {
-    return schemaId;
-  }
+  if (schemasKnownToStorage.has(schemaId)) return schemaId;
 
   // Mark schema as known to storage
   schemasKnownToStorage.add(schemaId);
 
   // Get rootSchema ID if available
-  const rootSchemaId = getRootSchemaId(schemaId);
+  const rootSchemaId = rootSchema ? getSchemaId(rootSchema) : undefined;
 
   // Prepare data for saving
   const data: { schema: JSONSchema; rootSchema?: string } = {
     schema,
+    ...(rootSchemaId ? { rootSchema: rootSchemaId } : {}),
   };
 
-  if (rootSchemaId) {
-    data.rootSchema = rootSchemaId;
+  const schemaPromise = saveToBlobby("schema", schemaId, data);
+  const rootSchemaPromise = rootSchema
+    ? saveSchema(rootSchema)
+    : Promise.resolve(true);
 
-    // If we have a root schema, make sure it's saved too
-    const rootSchema = getRootSchema(schemaId);
-    if (rootSchema) {
-      await saveSchema(rootSchema);
-    }
-  }
+  // Run saves in parallel
+  const success = (await Promise.all([schemaPromise, rootSchemaPromise]))
+    .every((s) => s);
 
-  const success = await saveToBlobby("schema", schemaId, data);
   return success ? schemaId : null;
 }
