@@ -718,54 +718,6 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       handler: () => handleExecuteCharmAction(deps),
     },
     {
-      id: "open-in-stack",
-      type: "action",
-      title: "Open in Stack",
-      group: "Navigation",
-      handler: async () => {
-        deps.setLoading(true);
-        try {
-          const charms = deps.charmManager.getCharms();
-          await deps.charmManager.sync(charms);
-          const results = charms.get().map((charm) => {
-            const data = charm.get();
-            const title = data?.[NAME] ?? "Untitled";
-            return {
-              title: title + ` (#${charmId(charm.entityId!)!.slice(-4)})`,
-              id: charmId(charm.entityId!)!,
-              value: charm.entityId!,
-            };
-          });
-          deps.setMode({
-            type: "select",
-            command: {
-              id: "stack-charm-select",
-              type: "select",
-              title: "Select Charm for Stack",
-              handler: (selected) => {
-                const id = charmId(selected);
-                if (!id || !deps.focusedReplicaId) {
-                  throw new Error("Missing charm ID or replica name");
-                }
-                // Navigate to stack URL instead of detail page
-                const path = createPath("stackedCharms", {
-                  charmIds: deps.focusedCharmId + "," + id,
-                  replicaName: deps.focusedReplicaId,
-                });
-                deps.navigate(path);
-                deps.setOpen(false);
-              },
-            },
-            options: results,
-          });
-        } catch (error) {
-          console.error("Open in stack error:", error);
-        } finally {
-          deps.setLoading(false);
-        }
-      },
-    },
-    {
       id: "spellcaster-menu",
       type: "menu",
       title: "Spellcaster",
