@@ -1,5 +1,8 @@
 import { ElementHandle, Page } from "@astral/astral";
 import * as path from "@std/path";
+import { assert } from "@std/assert";
+import { ensureDirSync } from "@std/fs";
+import { join } from "@std/path";
 
 const COMMON_CLI_PATH = path.join(import.meta.dirname!, "../../common-cli");
 
@@ -8,8 +11,39 @@ export const decode = (() => {
   return (buffer: Uint8Array): string => decoder.decode(buffer);
 })();
 
+const RECORD_SNAPSHOTS = false;
+const SNAPSHOTS_DIR = join(Deno.cwd(), "test_snapshots");
+console.log("SNAPSHOTS_DIR=", SNAPSHOTS_DIR);
+
+export async function snapshot(page: Page | undefined, snapshotName: string) {
+  console.log(snapshotName);
+  if (RECORD_SNAPSHOTS && page && snapshotName) {
+    ensureDirSync(SNAPSHOTS_DIR);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const filePrefix = `${snapshotName}_${timestamp}`;
+
+    const screenshot = await page.screenshot();
+    Deno.writeFileSync(`${SNAPSHOTS_DIR}/${filePrefix}.png`, screenshot);
+
+    const html = await page.content();
+    Deno.writeTextFileSync(`${SNAPSHOTS_DIR}/${filePrefix}.html`, html);
+
+    console.log(`→ Snapshot saved: ${filePrefix}`);
+  }
+}
+
 export const sleep = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
+
+export async function tryClick(
+  el?: ElementHandle | null,
+  page?: Page,
+): Promise<void> {
+  await snapshot(page, "try_click_element");
+  assert(el, "Element does not exist or is not clickable");
+
+  await el.click();
+}
 
 export const login = async (page: Page) => {
   // Wait a second :(
@@ -24,44 +58,42 @@ export const login = async (page: Page) => {
 
   // If not logged in, see if any credential data is
   // persisting. If so, destroy local data.
-  let buttons = await page.$$("button");
-  for (const button of buttons) {
-    if ((await button.innerText()) === "Clear Saved Credentials") {
-      await button.click();
-    }
+  let button = await page.$("button[aria-label='clear-credentials']");
+  if (button) {
+    await tryClick(button, page);
   }
 
   // Try log in
   console.log("Logging in");
 
   // Click the first button, "register"
-  let button = await page.$("button");
-  await button!.click();
+  button = await page.$("button[aria-label='register']");
+  await tryClick(button, page);
 
   // Click the first button, "register with passphrase"
-  button = await page.$("button");
-  await button!.click();
+  button = await page.$("button[aria-label='register-with-passphrase']");
+  await tryClick(button, page);
 
   // Get the mnemonic from textarea.
-  let input = await page.$("textarea");
+  let input = await page.$("textarea[aria-label='mnemonic']");
   const mnemonic = await input!.evaluate((textarea: HTMLInputElement) =>
     textarea.value
   );
 
   // Click the SECOND button, "continue to login"
-  buttons = await page.$$("button");
-  await buttons[1]!.click();
+  button = await page.$("button[aria-label='continue-login']");
+  await tryClick(button, page);
 
   // Paste the mnemonic in the input.
-  input = await page.$("input");
+  input = await page.$("input[aria-label='enter-passphrase']");
   await input!.evaluate(
     (input: HTMLInputElement, mnemonic: string) => input.value = mnemonic,
     { args: [mnemonic] },
   );
 
   // Click the only button, "login"
-  button = await page.$("button");
-  await button!.click();
+  button = await page.$("button[aria-label='login']");
+  await tryClick(button, page);
 };
 
 export const waitForSelectorWithText = async (

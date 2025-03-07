@@ -1,5 +1,4 @@
 import { Browser, launch, Page } from "@astral/astral";
-import { assert } from "@std/assert";
 import {
   afterAll,
   afterEach,
@@ -13,8 +12,10 @@ import {
   inspectCharm,
   login,
   sleep,
+  snapshot,
   waitForSelectorWithText,
 } from "./utils.ts";
+import { assert } from "@std/assert";
 
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
   "http://localhost:8000/";
@@ -48,23 +49,32 @@ describe("integration", () => {
   });
 
   it("renders a new charm", async () => {
-    assert(page);
-    assert(testCharm);
+    assert(page, "Page should be defined");
+    assert(testCharm, "Test charm should be defined");
+
+    await snapshot(page, "Initial state");
+
     const anchor = await page.waitForSelector("nav a");
     assert(
       (await anchor.innerText()) === "common-knowledge",
       "Logged in and Common Knowledge title renders",
     );
 
-    await page.goto(`${FRONTEND_URL}${testCharm.space}/${testCharm.charmId}`);
-    console.log(`Waiting for charm to render`);
+    await page.goto(
+      `${FRONTEND_URL}${testCharm.space}/${testCharm.charmId}`,
+    );
+    await snapshot(page, "Waiting for charm to render");
 
     await waitForSelectorWithText(
       page,
       "a[aria-current='charm-title']",
       "Simple Value: 1",
     );
-    console.log("Charm rendered.");
+    await snapshot(page, "Charm rendered.");
+    assert(
+      true,
+      "Charm rendered successfully",
+    );
 
     console.log("Clicking button");
     // Sometimes clicking this button throws:
@@ -76,6 +86,7 @@ describe("integration", () => {
       "div[aria-label='charm-content'] button",
     );
     await button.click();
+    await snapshot(page, "Button clicked");
 
     console.log("Checking if title changed");
     await waitForSelectorWithText(
@@ -83,7 +94,8 @@ describe("integration", () => {
       "a[aria-current='charm-title']",
       "Simple Value: 2",
     );
-    console.log("Title changed");
+
+    await snapshot(page, "Title changed");
 
     console.log("Inspecting charm to verify updates propagated from browser.");
     const charm = await inspectCharm(
@@ -91,14 +103,18 @@ describe("integration", () => {
       testCharm.space,
       testCharm.charmId,
     );
+
     console.log("Charm:", charm);
-    assert(charm.includes("Simple Value: 2"), "Charm updates propagated.");
+    assert(
+      charm.includes("Simple Value: 2"),
+      "Charm updates propagated.",
+    );
   });
 
   // Placeholder test ensuring browser can be used
   // across multiple tests (replace when we have more integration tests!)
   it("[placeholder]", () => {
-    assert(page);
-    assert(testCharm);
+    assert(page, "Page should be defined");
+    assert(testCharm, "Test charm should be defined");
   });
 });
