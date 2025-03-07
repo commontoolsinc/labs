@@ -58,13 +58,9 @@ Deno.test("test transaction", async (t) => {
       changes: ChangesBuilder.from([hello]),
     });
 
-    console.log(">> transaction");
-
     const result = await home.transact({
       changes: ChangesBuilder.from([hello]),
     });
-
-    console.log("<< transaction");
 
     assertEquals(result, {
       ok: ChangesBuilder.from([

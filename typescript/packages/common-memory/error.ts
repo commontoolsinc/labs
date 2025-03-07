@@ -15,7 +15,15 @@ import type {
 import { MemorySpace } from "./interface.ts";
 import { refer } from "merkle-reference";
 
-export const backoff = (message: string) => new TheRateLimitError(message);
+/**
+ * @param {number} wait Number of milliseconds to wait for
+ */
+export const backoff = (wait: number, message?: string) =>
+  new TheRateLimitError(
+    message ??
+      `Rate limit exceeded. Please wait at least ${wait}ms between requests.`,
+    wait,
+  );
 
 export const unauthorized = (
   message: string,
@@ -168,7 +176,7 @@ export class TheAuthorizationError extends Error implements AuthorizationError {
 
 class TheRateLimitError extends Error implements RateLimitError {
   override name = "RateLimitError" as const;
-  constructor(message: string) {
+  constructor(message: string, public wait: number) {
     super(message);
   }
 
@@ -177,6 +185,7 @@ class TheRateLimitError extends Error implements RateLimitError {
       name: this.name,
       message: this.message,
       stack: this.stack,
+      wait: this.wait,
     };
   }
 }

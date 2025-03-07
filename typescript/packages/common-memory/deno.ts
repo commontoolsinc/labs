@@ -6,8 +6,20 @@ import * as Receipt from "./receipt.ts";
 
 const storePath = (Deno.env.get("STORE") ?? "memory").replace(/\/?$/, "/");
 const STORE = new URL(storePath, Path.toFileUrl(`${Deno.cwd()}/`));
+
+const readInt = (value?: string) => {
+  const n = parseInt(value ?? "");
+  return isNaN(n) ? undefined : n;
+};
+
 const { ok: provider, error } = await Provider.open({
   store: STORE,
+  rateLimiting: {
+    baseThreshold: readInt(Deno.env.get("RATELIMIT_BASE_THRESHOLD")),
+    requestLimit: readInt(Deno.env.get("RATELIMIT_REQUEST_LIMIT")),
+    backoffFactor: readInt(Deno.env.get("RATELIMIT_BACKOFF_FACTOR")),
+    maxDebounceCount: readInt(Deno.env.get("MAX_DEBOUNCE_COUNT")),
+  },
 });
 
 if (error) {

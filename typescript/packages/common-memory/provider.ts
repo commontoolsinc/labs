@@ -20,6 +20,7 @@ import type {
   Query,
   QueryError,
   QueryResult,
+  RateLimitingOptions,
   Reference,
   Result,
   Selection,
@@ -40,19 +41,12 @@ import { refer } from "./reference.ts";
 import * as Access from "./access.ts";
 import * as Settings from "./settings.ts";
 
-export interface RateLimitingOptions {
-  baseThreshold?: number;
-  requestLimit?: number;
-  backoffFactor?: number;
-  maxDebounceCount?: number;
-}
-
-export interface ProviderOptions extends Memory.Options {
-  rateLimiting?: RateLimitingOptions;
+export interface Options extends Memory.Options {
+  rateLimiting?: Partial<RateLimitingOptions>;
 }
 
 export const open = async (
-  options: ProviderOptions,
+  options: Options,
 ): AsyncResult<Provider<Protocol>, ConnectionError> => {
   const result = await Memory.open(options);
   if (result.error) {
@@ -84,13 +78,11 @@ class MemoryProvider<
 > implements Provider<MemoryProtocol> {
   sessions: Set<ProviderSession<MemoryProtocol>> = new Set();
   #localSession: MemoryProviderSession<Space, MemoryProtocol> | null = null;
-  #rateLimitingOptions: RateLimitingOptions;
-  
+
   constructor(
-    public memory: MemorySession, 
-    rateLimitingOptions?: RateLimitingOptions
+    public memory: MemorySession,
+    public rateLimitingOptions: Partial<RateLimitingOptions> = {},
   ) {
-    this.#rateLimitingOptions = rateLimitingOptions || {};
   }
 
   invoke<Ability>(
@@ -98,7 +90,11 @@ class MemoryProvider<
   ): Await<ConsumerResultFor<Ability, MemoryProtocol>> {
     let session = this.#localSession;
     if (!session) {
-      session = new MemoryProviderSession(this.memory, null, this.#rateLimitingOptions);
+      session = new MemoryProviderSession(
+        this.memory,
+        null,
+        this.rateLimitingOptions,
+      );
     }
 
     return session.invoke(
@@ -110,7 +106,11 @@ class MemoryProvider<
     return fetch(this, request);
   }
   session(): ProviderSession<MemoryProtocol> {
-    const session = new MemoryProviderSession(this.memory, this.sessions, this.#rateLimitingOptions);
+    const session = new MemoryProviderSession(
+      this.memory,
+      this.sessions,
+      this.rateLimitingOptions,
+    );
     this.sessions.add(session);
     return session;
   }
@@ -149,13 +149,18 @@ class MemoryProviderSession<
   constructor(
     public memory: MemorySession,
     public sessions: null | Set<ProviderSession<MemoryProtocol>>,
-    rateLimitingOptions?: RateLimitingOptions,
+    rateLimitingOptions?: Partial<RateLimitingOptions>,
   ) {
     // Use provided options or defaults from settings
-    this.baseThreshold = rateLimitingOptions?.baseThreshold ?? Settings.rateLimiting.baseThreshold;
-    this.requestLimit = rateLimitingOptions?.requestLimit ?? Settings.rateLimiting.requestLimit;
-    this.backoffFactor = rateLimitingOptions?.backoffFactor ?? Settings.rateLimiting.backoffFactor;
-    this.maxDebounceCount = rateLimitingOptions?.maxDebounceCount ?? Settings.rateLimiting.maxDebounceCount;
+    this.baseThreshold = rateLimitingOptions?.baseThreshold ??
+      Settings.rateLimiting.baseThreshold;
+    this.requestLimit = rateLimitingOptions?.requestLimit ??
+      Settings.rateLimiting.requestLimit;
+    this.backoffFactor = rateLimitingOptions?.backoffFactor ??
+      Settings.rateLimiting.backoffFactor;
+    this.maxDebounceCount = rateLimitingOptions?.maxDebounceCount ??
+      Settings.rateLimiting.maxDebounceCount;
+
     this.readable = new ReadableStream<ProviderCommand<MemoryProtocol>>({
       start: (controller) => this.open(controller),
       cancel: () => this.cancel(),
@@ -242,9 +247,7 @@ class MemoryProviderSession<
         the: "task/return",
         of,
         is: {
-          error: backoff(
-            `Rate limit exceeded. Please wait at least ${suggestedWait}ms between requests.`,
-          ),
+          error: backoff(suggestedWait),
         },
       });
       return;

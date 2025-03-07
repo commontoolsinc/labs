@@ -68,6 +68,13 @@ const EnvSchema = z.object({
   MEMORY_URL: z.string().default(
     new URL(`./cache/memory/`, Path.toFileUrl(`${Deno.cwd()}/`)).href,
   ),
+
+  // Rate limits for memory service
+  RATELIMIT_BASE_THRESHOLD: z.coerce.number().optional(),
+  RATELIMIT_REQUEST_LIMIT: z.coerce.number().optional(),
+  RATELIMIT_BACKOFF_FACTOR: z.coerce.number().optional(),
+  MAX_DEBOUNCE_COUNT: z.coerce.number().optional(),
+
   // ===========================================================================
   // Sentry DSN global middleware
   //   * /lib/create-app.ts
