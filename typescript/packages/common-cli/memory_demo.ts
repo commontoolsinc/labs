@@ -1,6 +1,5 @@
-import { MemorySpace } from "@commontools/memory";
-import { RemoteStorageProvider } from "../common-charm/src/storage/remote.ts";
-import { StorageProvider } from "../common-charm/src/storage/base.ts";
+import { RemoteStorageProvider } from "../common-runner/src/storage/remote.ts";
+import { StorageProvider } from "../common-runner/src/storage/base.ts";
 import { EntityId } from "../common-runner/src/doc-map.ts";
 import { Identity } from "../common-identity/src/index.ts";
 
