@@ -17,6 +17,16 @@ const EnvSchema = z.object({
   CACHE_DIR: z.string().default("./cache"),
 
   // ===========================================================================
+  // OpenTelemetry Configuration
+  // ===========================================================================
+  OTEL_ENABLED: z.coerce.boolean().default(true),
+  OTEL_SERVICE_NAME: z.string().default("toolshed"),
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default("http://localhost:4318"),
+  OTEL_TRACES_SAMPLER: z.string().default("always_on"),
+  OTEL_TRACES_SAMPLER_ARG: z.string().default("1.0"),
+  // ===========================================================================
+
+  // ===========================================================================
   // (/routes/ai/llm) Environment variables for LLM Providers
   // ===========================================================================
   CTTS_AI_LLM_ANTHROPIC_API_KEY: z.string().default(""),

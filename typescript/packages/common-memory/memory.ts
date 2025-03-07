@@ -2,6 +2,13 @@ import * as Space from "./space.ts";
 import * as Error from "./error.ts";
 import * as FS from "@std/fs";
 import {
+  addChangesAttributes,
+  addMemoryAttributes,
+  recordResult,
+  traceAsync,
+  traceSync,
+} from "./telemetry.ts";
+import {
   AsyncResult,
   ConnectionError,
   MemorySession,
@@ -45,15 +52,18 @@ export class Memory implements Session, MemorySession {
    * which seems to cause problems if query and transaction happen concurrently.
    */
   async perform<Out>(task: () => Promise<Out>): Promise<Out> {
-    const result = this.ready.finally().then(task);
-    this.ready = result.finally();
-    await this.ready;
-    return await result;
+    return await traceAsync("memory.perform", async (span) => {
+      const result = this.ready.finally().then(task);
+      this.ready = result.finally();
+      await this.ready;
+      return await result;
+    });
   }
 
   subscribe(subscriber: Subscriber): SubscribeResult {
     return subscribe(this, subscriber);
   }
+
   unsubscribe(subscriber: Subscriber): SubscribeResult {
     return unsubscribe(this, subscriber);
   }
@@ -72,65 +82,116 @@ export class Memory implements Session, MemorySession {
 }
 
 export const subscribe = (session: Session, subscriber: Subscriber) => {
-  session.subscribers.add(subscriber);
-  return { ok: {} };
+  return traceSync("memory.subscribe", (span) => {
+    addMemoryAttributes(span, { operation: "subscribe" });
+    session.subscribers.add(subscriber);
+    span.setAttribute("memory.subscriber_count", session.subscribers.size);
+    return { ok: {} };
+  });
 };
 
 export const unsubscribe = (session: Session, subscriber: Subscriber) => {
-  session.subscribers.delete(subscriber);
-  return { ok: {} };
+  return traceSync("memory.unsubscribe", (span) => {
+    addMemoryAttributes(span, { operation: "unsubscribe" });
+    session.subscribers.delete(subscriber);
+    span.setAttribute("memory.subscriber_count", session.subscribers.size);
+    return { ok: {} };
+  });
 };
 
 export const query = async (session: Session, query: Query) => {
-  const { ok: space, error } = await mount(session, query.sub);
-  if (error) {
-    return { error };
-  }
+  return await traceAsync("memory.query", async (span) => {
+    addMemoryAttributes(span, {
+      operation: "query",
+      space: query.sub,
+    });
 
-  return space.query(query);
+    const { ok: space, error } = await mount(session, query.sub);
+    if (error) {
+      span.setAttribute("mount.status", "error");
+      return { error };
+    }
+
+    span.setAttribute("mount.status", "success");
+    return space.query(query);
+  });
 };
 
 export const transact = async (session: Session, transaction: Transaction) => {
-  const { ok: space, error } = await mount(session, transaction.sub);
-  if (error) {
-    return { error };
-  }
+  return await traceAsync("memory.transact", async (span) => {
+    addMemoryAttributes(span, {
+      operation: "transact",
+      space: transaction.sub,
+    });
 
-  const result = space.transact(transaction);
-
-  if (result.error) {
-    return result;
-  } else {
-    // Notify all the relevant subscribers.
-    const promises = [];
-    for (const subscriber of session.subscribers) {
-      promises.push(subscriber.transact(transaction));
+    if (transaction.args?.changes) {
+      addChangesAttributes(span, transaction.args.changes);
     }
-    await Promise.all(promises);
-  }
 
-  return result;
+    const { ok: space, error } = await mount(session, transaction.sub);
+    if (error) {
+      span.setAttribute("mount.status", "error");
+      return { error };
+    }
+
+    span.setAttribute("mount.status", "success");
+    const result = space.transact(transaction);
+
+    if (result.error) {
+      return result;
+    } else {
+      return await traceAsync(
+        "memory.notify_subscribers",
+        async (notifySpan) => {
+          notifySpan.setAttribute(
+            "memory.subscriber_count",
+            session.subscribers.size,
+          );
+
+          const promises = [];
+          for (const subscriber of session.subscribers) {
+            promises.push(subscriber.transact(transaction));
+          }
+          await Promise.all(promises);
+
+          return result;
+        },
+      );
+    }
+  });
 };
 
 export const mount = async (
   session: Session,
   subject: Subject,
 ): Promise<Result<SpaceSession, ConnectionError>> => {
-  const space = session.spaces.get(subject);
-  if (space) {
-    return { ok: space };
-  } else {
-    const result = await Space.open({
-      url: new URL(`./${subject}.sqlite`, session.store),
+  return await traceAsync("memory.mount", async (span) => {
+    addMemoryAttributes(span, {
+      operation: "mount",
+      space: subject,
     });
 
-    if (result.error) {
-      return result;
+    const space = session.spaces.get(subject);
+    if (space) {
+      span.setAttribute("memory.mount.cache", "hit");
+      return { ok: space };
+    } else {
+      span.setAttribute("memory.mount.cache", "miss");
+
+      const result = await Space.open({
+        url: new URL(`./${subject}.sqlite`, session.store),
+      });
+
+      if (result.error) {
+        return result;
+      }
+
+      const replica = result.ok as SpaceSession;
+      session.spaces.set(subject, replica);
+      span.setAttribute("memory.spaces_count", session.spaces.size);
+      return { ok: replica };
     }
-    const replica = result.ok as SpaceSession;
-    session.spaces.set(subject, replica);
-    return { ok: replica };
-  }
+  });
 };
 
 export interface Options {
@@ -140,27 +201,38 @@ export interface Options {
 export const open = async (
   options: Options,
 ): AsyncResult<Memory, ConnectionError> => {
-  try {
-    if (options.store.protocol === "file:") {
-      await FS.ensureDir(options.store);
+  return await traceAsync("memory.open", async (span) => {
+    addMemoryAttributes(span, { operation: "open" });
+    span.setAttribute("memory.store_url", options.store.toString());
+
+    try {
+      if (options.store.protocol === "file:") {
+        await FS.ensureDir(options.store);
+      }
+      return { ok: await new Memory(options) };
+    } catch (cause) {
+      return { error: Error.connection(options.store, cause as SystemError) };
     }
-    return { ok: await new Memory(options) };
-  } catch (cause) {
-    return { error: Error.connection(options.store, cause as SystemError) };
-  }
+  });
 };
 
 export const close = async (session: Session) => {
-  const promises = [];
-  for (const replica of session.spaces.values()) {
-    promises.push(replica.close());
-  }
+  return await traceAsync("memory.close", async (span) => {
+    addMemoryAttributes(span, { operation: "close" });
+    span.setAttribute("memory.spaces_count", session.spaces.size);
+    span.setAttribute("memory.subscriber_count", session.subscribers.size);
 
-  for (const subscriber of session.subscribers) {
-    promises.push(subscriber.close());
-  }
+    const promises = [];
+    for (const replica of session.spaces.values()) {
+      promises.push(replica.close());
+    }
 
-  const results = await Promise.all(promises);
-  const result = results.find((result) => result?.error);
-  return result ?? { ok: {} };
+    for (const subscriber of session.subscribers) {
+      promises.push(subscriber.close());
+    }
+
+    const results = await Promise.all(promises);
+    const result = results.find((result) => result?.error);
+    return result ?? { ok: {} };
+  });
 };
