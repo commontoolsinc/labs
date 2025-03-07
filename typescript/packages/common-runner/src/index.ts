@@ -43,8 +43,6 @@ export {
 } from "./recipe-map.ts";
 export {
   addSchema,
-  getRootSchema,
-  getRootSchemaId,
   getSchema,
   getSchemaId,
 } from "./schema-map.ts";
