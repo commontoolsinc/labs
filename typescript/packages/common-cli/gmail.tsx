@@ -8,6 +8,7 @@ import {
   recipe,
   Schema,
   UI,
+  str
 } from "@commontools/builder";
 
 const EmailSchema = {
@@ -90,7 +91,7 @@ const Recipe = {
   },
   required: ["settings"],
   default: { settings: { labels: "INBOX", limit: 10 } },
-  description: "fake gmail",
+  description: "Gmail Importer",
 } as const satisfies JSONSchema;
 
 const ResultSchema = {
@@ -212,10 +213,9 @@ export async function fetchEmail(
 ) {
   // First, get the list of message IDs from the inbox
   const listResponse = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=${
-      labelIds.join(
-        ",",
-      )
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=${labelIds.join(
+      ",",
+    )
     }&maxResults=${maxResults}`,
     {
       headers: {
@@ -313,7 +313,7 @@ export default recipe(Recipe, ResultSchema, ({ settings }) => {
   });
 
   return {
-    [NAME]: "gmail importer",
+    [NAME]: str`GMail Importer ${auth.user.email}`,
     [UI]: (
       <div>
         <h1>Gmail Importer</h1>
@@ -362,7 +362,6 @@ export default recipe(Recipe, ResultSchema, ({ settings }) => {
       </div>
     ),
     emails,
-    auth,
     googleUpdater: googleUpdater({ emails, auth, settings }),
   };
 });
