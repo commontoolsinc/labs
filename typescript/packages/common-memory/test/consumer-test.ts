@@ -32,6 +32,9 @@ const test = (
   const unit = async () => {
     const open = await Provider.open({
       store: url,
+      rateLimiting: {
+        baseThreshold: 0,
+      },
     });
 
     assert(open.ok, "Open create repository if it does not exist");

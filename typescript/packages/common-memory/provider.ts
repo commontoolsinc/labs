@@ -38,16 +38,28 @@ export * as Memory from "./memory.ts";
 export * as Subscription from "./subscription.ts";
 import { refer } from "./reference.ts";
 import * as Access from "./access.ts";
+import * as Settings from "./settings.ts";
+
+export interface RateLimitingOptions {
+  baseThreshold?: number;
+  requestLimit?: number;
+  backoffFactor?: number;
+  maxDebounceCount?: number;
+}
+
+export interface ProviderOptions extends Memory.Options {
+  rateLimiting?: RateLimitingOptions;
+}
 
 export const open = async (
-  options: Memory.Options,
+  options: ProviderOptions,
 ): AsyncResult<Provider<Protocol>, ConnectionError> => {
   const result = await Memory.open(options);
   if (result.error) {
     return result;
   }
 
-  return { ok: new MemoryProvider(result.ok) };
+  return { ok: new MemoryProvider(result.ok, options.rateLimiting) };
 };
 
 export interface Provider<Protocol extends Proto> {
@@ -72,14 +84,21 @@ class MemoryProvider<
 > implements Provider<MemoryProtocol> {
   sessions: Set<ProviderSession<MemoryProtocol>> = new Set();
   #localSession: MemoryProviderSession<Space, MemoryProtocol> | null = null;
-  constructor(public memory: MemorySession) {}
+  #rateLimitingOptions: RateLimitingOptions;
+  
+  constructor(
+    public memory: MemorySession, 
+    rateLimitingOptions?: RateLimitingOptions
+  ) {
+    this.#rateLimitingOptions = rateLimitingOptions || {};
+  }
 
   invoke<Ability>(
     ucan: UCAN<ConsumerInvocationFor<Ability, MemoryProtocol>>,
   ): Await<ConsumerResultFor<Ability, MemoryProtocol>> {
     let session = this.#localSession;
     if (!session) {
-      session = new MemoryProviderSession(this.memory, null);
+      session = new MemoryProviderSession(this.memory, null, this.#rateLimitingOptions);
     }
 
     return session.invoke(
@@ -91,7 +110,7 @@ class MemoryProvider<
     return fetch(this, request);
   }
   session(): ProviderSession<MemoryProtocol> {
-    const session = new MemoryProviderSession(this.memory, this.sessions);
+    const session = new MemoryProviderSession(this.memory, this.sessions, this.#rateLimitingOptions);
     this.sessions.add(session);
     return session;
   }
@@ -121,13 +140,22 @@ class MemoryProviderSession<
 
   // Rate limiting properties
   lastRequestTime: number = 0;
-  rateLimitThreshold: number = 100; // Milliseconds between requests
+  baseThreshold: number;
+  requestLimit: number;
+  backoffFactor: number;
+  maxDebounceCount: number;
   debounceCount: number = 0;
 
   constructor(
     public memory: MemorySession,
     public sessions: null | Set<ProviderSession<MemoryProtocol>>,
+    rateLimitingOptions?: RateLimitingOptions,
   ) {
+    // Use provided options or defaults from settings
+    this.baseThreshold = rateLimitingOptions?.baseThreshold ?? Settings.rateLimiting.baseThreshold;
+    this.requestLimit = rateLimitingOptions?.requestLimit ?? Settings.rateLimiting.requestLimit;
+    this.backoffFactor = rateLimitingOptions?.backoffFactor ?? Settings.rateLimiting.backoffFactor;
+    this.maxDebounceCount = rateLimitingOptions?.maxDebounceCount ?? Settings.rateLimiting.maxDebounceCount;
     this.readable = new ReadableStream<ProviderCommand<MemoryProtocol>>({
       start: (controller) => this.open(controller),
       cancel: () => this.cancel(),
@@ -188,21 +216,21 @@ class MemoryProviderSession<
     const timeSinceLastRequest = now - this.lastRequestTime;
 
     // Calculate the dynamic threshold based on debounce count
-    // First 10 requests have base threshold, then exponential increase
-    const exp = Math.max(0, this.debounceCount - 10) ** 2;
+    // First N requests have base threshold, then exponential increase
+    const exp = Math.max(0, this.debounceCount - this.requestLimit) ** 2;
     // Randomness here and in storage.ts are unlikely to align 🫣
-    const dynamicBackoff = 50 * exp * (1 + Math.random());
-    const currentThreshold = this.rateLimitThreshold + dynamicBackoff;
+    const dynamicBackoff = this.backoffFactor * exp * (1 + Math.random());
+    const currentThreshold = this.baseThreshold + dynamicBackoff;
 
     // Check if the request is coming too quickly
     if (timeSinceLastRequest < currentThreshold) {
-      // Increase debounce count (capped at 17 like in storage.ts)
-      if (this.debounceCount < 17) this.debounceCount++;
+      // Increase debounce count (capped at configured maximum)
+      if (this.debounceCount < this.maxDebounceCount) this.debounceCount++;
 
       // Recalculate with new debounce count for the error message
-      const newExp = Math.max(0, this.debounceCount - 10) ** 2;
-      const newBackoff = 50 * newExp * (1 + Math.random());
-      const suggestedWait = Math.round(this.rateLimitThreshold + newBackoff);
+      const newExp = Math.max(0, this.debounceCount - this.requestLimit) ** 2;
+      const newBackoff = this.backoffFactor * newExp * (1 + Math.random());
+      const suggestedWait = Math.round(this.baseThreshold + newBackoff);
 
       // Return a rate limit error through the command pipeline
       const invocation = command.invocation;
