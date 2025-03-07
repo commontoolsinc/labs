@@ -108,12 +108,17 @@ export const setupIframe = () =>
       key: string,
       callback: (key: string, value: any) => void,
     ): any {
+      let previousValue: any;
+
       const action: Action = (log: ReactivityLog) => {
         const data = isCell(context)
           ? context.withLog(log).key(key).get()
           : context?.[key];
         const serialized = serializeProxyObjects(data);
-        callback(key, serialized);
+        if (serialized !== previousValue) {
+          previousValue = serialized;
+          callback(key, serialized);
+        }
       };
 
       addAction(action);
