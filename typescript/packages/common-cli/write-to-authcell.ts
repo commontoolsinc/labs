@@ -1,10 +1,11 @@
 // Load .env file
-import { CharmManager, compileRecipe, createStorage } from "@commontools/charm";
-import { getEntityId, idle } from "@commontools/runner";
-import { fetchInboxEmails } from "./gmail.ts";
+import {
+  type DocLink,
+  getCellFromDocLink,
+  getSpace,
+  storage,
+} from "@commontools/runner";
 import { parseArgs } from "@std/cli/parse-args";
-
-import { getCellFromDocLink } from "@commontools/runner";
 
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ||
   "https://toolshed.saga-castor.ts.net";
@@ -15,23 +16,19 @@ async function main(
   cause?: string,
   jsonData?: any,
 ) {
-  const storage = createStorage({
-    type: "remote",
-    replica,
-    url: new URL(TOOLSHED_API_URL),
-  });
+  storage.setRemoteStorage(new URL(TOOLSHED_API_URL));
 
   const cellId = {
     "/": "baedreiajxdvqjxmgpfzjix4h6vd4pl77unvet2k3acfvhb6ottafl7gpua",
   };
 
-  await storage.syncCell(cellId, true);
+  const doc = await storage.syncCellById(getSpace(replica), cellId, true);
   const authCellEntity = {
-    cell: cellId,
+    cell: doc,
     path: ["argument", "auth"],
-  };
+  } satisfies DocLink;
 
-  const authCell = getCellFromDocLink(authCellEntity);
+  const authCell = getCellFromDocLink(getSpace(replica), authCellEntity);
   // authCell.set({ token: "wat" });
   await storage.synced();
 
@@ -113,7 +110,11 @@ async function loadFile(path: string): Promise<string> {
   try {
     return await Deno.readTextFile(path);
   } catch (error) {
-    throw new Error(`Error accessing file ${path}: ${error.message}`);
+    throw new Error(
+      `Error accessing file ${path}: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`,
+    );
   }
 }
 
@@ -122,7 +123,11 @@ async function loadJsonFile(path: string): Promise<unknown> {
   try {
     return JSON.parse(content);
   } catch (error) {
-    throw new Error(`Error parsing JSON from ${path}: ${error.message}`);
+    throw new Error(
+      `Error parsing JSON from ${path}: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`,
+    );
   }
 }
 
@@ -133,7 +138,7 @@ try {
     console.log("Loaded data:", jsonData);
   }
 } catch (error) {
-  console.error(error.message);
+  console.error(error instanceof Error ? error.message : "Unknown error");
   Deno.exit(1);
 }
 
