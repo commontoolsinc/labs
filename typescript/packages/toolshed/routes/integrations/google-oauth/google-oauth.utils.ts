@@ -60,7 +60,8 @@ export const createOAuthClient = (redirectUri: string) => {
     authorizationEndpointUri: "https://accounts.google.com/o/oauth2/v2/auth",
     redirectUri,
     defaults: {
-      scope: "email profile https://www.googleapis.com/auth/gmail.readonly",
+      scope:
+        "email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly",
     },
   });
 };
