@@ -160,12 +160,11 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
       "Received OAuth tokens",
     );
 
-    // Save tokens to auth cell
-    const tokenData = await persistTokens(tokens, decodedState);
-
-    // Fetch user info to demonstrate token usage
-    // TODO(ja): should we store the some of the user info?
+    // Fetch user info to verify the token
     const userInfo = await fetchUserInfo(tokens.accessToken);
+
+    // Save tokens to auth cell
+    const tokenData = await persistTokens(tokens, userInfo, decodedState);
 
     // Prepare and return the success response
     const callbackResult: CallbackResult = {
@@ -243,9 +242,13 @@ export const refresh: AppRouteHandler<RefreshRoute> = async (c) => {
         newToken.refreshToken = currentToken.refreshToken;
       }
 
+      // Fetch user info to verify the token
+      const userInfo = await fetchUserInfo(newToken.accessToken);
+
       // Update tokens in auth cell
       const updatedTokenData = await persistTokens(
         newToken,
+        userInfo,
         payload.authCellId,
       );
 

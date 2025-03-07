@@ -9,13 +9,18 @@ import {
 import { Context } from "@hono/hono";
 import { Identity, Signer } from "@commontools/identity";
 // Types
-export interface TokenData {
+export interface AuthData {
   token?: string;
   tokenType?: string;
   scope?: string[];
   expiresIn?: number;
   refreshToken?: string;
   expiresAt?: number;
+  user?: {
+    email: string;
+    name: string;
+    picture: string;
+  };
 }
 
 export interface OAuth2Tokens {
@@ -164,6 +169,7 @@ export async function getAuthCellAndStorage(docLink: DocLink | string) {
     storage.setRemoteStorage(new URL("http://localhost:8000"));
 
     // FIXME(ja): the space should be inferred from the doclink - but it isn't there yet
+    // FIXME(ja): add the authcell schema!
     const authCell = getCellFromDocLink(
       getSpace(parsedDocLink.space),
       parsedDocLink,
@@ -183,6 +189,7 @@ export async function getAuthCellAndStorage(docLink: DocLink | string) {
 // Persist encrypted tokens to the auth cell
 export async function persistTokens(
   oauthToken: OAuth2Tokens,
+  userInfo: UserInfo,
   authCellDocLink: string | DocLink,
 ) {
   try {
@@ -193,7 +200,7 @@ export async function persistTokens(
     }
 
     // Prepare token data to store
-    const tokenData: TokenData = {
+    const tokenData: AuthData = {
       token: oauthToken.accessToken,
       tokenType: oauthToken.tokenType,
       scope: oauthToken.scope,
@@ -202,6 +209,11 @@ export async function persistTokens(
       expiresAt: oauthToken.expiresIn
         ? Date.now() + oauthToken.expiresIn * 1000
         : undefined,
+      user: {
+        email: userInfo.email || "",
+        name: userInfo.name || "",
+        picture: userInfo.picture || "",
+      },
     };
 
     // Set the new tokens to the auth cell
@@ -226,7 +238,7 @@ export async function getTokensFromAuthCell(authCellDocLink: string | DocLink) {
     }
 
     // Get the token data
-    const tokenData = authCell.get() as TokenData | null;
+    const tokenData = authCell.get() as AuthData | null;
 
     if (!tokenData) {
       throw new Error("No token data found in auth cell");
@@ -239,7 +251,7 @@ export async function getTokensFromAuthCell(authCellDocLink: string | DocLink) {
 }
 
 // Format token info for response
-export function formatTokenInfo(tokenData: TokenData) {
+export function formatTokenInfo(tokenData: AuthData) {
   return {
     expiresAt: tokenData.expiresAt,
     hasRefreshToken: !!tokenData.refreshToken,
