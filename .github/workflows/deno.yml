@@ -1,4 +1,4 @@
-name: Deno Tests
+name: Workspace Tests
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
       - main
 
 jobs:
-  deno:
+  workspace-tests:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -32,6 +32,9 @@ jobs:
         # Errors if `deno.lock` file was not
         # committed with the current change.
         run: deno install --frozen=true
+      - name: Check 
+        working-directory: typescript/packages
+        run: deno task check
       - name: Lint 
         working-directory: typescript/packages
         run: deno lint

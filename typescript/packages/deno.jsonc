@@ -16,6 +16,7 @@
     "./toolshed"
   ],
   "tasks": {
+    "check": "./scripts/check-all.sh",
     "test-all": "./scripts/test-all.ts"
   },
   "compilerOptions": {
