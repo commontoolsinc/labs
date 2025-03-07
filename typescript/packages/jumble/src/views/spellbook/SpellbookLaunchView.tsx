@@ -5,18 +5,52 @@ import { getRecipe } from "@commontools/runner";
 import { createPath } from "@/routes.ts";
 
 export default function SpellbookLaunchView() {
-  const { spellId } = useParams<{ spellId: string }>();
+  const { spellId, replicaName } = useParams<{
+    spellId: string;
+    replicaName: string;
+  }>();
   const navigate = useNavigate();
   const { charmManager, currentReplica } = useCharmManager();
 
   useEffect(() => {
+    console.log("SpellbookLaunchView effect triggered", {
+      spellId,
+      replicaName,
+      currentReplica,
+      charmManager,
+    });
+
+    // If charm manager context is not initialized yet, we need to retry
+    if (!charmManager) {
+      console.log("CharmManager not available yet, waiting...");
+      // Return to detail view if not loading after 2 seconds
+      const timeout = setTimeout(() => {
+        console.log(
+          "CharmManager still not available after timeout, redirecting back"
+        );
+        if (spellId) {
+          navigate(createPath("spellbookDetail", { spellId }));
+        }
+      }, 2000);
+
+      return () => clearTimeout(timeout);
+    }
+
     const launchSpell = async () => {
-      if (!spellId || !currentReplica) return;
+      console.log("launchSpell function called");
+      if (!spellId) {
+        console.log("No spellId provided, returning early");
+        return;
+      }
 
       try {
+        console.log("Attempting to sync recipe for spellId:", spellId);
         // Sync the recipe
         await charmManager.syncRecipeBlobby(spellId);
+        console.log("Recipe sync completed");
+
         const recipe = getRecipe(spellId);
+        console.log("Retrieved recipe:", recipe);
 
         if (!recipe) {
           console.error("Recipe not found");
@@ -25,6 +59,7 @@ export default function SpellbookLaunchView() {
         }
 
         // Get AI suggestions for initial data
+        console.log("Fetching AI suggestions");
         const imagineUrl = `/api/ai/spell/imagine`;
         const response = await fetch(imagineUrl, {
           method: "POST",
@@ -41,34 +76,32 @@ export default function SpellbookLaunchView() {
           }),
         });
 
-        let initialData = {};
-        if (response.ok) {
-          const compatibleData = await response.json();
-          initialData = compatibleData.result;
-          console.log("AI response:", compatibleData);
-        } else {
-          console.error(
-            `Failed to get AI suggestions: ${response.status} ${response.statusText}`,
-          );
-          throw new Error(
-            `Failed to get AI suggestions: ${response.status} ${response.statusText}`,
-          );
-        }
+        const suggestionData = await response.json();
+        console.log("Received AI suggestions:", suggestionData);
 
-        // Run the recipe with the initial data
-        const charm = await charmManager.runPersistent(recipe, initialData);
-        const charmIdString = charm?.entityId?.["/"] as string;
-        await charmManager.add([charm]);
+        // Run the spell with the suggested values
+        console.log("Creating run with suggested values");
+        const spell = await charmManager.runPersistent(
+          recipe,
+          suggestionData.values || {}
+        );
+        console.log("Spell run created:", spell);
 
-        if (charmIdString) {
+        // Navigate to the charm show view
+        if (
+          spell &&
+          spell.entityId &&
+          spell.entityId["/"] &&
+          typeof spell.entityId["/"] === "string"
+        ) {
+          const charmId = spell.entityId["/"] as string;
           navigate(
             createPath("charmShow", {
-              charmId: charmIdString,
-              replicaName: currentReplica,
-            }),
+              charmId,
+              replicaName: replicaName || currentReplica,
+            })
           );
         } else {
-          console.error("Failed to create charm");
           navigate(createPath("spellbookDetail", { spellId }));
         }
       } catch (error) {
@@ -78,7 +111,7 @@ export default function SpellbookLaunchView() {
     };
 
     launchSpell();
-  }, [spellId, navigate, charmManager, currentReplica]);
+  }, [spellId, replicaName, navigate, charmManager, currentReplica]);
 
   return (
     <div className="flex items-center justify-center h-screen">
