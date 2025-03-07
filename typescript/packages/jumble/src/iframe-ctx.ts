@@ -17,6 +17,22 @@ const serializeProxyObjects = (proxy: any) => {
   return proxy == undefined ? undefined : JSON.parse(JSON.stringify(proxy));
 };
 
+// Type for tracking write operations per context+key
+type TimeoutId = ReturnType<typeof setTimeout>;
+type WriteTracking = {
+  pendingTimeout: TimeoutId | null;
+  pendingValue: any; // Store the value to be written when timeout fires
+  writeCount: number;
+  lastResetTime: number;
+};
+
+// Map to store write tracking by context and key
+const writeTrackers = new Map<any, Map<string, WriteTracking>>();
+
+// Configuration
+const MAX_IMMEDIATE_WRITES_PER_SECOND = 20; // Allow 20 immediate writes per second
+const THROTTLED_WRITE_INTERVAL_MS = 100; // 0.1s interval after threshold
+
 export const setupIframe = () =>
   setIframeContextHandler({
     read(context: any, key: string): any {
@@ -25,10 +41,64 @@ export const setupIframe = () =>
       return serialized;
     },
     write(context: any, key: string, value: any) {
-      if (isCell(context)) {
-        context.key(key).setRaw(value);
-      } else {
-        context[key] = value;
+      // Get or create context map for this specific context+key
+      if (!writeTrackers.has(context)) {
+        writeTrackers.set(context, new Map());
+      }
+      const contextMap = writeTrackers.get(context)!;
+
+      // Get or initialize tracking info for this key
+      if (!contextMap.has(key)) {
+        contextMap.set(key, {
+          pendingTimeout: null,
+          pendingValue: undefined,
+          writeCount: 0,
+          lastResetTime: Date.now(),
+        });
+      }
+
+      const tracking = contextMap.get(key)!;
+      const now = Date.now();
+
+      // Reset counter if a second has passed
+      if (now - tracking.lastResetTime > 1000) {
+        tracking.writeCount = 0;
+        tracking.lastResetTime = now;
+        if (tracking.pendingTimeout) {
+          clearTimeout(tracking.pendingTimeout);
+          tracking.pendingTimeout = null;
+        }
+      }
+
+      // If we're under the threshold, process immediately
+      if (tracking.writeCount < MAX_IMMEDIATE_WRITES_PER_SECOND) {
+        tracking.writeCount++;
+
+        // Perform write immediately
+        if (isCell(context)) {
+          context.key(key).setRaw(value);
+        } else {
+          context[key] = value;
+        }
+      } // Otherwise, use debouncing
+      else {
+        // Update the value to be written when the timeout fires
+        tracking.pendingValue = value;
+
+        // Only set a new timeout if there isn't one already
+        if (!tracking.pendingTimeout) {
+          tracking.pendingTimeout = setTimeout(() => {
+            // Perform the actual write operation with the latest value
+            if (isCell(context)) {
+              context.key(key).setRaw(tracking.pendingValue);
+            } else {
+              context[key] = tracking.pendingValue;
+            }
+
+            // Clear the timeout reference
+            tracking.pendingTimeout = null;
+          }, THROTTLED_WRITE_INTERVAL_MS);
+        }
       }
     },
     subscribe(
