@@ -156,6 +156,7 @@ export interface Cell<T> {
   [isCellMarker]: true;
   copyTrap: boolean;
   schema?: JSONSchema;
+  rootSchema?: JSONSchema;
 }
 
 type TypeOrSchema<T, S extends JSONSchema | undefined = JSONSchema> = T extends
@@ -166,6 +167,8 @@ type TypeOrSchema<T, S extends JSONSchema | undefined = JSONSchema> = T extends
 export interface Stream<T> {
   send(event: T): void;
   sink(callback: (event: T) => Cancel | undefined | void): Cancel;
+  schema?: JSONSchema;
+  rootSchema?: JSONSchema;
   [isStreamMarker]: true;
 }
 
@@ -275,13 +278,22 @@ export function createCell<T>(
   // or vice versa will not be detected.
   const ref = resolveLinkToValue(doc, path);
   if (isStreamAlias(ref.cell.getAtPath(ref.path))) {
-    return createStreamCell(ref.cell, ref.path) as unknown as Cell<T>;
+    return createStreamCell(
+      ref.cell,
+      ref.path,
+      log,
+      schema,
+      rootSchema,
+    ) as unknown as Cell<T>;
   } else return createRegularCell(doc, path, log, schema, rootSchema);
 }
 
 function createStreamCell<T>(
   doc: DocImpl<any>,
   path: PropertyKey[],
+  _log?: ReactivityLog,
+  schema?: JSONSchema,
+  rootSchema?: JSONSchema,
 ): Stream<T> {
   const listeners = new Set<(event: T) => Cancel | undefined>();
 
@@ -302,6 +314,8 @@ function createStreamCell<T>(
       listeners.add(callback);
       return () => listeners.delete(callback);
     },
+    schema,
+    rootSchema,
     [isStreamMarker]: true,
   } satisfies Stream<T>;
 
@@ -438,6 +452,7 @@ function createRegularCell<T>(
       );
     },
     schema,
+    rootSchema,
   } as Cell<T>;
 
   return self;
