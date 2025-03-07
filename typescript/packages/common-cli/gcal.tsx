@@ -1,70 +1,81 @@
 import { h } from "@commontools/html";
-import { cell, derive, handler, NAME, recipe, UI } from "@commontools/builder";
-import { z } from "zod";
+import { cell, derive, handler, NAME, recipe, UI, JSONSchema, Schema, str } from "@commontools/builder";
 
-// Define a CalendarEvent type
-const CalendarEvent = z.object({
-    id: z.string(),
-    summary: z.string().optional(),
-    description: z.string().optional(),
-    start: z.string(),
-    end: z.string(),
-    location: z.string().optional(),
-    eventType: z.string().optional(),
-});
-type CalendarEvent = z.infer<typeof CalendarEvent>;
+// Replace the Zod CalendarEvent type with JSONSchema
+const CalendarEventSchema = {
+    type: "object",
+    properties: {
+        id: { type: "string" },
+        summary: { type: "string" },
+        description: { type: "string" },
+        start: { type: "string" },
+        end: { type: "string" },
+        location: { type: "string" },
+        eventType: { type: "string" },
+    },
+    required: ["id", "start", "end"],
+} as const satisfies JSONSchema;
+type CalendarEvent = Schema<typeof CalendarEventSchema>;
 
-const Auth = z.object({
-    token: z.string(),
-    tokenType: z.string(),
-    scope: z.array(z.string()),
-    expiresIn: z.number(),
-    expiresAt: z.number(),
-    refreshToken: z.string(),
-    user: z.object({
-        email: z.string(),
-        name: z.string(),
-        picture: z.string(),
-    }),
-});
-type Auth = z.infer<typeof Auth>;
+// Replace the Zod Auth type with JSONSchema
+const AuthSchema = {
+    type: "object",
+    properties: {
+        token: { type: "string" },
+        tokenType: { type: "string" },
+        scope: { type: "array", items: { type: "string" } },
+        expiresIn: { type: "number" },
+        expiresAt: { type: "number" },
+        refreshToken: { type: "string" },
+        user: {
+            type: "object",
+            properties: {
+                email: { type: "string" },
+                name: { type: "string" },
+                picture: { type: "string" },
+            },
+            required: ["email", "name", "picture"],
+        },
+    },
+    required: ["token", "tokenType", "scope", "expiresIn", "expiresAt", "refreshToken", "user"],
+} as const satisfies JSONSchema;
+type Auth = Schema<typeof AuthSchema>;
 
-// Recipe settings now include calendarId and limit
-const Recipe = z
-    .object({
-        settings: z.object({
-            calendarId: z
-                .string()
-                .default("primary")
-                .describe("Calendar ID to fetch events from"),
-            limit: z
-                .number()
-                .default(250)
-                .describe("number of events to import"),
-        }),
-    })
-    .describe("fake calendar");
+// Replace the Zod Recipe type with JSONSchema
+const Recipe = {
+    type: "object",
+    properties: {
+        settings: {
+            type: "object",
+            properties: {
+                calendarId: {
+                    type: "string",
+                    description: "Calendar ID to fetch events from",
+                    default: "primary",
+                },
+                limit: {
+                    type: "number",
+                    description: "number of events to import",
+                    default: 250,
+                },
+            },
+            required: ["calendarId", "limit"],
+        },
+    },
+    required: ["settings"],
+    default: { settings: { calendarId: "primary", limit: 250 } },
+    description: "GCal Importer",
+} as const satisfies JSONSchema;
 
-// Updated result schema for calendar events
+// Update ResultSchema to match JSONSchema format
 const ResultSchema = {
     type: "object",
     properties: {
         events: {
             type: "array",
-            items: {
-                type: "object",
-                properties: {
-                    id: { type: "string" },
-                    summary: { type: "string" },
-                    description: { type: "string" },
-                    start: { type: "string" },
-                    end: { type: "string" },
-                    location: { type: "string" },
-                    eventType: { type: "string" },
-                },
-            },
+            items: CalendarEventSchema,
         },
-        googleUpdater: { asCell: true, type: "action" },
+        googleUpdater: { asStream: true, type: "object", properties: {} },
         auth: {
             type: "object",
             properties: {
@@ -77,7 +88,7 @@ const ResultSchema = {
             },
         },
     },
-};
+} as const satisfies JSONSchema;
 
 // Handler to update the limit for events to import
 const updateLimit = handler<{ detail: { value: string } }, { limit: number }>(
@@ -198,7 +209,7 @@ export default recipe(Recipe, ResultSchema, ({ settings }) => {
     });
 
     return {
-        [NAME]: "calendar importer",
+        [NAME]: str`GCal Importer ${auth.user.email}`,
         [UI]: (
             <div>
                 <h1>Calendar Importer</h1>
@@ -246,7 +257,6 @@ export default recipe(Recipe, ResultSchema, ({ settings }) => {
             </div>
         ),
         events,
-        auth,
         googleUpdater: calendarUpdater({ events, auth, settings }),
     };
 });
