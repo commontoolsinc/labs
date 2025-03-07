@@ -52,20 +52,21 @@ describe("integration", () => {
     assert(page, "Page should be defined");
     assert(testCharm, "Test charm should be defined");
 
-    const anchor = await page!.waitForSelector("nav a");
-    const innerText = await anchor.innerText();
+    await snapshot(page, "Initial state");
+
+    const anchor = await page.waitForSelector("nav a");
     assert(
-      innerText === "common-knowledge",
+      (await anchor.innerText()) === "common-knowledge",
       "Logged in and Common Knowledge title renders",
     );
 
-    await page!.goto(
-      `${FRONTEND_URL}${testCharm!.space}/${testCharm!.charmId}`,
+    await page.goto(
+      `${FRONTEND_URL}${testCharm.space}/${testCharm.charmId}`,
     );
     await snapshot(page, "Waiting for charm to render");
 
     await waitForSelectorWithText(
-      page!,
+      page,
       "a[aria-current='charm-title']",
       "Simple Value: 1",
     );
@@ -81,7 +82,7 @@ describe("integration", () => {
     // As if the reference was invalidated by a spurious re-render between
     // getting an element handle, and clicking it.
     await sleep(1000);
-    const button = await page!.waitForSelector(
+    const button = await page.waitForSelector(
       "div[aria-label='charm-content'] button",
     );
     await button.click();
@@ -89,7 +90,7 @@ describe("integration", () => {
 
     console.log("Checking if title changed");
     await waitForSelectorWithText(
-      page!,
+      page,
       "a[aria-current='charm-title']",
       "Simple Value: 2",
     );
@@ -103,8 +104,8 @@ describe("integration", () => {
     console.log("Inspecting charm to verify updates propagated from browser.");
     const charm = await inspectCharm(
       TOOLSHED_API_URL,
-      testCharm!.space,
-      testCharm!.charmId,
+      testCharm.space,
+      testCharm.charmId,
     );
     console.log("Charm:", charm);
     assert(
