@@ -1,9 +1,7 @@
 import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
-@customElement("common-pill")
-export class CommonButtonElement extends LitElement {
+export class CommonPillElement extends LitElement {
   static override styles = [
     baseStyles,
     css`
@@ -47,3 +45,4 @@ export class CommonButtonElement extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("common-pill", CommonPillElement);

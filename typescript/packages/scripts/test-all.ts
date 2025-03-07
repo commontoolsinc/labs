@@ -3,7 +3,7 @@ import * as path from "@std/path";
 
 const decoder = new TextDecoder();
 const workspaceCwd = Deno.cwd();
-const manifest = JSON.parse(await Deno.readTextFile("./deno.json"));
+const manifest = JSON.parse(await Deno.readTextFile("./deno.jsonc"));
 const members: string[] = manifest.workspace;
 
 const DISABLED = [

@@ -1,7 +1,5 @@
 import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
 
-@customElement("common-screen")
 export class CommonScreenElement extends LitElement {
   static override styles = css`
     :host {
@@ -17,3 +15,4 @@ export class CommonScreenElement extends LitElement {
     return html`<slot></slot>`;
   }
 }
+globalThis.customElements.define("common-screen", CommonScreenElement);

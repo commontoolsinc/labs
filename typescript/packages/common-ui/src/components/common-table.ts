@@ -1,14 +1,21 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 import { ZodObject } from "zod";
 
-@customElement("common-card")
 export class CommonCardElement extends LitElement {
-  @property({ type: Object })
-  accessor schema: ZodObject<any> | null = null;
-  @property({ type: Object })
-  accessor item: any = null;
+  static override properties = {
+    schema: { type: Object },
+    item: { type: Object },
+  };
+
+  declare schema: ZodObject<any> | null;
+  declare item: any;
+
+  constructor() {
+    super();
+    this.schema = null;
+    this.item = null;
+  }
 
   static override styles = [
     baseStyles,
@@ -167,25 +174,40 @@ export class CommonCardElement extends LitElement {
     return html`<div class="string-value">${value}</div>`;
   }
 }
+globalThis.customElements.define("common-card", CommonCardElement);
 
-@customElement("common-table")
 export class CommonTableElement extends LitElement {
-  @property({ type: Object })
-  accessor schema: ZodObject<any> | null = null;
-  @property({ type: Array })
-  accessor data: any[] = [];
-  @property({ type: Boolean })
-  accessor edit = false;
-  @property({ type: Boolean })
-  accessor delete = false;
-  @property({ type: Boolean })
-  accessor preview = false;
-  @property({ type: Boolean })
-  accessor download = false;
-  @property({ type: Boolean })
-  accessor copy = false;
-  @state()
-  accessor selectedItem: any = null;
+  static override properties = {
+    schema: { type: Object },
+    data: { type: Array },
+    edit: { type: Boolean },
+    delete: { type: Boolean },
+    preview: { type: Boolean },
+    download: { type: Boolean },
+    copy: { type: Boolean },
+    selectedItem: { state: true },
+  };
+
+  declare schema: ZodObject<any> | null;
+  declare data: any[];
+  declare edit: boolean;
+  declare delete: boolean;
+  declare preview: boolean;
+  declare download: boolean;
+  declare copy: boolean;
+  declare selectedItem: any;
+
+  constructor() {
+    super();
+    this.schema = null;
+    this.data = [];
+    this.edit = false;
+    this.delete = false;
+    this.preview = false;
+    this.download = false;
+    this.copy = false;
+    this.selectedItem = null;
+  }
 
   static override styles = [
     baseStyles,
@@ -549,3 +571,4 @@ export class CommonTableElement extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("common-table", CommonTableElement);

@@ -1,5 +1,4 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
 export type CommonTextarea = {
@@ -45,7 +44,6 @@ export class CommonTextareaBlurEvent extends Event {
   }
 }
 
-@customElement("common-textarea")
 export class CommonTextareaElement extends LitElement {
   static override styles = [
     baseStyles,
@@ -81,14 +79,25 @@ export class CommonTextareaElement extends LitElement {
     `,
   ];
 
-  @property({ type: String })
-  accessor value = "";
-  @property({ type: String })
-  accessor placeholder = "";
-  @property({ type: String })
-  accessor appearance = "default";
-  @property({ type: Number })
-  accessor rows = 3;
+  static override properties = {
+    value: { type: String },
+    placeholder: { type: String },
+    appearance: { type: String },
+    rows: { type: Number },
+  };
+
+  declare value: string;
+  declare placeholder: string;
+  declare appearance: string;
+  declare rows: number;
+
+  constructor() {
+    super();
+    this.value = "";
+    this.placeholder = "";
+    this.appearance = "default";
+    this.rows = 3;
+  }
 
   override render() {
     const oninput = (event: Event) => {
@@ -129,3 +138,4 @@ export class CommonTextareaElement extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("common-textarea", CommonTextareaElement);

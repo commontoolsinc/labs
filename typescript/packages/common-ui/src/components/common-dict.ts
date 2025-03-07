@@ -2,7 +2,6 @@ import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 
-@customElement("common-dict")
 export class CommonDictElement extends LitElement {
   static override styles = css`
     :host {
@@ -17,8 +16,15 @@ export class CommonDictElement extends LitElement {
     }
   `;
 
-  @property({ type: Object })
-  accessor records: Record<string, string> = {};
+  static override properties = {
+    records: { type: Object },
+  };
+  declare records: Record<string, string>;
+
+  constructor() {
+    super();
+    this.records = {};
+  }
 
   override render() {
     const records = repeat(Object.entries(this.records), ([key, value]) => {
@@ -33,3 +39,4 @@ export class CommonDictElement extends LitElement {
     return html`<div class="dict">${records}</div>`;
   }
 }
+globalThis.customElements.define("common-dict", CommonDictElement);

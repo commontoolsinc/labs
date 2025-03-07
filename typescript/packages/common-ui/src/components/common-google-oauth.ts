@@ -1,6 +1,5 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { baseStyles } from "./style.ts";
 
 export interface AuthData {
   token?: string;
@@ -16,19 +15,29 @@ export interface AuthData {
   };
 }
 
-@customElement("common-google-oauth")
 export class CommonGoogleOauthElement extends LitElement {
-  @property({ type: Object })
-  accessor auth: AuthData = {};
-  @property({ type: Object })
-  accessor authCell: Record<string, unknown> = {};
+  static override properties = {
+    auth: { type: Object },
+    authCell: { type: Object },
+    authStatus: { type: String },
+    isLoading: { type: Boolean },
+    authResult: { type: Object },
+  };
 
-  @property({ type: String })
-  accessor authStatus: string = "";
-  @property({ type: Boolean })
-  accessor isLoading: boolean = false;
-  @property({ type: Object })
-  accessor authResult: Record<string, unknown> | null = null;
+  declare auth: AuthData;
+  declare authCell: Record<string, unknown>;
+  declare authStatus: string;
+  declare isLoading: boolean;
+  declare authResult: Record<string, unknown> | null;
+
+  constructor() {
+    super();
+    this.auth = {};
+    this.authCell = {};
+    this.authStatus = "";
+    this.isLoading = false;
+    this.authResult = null;
+  }
 
   async handleClick() {
     this.isLoading = true;
@@ -274,3 +283,7 @@ export class CommonGoogleOauthElement extends LitElement {
     ];
   }
 }
+globalThis.customElements.define(
+  "common-google-oauth",
+  CommonGoogleOauthElement,
+);

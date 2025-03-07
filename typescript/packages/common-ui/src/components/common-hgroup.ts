@@ -1,9 +1,7 @@
 import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
-@customElement("common-hgroup")
-export class CommonHgroup extends LitElement {
+export class CommonHgroupElement extends LitElement {
   static override styles = [
     baseStyles,
     css`
@@ -41,3 +39,4 @@ export class CommonHgroup extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("common-hgroup", CommonHgroupElement);

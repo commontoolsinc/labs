@@ -1,9 +1,7 @@
 import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
-@customElement("common-grid")
-export class CommonHgroup extends LitElement {
+export class CommonGridElement extends LitElement {
   static override styles = [
     baseStyles,
     css`
@@ -39,3 +37,4 @@ export class CommonHgroup extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("common-grid", CommonGridElement);

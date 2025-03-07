@@ -1,5 +1,4 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
 export type CommonAudioRecording = {
@@ -17,7 +16,6 @@ export class CommonAudioRecordingEvent extends Event {
   }
 }
 
-@customElement("common-audio-recorder")
 export class CommonAudioRecorderElement extends LitElement {
   static override styles = [
     baseStyles,
@@ -39,11 +37,19 @@ export class CommonAudioRecorderElement extends LitElement {
     `,
   ];
 
-  @property({ type: Boolean })
-  accessor transcribe = false;
+  declare transcribe: boolean;
+  declare url: string;
 
-  @property({ type: String })
-  accessor url = "/api/ai/voice/transcribe";
+  static override properties = {
+    url: { type: String },
+    transcribe: { type: Boolean },
+  };
+
+  constructor() {
+    super();
+    this.transcribe = false;
+    this.url = "/api/ai/voice/transcribe";
+  }
 
   private mediaRecorder?: MediaRecorder;
   private audioChunks: Blob[] = [];
@@ -138,3 +144,8 @@ export class CommonAudioRecorderElement extends LitElement {
     `;
   }
 }
+
+globalThis.customElements.define(
+  "common-audio-recorder",
+  CommonAudioRecorderElement,
+);

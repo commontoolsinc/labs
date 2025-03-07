@@ -6,9 +6,5 @@
   "exports": {
     ".": "./mod.ts",
     "./cli": "./cli.ts"
-  },
-  "imports": {
-    "esbuild": "npm:esbuild",
-    "@luca/esbuild-deno-loader": "jsr:@luca/esbuild-deno-loader"
   }
 }

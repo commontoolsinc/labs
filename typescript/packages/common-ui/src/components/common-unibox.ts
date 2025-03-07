@@ -1,8 +1,6 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
-@customElement("common-unibox")
 export class CommonUniboxElement extends LitElement {
   static override styles = [
     baseStyles,
@@ -19,12 +17,22 @@ export class CommonUniboxElement extends LitElement {
     `,
   ];
 
-  @property({ type: String })
-  accessor value = "";
-  @property({ type: String })
-  accessor placeholder = "";
-  @property({ type: String })
-  accessor label = "Search";
+  static override properties = {
+    value: { type: String },
+    placeholder: { type: String },
+    label: { type: String },
+  };
+
+  declare value: string;
+  declare placeholder: string;
+  declare label: string;
+
+  constructor() {
+    super();
+    this.value = "";
+    this.placeholder = "";
+    this.label = "Search";
+  }
 
   private handleClick(e: Event & { shiftKey: boolean }) {
     const event = new CustomEvent("submit", {
@@ -66,3 +74,4 @@ export class CommonUniboxElement extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("common-unibox", CommonUniboxElement);

@@ -1,8 +1,6 @@
 import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
-@customElement("common-hscroll")
 export class CommonHscrollElement extends LitElement {
   static override styles = [
     baseStyles,
@@ -63,3 +61,4 @@ export class CommonHscrollElement extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("common-hscroll", CommonHscrollElement);

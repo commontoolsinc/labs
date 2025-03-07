@@ -1,5 +1,4 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
 interface FileContent {
@@ -22,7 +21,6 @@ export class CommonFileInputEvent extends Event {
   }
 }
 
-@customElement("common-file-input")
 export class CommonFileInputElement extends LitElement {
   static override styles = [
     baseStyles,
@@ -56,18 +54,31 @@ export class CommonFileInputElement extends LitElement {
     `,
   ];
 
-  @property({ type: Array })
-  accessor files: File[] = [];
-  @property({ type: Array })
-  accessor filesContent: FileContent[] = [];
-  @property({ type: Boolean })
-  accessor multiple = false;
-  @property({ type: String })
-  accessor accept: string = "";
-  @property({ type: String })
-  accessor appearance = "default";
-  @property({ type: String })
-  accessor loadMode: "base64" | "json" | "text" = "base64";
+  static override properties = {
+    files: { type: Array },
+    filesContent: { type: Array },
+    multiple: { type: Boolean },
+    accept: { type: String },
+    appearance: { type: String },
+    loadMode: { type: String },
+  };
+
+  declare files: File[];
+  declare filesContent: FileContent[];
+  declare multiple: boolean;
+  declare accept: string;
+  declare appearance: string;
+  declare loadMode: "base64" | "json" | "text";
+
+  constructor() {
+    super();
+    this.files = [];
+    this.filesContent = [];
+    this.multiple = false;
+    this.accept = "";
+    this.appearance = "default";
+    this.loadMode = "base64";
+  }
 
   /**
    * Handles the file input change event.
@@ -152,3 +163,4 @@ export class CommonFileInputElement extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("common-file-input", CommonFileInputElement);

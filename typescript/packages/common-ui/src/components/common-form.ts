@@ -5,14 +5,23 @@ import { ZodObject } from "zod";
 import { fromString } from "merkle-reference";
 
 // Reference Field Component
-@customElement("reference-field")
 export class ReferenceFieldElement extends LitElement {
-  @property({ type: String })
-  accessor key = "";
-  @property({ type: String })
-  accessor value = "";
-  @property({ type: String })
-  accessor error = "";
+  static override properties = {
+    key: { type: String },
+    value: { type: String },
+    error: { type: String },
+  };
+
+  declare key: string;
+  declare value: string;
+  declare error: string;
+
+  constructor() {
+    super();
+    this.key = "";
+    this.value = "";
+    this.error = "";
+  }
 
   static override styles = css`
     :host {
@@ -79,6 +88,7 @@ export class ReferenceFieldElement extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("reference-field", ReferenceFieldElement);
 
 export type ZodFormEvent = {
   path: string;
@@ -94,22 +104,31 @@ export class ZodFormSubmitEvent extends Event {
   }
 }
 
-@customElement("common-form")
 export class CommonFormElement extends LitElement {
   static override properties = {
     value: {},
+    schema: { type: Object },
+    fieldPath: { type: String, attribute: "field-path" },
+    errors: { type: Object },
+    reset: { type: Boolean },
+    referenceFields: { type: Object },
   };
   private _internalValue: { [key: string]: any } = {};
-  @property({ type: Object })
-  accessor schema: ZodObject<any> | null = null;
-  @property({ type: String, attribute: "field-path" })
-  accessor fieldPath = "";
-  @property({ type: Object })
-  accessor errors: { [key: string]: any } = {};
-  @property({ type: Boolean })
-  accessor reset = false;
-  @property({ type: Object })
-  accessor referenceFields: Set<string> = new Set();
+
+  declare schema: ZodObject<any> | null;
+  declare fieldPath: string;
+  declare errors: { [key: string]: any };
+  declare reset: boolean;
+  declare referenceFields: Set<string>;
+
+  constructor() {
+    super();
+    this.schema = null;
+    this.fieldPath = "";
+    this.errors = {};
+    this.reset = false;
+    this.referenceFields = new Set();
+  }
 
   get value() {
     return this._internalValue;
@@ -808,3 +827,4 @@ export class CommonFormElement extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("common-form", CommonFormElement);
