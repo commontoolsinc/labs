@@ -162,11 +162,20 @@ async function handleExecuteCharmAction(deps: CommandContext) {
     }
 
     // Create options for the select menu with key as the action name
-    const actionOptions = actions.map(([key, value]) => ({
-      id: key,
-      title: key,
-      value: { key, stream: value },
-    }));
+    const actionOptions = actions.map(([key, stream]) => {
+      console.log(
+        "schema for action",
+        key,
+        example,
+        charm,
+        charm.key(key).schema,
+      );
+      return {
+        id: key,
+        title: key,
+        value: { key, stream, example },
+      };
+    });
 
     // Show selection menu for actions
     deps.setMode({
@@ -183,7 +192,7 @@ async function handleExecuteCharmAction(deps: CommandContext) {
               id: "action-params",
               type: "input",
               title: `Input for ${selectedAction.key}`,
-              placeholder: "Enter input data",
+              placeholder: selectedAction.example || "Enter input data",
               handler: (input) => {
                 try {
                   // Execute the action by calling .send with the user input
@@ -202,7 +211,7 @@ async function handleExecuteCharmAction(deps: CommandContext) {
                 }
               },
             },
-            placeholder: "Enter input data",
+            placeholder: selectedAction.example || "Enter input data",
           });
         },
       },
