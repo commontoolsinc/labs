@@ -10,7 +10,7 @@ export const ROUTES = {
   charmDetail: "/:replicaName/:charmId/detail",
   spellbookIndex: "/spellbook",
   spellbookDetail: "/spellbook/:spellId",
-  spellbookLaunch: "/spellbook/launch/:spellId",
+  spellbookLaunch: "/spellbook/launch/:replicaName/:spellId",
   utilityJsonGen: "/utility/json-gen",
 } as const;
 

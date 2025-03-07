@@ -100,8 +100,12 @@ export default function SpellbookDetailView() {
         runs: (spell.runs || 0) + 1,
       });
 
-      // Navigate immediately
-      navigate(createPath("spellbookLaunch", { spellId }));
+      // Get the last used replica from localStorage
+      const replicaName =
+        localStorage.getItem("lastReplica") || "common-knowledge";
+
+      // Navigate immediately with the replicaName
+      navigate(createPath("spellbookLaunch", { replicaName, spellId }));
 
       // Track the run in the background
       await trackRun(spellId);
@@ -150,7 +154,7 @@ export default function SpellbookDetailView() {
 
     if (
       !confirm(
-        "Are you sure you want to delete this spell? This action cannot be undone.",
+        "Are you sure you want to delete this spell? This action cannot be undone."
       )
     ) {
       return;
@@ -166,13 +170,12 @@ export default function SpellbookDetailView() {
     }
   };
 
-  const content = loading || !spell || !spellId
-    ? (
+  const content =
+    loading || !spell || !spellId ? (
       <div className="container mx-auto">
         <div className="text-center">Loading spell...</div>
       </div>
-    )
-    : (
+    ) : (
       <div className="container mx-auto max-w-4xl flex flex-col gap-4">
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between gap-4">
@@ -253,9 +256,13 @@ export default function SpellbookDetailView() {
                   </span>
                 </div>
               }
-              label={isDescriptionExpanded
-                ? <LuChevronDown className="w-5 h-5" />
-                : <LuChevronRight className="w-5 h-5" />}
+              label={
+                isDescriptionExpanded ? (
+                  <LuChevronDown className="w-5 h-5" />
+                ) : (
+                  <LuChevronRight className="w-5 h-5" />
+                )
+              }
               onClick={() => setIsDescriptionExpanded(!isDescriptionExpanded)}
               popoverMessage=""
             />
@@ -276,9 +283,13 @@ export default function SpellbookDetailView() {
                 <span className="text-lg font-semibold">Comments</span>
               </div>
             }
-            label={isCommentsExpanded
-              ? <LuChevronDown className="w-5 h-5" />
-              : <LuChevronRight className="w-5 h-5" />}
+            label={
+              isCommentsExpanded ? (
+                <LuChevronDown className="w-5 h-5" />
+              ) : (
+                <LuChevronRight className="w-5 h-5" />
+              )
+            }
             onClick={() => setIsCommentsExpanded(!isCommentsExpanded)}
             popoverMessage=""
           />
@@ -306,9 +317,10 @@ export default function SpellbookDetailView() {
                 </div>
 
                 {[...spell.comments]
-                  .sort((a, b) =>
-                    new Date(b.createdAt).getTime() -
-                    new Date(a.createdAt).getTime()
+                  .sort(
+                    (a, b) =>
+                      new Date(b.createdAt).getTime() -
+                      new Date(a.createdAt).getTime()
                   )
                   .map((comment) => (
                     <div key={comment.id} className="flex flex-col gap-2">
@@ -340,9 +352,13 @@ export default function SpellbookDetailView() {
                 <span className="text-lg font-semibold">Spellbook Data</span>
               </div>
             }
-            label={isDetailsExpanded
-              ? <LuChevronDown className="w-5 h-5" />
-              : <LuChevronRight className="w-5 h-5" />}
+            label={
+              isDetailsExpanded ? (
+                <LuChevronDown className="w-5 h-5" />
+              ) : (
+                <LuChevronRight className="w-5 h-5" />
+              )
+            }
             onClick={() => setIsDetailsExpanded(!isDetailsExpanded)}
             popoverMessage=""
           />
