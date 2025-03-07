@@ -1,5 +1,5 @@
 import { createRoute } from "@hono/zod-openapi";
-import { hc } from "hono/client";
+import { hc } from "@hono/hono/client";
 import { jsonContent } from "stoker/openapi/helpers";
 import * as HttpStatusCodes from "stoker/http-status-codes";
 

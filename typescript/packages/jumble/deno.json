@@ -8,7 +8,6 @@
   },
   "imports": {
     "@/": "./src/",
-    "vite": "npm:vite@^6.0.11",
     "@vitejs/plugin-react": "npm:@vitejs/plugin-react@^4.3.4",
     "@codemirror/view": "npm:@codemirror/view@^6.36.2",
     "@lit/react": "npm:@lit/react@^1.0.7",
