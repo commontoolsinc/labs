@@ -1,5 +1,4 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
 export type Todo = {
@@ -26,7 +25,6 @@ export class CommonTodoInputEvent extends Event {
   }
 }
 
-@customElement("common-todo")
 export class CommonTodoElement extends LitElement {
   static override styles = [
     baseStyles,
@@ -75,12 +73,22 @@ export class CommonTodoElement extends LitElement {
     `,
   ];
 
-  @property({ type: Boolean })
-  accessor checked = false;
-  @property({ type: String })
-  accessor placeholder = "";
-  @property({ type: String })
-  accessor value = "";
+  static override properties = {
+    checked: { type: Boolean },
+    placeholder: { type: String },
+    value: { type: String },
+  };
+
+  declare checked: boolean;
+  declare placeholder: string;
+  declare value: string;
+
+  constructor() {
+    super();
+    this.checked = false;
+    this.placeholder = "";
+    this.value = "";
+  }
 
   override render() {
     const oncheck = (event: Event) => {
@@ -135,3 +143,4 @@ export class CommonTodoElement extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("common-todo", CommonTodoElement);

@@ -1,8 +1,6 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
-@customElement("common-send-message")
 export class SendMessageElement extends LitElement {
   static override styles = [
     baseStyles,
@@ -19,11 +17,19 @@ export class SendMessageElement extends LitElement {
     `,
   ];
 
-  @property({ type: String })
-  accessor name: string = "";
+  static override properties = {
+    name: { type: String },
+    placeholder: { type: String },
+  };
 
-  @property({ type: String })
-  accessor placeholder: string = "";
+  declare name: string;
+  declare placeholder: string;
+
+  constructor() {
+    super();
+    this.name = "";
+    this.placeholder = "";
+  }
 
   send(event: Event) {
     event.preventDefault();
@@ -64,3 +70,4 @@ export class SendMessageElement extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("common-send-message", SendMessageElement);

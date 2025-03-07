@@ -1,8 +1,6 @@
 import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
-@customElement("common-hero-layout")
 export class CommonHeroLayoutElement extends LitElement {
   static override styles = [
     baseStyles,
@@ -48,3 +46,4 @@ export class CommonHeroLayoutElement extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("common-hero-layout", CommonHeroLayoutElement);

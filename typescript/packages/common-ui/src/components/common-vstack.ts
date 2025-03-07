@@ -1,13 +1,20 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
-@customElement("common-vstack")
 export class CommonVstackElement extends LitElement {
-  @property({ type: String, reflect: true })
-  accessor gap: string;
-  @property({ type: String, reflect: true })
-  accessor pad: string;
+  static override properties = {
+    gap: { type: String, reflect: true },
+    pad: { type: String, reflect: true },
+  };
+
+  declare gap: string;
+  declare pad: string;
+
+  constructor() {
+    super();
+    this.gap = "";
+    this.pad = "";
+  }
 
   static override styles = [
     baseStyles,
@@ -66,3 +73,4 @@ export class CommonVstackElement extends LitElement {
     </div>`;
   }
 }
+globalThis.customElements.define("common-vstack", CommonVstackElement);

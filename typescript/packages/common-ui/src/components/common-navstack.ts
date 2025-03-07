@@ -1,7 +1,5 @@
 import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
 
-@customElement("common-navstack")
 export class CommonNavstackElement extends LitElement {
   static override styles = css`
     :host {
@@ -37,3 +35,4 @@ export class CommonNavstackElement extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("common-navstack", CommonNavstackElement);

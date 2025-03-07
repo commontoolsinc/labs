@@ -1,5 +1,4 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
 export type CommonInput = {
@@ -45,7 +44,6 @@ export class CommonBlurEvent extends Event {
   }
 }
 
-@customElement("common-input")
 export class CommonInputElement extends LitElement {
   static override styles = [
     baseStyles,
@@ -82,12 +80,22 @@ export class CommonInputElement extends LitElement {
     `,
   ];
 
-  @property({ type: String })
-  accessor value = "";
-  @property({ type: String })
-  accessor placeholder = "";
-  @property({ type: String })
-  accessor appearance = "default";
+  static override properties = {
+    value: { type: String },
+    placeholder: { type: String },
+    appearance: { type: String },
+  };
+
+  declare value: string;
+  declare placeholder: string;
+  declare appearance: string;
+
+  constructor() {
+    super();
+    this.value = "";
+    this.placeholder = "";
+    this.appearance = "default";
+  }
 
   override render() {
     const oninput = (event: Event) => {
@@ -128,3 +136,4 @@ export class CommonInputElement extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("common-input", CommonInputElement);

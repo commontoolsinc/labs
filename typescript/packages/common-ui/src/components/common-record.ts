@@ -1,7 +1,5 @@
 import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
 
-@customElement("common-record")
 export class CommonRecordElement extends LitElement {
   static override styles = css`
     :host {
@@ -30,3 +28,4 @@ export class CommonRecordElement extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("common-record", CommonRecordElement);

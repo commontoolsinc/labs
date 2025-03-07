@@ -7135,6 +7135,7 @@
     "dependencies": [
       "jsr:@astral/astral@*",
       "jsr:@cmd-johnson/oauth2-client@2",
+      "jsr:@luca/esbuild-deno-loader@*",
       "jsr:@std/assert@1",
       "jsr:@std/async@1",
       "jsr:@std/cli@1",
@@ -7154,6 +7155,7 @@
       "npm:@vercel/otel@^1.10.1",
       "npm:@web/test-runner@*",
       "npm:ai@^4.1.5",
+      "npm:esbuild@*",
       "npm:hono@^4.7.0",
       "npm:lit@^3.2.1",
       "npm:merkle-reference@^2.0.1",
@@ -7205,12 +7207,6 @@
             "npm:vitest@^2.1.1"
           ]
         }
-      },
-      "deno-web-test": {
-        "dependencies": [
-          "jsr:@luca/esbuild-deno-loader@*",
-          "npm:esbuild@*"
-        ]
       },
       "jumble": {
         "dependencies": [

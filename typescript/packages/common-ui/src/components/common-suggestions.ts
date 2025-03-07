@@ -1,5 +1,4 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import {
   readSuggestion,
@@ -17,7 +16,6 @@ export class SelectSuggestionEvent extends Event {
   }
 }
 
-@customElement("common-suggestions")
 export class CommonSuggestionsElement extends LitElement {
   static override styles = css`
     :host {
@@ -35,14 +33,25 @@ export class CommonSuggestionsElement extends LitElement {
     }
   `;
 
-  @property({ type: Array })
-  accessor suggestions: Array<Suggestion> = [];
-  @property({ type: Number })
-  accessor limit = 3;
-  @property({ type: String })
-  accessor gap = "sm";
-  @property({ type: String })
-  accessor pad = "none";
+  static override properties = {
+    suggestions: { type: Array },
+    limit: { type: Number },
+    gap: { type: String },
+    pad: { type: String },
+  };
+
+  declare suggestions: Array<Suggestion>;
+  declare limit: number;
+  declare gap: string;
+  declare pad: string;
+
+  constructor() {
+    super();
+    this.suggestions = [];
+    this.limit = 3;
+    this.gap = "sm";
+    this.pad = "none";
+  }
 
   override render() {
     const onclick = (event: Event) => {
@@ -63,3 +72,7 @@ export class CommonSuggestionsElement extends LitElement {
     `;
   }
 }
+globalThis.customElements.define(
+  "common-suggestions",
+  CommonSuggestionsElement,
+);

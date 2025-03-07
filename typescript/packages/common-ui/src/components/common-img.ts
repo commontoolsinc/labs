@@ -1,7 +1,5 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
 
-@customElement("common-img")
 export class CommonImgElement extends LitElement {
   static override styles = css`
     :host {
@@ -26,20 +24,31 @@ export class CommonImgElement extends LitElement {
     }
   `;
 
-  @property({ type: String })
-  accessor src = "";
-  @property({ type: String })
-  accessor alt = "";
-  @state()
-  accessor isLoaded = false;
+  static override properties = {
+    src: { type: String },
+    alt: { type: String },
+    _isLoaded: { state: true },
+  };
+
+  declare src: string;
+  declare alt: string;
+  declare _isLoaded: boolean;
+
+  constructor() {
+    super();
+    this.src = "";
+    this.alt = "";
+    this._isLoaded = false;
+  }
 
   override render() {
-    const onload = () => (this.isLoaded = true);
+    const onload = () => (this._isLoaded = true);
 
     return html`
       <img @load=${onload} class="${
-      this.isLoaded ? "img loaded" : "img"
+      this._isLoaded ? "img loaded" : "img"
     }" src="${this.src}" />
     `;
   }
 }
+globalThis.customElements.define("common-img", CommonImgElement);

@@ -1,8 +1,6 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 
-@customElement("common-datatable")
 export class CommonDatatableElement extends LitElement {
   static override styles = css`
     :host {
@@ -30,11 +28,19 @@ export class CommonDatatableElement extends LitElement {
     }
   `;
 
-  @property({ type: Array })
-  accessor cols: Array<string> = [];
+  static override properties = {
+    cols: { type: Array },
+    rows: { type: Array },
+  };
 
-  @property({ type: Array })
-  accessor rows: Array<Record<string, string>> = [];
+  declare cols: Array<string>;
+  declare rows: Array<Record<string, string>>;
+
+  constructor() {
+    super();
+    this.cols = [];
+    this.rows = [];
+  }
 
   override render() {
     const rows = repeat(this.rows, (row) => {
@@ -55,3 +61,4 @@ export class CommonDatatableElement extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("common-datatable", CommonDatatableElement);

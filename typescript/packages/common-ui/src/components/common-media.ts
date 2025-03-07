@@ -1,8 +1,6 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
-@customElement("common-media")
 export class CommonMediaElement extends LitElement {
   static override styles = [
     baseStyles,
@@ -103,10 +101,19 @@ export class CommonMediaElement extends LitElement {
     `,
   ];
 
-  @property({ type: String })
-  accessor src = "";
-  @property({ type: String })
-  accessor thumbsize = "md";
+  static override properties = {
+    src: { type: String },
+    thumbsize: { type: String },
+  };
+
+  declare src: string;
+  declare thumbsize: string;
+
+  constructor() {
+    super();
+    this.src = "";
+    this.thumbsize = "md";
+  }
 
   override render() {
     return html`
@@ -120,3 +127,4 @@ export class CommonMediaElement extends LitElement {
     </article>`;
   }
 }
+globalThis.customElements.define("common-media", CommonMediaElement);

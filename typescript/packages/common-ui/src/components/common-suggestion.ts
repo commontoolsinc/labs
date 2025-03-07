@@ -1,9 +1,7 @@
 import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 import { Identifiable } from "./identifiable.ts";
 
-@customElement("common-suggestion")
 export class CommonSuggestionElement extends LitElement {
   static override styles = [
     baseStyles,
@@ -40,6 +38,7 @@ export class CommonSuggestionElement extends LitElement {
     `;
   }
 }
+globalThis.customElements.define("common-suggestion", CommonSuggestionElement);
 
 /** Read suggestion element to Suggestion record */
 export const readSuggestion = (element: any): Suggestion | null => {
