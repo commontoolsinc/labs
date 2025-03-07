@@ -22,9 +22,6 @@ export async function assertAndSnapshot(
   page?: Page | void,
   snapshotName?: string,
 ): Promise<void> {
-  if (!condition) {
-    throw new Error(message);
-  }
   assert(condition, message);
 
   if (RECORD_SNAPSHOTS && page && snapshotName) {
@@ -32,11 +29,9 @@ export async function assertAndSnapshot(
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const filePrefix = `${snapshotName}_${timestamp}`;
 
-    // Take screenshot
     const screenshot = await page.screenshot();
     Deno.writeFileSync(`${SNAPSHOTS_DIR}/${filePrefix}.png`, screenshot);
 
-    // Snapshot HTML
     const html = await page.content();
     Deno.writeTextFileSync(`${SNAPSHOTS_DIR}/${filePrefix}.html`, html);
 

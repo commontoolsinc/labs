@@ -1,5 +1,4 @@
 import { Browser, launch, Page } from "@astral/astral";
-import { assert } from "@std/assert";
 import {
   afterAll,
   afterEach,
@@ -16,16 +15,12 @@ import {
   sleep,
   waitForSelectorWithText,
 } from "./utils.ts";
-import { join } from "@std/path";
 
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
   "http://localhost:8000/";
 const FRONTEND_URL = Deno.env.get("FRONTEND_URL") ?? "http://localhost:5173/";
 const HEADLESS = true;
-const RECORD_SNAPSHOTS = false;
 
-const SNAPSHOTS_DIR = join(Deno.cwd(), "test_snapshots");
-console.log("SNAPSHOTS_DIR=", SNAPSHOTS_DIR);
 console.log(`TOOLSHED_API_URL=${TOOLSHED_API_URL}`);
 console.log(`FRONTEND_URL=${FRONTEND_URL}`);
 
