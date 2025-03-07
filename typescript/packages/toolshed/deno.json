@@ -1,7 +1,7 @@
 {
   "tasks": {
-    "dev": "deno run -A --watch --env-file=.env index.ts",
-    "production": "deno run -A --env-file=.env index.ts",
+    "dev": "deno run --unstable-otel -A --watch --env-file=.env index.ts",
+    "production": "deno run --unstable-otel -A --env-file=.env index.ts",
     "test": "deno test -A --env-file=.env.test"
   },
   "fmt": {

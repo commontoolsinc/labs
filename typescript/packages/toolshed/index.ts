@@ -1,7 +1,6 @@
 import app from "@/app.ts";
 import env from "@/env.ts";
 import * as Sentry from "@sentry/deno";
-
 const port = env.PORT;
 
 console.log(`Server is running on port http://localhost:${port}`);
