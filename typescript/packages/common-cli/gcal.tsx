@@ -132,7 +132,7 @@ const calendarUpdater = handler<
         existingEventIds,
     ).then((result) => {
         // Filter out any duplicates by ID
-        const newEvents = result.items.filter((event) => !existingEventIds.has(event.id));
+        const newEvents = result.items.filter((event: CalendarEvent) => !existingEventIds.has(event.id));
         if (newEvents.length > 0) {
             console.log(`Adding ${newEvents.length} new events`);
             state.events.push(...newEvents);
