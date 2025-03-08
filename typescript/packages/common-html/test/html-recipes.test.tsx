@@ -102,11 +102,10 @@ describe("recipes with HTML", () => {
     const cell = result.asCell<{ [UI]: VNode }>().key(UI);
     render(parent, cell.get());
     
-    // Check for expected elements
-    assert.equal(parent.querySelector("h1")?.textContent, "test");
-    assert.equal(parent.querySelectorAll("li").length, 2);
-    assert.equal(parent.querySelector("li:first-child")?.textContent, "item 1");
-    assert.equal(parent.querySelector("li:last-child")?.textContent, "item 2");
+    assert.equal(
+      parent.innerHTML,
+      "<div><h1>test</h1><ul><li>item 1</li><li>item 2</li></ul></div>",
+    );
   });
 
   it("works with paths on nested recipes", async () => {
@@ -201,14 +200,9 @@ describe("recipes with HTML", () => {
     const cell = result.asCell([UI]);
     render(parent, cell.get());
 
-    // Check structure
-    const ulElements = parent.querySelectorAll("ul");
-    assert.equal(ulElements.length, 3);
-    
-    // Check content of first list
-    const firstListItems = ulElements[0].querySelectorAll("li");
-    assert.equal(firstListItems.length, 2);
-    assert.equal(firstListItems[0].textContent, "test: 123");
-    assert.equal(firstListItems[1].textContent, "ok: false");
+    assert.equal(
+      parent.innerHTML,
+      "<div><ul><li>test: 123</li><li>ok: false</li></ul><ul><li>test: 345</li><li>another: xxx</li></ul><ul><li>test: 456</li><li>ok: true</li></ul></div>",
+    );
   });
 });
