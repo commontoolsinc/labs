@@ -2,6 +2,13 @@
   "name": "@commontools/html",
   "exports": "./src/index.ts",
   "tasks": {
-    "test": "deno test"
+    "test": "deno test --allow-env"
+  },
+  "compilerOptions": {
+    "jsx": "react",
+    "jsxFactory": "h"
+  },
+  "imports": {
+    "jsdom": "npm:jsdom"
   }
 }
