@@ -30,9 +30,9 @@ export function ShellHeader(
   const colorSpace = getSpace(replicaName ?? "");
 
   const [style, setStyle] = useNamedCell(
+    colorSpace,
     colorCause,
     colorSchema,
-    colorSpace,
   );
 
   const handleHeaderClick = (e: React.MouseEvent) => {

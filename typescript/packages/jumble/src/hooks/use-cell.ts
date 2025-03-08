@@ -9,19 +9,19 @@ import {
 } from "@commontools/runner";
 
 export function useNamedCell<S extends JSONSchema>(
+  space: Space,
   cause: any,
   schema: S,
-  space: Space,
 ): [Schema<S>, (newValue: Schema<S>) => void];
 export function useNamedCell<T>(
+  space: Space,
   cause: any,
   schema: JSONSchema,
-  space: Space,
 ): [T, (newValue: T) => void];
 export function useNamedCell<T>(
+  space: Space,
   cause: any,
   schema: JSONSchema,
-  space: Space,
 ) {
   const cell = getCell<T>(space, cause, schema);
   storage.syncCell(cell, true);
