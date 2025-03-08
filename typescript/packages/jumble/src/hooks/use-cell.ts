@@ -1,36 +1,30 @@
 import { useEffect, useState } from "react";
-import { JSONSchema } from "@commontools/builder";
+import { JSONSchema, Schema } from "@commontools/builder";
 import {
   Cell,
-  type DocLink,
   effect,
-  getDoc,
-  getEntityId,
-  idle,
+  getCell,
   type Space,
   storage,
 } from "@commontools/runner";
-import { Identity } from "@commontools/identity";
+
+export function useNamedCell<S extends JSONSchema>(
+  cause: any,
+  schema: S,
+  space: Space,
+): [Schema<S>, (newValue: Schema<S>) => void];
 export function useNamedCell<T>(
-  defaultValue: T,
+  cause: any,
+  schema: JSONSchema,
+  space: Space,
+): [T, (newValue: T) => void];
+export function useNamedCell<T>(
   cause: any,
   schema: JSONSchema,
   space: Space,
 ) {
-  const doc = getDoc<T>(defaultValue, cause, space);
-  const cell = doc.asCell([], undefined, schema);
-
-  useEffect(() => {
-    const syncCell = async () => {
-      try {
-        await storage.syncCell(cell);
-        await idle();
-      } catch (error) {
-        console.error("Error syncing cell:", error);
-      }
-    };
-    syncCell();
-  }, [cell]);
+  const cell = getCell<T>(space, cause, schema);
+  storage.syncCell(cell, true);
 
   const [value, setValue] = useState<T>(cell.get());
 
@@ -40,7 +34,7 @@ export function useNamedCell<T>(
     });
 
     return cleanup;
-  }, [cause, schema]);
+  }, [space, cause]);
 
   return [value, (newValue: T) => {
     cell.set(newValue);

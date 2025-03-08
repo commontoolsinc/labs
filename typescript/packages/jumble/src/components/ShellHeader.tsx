@@ -11,31 +11,44 @@ type ShellHeaderProps = {
   charmId?: string;
 };
 
+const colorCause = { shell: "header v0" };
+const colorSchema = {
+  type: "object" as const,
+  properties: {
+    color: {
+      type: "string" as const,
+      default: "transparent",
+    },
+  },
+  required: ["color"],
+} as const;
+
 export function ShellHeader(
   { replicaName, charmId }: ShellHeaderProps,
 ) {
   const { isSyncing, lastSyncTime } = useSyncedStatus();
   const colorSpace = getSpace(replicaName ?? "");
-  const colorCause = { color: "schema" };
-  const colorSchema = {
-    type: "object" as const,
-    properties: {
-      color: {
-        type: "string" as const,
-      },
-    },
-  };
 
-  const [style, setStyle] = useNamedCell<{ color: string }>(
-    { color: "transparent" },
+  const [style, setStyle] = useNamedCell(
     colorCause,
     colorSchema,
     colorSpace,
   );
 
+  const handleHeaderClick = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) {
+      const randomColor = `#${Math.floor(Math.random()*16777215).toString(16)}`;
+      setStyle({ color: randomColor });
+    }
+  };
 
   return (
-    <header className="flex bg-gray-50 items-center justify-between border-b-2 p-2" style={{ backgroundColor: style?.color }}>
+    <header 
+      className="flex bg-gray-50 items-center justify-between border-b-2 p-2" 
+      style={{ backgroundColor: style?.color }}
+      onClick={handleHeaderClick}
+      title="Click empty space to change header color"
+    >
       <div className="header-start flex items-center gap-2">
         <NavLink
           to={replicaName ? `/${replicaName}` : "/"}
@@ -52,16 +65,6 @@ export function ShellHeader(
       </div>
       <div className="header-end flex items-center gap-2">
         <div className="relative group">
-        <div 
-            onClick={() => {
-              const randomColor = `#${Math.floor(Math.random()*16777215).toString(16)}`;
-              setStyle({ color: randomColor });
-            }}
-            className="w-8 h-8 rounded-full bg-white shadow-md flex items-center justify-center cursor-pointer hover:shadow-lg transition-shadow duration-200"
-            title="Change header color"
-          >
-            🎨
-          </div>
           <div
             className={`w-3 h-3 rounded-full ${
               isSyncing ? "bg-yellow-400 animate-pulse" : "bg-green-500 "
