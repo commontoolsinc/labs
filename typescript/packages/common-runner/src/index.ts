@@ -12,6 +12,7 @@ export type { QueryResult } from "./query-result-proxy.ts";
 export type { ReactivityLog } from "./scheduler.ts";
 export { getDoc, isDoc, isDocLink } from "./doc.ts";
 export {
+  getCell,
   getCellFromDocLink,
   getCellFromEntityId,
   getImmutableCell,
