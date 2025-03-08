@@ -3,19 +3,52 @@ import ShapeLogo from "@/assets/ShapeLogo.tsx";
 import { NavPath } from "@/components/NavPath.tsx";
 import { User } from "@/components/User.tsx";
 import { useSyncedStatus } from "@/hooks/use-synced-status.ts";
+import { useNamedCell } from "@/hooks/use-cell.ts";
+import { getSpace } from "@commontools/runner";
 
 type ShellHeaderProps = {
   replicaName?: string;
   charmId?: string;
 };
 
+const colorCause = { shell: "header v0" };
+const colorSchema = {
+  type: "object" as const,
+  properties: {
+    color: {
+      type: "string" as const,
+      default: "transparent",
+    },
+  },
+  required: ["color"],
+} as const;
+
 export function ShellHeader(
   { replicaName, charmId }: ShellHeaderProps,
 ) {
   const { isSyncing, lastSyncTime } = useSyncedStatus();
+  const colorSpace = getSpace(replicaName ?? "");
+
+  const [style, setStyle] = useNamedCell(
+    colorSpace,
+    colorCause,
+    colorSchema,
+  );
+
+  const handleHeaderClick = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) {
+      const randomColor = `#${Math.floor(Math.random()*16777215).toString(16)}`;
+      setStyle({ color: randomColor });
+    }
+  };
 
   return (
-    <header className="flex bg-gray-50 items-center justify-between border-b-2 p-2">
+    <header 
+      className="flex bg-gray-50 items-center justify-between border-b-2 p-2" 
+      style={{ backgroundColor: style?.color }}
+      onClick={handleHeaderClick}
+      title="Click empty space to change header color"
+    >
       <div className="header-start flex items-center gap-2">
         <NavLink
           to={replicaName ? `/${replicaName}` : "/"}
