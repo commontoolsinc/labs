@@ -97,7 +97,8 @@ describe("recipes with HTML", () => {
       items: { title: string; done: boolean }[];
     }>("todo list", ({ title }) => {
       const { [UI]: summaryUI } = recipe<
-        { title: { name: string } }
+        { title: { name: string } },
+        { [UI]: VNode }
       >(
         "summary",
         ({ title }) => {
@@ -124,8 +125,7 @@ describe("recipes with HTML", () => {
     const cell = result.asCell<{ [UI]: VNode }>().key(UI);
     render(parent, cell.get());
 
-    // Test the nested content
-    assert.equal(parent.textContent, "test");
+    assert.equal(parent.innerHTML, "<div><div>test</div></div>");
   });
 
   it("works with str", async () => {
