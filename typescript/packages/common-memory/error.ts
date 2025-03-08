@@ -5,6 +5,7 @@ import type {
   ConnectionError,
   Fact,
   QueryError,
+  RateLimitError,
   Selector,
   SystemError,
   ToJSON,
@@ -13,6 +14,16 @@ import type {
 } from "./interface.ts";
 import { MemorySpace } from "./interface.ts";
 import { refer } from "merkle-reference";
+
+/**
+ * @param {number} wait Number of milliseconds to wait for
+ */
+export const backoff = (wait: number, message?: string) =>
+  new TheRateLimitError(
+    message ??
+      `Rate limit exceeded. Please wait at least ${wait}ms between requests.`,
+    wait,
+  );
 
 export const unauthorized = (
   message: string,
@@ -159,6 +170,22 @@ export class TheAuthorizationError extends Error implements AuthorizationError {
       message: this.message,
       stack: this.stack,
       cause: this.cause,
+    };
+  }
+}
+
+class TheRateLimitError extends Error implements RateLimitError {
+  override name = "RateLimitError" as const;
+  constructor(message: string, public wait: number) {
+    super(message);
+  }
+
+  toJSON(): RateLimitError {
+    return {
+      name: this.name,
+      message: this.message,
+      stack: this.stack,
+      wait: this.wait,
     };
   }
 }

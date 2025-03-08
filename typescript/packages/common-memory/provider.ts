@@ -20,6 +20,7 @@ import type {
   Query,
   QueryError,
   QueryResult,
+  RateLimitingOptions,
   Reference,
   Result,
   Selection,
@@ -29,7 +30,7 @@ import type {
   UCAN,
 } from "./interface.ts";
 import * as Subscription from "./subscription.ts";
-
+import { backoff } from "./error.ts";
 export * from "./interface.ts";
 export * from "./util.ts";
 export * as Error from "./error.ts";
@@ -38,16 +39,21 @@ export * as Memory from "./memory.ts";
 export * as Subscription from "./subscription.ts";
 import { refer } from "./reference.ts";
 import * as Access from "./access.ts";
+import * as Settings from "./settings.ts";
+
+export interface Options extends Memory.Options {
+  rateLimiting?: Partial<RateLimitingOptions>;
+}
 
 export const open = async (
-  options: Memory.Options,
+  options: Options,
 ): AsyncResult<Provider<Protocol>, ConnectionError> => {
   const result = await Memory.open(options);
   if (result.error) {
     return result;
   }
 
-  return { ok: new MemoryProvider(result.ok) };
+  return { ok: new MemoryProvider(result.ok, options.rateLimiting) };
 };
 
 export interface Provider<Protocol extends Proto> {
@@ -72,14 +78,23 @@ class MemoryProvider<
 > implements Provider<MemoryProtocol> {
   sessions: Set<ProviderSession<MemoryProtocol>> = new Set();
   #localSession: MemoryProviderSession<Space, MemoryProtocol> | null = null;
-  constructor(public memory: MemorySession) {}
+
+  constructor(
+    public memory: MemorySession,
+    public rateLimitingOptions: Partial<RateLimitingOptions> = {},
+  ) {
+  }
 
   invoke<Ability>(
     ucan: UCAN<ConsumerInvocationFor<Ability, MemoryProtocol>>,
   ): Await<ConsumerResultFor<Ability, MemoryProtocol>> {
     let session = this.#localSession;
     if (!session) {
-      session = new MemoryProviderSession(this.memory, null);
+      session = new MemoryProviderSession(
+        this.memory,
+        null,
+        this.rateLimitingOptions,
+      );
     }
 
     return session.invoke(
@@ -91,7 +106,11 @@ class MemoryProvider<
     return fetch(this, request);
   }
   session(): ProviderSession<MemoryProtocol> {
-    const session = new MemoryProviderSession(this.memory, this.sessions);
+    const session = new MemoryProviderSession(
+      this.memory,
+      this.sessions,
+      this.rateLimitingOptions,
+    );
     this.sessions.add(session);
     return session;
   }
@@ -119,10 +138,29 @@ class MemoryProviderSession<
 
   channels: Map<InvocationURL<Reference<Subscribe>>, Set<string>> = new Map();
 
+  // Rate limiting properties
+  lastRequestTime: number = 0;
+  baseThreshold: number;
+  requestLimit: number;
+  backoffFactor: number;
+  maxDebounceCount: number;
+  debounceCount: number = 0;
+
   constructor(
     public memory: MemorySession,
     public sessions: null | Set<ProviderSession<MemoryProtocol>>,
+    rateLimitingOptions?: Partial<RateLimitingOptions>,
   ) {
+    // Use provided options or defaults from settings
+    this.baseThreshold = rateLimitingOptions?.baseThreshold ??
+      Settings.rateLimiting.baseThreshold;
+    this.requestLimit = rateLimitingOptions?.requestLimit ??
+      Settings.rateLimiting.requestLimit;
+    this.backoffFactor = rateLimitingOptions?.backoffFactor ??
+      Settings.rateLimiting.backoffFactor;
+    this.maxDebounceCount = rateLimitingOptions?.maxDebounceCount ??
+      Settings.rateLimiting.maxDebounceCount;
+
     this.readable = new ReadableStream<ProviderCommand<MemoryProtocol>>({
       start: (controller) => this.open(controller),
       cancel: () => this.cancel(),
@@ -131,7 +169,7 @@ class MemoryProviderSession<
       UCAN<ConsumerCommandInvocation<MemoryProtocol>>
     >({
       write: async (command) => {
-        await this.invoke(command as UCAN<ConsumerCommandInvocation<Protocol>>);
+        await this.processWithRateLimit(command);
       },
       abort: async () => {
         await this.close();
@@ -169,6 +207,58 @@ class MemoryProviderSession<
     this.controller = undefined;
     this.sessions?.delete(this);
     this.sessions = null;
+  }
+
+  /**
+   * Process a command with rate limiting.
+   * Rejects requests that come too quickly with an error,
+   * using same logic as storage.ts for calculating backoff.
+   */
+  async processWithRateLimit(
+    command: UCAN<ConsumerCommandInvocation<MemoryProtocol>>,
+  ): Promise<void> {
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+
+    // Calculate the dynamic threshold based on debounce count
+    // First N requests have base threshold, then exponential increase
+    const exp = Math.max(0, this.debounceCount - this.requestLimit) ** 2;
+    // Randomness here and in storage.ts are unlikely to align 🫣
+    const dynamicBackoff = this.backoffFactor * exp * (1 + Math.random());
+    const currentThreshold = this.baseThreshold + dynamicBackoff;
+
+    // Check if the request is coming too quickly
+    if (timeSinceLastRequest < currentThreshold) {
+      // Increase debounce count (capped at configured maximum)
+      if (this.debounceCount < this.maxDebounceCount) this.debounceCount++;
+
+      // Recalculate with new debounce count for the error message
+      const newExp = Math.max(0, this.debounceCount - this.requestLimit) ** 2;
+      const newBackoff = this.backoffFactor * newExp * (1 + Math.random());
+      const suggestedWait = Math.round(this.baseThreshold + newBackoff);
+
+      // Return a rate limit error through the command pipeline
+      const invocation = command.invocation;
+      const of = `job:${refer(invocation)}` as InvocationURL<
+        Reference<ConsumerCommandInvocation<Protocol>>
+      >;
+
+      this.perform({
+        the: "task/return",
+        of,
+        is: {
+          error: backoff(suggestedWait),
+        },
+      });
+      return;
+    } else {
+      // Reset counter if we're not rate limiting
+      this.debounceCount = 0;
+    }
+
+    // Update the last request time and process the command
+    this.lastRequestTime = now;
+    await this.invoke(command as UCAN<ConsumerCommandInvocation<Protocol>>);
   }
   async invoke(
     { invocation, authorization }: UCAN<ConsumerCommandInvocation<Protocol>>,

@@ -32,11 +32,17 @@ const test = (
   const unit = async () => {
     const open = await Provider.open({
       store: url,
+      rateLimiting: {
+        baseThreshold: 0,
+      },
     });
 
     assert(open.ok, "Open create repository if it does not exist");
     const provider = open.ok;
     const session = provider.session();
+
+    // Disable rate limiting for testing
+    (session as any).rateLimitThreshold = 0;
 
     try {
       await run(session);
