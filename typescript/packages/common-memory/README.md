@@ -213,18 +213,8 @@ title: Database Schema
 ---
 erDiagram
 datum {
-  this    TEXT PK "Merkle reference for this JSON"
+  this    TEXT PK "Merkle reference for this JSON or 'undefined'"
   source  JSON    "Source for this JSON"
-}
-
-maybe_datum {
-  this    U
-  source  U
-}
-
-null_datum {
-  this   NULL PK  "Represents undefined"
-  source NULL     "Null is used to represent undefined JSON"
 }
 
 fact {
@@ -243,9 +233,7 @@ memory {
 
 
 
-fact }|--|| maybe_datum: is-this
+fact }|--|| datum: is-this
 fact ||--|| fact: cause-this
 memory ||--|| fact: fact-this
-datum ||--|| maybe_datum: union
-null_datum ||--|| maybe_datum: union
 ```
