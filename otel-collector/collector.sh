@@ -9,11 +9,26 @@ if [ -z "$HONEYCOMB_API_KEY" ]; then
   exit 1
 fi
 
-# Check if HONEYCOMB_DATASET is set
-if [ -z "$HONEYCOMB_DATASET" ]; then
-  echo "Error: HONEYCOMB_DATASET environment variable is not set"
-  echo "Please set it with: export HONEYCOMB_DATASET=your_dataset"
-  exit 1
+# HONEYCOMB_DATASET is not required anymore
+# Honeycomb API can infer the dataset from the API key
+
+# Check Phoenix environment variables
+if [ -z "$CTTS_AI_LLM_PHOENIX_URL" ]; then
+  echo "Warning: CTTS_AI_LLM_PHOENIX_URL is not set."
+  echo "AI spans will not be routed to Phoenix."
+  echo "Set it with: export CTTS_AI_LLM_PHOENIX_URL=your_phoenix_url"
+fi
+
+if [ -z "$CTTS_AI_LLM_PHOENIX_API_KEY" ]; then
+  echo "Warning: CTTS_AI_LLM_PHOENIX_API_KEY is not set."
+  echo "AI spans will not be routed to Phoenix."
+  echo "Set it with: export CTTS_AI_LLM_PHOENIX_API_KEY=your_api_key"
+fi
+
+if [ -z "$CTTS_AI_LLM_PHOENIX_PROJECT" ]; then
+  echo "Warning: CTTS_AI_LLM_PHOENIX_PROJECT is not set."
+  echo "AI spans will not be routed to Phoenix."
+  echo "Set it with: export CTTS_AI_LLM_PHOENIX_PROJECT=your_project"
 fi
 
 function start_collector {

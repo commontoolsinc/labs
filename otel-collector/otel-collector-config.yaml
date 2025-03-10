@@ -10,43 +10,103 @@ processors:
   batch:
     timeout: 1s
     send_batch_size: 1000
-    
-  memory_sampler:
-    sampling_percentage: 10
-    attribute_source: span
-    sampling_attributes:
-      - key: service.name
-        values:
-          - memory
-        value_match_type: regexp
 
-  tail_sampling:
-    decision_wait: 10s
-    num_traces: 100
-    expected_new_traces_per_sec: 10
-    policies:
-      - name: memory-sampling-policy
-        type: string_attribute
-        string_attribute:
-          key: service.name
-          values: ["memory.*"]
-          enabled_regex_matching: true
-          inverted_matching: false
-        sampling_percentage: 5
+  # Filter for AI/LLM related spans
+  filter/ai:
+    spans:
+      include:
+        match_type: regexp
+        attributes:
+          - key: service.name
+            value: "ai.*"
+          - key: span.name
+            value: "(llm|ai|prompt|completion|embedding).*"
+
+  # Filter for non-AI spans
+  filter/non_ai:
+    spans:
+      exclude:
+        match_type: regexp
+        attributes:
+          - key: service.name
+            value: "ai.*"
+          - key: span.name
+            value: "(llm|ai|prompt|completion|embedding).*"
+
+  # More practical sampling approach - temporarily set to 100% for testing
+  probabilistic_sampler:
+    sampling_percentage: 100 # 100% sampling for initial testing
+    hash_seed: 42
+    attribute_source: "traceID"
+
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+
+  # Filter to include memory-related spans by span name instead of service name
+  filter/memory_spans:
+    spans:
+      include:
+        match_type: regexp
+        attributes:
+          - key: name # This targets the span name, not an attribute
+            value: "memory.*"
 
 exporters:
-  logging:
+  # Replace deprecated logging exporter with debug exporter
+  debug:
     verbosity: detailed
-    
-  otlp:
+    sampling_initial: 1
+    sampling_thereafter: 1
+
+  otlp/honeycomb:
     endpoint: "api.honeycomb.io:443"
     headers:
       x-honeycomb-team: "${env:HONEYCOMB_API_KEY}"
-      x-honeycomb-dataset: "${env:HONEYCOMB_DATASET}"
+      x-honeycomb-dataset: "toolshed" # Added explicit dataset name
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  otlp/phoenix:
+    endpoint: "phoenix.commontools.dev:443"
+    headers:
+      Authorization: "Bearer ${env:CTTS_AI_LLM_PHOENIX_API_KEY}"
+      Project: "${env:CTTS_AI_LLM_PHOENIX_PROJECT}"
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
 
 service:
+  telemetry:
+    logs:
+      level: "debug"
+    metrics:
+      level: "detailed"
+
+  extensions: []
+
   pipelines:
-    traces:
+    # Pipeline for all non-AI traces
+    traces/general:
       receivers: [otlp]
-      processors: [memory_sampler, batch]
-      exporters: [otlp, logging]
+      processors: [
+        filter/non_ai,
+        filter/memory_spans,
+        probabilistic_sampler,
+        batch,
+      ]
+      exporters: [otlp/honeycomb, debug]
+
+    # Pipeline for AI/LLM traces to Phoenix
+    traces/ai:
+      receivers: [otlp]
+      processors: [
+        filter/ai,
+        batch,
+      ]
+      exporters: [otlp/phoenix, debug]
