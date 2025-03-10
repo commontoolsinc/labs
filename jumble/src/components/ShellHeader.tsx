@@ -2,7 +2,7 @@ import { NavLink } from "react-router-dom";
 import ShapeLogo from "@/assets/ShapeLogo.tsx";
 import { NavPath } from "@/components/NavPath.tsx";
 import { User } from "@/components/User.tsx";
-import { useSyncedStatus } from "@/hooks/use-synced-status.ts";
+import { useSyncedStatus } from "@/contexts/SyncStatusContext.tsx";
 import { useNamedCell } from "@/hooks/use-cell.ts";
 import { getSpace } from "@commontools/runner";
 
@@ -43,8 +43,8 @@ export function ShellHeader(
   };
 
   return (
-    <header 
-      className="flex bg-gray-50 items-center justify-between border-b-2 p-2" 
+    <header
+      className="flex bg-gray-50 items-center justify-between border-b-2 p-2"
       style={{ backgroundColor: style?.color }}
       onClick={handleHeaderClick}
       title="Click empty space to change header color"

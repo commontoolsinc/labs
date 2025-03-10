@@ -11,7 +11,7 @@ import { render } from "@commontools/html";
 import { Cell } from "@commontools/runner";
 import ShapeLogo from "@/assets/ShapeLogo.tsx";
 import { MdOutlineStar } from "react-icons/md";
-import { useSyncedStatus } from "@/hooks/use-synced-status.ts";
+import { useSyncedStatus } from "@/contexts/SyncStatusContext.tsx";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
 
 export interface CommonDataEvent extends CustomEvent {
