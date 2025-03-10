@@ -22,6 +22,238 @@ import { type Schema } from "@commontools/builder";
 import { Space } from "./space.ts";
 
 /**
+ * Check if value is a simple cell.
+ *
+ * @param {any} value - The value to check.
+ * @returns {boolean}
+ */
+export function isCell(value: any): value is Cell<any> {
+  return typeof value === "object" && value !== null &&
+    value[isCellMarker] === true;
+}
+
+const isCellMarker = Symbol("isCell");
+
+export function isStream(value: any): value is Stream<any> {
+  return typeof value === "object" && value !== null &&
+    value[isStreamMarker] === true;
+}
+
+const isStreamMarker = Symbol("isStream");
+
+/**
+* HACKS
+*/
+
+class StreamImpl<T> implements Stream<T> {
+  private readonly _doc: DocImpl<any>;
+  private readonly _path: PropertyKey[];
+  private readonly _listeners = new Set<(event: T) => Cancel | undefined>();
+  private _cleanup?: Cancel;
+
+  constructor(doc: DocImpl<any>, path: PropertyKey[]) {
+    this._doc = doc;
+    this._path = path;
+  }
+
+  send(event: T): void {
+    queueEvent({ cell: this._doc, path: this._path }, event);
+
+    this._cleanup?.();
+    const [cancel, addCancel] = useCancelGroup();
+    this._cleanup = cancel;
+
+    this._listeners.forEach((callback) => addCancel(callback(event)));
+  }
+
+  sink(callback: (value: T) => Cancel | undefined): Cancel {
+    this._listeners.add(callback);
+    return () => this._listeners.delete(callback);
+  }
+
+  [isStreamMarker] = true as const;
+}
+
+class CellImpl<T> implements Cell<T> {
+  // Private fields to store cell state
+  private readonly _doc: DocImpl<any>;
+  private readonly _path: PropertyKey[];
+  private readonly _log?: ReactivityLog;
+  private readonly _schema?: JSONSchema;
+  private readonly _rootSchema?: JSONSchema;
+
+  constructor(doc: DocImpl<any>, path: PropertyKey[] = [], log?: ReactivityLog,
+    schema?: JSONSchema, rootSchema: JSONSchema | undefined = schema) {
+    this._doc = doc;
+    this._path = path;
+    this._log = log;
+    this._schema = schema;
+    this._rootSchema = rootSchema;
+  }
+
+  get(): T {
+    return validateAndTransform(this._doc, this._path, this._schema, this._log, this._rootSchema);
+  }
+
+  set(newValue: T): void {
+    const ref = resolvePath(this._doc, this._path, this._log);
+    if (prepareForSaving(
+      ref.cell,
+      newValue,
+      ref.cell.getAtPath(ref.path),
+      this._log,
+      {
+        parent: getTopFrame()?.cause,
+        doc: ref.cell,
+        path: ref.path,
+      }
+    )) {
+      ref.cell.setAtPath(ref.path, newValue, this._log);
+    }
+  }
+
+  send(newValue: T): void {
+    this.set(newValue);
+  }
+
+  update(values: Partial<T>): void {
+    if (typeof values !== "object" || values === null) {
+      throw new Error("Can't update with non-object value");
+    }
+    for (const [key, value] of Object.entries(values)) {
+      // Workaround for type checking, since T can be Cell<> and that's fine.
+      (this.key as any)(key).set(value);
+    }
+  }
+
+  push(value: any): void {
+    // Follow aliases and references, since we want to get to an assumed
+    // existing array.
+    const ref = resolveLinkToValue(this._doc, this._path, this._log);
+    const array = ref.cell.getAtPath(ref.path) ?? [];
+    if (!Array.isArray(array)) {
+      throw new Error("Can't push into non-array value");
+    }
+
+    // Every element pushed to the array should be it's own doc or link to
+    // one. So if it isn't already, make it one.
+    if (isCell(value)) {
+      value = value.getAsDocLink();
+    } else if (isDoc(value)) {
+      value = { cell: value, path: [] };
+    } else {
+      value = getDocLinkOrValue(value);
+      if (!isDocLink(value)) {
+        const cause = {
+          parent: this._doc.entityId,
+          path: this._path,
+          length: array.length,
+          // Context is the event id in event handlers, making this unique.
+          // TODO(seefeld): In this case it shouldn't depend on the length, maybe
+          // instead just call order in the current context.
+          context: getTopFrame()?.cause ?? "unknown",
+        };
+
+        value = { cell: getDoc<any>(value, cause, this._doc.space), path: [] };
+      }
+    }
+
+    ref.cell.setAtPath(ref.path, [...array, value], this._log);
+  }
+
+  equals(other: Cell<any>): boolean {
+    return JSON.stringify(this) === JSON.stringify(other);
+  }
+
+  sink(callback: (value: T) => Cancel | undefined): Cancel {
+    return subscribeToReferencedDocs(callback, this._doc, this._path, this._schema, this._rootSchema);
+  }
+
+  key<K extends T extends Cell<infer S> ? keyof S : keyof T>(
+    valueKey: K
+  ): Cell<T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]> {
+    const currentSchema = this._schema?.type === "object"
+      ? (this._schema.properties?.[valueKey as string] ??
+        (typeof this._schema.additionalProperties === "object"
+          ? this._schema.additionalProperties
+          : undefined))
+      : this._schema?.type === "array"
+        ? this._schema.items
+        : undefined;
+    return createCell(
+      this._doc,
+      [...this._path, valueKey],
+      this._log,
+      currentSchema,
+      this._rootSchema,
+    ) as Cell<T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]>;
+  }
+
+  setRaw(newValue: T): void {
+    const ref = resolvePath(this._doc, this._path, this._log);
+    ref.cell.setAtPath(ref.path, newValue, this._log);
+  }
+
+  asSchema<T>(newSchema?: JSONSchema): Cell<T>;
+  asSchema<S extends JSONSchema = JSONSchema>(newSchema: S): Cell<Schema<S>>;
+  asSchema(newSchema?: JSONSchema): Cell<any> {
+    return createCell(this._doc, this._path, this._log, newSchema, newSchema);
+  }
+
+  withLog(newLog: ReactivityLog): Cell<T> {
+    return createCell(this._doc, this._path, newLog, this._schema, this._rootSchema);
+  }
+
+  getAsQueryResult<Path extends PropertyKey[]>(
+    subPath: Path = [] as unknown as Path,
+    newLog?: ReactivityLog
+  ): QueryResult<DeepKeyLookup<T, Path>> {
+    return createQueryResultProxy(this._doc, [...this._path, ...subPath], newLog ?? this._log);
+  }
+
+  getAsDocLink(): DocLink {
+    return { cell: this._doc, path: this._path } satisfies DocLink;
+  }
+
+  getSourceCell<T>(schema?: JSONSchema): Cell<T & { [TYPE]: string | undefined } & ("argument" extends keyof T ? unknown : { argument: any })>;
+  getSourceCell<S extends JSONSchema = JSONSchema>(schema: S): Cell<Schema<S> & { [TYPE]: string | undefined } & ("argument" extends keyof Schema<S> ? unknown : { argument: any })>;
+  getSourceCell(schema?: JSONSchema): Cell<any> {
+    return this._doc.sourceCell?.asCell([], this._log, schema) as Cell<any>;
+  }
+
+  toJSON(): { cell: { "/": string } | undefined; path: PropertyKey[] } {
+    // TODO(seefeld): Should this include the schema, as cells are defiined by doclink & schema?
+    return { cell: this._doc.toJSON(), path: this._path } satisfies {
+      cell: { "/": string } | undefined;
+      path: PropertyKey[];
+    };
+  }
+
+  get value(): T {
+    return this.get();
+  }
+
+  get docLink(): DocLink {
+    return { cell: this._doc, path: this._path };
+  }
+
+  get entityId(): EntityId | undefined {
+    return getEntityId(this.getAsDocLink());
+  }
+
+  get schema(): JSONSchema | undefined {
+    return this._schema;
+  }
+
+  // Symbol properties
+  [isCellMarker] = true as const;
+
+  get copyTrap(): boolean {
+    throw new Error("Copy trap: Don't copy renderer cells. Create references instead.");
+  }
+}
+
+/**
  * This is the regular Cell interface, generated by DocImpl.asCell().
  *
  * This abstracts away the paths behind an interface that e.g. the UX code or
@@ -406,8 +638,8 @@ function createRegularCell<T>(
             ? schema.additionalProperties
             : undefined))
         : schema?.type === "array"
-        ? schema.items
-        : undefined;
+          ? schema.items
+          : undefined;
       return createCell(
         doc,
         [...path, valueKey],
@@ -499,23 +731,3 @@ function subscribeToReferencedDocs<T>(
     if (isCancel(cleanup)) cleanup();
   };
 }
-
-/**
- * Check if value is a simple cell.
- *
- * @param {any} value - The value to check.
- * @returns {boolean}
- */
-export function isCell(value: any): value is Cell<any> {
-  return typeof value === "object" && value !== null &&
-    value[isCellMarker] === true;
-}
-
-const isCellMarker = Symbol("isCell");
-
-export function isStream(value: any): value is Stream<any> {
-  return typeof value === "object" && value !== null &&
-    value[isStreamMarker] === true;
-}
-
-const isStreamMarker = Symbol("isStream");

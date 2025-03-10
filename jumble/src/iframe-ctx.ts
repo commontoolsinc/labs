@@ -111,10 +111,12 @@ export const setupIframe = () =>
       let previousValue: any;
 
       const action: Action = (log: ReactivityLog) => {
-        const data = isCell(context)
-          // get?.() because streams don't have a get, set undefined for those
-          ? context.withLog(log).key(key).get?.()
-          : context?.[key];
+      const data = key === "*"
+        ? (isCell(context) ? context.withLog(log).get() : context)
+        : (isCell(context)
+            // get?.() because streams don't have a get, set undefined for those
+            ? context.withLog(log).key(key).get?.()
+            : context?.[key]);
         const serialized = serializeProxyObjects(data);
         if (serialized !== previousValue) {
           previousValue = serialized;
