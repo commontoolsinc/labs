@@ -4,7 +4,7 @@ import { assert } from "@std/assert";
 import { ensureDirSync } from "@std/fs";
 import { join } from "@std/path";
 
-const COMMON_CLI_PATH = path.join(import.meta.dirname!, "../../common-cli");
+const COMMON_CLI_PATH = path.join(import.meta.dirname!, "../../cli");
 
 export const decode = (() => {
   const decoder = new TextDecoder();
