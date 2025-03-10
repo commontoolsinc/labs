@@ -30,7 +30,6 @@
     "emoji-picker-react": "npm:emoji-picker-react@^4.12.0",
     "json5": "npm:json5@^2.2.3",
     "react-dom": "npm:react-dom@^18.3.1",
-    "react-dom/client": "npm:react-dom@^18.3.1",
     "react-dropzone": "npm:react-dropzone@^14.3.5",
     "react-icons": "npm:react-icons@^5.4.0",
     "react-markdown": "npm:react-markdown@^9.0.3",
