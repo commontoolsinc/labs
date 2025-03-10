@@ -8,16 +8,16 @@ Radioactive experiments. Turn back! You will find no API stability here.
 
 There's a frontend, and a backend.
 
-All of the backend code lives within [Toolshed](./typescript/packages/toolshed), and is written in Deno2.
+All of the backend code lives within [Toolshed](./toolshed), and is written in Deno2.
 
-All of the frontend code lives within various packages, inside of `./typescript/packages/`.
+All of the frontend code lives within various packages, put together in [Jumble](./jumble/).
 
 ## Running the backend
 
-For a more detailed guide, see [./typescript/packages/toolshed/README.md](./typescript/packages/toolshed/README.md).
+For a more detailed guide, see [./toolshed/README.md](./toolshed/README.md).
 
 ```bash
-cd ./typescript/packages/toolshed
+cd ./toolshed
 deno task dev
 ```
 
@@ -25,12 +25,10 @@ By default the backend will run at http://localhost:8000
 
 ## Running the frontend
 
-For a more detailed guide, see the pnpm monorepo readme [./typescript/packages/README.md](./typescript/packages/README.md).
-
 Run the dev server
 
 ```bash
-cd ./typescript/packages/jumble
+cd ./jumble
 deno task dev
 ```
 

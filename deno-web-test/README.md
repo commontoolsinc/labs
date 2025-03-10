@@ -18,7 +18,7 @@ Deno.test("add", function () {
 ```
 
 Optionally add a `deno-web-test.config.ts` to the project root to configure the
-runner. See [config.ts](/typescript/packages/deno-web-test/config.ts) for all
+runner. See [config.ts](/deno-web-test/config.ts) for all
 options.
 
 ```ts

@@ -5,7 +5,7 @@ After=network.target
 
 [Service]
 User=jake
-WorkingDirectory=/home/jake/labs/typescript/packages/toolshed
+WorkingDirectory=/home/jake/labs/toolshed
 Environment="PORT=%I"
 ExecStart=/bin/sh -c "/home/jake/.deno/bin/deno task production"
 Restart=always
