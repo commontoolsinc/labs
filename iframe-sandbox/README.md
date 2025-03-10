@@ -38,14 +38,12 @@ element.context = {};
 
 The element has a `context` property that can be set to read, write, or
 subscribe to a key/value store from the iframe contents. See the inter-frame
-communications in
-[ipc.ts](/typescript/packages/common-iframe-sandbox/src/ipc.ts).
+communications in [ipc.ts](/common-iframe-sandbox/src/ipc.ts).
 
 To handle these messages, a global singleton handler is used that must be set
 via `setIframeContextHandler(handler)`. The handler is called with the `context`
 provided to the iframe, and the handler determines how values are stored and
-retrieved. See
-[context.ts](/typescript/packages/common-iframe-sandbox/src/context.ts).
+retrieved. See [context.ts](/common-iframe-sandbox/src/context.ts).
 
 ## How it works
 
@@ -53,10 +51,9 @@ retrieved. See
 iframe, using [CSP]. Due to
 [inconsistent HTMLIFrameElement.prototype.csp support](https://caniuse.com/mdn-html_elements_iframe_csp),
 we take the approach of each untrusted iframe running inside
-[another iframe](/typescript/packages/common-iframe-sandbox/src/outer-frame.ts).
-Setting contents via `srcdoc` on the iframes, this approach allows us to set CSP
-in the outer frame that propagates to the inner (untrusted) frame across
-browsers.
+[another iframe](/common-iframe-sandbox/src/outer-frame.ts). Setting contents
+via `srcdoc` on the iframes, this approach allows us to set CSP in the outer
+frame that propagates to the inner (untrusted) frame across browsers.
 
 > Whenever a user agent creates an iframe srcdoc document in a browsing context
 > nested in the protected resource, if the user agent is enforcing any policies
