@@ -131,3 +131,132 @@ declare module "react-dom" {
     unmount(): void;
   };
 }
+
+// Add type declarations for @react-three components
+declare module "@react-three/fiber" {
+  import * as React from "react";
+  
+  export interface CanvasProps {
+    children?: React.ReactNode;
+    gl?: {
+      antialias?: boolean;
+      alpha?: boolean;
+      [key: string]: any;
+    };
+    [key: string]: any;
+  }
+  
+  export const Canvas: React.FC<CanvasProps>;
+  export function extend(objects: Record<string, any>): void;
+  export function useFrame(callback: (state: any) => void): void;
+}
+
+declare module "@react-three/drei" {
+  import * as React from "react";
+  
+  export interface OrthographicCameraProps {
+    makeDefault?: boolean;
+    position?: [number, number, number];
+    zoom?: number;
+    near?: number;
+    far?: number;
+    [key: string]: any;
+  }
+  
+  export interface OrbitControlsProps {
+    enableZoom?: boolean;
+    [key: string]: any;
+  }
+  
+  export interface EffectsProps {
+    children?: React.ReactNode;
+    [key: string]: any;
+  }
+  
+  export const OrthographicCamera: React.FC<OrthographicCameraProps>;
+  export const OrbitControls: React.FC<OrbitControlsProps>;
+  export const Effects: React.FC<EffectsProps>;
+}
+
+// Add type declarations for cmdk package
+declare module "cmdk" {
+  import * as React from "react";
+  
+  export interface CommandProps {
+    children: React.ReactNode;
+    label?: string;
+    filter?: (value: string, search: string) => number;
+    loop?: boolean;
+    value?: string;
+    onValueChange?: (value: string) => void;
+    shouldFilter?: boolean;
+    className?: string;
+  }
+  
+  export interface CommandInputProps {
+    value?: string;
+    onValueChange?: (value: string) => void;
+    placeholder?: string;
+    className?: string;
+    readOnly?: boolean;
+    onKeyDown?: (e: React.KeyboardEvent) => void;
+    style?: React.CSSProperties;
+  }
+  
+  export interface CommandItemProps {
+    value?: string;
+    disabled?: boolean;
+    onSelect?: (value: string) => void;
+    className?: string;
+    key?: React.Key;
+    children?: React.ReactNode;
+  }
+  
+  export interface CommandGroupProps {
+    heading?: React.ReactNode;
+    className?: string;
+    value?: string;
+    forceMount?: boolean;
+    children?: React.ReactNode;
+  }
+  
+  export interface CommandListProps {
+    children?: React.ReactNode;
+    className?: string;
+  }
+  
+  export interface CommandEmptyProps {
+    children?: React.ReactNode;
+    className?: string;
+  }
+  
+  export interface CommandLoadingProps {
+    children?: React.ReactNode;
+    className?: string;
+  }
+  
+  export interface CommandSeparatorProps {
+    className?: string;
+    alwaysRender?: boolean;
+  }
+  
+  export interface CommandDialogProps {
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+    container?: HTMLElement | null;
+    className?: string;
+    children?: React.ReactNode;
+    title?: string;
+  }
+  
+  export const Command: React.FC<CommandProps> & {
+    Input: React.FC<CommandInputProps>;
+    List: React.FC<CommandListProps>;
+    Empty: React.FC<CommandEmptyProps>;
+    Group: React.FC<CommandGroupProps>;
+    Item: React.FC<CommandItemProps>;
+    Separator: React.FC<CommandSeparatorProps>;
+    Dialog: React.FC<CommandDialogProps>;
+    Loading: React.FC<CommandLoadingProps>;
+  };
+}
