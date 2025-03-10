@@ -33,7 +33,20 @@ export const claim = async <Access extends Invocation>(
       if (result.error) {
         return result;
       } else {
-        return { ok: access };
+        // Right now we enforce issuer to be authorized by a subject only if
+        // subject space is a DID identifier. Furthermore we assume that the
+        // subject and issuer are the same DID. In the future we will add UCANs
+        // to allow delegations.
+        const { ok: subject } = Principal.fromDID(access.sub);
+        if (!subject || subject.did() === issuer.did()) {
+          return { ok: access };
+        } else {
+          return {
+            error: unauthorized(
+              `Principal ${issuer.did()} has no authority over ${subject.did()} space`,
+            ),
+          };
+        }
       }
     }
   } else {
