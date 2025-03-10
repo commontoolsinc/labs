@@ -6,6 +6,10 @@
     "test": "echo 'No tests to run.'",
     "integration": "deno test -A ./integration/*.test.ts"
   },
+  "compilerOptions": {
+    "jsx": "react-jsxdev",
+    "types": ["./src/global.d.ts", "./src/vite-env.d.ts"]
+  },
   "imports": {
     "@/": "./src/",
     "@vitejs/plugin-react": "npm:@vitejs/plugin-react@^4.3.4",

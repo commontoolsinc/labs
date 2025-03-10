@@ -41,8 +41,10 @@ export function useNamedCell<T>(
   }] as const;
 }
 
-export function useCell<T>(cell: Cell<T>): [T, (value: T) => void] {
-  const [value, setValue] = useState<T>(cell.get());
+export function useCell<T>(
+  cell: Cell<T> | null | undefined,
+): [T | null | undefined, (value: T) => void] {
+  const [value, setValue] = useState<T | null | undefined>(cell?.get());
 
   useEffect(() => {
     // Set up effect to update state when cell changes
@@ -58,7 +60,7 @@ export function useCell<T>(cell: Cell<T>): [T, (value: T) => void] {
   return [
     value,
     (newValue: T) => {
-      cell.set(newValue);
+      cell?.set(newValue);
     },
   ];
 }

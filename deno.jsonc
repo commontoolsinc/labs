@@ -21,7 +21,7 @@
   },
   "compilerOptions": {
     "jsx": "react-jsxdev",
-    "lib": ["deno.ns", "dom", "dom.iterable", "dom.asynciterable"]
+    "lib": ["deno.ns", "dom", "dom.iterable", "dom.asynciterable", "esnext"]
   },
   "lint": {
     "exclude": [

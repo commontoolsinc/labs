@@ -51,7 +51,7 @@ export async function extendCharm(
   focusedCharmId: string,
   focusedReplicaId: string,
   input: string,
-  variants: boolean,
+  variants: boolean = false,
   preferredModel?: string,
 ): Promise<string | undefined> {
   try {
@@ -68,7 +68,6 @@ export async function extendCharm(
       charmManager,
       charm ?? null,
       input,
-      false,
       preferredModel,
     );
     if (!newCharmId) {

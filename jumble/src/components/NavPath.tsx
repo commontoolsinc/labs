@@ -19,7 +19,7 @@ export function NavPath({ replicaId, charmId }: NavPathProps) {
 
     async function getCharm() {
       if (charmId) {
-        const charm = await charmManager.get(charmId);
+        const charm = await charmManager?.get(charmId);
         cancel = charm?.key(NAME).sink((value) => {
           if (mounted) setCharmName(value ?? null);
         });

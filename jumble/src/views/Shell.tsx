@@ -1,5 +1,5 @@
 import "@commontools/ui";
-import { Outlet, useParams } from "react-router-dom";
+import { CharmRouteParams, Outlet, useParams } from "react-router-dom";
 
 import ShellHeader from "@/components/ShellHeader.tsx";
 import { CommandCenter } from "@/components/CommandCenter.tsx";
@@ -10,7 +10,7 @@ import { CharmPublisher } from "@/components/Publish.tsx";
 import { useGlobalActions } from "@/hooks/use-global-actions.tsx";
 
 export default function Shell() {
-  const { charmId, replicaName } = useParams();
+  const { charmId, replicaName } = useParams<CharmRouteParams>();
   useGlobalActions();
   const { user } = useAuthentication();
 

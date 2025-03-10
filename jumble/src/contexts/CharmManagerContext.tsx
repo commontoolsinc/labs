@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useMemo } from "react";
 import { CharmManager } from "@commontools/charm";
-import { useParams } from "react-router-dom";
+import { CharmRouteParams, useParams } from "react-router-dom";
 import { useAuthentication } from "./AuthenticationContext.tsx";
 
 export type CharmManagerContextType = {
@@ -9,14 +9,14 @@ export type CharmManagerContextType = {
 };
 
 const CharmManagerContext = createContext<CharmManagerContextType>({
-  charmManager: null!,
-  currentReplica: undefined!,
+  charmManager: null,
+  currentReplica: "",
 });
 
 export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = (
   { children },
 ) => {
-  const { replicaName } = useParams<{ replicaName: string }>();
+  const { replicaName } = useParams<CharmRouteParams>();
   const { user } = useAuthentication();
 
   const charmManager = useMemo(() => {

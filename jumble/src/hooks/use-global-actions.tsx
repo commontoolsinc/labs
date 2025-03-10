@@ -1,5 +1,5 @@
 import "@commontools/ui";
-import { useLocation, useParams } from "react-router-dom";
+import { CharmRouteParams, useLocation, useParams } from "react-router-dom";
 import { MdEdit, MdOutlineStar, MdShare } from "react-icons/md";
 
 import { useAction } from "@/contexts/ActionManagerContext.tsx";
@@ -8,7 +8,7 @@ import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { NAME } from "@commontools/builder";
 
 export function useGlobalActions() {
-  const { charmId, replicaName } = useParams();
+  const { charmId, replicaName } = useParams<CharmRouteParams>();
   const location = useLocation();
 
   const isDetailActive = location.pathname.endsWith("/detail");

@@ -1,6 +1,7 @@
 import React from "react";
 
-export function useWebComponent<P extends Record<string, any>>(
+// Export with a default export to be compatible with both import styles
+export default function useWebComponent<P extends Record<string, any>>(
   ref: React.RefObject<HTMLElement>,
   props: P,
 ) {
@@ -20,7 +21,7 @@ export function useWebComponent<P extends Record<string, any>>(
             element.removeAttribute(key);
           }
         } else {
-          element[key] = value;
+          (element as any)[key] = value;
         }
       }
     });

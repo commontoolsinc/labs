@@ -5,7 +5,8 @@ import {
   CharmManager,
   compileAndRunRecipe,
 } from "@commontools/charm";
-import { NavigateFunction } from "react-router-dom";
+// Import NavigateFunction from our types rather than directly from react-router-dom
+import type { NavigateFunction } from "react-router-dom";
 import { charmId } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
 import {
@@ -215,7 +216,7 @@ async function handleExecuteCharmAction(deps: CommandContext) {
     console.error("Error fetching charm actions:", error);
     deps.addJobMessage(
       deps.startJob("Action Error"),
-      `Error: ${error.message}`,
+      `Error: ${error instanceof Error ? error.message : String(error)}`,
     );
   } finally {
     deps.setLoading(false);

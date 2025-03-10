@@ -63,7 +63,7 @@ function CharmPreview(
           if (
             globalThis.confirm("Are you sure you want to remove this charm?")
           ) {
-            charmManager.remove({ "/": charmId(charm)! });
+            charmManager?.remove({ "/": charmId(charm)! });
           }
         }}
         className="absolute hidden group-hover:block top-2 right-2 p-2 text-gray-400 hover:text-red-500 transition-colors"
@@ -259,8 +259,8 @@ const CharmTable = (
 export default function CharmList() {
   const { replicaName } = useParams<{ replicaName: string }>();
   const { charmManager } = useCharmManager();
-  const [pinned] = useCell(charmManager.getPinned());
-  const [charms] = useCell(charmManager.getCharms());
+  const [pinned] = useCell(charmManager?.getPinned());
+  const [charms] = useCell(charmManager?.getCharms());
   const { isSyncing } = useSyncedStatus(charmManager);
 
   if (!isSyncing && (!charms || charms.length === 0)) {
@@ -295,7 +295,7 @@ export default function CharmList() {
     <div className="p-2">
       <h1 className="text-2xl font-bold">Pinned</h1>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-8">
-        {replicaName &&
+        {replicaName && pinned && 
           pinned.map((charm) => (
             <CharmPreview
               key={charmId(charm)}
@@ -306,7 +306,7 @@ export default function CharmList() {
       </div>
       <h1 className="text-2xl font-bold">All Charms</h1>
       <div className="p-8">
-        {replicaName && (
+        {replicaName && charms && (
           <CharmTable
             charms={charms}
             replicaName={replicaName}
