@@ -1,7 +1,7 @@
 // Define the simplified interface that developers will use
 export const simplifiedInterface = `
 // Available in scope: React, ReactDOM, TailwindCSS, Babel
-// Available functions: llm(message), generateImage(description), useDoc(key)
+// Available functions: llm(message), generateImage(description), useDoc(key, defaultValue?)
 
 // Request any additional libraries to load (optional)
 // available set: d3, moment
@@ -15,7 +15,7 @@ function onReady(mount) {
 
   // Example:
   function App() {
-    const [count, setCount] = useDoc("counter");
+    const [count, setCount] = useDoc("counter", -1); // default value
 
     return (
       <div className="p-4">
@@ -73,9 +73,10 @@ function useDoc(key, defaultValue = undefined) {
     function handleMessage(event) {
       if (
         event.data &&
-        event.data.type === "update"
+        event.data.type === "update" &&
+        event.data.data[0] === key
       ) {
-        setDoc(event.data.data[1] === undefined ? null : event.data.data[1]);
+        setDocState(event.data.data[1] === undefined ? null : event.data.data[1]);
       }
     }
 
@@ -401,11 +402,10 @@ document.head.appendChild(script);
 checkBabelReady();
 });
 </script>
-  < title > App </title>
-  </head>
-  < body class="bg-gray-50" >
-    </body>
-    </html>`;
+<title>App</title>
+</head>
+  <body class="bg-gray-50"></body>
+</html>`;
 
 // Function to inject the user's code into the template
 export function injectUserCode(userCode: string) {
@@ -517,9 +517,10 @@ function ImageComponent() {
 
 \`\`\`javascript
 // Request additional libraries as needed (optional)
+// Must choose from available set.
 // available set: d3, moment
 function onLoad() {
-  return [];
+  return ['d3']; // only use libraries when you have good reason
 }
 
 // Main application code
