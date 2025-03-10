@@ -23,13 +23,12 @@
 - Export types explicitly with `export type { ... }`
 - Use descriptive JSDoc comments for public interfaces
 - Prefer strong typing with interfaces/types over any
-- Use Zod for runtime schema validation
 
 ### Imports
 
 - Group imports by source (std lib, external, internal)
 - Prefer named exports over default exports
-- Use relative paths for internal imports
+- Use package names for internal imports
 - Use destructuring for multiple imports from same source
 
 ### Error Handling
