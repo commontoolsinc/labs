@@ -311,6 +311,13 @@ export function CommandCenter() {
         </DialogDescription>
       </VisuallyHidden>
 
+      {/* Special handling for agent mode display text */}
+      {mode.type === "input" && "displayText" in mode && mode.displayText && (
+        <div className="agent-display-text p-2 max-h-80 overflow-y-auto text-sm whitespace-pre-wrap">
+          {mode.displayText}
+        </div>
+      )}
+      
       <div
         className="flex items-center gap-2"
         style={{ display: mode.type == "transcribe" ? "none" : "flex" }}
