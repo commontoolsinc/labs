@@ -75,7 +75,13 @@ export const Fact = z.object({
   cause: Reference,
 });
 
-export const Delegation = z.never().describe("UCAN delegation");
+export const Delegation = z.never()
+  .describe("UCAN delegation")
+  .openapi({
+    type: "object",
+    properties: {},
+  });
+
 export const Since = z.number().int().describe(
   "Sequence number of the transaction",
 );
