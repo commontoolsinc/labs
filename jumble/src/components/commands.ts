@@ -1176,8 +1176,8 @@ IMPORTANT:
 3. Tool names should be plain text (e.g., "edit-recipe" not "<font color='green'>edit-recipe</font>")`;
 
     const response = await llm.sendRequest({
-      model: deps.preferredModel ||
-        "anthropic:claude-3-7-sonnet-20250219-thinking",
+      model: /*deps.preferredModel ||*/
+        "anthropic:claude-3-5-haiku-latest",
       system,
       messages: [{ role: "user", content: input }],
     });
