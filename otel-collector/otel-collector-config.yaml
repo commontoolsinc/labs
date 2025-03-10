@@ -1,0 +1,52 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1000
+    
+  memory_sampler:
+    sampling_percentage: 10
+    attribute_source: span
+    sampling_attributes:
+      - key: service.name
+        values:
+          - memory
+        value_match_type: regexp
+
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 100
+    expected_new_traces_per_sec: 10
+    policies:
+      - name: memory-sampling-policy
+        type: string_attribute
+        string_attribute:
+          key: service.name
+          values: ["memory.*"]
+          enabled_regex_matching: true
+          inverted_matching: false
+        sampling_percentage: 5
+
+exporters:
+  logging:
+    verbosity: detailed
+    
+  otlp:
+    endpoint: "api.honeycomb.io:443"
+    headers:
+      x-honeycomb-team: "${env:HONEYCOMB_API_KEY}"
+      x-honeycomb-dataset: "${env:HONEYCOMB_DATASET}"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_sampler, batch]
+      exporters: [otlp, logging]
