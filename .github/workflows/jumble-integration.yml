@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 10
     defaults:
       run:
-        working-directory: ./typescript/packages/jumble
+        working-directory: jumble
 
     services:
       redis:
@@ -44,11 +44,11 @@ jobs:
           key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
 
       - name: Run Toolshed
-        working-directory: typescript/packages/toolshed
+        working-directory: toolshed
         run: deno task dev &
 
       - name: Run Vite
-        working-directory: typescript/packages/jumble
+        working-directory: jumble
         run: TOOLSHED_API_URL=http://localhost:8000 deno task dev &
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
@@ -56,5 +56,5 @@ jobs:
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
       - name: Run Integration
-        working-directory: ./typescript/packages/jumble
+        working-directory: jumble
         run: deno task integration
