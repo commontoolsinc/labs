@@ -33,7 +33,7 @@ function useDoc(key) {
         Array.isArray(event.data.data) &&
         event.data.data[0] === key
       ) {
-        setDoc(event.data.data[1]);
+        setDoc(event.data.data[1] === undefined ? null : event.data.data[1]);
       }
     }
 
@@ -117,10 +117,8 @@ This guide explains how to integrate the provided SDK functions into your React 
 
 The \`useDoc\` hook subscribes to real-time updates for a given key and returns a tuple \`[doc, setDoc]\`:
 
-- **\`doc\`**: The current data (which may initially be \`undefined\`).
+- **\`doc\`**: The current data (which may initially be \`undefined\` while loading, or \`null\` if the data is not found / needs to be initialized).
 - **\`setDoc\`**: A function used to update the document data.
-
-**New Behavior – Functional Updates**
 
 The returned \`setDoc\` supports both direct values and updater functions. This means that, similar to how React's \`useState\` works, you can pass a function to compute the new state based on the previous state. If a function is provided, it will be called with the current state (\`doc\`) and its return value will be used as the updated value.
 
@@ -130,13 +128,24 @@ The returned \`setDoc\` supports both direct values and updater functions. This 
 function CounterComponent() {
   const [counter, setCounter] = useDoc("counter");
 
+  // Show loading state when counter is undefined
+  if (counter === undefined) {
+    return <div>Loading...</div>;
+  }
+
+  // Initialize to 0 if counter is null
+  if (counter === null) {
+    setCounter(0);
+    return <div>Initializing...</div>;
+  }
+
   return (
     <div>
-      <h2>Counter: {counter || 0}</h2>
-      <button onClick={() => setCounter((prevCounter || 0) + 1)}>
+      <h2>Counter: {counter}</h2>
+      <button onClick={() => setCounter(counter + 1)}>
         Increment
       </button>
-      <button onClick={() => setCounter((prevCounter = 0) => prevCounter - 1)}>
+      <button onClick={() => setCounter(prev => prev - 1)}>
         Decrement
       </button>
     </div>
