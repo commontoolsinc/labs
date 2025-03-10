@@ -11,9 +11,6 @@ on:
 jobs:
   workspace-tests:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./typescript/packages
     steps:
       - uses: actions/checkout@v4
       - name: Setup Deno
@@ -28,20 +25,16 @@ jobs:
             ~/.cache/deno
           key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
       - name: Install dependencies 
-        working-directory: typescript/packages
         # Errors if `deno.lock` file was not
         # committed with the current change.
         run: deno install --frozen=true
       - name: Check 
-        working-directory: typescript/packages
         run: deno task check
       - name: Lint 
-        working-directory: typescript/packages
         run: deno lint
       # For deno-web-test browser tests
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
       - name: Disable AppArmor
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
       - name: Run tests
-        working-directory: typescript/packages
         run: deno task test-all

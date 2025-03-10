@@ -20,7 +20,7 @@ jobs:
           deno-version: "2.2.2"
 
       - name: Build
-        working-directory: ./typescript/packages/jumble
+        working-directory: jumble
         run: deno task build
         env:
           VITE_STORAGE_TYPE: "remote"
@@ -28,13 +28,13 @@ jobs:
           VITE_TOOLSHED_API_URL: ${{ secrets.TOOLSHED_API_URL }}
 
       - name: Tarballify dist
-        working-directory: ./typescript/packages/jumble
+        working-directory: jumble
         run: tar -czvf dist.tar.gz dist
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ github.sha }}.tar.gz
-          path: ./typescript/packages/jumble/dist.tar.gz
+          path: jumble/dist.tar.gz
 
       - uses: ryand56/r2-upload-action@v1.4
         if: github.ref == 'refs/heads/main'
@@ -43,7 +43,7 @@ jobs:
           r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           r2-bucket: ${{ secrets.R2_BUCKET }}
-          source-dir: ./typescript/packages/jumble/dist
+          source-dir: jumble/dist
           destination-dir: jumble/latest
 
       - uses: ryand56/r2-upload-action@v1.4
@@ -52,5 +52,5 @@ jobs:
           r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           r2-bucket: ${{ secrets.R2_BUCKET }}
-          source-dir: ./typescript/packages/jumble/dist
+          source-dir: jumble/dist
           destination-dir: jumble/${{ github.sha }}
