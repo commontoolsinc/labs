@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 
 # DISABLED
-#  common-html \
 #  jumble \
 deno check \
   common-builder \
   common-charm \
   common-cli \
+  common-html \
   common-identity \
   common-iframe-sandbox \
   common-memory \
