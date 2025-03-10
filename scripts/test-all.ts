@@ -13,7 +13,7 @@ const DISABLED = [
 
 let success = true;
 for (const memberPath of members) {
-  // Convert "./common-memory" to "common-memory"
+  // Convert "./memory" to "memory"
   const packageName = memberPath.substring(2);
   if (DISABLED.includes(packageName)) {
     continue;
