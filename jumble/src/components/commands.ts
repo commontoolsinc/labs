@@ -906,14 +906,22 @@ Type 'cancel' to stop the agent
 
             // Get schema info if available
             const argument = deps.charmManager.getArgument(charm);
-            const schema = argument?.schema || "No schema available";
+            const schema = argument?.schema;
+            const schemaStr = schema
+              ? JSON.stringify(schema, null, 2)
+              : "No schema available";
+            const example = schema?.example;
+            const exampleStr = example
+              ? `\nExample: ${JSON.stringify(example, null, 2)}`
+              : "";
 
             // Store in context for future steps
             agentContext.set("currentCharmName", name);
             agentContext.set("currentCharmId", id);
             agentContext.set("currentCharmSchema", schema);
 
-            const result = `Current charm: ${name} (ID: ${id})`;
+            const result = `Current charm: ${name} (ID: ${id})
+Schema: ${schemaStr}${exampleStr}`;
             log(result);
             return result;
           } catch (error) {
@@ -1085,7 +1093,21 @@ Type 'cancel' to stop the agent
           const actions = entries.filter(([_, value]) => isStream(value));
 
           charmActions = actions.map(([key]) => {
-            return `TOOL: charm-action:${key}\nDESCRIPTION: Execute the '${key}' action on the current charm\nTYPE: charm-action\nPARAMETERS:\n  - input: Input for the action (required, string)`;
+            // Get schema and example information for this action
+            const actionSchema = charm.key(key).schema;
+            const example = actionSchema?.example;
+            const schemaInfo = actionSchema
+              ? `\nSCHEMA: ${JSON.stringify(actionSchema, null, 2)}`
+              : "";
+            const exampleInfo = example
+              ? `\nEXAMPLE: ${JSON.stringify(example)}`
+              : "";
+
+            return `TOOL: charm-action:${key}
+DESCRIPTION: Execute the '${key}' action on the current charm
+TYPE: charm-action
+PARAMETERS:
+  - input: Input for the action (required, string)${schemaInfo}${exampleInfo}`;
           });
 
           log(`Found ${actions.length} charm actions`);
