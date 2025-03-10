@@ -124,12 +124,31 @@ The returned \`setDoc\` supports both direct values and updater functions. This 
 
 **Example:**
 
+For this schema:
+
+\`\`\`json
+{
+  "type": "object",
+  "properties": {
+    "counter": {
+      "type": "number",
+      "default": 0
+    },
+    "title": {
+      "type": "string",
+      "default": "My Counter App"
+    }
+  }
+}
+\`\`\`
+
 \`\`\`jsx
 function CounterComponent() {
   const [counter, setCounter] = useDoc("counter");
+  const [title, setTitle] = useDoc("title");
 
   // Show loading state when counter is undefined
-  if (counter === undefined) {
+  if (counter === undefined || title === undefined) {
     return <div>Loading...</div>;
   }
 
@@ -139,9 +158,18 @@ function CounterComponent() {
     return <div>Initializing...</div>;
   }
 
+  // Initialize to "My Counter App" if title is null
+  if (title === null) {
+    setTitle("My Counter App");
+    return <div>Initializing...</div>;
+  }
+
   return (
     <div>
-      <h2>Counter: {counter}</h2>
+      <h2>{title}</h2>
+      <button onClick={() => setTitle(Math.random().toString(36).substring(2, 15))}>
+        Randomize Title
+      </button>
       <button onClick={() => setCounter(counter + 1)}>
         Increment
       </button>
