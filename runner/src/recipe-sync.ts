@@ -6,7 +6,7 @@ import {
   getRecipeSpec,
   getRecipeSrc,
 } from "@commontools/runner";
-import { buildRecipe } from "../../common-charm/src/localBuild.ts";
+import { buildRecipe } from "@commontools/charm";
 
 let BLOBBY_SERVER_URL = "/api/storage/blobby";
 

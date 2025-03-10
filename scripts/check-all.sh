@@ -3,14 +3,14 @@
 # DISABLED
 #  jumble \
 deno check \
-  common-builder \
-  common-charm \
-  common-cli \
-  common-html \
-  common-identity \
-  common-iframe-sandbox \
-  common-memory \
-  common-runner \
-  common-ui \
+  builder \
+  charm \
+  cli \
+  html \
+  identity \
+  iframe-sandbox \
+  memory \
+  runner \
+  ui \
   llm-client \
   deno-web-test

@@ -1,7 +1,7 @@
-import { RemoteStorageProvider } from "../common-runner/src/storage/remote.ts";
-import { StorageProvider } from "../common-runner/src/storage/base.ts";
-import { EntityId } from "../common-runner/src/doc-map.ts";
-import { Identity } from "../common-identity/src/index.ts";
+import { RemoteStorageProvider } from "../runner/src/storage/remote.ts";
+import { StorageProvider } from "../runner/src/storage/base.ts";
+import { EntityId } from "../runner/src/doc-map.ts";
+import { Identity } from "../identity/src/index.ts";
 
 // i'm running common memory locally, so connect to it directly
 const BASE_URL = "http://localhost:8000";

@@ -5,13 +5,13 @@
  * I'm starting from the bottom (common memory) up and purposely calling
  * APIs that would normally call into common memory.
  */
-import { Charm, CharmManager } from "../common-charm/src/charm.ts";
-import { Cell } from "../common-runner/src/cell.ts";
-import { DocImpl, getDoc } from "../common-runner/src/doc.ts";
-import { EntityId } from "../common-runner/src/doc-map.ts";
-import { storage } from "../common-runner/src/storage.ts";
-import { getSpace, Space } from "../common-runner/src/space.ts";
-import { Identity } from "../common-identity/src/index.ts";
+import { Charm, CharmManager } from "../charm/src/charm.ts";
+import { Cell } from "../runner/src/cell.ts";
+import { DocImpl, getDoc } from "../runner/src/doc.ts";
+import { EntityId } from "../runner/src/doc-map.ts";
+import { storage } from "../runner/src/storage.ts";
+import { getSpace, Space } from "../runner/src/space.ts";
+import { Identity } from "../identity/src/index.ts";
 
 const TOOLSHED_API_URL = "https://toolshed.saga-castor.ts.net/";
 

@@ -7361,40 +7361,6 @@
       "npm:zod@^3.24.1"
     ],
     "members": {
-      "common-html": {
-        "dependencies": [
-          "npm:jsdom@*"
-        ]
-      },
-      "common-identity": {
-        "dependencies": [
-          "npm:@scure/bip39@^1.5.4"
-        ]
-      },
-      "common-memory": {
-        "dependencies": [
-          "jsr:@db/sqlite@0.12",
-          "jsr:@hono/hono@^4.6.9",
-          "jsr:@std/assert@1",
-          "jsr:@std/encoding@^1.0.5",
-          "jsr:@std/fs@^1.0.10",
-          "jsr:@std/path@^1.0.8",
-          "npm:@opentelemetry/api@^1.9.0",
-          "npm:merkle-reference@^2.0.1",
-          "npm:multiformats@^13.3.2"
-        ],
-        "packageJson": {
-          "dependencies": [
-            "npm:merkle-reference@^2.0.1",
-            "npm:multiformats@^13.3.2"
-          ]
-        }
-      },
-      "common-ui": {
-        "dependencies": [
-          "npm:@shoelace-style/shoelace@^2.19.1"
-        ]
-      },
       "deno-vite-plugin": {
         "packageJson": {
           "dependencies": [
@@ -7406,6 +7372,16 @@
             "npm:vitest@^2.1.1"
           ]
         }
+      },
+      "html": {
+        "dependencies": [
+          "npm:jsdom@*"
+        ]
+      },
+      "identity": {
+        "dependencies": [
+          "npm:@scure/bip39@^1.5.4"
+        ]
       },
       "jumble": {
         "dependencies": [
@@ -7439,6 +7415,25 @@
           "npm:three@0.173"
         ]
       },
+      "memory": {
+        "dependencies": [
+          "jsr:@db/sqlite@0.12",
+          "jsr:@hono/hono@^4.6.9",
+          "jsr:@std/assert@1",
+          "jsr:@std/encoding@^1.0.5",
+          "jsr:@std/fs@^1.0.10",
+          "jsr:@std/path@^1.0.8",
+          "npm:@opentelemetry/api@^1.9.0",
+          "npm:merkle-reference@^2.0.1",
+          "npm:multiformats@^13.3.2"
+        ],
+        "packageJson": {
+          "dependencies": [
+            "npm:merkle-reference@^2.0.1",
+            "npm:multiformats@^13.3.2"
+          ]
+        }
+      },
       "toolshed": {
         "dependencies": [
           "jsr:@std/cli@^1.0.12",
@@ -7469,6 +7464,11 @@
           "npm:pino@^9.6.0",
           "npm:redis@^4.7.0",
           "npm:stoker@^1.4.2"
+        ]
+      },
+      "ui": {
+        "dependencies": [
+          "npm:@shoelace-style/shoelace@^2.19.1"
         ]
       }
     }
