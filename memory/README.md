@@ -11,7 +11,7 @@ root
 deno task start
 # Task start deno run --allow-read --allow-write --allow-net --allow-ffi --allow-env deno.ts
 # Mounting memory http://0.0.0.0:8001/
-# from file:///Users/gozala/labs/typescript/packages/common-memory/memory/
+# from file:///Users/gozala/labs/common-memory/memory/
 ```
 
 It will print out service URL endpoint and `file:` URL for the directory where
@@ -19,7 +19,8 @@ memory will be persisted in `.sqlite` files.
 
 ## Database Migrations
 
-You can upgrade database to latest version by running following command from the package root
+You can upgrade database to latest version by running following command from the
+package root
 
 ```sh
 deno task migrate ./path/to/db.sqlite

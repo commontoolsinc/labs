@@ -52,7 +52,7 @@ To clone the repository, you can run the following command:
 
 ```
 git clone git@github.com:commontoolsinc/labs.git
-cd labs/typescript/packages/toolshed
+cd labs/toolshed
 ```
 
 ### Prerequisites
@@ -115,7 +115,7 @@ deno task test
 
 The simplest thing to do is open the toolshed directory in vscode/cursor, and
 everything should work; as there is configuration in
-`typescript/packages/toolshed/.vscode/settings.json`.
+/toolshed/.vscode/settings.json`.
 
 You'll want to install the
 [Deno extension](https://docs.deno.com/runtime/reference/vscode/), and the
