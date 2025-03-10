@@ -26,19 +26,44 @@ interface MemoryState<Space extends MemorySpace = MemorySpace> {
    * Local representation of the remote state. It holds set of active query
    * subscriptions that update state as we receive changes in our subscription.
    */
-  remote: Map<Entity, Query<Space>>;
+  remote: Map<Entity, Subscription<Space>>;
 
   /**
    * Local state of the memory space. It may be ahead of the `remote` if
    * changes occur faster than transaction roundtrip.
    */
   local: Map<Entity, Memory.Fact>;
+
+  /**
+   * Queued queries that aren't yet sent.
+   */
+  queue: Map<Entity, Subscription<Space>>;
 }
 
 /**
  * ed25519 key derived from the sha256 of the "common knowledge".
  */
 const HOME = "did:key:z6Mko2qR9b8mbdPnaEKXvcYwdK7iDnRkh8mEcEP2719aCu6P";
+
+export interface RemoteStorageProviderSettings {
+  /**
+   * Number of subscriptions remote storage provider is allowed to have per
+   * space.
+   */
+  maxSubscriptionsPerSpace: number;
+}
+
+export interface RemoteStorageProviderOptions {
+  address: URL;
+  as: Memory.Signer;
+  space?: MemorySpace;
+  the?: string;
+  settings?: RemoteStorageProviderSettings;
+}
+
+const defaultSettings: RemoteStorageProviderSettings = {
+  maxSubscriptionsPerSpace: 50_000,
+};
 
 export class RemoteStorageProvider implements StorageProvider {
   connection: WebSocket | null = null;
@@ -47,6 +72,7 @@ export class RemoteStorageProvider implements StorageProvider {
   the: string;
   state: Map<MemorySpace, MemoryState> = new Map();
   session: Memory.MemorySession<MemorySpace>;
+  settings: RemoteStorageProviderSettings;
 
   /**
    * queue that holds commands that we read from the session, but could not
@@ -66,15 +92,12 @@ export class RemoteStorageProvider implements StorageProvider {
     as,
     space = HOME,
     the = "application/json",
-  }: {
-    address: URL;
-    as: Memory.Signer;
-    space?: MemorySpace;
-    the?: string;
-  }) {
+    settings = defaultSettings,
+  }: RemoteStorageProviderOptions) {
     this.address = address;
     this.workspace = space;
     this.the = the;
+    this.settings = settings;
 
     const session = Memory.create({ as });
 
@@ -94,6 +117,7 @@ export class RemoteStorageProvider implements StorageProvider {
         memory: this.session.mount(space),
         remote: new Map(),
         local: new Map(),
+        queue: new Map(),
       };
 
       this.state.set(space, state);
@@ -118,42 +142,55 @@ export class RemoteStorageProvider implements StorageProvider {
     }
   }
 
+  subscribe(entityId: EntityId) {
+    const { the } = this;
+    const of = RemoteStorageProvider.toEntity(entityId);
+    const local = this.mount(this.workspace);
+    let subscription = local.remote.get(of);
+
+    if (!subscription) {
+      if (local.remote.size < this.settings.maxSubscriptionsPerSpace) {
+        // If we do not have a subscription yet we create a query and
+        // subscribe to it.
+        const query = local.memory.query({ select: { [of]: { [the]: {} } } });
+        subscription = new Subscription(query, new Set());
+        // store subscription so it can be reused.
+        local.remote.set(of, subscription);
+      }
+    }
+
+    return subscription;
+  }
+
   sink<T = any>(
     entityId: EntityId,
     callback: (value: StorageValue<T>) => void,
   ): Cancel {
-    const { the } = this;
-    const of = RemoteStorageProvider.toEntity(entityId);
-    const local = this.mount(this.workspace);
-    // ⚠️ Types are incorrect because when there is no value we still want to
-    // notify the subscriber.
-    const subscriber = callback as unknown as Subscriber;
-    let query = local.remote.get(of);
-    if (!query) {
-      query = new Query(
-        local.memory.query({ select: { [of]: { [the]: {} } } }),
+    const subscription = this.subscribe(entityId);
+    if (subscription) {
+      // ⚠️ Types are incorrect because when there is no value we still want to
+      // notify the subscriber.
+      return subscription.subscribe(callback as unknown as Subscriber);
+    } else {
+      console.warn(
+        `⚠️ Reached maximum subscription limit on ${this.workspace}. Call to .sink is ignored`,
       );
-      local.remote.set(of, query);
+      return () => {};
     }
-
-    return query.subscribe(subscriber);
   }
   async sync(entityId: EntityId): Promise<void> {
-    const { the } = this;
-    // Just wait to have a local revision.
-    const of = RemoteStorageProvider.toEntity(entityId);
-    const local = this.mount(this.workspace);
-    const query = local.remote.get(of);
-    if (query) {
-      query.subscribe(RemoteStorageProvider.sync);
+    const subscription = this.subscribe(entityId);
+    if (subscription) {
+      // We add noop subscriber just to keep subscription alive.
+      subscription.subscribe(RemoteStorageProvider.sync);
+      // Then await for the query to be resolved because that is what
+      // caller will await on.
+      await subscription.query;
     } else {
-      const query = local.memory.query({ select: { [of]: { [the]: {} } } });
-      local.remote.set(
-        of,
-        new Query(query, new Set([RemoteStorageProvider.sync])),
+      console.warn(
+        `⚠️ Reached maximum subscription limit on ${this.workspace}. Call to .sync is ignored`,
       );
-
-      await query.promise;
+      return new Promise(() => {});
     }
   }
 
@@ -394,7 +431,7 @@ export interface Subscriber {
   (value: JSONValue | undefined): void;
 }
 
-class Query<Space extends MemorySpace> {
+class Subscription<Space extends MemorySpace> {
   reader: ReadableStreamDefaultReader;
   constructor(
     public query: Memory.QueryView<Space, Protocol<Space>>,
