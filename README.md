@@ -11,9 +11,11 @@ There's a frontend, and a backend.
 All of the backend code lives within [Toolshed](./toolshed), and is written in
 Deno2.
 
-All of the frontend code lives within various packages, inside of `./`.
+All of the user-facing frontend code lives within [Jumble](./jumble), and is
+written with React.
 
 ## Running the backend
+
 
 For a more detailed guide, see [./toolshed/README.md](./toolshed/README.md).
 
@@ -25,9 +27,6 @@ deno task dev
 By default the backend will run at http://localhost:8000
 
 ## Running the frontend
-
-For a more detailed guide, see the pnpm monorepo readme
-[./README.md](./README.md).
 
 Run the dev server
 
