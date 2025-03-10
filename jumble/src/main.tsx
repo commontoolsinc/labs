@@ -18,6 +18,7 @@ import CharmDetailView from "@/views/CharmDetailView.tsx";
 import { LanguageModelProvider } from "./contexts/LanguageModelContext.tsx";
 import { BackgroundTaskProvider } from "./contexts/BackgroundTaskContext.tsx";
 import { AuthenticationProvider } from "./contexts/AuthenticationContext.tsx";
+import { SyncStatusProvider } from "./contexts/SyncStatusContext.tsx";
 import { setupIframe } from "./iframe-ctx.ts";
 import GenerateJSONView from "@/views/utility/GenerateJSONView.tsx";
 import SpellbookIndexView from "@/views/spellbook/SpellbookIndexView.tsx";
@@ -41,62 +42,64 @@ createRoot(document.getElementById("root")!).render(
         <ActionManagerProvider>
           <BackgroundTaskProvider>
             <LanguageModelProvider>
-              <Router>
-                <Routes>
-                  {/* Redirect root to saved replica or default */}
-                  <Route
-                    path={ROUTES.root}
-                    element={<ReplicaRedirect />}
-                  />
-
-                  <Route
-                    path={ROUTES.replicaRoot}
-                    element={
-                      <CharmsManagerProvider>
-                        <Shell />
-                      </CharmsManagerProvider>
-                    }
-                  >
-                    <Route index element={<CharmList />} />
+              <SyncStatusProvider>
+                <Router>
+                  <Routes>
+                    {/* Redirect root to saved replica or default */}
                     <Route
-                      path={ROUTES.charmShow}
-                      element={<CharmShowView />}
+                      path={ROUTES.root}
+                      element={<ReplicaRedirect />}
+                    />
+
+                    <Route
+                      path={ROUTES.replicaRoot}
+                      element={
+                        <CharmsManagerProvider>
+                          <Shell />
+                        </CharmsManagerProvider>
+                      }
+                    >
+                      <Route index element={<CharmList />} />
+                      <Route
+                        path={ROUTES.charmShow}
+                        element={<CharmShowView />}
+                      />
+                      <Route
+                        path={ROUTES.charmDetail}
+                        element={<CharmDetailView />}
+                      />
+                      <Route
+                        path={ROUTES.stackedCharms}
+                        element={<StackedCharmsView />}
+                      />
+                    </Route>
+
+                    {/* Spellbook routes */}
+                    <Route
+                      path={ROUTES.spellbookIndex}
+                      element={<SpellbookIndexView />}
                     />
                     <Route
-                      path={ROUTES.charmDetail}
-                      element={<CharmDetailView />}
+                      path={ROUTES.spellbookDetail}
+                      element={<SpellbookDetailView />}
                     />
                     <Route
-                      path={ROUTES.stackedCharms}
-                      element={<StackedCharmsView />}
+                      path={ROUTES.spellbookLaunch}
+                      element={
+                        <CharmsManagerProvider>
+                          <SpellbookLaunchView />
+                        </CharmsManagerProvider>
+                      }
                     />
-                  </Route>
 
-                  {/* Spellbook routes */}
-                  <Route
-                    path={ROUTES.spellbookIndex}
-                    element={<SpellbookIndexView />}
-                  />
-                  <Route
-                    path={ROUTES.spellbookDetail}
-                    element={<SpellbookDetailView />}
-                  />
-                  <Route
-                    path={ROUTES.spellbookLaunch}
-                    element={
-                      <CharmsManagerProvider>
-                        <SpellbookLaunchView />
-                      </CharmsManagerProvider>
-                    }
-                  />
-
-                  {/* internal tools / experimental routes */}
-                  <Route
-                    path={ROUTES.utilityJsonGen}
-                    element={<GenerateJSONView />}
-                  />
-                </Routes>
-              </Router>
+                    {/* internal tools / experimental routes */}
+                    <Route
+                      path={ROUTES.utilityJsonGen}
+                      element={<GenerateJSONView />}
+                    />
+                  </Routes>
+                </Router>
+              </SyncStatusProvider>
             </LanguageModelProvider>
           </BackgroundTaskProvider>
         </ActionManagerProvider>
