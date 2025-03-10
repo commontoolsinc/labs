@@ -8,9 +8,3 @@ lib
 .vscode
 __pycache__
 cache
-typescript/packages/planning-server/.env
-typescript/packages/linkheap/views
-typescript/packages/linkheap/.env
-typescript/packages/collectathon/collections.db
-typescript/packages/linkheap/links.db
-typescript/packages/collectathon/.env
