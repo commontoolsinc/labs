@@ -108,7 +108,8 @@ export type CommandMode =
   | { type: "confirm"; command: CommandItem; message: string }
   | { type: "select"; command: CommandItem; options: SelectOption[] }
   | { type: "transcribe"; command: CommandItem; placeholder: string }
-  | { type: "loading" };
+  | { type: "loading" }
+  | { type: "placeholder" };
 
 export interface SelectOption {
   id: string;
