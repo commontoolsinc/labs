@@ -112,7 +112,7 @@ key is recovered in a browser (that now) supports native ed25519 keys.
 
 ## Usage
 
-See [`examples/index.html`](/common-identity/examples/index.html) of an example
+See [`examples/index.html`](/identity/examples/index.html) of an example
 authentication flow.
 
 ```js

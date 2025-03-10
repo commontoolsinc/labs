@@ -128,7 +128,7 @@ export class NotesWatcher {
 }
 
 // usage:
-// const watcher = new NotesWatcher("/Users/ben/code/common-tools/labs/typescript/packages/common-cli/notes", (change) => {
+// const watcher = new NotesWatcher("/Users/ben/code/common-tools/labs/cli/notes", (change) => {
 //   console.log('File changed:', change.path);
 //   console.log('Change type:', change.type);
 //   if (change.content) {

@@ -8,7 +8,7 @@ WORKDIR /app
 # Create cache directories and set permissions before switching user
 RUN mkdir -p /app/node_modules/.deno && \
     mkdir -p /app/cache && \
-    mkdir -p /app/vendor/common-memory && \
+    mkdir -p /app/vendor/memory && \
     chown -R deno:deno /app
 
 # Prefer not to run as root.
@@ -16,9 +16,9 @@ USER deno
 
 
 # FIXME(jake): We need to sort out a better way to handle deno dependencies...
-# NOTE(jake): We need to put common-memory in the vendor directory
+# NOTE(jake): We need to put memory in the vendor directory
 # so that it can be used by the app.
-COPY --chown=deno:deno ./vendor/common-memory /common-memory
+COPY --chown=deno:deno ./vendor/memory /memory
 
 # Then copy the rest of the app
 COPY --chown=deno:deno . .
