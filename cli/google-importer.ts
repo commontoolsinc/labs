@@ -9,6 +9,7 @@ import {
   storage,
 } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
+import type { DID } from "@commontools/identity";
 import * as Session from "./session.ts";
 
 /**
@@ -182,7 +183,8 @@ async function main() {
 
   const session = await Session.open({
     passphrase: OPERATOR_PASS,
-    name: space!,
+    name: "~importer",
+    space: space as DID,
   });
   manager = new CharmManager(session);
 

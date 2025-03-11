@@ -8,6 +8,7 @@ import {
   storage,
 } from "@commontools/runner";
 import * as Session from "./session.ts";
+import type { DID } from "@commontools/identity";
 
 const { space, charmId, recipeFile, cause, quit } = parseArgs(Deno.args, {
   string: ["space", "charmId", "recipeFile", "cause"],
@@ -26,7 +27,8 @@ setBobbyServerUrl(toolshedUrl);
 async function main() {
   const session = await Session.open({
     passphrase: OPERATOR_PASS,
-    name: space ?? "",
+    space: space as DID,
+    name: `~${space}`,
   });
 
   console.log("params:", {
