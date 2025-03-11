@@ -142,9 +142,9 @@ export function isGuestMessage(message: any): message is GuestMessage {
     case GuestMessageType.Error: {
       return isGuestError(message.data);
     }
-    case GuestMessageType.Subscribe:
     case GuestMessageType.LLMRequest:
     case GuestMessageType.Read:
+    case GuestMessageType.Subscribe:
     case GuestMessageType.Unsubscribe: {
       return typeof message.data === "string";
     }
