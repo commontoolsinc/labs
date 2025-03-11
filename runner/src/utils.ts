@@ -472,7 +472,8 @@ export function staticDataToNestedDocs(
 ): any {
   value = maybeUnwrapProxy(value);
   value = deepCopy(value);
-  normalizeToDocLinks(parentDoc, value, undefined, log, cause);
+  // FIXME(seefeld): Figure out what the actual bug is. the IDs might be causing collisions.
+  //normalizeToDocLinks(parentDoc, value, undefined, log, cause);
   return value;
 }
 
