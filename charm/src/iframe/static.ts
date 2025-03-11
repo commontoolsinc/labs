@@ -29,11 +29,11 @@ window.onerror = function (message, source, lineno, colno, error) {
   return false;
 };
 
-function useDoc(key, defaultValue = undefined) {
+function useDoc(key, defaultValue = null) {
   // Track if we've received a response from the parent
   const [received, setReceived] = React.useState(false);
-  // Initialize state with undefined
-  const [doc, setDocState] = React.useState(undefined);
+  // Initialize state with defaultValue
+  const [doc, setDocState] = React.useState(defaultValue);
 
   React.useEffect(() => {
     // Handler for document updates
@@ -57,6 +57,7 @@ function useDoc(key, defaultValue = undefined) {
 
     // Subscribe to the specific key
     window.parent.postMessage({ type: "subscribe", data: key }, "*");
+    window.parent.postMessage({ type: "read", data: key }, "*");
 
     return () => {
       window.removeEventListener("message", handleMessage);
