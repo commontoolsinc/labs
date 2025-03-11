@@ -67,7 +67,7 @@ describe("integration", () => {
 
     await waitForSelectorWithText(
       page,
-      "a[aria-current='charm-title']",
+      "a[aria-roledescription='charm-link']",
       "Simple Value: 1",
     );
     await snapshot(page, "Charm rendered.");
@@ -91,7 +91,7 @@ describe("integration", () => {
     console.log("Checking if title changed");
     await waitForSelectorWithText(
       page,
-      "a[aria-current='charm-title']",
+      "a[aria-roledescription='charm-link']",
       "Simple Value: 2",
     );
 
