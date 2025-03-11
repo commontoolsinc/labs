@@ -2,7 +2,7 @@ import React, { createContext, useContext, useMemo } from "react";
 import { CharmManager } from "@commontools/charm";
 import { useParams } from "react-router-dom";
 import { type CharmRouteParams } from "@/routes.ts";
-import { useAuthentication } from "./AuthenticationContext.tsx";
+import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
 
 export type CharmManagerContextType = {
   charmManager: CharmManager;

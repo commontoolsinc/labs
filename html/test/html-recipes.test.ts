@@ -65,7 +65,7 @@ describe("recipes with HTML", () => {
             "ul",
             null,
             (items as unknown as any).map((item: any, i: any) =>
-              h("li", null, item.title)
+              h("li", { key: i.toString() }, item.title)
             ),
           ),
         ),

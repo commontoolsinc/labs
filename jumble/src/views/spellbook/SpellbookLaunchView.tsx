@@ -1,10 +1,15 @@
 import { useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import {
+  CharmsManagerProvider,
+  useCharmManager,
+} from "@/contexts/CharmManagerContext.tsx";
 import { getRecipe } from "@commontools/runner";
 import { createPath } from "@/routes.ts";
+import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
+import { AuthenticationView } from "@/views/AuthenticationView.tsx";
 
-export default function SpellbookLaunchView() {
+function Launcher() {
   const { spellId, replicaName } = useParams<{
     spellId: string;
     replicaName: string;
@@ -26,7 +31,7 @@ export default function SpellbookLaunchView() {
       // Return to detail view if not loading after 2 seconds
       const timeout = setTimeout(() => {
         console.log(
-          "CharmManager still not available after timeout, redirecting back"
+          "CharmManager still not available after timeout, redirecting back",
         );
         if (spellId) {
           navigate(createPath("spellbookDetail", { spellId }));
@@ -83,7 +88,7 @@ export default function SpellbookLaunchView() {
         console.log("Creating run with suggested values");
         const spell = await charmManager.runPersistent(
           recipe,
-          suggestionData.values || {}
+          suggestionData.values || {},
         );
         console.log("Spell run created:", spell);
 
@@ -99,7 +104,7 @@ export default function SpellbookLaunchView() {
             createPath("charmShow", {
               charmId,
               replicaName: replicaName || currentReplica,
-            })
+            }),
           );
         } else {
           navigate(createPath("spellbookDetail", { spellId }));
@@ -114,13 +119,28 @@ export default function SpellbookLaunchView() {
   }, [spellId, replicaName, navigate, charmManager, currentReplica]);
 
   return (
-    <div className="flex items-center justify-center h-screen">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold mb-4">Launching Spell...</h1>
-        <p className="text-gray-600">
-          Please wait while we prepare your spell.
-        </p>
+    <CharmsManagerProvider>
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold mb-4">Launching Spell...</h1>
+          <p className="text-gray-600">
+            Please wait while we prepare your spell.
+          </p>
+        </div>
       </div>
-    </div>
+    </CharmsManagerProvider>
+  );
+}
+
+export default function SpellbookLaunchView() {
+  const { user } = useAuthentication();
+
+  if (!user) {
+    return <AuthenticationView />;
+  }
+  return (
+    <CharmsManagerProvider>
+      <Launcher />
+    </CharmsManagerProvider>
   );
 }
