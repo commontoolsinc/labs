@@ -20,7 +20,7 @@ import {
   run,
   syncRecipeBlobby,
 } from "@commontools/runner";
-import { getSpace, storage } from "@commontools/runner";
+import { storage } from "@commontools/runner";
 import { DID, Identity } from "@commontools/identity";
 
 export type Charm = {
@@ -125,7 +125,7 @@ export class CharmManager {
   }
 
   getReplica(): string | undefined {
-    return this.space.uri;
+    return this.space;
   }
 
   async synced(): Promise<void> {

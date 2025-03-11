@@ -4,7 +4,6 @@ import type { Recipe } from "@commontools/builder";
 import { getDoc } from "../src/doc.ts";
 import { run, stop } from "../src/runner.ts";
 import { idle } from "../src/scheduler.ts";
-import { getSpace } from "../src/space.ts";
 
 describe("runRecipe", () => {
   it("should work with passthrough", async () => {
@@ -33,7 +32,7 @@ describe("runRecipe", () => {
     const result = run(
       recipe,
       { input: 1 },
-      getDoc(undefined, "should work with passthrough", getSpace("test")),
+      getDoc(undefined, "should work with passthrough", "test"),
     );
     await idle();
 
@@ -98,7 +97,7 @@ describe("runRecipe", () => {
     const result = run(
       outerRecipe,
       { value: 5 },
-      getDoc(undefined, "should work with nested recipes", getSpace("test")),
+      getDoc(undefined, "should work with nested recipes", "test"),
     );
     await idle();
 
@@ -125,7 +124,7 @@ describe("runRecipe", () => {
     const result = run(
       mockRecipe,
       { value: 1 },
-      getDoc(undefined, "should run a simple module", getSpace("test")),
+      getDoc(undefined, "should run a simple module", "test"),
     );
     await idle();
     expect(result.getAsQueryResult()).toEqual({ result: 2 });
@@ -158,7 +157,7 @@ describe("runRecipe", () => {
       getDoc(
         undefined,
         "should run a simple module with no outputs",
-        getSpace("test"),
+        "test",
       ),
     );
     await idle();
@@ -193,7 +192,7 @@ describe("runRecipe", () => {
       getDoc(
         undefined,
         "should handle incorrect inputs gracefully",
-        getSpace("test"),
+        "test",
       ),
     );
     await idle();
@@ -234,7 +233,7 @@ describe("runRecipe", () => {
     const result = run(
       mockRecipe,
       { value: 1 },
-      getDoc(undefined, "should handle nested recipes", getSpace("test")),
+      getDoc(undefined, "should handle nested recipes", "test"),
     );
     await idle();
     expect(result.getAsQueryResult()).toEqual({ result: 2 });
@@ -260,7 +259,7 @@ describe("runRecipe", () => {
     const inputCell = getDoc(
       { input: 10, output: 0 },
       "should allow passing a cell as a binding: input cell",
-      getSpace("test"),
+      "test",
     );
     const result = run(
       recipe,
@@ -268,7 +267,7 @@ describe("runRecipe", () => {
       getDoc(
         undefined,
         "should allow passing a cell as a binding",
-        getSpace("test"),
+        "test",
       ),
     );
 
@@ -305,12 +304,12 @@ describe("runRecipe", () => {
     const inputCell = getDoc(
       { input: 10, output: 0 },
       "should allow stopping a recipe: input cell",
-      getSpace("test"),
+      "test",
     );
     const result = run(
       recipe,
       inputCell,
-      getDoc(undefined, "should allow stopping a recipe", getSpace("test")),
+      getDoc(undefined, "should allow stopping a recipe", "test"),
     );
 
     await idle();

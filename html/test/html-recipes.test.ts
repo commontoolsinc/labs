@@ -3,7 +3,7 @@ import { h, render, VNode } from "../src/index.ts";
 import { lift, recipe, str, UI } from "@commontools/builder";
 import { idle, run } from "@commontools/runner";
 import * as assert from "./assert.ts";
-import { getDoc, getSpace } from "@commontools/runner";
+import { getDoc } from "@commontools/runner";
 import { JSDOM } from "jsdom";
 
 describe("recipes with HTML", () => {
@@ -30,7 +30,7 @@ describe("recipes with HTML", () => {
       },
     );
 
-    const space = getSpace("test");
+    const space = "test";
     const resultCell = getDoc(undefined, "simple-ui-result", space);
     const result = run(simpleRecipe, { value: 5 }, resultCell);
 
@@ -72,7 +72,7 @@ describe("recipes with HTML", () => {
       };
     });
 
-    const space = getSpace("test");
+    const space = "test";
     const resultCell = getDoc(undefined, "todo-list-result", space);
     const result = run(todoList, {
       title: "test",
@@ -112,7 +112,7 @@ describe("recipes with HTML", () => {
       return { [UI]: h("div", null, summaryUI as any) };
     });
 
-    const space = getSpace("test");
+    const space = "test";
     const resultCell = getDoc(undefined, "nested-todo-result", space);
     const result = run(todoList, {
       title: { name: "test" },
@@ -137,7 +137,7 @@ describe("recipes with HTML", () => {
       return { [UI]: h("div", null, str`Hello, ${name}!`) };
     });
 
-    const space = getSpace("test");
+    const space = "test";
     const resultCell = getDoc(undefined, "str-recipe-result", space);
     const result = run(strRecipe, { name: "world" }, resultCell);
 
@@ -176,7 +176,7 @@ describe("recipes with HTML", () => {
       ),
     }));
 
-    const space = getSpace("test");
+    const space = "test";
     const resultCell = getDoc(undefined, "nested-map-result", space);
     const result = run(nestedMapRecipe, data, resultCell);
 

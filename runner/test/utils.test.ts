@@ -14,7 +14,6 @@ import {
 } from "../src/utils.ts";
 import { DocLink, getDoc } from "../src/doc.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
-import { getSpace } from "../src/space.ts";
 
 describe("extractDefaultValues", () => {
   it("should extract default values from a schema", () => {
@@ -82,7 +81,7 @@ describe("mergeObjects", () => {
     const testCell = getDoc(
       undefined,
       "should treat cell aliases and references as values 1",
-      getSpace("test"),
+      "test",
     );
     const obj1 = { a: { $alias: { path: [] } } };
     const obj2 = { a: 2, b: { c: { cell: testCell, path: [] } } };
@@ -104,7 +103,7 @@ describe("sendValueToBinding", () => {
     const testCell = getDoc(
       { value: 0 },
       "should send value to a simple binding 1",
-      getSpace("test"),
+      "test",
     );
     sendValueToBinding(testCell, { $alias: { path: ["value"] } }, 42);
     expect(testCell.getAsQueryResult()).toEqual({ value: 42 });
@@ -114,7 +113,7 @@ describe("sendValueToBinding", () => {
     const testCell = getDoc(
       { arr: [0, 0, 0] },
       "should handle array bindings 1",
-      getSpace("test"),
+      "test",
     );
     sendValueToBinding(
       testCell,
@@ -136,7 +135,7 @@ describe("sendValueToBinding", () => {
         },
       },
       "should handle bindings with multiple levels 1",
-      getSpace("test"),
+      "test",
     );
 
     const binding = {
@@ -178,7 +177,7 @@ describe("setNestedValue", () => {
     const testCell = getDoc(
       { a: 1, b: { c: 2 } },
       "should set a value at a path 1",
-      getSpace("test"),
+      "test",
     );
     const success = setNestedValue(testCell, ["b", "c"], 3);
     expect(success).toBe(true);
@@ -189,7 +188,7 @@ describe("setNestedValue", () => {
     const testCell = getDoc(
       { a: 1, b: { c: 2, d: 3 } },
       "should delete no longer used fields 1",
-      getSpace("test"),
+      "test",
     );
     const success = setNestedValue(testCell, ["b"], { c: 4 });
     expect(success).toBe(true);
@@ -200,7 +199,7 @@ describe("setNestedValue", () => {
     const testCell = getDoc(
       { a: 1, b: { c: 2 } },
       "should log no changes 1",
-      getSpace("test"),
+      "test",
     );
     const log: ReactivityLog = { reads: [], writes: [] };
     const success = setNestedValue(testCell, [], { a: 1, b: { c: 2 } }, log);
@@ -213,7 +212,7 @@ describe("setNestedValue", () => {
     const testCell = getDoc(
       { a: 1, b: { c: 2 } },
       "should log minimal changes 1",
-      getSpace("test"),
+      "test",
     );
     const log: ReactivityLog = { reads: [], writes: [] };
     const success = setNestedValue(testCell, [], { a: 1, b: { c: 3 } }, log);
@@ -227,7 +226,7 @@ describe("setNestedValue", () => {
     const testCell = getDoc(
       { a: 1, b: { c: 2 } },
       "should fail when setting a nested value on a frozen cell 1",
-      getSpace("test"),
+      "test",
     );
     testCell.freeze();
     const log: ReactivityLog = { reads: [], writes: [] };
@@ -239,7 +238,7 @@ describe("setNestedValue", () => {
     const testCell = getDoc(
       { a: [1, 2, 3] },
       "should correctly update with shorter arrays 1",
-      getSpace("test"),
+      "test",
     );
     const success = setNestedValue(testCell, ["a"], [1, 2]);
     expect(success).toBe(true);
@@ -250,7 +249,7 @@ describe("setNestedValue", () => {
     const testCell = getDoc(
       { a: [1, 2, 3] },
       "should correctly update with a longer arrays 1",
-      getSpace("test"),
+      "test",
     );
     const success = setNestedValue(testCell, ["a"], [1, 2, 3, 4]);
     expect(success).toBe(true);
@@ -261,7 +260,7 @@ describe("setNestedValue", () => {
     const testCell = getDoc(
       { a: { b: 1 } },
       "should overwrite an object with an array 1",
-      getSpace("test"),
+      "test",
     );
     const success = setNestedValue(testCell, ["a"], [1, 2, 3]);
     expect(success).toBeTruthy();
@@ -276,7 +275,7 @@ describe("mapBindingToCell", () => {
     const testCell = getDoc(
       { a: 1, b: { c: 2 } },
       "should map bindings to cell aliases 1",
-      getSpace("test"),
+      "test",
     );
     const binding = {
       x: { $alias: { path: ["a"] } },
@@ -298,7 +297,7 @@ describe("followCellReferences", () => {
     const testCell = getDoc(
       { value: 42 },
       "should follow a simple cell reference 1",
-      getSpace("test"),
+      "test",
     );
     const reference: DocLink = { cell: testCell, path: ["value"] };
     const result = followCellReferences(reference);
@@ -309,14 +308,14 @@ describe("followCellReferences", () => {
     const innerCell = getDoc(
       { inner: 10 },
       "should follow nested cell references 1",
-      getSpace("test"),
+      "test",
     );
     const outerCell = getDoc(
       {
         outer: { cell: innerCell, path: ["inner"] },
       },
       "should follow nested cell references 2",
-      getSpace("test"),
+      "test",
     );
     const reference: DocLink = { cell: outerCell, path: ["outer"] };
     const result = followCellReferences(reference);
@@ -327,12 +326,12 @@ describe("followCellReferences", () => {
     const cellA = getDoc(
       {},
       "should throw an error on circular references 1",
-      getSpace("test"),
+      "test",
     );
     const cellB = getDoc(
       {},
       "should throw an error on circular references 2",
-      getSpace("test"),
+      "test",
     );
     cellA.send({ ref: { cell: cellB, path: ["ref"] } });
     cellB.send({ ref: { cell: cellA, path: ["ref"] } });
@@ -348,7 +347,7 @@ describe("followAliases", () => {
     const testCell = getDoc(
       { value: 42 },
       "should follow a simple alias 1",
-      getSpace("test"),
+      "test",
     );
     const binding = { $alias: { path: ["value"] } };
     const result = followAliases(binding, testCell);
@@ -359,14 +358,14 @@ describe("followAliases", () => {
     const innerCell = getDoc(
       { inner: 10 },
       "should follow nested aliases 1",
-      getSpace("test"),
+      "test",
     );
     const outerCell = getDoc(
       {
         outer: { $alias: { cell: innerCell, path: ["inner"] } },
       },
       "should follow nested aliases 2",
-      getSpace("test"),
+      "test",
     );
     const binding = { $alias: { path: ["outer"] } };
     const result = followAliases(binding, outerCell);
@@ -379,12 +378,12 @@ describe("followAliases", () => {
     const cellA = getDoc(
       {},
       "should throw an error on circular aliases 1",
-      getSpace("test"),
+      "test",
     );
     const cellB = getDoc(
       {},
       "should throw an error on circular aliases 2",
-      getSpace("test"),
+      "test",
     );
     cellA.send({ alias: { $alias: { cell: cellB, path: ["alias"] } } });
     cellB.send({ alias: { $alias: { cell: cellA, path: ["alias"] } } });
@@ -398,7 +397,7 @@ describe("normalizeAndDiff", () => {
     const testCell = getDoc(
       { value: 42 },
       "normalizeAndDiff simple value changes",
-      getSpace("test"),
+      "test",
     );
     const current: DocLink = { cell: testCell, path: ["value"] };
     const changes = normalizeAndDiff(current, 100);
@@ -412,7 +411,7 @@ describe("normalizeAndDiff", () => {
     const testCell = getDoc(
       { user: { name: "John", age: 30 } },
       "normalizeAndDiff object property changes",
-      getSpace("test"),
+      "test",
     );
     const current: DocLink = { cell: testCell, path: ["user"] };
     const changes = normalizeAndDiff(current, { name: "Jane", age: 30 });
@@ -429,7 +428,7 @@ describe("normalizeAndDiff", () => {
     const testCell = getDoc(
       { user: { name: "John" } },
       "normalizeAndDiff added object properties",
-      getSpace("test"),
+      "test",
     );
     const current: DocLink = { cell: testCell, path: ["user"] };
     const changes = normalizeAndDiff(current, { name: "John", age: 30 });
@@ -446,7 +445,7 @@ describe("normalizeAndDiff", () => {
     const testCell = getDoc(
       { user: { name: "John", age: 30 } },
       "normalizeAndDiff removed object properties",
-      getSpace("test"),
+      "test",
     );
     const current: DocLink = { cell: testCell, path: ["user"] };
     const changes = normalizeAndDiff(current, { name: "John" });
@@ -463,7 +462,7 @@ describe("normalizeAndDiff", () => {
     const testCell = getDoc(
       { items: [1, 2, 3] },
       "normalizeAndDiff array length changes",
-      getSpace("test"),
+      "test",
     );
     const current: DocLink = { cell: testCell, path: ["items"] };
     const changes = normalizeAndDiff(current, [1, 2]);
@@ -480,7 +479,7 @@ describe("normalizeAndDiff", () => {
     const testCell = getDoc(
       { items: [1, 2, 3] },
       "normalizeAndDiff array element changes",
-      getSpace("test"),
+      "test",
     );
     const current: DocLink = { cell: testCell, path: ["items"] };
     const changes = normalizeAndDiff(current, [1, 5, 3]);
@@ -500,7 +499,7 @@ describe("normalizeAndDiff", () => {
         alias: { $alias: { path: ["value"] } },
       },
       "normalizeAndDiff follow aliases",
-      getSpace("test"),
+      "test",
     );
     const current: DocLink = { cell: testCell, path: ["alias"] };
     const changes = normalizeAndDiff(current, 100);
@@ -519,7 +518,7 @@ describe("normalizeAndDiff", () => {
         alias: { $alias: { path: ["value"] } },
       },
       "normalizeAndDiff update aliases",
-      getSpace("test"),
+      "test",
     );
     const current: DocLink = { cell: testCell, path: ["alias"] };
     const changes = normalizeAndDiff(current, 100);
@@ -563,7 +562,7 @@ describe("normalizeAndDiff", () => {
         },
       },
       "normalizeAndDiff nested changes",
-      getSpace("test"),
+      "test",
     );
     const current: DocLink = { cell: testCell, path: ["user", "profile"] };
     const changes = normalizeAndDiff(current, {
@@ -584,7 +583,7 @@ describe("normalizeAndDiff", () => {
   });
 
   it("should handle ID-based entity objects", () => {
-    const testSpace = getSpace("test");
+    const testSpace = "test";
     const testCell = getDoc(
       { items: [] },
       "normalizeAndDiff ID-based entity objects",
@@ -609,7 +608,7 @@ describe("normalizeAndDiff", () => {
   });
 
   it("should update the same document with ID-based entity objects", () => {
-    const testSpace = getSpace("test");
+    const testSpace = "test";
     const testCell = getDoc<any>(
       { items: [] },
       "normalizeAndDiff ID-based entity objects",
@@ -650,7 +649,7 @@ describe("normalizeAndDiff", () => {
     const testCell = getDoc(
       { value: 42 },
       "normalizeAndDiff no changes",
-      getSpace("test"),
+      "test",
     );
     const current: DocLink = { cell: testCell, path: ["value"] };
     const changes = normalizeAndDiff(current, 42);
@@ -662,12 +661,12 @@ describe("normalizeAndDiff", () => {
     const docA = getDoc(
       { name: "Doc A" },
       "normalizeAndDiff doc reference A",
-      getSpace("test"),
+      "test",
     );
     const docB = getDoc(
       { value: { name: "Original" } },
       "normalizeAndDiff doc reference B",
-      getSpace("test"),
+      "test",
     );
 
     const current: DocLink = { cell: docB, path: ["value"] };
@@ -682,12 +681,12 @@ describe("normalizeAndDiff", () => {
     const docA = getDoc(
       { name: "Doc A" },
       "normalizeAndDiff doc reference no change A",
-      getSpace("test"),
+      "test",
     );
     const docB = getDoc(
       { value: { name: "Original" } },
       "normalizeAndDiff doc reference no change B",
-      getSpace("test"),
+      "test",
     );
 
     const current: DocLink = { cell: docB, path: ["value"] };

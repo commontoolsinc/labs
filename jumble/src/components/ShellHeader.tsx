@@ -4,7 +4,6 @@ import { NavPath } from "@/components/NavPath.tsx";
 import { User } from "@/components/User.tsx";
 import { useSyncedStatus } from "@/contexts/SyncStatusContext.tsx";
 import { useNamedCell } from "@/hooks/use-cell.ts";
-import { getSpace } from "@commontools/runner";
 
 type ShellHeaderProps = {
   /**
@@ -30,7 +29,7 @@ export function ShellHeader(
   { session, charmId }: ShellHeaderProps,
 ) {
   const { isSyncing, lastSyncTime } = useSyncedStatus();
-  const colorSpace = getSpace(session.space);
+  const colorSpace = session.space;
 
   const [style, setStyle] = useNamedCell(
     colorSpace,

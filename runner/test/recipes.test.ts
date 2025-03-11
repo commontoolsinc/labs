@@ -6,7 +6,6 @@ import { addModuleByRef } from "../src/module.ts";
 import { getDoc } from "../src/doc.ts";
 import { idle } from "../src/scheduler.ts";
 import { type Cell } from "../src/cell.ts";
-import { getSpace } from "../src/space.ts";
 
 describe("Recipe Runner", () => {
   it("should run a simple recipe", async () => {
@@ -21,7 +20,7 @@ describe("Recipe Runner", () => {
     const result = run(
       simpleRecipe,
       { value: 5 },
-      getDoc(undefined, "should run a simple recipe", getSpace("test")),
+      getDoc(undefined, "should run a simple recipe", "test"),
     );
 
     await idle();
@@ -51,7 +50,7 @@ describe("Recipe Runner", () => {
     const result = run(
       outerRecipe,
       { value: 4 },
-      getDoc(undefined, "should handle nested recipes", getSpace("test")),
+      getDoc(undefined, "should handle nested recipes", "test"),
     );
 
     await idle();
@@ -76,7 +75,7 @@ describe("Recipe Runner", () => {
       getDoc(
         undefined,
         "should handle recipes with defaults",
-        getSpace("test"),
+        "test",
       ),
     );
 
@@ -90,7 +89,7 @@ describe("Recipe Runner", () => {
       getDoc(
         undefined,
         "should handle recipes with defaults (2)",
-        getSpace("test"),
+        "test",
       ),
     );
 
@@ -119,7 +118,7 @@ describe("Recipe Runner", () => {
       getDoc(
         undefined,
         "should handle recipes with map nodes",
-        getSpace("test"),
+        "test",
       ),
     );
 
@@ -152,7 +151,7 @@ describe("Recipe Runner", () => {
       getDoc(
         undefined,
         "should handle recipes with map nodes with closures",
-        getSpace("test"),
+        "test",
       ),
     );
 
@@ -183,7 +182,7 @@ describe("Recipe Runner", () => {
     const result = run(
       incRecipe,
       { counter: { value: 0 } },
-      getDoc(undefined, "should execute handlers", getSpace("test")),
+      getDoc(undefined, "should execute handlers", "test"),
     );
 
     await idle();
@@ -222,7 +221,7 @@ describe("Recipe Runner", () => {
       getDoc(
         undefined,
         "should execute handlers that use bind and this",
-        getSpace("test"),
+        "test",
       ),
     );
 
@@ -258,7 +257,7 @@ describe("Recipe Runner", () => {
       getDoc(
         undefined,
         "should execute handlers that use bind and this (no types)",
-        getSpace("test"),
+        "test",
       ),
     );
 
@@ -277,12 +276,12 @@ describe("Recipe Runner", () => {
     const counter = getDoc(
       { value: 0 },
       "should execute recipes returned by handlers 1",
-      getSpace("test"),
+      "test",
     );
     const nested = getDoc(
       { a: { b: { c: 0 } } },
       "should execute recipes returned by handlers 2",
-      getSpace("test"),
+      "test",
     );
 
     const values: [number, number, number][] = [];
@@ -317,7 +316,7 @@ describe("Recipe Runner", () => {
       getDoc(
         undefined,
         "should execute recipes returned by handlers",
-        getSpace("test"),
+        "test",
       ),
     );
 
@@ -342,12 +341,12 @@ describe("Recipe Runner", () => {
     const x = getDoc(
       2,
       "should handle recipes returned by lifted functions 1",
-      getSpace("test"),
+      "test",
     );
     const y = getDoc(
       3,
       "should handle recipes returned by lifted functions 2",
-      getSpace("test"),
+      "test",
     );
 
     const runCounts = {
@@ -389,7 +388,7 @@ describe("Recipe Runner", () => {
       getDoc(
         undefined,
         "should handle recipes returned by lifted functions",
-        getSpace("test"),
+        "test",
       ),
     );
 
@@ -440,7 +439,7 @@ describe("Recipe Runner", () => {
     const result = run(
       simpleRecipe,
       { value: 5 },
-      getDoc(undefined, "should support referenced modules", getSpace("test")),
+      getDoc(undefined, "should support referenced modules", "test"),
     );
 
     await idle();
@@ -477,7 +476,7 @@ describe("Recipe Runner", () => {
     const settingsCell = getDoc(
       { value: 5 },
       "should handle schema with cell references 1",
-      getSpace("test"),
+      "test",
     );
     const result = run(
       multiplyRecipe,
@@ -488,7 +487,7 @@ describe("Recipe Runner", () => {
       getDoc(
         undefined,
         "should handle schema with cell references",
-        getSpace("test"),
+        "test",
       ),
     );
 
@@ -545,12 +544,12 @@ describe("Recipe Runner", () => {
     const item1 = getDoc(
       { value: 1 },
       "should handle nested cell references in schema 1",
-      getSpace("test"),
+      "test",
     );
     const item2 = getDoc(
       { value: 2 },
       "should handle nested cell references in schema 2",
-      getSpace("test"),
+      "test",
     );
     const result = run(
       sumRecipe,
@@ -558,7 +557,7 @@ describe("Recipe Runner", () => {
       getDoc(
         undefined,
         "should handle nested cell references in schema",
-        getSpace("test"),
+        "test",
       ),
     );
 
@@ -600,12 +599,12 @@ describe("Recipe Runner", () => {
     const value1 = getDoc(
       5,
       "should handle dynamic cell references with schema 1",
-      getSpace("test"),
+      "test",
     );
     const value2 = getDoc(
       7,
       "should handle dynamic cell references with schema 2",
-      getSpace("test"),
+      "test",
     );
     const result = run(
       dynamicRecipe,
@@ -618,7 +617,7 @@ describe("Recipe Runner", () => {
       getDoc(
         undefined,
         "should handle dynamic cell references with schema",
-        getSpace("test"),
+        "test",
       ),
     );
 
@@ -658,7 +657,7 @@ describe("Recipe Runner", () => {
       getDoc(
         undefined,
         "should execute handlers with schemas",
-        getSpace("test"),
+        "test",
       ),
     );
 

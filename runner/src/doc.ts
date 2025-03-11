@@ -24,7 +24,6 @@ import {
 import { type ReactivityLog } from "./scheduler.ts";
 import { type Cancel } from "./cancel.ts";
 import { arrayEqual } from "./utils.ts";
-import { type Space } from "./space.ts";
 
 /**
  * Lowest level cell implementation.
@@ -166,7 +165,7 @@ export type DocImpl<T> = {
    * The space this doc belongs to.
    * Required when entityId is set.
    */
-  space: Space;
+  space: string;
 
   /**
    * Get current entity ID.
@@ -235,7 +234,7 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
     : any
   : any;
 
-export function getDoc<T>(value: T, cause: any, space: Space): DocImpl<T> {
+export function getDoc<T>(value: T, cause: any, space: string): DocImpl<T> {
   // If cause is provided, generate ID and return pre-existing cell if any.
   const entityId = generateEntityId(value, cause);
   const existing = getDocByEntityId(space, entityId, false);
@@ -247,7 +246,7 @@ export function getDoc<T>(value: T, cause: any, space: Space): DocImpl<T> {
 export function createDoc<T>(
   value: T,
   entityId: EntityId,
-  space: Space,
+  space: string,
 ): DocImpl<T> {
   const callbacks = new Set<(value: T, path: PropertyKey[]) => void>();
   let readOnly = false;
@@ -317,10 +316,10 @@ export function createDoc<T>(
     set entityId(id: EntityId) {
       throw new Error("Can't set entity ID directly, use getDocByEntityId");
     },
-    get space(): Space {
+    get space(): string {
       return space;
     },
-    set space(newSpace: Space) {
+    set space(newSpace: string) {
       throw new Error("Can't set space directly, use getDocByEntityId");
     },
     get sourceCell(): DocImpl<any> | undefined {

@@ -3,13 +3,7 @@ import { expect } from "@std/expect";
 import { storage } from "../src/storage.ts";
 import { StorageProvider } from "../src/storage/base.ts";
 import { InMemoryStorageProvider } from "../src/storage/memory.ts";
-import {
-  createRef,
-  DocImpl,
-  DocLink,
-  getDoc,
-  getSpace,
-} from "@commontools/runner";
+import { createRef, DocImpl, DocLink, getDoc } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 
 storage.setRemoteStorage(new URL("memory://"));
@@ -25,7 +19,7 @@ describe("Storage", () => {
     testDoc = getDoc<string>(
       undefined as unknown as string,
       `storage test cell ${n++}`,
-      getSpace("test"),
+      "test",
     );
   });
 
@@ -50,7 +44,7 @@ describe("Storage", () => {
       const refDoc = getDoc(
         "hello",
         "should persist a cells and referenced cell references within it",
-        getSpace("test"),
+        "test",
       );
 
       const testValue = {
@@ -73,7 +67,7 @@ describe("Storage", () => {
       const refDoc = getDoc(
         "hello",
         "should persist a cells and referenced cells 1",
-        getSpace("test"),
+        "test",
       );
 
       const testValue = {
@@ -128,7 +122,7 @@ describe("Storage", () => {
 
   describe("ephemeral docs", () => {
     it("should not be loaded from storage", async () => {
-      const ephemeralDoc = getDoc("transient", "ephemeral", getSpace("test"));
+      const ephemeralDoc = getDoc("transient", "ephemeral", "test");
       ephemeralDoc.ephemeral = true;
       await storage.syncCell(ephemeralDoc);
 
