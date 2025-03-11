@@ -92,8 +92,7 @@ export function sendValueToBinding(
 ) {
   if (isAlias(binding)) {
     const ref = followAliases(binding, doc, log);
-    const changes = normalizeAndDiff(ref, value, log, { doc, binding });
-    applyChangeSet(changes, log);
+    diffAndUpdate(ref, value, log, { doc, binding });
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value)) {
       for (let i = 0; i < Math.min(binding.length, value.length); i++) {
@@ -460,7 +459,7 @@ export function followAliases(
  * @param newValue - The new value to traverse.
  * @param log - The log to write to.
  * @param context - The context of the change.
- * @returns An array of changes that should be written.
+ * @returns Whether any changes were made.
  */
 export function diffAndUpdate(
   current: DocLink,

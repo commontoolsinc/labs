@@ -382,10 +382,10 @@ describe("createProxy", () => {
     ]);
   });
 
-  it("should allow changig array lengts by writing length", () => {
+  it("should allow changing array lengths by writing length", () => {
     const c = getDoc(
       [1, 2, 3],
-      "should allow changig array lengts by writing length",
+      "should allow changing array lengths by writing length",
       getSpace("test"),
     );
     const log: ReactivityLog = { reads: [], writes: [] };
@@ -407,10 +407,10 @@ describe("createProxy", () => {
     ]);
   });
 
-  it("should allow changig array by splicing", () => {
+  it("should allow changing array by splicing", () => {
     const c = getDoc(
       [1, 2, 3],
-      "should allow changig array by splicing",
+      "should allow changing array by splicing",
       getSpace("test"),
     );
     const log: ReactivityLog = { reads: [], writes: [] };
