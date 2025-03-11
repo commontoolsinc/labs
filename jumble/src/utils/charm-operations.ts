@@ -111,7 +111,7 @@ export async function iterateCharm(
       charmManager,
       charm ?? null,
       input,
-      false,
+      variants,
       preferredModel,
     );
     if (!newCharmId) {
