@@ -13,7 +13,7 @@ import {
   getDocLinkOrValue,
   type QueryResult,
 } from "./query-result-proxy.ts";
-import { prepareForSaving, resolveLinkToValue, resolvePath } from "./utils.ts";
+import { diffAndUpdate, resolveLinkToValue, resolvePath } from "./utils.ts";
 import { queueEvent, type ReactivityLog, subscribe } from "./scheduler.ts";
 import { type EntityId, getDocByEntityId, getEntityId } from "./doc-map.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
@@ -331,24 +331,13 @@ function createRegularCell<T>(
 ): Cell<T> {
   const self = {
     get: () => validateAndTransform(doc, path, schema, log, rootSchema),
-    set: (newValue: T) => {
-      const ref = resolvePath(doc, path, log);
-      if (
-        prepareForSaving(
-          ref.cell,
-          newValue,
-          ref.cell.getAtPath(ref.path),
-          log,
-          {
-            parent: getTopFrame()?.cause,
-            doc: ref.cell,
-            path: ref.path,
-          },
-        )
-      ) {
-        ref.cell.setAtPath(ref.path, newValue, log);
-      }
-    },
+    set: (newValue: T) =>
+      diffAndUpdate(
+        resolvePath(doc, path, log),
+        newValue,
+        log,
+        getTopFrame()?.cause,
+      ),
     send: (newValue: T) => self.set(newValue),
     update: (values: Partial<T>) => {
       if (typeof values !== "object" || values === null) {

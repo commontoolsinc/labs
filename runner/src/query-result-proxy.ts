@@ -1,19 +1,7 @@
-import { isAlias } from "@commontools/builder";
 import { getTopFrame, toOpaqueRef } from "@commontools/builder";
-import {
-  type DocImpl,
-  type DocLink,
-  getDoc,
-  isDoc,
-  isDocLink,
-  makeOpaqueRef,
-} from "./doc.ts";
+import { type DocImpl, type DocLink, getDoc, makeOpaqueRef } from "./doc.ts";
 import { queueEvent, type ReactivityLog } from "./scheduler.ts";
-import {
-  normalizeToDocLinks,
-  resolveLinkToValue,
-  setNestedValue,
-} from "./utils.ts";
+import { diffAndUpdate, resolveLinkToValue, setNestedValue } from "./utils.ts";
 
 // Array.prototype's entries, and whether they modify the array
 enum ArrayMethodType {
@@ -139,13 +127,17 @@ export function createQueryResultProxy<T>(
 
             // Turn any newly added elements into cells. And if there was a
             // change at all, update the cell.
-            normalizeToDocLinks(valueCell, copy, target, log, {
-              parent: valueCell.entityId,
-              method: prop,
-              call: new Error().stack,
-              context: getTopFrame()?.cause ?? "unknown",
-            });
-            setNestedValue(valueCell, valuePath, copy, log);
+            diffAndUpdate(
+              { cell: valueCell, path: valuePath },
+              copy,
+              log,
+              {
+                parent: valueCell.entityId,
+                method: prop,
+                call: new Error().stack,
+                context: getTopFrame()?.cause ?? "unknown",
+              },
+            );
 
             if (Array.isArray(result)) {
               if (!valueCell.entityId) {
@@ -159,7 +151,13 @@ export function createQueryResultProxy<T>(
                 call: new Error().stack,
                 context: getTopFrame()?.cause ?? "unknown",
               };
-              normalizeToDocLinks(valueCell, result, undefined, log, cause);
+
+              diffAndUpdate(
+                { cell: valueCell, path: valuePath },
+                result,
+                log,
+                cause,
+              );
 
               const resultCell = getDoc<any[]>(
                 undefined as unknown as any[],
@@ -182,14 +180,14 @@ export function createQueryResultProxy<T>(
 
       if (Array.isArray(target) && prop === "length") {
         const oldLength = target.length;
-        const result = setNestedValue(
+        const changed = setNestedValue(
           valueCell,
           [...valuePath, prop],
           value,
           log,
         );
         const newLength = value;
-        if (result) {
+        if (changed) {
           for (
             let i = Math.min(oldLength, newLength);
             i < Math.max(oldLength, newLength);
@@ -199,41 +197,17 @@ export function createQueryResultProxy<T>(
             queueEvent({ cell: valueCell, path: [...valuePath, i] }, undefined);
           }
         }
-        return result;
+        return true;
       }
 
-      // Make sure that any nested arrays are made of cells.
-      normalizeToDocLinks(valueCell, value, undefined, log, {
-        cell: valueCell.entityId,
-        path: [...valuePath, prop],
-      });
+      diffAndUpdate(
+        { cell: valueCell, path: [...valuePath, prop] },
+        value,
+        log,
+        getTopFrame()?.cause ?? "unknown",
+      );
 
-      if (isDoc(value)) value = { cell: value, path: [] } satisfies DocLink;
-
-      // When setting a value in an array, make sure it's a cell reference.
-      if (Array.isArray(target) && !isDocLink(value)) {
-        const ref = {
-          cell: getDoc(
-            undefined,
-            {
-              list: { cell: valueCell.entityId, path: valuePath },
-              previous: Number(prop) > 0
-                ? (target[Number(prop) - 1].cell?.entityId ?? Number(prop) - 1)
-                : null,
-            },
-            valueCell.space,
-          ),
-          path: [],
-        };
-        ref.cell.send(value);
-        ref.cell.sourceCell = valueCell;
-
-        log?.writes.push(ref);
-
-        value = ref;
-      }
-
-      return setNestedValue(valueCell, [...valuePath, prop], value, log);
+      return true;
     },
   }) as T;
 }

@@ -204,21 +204,13 @@ describe("createProxy", () => {
     const proxy = c.getAsQueryResult([], log);
     proxy[0] = 1;
     proxy.push(2);
-    expect(c.get()).toHaveLength(2);
-    expect(isDocLink(c.get()[0])).toBeTruthy();
-    expect(c.get()[0].cell.get()).toBe(1);
-    expect(isDocLink(c.get()[1])).toBeTruthy();
-    expect(c.get()[1].cell.get()).toBe(2);
+    expect(c.get()).toEqual([1, 2]);
+    // only read array, but not the elements
     expect(log.reads.map((r) => r.path)).toEqual([[]]);
+    // writes to path ["0", "1"]
     expect(log.writes.filter((w) => w.cell === c).map((w) => w.path)).toEqual([[
       "0",
     ], ["1"]]);
-    expect(
-      log.writes.filter((w) => w.cell === c.get()[0].cell).map((w) => w.path),
-    ).toEqual([[]]);
-    expect(
-      log.writes.filter((w) => w.cell === c.get()[1].cell).map((w) => w.path),
-    ).toEqual([[]]);
   });
 
   it("should support pop() and only read the popped element", () => {
