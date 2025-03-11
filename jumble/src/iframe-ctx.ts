@@ -111,9 +111,9 @@ export const setupIframe = () =>
       let previousValue: any;
 
       const action: Action = (log: ReactivityLog) => {
-      const data = key === "*"
-        ? (isCell(context) ? context.withLog(log).get() : context)
-        : (isCell(context)
+        const data = key === "*"
+          ? (isCell(context) ? context.withLog(log).get() : context)
+          : (isCell(context)
             // get?.() because streams don't have a get, set undefined for those
             ? context.withLog(log).key(key).get?.()
             : context?.[key]);
@@ -143,5 +143,13 @@ export const setupIframe = () =>
       const res = await llm.sendRequest(jsonPayload);
       console.log("onLLMRequest res", res);
       return res as any;
+    },
+    async onReadWebpageRequest(_context: any, payload: string) {
+      console.log("onReadWebpageRequest", payload);
+      const res = await fetch(
+        `/api/ai/webreader/${encodeURIComponent(payload)}`,
+      );
+      console.log("onReadWebpageRequest res", res);
+      return await res.json();
     },
   });
