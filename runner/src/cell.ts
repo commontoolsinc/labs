@@ -56,10 +56,6 @@ import { Space } from "./space.ts";
  *
  * Everything below is only available in the system, not in spell code:
  *
- * @method setRaw Sets the value of the cell without transforming it at all.
- * @param {T} value - The value to set.
- * @returns {void}
- *
  * @method asSchema Creates a new cell with a specific schema.
  * @param {JSONSchema} schema - The schema to apply.
  * @returns {Cell<T>} - A cell with the specified schema.
@@ -113,13 +109,12 @@ export interface Cell<T> {
     >
   ): void;
   equals(other: Cell<any>): boolean;
-  sink(callback: (value: T) => Cancel | undefined | void): Cancel;
   key<K extends T extends Cell<infer S> ? keyof S : keyof T>(
     valueKey: K,
   ): Cell<
     T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
   >;
-  setRaw(value: T): void;
+
   asSchema<T>(
     schema?: JSONSchema,
   ): Cell<T>;
@@ -127,6 +122,7 @@ export interface Cell<T> {
     schema: S,
   ): Cell<Schema<S>>;
   withLog(log: ReactivityLog): Cell<T>;
+  sink(callback: (value: T) => Cancel | undefined | void): Cancel;
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Path,
     log?: ReactivityLog,
@@ -394,8 +390,6 @@ function createRegularCell<T>(
     },
     equals: (other: Cell<any>) =>
       JSON.stringify(self) === JSON.stringify(other),
-    sink: (callback: (value: T) => Cancel | undefined) =>
-      subscribeToReferencedDocs(callback, doc, path, schema, rootSchema),
     key: <K extends T extends Cell<infer S> ? keyof S : keyof T>(
       valueKey: K,
     ): T extends Cell<infer S> ? Cell<S[K & keyof S]> : Cell<T[K]> => {
@@ -415,15 +409,13 @@ function createRegularCell<T>(
         rootSchema,
       ) as T extends Cell<infer S> ? Cell<S[K & keyof S]> : Cell<T[K]>;
     },
-    setRaw: (newValue: T) => {
-      const ref = resolvePath(doc, path, log);
-      ref.cell.setAtPath(ref.path, newValue, log);
-    },
 
     asSchema: (newSchema?: JSONSchema) =>
       createCell(doc, path, log, newSchema, newSchema),
     withLog: (newLog: ReactivityLog) =>
       createCell(doc, path, newLog, schema, rootSchema),
+    sink: (callback: (value: T) => Cancel | undefined) =>
+      subscribeToReferencedDocs(callback, doc, path, schema, rootSchema),
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
     getAsDocLink: () => ({ cell: doc, path }) satisfies DocLink,
