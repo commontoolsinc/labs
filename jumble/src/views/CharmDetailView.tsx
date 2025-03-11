@@ -29,6 +29,7 @@ import {
 } from "@/utils/prompt-library/charm-suggestions.ts";
 import { Cell } from "@commontools/runner";
 import { createPath, createPathWithHash } from "@/routes.ts";
+import JsonView from "@uiw/react-json-view";
 
 type Tab = "iterate" | "code" | "data";
 type OperationType = "iterate" | "extend";
@@ -853,7 +854,13 @@ const CodeTab = () => {
 // Data Tab Component
 const DataTab = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
-  const { currentFocus: charm } = useCharm(paramCharmId);
+  const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
+  const [isArgumentExpanded, setIsArgumentExpanded] = useState(false);
+  const [isResultExpanded, setIsResultExpanded] = useState(false);
+  const [isArgumentSchemaExpanded, setIsArgumentSchemaExpanded] = useState(
+    false,
+  );
+  const [isResultSchemaExpanded, setIsResultSchemaExpanded] = useState(false);
 
   if (!charm) return null;
 
@@ -861,21 +868,110 @@ const DataTab = () => {
     <div className="h-full overflow-auto p-4">
       {charm.getSourceCell && (
         <div className="mb-4">
-          <h3 className="text-md font-semibold mb-1">Argument</h3>
-          <pre className="bg-gray-50 p-2 rounded text-sm overflow-auto max-h-36 border border-gray-200">
-            {JSON.stringify(charm.getSourceCell()?.get()?.argument, null, 2)}
-          </pre>
+          <button
+            type="button"
+            onClick={() => setIsArgumentExpanded(!isArgumentExpanded)}
+            className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+          >
+            <span className="text-md font-semibold">Argument</span>
+            <span>{isArgumentExpanded ? "▼" : "▶"}</span>
+          </button>
+
+          {isArgumentExpanded && (
+            <div className="border border-gray-300 rounded bg-gray-50 p-2">
+              {/* @ts-expect-error JsonView is imported as any */}
+              <JsonView
+                value={charm.getSourceCell()?.get()?.argument || {}}
+                style={{
+                  background: "transparent",
+                  fontSize: "0.875rem",
+                }}
+              />
+            </div>
+          )}
         </div>
       )}
-      <h2 className="text-lg font-semibold mb-2">Result</h2>
+
       <div className="mb-4">
-        <pre className="bg-gray-50 p-2 rounded text-sm overflow-auto max-h-64 border border-gray-200">
-          {JSON.stringify(charm.get(), null, 2)}
-        </pre>
+        <button
+          type="button"
+          onClick={() => setIsResultExpanded(!isResultExpanded)}
+          className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+        >
+          <span className="text-md font-semibold">Result</span>
+          <span>{isResultExpanded ? "▼" : "▶"}</span>
+        </button>
+
+        {isResultExpanded && (
+          <div className="border border-gray-300 rounded bg-gray-50 p-2">
+            {/* @ts-expect-error JsonView is imported as any */}
+            <JsonView
+              value={charm.get() || {}}
+              style={{
+                background: "transparent",
+                fontSize: "0.875rem",
+              }}
+            />
+          </div>
+        )}
       </div>
+
+      {iframeRecipe && (
+        <>
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={() =>
+                setIsArgumentSchemaExpanded(!isArgumentSchemaExpanded)}
+              className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+            >
+              <span className="text-md font-semibold">Argument Schema</span>
+              <span>{isArgumentSchemaExpanded ? "▼" : "▶"}</span>
+            </button>
+
+            {isArgumentSchemaExpanded && (
+              <div className="border border-gray-300 rounded p-2 bg-gray-50">
+                {/* @ts-expect-error JsonView is imported as any */}
+                <JsonView
+                  value={iframeRecipe.argumentSchema || {}}
+                  style={{
+                    background: "transparent",
+                    fontSize: "0.875rem",
+                  }}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={() => setIsResultSchemaExpanded(!isResultSchemaExpanded)}
+              className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+            >
+              <span className="text-md font-semibold">Result Schema</span>
+              <span>{isResultSchemaExpanded ? "▼" : "▶"}</span>
+            </button>
+
+            {isResultSchemaExpanded && (
+              <div className="border border-gray-300 rounded p-2 bg-gray-50">
+                {/* @ts-expect-error JsonView is imported as any */}
+                <JsonView
+                  value={iframeRecipe.resultSchema || {}}
+                  style={{
+                    background: "transparent",
+                    fontSize: "0.875rem",
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 };
+
 // Bottom Sheet Component
 const BottomSheet = ({
   children,
