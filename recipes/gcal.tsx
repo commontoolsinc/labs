@@ -3,6 +3,7 @@ import {
   cell,
   derive,
   handler,
+  ID,
   JSONSchema,
   NAME,
   recipe,
@@ -109,64 +110,109 @@ const ResultSchema = {
 } as const satisfies JSONSchema;
 
 // Handler to update the limit for events to import
-const updateLimit = handler<{ detail: { value: string } }, { limit: number }>(
+const updateLimit = handler(
+  {
+    type: "object",
+    properties: {
+      detail: {
+        type: "object",
+        properties: { value: { type: "string" } },
+        required: ["value"],
+      },
+    },
+  },
+  {
+    type: "object",
+    properties: { limit: { type: "number", asCell: true } },
+    required: ["limit"],
+  },
   ({ detail }, state) => {
-    state.limit = parseInt(detail?.value ?? "10") || 0;
+    state.limit.set(parseInt(detail?.value ?? "10") || 0);
   },
 );
 
 // Handler to update the calendar ID
-const updateCalendarId = handler<
-  { detail: { value: string } },
-  { calendarId: string }
->(({ detail }, state) => {
-  state.calendarId = detail?.value ?? "primary";
-});
+const updateCalendarId = handler(
+  {
+    type: "object",
+    properties: {
+      detail: {
+        type: "object",
+        properties: { value: { type: "string" } },
+        required: ["value"],
+      },
+    },
+  },
+  {
+    type: "object",
+    properties: { calendarId: { type: "string", asCell: true } },
+    required: ["calendarId"],
+  },
+  ({ detail }, state) => {
+    state.calendarId.set(detail?.value ?? "primary");
+  },
+);
 
 // The updater now fetches calendar events using Fetch
-const calendarUpdater = handler<
-  NonNullable<unknown>,
+const calendarUpdater = handler(
+  {},
   {
-    events: CalendarEvent[];
-    auth: Auth;
-    settings: { calendarId: string; limit: number };
-  }
->((_event, state) => {
-  console.log("calendarUpdater!");
+    type: "object",
+    properties: {
+      events: {
+        type: "array",
+        items: CalendarEventSchema,
+        default: [],
+        asCell: true,
+      },
+      auth: AuthSchema,
+      settings: Recipe.properties.settings,
+    },
+    required: ["events", "auth", "settings"],
+  },
+  (_event, state) => {
+    console.log("calendarUpdater!");
 
-  if (!state.auth.token) {
-    console.log("no token");
-    return;
-  }
-  if (state.auth.expiresAt && state.auth.expiresAt < Date.now()) {
-    console.log("token expired at ", state.auth.expiresAt);
-    return;
-  }
-
-  // Get existing event IDs for lookup
-  const existingEventIds = new Set(
-    (state.events || []).map((event) => event.id),
-  );
-  console.log("existing event ids", existingEventIds);
-
-  fetchCalendar(
-    state.auth.token,
-    state.settings.limit,
-    state.settings.calendarId,
-    existingEventIds,
-  ).then((result) => {
-    // Filter out any duplicates by ID
-    const newEvents = result.items.filter((event: CalendarEvent) =>
-      !existingEventIds.has(event.id)
-    );
-    if (newEvents.length > 0) {
-      console.log(`Adding ${newEvents.length} new events`);
-      state.events.push(...newEvents);
-    } else {
-      console.log("No new events found");
+    if (!state.auth.token) {
+      console.warn("no token");
+      return;
     }
-  });
-});
+    if (state.auth.expiresAt && state.auth.expiresAt < Date.now()) {
+      console.warn("token expired at ", state.auth.expiresAt);
+      return;
+    }
+
+    // Get existing event IDs for lookup
+    const existingEventIds = new Set(
+      state.events.get().map((event) => event.id),
+    );
+    console.log("existing event ids", existingEventIds);
+
+    fetchCalendar(
+      state.auth.token,
+      state.settings.limit,
+      state.settings.calendarId,
+      existingEventIds,
+    ).then((result) => {
+      // Filter out any duplicates by ID
+      const newEvents = result.items.filter((event: CalendarEvent) =>
+        !existingEventIds.has(event.id)
+      );
+      if (newEvents.length > 0) {
+        console.log(`Adding ${newEvents.length} new events`);
+
+        // Use email ID to generate our ID
+        newEvents.forEach((event: any) => {
+          event[ID] = event.id;
+        });
+
+        state.events.push(...newEvents);
+      } else {
+        console.log("No new events found");
+      }
+    });
+  },
+);
 
 // Helper function to fetch calendar events using the Google Calendar API
 export async function fetchCalendar(

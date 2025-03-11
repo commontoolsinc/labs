@@ -166,18 +166,17 @@ const googleUpdater = handler(
     console.log("googleUpdater!");
 
     if (!state.auth.token) {
-      debugger;
-      console.log("no token");
+      console.warn("no token");
       return;
     }
     if (state.auth.expiresAt && state.auth.expiresAt < Date.now()) {
-      console.log("token expired at ", state.auth.expiresAt);
+      console.warn("token expired at ", state.auth.expiresAt);
       return;
     }
 
     // Get the set of existing email IDs for efficient lookup
     const existingEmailIds = new Set(
-      (state.emails.get()).map((email) => email.id),
+      state.emails.get().map((email) => email.id),
     );
 
     console.log("existing email ids", existingEmailIds);
