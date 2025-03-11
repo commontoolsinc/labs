@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
+// Import JsonView without type checking
 import JsonView from "@uiw/react-json-view";
 import {
   LuBookOpen,
@@ -364,6 +365,7 @@ export default function SpellbookDetailView() {
           />
           {isDetailsExpanded && (
             <div className="p-8 border-2 border-black">
+              {/* @ts-expect-error JsonView is imported as any */}
               <JsonView
                 value={spell.data}
                 style={{
