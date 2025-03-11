@@ -46,18 +46,14 @@ export async function iterate(
   value: string,
   shiftKey: boolean,
   model?: string,
-): Promise<EntityId | undefined> {
+): Promise<Cell<Charm>> {
   if (!charm) {
-    console.error("FIXME, no charm, what should we do?");
-    return;
+    throw new Error("FIXME, no charm, what should we do?");
   }
 
   const { iframe } = getIframeRecipe(charm);
   if (!iframe) {
-    console.error(
-      "Cannot iterate on a non-iframe. Must extend instead.",
-    );
-    return;
+    throw new Error("Cannot iterate on a non-iframe. Must extend instead.");
   }
 
   const newSpec = shiftKey ? iframe.spec + "\n" + value : value;
@@ -78,16 +74,15 @@ export async function extend(
   charm: Cell<Charm> | null,
   value: string,
   model?: string,
-): Promise<EntityId | undefined> {
+): Promise<Cell<Charm>> {
   if (!charm) {
-    console.error("FIXME, no charm, what should we do?");
-    return;
+    throw new Error("FIXME, no charm, what should we do?");
   }
 
   return await castRecipeOnCell(charmManager, charm, value);
 }
 
-export const saveNewRecipeVersion = async (
+export const saveNewRecipeVersion = (
   charmManager: CharmManager,
   charm: Cell<Charm>,
   newIFrameSrc: string,
@@ -96,8 +91,7 @@ export const saveNewRecipeVersion = async (
   const { recipeId, iframe } = getIframeRecipe(charm);
 
   if (!recipeId || !iframe) {
-    console.error("FIXME, no recipeId or iframe, what should we do?");
-    return;
+    throw new Error("FIXME, no recipeId or iframe, what should we do?");
   }
 
   const name = newIFrameSrc.match(/<title>(.*?)<\/title>/)?.[1] ?? newSpec;
@@ -108,7 +102,7 @@ export const saveNewRecipeVersion = async (
     name,
   });
 
-  return await compileAndRunRecipe(
+  return compileAndRunRecipe(
     charmManager,
     newRecipeSrc,
     newSpec,
@@ -121,7 +115,7 @@ export async function castRecipeOnCell(
   charmManager: CharmManager,
   cell: Cell<any>,
   newSpec: string,
-): Promise<EntityId | undefined> {
+): Promise<Cell<Charm>> {
   const schema = { ...cell.schema, description: newSpec };
   console.log("schema", schema);
 
@@ -135,14 +129,14 @@ export async function castRecipeOnCell(
     name,
   });
 
-  return await compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, cell);
+  return compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, cell);
 }
 
 export async function castNewRecipe(
   charmManager: CharmManager,
   data: any,
   newSpec: string,
-): Promise<EntityId | undefined> {
+): Promise<Cell<Charm>> {
   const schema = createJsonSchema({}, data);
   schema.description = newSpec;
   console.log("schema", schema);
@@ -157,7 +151,7 @@ export async function castNewRecipe(
     name,
   });
 
-  return await compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, data);
+  return compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, data);
 }
 
 export async function compileRecipe(
@@ -186,15 +180,11 @@ export async function compileAndRunRecipe(
   spec: string,
   runOptions: any,
   parents?: string[],
-): Promise<EntityId | undefined> {
+): Promise<Cell<Charm>> {
   const recipe = await compileRecipe(recipeSrc, spec, parents);
   if (!recipe) {
-    return;
+    throw new Error("Failed to compile recipe");
   }
 
-  const newCharm = await charmManager.runPersistent(recipe, runOptions);
-  await charmManager.add([newCharm]);
-  await charmManager.syncRecipe(newCharm);
-
-  return newCharm.entityId;
+  return charmManager.runPersistent(recipe, runOptions);
 }

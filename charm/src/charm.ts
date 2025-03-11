@@ -153,7 +153,9 @@ export class CharmManager {
     return this.charms;
   }
 
-  async add(newCharms: Cell<Charm>[]) {
+  // NOTE(ja): making a private method, as runPersistent ensures the charm
+  // and recipe are persisted.. cleanup?
+  async _add(newCharms: Cell<Charm>[]) {
     await storage.syncCell(this.charmsDoc);
     await idle();
 
@@ -276,58 +278,16 @@ export class CharmManager {
   ): Promise<Cell<Charm>> {
     await idle();
 
-    // Fill in missing parameters from other charms. It's a simple match on
-    // hashtags: For each top-level argument prop that has a hashtag in the
-    // description, look for a charm that has a top-level output prop with the
-    // same hashtag in the description, or has the hashtag in its own description.
-    // If there is a match, assign the first one to the input property.
-
-    // TODO(seefeld,ben): This should be in spellcaster.
-    /*
-    if (
-      !isDoc(inputs) && // Adding to a cell input is not supported yet
-      !isDocLink(inputs) && // Neither for cell reference
-      recipe.argumentSchema &&
-      (recipe.argumentSchema as any).type === "object"
-    ) {
-      const properties = (recipe.argumentSchema as any).properties;
-      const inputProperties =
-        typeof inputs === "object" && inputs !== null ? Object.keys(inputs) : [];
-      for (const key in properties) {
-        if (!(key in inputProperties) && properties[key].description?.includes("#")) {
-          const hashtag = properties[key].description.match(/#(\w+)/)?.[1];
-          if (hashtag) {
-            this.charms.get().forEach((charm) => {
-              const type = charm.getAsDocLink().cell?.sourceCell?.get()?.[TYPE];
-              const recipe = getRecipe(type);
-              const charmProperties = (recipe?.resultSchema as any)?.properties as any;
-              const matchingProperty = Object.keys(charmProperties ?? {}).find((property) =>
-                charmProperties[property].description?.includes(`#${hashtag}`),
-              );
-              if (matchingProperty) {
-                inputs = {
-                  ...inputs,
-                  [key]: { $alias: { cell: charm.getAsDocLink().cell, path: [matchingProperty] } },
-                };
-              }
-            });
-          }
-        }
-      }
-    }*/
-
-    const syncAllMentionedCells = (value: any, promises: any[] = []) => {
-      if (isCell(value)) {
-        promises.push(storage.syncCell(value.getAsDocLink().cell));
-      } else if (typeof value === "object" && value !== null) {
-        for (const key in value) {
-          promises.push(syncAllMentionedCells(value[key], promises));
-        }
+    const syncAllMentionedCells = (item: any, promises: any[] = []) => {
+      if (isCell(item)) {
+        promises.push(storage.syncCell(item.getAsDocLink().cell));
+      } else if (typeof item === "object" && item !== null) {
+        Object.values(item).forEach((v) => syncAllMentionedCells(v, promises));
       }
       return promises;
     };
 
-    await syncAllMentionedCells(inputs);
+    await Promise.all(syncAllMentionedCells(inputs));
 
     const doc = await storage.syncCellById(
       this.space,
@@ -335,36 +295,37 @@ export class CharmManager {
     );
     const resultDoc = run(recipe, inputs, doc);
 
-    // FIXME(ja): should we add / sync explicitly here?
-    // await this.add([charm]);
-    // await this.storage.syncCell(this.charms, true);
-    return resultDoc.asCell([], undefined, charmSchema);
+    const newCharm = resultDoc.asCell([], undefined, charmSchema);
+
+    await this._add([newCharm]);
+    await this.syncRecipe(newCharm);
+
+    return newCharm;
   }
 
   // FIXME(JA): this really really really needs to be revisited
-  syncRecipe(charm: Cell<Charm>): Promise<string | undefined> {
+  async syncRecipe(charm: Cell<Charm>): Promise<string | undefined> {
     const recipeId = charm.getSourceCell()?.get()?.[TYPE];
-    if (!recipeId) return Promise.resolve(undefined);
+    if (!recipeId) return Promise.reject(new Error("No recipe ID found"));
 
-    return Promise.all([
+    await Promise.all([
       this.syncRecipeCells(recipeId),
       this.syncRecipeBlobby(recipeId),
-    ]).then(
-      () => recipeId,
-    );
+    ]);
+    return recipeId;
   }
 
-  async syncRecipeCells(recipeId: string) {
+  syncRecipeCells(recipeId: string) {
     // NOTE(ja): I don't think this actually syncs the recipe
-    if (recipeId) await storage.syncCellById(this.space, { "/": recipeId });
+    if (recipeId) return storage.syncCellById(this.space, { "/": recipeId });
   }
 
   // FIXME(ja): blobby seems to be using toString not toJSON
-  async syncRecipeBlobby(recipeId: string) {
-    await syncRecipeBlobby(recipeId);
+  syncRecipeBlobby(recipeId: string) {
+    return syncRecipeBlobby(recipeId);
   }
 
-  async sync(entity: Cell<any>, waitForStorage: boolean = false) {
-    await storage.syncCell(entity, waitForStorage);
+  sync(entity: Cell<any>, waitForStorage: boolean = false) {
+    return storage.syncCell(entity, waitForStorage);
   }
 }

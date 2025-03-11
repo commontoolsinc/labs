@@ -60,7 +60,7 @@ async function main() {
   );
 
   // let's add the cell to the charmManager
-  await charmManager.add([cell]);
+  // await charmManager.add([cell]); // Note(ja): commenting out as I'm hiding the add() method
   log(charmManager, "charmmanager after adding cell");
 }
 

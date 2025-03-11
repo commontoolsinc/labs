@@ -51,8 +51,6 @@ function useCharmLoader({
       const charm = await charmManager.runPersistent(factory, argument);
       if (currentMountKey !== mountingKey.current) return;
 
-      charmManager.add([charm]);
-
       if (currentMountKey !== mountingKey.current) return;
 
       onCharmReadyCallback(charm);

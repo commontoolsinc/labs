@@ -131,12 +131,7 @@ export const castSpellAsCharm = async (
     if (!recipe) return;
 
     console.log("Casting...");
-    const charm: Cell<Charm> = await charmManager.runPersistent(
-      recipe,
-      argument,
-    );
-    charmManager.add([charm]);
-    return charm.entityId;
+    return charmManager.runPersistent(recipe, argument);
   }
   console.log("Failed to cast");
   return null;
@@ -414,7 +409,6 @@ async function handleImportJSON(deps: CommandContext) {
     if (!title) return;
 
     const newCharm = await castNewRecipe(deps.charmManager, data, title);
-    if (!newCharm) throw new Error("Failed to create new charm");
 
     const id = charmId(newCharm);
     if (!id || !deps.focusedReplicaId) {
@@ -438,6 +432,9 @@ async function handleImportJSON(deps: CommandContext) {
 async function handleLoadRecipe(deps: CommandContext) {
   deps.setLoading(true);
   try {
+    if (!deps.focusedReplicaId) {
+      throw new Error("Missing focused replica name");
+    }
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".tsx";
@@ -457,21 +454,13 @@ async function handleLoadRecipe(deps: CommandContext) {
       "imported",
       {},
     );
-    if (!newCharm) {
-      throw new Error("Failed to cast charm");
-    }
     const id = charmId(newCharm);
-    if (!id || !deps.focusedReplicaId) {
-      throw new Error("Missing charm ID or replica name");
-    }
-    if (id) {
-      deps.navigate(
-        createPath("charmShow", {
-          charmId: id,
-          replicaName: deps.focusedReplicaId,
-        }),
-      );
-    }
+    deps.navigate(
+      createPath("charmShow", {
+        charmId: id,
+        replicaName: deps.focusedReplicaId,
+      }),
+    );
   } finally {
     deps.setLoading(false);
     deps.setOpen(false);
