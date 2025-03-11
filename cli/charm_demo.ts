@@ -42,9 +42,11 @@ function createCell(space: Space): Cell<Charm> {
 async function main() {
   const authority = await Identity.fromPassphrase("charm manager");
   // create a charm manager to start things off
-  const charmManager = await CharmManager.open({
+  const charmManager = new CharmManager({
+    private: false,
+    name: "Whatever",
     space: authority.did(),
-    signer: authority,
+    as: authority,
   });
   log(charmManager, "charmManager");
 
