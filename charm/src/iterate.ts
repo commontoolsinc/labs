@@ -5,7 +5,8 @@ import { createJsonSchema, JSONSchema } from "@commontools/builder";
 import { tsToExports } from "./localBuild.ts";
 import { Charm, CharmManager } from "./charm.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
-import { buildPrompt } from "./iframe/prompt.ts";
+import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
+import { injectUserCode } from "./iframe/static.ts";
 
 const llm = new LLMClient(LLMClient.DEFAULT_URL);
 
@@ -27,12 +28,12 @@ const genSrc = async ({
   let response = await llm.sendRequest(request);
 
   // FIXME(ja): this is a hack to get the prefill to work
-  const responsePrefill = request.messages[request.messages.length - 1];
-  if (!response.startsWith("```html\n")) {
-    response = responsePrefill + response;
+  if (!response.startsWith(RESPONSE_PREFILL)) {
+    response = RESPONSE_PREFILL + response;
   }
 
-  return response.split("```html\n")[1].split("\n```")[0];
+  const source = injectUserCode(response.split(RESPONSE_PREFILL)[1].split("\n```")[0]);
+  return source;
 };
 
 export async function iterate(
@@ -82,6 +83,12 @@ export async function extend(
   return await castRecipeOnCell(charmManager, charm, value);
 }
 
+export function extractTitle(src: string, defaultTitle: string): string {
+  const htmlTitleMatch = src.match(/<title>(.*?)<\/title>/)?.[1];
+  const jsTitleMatch = src.match(/const title = ['"](.*)['"];?/)?.[1];
+  return htmlTitleMatch || jsTitleMatch || defaultTitle;
+}
+
 export const saveNewRecipeVersion = async (
   charmManager: CharmManager,
   charm: Cell<Charm>,
@@ -95,7 +102,7 @@ export const saveNewRecipeVersion = async (
     return;
   }
 
-  const name = newIFrameSrc.match(/<title>(.*?)<\/title>/)?.[1] ?? newSpec;
+  const name = extractTitle(newIFrameSrc, '<unknown>');
   const newRecipeSrc = buildFullRecipe({
     ...iframe,
     src: newIFrameSrc,
@@ -121,7 +128,7 @@ export async function castRecipeOnCell(
   console.log("schema", schema);
 
   const newIFrameSrc = await genSrc({ newSpec, schema });
-  const name = newIFrameSrc.match(/<title>(.*?)<\/title>/)?.[1] ?? newSpec;
+  const name = extractTitle(newIFrameSrc, '<unknown>');
   const newRecipeSrc = buildFullRecipe({
     src: newIFrameSrc,
     spec: newSpec,
@@ -143,7 +150,7 @@ export async function castNewRecipe(
   console.log("schema", schema);
 
   const newIFrameSrc = await genSrc({ newSpec, schema });
-  const name = newIFrameSrc.match(/<title>(.*?)<\/title>/)?.[1] ?? newSpec;
+  const name = extractTitle(newIFrameSrc, '<unknown>');
   const newRecipeSrc = buildFullRecipe({
     src: newIFrameSrc,
     spec: newSpec,

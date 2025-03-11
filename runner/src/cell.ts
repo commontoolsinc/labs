@@ -406,8 +406,8 @@ function createRegularCell<T>(
             ? schema.additionalProperties
             : undefined))
         : schema?.type === "array"
-        ? schema.items
-        : undefined;
+          ? schema.items
+          : undefined;
       return createCell(
         doc,
         [...path, valueKey],
