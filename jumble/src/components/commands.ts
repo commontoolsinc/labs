@@ -21,6 +21,8 @@ import { BackgroundJob } from "@/contexts/BackgroundTaskContext.tsx";
 import { startCharmIndexing } from "@/utils/indexing.ts";
 import { generateJSON } from "@/utils/prompt-library/json-gen.ts";
 import { createPath, createPathWithHash, ROUTES } from "@/routes.ts";
+import { llm } from "@/utils/llm.ts";
+import { handleAgentMode } from "./agent.ts";
 
 export type CommandType =
   | "action"
@@ -104,6 +106,7 @@ export type CommandMode =
     command: CommandItem;
     placeholder: string;
     preserveInput?: boolean;
+    displayText?: string; // Add display text for agent mode
   }
   | { type: "confirm"; command: CommandItem; message: string }
   | { type: "select"; command: CommandItem; options: SelectOption[] }
@@ -165,11 +168,11 @@ async function handleExecuteCharmAction(deps: CommandContext) {
 
     // Create options for the select menu with key as the action name
     const actionOptions = actions.map(([key, stream]) => {
-      const example = JSON.stringify(charm.key(key).schema?.example);
+      const schema = charm.key(key).schema;
       return {
         id: key,
         title: key,
-        value: { key, stream, example },
+        value: { key, stream, schema },
       };
     });
 
@@ -188,9 +191,16 @@ async function handleExecuteCharmAction(deps: CommandContext) {
               id: "action-params",
               type: "input",
               title: `Input for ${selectedAction.key}`,
-              placeholder: selectedAction.example || "Enter input data",
               handler: (input) => {
                 try {
+                  if (
+                    typeof input === "string" &&
+                    ["object", "array", "anyOf"].includes(
+                      selectedAction.schema?.type,
+                    )
+                  ) {
+                    input = JSON.parse(input);
+                  }
                   // Execute the action by calling .send with the user input
                   selectedAction.stream.send(input);
                   console.log(
@@ -202,12 +212,14 @@ async function handleExecuteCharmAction(deps: CommandContext) {
                   console.error(
                     `Error executing action ${selectedAction.key}:`,
                     error,
+                    input,
                   );
                   deps.setOpen(false);
                 }
               },
             },
-            placeholder: selectedAction.example || "Enter input data",
+            placeholder: JSON.stringify(selectedAction.schema?.example) ||
+              "Enter input data",
           });
         },
       },
@@ -698,8 +710,17 @@ async function handleUseSpellOnOtherData(deps: CommandContext) {
   }
 }
 
+
 export function getCommands(deps: CommandContext): CommandItem[] {
   return [
+    {
+      id: "agent-mode",
+      type: "input",
+      title: "Agent Mode",
+      group: "Create",
+      placeholder: "What would you like me to help you with?",
+      handler: (input) => handleAgentMode(deps, input),
+    },
     {
       id: "new-charm",
       type: "input",
