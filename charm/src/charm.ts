@@ -155,7 +155,7 @@ export class CharmManager {
 
   // NOTE(ja): making a private method, as runPersistent ensures the charm
   // and recipe are persisted.. cleanup?
-  async _add(newCharms: Cell<Charm>[]) {
+  private async add(newCharms: Cell<Charm>[]) {
     await storage.syncCell(this.charmsDoc);
     await idle();
 
@@ -297,7 +297,7 @@ export class CharmManager {
 
     const newCharm = resultDoc.asCell([], undefined, charmSchema);
 
-    await this._add([newCharm]);
+    await this.add([newCharm]);
     await this.syncRecipe(newCharm);
 
     return newCharm;
