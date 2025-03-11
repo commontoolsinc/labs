@@ -402,7 +402,10 @@ export function CommandCenter() {
                             // Only close if the handler doesn't return a Promise
                             // This allows async handlers that change mode to keep the palette open
                             const result = cmd.handler?.(context);
-                            if (!cmd.handler || (!result && cmd.handler.length === 0)) {
+                            if (
+                              !cmd.handler ||
+                              (!result && cmd.handler.length === 0)
+                            ) {
                               setOpen(false);
                             }
                           } else {
@@ -433,7 +436,8 @@ export function CommandCenter() {
                                 setMode({
                                   type: "transcribe",
                                   command: cmd,
-                                  placeholder: cmd.placeholder || "Speak now...",
+                                  placeholder: cmd.placeholder ||
+                                    "Speak now...",
                                 });
                                 break;
                               case "placeholder":
@@ -442,7 +446,9 @@ export function CommandCenter() {
                                 });
                                 break;
                               default:
-                                console.warn(`Unhandled command type: ${cmd.type}`);
+                                console.warn(
+                                  `Unhandled command type: ${cmd.type}`,
+                                );
                                 break;
                             }
                           }

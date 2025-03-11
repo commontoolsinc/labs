@@ -23,8 +23,9 @@ export const buildFullRecipe = (iframe: IFrameRecipe) => {
     name: string,
   }
 
-  const inst: IFrameRecipe = /* IFRAME-V0 */ ${JSON.stringify(iframe, null, 2)
-    } /* IFRAME-V0 */
+  const inst: IFrameRecipe = /* IFRAME-V0 */ ${
+    JSON.stringify(iframe, null, 2)
+  } /* IFRAME-V0 */
 
 
   const runIframeRecipe = ({ argumentSchema, resultSchema, src, name }: IFrameRecipe) =>

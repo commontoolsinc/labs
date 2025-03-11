@@ -9,7 +9,8 @@ import { charmId } from "@/utils/charms.ts";
 function StackedCharmsView() {
   const { charmIds: paramCharmIds } = useParams<StackedCharmsRouteParams>();
   const charmIds = React.useMemo(() => {
-    return paramCharmIds?.split(",").filter((id: string) => id.trim() !== "") || [];
+    return paramCharmIds?.split(",").filter((id: string) => id.trim() !== "") ||
+      [];
   }, [paramCharmIds]);
 
   if (!charmIds || charmIds.length === 0) {
@@ -30,7 +31,9 @@ function StackedCharmsView() {
     <div className="h-full">
       <div className="flex flex-row w-full h-full p-2">
         {charms.map((charm, index) => (
-          <React.Fragment key={charm ? charmId(charm) : `missing-charm-${index}`}>
+          <React.Fragment
+            key={charm ? charmId(charm) : `missing-charm-${index}`}
+          >
             {index > 0 && <div className="w-px bg-gray-300 mx-2 h-full"></div>}
             {charm && (
               <CharmRenderer

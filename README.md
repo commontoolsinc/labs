@@ -16,7 +16,6 @@ written with React.
 
 ## Running the backend
 
-
 For a more detailed guide, see [./toolshed/README.md](./toolshed/README.md).
 
 ```bash

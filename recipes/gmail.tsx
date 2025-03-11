@@ -7,8 +7,8 @@ import {
   NAME,
   recipe,
   Schema,
+  str,
   UI,
-  str
 } from "@commontools/builder";
 
 const EmailSchema = {
@@ -213,9 +213,10 @@ export async function fetchEmail(
 ) {
   // First, get the list of message IDs from the inbox
   const listResponse = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=${labelIds.join(
-      ",",
-    )
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=${
+      labelIds.join(
+        ",",
+      )
     }&maxResults=${maxResults}`,
     {
       headers: {

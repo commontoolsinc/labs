@@ -29,18 +29,22 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   },
 );
 
-export default recipe(InputSchema, OutputSchema, ({ superCoolField, auth }) => ({
-  [NAME]: superCoolField,
-  [UI]: (
-    <div>
-      <common-input
-        value={superCoolField}
-        placeholder="List title"
-        oncommon-input={updateValue({ value: superCoolField })}
-      />
-      <common-google-oauth $auth={auth} />
-    </div>
-  ),
-  exportedSuperCoolField: superCoolField,
-  exportedAuth: auth,
-}));
+export default recipe(
+  InputSchema,
+  OutputSchema,
+  ({ superCoolField, auth }) => ({
+    [NAME]: superCoolField,
+    [UI]: (
+      <div>
+        <common-input
+          value={superCoolField}
+          placeholder="List title"
+          oncommon-input={updateValue({ value: superCoolField })}
+        />
+        <common-google-oauth $auth={auth} />
+      </div>
+    ),
+    exportedSuperCoolField: superCoolField,
+    exportedAuth: auth,
+  }),
+);

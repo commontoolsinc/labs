@@ -291,7 +291,9 @@ function useCharmOperation() {
   const [showVariants, setShowVariants] = useState(true);
   const [loading, setLoading] = useState(false);
   const [variants, setVariants] = useState<Cell<Charm>[]>([]);
-  const [variantModelsMap, setVariantModelsMap] = useState<Record<string, string>>({});
+  const [variantModelsMap, setVariantModelsMap] = useState<
+    Record<string, string>
+  >({});
   const [selectedVariant, setSelectedVariant] = useState<Cell<Charm> | null>(
     null,
   );
@@ -310,7 +312,7 @@ function useCharmOperation() {
         console.error("No charm manager available");
         return null;
       }
-      
+
       if (operationType === "iterate") {
         return await iterateCharm(
           charmManager,
@@ -359,16 +361,16 @@ function useCharmOperation() {
               if (charmManager) {
                 const newCharm = await charmManager.get(id);
                 if (newCharm) {
-                // Store the variant and keep track of which model was used
-                setVariants((prev) => [...prev, newCharm]);
-                setVariantModelsMap((prev) => ({ 
-                  ...prev, 
-                  [charmId(newCharm) || ""]: model 
-                }));
-                // Set the first completed variant as selected if none selected
-                setSelectedVariant((current) =>
-                  current === charm ? newCharm : current
-                );
+                  // Store the variant and keep track of which model was used
+                  setVariants((prev) => [...prev, newCharm]);
+                  setVariantModelsMap((prev) => ({
+                    ...prev,
+                    [charmId(newCharm) || ""]: model,
+                  }));
+                  // Set the first completed variant as selected if none selected
+                  setSelectedVariant((current) =>
+                    current === charm ? newCharm : current
+                  );
                 }
               }
             }
@@ -570,7 +572,7 @@ const Variants = () => {
                 variantForModel && setSelectedVariant(variantForModel)}
               className={`variant-item min-w-48 h-32 border-2 cursor-pointer flex-shrink-0 ${
                 variantForModel && selectedVariant === variantForModel
-                  ? "border-blue-500" 
+                  ? "border-blue-500"
                   : variantForModel
                   ? "border-black"
                   : "border-dashed border-gray-300"

@@ -295,7 +295,7 @@ export default function CharmList() {
     <div className="p-2">
       <h1 className="text-2xl font-bold">Pinned</h1>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-8">
-        {replicaName && pinned && 
+        {replicaName && pinned &&
           pinned.map((charm) => (
             <CharmPreview
               key={charmId(charm)}
