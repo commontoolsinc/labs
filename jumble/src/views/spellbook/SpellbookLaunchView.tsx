@@ -133,9 +133,9 @@ function Launcher() {
 }
 
 export default function SpellbookLaunchView() {
-  const { user } = useAuthentication();
+  const { session } = useAuthentication();
 
-  if (!user) {
+  if (!session) {
     return <AuthenticationView />;
   }
   return (

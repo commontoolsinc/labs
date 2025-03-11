@@ -2,16 +2,16 @@ import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
 import { useEffect, useState } from "react";
 
 export function User() {
-  const { user, clearAuthentication } = useAuthentication();
+  const { session, clearAuthentication } = useAuthentication();
   const [did, setDid] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     let ignore = false;
     function setDidInner() {
-      if (!user) {
+      if (!session) {
         return;
       }
-      const did = user.verifier.did();
+      const did = session.as.did();
       if (!ignore) {
         setDid(did);
       }
@@ -21,7 +21,7 @@ export function User() {
       setDid(undefined);
       ignore = true;
     };
-  }, [user]);
+  }, [session]);
 
   let h = "0";
   let s = "50%";
