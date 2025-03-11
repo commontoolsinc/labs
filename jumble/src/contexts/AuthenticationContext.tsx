@@ -11,7 +11,7 @@ import { matchSpace } from "@/routes.ts";
 // Location in storage of root key.
 const ROOT_KEY = "$ROOT_KEY";
 
-export const EVERYONE_KEY = "common user";
+export const ANYONE = "common user";
 
 /**
  * Representation authorization session.
@@ -101,7 +101,7 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
 
       const account = isPrivateSpace(spaceName)
         ? root
-        : await Identity.fromPassphrase(EVERYONE_KEY);
+        : await Identity.fromPassphrase(ANYONE);
 
       const user = await account.derive(spaceName);
 

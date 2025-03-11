@@ -48,6 +48,8 @@ const CHECK_INTERVAL = parseInt(interval as string) * 1000;
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
 
+const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
+
 let manager: CharmManager | undefined;
 const checkedCharms = new Map<string, boolean>();
 // Initialize storage and Bobby server
@@ -178,7 +180,10 @@ function watchSpace(spaceName: string) {
 async function main() {
   log(undefined, "Starting Google Updater");
 
-  const session = await Session.open({ name: space! });
+  const session = await Session.open({
+    passphrase: OPERATOR_PASS,
+    name: space!,
+  });
   manager = new CharmManager(session);
 
   if (charmId) {

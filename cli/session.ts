@@ -1,10 +1,18 @@
 import { Identity } from "@commontools/identity";
-export const EVERYONE_KEY = "common user";
+export const ANYONE = "common user";
+
+const isPrivateSpace = (name: string) => name.startsWith("~");
 
 export const open = async (
-  { passphrase = EVERYONE_KEY, name = "" } = {},
+  { passphrase = ANYONE, name = "" } = {},
 ) => {
-  const account = await Identity.fromPassphrase(passphrase);
+  // For private space we use account derived from provided passphrase
+  // otherwise we use passphrase for public spaces
+  const account = isPrivateSpace(name)
+    ? await Identity.fromPassphrase(passphrase)
+    : await Identity.fromPassphrase(ANYONE);
+
+  // Derive space access identity from the given space name.
   const space = await account.derive(name);
 
   return {

@@ -11,6 +11,9 @@ import { refer } from "merkle-reference";
 import { unauthorized } from "./error.ts";
 import * as Principal from "./principal.ts";
 
+// Derived from passphrase "implicit trust"
+const SERVICE_DID = "did:key:z6MksHnZGdHxNoCqcC3kPvBSo2goCzLSWheQ8LrVpAtQwgwW";
+
 /**
  * Claims access via provide authorization. Function either returns ok with
  * claimed access back or an error if authorization is invalid.
@@ -38,7 +41,11 @@ export const claim = async <Access extends Invocation>(
         // subject and issuer are the same DID. In the future we will add UCANs
         // to allow delegations.
         const { ok: subject } = Principal.fromDID(access.sub);
-        if (!subject || subject.did() === issuer.did()) {
+        if (
+          !subject || subject.did() === issuer.did() ||
+          // At the moment allow invocations from SERVICE_DID
+          issuer.did() === SERVICE_DID
+        ) {
           return { ok: access };
         } else {
           return {

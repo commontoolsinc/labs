@@ -18,11 +18,16 @@ const { space, charmId, recipeFile, cause, quit } = parseArgs(Deno.args, {
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
 
+const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
+
 storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
 
 async function main() {
-  const session = await Session.open({ name: space ?? "" });
+  const session = await Session.open({
+    passphrase: OPERATOR_PASS,
+    name: space ?? "",
+  });
 
   console.log("params:", {
     space,
