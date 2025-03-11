@@ -379,7 +379,9 @@ function instantiateJavaScriptNode(
     const stream = { ...streamRef };
 
     const handler = (event: any) => {
-      if (event.preventDefault) event.preventDefault();
+      if (typeof event === "object" && event !== null && event.preventDefault) {
+        event.preventDefault();
+      }
       const eventInputs = { ...inputs };
       const cause = { ...inputs };
       for (const key in eventInputs) {
