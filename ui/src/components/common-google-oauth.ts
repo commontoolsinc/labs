@@ -117,8 +117,67 @@ export class CommonGoogleOauthElement extends LitElement {
     }
   }
 
-  handleLogout() {
-    console.warn("FIXME(ja): handle logout");
+  async handleLogout() {
+    try {
+      this.isLoading = true;
+      this.authStatus = "Logging out...";
+
+      // Construct the authCellId the same way as in handleClick
+      let authCellId = JSON.parse(JSON.stringify(this.authCell, null, 2));
+      authCellId.space = location.pathname.split("/")[1];
+      authCellId = JSON.stringify(authCellId);
+
+      // Call the logout API endpoint
+      const response = await fetch("/api/integrations/google-oauth/logout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          authCellId,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Reset auth state locally
+        this.auth = {
+          token: "",
+          tokenType: "",
+          scope: [],
+          expiresIn: 0,
+          expiresAt: 0,
+          refreshToken: "",
+          user: {
+            email: "",
+            name: "",
+            picture: "",
+          },
+        };
+
+        this.authStatus = "Logged out successfully";
+        this.authResult = null;
+      } else {
+        // Handle error object that might be nested
+        let errorMessage = "Unknown error";
+        if (typeof result.error === "string") {
+          errorMessage = result.error;
+        } else if (result.error && typeof result.error === "object") {
+          errorMessage = JSON.stringify(result.error);
+        }
+
+        this.authStatus = `Logout error: ${errorMessage}`;
+        console.error("Logout error details:", result);
+      }
+    } catch (error: unknown) {
+      console.error("Logout error:", error);
+      this.authStatus = `Logout error: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+    } finally {
+      this.isLoading = false;
+    }
   }
 
   override render() {
