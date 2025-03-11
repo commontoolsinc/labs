@@ -392,16 +392,7 @@ function useCharmOperation() {
           selectedModel,
         );
         if (newPath) {
-          navigate(
-            createPathWithHash(
-              "charmDetail",
-              {
-                charmId: paramCharmId,
-                replicaName,
-              },
-              "iterate",
-            ),
-          );
+          navigate(newPath);
         }
       } catch (error) {
         console.error(`${operationType} error:`, error);
