@@ -1,11 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import {
-  BrowserRouter as Router,
-  Navigate,
-  Route,
-  Routes,
-} from "react-router-dom";
+import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
 import "./styles/index.css";
 import Shell from "@/views/Shell.tsx";
 import { CharmsProvider } from "@/contexts/CharmsContext.tsx";
@@ -26,8 +21,11 @@ import { ActionManagerProvider } from "@/contexts/ActionManagerContext.tsx";
 import { ROUTES } from "@/routes.ts";
 
 const ReplicaRedirect = () => {
-  const savedReplica = localStorage.getItem("replica");
-  return <Navigate to={savedReplica || ROUTES.defaultReplica} replace />;
+  const savedReplica = localStorage.getItem("lastReplica");
+  globalThis.location.href = savedReplica
+    ? "/" + savedReplica
+    : ROUTES.defaultReplica;
+  return <div>redirecting...</div>;
 };
 
 setupIframe();

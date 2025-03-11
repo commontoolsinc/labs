@@ -32,6 +32,12 @@ export class CommonIframeElement extends LitElement {
   }
 
   static override styles = css`
+    :host {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
     .error-modal {
       position: fixed;
       top: 0;

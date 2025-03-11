@@ -178,6 +178,72 @@ export const refresh = createRoute({
   },
 });
 
+export const logout = createRoute({
+  path: "/api/integrations/google-oauth/logout",
+  method: "post",
+  tags,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z
+            .object({
+              authCellId: z
+                .string()
+                .describe(
+                  "The authentication cell ID to clear",
+                ),
+            })
+            .openapi({
+              example: {
+                authCellId: "auth-cell-123",
+              },
+            }),
+        },
+      },
+    },
+  },
+  responses: {
+    [HttpStatusCodes.OK]: {
+      content: {
+        "application/json": {
+          schema: z.union([
+            z.object({
+              success: z.boolean(),
+              message: z.string(),
+            }),
+            z.object({
+              error: z.string(),
+            }),
+          ]),
+        },
+      },
+      description: "Logout response",
+    },
+    [HttpStatusCodes.BAD_REQUEST]: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            error: z.string(),
+          }),
+        },
+      },
+      description: "Invalid request parameters",
+    },
+    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            error: z.string(),
+          }),
+        },
+      },
+      description: "Failed to clear authentication data",
+    },
+  },
+});
+
 export type LoginRoute = typeof login;
 export type CallbackRoute = typeof callback;
 export type RefreshRoute = typeof refresh;
+export type LogoutRoute = typeof logout;

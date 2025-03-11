@@ -1,4 +1,4 @@
-import { html, LitElement, PropertyValues } from "lit";
+import { css, html, LitElement, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
 import * as IPC from "./ipc.ts";
@@ -26,6 +26,15 @@ export class CommonIframeSandboxElement extends LitElement {
     this.src = "";
     this.context = undefined;
   }
+
+  static override styles = css`
+  :host {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    }
+  `;
 
   // Static id for this component for its lifetime.
   private frameId: number = ++FRAME_IDS;
@@ -92,7 +101,7 @@ export class CommonIframeSandboxElement extends LitElement {
   };
 
   // Message from the inner frame.
-  private onGuestMessage(message: IPC.GuestMessage) {
+  private async onGuestMessage(message: IPC.GuestMessage) {
     const IframeHandler = getIframeContextHandler();
     if (IframeHandler == null) {
       console.error("common-iframe-sandbox: No iframe handler defined.");
@@ -213,6 +222,37 @@ export class CommonIframeSandboxElement extends LitElement {
         });
         return;
       }
+
+      case IPC.GuestMessageType.WebpageRequest: {
+        const payload = message.data;
+        const instanceId = this.instanceId;
+
+        let result, error;
+        try {
+          result = await IframeHandler.onReadWebpageRequest(this.context, payload);
+        } catch (e) {
+          error = e;
+        }
+
+        if (this.instanceId !== instanceId) {
+          // Inner frame was reloaded. This response was
+          // from a previous page. Abort.
+          return;
+        }
+
+        this.toGuest({
+          id: this.frameId,
+          type: IPC.IPCHostMessageType.Passthrough,
+          data: {
+            type: IPC.HostMessageType.ReadWebpageResponse,
+            request: payload,
+            data: result || null,
+            error,
+          },
+        });
+        return;
+      }
+
     }
   }
 

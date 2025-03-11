@@ -29,9 +29,9 @@ import {
   extractDefaultValues,
   findAllAliasedDocs,
   followAliases,
+  maybeUnwrapProxy,
   mergeObjects,
   sendValueToBinding,
-  staticDataToNestedDocs,
   unsafe_noteParentOnRecipes,
   unwrapOneLevelAndBindtoDoc,
 } from "./utils.ts";
@@ -203,12 +203,7 @@ export function run<T, R = any>(
   };
 
   // Ensure static data is converted to doc link, e.g. for arrays
-  argument = staticDataToNestedDocs(
-    processCell,
-    argument,
-    undefined,
-    resultCell,
-  );
+  argument = deepCopy(maybeUnwrapProxy(argument));
 
   // TODO(seefeld): Move up, only do this if it's not from the sourceCell
   if (defaults) argument = mergeObjects(argument, deepCopy(defaults));

@@ -1,9 +1,9 @@
 import { JSONSchema } from "@commontools/builder";
 import { LLMRequest } from "@commontools/llm-client";
 
-import { prefillHtml, systemMd } from "./static.ts";
+import { extractUserCode, prefillHtml, systemMd } from "./static.ts";
 
-const responsePrefill = "```html\n" + prefillHtml;
+export const RESPONSE_PREFILL = "```javascript\n";
 
 const SELECTED_MODEL = [
   // "groq:llama-3.3-70b-specdec",
@@ -31,21 +31,25 @@ export const buildPrompt = ({
   schema: JSONSchema;
   model?: string;
 }): LLMRequest => {
-  const messages = [];
+  const messages: string[] = [];
   if (spec && src) {
     messages.push(spec);
-    messages.push("```html\n" + src + "\n```");
+    const extractedCode = extractUserCode(src);
+    if (extractedCode !== null) {
+      messages.push("```javascript\n" + extractedCode + "\n```");
+    } else {
+      messages.push("```html\n" + src + "\n```");
+    }
   }
 
   messages.push(
-    `The user asked you to ${
-      spec ? "update" : "create"
+    `The user asked you to ${spec ? "update" : "create"
     } the source code with the following comments:
 \`\`\`
 ${newSpec}
 \`\`\``,
   );
-  messages.push(responsePrefill);
+  messages.push(RESPONSE_PREFILL);
 
   const system = systemMd.replace("SCHEMA", JSON.stringify(schema, null, 2));
 
