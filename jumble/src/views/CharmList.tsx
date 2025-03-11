@@ -63,7 +63,7 @@ function CharmPreview(
           if (
             globalThis.confirm("Are you sure you want to remove this charm?")
           ) {
-            charmManager?.remove({ "/": charmId(charm)! });
+            charmManager.remove({ "/": charmId(charm)! });
           }
         }}
         className="absolute hidden group-hover:block top-2 right-2 p-2 text-gray-400 hover:text-red-500 transition-colors"
@@ -259,8 +259,8 @@ const CharmTable = (
 export default function CharmList() {
   const { replicaName } = useParams<{ replicaName: string }>();
   const { charmManager } = useCharmManager();
-  const [pinned] = useCell(charmManager?.getPinned());
-  const [charms] = useCell(charmManager?.getCharms());
+  const [pinned] = useCell(charmManager.getPinned());
+  const [charms] = useCell(charmManager.getCharms());
   const { isSyncing } = useSyncedStatus();
 
   if (!isSyncing && (!charms || charms.length === 0)) {

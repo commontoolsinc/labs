@@ -43,7 +43,7 @@ export function usePublish() {
 
       setIsPublishing(true);
       try {
-        const charm = await charmManager?.get(currentCharmId);
+        const charm = await charmManager.get(currentCharmId);
         if (!charm) throw new Error("Charm not found");
         const spell = charm.getSourceCell()?.get();
         const spellId = spell?.[TYPE];
