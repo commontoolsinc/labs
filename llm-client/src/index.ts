@@ -15,6 +15,11 @@ type TypedContent =
     url: string;
   };
 
+const DEFAULT_LLM_URL = typeof globalThis.location !== "undefined"
+  ? globalThis.location.protocol + "//" + globalThis.location.host +
+    "/api/ai/llm"
+  : "//api/ai/llm";
+
 export type LLMRequest = {
   messages: SimpleMessage[] | SimpleContent[];
   system?: string;
@@ -25,6 +30,8 @@ export type LLMRequest = {
 };
 
 export class LLMClient {
+  static DEFAULT_URL = DEFAULT_LLM_URL;
+
   private serverUrl: string;
 
   constructor(serverUrl: string) {

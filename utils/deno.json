@@ -1,0 +1,11 @@
+{
+  "name": "@commontools/utils",
+  "tasks": {
+    "test": "echo 'No tests to run.'"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./defer": "./src/defer.ts",
+    "./env": "./src/env.ts"
+  }
+}

@@ -7,12 +7,7 @@ import { Charm, CharmManager } from "./charm.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt } from "./iframe/prompt.ts";
 
-const llmUrl = typeof globalThis.location !== "undefined"
-  ? globalThis.location.protocol + "//" + globalThis.location.host +
-    "/api/ai/llm"
-  : "//api/ai/llm";
-
-const llm = new LLMClient(llmUrl);
+const llm = new LLMClient(LLMClient.DEFAULT_URL);
 
 const genSrc = async ({
   src,
