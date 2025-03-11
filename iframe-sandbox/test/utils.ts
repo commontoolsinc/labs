@@ -65,6 +65,10 @@ export function setIframeTestHandler() {
       // Not implemented
       return Promise.resolve({});
     },
+    onReadWebpageRequest(context, payload) {
+      // Not implemented
+      return Promise.resolve({});
+    },
   });
 }
 
