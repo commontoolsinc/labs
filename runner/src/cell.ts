@@ -105,10 +105,12 @@ export interface Cell<T> {
   send(value: T): void;
   update(values: Partial<T>): void;
   push(
-    value:
+    ...value: Array<
       | (T extends Array<infer U> ? U : any)
       | DocImpl<T extends Array<infer U> ? U : any>
-      | DocLink,
+      | DocLink
+      | Cell<T extends Array<infer U> ? U : any>
+    >
   ): void;
   equals(other: Cell<any>): boolean;
   sink(callback: (value: T) => Cancel | undefined | void): Cancel;
@@ -348,7 +350,14 @@ function createRegularCell<T>(
         (self.key as any)(key).set(value);
       }
     },
-    push: (value: any) => {
+    push: (
+      ...values: Array<
+        | (T extends Array<infer U> ? U : any)
+        | DocImpl<T extends Array<infer U> ? U : any>
+        | DocLink
+        | Cell<T extends Array<infer U> ? U : any>
+      >
+    ) => {
       // Follow aliases and references, since we want to get to an assumed
       // existing array.
       const ref = resolveLinkToValue(doc, path, log);
@@ -358,37 +367,30 @@ function createRegularCell<T>(
       }
 
       // If this is an object and it doesn't have an ID, add one.
-      if (
-        !isCell(value) && !isDocLink(value) && !isDoc(value) &&
-        !Array.isArray(value) && typeof value === "object" && value !== null &&
-        !value[ID] && getTopFrame()
-      ) {
-        value = {
-          [ID]: getTopFrame()!.generatedIdCounter++,
-          ...value,
-        };
-      }
+      const valuesToWrite = values.map((value: any) => {
+        if (
+          !isCell(value) && !isDocLink(value) && !isDoc(value) &&
+          !Array.isArray(value) && typeof value === "object" &&
+          value !== null &&
+          !value[ID] && getTopFrame()
+        ) {
+          return {
+            [ID]: getTopFrame()!.generatedIdCounter++,
+            ...value,
+          };
+        } else {
+          return value;
+        }
+      });
 
       // Implement push by overwriting the `length`s element.
-      if (array === undefined) {
-        // Let's create an array.
-        const defaultArray = Array.isArray(schema?.default)
-          ? schema.default
-          : [];
-        diffAndUpdate(
-          { cell: doc, path },
-          [...defaultArray, value],
-          log,
-          getTopFrame()?.cause,
-        );
-      } else {
-        diffAndUpdate(
-          { cell: doc, path: [...path, array.length] },
-          value,
-          log,
-          getTopFrame()?.cause,
-        );
-      }
+      const defaultArray = Array.isArray(schema?.default) ? schema.default : [];
+      diffAndUpdate(
+        { cell: doc, path },
+        [...(array === undefined ? defaultArray : array), ...valuesToWrite],
+        log,
+        getTopFrame()?.cause,
+      );
     },
     equals: (other: Cell<any>) =>
       JSON.stringify(self) === JSON.stringify(other),
@@ -403,8 +405,8 @@ function createRegularCell<T>(
             ? schema.additionalProperties
             : undefined))
         : schema?.type === "array"
-          ? schema.items
-          : undefined;
+        ? schema.items
+        : undefined;
       return createCell(
         doc,
         [...path, valueKey],

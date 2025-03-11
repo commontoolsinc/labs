@@ -1235,9 +1235,10 @@ describe("asCell with schema", () => {
       "should push values that are already cells reusing the reference",
       getSpace("test"),
     );
+    const dCell = d.asCell();
 
     arrayCell.push(d);
-    arrayCell.push(d.asCell());
+    arrayCell.push(dCell);
     arrayCell.push(d.getAsQueryResult());
     arrayCell.push({ cell: d, path: [] });
 
