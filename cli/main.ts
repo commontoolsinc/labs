@@ -7,7 +7,7 @@ import {
   setBobbyServerUrl,
   storage,
 } from "@commontools/runner";
-import { Identity } from "@commontools/identity";
+import * as Session from "./session.ts";
 
 const { space, charmId, recipeFile, cause, quit } = parseArgs(Deno.args, {
   string: ["space", "charmId", "recipeFile", "cause"],
@@ -21,16 +21,9 @@ const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
 storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
 
-export const EVERYONE_KEY = "common user";
 async function main() {
-  const account = await Identity.fromPassphrase(EVERYONE_KEY);
-  const user = await account.derive(space ?? "");
-  const session = {
-    private: false,
-    name: "CLI Space",
-    space: user.did(),
-    as: user,
-  };
+  const session = await Session.open({ name: space ?? "" });
+
   console.log("params:", {
     space,
     session,

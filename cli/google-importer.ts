@@ -9,7 +9,7 @@ import {
   storage,
 } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
-import { Identity } from "@commontools/identity";
+import * as Session from "./session.ts";
 
 /**
  * Display usage information
@@ -178,13 +178,7 @@ function watchSpace(spaceName: string) {
 async function main() {
   log(undefined, "Starting Google Updater");
 
-  const identity = await Identity.fromPassphrase("common-cli");
-  const session = {
-    private: false,
-    name: "importer",
-    space: identity.did(),
-    as: identity,
-  };
+  const session = await Session.open({ name: space! });
   manager = new CharmManager(session);
 
   if (charmId) {
