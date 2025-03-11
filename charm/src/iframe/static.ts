@@ -3,7 +3,7 @@ export const simplifiedInterface = `
 // Available in scope: React, ReactDOM, TailwindCSS, Babel
 // Available functions: llm(message), generateImage(description), useDoc(key, defaultValue?)
 
-// Request any additional libraries to load (optional)
+// Must choose from available set and use keys
 // available set: d3, moment
 function onLoad() {
   return ['d3'];
@@ -356,6 +356,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Track loaded libraries
     let loadedCount = 0;
+    let hasErrors = false;
     const totalLibraries = librariesToLoad.length;
 
     // Load all libraries in parallel
@@ -370,31 +371,37 @@ document.addEventListener('DOMContentLoaded', () => {
         loader.updateLibrary(lib.url, true, false);
         loader.updateStatus(\`Loaded \${ loadedCount }/\${totalLibraries} libraries\`);
 
-if (loadedCount === totalLibraries) {
-  // Add a small delay after all libraries have loaded
-  // This gives them time to initialize properly
-  setTimeout(() => {
-    loadingStates.librariesReady = true;
-    checkAllReady();
-  }, 300); // 300ms delay should be enough for most libraries
-}
+        if (loadedCount === totalLibraries) {
+          // Add a small delay after all libraries have loaded
+          // This gives them time to initialize properly
+          setTimeout(() => {
+            if (!hasErrors) {
+              loadingStates.librariesReady = true;
+              checkAllReady();
+            } else {
+              // Don't set librariesReady to true if there were errors
+              loader.updateStatus('Cannot initialize application due to library loading errors');
+            }
+          }, 300);
+        }
       };
 
-script.onerror = (e) => {
-  loadedCount++;
-  loader.updateLibrary(lib.url, false, true);
-  loader.addError(\`Failed to load: \${lib.name}\`);
+      script.onerror = (e) => {
+        loadedCount++;
+        hasErrors = true;
+        loader.updateLibrary(lib.url, false, true);
+        loader.addError(\`Failed to load: \${lib.name}\`);
 
-  if (loadedCount === totalLibraries) {
-    // Still use the delay even if there are errors
-    setTimeout(() => {
-      loadingStates.librariesReady = true;
-      checkAllReady();
-    }, 300);
-  }
-};
+        if (loadedCount === totalLibraries) {
+          // Show permanent error message
+          setTimeout(() => {
+            loader.updateStatus('Cannot initialize application due to library loading errors');
+            // Never set librariesReady to true
+          }, 300);
+        }
+      };
 
-document.head.appendChild(script);
+      document.head.appendChild(script);
     });
   }
 
@@ -454,6 +461,8 @@ SCHEMA
 The \`useDoc\` hook subscribes to real-time updates for a given key and returns a tuple \`[doc, setDoc]\`:
 
 Any keys from the view-model-schema are valid for useDoc, any other keys will fail. Never try to initialize the doc value, instead, provide a default as the optional second argument.
+
+Never check the result of useDoc to set a default value, just use the default argument, it will always fail and upset the user if you overwrite.
 
 For this schema:
 
@@ -517,10 +526,10 @@ function ImageComponent() {
 
 \`\`\`javascript
 // Request additional libraries as needed (optional)
-// Must choose from available set.
+// Must choose from available set and use keys
 // available set: d3, moment
 function onLoad() {
-  return ['d3']; // only use libraries when you have good reason
+  return ['d3']; // only use libraries when you have good reason, always use the key, URLs will error
 }
 
 // Main application code
