@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import process from "node:process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execAsync } from "./utils.js";
+import { execAsync } from "./utils.ts";
 
 export type DenoMediaType =
   | "TypeScript"
@@ -133,7 +133,7 @@ export async function resolveDeno(
   }
 
   if (mod.kind === "esm") {
-   return {
+    return {
       id: mod.local,
       kind: mod.kind,
       loader: mod.mediaType,

@@ -16,7 +16,7 @@ export default function configureOpenAPI(app: AppOpenAPI) {
     apiReference({
       // theme: "kepler",
       defaultHttpClient: {
-        targetKey: "typescript",
+        targetKey: "node",
         clientKey: "fetch",
       },
       spec: {

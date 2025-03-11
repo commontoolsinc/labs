@@ -5,7 +5,8 @@ import {
   CharmManager,
   compileAndRunRecipe,
 } from "@commontools/charm";
-import { NavigateFunction } from "react-router-dom";
+// Import NavigateFunction from our types rather than directly from react-router-dom
+import type { NavigateFunction } from "react-router-dom";
 import { charmId } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
 import {
@@ -107,7 +108,8 @@ export type CommandMode =
   | { type: "confirm"; command: CommandItem; message: string }
   | { type: "select"; command: CommandItem; options: SelectOption[] }
   | { type: "transcribe"; command: CommandItem; placeholder: string }
-  | { type: "loading" };
+  | { type: "loading" }
+  | { type: "placeholder" };
 
 export interface SelectOption {
   id: string;
@@ -215,7 +217,7 @@ async function handleExecuteCharmAction(deps: CommandContext) {
     console.error("Error fetching charm actions:", error);
     deps.addJobMessage(
       deps.startJob("Action Error"),
-      `Error: ${error.message}`,
+      `Error: ${error instanceof Error ? error.message : String(error)}`,
     );
   } finally {
     deps.setLoading(false);
@@ -719,7 +721,8 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       group: "Action",
       predicate: !!deps.focusedCharmId,
       handler: () => handleExecuteCharmAction(deps),
-    }, {
+    },
+    {
       id: "open-in-stack",
       type: "action",
       title: "Open in Stack",
@@ -1121,4 +1124,22 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       ],
     },
   ];
+}
+
+export function isInputCommand(
+  cmd: CommandItem,
+): cmd is CommandItem & { type: "input" } {
+  return cmd.type === "input";
+}
+
+export function isTranscribeCommand(
+  cmd: CommandItem,
+): cmd is CommandItem & { type: "transcribe" } {
+  return cmd.type === "transcribe";
+}
+
+export function isConfirmCommand(
+  cmd: CommandItem,
+): cmd is CommandItem & { type: "confirm" } {
+  return cmd.type === "confirm";
 }

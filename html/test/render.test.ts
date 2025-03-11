@@ -15,10 +15,10 @@ describe("render", () => {
     globalThis.Node = dom.window.Node;
     globalThis.Text = dom.window.Text;
 
-    const renderable = (
-      <div class="hello">
-        <p>Hello world!</p>
-      </div>
+    const renderable = h(
+      "div",
+      { id: "hello" },
+      h("p", null, "Hello world!"),
     );
 
     const parent = document.createElement("div");
@@ -26,7 +26,7 @@ describe("render", () => {
     render(parent, renderable);
 
     // NOTE: JSDOM has a class instead of className :(
-    assert.equal(parent.firstElementChild?.class, "hello");
+    assert.equal(parent.firstElementChild?.id, "hello");
     assert.equal(parent.querySelector("p")?.textContent, "Hello world!");
   });
 });

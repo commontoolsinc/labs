@@ -13,6 +13,7 @@ import React, {
   useState,
 } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { type CharmRouteParams } from "@/routes.ts";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { LoadingSpinner } from "@/components/Loader.tsx";
 import { useCharm } from "@/hooks/use-charm.ts";
@@ -264,7 +265,7 @@ function useCodeEditor(
     if (workingSrc && iframeRecipe && charm) {
       saveNewRecipeVersion(charmManager, charm, workingSrc, iframeRecipe.spec);
     }
-  }, [workingSrc, iframeRecipe, charm, charmManager]);
+  }, [workingSrc, iframeRecipe, charm]);
 
   return {
     workingSrc,
@@ -276,7 +277,7 @@ function useCodeEditor(
 
 // Hook for charm operations (iterate or extend)
 function useCharmOperation() {
-  const { charmId: paramCharmId, replicaName } = useParams();
+  const { charmId: paramCharmId, replicaName } = useParams<CharmRouteParams>();
   const { currentFocus: charm } = useCharm(paramCharmId);
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
@@ -289,9 +290,10 @@ function useCharmOperation() {
   const [operationType, setOperationType] = useState<OperationType>("iterate");
   const [showVariants, setShowVariants] = useState(true);
   const [loading, setLoading] = useState(false);
-  const [variants, setVariants] = useState<
-    Array<{ charm: Cell<Charm>; model: string }>
-  >([]);
+  const [variants, setVariants] = useState<Cell<Charm>[]>([]);
+  const [variantModelsMap, setVariantModelsMap] = useState<
+    Record<string, string>
+  >({});
   const [selectedVariant, setSelectedVariant] = useState<Cell<Charm> | null>(
     null,
   );
@@ -353,8 +355,12 @@ function useCharmOperation() {
               const id = path.split("/").pop()!;
               const newCharm = await charmManager.get(id);
               if (newCharm) {
-                // Store the variant with its model information
-                setVariants((prev) => [...prev, { charm: newCharm, model }]);
+                // Store the variant and keep track of which model was used
+                setVariants((prev) => [...prev, newCharm]);
+                setVariantModelsMap((prev) => ({
+                  ...prev,
+                  [charmId(newCharm) || ""]: model,
+                }));
                 // Set the first completed variant as selected if none selected
                 setSelectedVariant((current) =>
                   current === charm ? newCharm : current
@@ -453,7 +459,7 @@ const Variants = () => {
     handleCancelVariants,
   } = useCharmOperationContext();
 
-  const { charmId: paramCharmId, replicaName } = useParams();
+  const { charmId: paramCharmId, replicaName } = useParams<CharmRouteParams>();
 
   if (!paramCharmId || !replicaName) {
     throw new Error("Missing charmId or replicaName");
@@ -549,16 +555,16 @@ const Variants = () => {
 
         {/* Display variants in the order of the variantModels array */}
         {variantModels.map((model, modelIdx) => {
-          // Find the variant for this model, if it exists
-          const variantForModel = variants.find((v) => v.model === model);
+          // Simply index into the variants array for now since we don't have the map
+          const variantForModel = variants[modelIdx];
 
           return (
             <div
               key={modelIdx}
               onClick={() =>
-                variantForModel && setSelectedVariant(variantForModel.charm)}
+                variantForModel && setSelectedVariant(variantForModel)}
               className={`variant-item min-w-48 h-32 border-2 cursor-pointer flex-shrink-0 ${
-                variantForModel && selectedVariant === variantForModel.charm
+                variantForModel && selectedVariant === variantForModel
                   ? "border-blue-500"
                   : variantForModel
                   ? "border-black"
@@ -586,7 +592,7 @@ const Variants = () => {
                       >
                         <CharmRenderer
                           className="w-full h-full"
-                          charm={variantForModel.charm}
+                          charm={variantForModel}
                         />
                       </div>
                     )
@@ -615,7 +621,7 @@ const Variants = () => {
 
 // Suggestions Component
 const Suggestions = () => {
-  const { charmId: paramCharmId } = useParams();
+  const { charmId: paramCharmId } = useParams<CharmRouteParams>();
   const { currentFocus: charm } = useCharm(paramCharmId);
   const { suggestions, loadingSuggestions } = useSuggestions(charm);
   const {
@@ -813,7 +819,7 @@ const OperationTab = () => {
 
 // Code Tab Component
 const CodeTab = () => {
-  const { charmId: paramCharmId } = useParams();
+  const { charmId: paramCharmId } = useParams<CharmRouteParams>();
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
   const { workingSrc, setWorkingSrc, hasUnsavedChanges, saveChanges } =
     useCodeEditor(
@@ -826,7 +832,7 @@ const CodeTab = () => {
       <div className="p-4 flex-grow flex flex-col overflow-hidden">
         <div className="flex-grow overflow-hidden border border-black h-full">
           <CodeMirror
-            value={workingSrc}
+            value={workingSrc || ""}
             theme="dark"
             extensions={[javascript()]}
             onChange={setWorkingSrc}
@@ -855,7 +861,7 @@ const CodeTab = () => {
 
 // Data Tab Component
 const DataTab = () => {
-  const { charmId: paramCharmId } = useParams();
+  const { charmId: paramCharmId } = useParams<CharmRouteParams>();
   const { currentFocus: charm } = useCharm(paramCharmId);
 
   if (!charm) return null;
@@ -950,7 +956,7 @@ const BottomSheet = ({
 
 // Main CharmDetailView Component
 function CharmDetailView() {
-  const { charmId: paramCharmId, replicaName } = useParams();
+  const { charmId: paramCharmId, replicaName } = useParams<CharmRouteParams>();
 
   if (!paramCharmId || !replicaName) {
     throw new Error("Missing navigation params");

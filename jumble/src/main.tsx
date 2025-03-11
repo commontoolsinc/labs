@@ -9,24 +9,21 @@ import {
 import "./styles/index.css";
 import Shell from "@/views/Shell.tsx";
 import { CharmsProvider } from "@/contexts/CharmsContext.tsx";
-
-import "./recipes/index.ts";
-import { CharmsManagerProvider } from "@/contexts/CharmManagerContext.tsx";
 import CharmList from "@/views/CharmList.tsx";
 import CharmShowView from "@/views/CharmShowView.tsx";
 import CharmDetailView from "@/views/CharmDetailView.tsx";
-import { LanguageModelProvider } from "./contexts/LanguageModelContext.tsx";
-import { BackgroundTaskProvider } from "./contexts/BackgroundTaskContext.tsx";
-import { AuthenticationProvider } from "./contexts/AuthenticationContext.tsx";
-import { SyncStatusProvider } from "./contexts/SyncStatusContext.tsx";
-import { setupIframe } from "./iframe-ctx.ts";
+import { LanguageModelProvider } from "@/contexts/LanguageModelContext.tsx";
+import { BackgroundTaskProvider } from "@/contexts/BackgroundTaskContext.tsx";
+import { AuthenticationProvider } from "@/contexts/AuthenticationContext.tsx";
+import { SyncStatusProvider } from "@/contexts/SyncStatusContext.tsx";
+import { setupIframe } from "@/iframe-ctx.ts";
 import GenerateJSONView from "@/views/utility/GenerateJSONView.tsx";
 import SpellbookIndexView from "@/views/spellbook/SpellbookIndexView.tsx";
 import SpellbookDetailView from "@/views/spellbook/SpellbookDetailView.tsx";
 import StackedCharmsView from "@/views/StackedCharmsView.tsx";
-import SpellbookLaunchView from "./views/spellbook/SpellbookLaunchView.tsx";
-import { ActionManagerProvider } from "./contexts/ActionManagerContext.tsx";
-import { ROUTES } from "./routes.ts";
+import SpellbookLaunchView from "@/views/spellbook/SpellbookLaunchView.tsx";
+import { ActionManagerProvider } from "@/contexts/ActionManagerContext.tsx";
+import { ROUTES } from "@/routes.ts";
 
 const ReplicaRedirect = () => {
   const savedReplica = localStorage.getItem("replica");
@@ -53,11 +50,7 @@ createRoot(document.getElementById("root")!).render(
 
                     <Route
                       path={ROUTES.replicaRoot}
-                      element={
-                        <CharmsManagerProvider>
-                          <Shell />
-                        </CharmsManagerProvider>
-                      }
+                      element={<Shell />}
                     >
                       <Route index element={<CharmList />} />
                       <Route
@@ -85,11 +78,7 @@ createRoot(document.getElementById("root")!).render(
                     />
                     <Route
                       path={ROUTES.spellbookLaunch}
-                      element={
-                        <CharmsManagerProvider>
-                          <SpellbookLaunchView />
-                        </CharmsManagerProvider>
-                      }
+                      element={<SpellbookLaunchView />}
                     />
 
                     {/* internal tools / experimental routes */}

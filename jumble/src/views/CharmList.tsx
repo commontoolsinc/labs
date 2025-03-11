@@ -261,7 +261,7 @@ export default function CharmList() {
   const { charmManager } = useCharmManager();
   const [pinned] = useCell(charmManager.getPinned());
   const [charms] = useCell(charmManager.getCharms());
-  const { isSyncing } = useSyncedStatus(charmManager);
+  const { isSyncing } = useSyncedStatus();
 
   if (!isSyncing && (!charms || charms.length === 0)) {
     return (
@@ -295,7 +295,7 @@ export default function CharmList() {
     <div className="p-2">
       <h1 className="text-2xl font-bold">Pinned</h1>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-8">
-        {replicaName &&
+        {replicaName && pinned &&
           pinned.map((charm) => (
             <CharmPreview
               key={charmId(charm)}
@@ -306,7 +306,7 @@ export default function CharmList() {
       </div>
       <h1 className="text-2xl font-bold">All Charms</h1>
       <div className="p-8">
-        {replicaName && (
+        {replicaName && charms && (
           <CharmTable
             charms={charms}
             replicaName={replicaName}

@@ -1,5 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+// Define NodeJS.Timeout for Deno compatibility
+declare global {
+  namespace NodeJS {
+    interface Timeout {
+      _idleTimeout: number;
+      _idlePrev: object;
+      _idleNext: object;
+      _idleStart: number;
+      _onTimeout: () => void;
+      _timerArgs: unknown[];
+      _repeat: number | null;
+    }
+  }
+}
+
 interface AudioRecorderOptions {
   transcribe?: boolean;
   url?: string;
@@ -48,7 +63,7 @@ export function useAudioRecorder({
     }
 
     if (recordingTimerRef.current) {
-      clearInterval(recordingTimerRef.current);
+      clearInterval(recordingTimerRef.current as unknown as number);
       recordingTimerRef.current = null;
     }
 
@@ -151,7 +166,10 @@ export function useAudioRecorder({
       console.log("Recording started");
 
       console.log("Setting up recording timer");
-      recordingTimerRef.current = setInterval(updateRecordingTime, 100);
+      recordingTimerRef.current = setInterval(
+        updateRecordingTime,
+        100,
+      ) as unknown as NodeJS.Timeout;
       console.log("Timer started");
     } catch (error: any) {
       cleanupRecording();

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 # DISABLED
-#  jumble \
 deno check \
   builder \
   charm \
@@ -9,6 +8,7 @@ deno check \
   html \
   identity \
   iframe-sandbox \
+  jumble \
   memory \
   runner \
   ui \

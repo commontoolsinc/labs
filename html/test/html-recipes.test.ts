@@ -26,7 +26,7 @@ describe("recipes with HTML", () => {
       "Simple UI Recipe",
       ({ value }) => {
         const doubled = lift((x: number) => x * 2)(value);
-        return { [UI]: <div>{doubled}</div> };
+        return { [UI]: h("div", null, doubled) };
       },
     );
 
@@ -57,13 +57,17 @@ describe("recipes with HTML", () => {
     }>("todo list", ({ title, items }) => {
       title.setDefault("untitled");
       return {
-        [UI]: (
-          <div>
-            <h1>{title}</h1>
-            <ul>
-              {items.map((item, i) => <li key={i.toString()}>{item.title}</li>)}
-            </ul>
-          </div>
+        [UI]: h(
+          "div",
+          null,
+          h("h1", null, title),
+          h(
+            "ul",
+            null,
+            (items as unknown as any).map((item: any, i: any) =>
+              h("li", { key: i.toString() }, item.title)
+            ),
+          ),
         ),
       };
     });
@@ -102,10 +106,10 @@ describe("recipes with HTML", () => {
       >(
         "summary",
         ({ title }) => {
-          return { [UI]: <div>{title.name}</div> };
+          return { [UI]: h("div", null, title.name) };
         },
       )({ title });
-      return { [UI]: <div>{summaryUI}</div> };
+      return { [UI]: h("div", null, summaryUI as any) };
     });
 
     const space = getSpace("test");
@@ -130,7 +134,7 @@ describe("recipes with HTML", () => {
 
   it("works with str", async () => {
     const strRecipe = recipe<{ name: string }>("str recipe", ({ name }) => {
-      return { [UI]: <div>{str`Hello, ${name}!`}</div> };
+      return { [UI]: h("div", null, str`Hello, ${name}!`) };
     });
 
     const space = getSpace("test");
@@ -157,18 +161,18 @@ describe("recipes with HTML", () => {
     ];
 
     const nestedMapRecipe = recipe<any[]>("nested map recipe", (data) => ({
-      [UI]: (
-        <div>
-          {data.map((row) => (
-            <ul>
-              {entries(row).map(([k, v]) => (
-                <li>
-                  {k}: {v}
-                </li>
-              ))}
-            </ul>
-          ))}
-        </div>
+      [UI]: h(
+        "div",
+        null,
+        (data as unknown as any).map((row: any) =>
+          h(
+            "ul",
+            null,
+            (entries(row) as unknown as any).map(([k, v]: any) =>
+              h("li", null, [k, ": ", v])
+            ),
+          )
+        ),
       ),
     }));
 
