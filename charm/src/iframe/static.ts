@@ -493,6 +493,24 @@ ${JSON.stringify(libraries)}
   } else {
     window.initializeApp();
   }
+
+  // This is the third listener to "message";
+  // consider condensing into one handler.
+  //
+  // Leave the sigil below as an indicator that
+  // health checks are supported:
+  // <PING-HANDLER>
+  window.addEventListener("message", e => {
+    if (e.data.type !== "ping") {
+      return;
+    }
+    const nonce = e.data.data;
+    window.parent.postMessage({
+      type: "pong",
+      data: nonce,
+    }, "*");
+  });
+
 </script>
 
 <!-- User code to be transformed by Babel -->

@@ -1,5 +1,4 @@
 import { type JSONSchema } from "@commontools/builder";
-import { effect } from "../../runner/src/reactivity.ts";
 
 // Types used by the `common-iframe-sandbox` IPC.
 
@@ -29,6 +28,8 @@ export enum IPCHostMessageType {
   LoadDocument = "load-document",
   // Host instructing guest to pass through a `HostMessage`.
   Passthrough = "passthrough",
+  // Host instructing guest to remove inner content (due to failed HealthCheck)
+  Freeze = "freeze",
 }
 
 /**
@@ -38,7 +39,8 @@ export enum IPCHostMessageType {
 export type IPCHostMessage =
   | { id: any; type: IPCHostMessageType.Init }
   | { id: any; type: IPCHostMessageType.LoadDocument; data: string }
-  | { id: any; type: IPCHostMessageType.Passthrough; data: HostMessage };
+  | { id: any; type: IPCHostMessageType.Passthrough; data: HostMessage }
+  | { id: any; type: IPCHostMessageType.Freeze };
 
 export enum IPCGuestMessageType {
   // Guest alerting the host that it is ready.
@@ -138,6 +140,7 @@ export const isJSONSchema = (source: unknown): source is JSONSchema => {
 };
 
 export enum HostMessageType {
+  Ping = "ping",
   Update = "update",
   LLMResponse = "llm-response",
   ReadWebpageResponse = "readwebpage-response",
@@ -145,6 +148,7 @@ export enum HostMessageType {
 }
 
 export type HostMessage =
+  | { type: HostMessageType.Ping; data: string }
   | { type: HostMessageType.Update; data: [string, any] }
   | {
     type: HostMessageType.LLMResponse;
@@ -184,6 +188,7 @@ export enum GuestMessageType {
   LLMRequest = "llm-request",
   WebpageRequest = "readwebpage-request",
   Perform = "perform",
+  Pong = "pong",
 }
 
 export type GuestMessage =
@@ -194,7 +199,8 @@ export type GuestMessage =
   | { type: GuestMessageType.Write; data: [string, any] }
   | { type: GuestMessageType.LLMRequest; data: string }
   | { type: GuestMessageType.WebpageRequest; data: string }
-  | { type: GuestMessageType.Perform; data: TaskPerform };
+  | { type: GuestMessageType.Perform; data: TaskPerform }
+  | { type: GuestMessageType.Pong; data: string };
 
 /**
  * Message asking a host to perform certain task.
@@ -245,7 +251,8 @@ export function isGuestMessage(message: any): message is GuestMessage {
     }
     case GuestMessageType.LLMRequest:
     case GuestMessageType.WebpageRequest:
-    case GuestMessageType.Read: {
+    case GuestMessageType.Read:
+    case GuestMessageType.Pong: {
       return typeof message.data === "string";
     }
     case GuestMessageType.Subscribe:
