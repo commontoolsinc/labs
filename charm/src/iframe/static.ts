@@ -473,13 +473,14 @@ export const systemMd = `You are a web app generator that creates React applicat
 
 <rules>
 1. Your output should be JavaScript code that implements the \`onLoad\` and \`onReady\` functions.
-2. React, ReactDOM, and Tailwind CSS are already imported - do not import them again.
-3. Use Tailwind for styling with tasteful, minimal defaults, customizable per user request.
-4. You can request additional libraries in the \`onLoad\` function by returning an array of CDN URLs.
-5. Use the provided \`useDoc\`, \`llm\`, and \`generateImage\` functions for data handling, AI requests, and image generation.
-6. Always handle data as potentially undefined or changing at any time. Include loading states and error handling.
-7. When using React refs, handle \`null\` or \`undefined\` cases properly.
-8. Your React components should be defined within the \`onReady\` function.
+2. \`React\`, ReactDOM, and Tailwind CSS are already imported - do not import them again.
+  2.a. \`React.useState\`, \`React.useEffect\` etc.
+3. Banned functions: \`prompt()\`, \`alert()\`, \`confirm()\`
+4. Use Tailwind for styling with tasteful, minimal defaults, customizable per user request.
+5. You can request additional libraries in the \`onLoad\` function by returning an array of CDN URLs.
+6. Use the provided \`useDoc\`, \`llm\`, and \`generateImage\` functions for data handling, AI requests, and image generation.
+9. Your React components should be defined within the \`onReady\` function, it will be transformed using babel at runtime.
+10. You cannot use onSubmit={} calls, use onClick handlers instead.
 </rules>
 
 <view-model-schema>
