@@ -5,12 +5,13 @@ import React, {
   useEffect,
   useState,
 } from "react";
+import { useParams } from "react-router-dom";
 import { Identity, KeyStore, PassKey } from "@commontools/identity";
 
 // Location in storage of root key.
 const ROOT_KEY = "$ROOT_KEY";
-// "Name" of default persona derived from root key.
-const DEFAULT_PERSONA = "default";
+
+export const EVERYONE_KEY = "common user";
 
 interface AuthenticationContextType {
   // The authenticated user/persona.
@@ -42,6 +43,8 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
   const [user, setUser] = useState<Identity | void>(undefined);
   const [root, setRoot] = useState<Identity | void>(undefined);
 
+  const { replicaName: spaceName } = useParams<{ replicaName: string }>();
+
   // On load, open the KeyStore and find a root key.
   useEffect(() => {
     let ignore = false;
@@ -64,22 +67,32 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
   // When root changes, update `user` to the default persona
   useEffect(() => {
     let ignore = false;
+
     async function setPersona() {
       setUser(undefined);
-      if (!root) {
+      if (!root || !spaceName) {
         return;
       }
-      const user = await root.derive(DEFAULT_PERSONA);
+
+      const account = isPrivateSpace(spaceName)
+        ? root
+        : await Identity.fromPassphrase(EVERYONE_KEY);
+
+      const user = await account.derive(spaceName);
+
       if (!ignore) {
         setUser(user);
       }
     }
     setPersona();
+
+    console.log("auth", spaceName);
+
     return () => {
       ignore = true;
       setUser(undefined);
     };
-  }, [root]);
+  }, [root, spaceName]);
 
   // This calls out to WebAuthn to register a user. The state of whether
   // a user has previously registered a passkey is not tracked (and could
@@ -161,5 +174,7 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
     </AuthenticationContext.Provider>
   );
 };
+
+const isPrivateSpace = (name: string) => name.startsWith("~");
 
 export const useAuthentication = () => useContext(AuthenticationContext);

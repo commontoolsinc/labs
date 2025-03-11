@@ -1,8 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { CharmManager } from "@commontools/charm";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useAuthentication } from "./AuthenticationContext.tsx";
-import { Identity } from "../../../identity/src/index.ts";
 import { useMemo } from "react";
 
 export type CharmManagerContextType = {
@@ -18,33 +17,35 @@ const CharmManagerContext = createContext<CharmManagerContextType>({
 export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = (
   { children },
 ) => {
-  const { replicaName } = useParams<{ replicaName: string }>();
-  const { root } = useAuthentication();
-  const [user, setUser] = useState<Identity>();
+  const { replicaName: spaceName } = useParams<{ replicaName: string }>();
+  const { user } = useAuthentication();
 
   useEffect(() => {
-    console.log("CharmManagerProvider", replicaName);
+    console.log("CharmManagerProvider", spaceName);
 
-    // 😅 Maybe we can let this go
-    if (replicaName) {
-      localStorage.setItem("lastReplica", replicaName);
+    // I have no idea what is this used by or what is it for, but I got a
+    // feeling this is very brittle and perhaps need to be removed.
+    if (spaceName) {
+      localStorage.setItem("lastReplica", spaceName);
     }
+  }, [spaceName]);
 
-    if (root && replicaName) {
-      root.derive(replicaName).then(setUser, (error) => {
-        console.error(`💥 Space key derivation failed`, error);
-      });
-    }
-  }, [replicaName, root]);
+  console.log(user);
 
   const charmManager = useMemo(
-    () => user ? new CharmManager(replicaName!, user) : null,
+    () =>
+      user
+        ? new CharmManager(
+          user.did(),
+          user,
+        )
+        : null,
     [user],
   );
 
   return (
     <CharmManagerContext.Provider
-      value={{ charmManager, currentReplica: replicaName || "" }}
+      value={{ charmManager, currentReplica: spaceName || "" }}
     >
       {children}
     </CharmManagerContext.Provider>
