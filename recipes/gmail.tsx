@@ -205,6 +205,108 @@ function getHeader(headers: any[], name: string): string {
   return header ? header.value : "";
 }
 
+async function processBatch(
+  messages: { id: string }[],
+  accessToken: string,
+): Promise<Email[]> {
+  const boundary = `batch_${Math.random().toString(36).substring(2)}`;
+  console.log("Processing batch with boundary", boundary);
+
+  const batchBody = messages.map((message, index) => `
+--${boundary}
+Content-Type: application/http
+Content-ID: <batch-${index}+${message.id}>
+
+GET /gmail/v1/users/me/messages/${message.id}?format=full
+Authorization: Bearer ${accessToken}
+Accept: application/json
+
+`).join("") + `--${boundary}--`;
+
+  console.log("Sending batch request for", messages.length, "messages");
+
+  const batchResponse = await fetch(
+    "https://gmail.googleapis.com/batch/gmail/v1",
+    {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${accessToken}`,
+        "Content-Type": `multipart/mixed; boundary=${boundary}`,
+      },
+      body: batchBody,
+    },
+  );
+
+  const responseText = await batchResponse.text();
+  console.log("Received batch response of length:", responseText.length);
+
+  const parts = responseText.split(`--batch_`)
+    .slice(1, -1)
+    .map((part) => {
+      try {
+        const jsonStart = part.indexOf("\n{");
+        if (jsonStart === -1) return null;
+        const jsonContent = part.slice(jsonStart).trim();
+        return JSON.parse(jsonContent);
+      } catch (error) {
+        console.error("Error parsing part:", error);
+        return null;
+      }
+    })
+    .filter((part) => part !== null);
+
+  console.log("Found", parts.length, "parts in response");
+
+  return parts.map((messageData) => {
+    try {
+      if (!messageData.payload?.headers) {
+        console.log("Missing required message data:", messageData);
+        return null;
+      }
+
+      const messageHeaders = messageData.payload.headers;
+      const subject = getHeader(messageHeaders, "Subject");
+      const from = getHeader(messageHeaders, "From");
+      const to = getHeader(messageHeaders, "To");
+      const date = getHeader(messageHeaders, "Date");
+
+      let plainText = "";
+      if (
+        messageData.payload.parts && Array.isArray(messageData.payload.parts)
+      ) {
+        const textPart = messageData.payload.parts.find(
+          (part: any) => part.mimeType === "text/plain",
+        );
+        if (textPart?.body?.data) {
+          plainText = decodeBase64(textPart.body.data);
+        }
+      } else if (messageData.payload.body?.data) {
+        plainText = decodeBase64(messageData.payload.body.data);
+      }
+
+      return {
+        id: messageData.id,
+        threadId: messageData.threadId,
+        labelIds: messageData.labelIds || ["INBOX"],
+        snippet: messageData.snippet || "",
+        subject,
+        from: extractEmailAddress(from),
+        date,
+        to: extractEmailAddress(to),
+        plainText,
+      };
+    } catch (error) {
+      console.error("Error processing message part:", error);
+      return null;
+    }
+  }).filter((message): message is Email => message !== null);
+}
+
+// Add this helper function for sleeping
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function fetchEmail(
   accessToken: string,
   maxResults: number = 10,
@@ -214,9 +316,7 @@ export async function fetchEmail(
   // First, get the list of message IDs from the inbox
   const listResponse = await fetch(
     `https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=${
-      labelIds.join(
-        ",",
-      )
+      labelIds.map(encodeURIComponent).join(",")
     }&maxResults=${maxResults}`,
     {
       headers: {
@@ -228,62 +328,53 @@ export async function fetchEmail(
   const listData = await listResponse.json();
 
   if (!listData.messages || !Array.isArray(listData.messages)) {
+    console.log("No messages found in response");
     return { messages: [] };
   }
 
-  // Fetch full details for each message
-  const detailedMessages = await Promise.all(
-    listData.messages
-      .filter((message: { id: string }) => !existingEmailIds.has(message.id))
-      .map(async (message: { id: string }) => {
-        const messageResponse = await fetch(
-          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${message.id}?format=full`,
-          {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-          },
-        );
-
-        const messageData = await messageResponse.json();
-
-        // Extract email details from the message data
-        const headers = messageData.payload.headers;
-        const subject = getHeader(headers, "Subject");
-        const from = getHeader(headers, "From");
-        const to = getHeader(headers, "To");
-        const date = getHeader(headers, "Date");
-
-        // Extract plain text content if available
-        let plainText = "";
-        if (
-          messageData.payload.parts && Array.isArray(messageData.payload.parts)
-        ) {
-          const textPart = messageData.payload.parts.find(
-            (part: any) => part.mimeType === "text/plain",
-          );
-          if (textPart && textPart.body && textPart.body.data) {
-            plainText = decodeBase64(textPart.body.data);
-          }
-        } else if (messageData.payload.body && messageData.payload.body.data) {
-          plainText = decodeBase64(messageData.payload.body.data);
-        }
-
-        return {
-          id: messageData.id,
-          threadId: messageData.threadId,
-          labelIds: messageData.labelIds || ["INBOX"],
-          snippet: messageData.snippet || "",
-          subject,
-          from: extractEmailAddress(from),
-          date,
-          to: extractEmailAddress(to),
-          plainText,
-        };
-      }),
+  // Filter out existing messages
+  const newMessages = listData.messages.filter(
+    (message: { id: string }) => !existingEmailIds.has(message.id),
   );
 
-  return { messages: detailedMessages };
+  if (newMessages.length === 0) {
+    console.log("No new messages to fetch");
+    return { messages: [] };
+  }
+
+  const batchSize = 100;
+  const allDetailedMessages: Email[] = [];
+
+  // Process messages in batches with delay
+  for (let i = 0; i < newMessages.length; i += batchSize) {
+    const batchMessages = newMessages.slice(i, i + batchSize);
+    console.log(
+      `Processing batch ${i / batchSize + 1} of ${
+        Math.ceil(newMessages.length / batchSize)
+      }`,
+    );
+
+    try {
+      const batchResults = await processBatch(batchMessages, accessToken);
+      allDetailedMessages.push(...batchResults);
+
+      // Add 1 second delay between batches, but not after the last batch
+      if (i + batchSize < newMessages.length) {
+        console.log("Waiting 1 second before next batch...");
+        await sleep(1000);
+      }
+    } catch (error) {
+      console.error("Error processing batch:", error);
+      // Optional: add longer delay and retry logic here if needed
+    }
+  }
+
+  console.log(
+    "Successfully parsed",
+    allDetailedMessages.length,
+    "messages total",
+  );
+  return { messages: allDetailedMessages };
 }
 
 const updateLabels = handler<{ detail: { value: string } }, { labels: string }>(
@@ -314,7 +405,9 @@ export default recipe(Recipe, ResultSchema, ({ settings }) => {
   });
 
   return {
-    [NAME]: str`GMail Importer ${auth.user.email}`,
+    [NAME]: str`GMail Importer ${
+      derive(auth, (auth) => auth?.user?.email || "unauthorized")
+    }`,
     [UI]: (
       <div>
         <h1>Gmail Importer</h1>
