@@ -14,6 +14,7 @@ import { RemoteStorageProvider } from "./storage/remote.ts";
 import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
 import { InMemoryStorageProvider } from "./storage/memory.ts";
 import { Signer } from "@commontools/identity";
+import { isBrowser } from "@commontools/utils/env";
 
 export function log(fn: () => any[]) {
   debug(() => {
@@ -140,11 +141,7 @@ class StorageImpl implements Storage {
     this.addCancel = addCancel;
 
     // Check if we're in a browser environment before accessing location
-    if (
-      typeof globalThis !== "undefined" &&
-      typeof globalThis.location !== "undefined" &&
-      globalThis.location?.href
-    ) {
+    if (isBrowser()) {
       this.setRemoteStorage(new URL(globalThis.location.href));
     }
   }

@@ -175,7 +175,11 @@ async function execute() {
   for (const fn of order) {
     loopCounter.set(fn, (loopCounter.get(fn) || 0) + 1);
     if (loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
-      handleError(new Error("Too many iterations"));
+      handleError(
+        new Error(
+          `Too many iterations: ${loopCounter.get(fn)} ${fn.name ?? ""}`,
+        ),
+      );
     } else await run(fn);
   }
 

@@ -163,7 +163,8 @@ export async function getAuthCellAndStorage(docLink: DocLink | string) {
       : docLink;
 
     if (!signer) {
-      signer = await Identity.fromPassphrase("toolshed");
+      // FIXME(ja): we should load operator passphrase from env
+      signer = await Identity.fromPassphrase("implicit trust");
       storage.setSigner(signer);
     }
 
@@ -311,4 +312,61 @@ export function createRefreshErrorResponse(
   status = 400,
 ) {
   return c.json({ error: errorMessage }, status) as any;
+}
+
+// Clears authentication data from the auth cell
+export async function clearAuthData(authCellDocLink: string | DocLink) {
+  try {
+    const { authCell, storage } = await getAuthCellAndStorage(authCellDocLink);
+
+    if (!authCell) {
+      throw new Error("Auth cell not found");
+    }
+
+    // Create empty default auth data
+    const emptyAuthData: AuthData = {
+      token: "",
+      tokenType: "",
+      scope: [],
+      expiresIn: 0,
+      expiresAt: 0,
+      refreshToken: "",
+      user: {
+        email: "",
+        name: "",
+        picture: "",
+      },
+    };
+
+    // Set the empty data to the auth cell
+    authCell.set(emptyAuthData);
+
+    // Ensure the cell is synced
+    await storage.synced();
+
+    return emptyAuthData;
+  } catch (error) {
+    throw new Error(`Error clearing auth data: ${error}`);
+  }
+}
+
+export function createLogoutSuccessResponse(c: any, message: string) {
+  return c.json({
+    success: true,
+    message,
+  });
+}
+
+export function createLogoutErrorResponse(
+  c: any,
+  errorMessage: string,
+  status = 400,
+) {
+  return c.json(
+    {
+      success: false,
+      error: errorMessage,
+    },
+    status,
+  );
 }

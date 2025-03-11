@@ -28,6 +28,7 @@ export {
 export {
   type Alias,
   type Frame,
+  ID,
   isAlias,
   isModule,
   isOpaqueRef,

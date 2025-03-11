@@ -1,5 +1,4 @@
 import { type DocImpl, getDoc } from "../doc.ts";
-import { normalizeToDocLinks } from "../utils.ts";
 import { type Action, idle } from "../scheduler.ts";
 import { type ReactivityLog } from "../scheduler.ts";
 
@@ -135,11 +134,6 @@ export function streamData(
               event,
               data: JSON.parse(data),
             };
-
-            normalizeToDocLinks(parentDoc, parsedData, undefined, log, {
-              streamData: { url },
-              cause,
-            });
 
             await idle();
 

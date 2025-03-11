@@ -1,6 +1,5 @@
 import { type DocImpl, getDoc } from "../doc.ts";
 import { type ReactivityLog } from "../scheduler.ts";
-import { normalizeToDocLinks } from "../utils.ts";
 import { type Action, idle } from "../scheduler.ts";
 import { refer } from "merkle-reference";
 
@@ -102,11 +101,6 @@ export function fetchData(
       .then(processResponse)
       .then(async (data) => {
         if (thisRun !== currentRun) return;
-
-        normalizeToDocLinks(parentDoc, data, undefined, log, {
-          fetchData: { url },
-          cause,
-        });
 
         await idle();
 

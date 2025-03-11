@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { assertSpyCalls, spy } from "@std/testing/mock";
+import { assertSpyCall, assertSpyCalls, spy } from "@std/testing/mock";
 import { getDoc } from "../src/doc.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import {
@@ -16,6 +16,7 @@ import {
   unschedule,
 } from "../src/scheduler.ts";
 import { getSpace } from "../src/space.ts";
+
 describe("scheduler", () => {
   it("should run actions when cells change", async () => {
     let runCount = 0;
@@ -271,8 +272,8 @@ describe("scheduler", () => {
 
     await idle();
 
-    expect(maxRuns).toBeGreaterThan(0);
-    assertSpyCalls(stopped, 1);
+    expect(maxRuns).toBeGreaterThan(10);
+    assertSpyCall(stopped, 0, undefined);
   });
 
   it("should not loop on r/w changes on its own output", async () => {

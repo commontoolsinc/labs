@@ -13,7 +13,8 @@
     "./llm-client",
     "./deno-vite-plugin",
     "./deno-web-test",
-    "./toolshed"
+    "./toolshed",
+    "./utils"
   ],
   "tasks": {
     "check": "./scripts/check-all.sh",

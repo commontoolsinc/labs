@@ -1,4 +1,5 @@
 import {
+  ID,
   isAlias,
   isOpaqueRef,
   isStatic,
@@ -91,16 +92,7 @@ export function sendValueToBinding(
 ) {
   if (isAlias(binding)) {
     const ref = followAliases(binding, doc, log);
-    if (!isDocLink(value) && !isDoc(value) && !isAlias(value)) {
-      normalizeToDocLinks(
-        doc,
-        value,
-        ref.cell.getAtPath(ref.path),
-        log,
-        binding,
-      );
-    }
-    setNestedValue(ref.cell, ref.path, value, log);
+    diffAndUpdate(ref, value, log, { doc, binding });
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value)) {
       for (let i = 0; i < Math.min(binding.length, value.length); i++) {
@@ -455,173 +447,199 @@ export function followAliases(
 }
 
 /**
- * Ensures that all elements of an array are docs. If not, i.e. they are static
- * data, turn them into doc links. Also unwraps proxies.
+ * Traverses newValue and updates `current` and any relevant linked documents.
  *
- * Use e.g. when running a recipe and getting static data as input.
+ * Returns true if any changes were made.
  *
- * @param value - The value to traverse and make sure all arrays are arrays of
- * docs. NOTE: The passed value is mutated.
- * @returns The (potentially unwrapped) input value
+ * When encountering an object with a `[ID]` property, it'll be used to compute
+ * an entity id based on it's relative location and the passed context, and the
+ * changes will be written to that entity.
+ *
+ * @param current - A doc link to the current value to compare against.
+ * @param newValue - The new value to traverse.
+ * @param log - The log to write to.
+ * @param context - The context of the change.
+ * @returns Whether any changes were made.
  */
-export function staticDataToNestedDocs(
-  parentDoc: DocImpl<any>,
-  value: any,
+export function diffAndUpdate(
+  current: DocLink,
+  newValue: any,
   log?: ReactivityLog,
-  cause?: any,
-): any {
-  value = maybeUnwrapProxy(value);
-  value = deepCopy(value);
-  // FIXME(seefeld): Figure out what the actual bug is. the IDs might be causing collisions.
-  //normalizeToDocLinks(parentDoc, value, undefined, log, cause);
-  return value;
+  context?: any,
+): boolean {
+  const changes = normalizeAndDiff(current, newValue, log, context);
+  applyChangeSet(changes, log);
+  return changes.length > 0;
+}
+
+export type ChangeSet = { location: DocLink; value: any }[];
+
+/**
+ * Traverses objects and returns an array of changes that should be written. An
+ * empty array means no changes.
+ *
+ * When encountering an object with a `[ID]` property, it'll be used to compute
+ * an entity id based on it's relative location and the passed context, and the
+ * changes will be queued to be written to that entity.
+ *
+ * Otherwise, when traversing and if the new value is a regular JSON value, but
+ * the old value is an alias, follow the alias before writing. However document
+ * references get overwritten (except as per above, the object gets converted to
+ * a document itself).
+ *
+ * Any proxy is unwrapped, and docs and cells mapped to doc links.
+ *
+ * @param current - A doc link to the current value to compare against.
+ * @param newValue - The new value to traverse.
+ * @param log - The log to write to.
+ * @param context - The context of the change.
+ * @returns An array of changes that should be written.
+ */
+export function normalizeAndDiff(
+  current: DocLink,
+  newValue: any,
+  log?: ReactivityLog,
+  context?: any,
+): ChangeSet {
+  const changes: ChangeSet = [];
+
+  // Unwrap proxies and handle special types
+  newValue = maybeUnwrapProxy(newValue);
+  if (isDoc(newValue)) newValue = { cell: newValue, path: [] };
+  if (isCell(newValue)) newValue = newValue.getAsDocLink();
+
+  // Get current value to compare against
+  const currentValue = current.cell.getAtPath(current.path);
+
+  // Handle alias in current value
+  if (isAlias(currentValue)) {
+    // Log reads of the alias, so that changing aliases cause refreshes
+    log?.reads.push({ cell: current.cell, path: current.path });
+    const ref = followAliases(currentValue, current.cell, log);
+    return normalizeAndDiff(ref, newValue, log, context);
+  }
+
+  if (isDocLink(currentValue) && isDocLink(newValue)) {
+    if (
+      currentValue.cell === newValue.cell &&
+      arrayEqual(currentValue.path, newValue.path)
+    ) {
+      return [];
+    } else {
+      return [
+        { location: current, value: newValue },
+      ];
+    }
+  }
+
+  // Handle ID-based object (convert to entity)
+  if (
+    typeof newValue === "object" && newValue !== null &&
+    newValue[ID] !== undefined
+  ) {
+    const { [ID]: id, ...rest } = newValue;
+    const entityId = createRef(id, {
+      parent: current.cell,
+      path: current.path,
+      context: context,
+    });
+    const doc = getDocByEntityId(
+      current.cell.space,
+      entityId,
+      true,
+      current.cell,
+    )!;
+    const ref = { cell: doc, path: [] };
+    return [
+      // If it wasn't already, set the current value to be a doc link to this doc
+      ...normalizeAndDiff(current, ref, log, context),
+      // And see whether the value of the document itself changed
+      ...normalizeAndDiff(ref, rest, log, context),
+    ];
+  }
+
+  // Handle arrays
+  if (Array.isArray(newValue) && Array.isArray(currentValue)) {
+    for (let i = 0; i < newValue.length; i++) {
+      const nestedChanges = normalizeAndDiff(
+        { cell: current.cell, path: [...current.path, i.toString()] },
+        newValue[i],
+        log,
+        context,
+      );
+      changes.push(...nestedChanges);
+    }
+
+    // Handle array length changes
+    if (currentValue.length > newValue.length) {
+      changes.push({
+        location: { cell: current.cell, path: [...current.path, "length"] },
+        value: newValue.length,
+      });
+    }
+
+    return changes;
+  }
+
+  // Handle objects
+  if (
+    typeof newValue === "object" && newValue !== null &&
+    typeof currentValue === "object" && currentValue !== null &&
+    !Array.isArray(newValue) && !Array.isArray(currentValue) &&
+    !isDocLink(newValue) && !isDocLink(currentValue) &&
+    !isAlias(newValue) && !isAlias(currentValue)
+  ) {
+    for (const key in newValue) {
+      const nestedChanges = normalizeAndDiff(
+        { cell: current.cell, path: [...current.path, key] },
+        newValue[key],
+        log,
+        context,
+      );
+      changes.push(...nestedChanges);
+    }
+
+    // Handle removed keys
+    for (const key in currentValue) {
+      if (!(key in newValue)) {
+        changes.push({
+          location: { cell: current.cell, path: [...current.path, key] },
+          value: undefined,
+        });
+      }
+    }
+
+    return changes;
+  }
+
+  // Handle primitive values and other cases
+  if (!Object.is(currentValue, newValue)) {
+    changes.push({ location: current, value: newValue });
+  }
+
+  return changes;
 }
 
 /**
- * Ensures that all elements of an array are docs. If not, i.e. they are static
- * data, turn them into doc links. "Is a doc" means it's either a doc, a doc
- * link or an alias.
+ * Apply a change set to all mentioned documents.
  *
- * Pass the previous value to reuse docs from previous transitions. It does so
- * if the values match, but only on arrays (as for objects we don't (yet?) do
- * this behind the scenes translation).
- *
- * @param value - The value to traverse and make sure all arrays are arrays of
- * docs.
- * @returns Whether the value was changed.
+ * @param changes - The change set to apply.
+ * @param log - The log to write to.
  */
-export function normalizeToDocLinks(
-  parentDoc: DocImpl<any>,
-  value: any,
-  previous?: any,
+export function applyChangeSet(
+  changes: ChangeSet,
   log?: ReactivityLog,
-  cause: any = createRef(),
-): boolean {
-  value = maybeUnwrapProxy(value);
-  previous = maybeUnwrapProxy(previous);
-
-  let changed = false;
-  if (isStatic(value)) {
-    // no-op, don't normalize deep static values and assume they don't change
-  } else if (isDoc(value) || isCell(value)) {
-    changed = value !== previous;
-  } else if (isDocLink(value)) {
-    changed = isDocLink(previous)
-      ? value.cell !== previous.cell || !arrayEqual(value.path, previous.path)
-      : true;
-  } else if (isAlias(value)) {
-    changed = isAlias(previous)
-      ? value.$alias.cell !== previous.$alias.cell ||
-        !arrayEqual(value.$alias.path, previous.$alias.path)
-      : true;
-  } else if (Array.isArray(value)) {
-    if (!Array.isArray(previous)) {
-      previous = undefined;
-      changed = true;
-    } else if (value.length !== previous.length) {
-      changed = true;
-    }
-    let itemId = null;
-    let preceedingItemId = null;
-    for (let i = 0; i < value.length; i++) {
-      let item = maybeUnwrapProxy(value[i]);
-      if (isCell(item)) item = item.getAsDocLink();
-      if (item !== value[i]) value[i] = item; // Capture unwrapped value
-      const previousItem = previous ? maybeUnwrapProxy(previous[i]) : undefined;
-      if (!(isDoc(item) || isDocLink(item) || isAlias(item))) {
-        // TODO(seefeld): Should this depend on the value if there is no id provided?
-        // This is probably generating extra churn on ids.
-        itemId = typeof item === "object" && item !== null && "id" in item
-          ? createRef({ id: item.id }, { parent: cause })
-          : createRef(value[i], {
-            parent: cause,
-            index: i,
-            preceeding: preceedingItemId,
-          });
-        const different = normalizeToDocLinks(
-          parentDoc,
-          value[i],
-          isDocLink(previousItem)
-            ? previousItem.cell.getAtPath(previousItem.path)
-            : previousItem,
-          log,
-          isDocLink(previousItem)
-            ? (previousItem.cell.entityId ?? itemId)
-            : itemId,
-        );
-        if (!different && previous && previous[i] && isDocLink(previous[i])) {
-          value[i] = previous[i];
-          preceedingItemId = previousItem.cell.entityId;
-          // NOTE: We don't treat making it a cell reference as a change, since
-          // we'll still have the same value. This is reusing the cell reference
-          // transition from a previous run, but only if the value didn't
-          // change as well.
-        } else {
-          const doc = getDocByEntityId(
-            parentDoc.space,
-            itemId,
-            true,
-            parentDoc,
-          )!;
-          doc.send(value[i]);
-          value[i] = { cell: doc, path: [] };
-          log?.writes.push(value[i]);
-
-          preceedingItemId = itemId;
-          changed = true;
-        }
-      }
-    }
-  } else if (typeof value === "object" && value !== null) {
-    if (typeof previous !== "object" || previous === null) {
-      previous = undefined;
-      changed = true;
-    }
-    for (const key in value) {
-      const item = maybeUnwrapProxy(value[key]);
-      if (item !== value[key]) value[key] = item; // Capture unwrapped value
-      const previousItem = previous
-        ? maybeUnwrapProxy(previous[key])
-        : undefined;
-      const change = normalizeToDocLinks(parentDoc, item, previousItem, log, {
-        parent: cause,
-        key,
-      });
-      changed ||= change;
-    }
-    if (!changed) {
-      for (const key in previous) {
-        if (!(key in value)) {
-          changed = true;
-          break;
-        }
-      }
-    }
-  } else if (isDocLink(previous)) {
-    // value is a literal value here and the last clause
-    changed = value !== previous.cell.getAtPath(previous.path);
-  } else if (isCell(previous)) {
-    changed = value !== previous.get();
-  } else {
-    changed = value !== previous;
+) {
+  for (const change of changes) {
+    change.location.cell.setAtPath(
+      change.location.path,
+      change.value,
+    );
+    log?.writes.push(change.location);
   }
-  return changed;
 }
 
-export function prepareForSaving(
-  doc: DocImpl<any>,
-  value: any,
-  previous?: any,
-  log?: ReactivityLog,
-  cause?: any,
-): any {
-  if (isCell(value)) return value.getAsDocLink();
-  else if (isDocLink(value)) return value;
-  else if (isDoc(value)) return { cell: value, path: [] };
-  else return normalizeToDocLinks(doc, value, previous, log, cause);
-}
-
-function maybeUnwrapProxy(value: any): any {
+export function maybeUnwrapProxy(value: any): any {
   return isQueryResultForDereferencing(value)
     ? getDocLinkOrThrow(value)
     : value;

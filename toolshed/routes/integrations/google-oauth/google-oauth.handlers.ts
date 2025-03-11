@@ -2,15 +2,19 @@ import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
   CallbackRoute,
   LoginRoute,
+  LogoutRoute,
   RefreshRoute,
 } from "./google-oauth.routes.ts";
 import {
   type CallbackResult,
+  clearAuthData,
   codeVerifiers,
   createCallbackResponse,
   createErrorResponse,
   createLoginErrorResponse,
   createLoginSuccessResponse,
+  createLogoutErrorResponse,
+  createLogoutSuccessResponse,
   createOAuthClient,
   createRefreshErrorResponse,
   createRefreshSuccessResponse,
@@ -269,5 +273,52 @@ export const refresh: AppRouteHandler<RefreshRoute> = async (c) => {
   } catch (error) {
     logger.error({ error }, "Failed to process refresh request");
     return createRefreshErrorResponse(c, "Failed to process refresh request");
+  }
+};
+
+/**
+ * Google OAuth Logout Handler
+ * Clears authentication data from the auth cell
+ */
+export const logout: AppRouteHandler<LogoutRoute> = async (c) => {
+  const logger = c.get("logger");
+
+  try {
+    const payload = await c.req.json();
+    logger.info({ payload }, "Received Google OAuth logout request");
+
+    if (!payload.authCellId) {
+      logger.error({ payload }, "No authCellId provided in logout request");
+      return createLogoutErrorResponse(c, "No authCellId provided");
+    }
+
+    try {
+      // Clear auth data in the auth cell
+      await clearAuthData(payload.authCellId);
+
+      logger.info(
+        { authCellId: payload.authCellId },
+        "Successfully logged out",
+      );
+
+      // Return success response
+      return createLogoutSuccessResponse(c, "Successfully logged out");
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error
+        ? error.message
+        : String(error);
+      logger.error(
+        { error, authCellId: payload.authCellId },
+        "Failed to clear auth data",
+      );
+      return createLogoutErrorResponse(
+        c,
+        `Failed to clear authentication data: ${errorMessage}`,
+        500,
+      );
+    }
+  } catch (error: unknown) {
+    logger.error({ error }, "Failed to process logout request");
+    return createLogoutErrorResponse(c, "Failed to process logout request");
   }
 };
