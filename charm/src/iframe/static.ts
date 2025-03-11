@@ -139,6 +139,39 @@ window.generateImage = function(prompt) {
   return '/api/ai/img?prompt=' + encodeURIComponent(prompt);
 }
 
+/**
+ * Reads content from a webpage via server-side fetching
+ * @param {string} url - The URL of the webpage to read
+ * @returns {Promise<{
+ *   content: string,
+ *   metadata: {
+ *     title: string,
+ *     word_count: number
+ *   }
+ * }>} - The webpage content and metadata
+ */
+window.readWebpage = async function(url) {
+  try {
+    const encodedUrl = encodeURIComponent(url);
+    const response = await fetch(\`/api/ai/webreader/\${encodedUrl}\`);
+
+    if (!response.ok) {
+      throw new Error(\`Failed to fetch webpage: \${response.status} \${response.statusText}\`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error reading webpage:', error);
+    return {
+      content: '',
+      metadata: {
+        title: 'Error',
+        word_count: 0
+      }
+    };
+  }
+};
+
 const sourceTimeout = 1000;
 
 function LoadingUI() {
@@ -521,6 +554,30 @@ function ImageComponent() {
   return <img src={generateImage("A beautiful sunset over mountains")} alt="Generated landscape" />;
 }
 \`\`\`
+
+## 4. readWebpage Function
+
+The \`readWebpage\` function fetches the content of a web page via server-side fetching:
+
+\`\`\`jsx
+async function fetchWebContent() {
+  try {
+    const result = await readWebpage('https://example.com');
+    console.log('Title:', result.metadata.title);
+    console.log('Word count:', result.metadata.word_count);
+    console.log('Content:', result.content);
+    return result;
+  } catch (error) {
+    console.error('Error reading webpage:', error);
+  }
+}
+\`\`\`
+
+The function returns an object with:
+- \`content\`: The extracted text content from the webpage
+- \`metadata\`: Object containing:
+  - \`title\`: The page title
+  - \`word_count\`: Approximate word count of the content
 
 ## 4. Using the Interface Functions
 
