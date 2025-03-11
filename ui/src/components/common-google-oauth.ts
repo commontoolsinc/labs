@@ -1,5 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { baseStyles } from "./style.ts";
+import { Cell } from "@commontools/runner";
 
 export interface AuthData {
   token?: string;
@@ -18,22 +19,18 @@ export interface AuthData {
 export class CommonGoogleOauthElement extends LitElement {
   static override properties = {
     auth: { type: Object },
-    authCell: { type: Object },
     authStatus: { type: String },
     isLoading: { type: Boolean },
     authResult: { type: Object },
   };
 
-  declare auth: AuthData;
-  declare authCell: Record<string, unknown>;
+  declare auth: Cell<AuthData> | undefined;
   declare authStatus: string;
   declare isLoading: boolean;
   declare authResult: Record<string, unknown> | null;
 
   constructor() {
     super();
-    this.auth = {};
-    this.authCell = {};
     this.authStatus = "";
     this.isLoading = false;
     this.authResult = null;
@@ -44,7 +41,7 @@ export class CommonGoogleOauthElement extends LitElement {
     this.authStatus = "Initiating OAuth flow...";
     this.authResult = null;
 
-    let authCellId = JSON.parse(JSON.stringify(this.authCell, null, 2));
+    let authCellId = JSON.parse(JSON.stringify(this.auth, null, 2));
     authCellId.space = location.pathname.split("/")[1];
     authCellId = JSON.stringify(authCellId);
 
@@ -118,66 +115,20 @@ export class CommonGoogleOauthElement extends LitElement {
   }
 
   async handleLogout() {
-    try {
-      this.isLoading = true;
-      this.authStatus = "Logging out...";
-
-      // Construct the authCellId the same way as in handleClick
-      let authCellId = JSON.parse(JSON.stringify(this.authCell, null, 2));
-      authCellId.space = location.pathname.split("/")[1];
-      authCellId = JSON.stringify(authCellId);
-
-      // Call the logout API endpoint
-      const response = await fetch("/api/integrations/google-oauth/logout", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          authCellId,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        // Reset auth state locally
-        this.auth = {
-          token: "",
-          tokenType: "",
-          scope: [],
-          expiresIn: 0,
-          expiresAt: 0,
-          refreshToken: "",
-          user: {
-            email: "",
-            name: "",
-            picture: "",
-          },
-        };
-
-        this.authStatus = "Logged out successfully";
-        this.authResult = null;
-      } else {
-        // Handle error object that might be nested
-        let errorMessage = "Unknown error";
-        if (typeof result.error === "string") {
-          errorMessage = result.error;
-        } else if (result.error && typeof result.error === "object") {
-          errorMessage = JSON.stringify(result.error);
-        }
-
-        this.authStatus = `Logout error: ${errorMessage}`;
-        console.error("Logout error details:", result);
-      }
-    } catch (error: unknown) {
-      console.error("Logout error:", error);
-      this.authStatus = `Logout error: ${
-        error instanceof Error ? error.message : String(error)
-      }`;
-    } finally {
-      this.isLoading = false;
-    }
+    await this.auth?.set({
+      token: "",
+      tokenType: "",
+      scope: [],
+      expiresIn: 0,
+      expiresAt: 0,
+      refreshToken: "",
+      user: {
+        email: "",
+        name: "",
+        picture: "",
+      },
+    });
+    this.requestUpdate();
   }
 
   override render() {
@@ -185,12 +136,12 @@ export class CommonGoogleOauthElement extends LitElement {
       <div class="oauth-wrapper">
         <div class="profile-section">
           ${
-      this.auth.user?.email && this.auth.token
+      this.auth?.get()?.user?.email && this.auth?.get()?.token
         ? html`
-            <img class="profile-picture" src="${this.auth.user.picture}" alt="User profile picture" />
+            <img class="profile-picture" src="${this.auth?.get()?.user?.picture}" alt="User profile picture" />
             <div class="user-info">
-              <h2 class="user-name">${this.auth.user.name}</h2>
-              <p class="user-email">${this.auth.user.email}</p>
+              <h2 class="user-name">${this.auth?.get()?.user?.name}</h2>
+              <p class="user-email">${this.auth?.get()?.user?.email}</p>
             </div>
           `
         : ""
@@ -199,7 +150,7 @@ export class CommonGoogleOauthElement extends LitElement {
 
         <div class="action-section">
           ${
-      this.auth.token
+      this.auth?.get()?.token
         ? html`
             <button @click=${this.handleLogout} class="oauth-button logout">
               Logout
