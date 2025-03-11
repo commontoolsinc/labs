@@ -21,7 +21,7 @@ import { ActionManagerProvider } from "@/contexts/ActionManagerContext.tsx";
 import { ROUTES } from "@/routes.ts";
 
 const ReplicaRedirect = () => {
-  const savedReplica = localStorage.getItem("replica");
+  const savedReplica = localStorage.getItem("lastReplica");
   globalThis.location.href = savedReplica
     ? "/" + savedReplica
     : ROUTES.defaultReplica;
