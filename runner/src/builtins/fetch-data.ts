@@ -103,11 +103,6 @@ export function fetchData(
       .then(async (data) => {
         if (thisRun !== currentRun) return;
 
-        normalizeToDocLinks(parentDoc, data, undefined, log, {
-          fetchData: { url },
-          cause,
-        });
-
         await idle();
 
         pending.setAtPath([], false, log);

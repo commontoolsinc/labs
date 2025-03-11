@@ -136,11 +136,6 @@ export function streamData(
               data: JSON.parse(data),
             };
 
-            normalizeToDocLinks(parentDoc, parsedData, undefined, log, {
-              streamData: { url },
-              cause,
-            });
-
             await idle();
 
             result.setAtPath([], parsedData, log);
