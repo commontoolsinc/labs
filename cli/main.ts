@@ -21,14 +21,15 @@ const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
 storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
 
+export const EVERYONE_KEY = "common user";
 async function main() {
-  const root = await Identity.fromPassphrase("common-cli");
-  const space = root.derive("");
+  const account = await Identity.fromPassphrase(EVERYONE_KEY);
+  const user = await account.derive(space ?? "");
   const session = {
     private: false,
     name: "CLI Space",
-    space: root.did(),
-    as: root,
+    space: user.did(),
+    as: user,
   };
   console.log("params:", {
     space,
