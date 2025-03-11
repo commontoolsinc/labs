@@ -1328,10 +1328,9 @@ IMPORTANT:
                 continue;
               }
 
-              const charmData = charm.get();
-              const stream = charmData[actionName];
+              const stream = charm.key(actionName);
 
-              if (!stream || typeof stream.send !== "function") {
+              if (!isStream(stream)) {
                 const feedback =
                   `Failed: Action ${actionName} not found or not executable`;
                 log(feedback);
@@ -1342,8 +1341,10 @@ IMPORTANT:
               }
 
               // Execute the action
-              stream.send(step.args?.input);
-              const feedback = `Executed charm action: ${actionName}`;
+              stream.send(step.args);
+              const feedback = `Executed charm action: ${actionName} ${
+                step.args ?? "with no input"
+              }`;
               log(feedback);
               step.feedback = feedback;
               step.status = "completed";
