@@ -262,10 +262,10 @@ function useCodeEditor(
   const hasUnsavedChanges = workingSrc !== iframeRecipe?.src;
 
   const saveChanges = useCallback(() => {
-    if (workingSrc && iframeRecipe && charm && charmManager) {
+    if (workingSrc && iframeRecipe && charm) {
       saveNewRecipeVersion(charmManager, charm, workingSrc, iframeRecipe.spec);
     }
-  }, [workingSrc, iframeRecipe, charm, charmManager]);
+  }, [workingSrc, iframeRecipe, charm]);
 
   return {
     workingSrc,
@@ -308,11 +308,6 @@ function useCharmOperation() {
       replace: boolean,
       model: string,
     ) => {
-      if (!charmManager) {
-        console.error("No charm manager available");
-        return null;
-      }
-
       if (operationType === "iterate") {
         return await iterateCharm(
           charmManager,
@@ -358,20 +353,18 @@ function useCharmOperation() {
             );
             if (path) {
               const id = path.split("/").pop()!;
-              if (charmManager) {
-                const newCharm = await charmManager.get(id);
-                if (newCharm) {
-                  // Store the variant and keep track of which model was used
-                  setVariants((prev) => [...prev, newCharm]);
-                  setVariantModelsMap((prev) => ({
-                    ...prev,
-                    [charmId(newCharm) || ""]: model,
-                  }));
-                  // Set the first completed variant as selected if none selected
-                  setSelectedVariant((current) =>
-                    current === charm ? newCharm : current
-                  );
-                }
+              const newCharm = await charmManager.get(id);
+              if (newCharm) {
+                // Store the variant and keep track of which model was used
+                setVariants((prev) => [...prev, newCharm]);
+                setVariantModelsMap((prev) => ({
+                  ...prev,
+                  [charmId(newCharm) || ""]: model,
+                }));
+                // Set the first completed variant as selected if none selected
+                setSelectedVariant((current) =>
+                  current === charm ? newCharm : current
+                );
               }
             }
           } catch (error) {
