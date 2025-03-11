@@ -372,7 +372,7 @@ function createRegularCell<T>(
           !isCell(value) && !isDocLink(value) && !isDoc(value) &&
           !Array.isArray(value) && typeof value === "object" &&
           value !== null &&
-          !value[ID] && getTopFrame()
+          value[ID] === undefined && getTopFrame()
         ) {
           return {
             [ID]: getTopFrame()!.generatedIdCounter++,
