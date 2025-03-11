@@ -18,7 +18,8 @@ export default defineConfig({
     ],
     proxy: {
       "/api/integrations": {
-        target: Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
+        target: Deno.env.get("INTEGRATIONS_URL") ??
+          Deno.env.get("TOOLSHED_API_URL") ?? "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/ai/spell/": {

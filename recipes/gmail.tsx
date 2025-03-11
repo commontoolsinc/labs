@@ -3,6 +3,7 @@ import {
   cell,
   derive,
   handler,
+  ID,
   JSONSchema,
   NAME,
   recipe,
@@ -69,7 +70,7 @@ const AuthSchema = {
 } as const satisfies JSONSchema;
 type Auth = Schema<typeof AuthSchema>;
 
-const Recipe = {
+const GmailImporterInputs = {
   type: "object",
   properties: {
     settings: {
@@ -129,56 +130,86 @@ const ResultSchema = {
   },
 } as const satisfies JSONSchema;
 
-const updateLimit = handler<{ detail: { value: string } }, { limit: number }>(
+const updateLimit = handler(
+  {
+    type: "object",
+    properties: {
+      detail: {
+        type: "object",
+        properties: { value: { type: "string" } },
+        required: ["value"],
+      },
+    },
+  },
+  {
+    type: "object",
+    properties: { limit: { type: "number", asCell: true } },
+    required: ["limit"],
+  },
   ({ detail }, state) => {
-    state.limit = parseInt(detail?.value ?? "10") || 0;
+    state.limit.set(parseInt(detail?.value ?? "10") || 0);
   },
 );
 
-const googleUpdater = handler<
-  NonNullable<unknown>,
-  { emails: Email[]; auth: Auth; settings: { labels: string; limit: number } }
->((_event, state) => {
-  console.log("googleUpdater!");
+const googleUpdater = handler(
+  {},
+  {
+    type: "object",
+    properties: {
+      emails: { type: "array", items: EmailSchema, default: [], asCell: true },
+      auth: AuthSchema,
+      settings: GmailImporterInputs.properties.settings,
+    },
+    required: ["emails", "auth", "settings"],
+  },
+  (_event, state) => {
+    console.log("googleUpdater!");
 
-  if (!state.auth.token) {
-    console.log("no token");
-    return;
-  }
-  if (state.auth.expiresAt && state.auth.expiresAt < Date.now()) {
-    console.log("token expired at ", state.auth.expiresAt);
-    return;
-  }
+    if (!state.auth.token) {
+      console.warn("no token");
+      return;
+    }
+    if (state.auth.expiresAt && state.auth.expiresAt < Date.now()) {
+      console.warn("token expired at ", state.auth.expiresAt);
+      return;
+    }
 
-  // Get the set of existing email IDs for efficient lookup
-  const existingEmailIds = new Set(
-    (state.emails || []).map((email) => email.id),
-  );
+    // Get the set of existing email IDs for efficient lookup
+    const existingEmailIds = new Set(
+      state.emails.get().map((email) => email.id),
+    );
 
-  console.log("existing email ids", existingEmailIds);
+    console.log("existing email ids", existingEmailIds);
 
-  const labels = state.settings.labels
-    .split(",")
-    .map((label) => label.trim())
-    .filter(Boolean);
+    const labels = state.settings.labels
+      .split(",")
+      .map((label) => label.trim())
+      .filter(Boolean);
 
-  console.log("labels", labels);
+    console.log("labels", labels);
 
-  fetchEmail(state.auth.token, state.settings.limit, labels, existingEmailIds)
-    .then((emails) => {
-      // Filter out any duplicates by ID
-      const newEmails = emails.messages.filter((email) =>
-        !existingEmailIds.has(email.id)
-      );
+    fetchEmail(state.auth.token, state.settings.limit, labels, existingEmailIds)
+      .then((emails) => {
+        // Filter out any duplicates by ID
+        const newEmails = emails.messages.filter((email) =>
+          !existingEmailIds.has(email.id)
+        );
 
-      if (newEmails.length > 0) {
-        console.log(`Adding ${newEmails.length} new emails`);
-        state.emails.push(...newEmails);
-      } else {
-        console.log("No new emails found");
-      }
-    });
-});
+        if (newEmails.length > 0) {
+          console.log(`Adding ${newEmails.length} new emails`);
+
+          // Use email ID to generate our ID
+          newEmails.forEach((email) => {
+            email[ID] = email.id;
+          });
+
+          state.emails.push(...newEmails);
+        } else {
+          console.log("No new emails found");
+        }
+      });
+  },
+);
 
 // Helper function to decode base64 encoded email parts
 function decodeBase64(data: string) {
@@ -292,7 +323,7 @@ const updateLabels = handler<{ detail: { value: string } }, { labels: string }>(
   },
 );
 
-export default recipe(Recipe, ResultSchema, ({ settings }) => {
+export default recipe(GmailImporterInputs, ResultSchema, ({ settings }) => {
   const auth = cell<Auth>({
     token: "",
     tokenType: "",

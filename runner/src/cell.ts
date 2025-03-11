@@ -1,5 +1,5 @@
 import { isStreamAlias, TYPE } from "@commontools/builder";
-import { getTopFrame, type JSONSchema } from "@commontools/builder";
+import { getTopFrame, ID, type JSONSchema } from "@commontools/builder";
 import {
   type DeepKeyLookup,
   type DocImpl,
@@ -13,7 +13,7 @@ import {
   getDocLinkOrValue,
   type QueryResult,
 } from "./query-result-proxy.ts";
-import { prepareForSaving, resolveLinkToValue, resolvePath } from "./utils.ts";
+import { diffAndUpdate, resolveLinkToValue, resolvePath } from "./utils.ts";
 import { queueEvent, type ReactivityLog, subscribe } from "./scheduler.ts";
 import { type EntityId, getDocByEntityId, getEntityId } from "./doc-map.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
@@ -105,10 +105,12 @@ export interface Cell<T> {
   send(value: T): void;
   update(values: Partial<T>): void;
   push(
-    value:
+    ...value: Array<
       | (T extends Array<infer U> ? U : any)
       | DocImpl<T extends Array<infer U> ? U : any>
-      | DocLink,
+      | DocLink
+      | Cell<T extends Array<infer U> ? U : any>
+    >
   ): void;
   equals(other: Cell<any>): boolean;
   sink(callback: (value: T) => Cancel | undefined | void): Cancel;
@@ -331,24 +333,13 @@ function createRegularCell<T>(
 ): Cell<T> {
   const self = {
     get: () => validateAndTransform(doc, path, schema, log, rootSchema),
-    set: (newValue: T) => {
-      const ref = resolvePath(doc, path, log);
-      if (
-        prepareForSaving(
-          ref.cell,
-          newValue,
-          ref.cell.getAtPath(ref.path),
-          log,
-          {
-            parent: getTopFrame()?.cause,
-            doc: ref.cell,
-            path: ref.path,
-          },
-        )
-      ) {
-        ref.cell.setAtPath(ref.path, newValue, log);
-      }
-    },
+    set: (newValue: T) =>
+      diffAndUpdate(
+        resolvePath(doc, path, log),
+        newValue,
+        log,
+        getTopFrame()?.cause,
+      ),
     send: (newValue: T) => self.set(newValue),
     update: (values: Partial<T>) => {
       if (typeof values !== "object" || values === null) {
@@ -359,39 +350,47 @@ function createRegularCell<T>(
         (self.key as any)(key).set(value);
       }
     },
-    push: (value: any) => {
+    push: (
+      ...values: Array<
+        | (T extends Array<infer U> ? U : any)
+        | DocImpl<T extends Array<infer U> ? U : any>
+        | DocLink
+        | Cell<T extends Array<infer U> ? U : any>
+      >
+    ) => {
       // Follow aliases and references, since we want to get to an assumed
       // existing array.
       const ref = resolveLinkToValue(doc, path, log);
-      const array = ref.cell.getAtPath(ref.path) ?? [];
-      if (!Array.isArray(array)) {
+      const array = ref.cell.getAtPath(ref.path);
+      if (array !== undefined && !Array.isArray(array)) {
         throw new Error("Can't push into non-array value");
       }
 
-      // Every element pushed to the array should be it's own doc or link to
-      // one. So if it isn't already, make it one.
-      if (isCell(value)) {
-        value = value.getAsDocLink();
-      } else if (isDoc(value)) {
-        value = { cell: value, path: [] };
-      } else {
-        value = getDocLinkOrValue(value);
-        if (!isDocLink(value)) {
-          const cause = {
-            parent: doc.entityId,
-            path: path,
-            length: array.length,
-            // Context is the event id in event handlers, making this unique.
-            // TODO(seefeld): In this case it shouldn't depend on the length, maybe
-            // instead just call order in the current context.
-            context: getTopFrame()?.cause ?? "unknown",
+      // If this is an object and it doesn't have an ID, add one.
+      const valuesToWrite = values.map((value: any) => {
+        if (
+          !isCell(value) && !isDocLink(value) && !isDoc(value) &&
+          !Array.isArray(value) && typeof value === "object" &&
+          value !== null &&
+          value[ID] === undefined && getTopFrame()
+        ) {
+          return {
+            [ID]: getTopFrame()!.generatedIdCounter++,
+            ...value,
           };
-
-          value = { cell: getDoc<any>(value, cause, doc.space), path: [] };
+        } else {
+          return value;
         }
-      }
+      });
 
-      ref.cell.setAtPath(ref.path, [...array, value], log);
+      // Implement push by overwriting the `length`s element.
+      const defaultArray = Array.isArray(schema?.default) ? schema.default : [];
+      diffAndUpdate(
+        { cell: doc, path },
+        [...(array === undefined ? defaultArray : array), ...valuesToWrite],
+        log,
+        getTopFrame()?.cause,
+      );
     },
     equals: (other: Cell<any>) =>
       JSON.stringify(self) === JSON.stringify(other),
@@ -406,8 +405,8 @@ function createRegularCell<T>(
             ? schema.additionalProperties
             : undefined))
         : schema?.type === "array"
-          ? schema.items
-          : undefined;
+        ? schema.items
+        : undefined;
       return createCell(
         doc,
         [...path, valueKey],
