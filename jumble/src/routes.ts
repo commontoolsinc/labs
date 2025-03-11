@@ -63,6 +63,17 @@ export function createPathWithHash<T extends keyof typeof ROUTES>(
   return `${path}#${hash}`;
 }
 
+/**
+ * Attempts to match the route that has replica name in them and returns params
+ * or `{}` otherwise.
+ */
+export const matchSpace = (path: string): { replicaName?: string } =>
+  matchPath(ROUTES.replicaRoot, path)?.params ??
+    matchPath(ROUTES.charmShow, path)?.params ??
+    matchPath(ROUTES.stackedCharms, path)?.params ??
+    matchPath(ROUTES.charmDetail, path)?.params ??
+    {};
+
 export type CharmRouteParams = {
   charmId: string;
   replicaName?: string;

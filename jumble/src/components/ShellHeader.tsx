@@ -7,7 +7,10 @@ import { useNamedCell } from "@/hooks/use-cell.ts";
 import { getSpace } from "@commontools/runner";
 
 type ShellHeaderProps = {
-  replicaName?: string;
+  /**
+   * DID of the space.
+   */
+  session: { space: string; name: string };
   charmId?: string;
 };
 
@@ -24,10 +27,10 @@ const colorSchema = {
 } as const;
 
 export function ShellHeader(
-  { replicaName, charmId }: ShellHeaderProps,
+  { session, charmId }: ShellHeaderProps,
 ) {
   const { isSyncing, lastSyncTime } = useSyncedStatus();
-  const colorSpace = getSpace(replicaName ?? "");
+  const colorSpace = getSpace(session.space);
 
   const [style, setStyle] = useNamedCell(
     colorSpace,
@@ -53,7 +56,7 @@ export function ShellHeader(
     >
       <div className="header-start flex items-center gap-2">
         <NavLink
-          to={replicaName ? `/${replicaName}` : "/"}
+          to={`/${session.name}`}
           className="brand flex items-center gap-2"
         >
           <ShapeLogo
@@ -63,7 +66,7 @@ export function ShellHeader(
             containerColor="#d2d2d2"
           />
         </NavLink>
-        <NavPath replicaId={replicaName} charmId={charmId} />
+        <NavPath replicaId={session.name} charmId={charmId} />
       </div>
       <div className="header-end flex items-center gap-2">
         <div className="relative group">

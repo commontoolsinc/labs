@@ -11,18 +11,18 @@ import { CharmPublisher } from "@/components/Publish.tsx";
 import { useGlobalActions } from "@/hooks/use-global-actions.tsx";
 
 export default function Shell() {
-  const { charmId, replicaName } = useParams<CharmRouteParams>();
+  const { charmId } = useParams<CharmRouteParams>();
   useGlobalActions();
-  const { user } = useAuthentication();
+  const { session } = useAuthentication();
 
-  if (!user) {
+  if (!session) {
     return <AuthenticationView />;
   }
 
   return (
     <CharmsManagerProvider>
       <div className="flex flex-col shell h-full bg-gray-50 border-2 border-black">
-        <ShellHeader replicaName={replicaName} charmId={charmId} />
+        <ShellHeader session={session} charmId={charmId} />
 
         <div className="relative h-full overflow-y-auto">
           <Outlet />
