@@ -1,10 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { ID } from "@commontools/builder";
 import {
+  applyChangeSet,
   extractDefaultValues,
   followAliases,
   followCellReferences,
   mergeObjects,
+  normalizeAndDiff,
   normalizeToDocLinks,
   sendValueToBinding,
   setNestedValue,
@@ -13,6 +16,7 @@ import {
 import { DocLink, getDoc, isDocLink } from "../src/doc.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { getSpace } from "../src/space.ts";
+
 describe("extractDefaultValues", () => {
   it("should extract default values from a schema", () => {
     const schema = {
@@ -705,5 +709,277 @@ describe("makeArrayElementsAllCells", () => {
     );
 
     expect(changed).toBe(true);
+  });
+});
+
+describe("normalizeAndDiff", () => {
+  it("should detect simple value changes", () => {
+    const testCell = getDoc(
+      { value: 42 },
+      "normalizeAndDiff simple value changes",
+      getSpace("test"),
+    );
+    const current: DocLink = { cell: testCell, path: ["value"] };
+    const changes = normalizeAndDiff(current, 100);
+
+    expect(changes.length).toBe(1);
+    expect(changes[0].location).toEqual(current);
+    expect(changes[0].value).toBe(100);
+  });
+
+  it("should detect object property changes", () => {
+    const testCell = getDoc(
+      { user: { name: "John", age: 30 } },
+      "normalizeAndDiff object property changes",
+      getSpace("test"),
+    );
+    const current: DocLink = { cell: testCell, path: ["user"] };
+    const changes = normalizeAndDiff(current, { name: "Jane", age: 30 });
+
+    expect(changes.length).toBe(1);
+    expect(changes[0].location).toEqual({
+      cell: testCell,
+      path: ["user", "name"],
+    });
+    expect(changes[0].value).toBe("Jane");
+  });
+
+  it("should detect added object properties", () => {
+    const testCell = getDoc(
+      { user: { name: "John" } },
+      "normalizeAndDiff added object properties",
+      getSpace("test"),
+    );
+    const current: DocLink = { cell: testCell, path: ["user"] };
+    const changes = normalizeAndDiff(current, { name: "John", age: 30 });
+
+    expect(changes.length).toBe(1);
+    expect(changes[0].location).toEqual({
+      cell: testCell,
+      path: ["user", "age"],
+    });
+    expect(changes[0].value).toBe(30);
+  });
+
+  it("should detect removed object properties", () => {
+    const testCell = getDoc(
+      { user: { name: "John", age: 30 } },
+      "normalizeAndDiff removed object properties",
+      getSpace("test"),
+    );
+    const current: DocLink = { cell: testCell, path: ["user"] };
+    const changes = normalizeAndDiff(current, { name: "John" });
+
+    expect(changes.length).toBe(1);
+    expect(changes[0].location).toEqual({
+      cell: testCell,
+      path: ["user", "age"],
+    });
+    expect(changes[0].value).toBe(undefined);
+  });
+
+  it("should handle array length changes", () => {
+    const testCell = getDoc(
+      { items: [1, 2, 3] },
+      "normalizeAndDiff array length changes",
+      getSpace("test"),
+    );
+    const current: DocLink = { cell: testCell, path: ["items"] };
+    const changes = normalizeAndDiff(current, [1, 2]);
+
+    expect(changes.length).toBe(1);
+    expect(changes[0].location).toEqual({
+      cell: testCell,
+      path: ["items", "length"],
+    });
+    expect(changes[0].value).toBe(2);
+  });
+
+  it("should handle array element changes", () => {
+    const testCell = getDoc(
+      { items: [1, 2, 3] },
+      "normalizeAndDiff array element changes",
+      getSpace("test"),
+    );
+    const current: DocLink = { cell: testCell, path: ["items"] };
+    const changes = normalizeAndDiff(current, [1, 5, 3]);
+
+    expect(changes.length).toBe(1);
+    expect(changes[0].location).toEqual({ cell: testCell, path: ["items", 1] });
+    expect(changes[0].value).toBe(5);
+  });
+
+  it("should follow aliases", () => {
+    const testCell = getDoc(
+      {
+        value: 42,
+        alias: { $alias: { path: ["value"] } },
+      },
+      "normalizeAndDiff follow aliases",
+      getSpace("test"),
+    );
+    const current: DocLink = { cell: testCell, path: ["alias"] };
+    const changes = normalizeAndDiff(current, 100);
+
+    // Should follow alias to value and change it there
+    expect(changes.length).toBe(1);
+    expect(changes[0].location).toEqual({ cell: testCell, path: ["value"] });
+    expect(changes[0].value).toBe(100);
+  });
+
+  it("should handle nested changes", () => {
+    const testCell = getDoc(
+      {
+        user: {
+          profile: {
+            details: {
+              address: {
+                city: "New York",
+                zipcode: 10001,
+              },
+            },
+          },
+        },
+      },
+      "normalizeAndDiff nested changes",
+      getSpace("test"),
+    );
+    const current: DocLink = { cell: testCell, path: ["user", "profile"] };
+    const changes = normalizeAndDiff(current, {
+      details: {
+        address: {
+          city: "Boston",
+          zipcode: 10001,
+        },
+      },
+    });
+
+    expect(changes.length).toBe(1);
+    expect(changes[0].location).toEqual({
+      cell: testCell,
+      path: ["user", "profile", "details", "address", "city"],
+    });
+    expect(changes[0].value).toBe("Boston");
+  });
+
+  it("should handle ID-based entity objects", () => {
+    const testSpace = getSpace("test");
+    const testCell = getDoc(
+      { items: [] },
+      "normalizeAndDiff ID-based entity objects",
+      testSpace,
+    );
+    const current: DocLink = { cell: testCell, path: ["items", 0] };
+
+    const newValue = { [ID]: "item1", name: "First Item" };
+    const changes = normalizeAndDiff(
+      current,
+      newValue,
+      undefined,
+      "normalizeAndDiff ID-based entity objects",
+    );
+
+    // Should create an entity and return changes to that entity
+    expect(changes[0].location.cell).toBe(testCell);
+    expect(changes[0].location.path).toEqual(["items", 0]);
+    expect(changes.length).toBe(2);
+    expect(changes[1].location.cell).not.toBe(changes[0].value);
+    expect(changes[1].location.path).toEqual([]);
+  });
+
+  it("should update the same document with ID-based entity objects", () => {
+    const testSpace = getSpace("test");
+    const testCell = getDoc<any>(
+      { items: [] },
+      "normalizeAndDiff ID-based entity objects",
+      testSpace,
+    );
+    const current: DocLink = { cell: testCell, path: ["items", 0] };
+
+    const newValue = { [ID]: "item1", name: "First Item" };
+    const changes = normalizeAndDiff(
+      current,
+      newValue,
+      undefined,
+      "normalizeAndDiff ID-based entity objects with updates",
+    );
+
+    applyChangeSet(changes);
+
+    const newDoc = testCell.get().items[0].cell;
+
+    const newValue2 = { [ID]: "item1", name: "Second Value" };
+    const changes2 = normalizeAndDiff(
+      current,
+      newValue2,
+      undefined,
+      "normalizeAndDiff ID-based entity objects with updates",
+    );
+
+    applyChangeSet(changes2);
+
+    // Should create an entity and return changes to that entity
+    expect(changes2.length).toBe(1);
+    expect(changes2[0].location.cell).toBe(newDoc);
+    expect(changes2[0].location.path).toEqual(["name"]);
+    expect(changes2[0].value).toEqual("Second Value");
+  });
+
+  it("should return empty array when no changes", () => {
+    const testCell = getDoc(
+      { value: 42 },
+      "normalizeAndDiff no changes",
+      getSpace("test"),
+    );
+    const current: DocLink = { cell: testCell, path: ["value"] };
+    const changes = normalizeAndDiff(current, 42);
+
+    expect(changes.length).toBe(0);
+  });
+
+  it("should handle doc and cell references", () => {
+    const docA = getDoc(
+      { name: "Doc A" },
+      "normalizeAndDiff doc reference A",
+      getSpace("test"),
+    );
+    const docB = getDoc(
+      { value: { name: "Original" } },
+      "normalizeAndDiff doc reference B",
+      getSpace("test"),
+    );
+
+    const current: DocLink = { cell: docB, path: ["value"] };
+    const changes = normalizeAndDiff(current, docA);
+
+    expect(changes.length).toBe(1);
+    expect(changes[0].location).toEqual(current);
+    expect(changes[0].value).toEqual({ cell: docA, path: [] });
+  });
+
+  it("should handle doc and cell references that don't change", () => {
+    const docA = getDoc(
+      { name: "Doc A" },
+      "normalizeAndDiff doc reference no change A",
+      getSpace("test"),
+    );
+    const docB = getDoc(
+      { value: { name: "Original" } },
+      "normalizeAndDiff doc reference no change B",
+      getSpace("test"),
+    );
+
+    const current: DocLink = { cell: docB, path: ["value"] };
+    const changes = normalizeAndDiff(current, docA);
+
+    expect(changes.length).toBe(1);
+    expect(changes[0].location).toEqual(current);
+    expect(changes[0].value).toEqual({ cell: docA, path: [] });
+
+    applyChangeSet(changes);
+
+    const changes2 = normalizeAndDiff(current, docA);
+
+    expect(changes2.length).toBe(0);
   });
 });

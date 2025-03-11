@@ -1,3 +1,5 @@
+export const ID: symbol = Symbol("ID, unique to the context");
+
 // Should be Symbol("UI") or so, but this makes repeat() use these when
 // iterating over recipes.
 export const TYPE = "$TYPE";

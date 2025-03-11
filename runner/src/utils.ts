@@ -1,4 +1,5 @@
 import {
+  ID,
   isAlias,
   isOpaqueRef,
   isStatic,
@@ -454,27 +455,167 @@ export function followAliases(
   return result!;
 }
 
+export type ChangeSet = { location: DocLink; value: any }[];
+
 /**
- * Ensures that all elements of an array are docs. If not, i.e. they are static
- * data, turn them into doc links. Also unwraps proxies.
+ * Traverses objects and returns an array of changes that should be written. An
+ * empty array means no changes.
  *
- * Use e.g. when running a recipe and getting static data as input.
+ * When encountering an object with a `[ID]` property, it'll be used to compute
+ * an entity id based on it's relative location and the passed context, and the
+ * changes will be queued to be written to that entity.
  *
- * @param value - The value to traverse and make sure all arrays are arrays of
- * docs. NOTE: The passed value is mutated.
- * @returns The (potentially unwrapped) input value
+ * Otherwise, when traversing and if the new value is a regular JSON value, but
+ * the old value is an alias, follow the alias before writing. However document
+ * references get overwritten (except as per above, the object gets converted to
+ * a document itself).
+ *
+ * Any proxy is unwrapped, and docs and cells mapped to doc links.
+ *
+ * @param current - A doc link to the current value to compare against.
+ * @param newValue - The new value to traverse.
+ * @param log - The log to write to.
+ * @param context - The context of the change.
+ * @returns An array of changes that should be written.
  */
-export function staticDataToNestedDocs(
-  parentDoc: DocImpl<any>,
-  value: any,
+export function normalizeAndDiff(
+  current: DocLink,
+  newValue: any,
   log?: ReactivityLog,
-  cause?: any,
-): any {
-  value = maybeUnwrapProxy(value);
-  value = deepCopy(value);
-  // FIXME(seefeld): Figure out what the actual bug is. the IDs might be causing collisions.
-  //normalizeToDocLinks(parentDoc, value, undefined, log, cause);
-  return value;
+  context?: any,
+): ChangeSet {
+  const changes: ChangeSet = [];
+
+  // Unwrap proxies and handle special types
+  newValue = maybeUnwrapProxy(newValue);
+  if (isDoc(newValue)) newValue = { cell: newValue, path: [] };
+  if (isCell(newValue)) newValue = newValue.getAsDocLink();
+
+  // Get current value to compare against
+  const currentValue = current.cell.getAtPath(current.path);
+  log?.reads.push({ cell: current.cell, path: current.path });
+
+  // Handle alias in current value
+  if (isAlias(currentValue)) {
+    const ref = followAliases(currentValue, current.cell, log);
+    return normalizeAndDiff(ref, newValue, log, context);
+  }
+
+  if (isDocLink(currentValue) && isDocLink(newValue)) {
+    if (
+      currentValue.cell === newValue.cell &&
+      arrayEqual(currentValue.path, newValue.path)
+    ) {
+      return [];
+    } else {
+      return [
+        { location: current, value: newValue },
+      ];
+    }
+  }
+
+  // Handle ID-based object (convert to entity)
+  if (
+    typeof newValue === "object" && newValue !== null &&
+    newValue[ID] !== undefined
+  ) {
+    const { [ID]: id, ...rest } = newValue;
+    const entityId = createRef(id, {
+      parent: current.cell,
+      path: current.path,
+      context: context,
+    });
+    const doc = getDocByEntityId(
+      current.cell.space,
+      entityId,
+      true,
+      current.cell,
+    )!;
+    const ref = { cell: doc, path: [] };
+    return [
+      // If it wasn't already, set the current value to be a doc link to this doc
+      ...normalizeAndDiff(current, ref, log, context),
+      // And see whether the value of the document itself changed
+      ...normalizeAndDiff(ref, rest, log, context),
+    ];
+  }
+
+  // Handle arrays
+  if (Array.isArray(newValue) && Array.isArray(currentValue)) {
+    for (let i = 0; i < newValue.length; i++) {
+      const nestedChanges = normalizeAndDiff(
+        { cell: current.cell, path: [...current.path, i] },
+        newValue[i],
+        log,
+        context,
+      );
+      changes.push(...nestedChanges);
+    }
+
+    // Handle array length changes
+    if (currentValue.length > newValue.length) {
+      changes.push({
+        location: { cell: current.cell, path: [...current.path, "length"] },
+        value: newValue.length,
+      });
+    }
+
+    return changes;
+  }
+
+  // Handle objects
+  if (
+    typeof newValue === "object" && newValue !== null &&
+    typeof currentValue === "object" && currentValue !== null &&
+    !Array.isArray(newValue) && !Array.isArray(currentValue) &&
+    !isDocLink(newValue) && !isDocLink(currentValue) &&
+    !isAlias(newValue) && !isAlias(currentValue)
+  ) {
+    for (const key in newValue) {
+      const nestedChanges = normalizeAndDiff(
+        { cell: current.cell, path: [...current.path, key] },
+        newValue[key],
+        log,
+        context,
+      );
+      changes.push(...nestedChanges);
+    }
+
+    // Handle removed keys
+    for (const key in currentValue) {
+      if (!(key in newValue)) {
+        changes.push({
+          location: { cell: current.cell, path: [...current.path, key] },
+          value: undefined,
+        });
+      }
+    }
+
+    return changes;
+  }
+
+  // Handle primitive values and other cases
+  if (!Object.is(currentValue, newValue)) {
+    changes.push({ location: current, value: newValue });
+  }
+
+  return changes;
+}
+
+/**
+ * Apply a change set to all mentioned documents.
+ *
+ * @param changes - The change set to apply.
+ * @param log - The log to write to.
+ */
+export function applyChangeSet(
+  changes: ChangeSet,
+  log?: ReactivityLog,
+) {
+  for (const change of changes) {
+    change.location.cell.setAtPath(change.location.path, change.value);
+    log?.writes.push(change.location);
+  }
 }
 
 /**
@@ -621,7 +762,7 @@ export function prepareForSaving(
   else return normalizeToDocLinks(doc, value, previous, log, cause);
 }
 
-function maybeUnwrapProxy(value: any): any {
+export function maybeUnwrapProxy(value: any): any {
   return isQueryResultForDereferencing(value)
     ? getDocLinkOrThrow(value)
     : value;
