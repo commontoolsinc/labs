@@ -1,7 +1,9 @@
-import React, { createContext, useContext, useMemo } from "react";
+import React, { createContext, useContext, useEffect, useState } from "react";
 import { CharmManager } from "@commontools/charm";
 import { useParams } from "react-router-dom";
 import { useAuthentication } from "./AuthenticationContext.tsx";
+import { Identity } from "../../../identity/src/index.ts";
+import { useMemo } from "react";
 
 export type CharmManagerContextType = {
   charmManager: CharmManager | null;
@@ -17,16 +19,28 @@ export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = (
   { children },
 ) => {
   const { replicaName } = useParams<{ replicaName: string }>();
-  const { user } = useAuthentication();
+  const { root } = useAuthentication();
+  const [user, setUser] = useState<Identity>();
 
-  const charmManager = useMemo(() => {
+  useEffect(() => {
     console.log("CharmManagerProvider", replicaName);
 
+    // 😅 Maybe we can let this go
     if (replicaName) {
       localStorage.setItem("lastReplica", replicaName);
     }
-    return user && replicaName ? new CharmManager(replicaName, user) : null;
-  }, [replicaName, user]);
+
+    if (root && replicaName) {
+      root.derive(replicaName).then(setUser, (error) => {
+        console.error(`💥 Space key derivation failed`, error);
+      });
+    }
+  }, [replicaName, root]);
+
+  const charmManager = useMemo(
+    () => user ? new CharmManager(replicaName!, user) : null,
+    [user],
+  );
 
   return (
     <CharmManagerContext.Provider
