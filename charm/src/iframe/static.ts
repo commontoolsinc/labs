@@ -1,39 +1,3 @@
-// Define the simplified interface that developers will use
-export const simplifiedInterface = `
-// Available in scope: React, ReactDOM, TailwindCSS, Babel
-// Available functions: llm(message), generateImage(description), useDoc(key, defaultValue?)
-
-// Must choose from available set and use keys
-// available set: d3, moment
-function onLoad() {
-  return ['d3'];
-}
-
-// Your main code - this will be called when everything is ready
-function onReady(mount) {
-  // Your React components and rendering logic goes here
-
-  // Example:
-  function App() {
-    const [count, setCount] = useDoc("counter", -1); // default value
-
-    return (
-      <div className="p-4">
-        <h1 className="text-xl font-bold">Hello World</h1>
-        <p>Counter: {count || 0}</p>
-        <button
-          className="bg-blue-500 text-white px-4 py-2 rounded mt-2"
-          onClick={() => setCount((prev) => (prev || 0) + 1)}>
-          Increment
-        </button>
-      </div>
-    );
-  }
-
-  ReactDOM.render(<App />, mount);
-}
-`;
-
 // The HTML template that wraps the developer's code
 export const prefillHtml = `<html>
 <head>
@@ -45,7 +9,7 @@ export const prefillHtml = `<html>
 // USER_CODE_PLACEHOLDER
 
 // Export the functions so we can access them after Babel transformation
-window.__app = { onLoad, onReady };
+window.__app = { onLoad, onReady, title };
 </script>
 <script>
 window.onerror = function (message, source, lineno, colno, error) {
@@ -138,39 +102,6 @@ window.llm = (() => {
 window.generateImage = function(prompt) {
   return '/api/ai/img?prompt=' + encodeURIComponent(prompt);
 }
-
-/**
- * Reads content from a webpage via server-side fetching
- * @param {string} url - The URL of the webpage to read
- * @returns {Promise<{
- *   content: string,
- *   metadata: {
- *     title: string,
- *     word_count: number
- *   }
- * }>} - The webpage content and metadata
- */
-window.readWebpage = async function(url) {
-  try {
-    const encodedUrl = encodeURIComponent(url);
-    const response = await fetch(\`/api/ai/webreader/\${encodedUrl}\`);
-
-    if (!response.ok) {
-      throw new Error(\`Failed to fetch webpage: \${response.status} \${response.statusText}\`);
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('Error reading webpage:', error);
-    return {
-      content: '',
-      metadata: {
-        title: 'Error',
-        word_count: 0
-      }
-    };
-  }
-};
 
 const sourceTimeout = 1000;
 
@@ -341,7 +272,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const knownLibraries = {
     'd3': 'https://unpkg.com/d3@7.8.5/dist/d3.min.js',
-    'moment': 'https://unpkg.com/moment@2.29.4/min/moment.min.js'
+    'moment': 'https://unpkg.com/moment@2.29.4/min/moment.min.js',
+    'three': 'https://unpkg.com/three@0.159.0/build/three.min.js',
+    'p5': 'https://unpkg.com/p5@1.11.3/lib/p5.min.js'
   };
 
   function loadLibraries() {
@@ -442,7 +375,6 @@ document.addEventListener('DOMContentLoaded', () => {
 checkBabelReady();
 });
 </script>
-<title>App</title>
 </head>
   <body class="bg-gray-50"></body>
 </html>`;
@@ -472,6 +404,7 @@ export function extractUserCode(html: string): string | null {
 export const systemMd = `You are a web app generator that creates React applications using a simplified interface.
 
 <rules>
+  0. Name your work by defining \`const title = 'My App';\`
   1. Your output should be JavaScript code that implements the \`onLoad\` and \`onReady\` functions.
   2. \`React\`, \`ReactDOM\` and Tailwind CSS are already imported - do not import them again.
     2.a. All react hooks must be namespaced: \`React.useState\`, \`React.useEffect\` etc.
@@ -559,10 +492,12 @@ function ImageComponent() {
 \`\`\`javascript
 // Request additional libraries as needed (optional)
 // Must choose from available set and use keys
-// available set: d3, moment
+// available set: d3, moment, three, p5
 function onLoad() {
   return ['d3']; // only use libraries when you have good reason, always use the key, URLs will error
 }
+
+const title = 'My Application';
 
 // Main application code
 function onReady(mount, sourceData) {
