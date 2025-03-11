@@ -22,20 +22,24 @@ storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
 
 async function main() {
-  const identity = await Identity.fromPassphrase("common-cli");
+  const root = await Identity.fromPassphrase("common-cli");
+  const space = root.derive("");
+  const session = {
+    private: false,
+    name: "CLI Space",
+    space: root.did(),
+    as: root,
+  };
   console.log("params:", {
     space,
-    identity,
+    session,
     charmId,
     recipeFile,
     cause,
     quit,
     toolshedUrl,
   });
-  const manager = await CharmManager.open({
-    space: (space as `did:key:${string}`) ?? identity.did(),
-    signer: identity,
-  });
+  const manager = new CharmManager(session);
   const charms = manager.getCharms();
   charms.sink((charms) => {
     console.log(
