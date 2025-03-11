@@ -1,3 +1,5 @@
+/// <reference lib="deno.ns" />
+
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import deno from "../deno-vite-plugin/src/index.ts";
@@ -7,7 +9,7 @@ import * as path from "@std/path";
 console.log("TOOLSHED_API_URL", Deno.env.get("TOOLSHED_API_URL"));
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [deno(), react(), tailwindcss()],
+  plugins: [deno(), react(), tailwindcss() as any],
   server: {
     allowedHosts: [
       "localhost",
@@ -21,7 +23,7 @@ export default defineConfig({
       },
       "/api/ai/spell/": {
         target: Deno.env.get("AI_URL") ??
-          Deno.env.get("TOOLSHED_API_URL") ?? 
+          Deno.env.get("TOOLSHED_API_URL") ??
           "http://localhost:8000/",
         changeOrigin: true,
       },
@@ -35,25 +37,25 @@ export default defineConfig({
       },
       "/api/ai/llm": {
         target: Deno.env.get("AI_URL") ??
-          Deno.env.get("TOOLSHED_API_URL") ?? 
+          Deno.env.get("TOOLSHED_API_URL") ??
           "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/ai/img": {
         target: Deno.env.get("AI_URL") ??
-          Deno.env.get("TOOLSHED_API_URL") ?? 
+          Deno.env.get("TOOLSHED_API_URL") ??
           "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/ai/voice": {
         target: Deno.env.get("AI_URL") ??
-          Deno.env.get("TOOLSHED_API_URL") ?? 
+          Deno.env.get("TOOLSHED_API_URL") ??
           "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/ai/webreader": {
         target: Deno.env.get("AI_URL") ??
-          Deno.env.get("TOOLSHED_API_URL") ?? 
+          Deno.env.get("TOOLSHED_API_URL") ??
           "http://localhost:8000/",
         changeOrigin: true,
       },

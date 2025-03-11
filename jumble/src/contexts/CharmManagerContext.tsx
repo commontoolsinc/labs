@@ -1,24 +1,32 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo } from "react";
 import { CharmManager } from "@commontools/charm";
 import { useNavigate, useParams } from "react-router-dom";
-import { useAuthentication } from "./AuthenticationContext.tsx";
+import { type CharmRouteParams } from "@/routes.ts";
+import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
 import { useMemo } from "react";
 
 export type CharmManagerContextType = {
-  charmManager: CharmManager | null;
+  charmManager: CharmManager;
   currentReplica: string;
 };
 
 const CharmManagerContext = createContext<CharmManagerContextType>({
   charmManager: null!,
-  currentReplica: undefined!,
+  currentReplica: "",
 });
 
 export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = (
   { children },
 ) => {
-  const { replicaName: spaceName } = useParams<{ replicaName: string }>();
+  const { replicaName: spaceName } = useParams<CharmRouteParams>();
   const { user } = useAuthentication();
+
+  if (!spaceName) {
+    throw new Error("No space name found, cannot create CharmManager");
+  }
+  if (!user) {
+    throw new Error("No user found, cannot create CharmManager");
+  }
 
   useEffect(() => {
     console.log("CharmManagerProvider", spaceName);
@@ -30,22 +38,19 @@ export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = (
     }
   }, [spaceName]);
 
-  console.log(user);
+  const charmManager = useMemo(() => {
+    console.log("CharmManagerProvider", spaceName);
 
-  const charmManager = useMemo(
-    () =>
-      user
-        ? new CharmManager(
-          user.did(),
-          user,
-        )
-        : null,
-    [user],
-  );
+    if (spaceName) {
+      localStorage.setItem("lastReplica", spaceName);
+    }
+
+    return new CharmManager(spaceName, user);
+  }, [spaceName, user]);
 
   return (
     <CharmManagerContext.Provider
-      value={{ charmManager, currentReplica: spaceName || "" }}
+      value={{ charmManager, currentReplica: spaceName }}
     >
       {children}
     </CharmManagerContext.Provider>

@@ -5,7 +5,7 @@ import {
   isDenoSpecifier,
   parseDenoSpecifier,
   resolveViteSpecifier,
-} from "./resolver.js";
+} from "./resolver.ts";
 import { type Loader, transform } from "esbuild";
 import * as fsp from "node:fs/promises";
 import process from "node:process";

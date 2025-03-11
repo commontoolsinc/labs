@@ -5,7 +5,8 @@ import {
   CharmManager,
   compileAndRunRecipe,
 } from "@commontools/charm";
-import { NavigateFunction } from "react-router-dom";
+// Import NavigateFunction from our types rather than directly from react-router-dom
+import type { NavigateFunction } from "react-router-dom";
 import { charmId } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
 import {
@@ -107,7 +108,8 @@ export type CommandMode =
   | { type: "confirm"; command: CommandItem; message: string }
   | { type: "select"; command: CommandItem; options: SelectOption[] }
   | { type: "transcribe"; command: CommandItem; placeholder: string }
-  | { type: "loading" };
+  | { type: "loading" }
+  | { type: "placeholder" };
 
 export interface SelectOption {
   id: string;
@@ -215,7 +217,7 @@ async function handleExecuteCharmAction(deps: CommandContext) {
     console.error("Error fetching charm actions:", error);
     deps.addJobMessage(
       deps.startJob("Action Error"),
-      `Error: ${error.message}`,
+      `Error: ${error instanceof Error ? error.message : String(error)}`,
     );
   } finally {
     deps.setLoading(false);
@@ -721,6 +723,54 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       handler: () => handleExecuteCharmAction(deps),
     },
     {
+      id: "open-in-stack",
+      type: "action",
+      title: "Open in Stack",
+      group: "Navigation",
+      handler: async () => {
+        deps.setLoading(true);
+        try {
+          const charms = deps.charmManager.getCharms();
+          await deps.charmManager.sync(charms);
+          const results = charms.get().map((charm) => {
+            const data = charm.get();
+            const title = data?.[NAME] ?? "Untitled";
+            return {
+              title: title + ` (#${charmId(charm.entityId!)!.slice(-4)})`,
+              id: charmId(charm.entityId!)!,
+              value: charm.entityId!,
+            };
+          });
+          deps.setMode({
+            type: "select",
+            command: {
+              id: "stack-charm-select",
+              type: "select",
+              title: "Select Charm for Stack",
+              handler: (selected) => {
+                const id = charmId(selected);
+                if (!id || !deps.focusedReplicaId) {
+                  throw new Error("Missing charm ID or replica name");
+                }
+                // Navigate to stack URL instead of detail page
+                const path = createPath("stackedCharms", {
+                  charmIds: deps.focusedCharmId + "," + id,
+                  replicaName: deps.focusedReplicaId,
+                });
+                deps.navigate(path);
+                deps.setOpen(false);
+              },
+            },
+            options: results,
+          });
+        } catch (error) {
+          console.error("Open in stack error:", error);
+        } finally {
+          deps.setLoading(false);
+        }
+      },
+    },
+    {
       id: "spellcaster-menu",
       type: "menu",
       title: "Spellcaster",
@@ -1074,4 +1124,22 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       ],
     },
   ];
+}
+
+export function isInputCommand(
+  cmd: CommandItem,
+): cmd is CommandItem & { type: "input" } {
+  return cmd.type === "input";
+}
+
+export function isTranscribeCommand(
+  cmd: CommandItem,
+): cmd is CommandItem & { type: "transcribe" } {
+  return cmd.type === "transcribe";
+}
+
+export function isConfirmCommand(
+  cmd: CommandItem,
+): cmd is CommandItem & { type: "confirm" } {
+  return cmd.type === "confirm";
 }

@@ -1,4 +1,3 @@
-import { animated } from "@react-spring/web";
 type CardProps = {
   details?: boolean;
   children: React.ReactNode;
@@ -8,7 +7,7 @@ export function CommonCard(
   { details = false, children, className }: CardProps,
 ) {
   return (
-    <animated.div
+    <div
       className={`
       ${
         details
@@ -20,6 +19,6 @@ export function CommonCard(
     `}
     >
       {children}
-    </animated.div>
+    </div>
   );
 }

@@ -94,9 +94,12 @@ export function CommandCenter() {
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
   // TODO(bf): matchesRoute?
-  const match = useMatch("/:replicaName/:charmId?/*");
-  const focusedCharmId = match?.params.charmId ?? null;
-  const focusedReplicaId = match?.params.replicaName ?? null;
+  const replicaMatch = useMatch("/:replicaName/:charmId?/*");
+  const stackMatch = useMatch("/:replicaName/stack/:charmIds/*");
+  const focusedCharmId = stackMatch?.params.charmIds ??
+    replicaMatch?.params.charmId ?? null;
+  const focusedReplicaId = stackMatch?.params.replicaName ??
+    replicaMatch?.params.replicaName ?? null;
 
   const allCommands = useMemo(
     () =>
@@ -406,8 +409,48 @@ export function CommandCenter() {
                               setOpen(false);
                             }
                           } else {
-                            // TODO(bf): need to refactor types
-                            setMode({ type: cmd.type, command: cmd });
+                            // Handle each command type explicitly
+                            switch (cmd.type) {
+                              case "input":
+                                setMode({
+                                  type: "input",
+                                  command: cmd,
+                                  placeholder: cmd.placeholder || "Enter input",
+                                });
+                                break;
+                              case "confirm":
+                                setMode({
+                                  type: "confirm",
+                                  command: cmd,
+                                  message: cmd.message || "Are you sure?",
+                                });
+                                break;
+                              case "select":
+                                setMode({
+                                  type: "select",
+                                  command: cmd,
+                                  options: [], // You'll need to provide the actual options here
+                                });
+                                break;
+                              case "transcribe":
+                                setMode({
+                                  type: "transcribe",
+                                  command: cmd,
+                                  placeholder: cmd.placeholder ||
+                                    "Speak now...",
+                                });
+                                break;
+                              case "placeholder":
+                                setMode({
+                                  type: "placeholder",
+                                });
+                                break;
+                              default:
+                                console.warn(
+                                  `Unhandled command type: ${cmd.type}`,
+                                );
+                                break;
+                            }
                           }
                         }}
                       >

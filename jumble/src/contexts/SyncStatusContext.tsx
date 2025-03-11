@@ -1,4 +1,11 @@
-import React, { createContext, useContext, useEffect, useState, useRef, ReactNode } from "react";
+import React, {
+  createContext,
+  ReactNode,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 
 interface SyncStatusContextType {
@@ -6,7 +13,9 @@ interface SyncStatusContextType {
   lastSyncTime: Date | null;
 }
 
-const SyncStatusContext = createContext<SyncStatusContextType | undefined>(undefined);
+const SyncStatusContext = createContext<SyncStatusContextType | undefined>(
+  undefined,
+);
 
 interface SyncStatusProviderProps {
   children: ReactNode;
@@ -15,7 +24,7 @@ interface SyncStatusProviderProps {
 
 export function SyncStatusProvider({
   children,
-  intervalMs = 5000
+  intervalMs = 5000,
 }: SyncStatusProviderProps) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);

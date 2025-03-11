@@ -1,11 +1,11 @@
 import { useParams } from "react-router-dom";
-
+import { type CharmRouteParams } from "@/routes.ts";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
 import { LoadingSpinner } from "@/components/Loader.tsx";
 import { useCharm } from "@/hooks/use-charm.ts";
 
 function CharmShowView() {
-  const { charmId } = useParams();
+  const { charmId } = useParams<CharmRouteParams>();
   const { currentFocus: charm } = useCharm(charmId);
 
   function test() {
