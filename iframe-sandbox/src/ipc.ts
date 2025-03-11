@@ -125,7 +125,7 @@ export enum GuestMessageType {
   Write = "write",
   Read = "read",
   LLMRequest = "llm-request",
-  WebPageRequest = 'readwebpage-request'
+  WebpageRequest = 'readwebpage-request'
 }
 
 export type GuestMessage =
@@ -135,7 +135,7 @@ export type GuestMessage =
   | { type: GuestMessageType.Read; data: string }
   | { type: GuestMessageType.Write; data: [string, any] }
   | { type: GuestMessageType.LLMRequest; data: string }
-  | { type: GuestMessageType.WebPageRequest; data: string };
+  | { type: GuestMessageType.WebpageRequest; data: string };
 
 export function isGuestMessage(message: any): message is GuestMessage {
   if (
@@ -152,7 +152,7 @@ export function isGuestMessage(message: any): message is GuestMessage {
       return isGuestError(message.data);
     }
     case GuestMessageType.LLMRequest:
-    case GuestMessageType.WebPageRequest:
+    case GuestMessageType.WebpageRequest:
     case GuestMessageType.Read:
     case GuestMessageType.Subscribe:
     case GuestMessageType.Unsubscribe: {

@@ -214,7 +214,7 @@ export class CommonIframeSandboxElement extends LitElement {
         return;
       }
 
-      case IPC.GuestMessageType.WebPageRequest: {
+      case IPC.GuestMessageType.WebpageRequest: {
         const payload = message.data;
         const promise = IframeHandler.onReadWebpageRequest(this.context, payload);
         const instanceId = this.instanceId;
