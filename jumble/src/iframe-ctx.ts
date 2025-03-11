@@ -146,8 +146,9 @@ export const setupIframe = () =>
     },
     async onReadWebpageRequest(_context: any, payload: string) {
       console.log("onReadWebpageRequest", payload);
-      const url = payload.trim().replace(/^["']+|["']+$/g, "");
-      const res = await fetch(`/api/ai/webreader/${encodeURIComponent(url)}`);
+      const res = await fetch(
+        `/api/ai/webreader/${encodeURIComponent(payload)}`,
+      );
       console.log("onReadWebpageRequest res", res);
       return await res.json();
     },

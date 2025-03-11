@@ -92,7 +92,7 @@ export class CommonIframeSandboxElement extends LitElement {
   };
 
   // Message from the inner frame.
-  private onGuestMessage(message: IPC.GuestMessage) {
+  private async onGuestMessage(message: IPC.GuestMessage) {
     const IframeHandler = getIframeContextHandler();
     if (IframeHandler == null) {
       console.error("common-iframe-sandbox: No iframe handler defined.");
@@ -216,40 +216,30 @@ export class CommonIframeSandboxElement extends LitElement {
 
       case IPC.GuestMessageType.WebpageRequest: {
         const payload = message.data;
-        const promise = IframeHandler.onReadWebpageRequest(this.context, payload);
         const instanceId = this.instanceId;
-        promise.then((result: object) => {
-          if (this.instanceId !== instanceId) {
-            // Inner frame was reloaded. This response was
-            // from a previous page. Abort.
-            return;
-          }
-          this.toGuest({
-            id: this.frameId,
-            type: IPC.IPCHostMessageType.Passthrough,
-            data: {
-              type: IPC.HostMessageType.ReadWebpageResponse,
-              request: payload,
-              data: result,
-              error: undefined,
-            },
-          });
-        }, (error: any) => {
-          if (this.instanceId !== instanceId) {
-            // Inner frame was reloaded. This response was
-            // from a previous page. Abort.
-            return;
-          }
-          this.toGuest({
-            id: this.frameId,
-            type: IPC.IPCHostMessageType.Passthrough,
-            data: {
-              type: IPC.HostMessageType.ReadWebpageResponse,
-              request: payload,
-              data: null,
-              error,
-            },
-          });
+
+        let result, error;
+        try {
+          result = await IframeHandler.onReadWebpageRequest(this.context, payload);
+        } catch (e) {
+          error = e;
+        }
+
+        if (this.instanceId !== instanceId) {
+          // Inner frame was reloaded. This response was
+          // from a previous page. Abort.
+          return;
+        }
+
+        this.toGuest({
+          id: this.frameId,
+          type: IPC.IPCHostMessageType.Passthrough,
+          data: {
+            type: IPC.HostMessageType.ReadWebpageResponse,
+            request: payload,
+            data: result || null,
+            error,
+          },
         });
         return;
       }

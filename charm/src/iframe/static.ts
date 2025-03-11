@@ -104,11 +104,10 @@ window.readWebpage = (() => {
 
   async function readWebpage(url) {
     return new Promise((resolve, reject) => {
-      let stringified = JSON.stringify(url);
-      inflight.push([stringified, resolve, reject]);
+      inflight.push([url, resolve, reject]);
       window.parent.postMessage({
         type: "readwebpage-request",
-        data: stringified,
+        data: url,
       }, "*");
     });
   };
