@@ -152,19 +152,19 @@ export function createQueryResultProxy<T>(
                 context: getTopFrame()?.cause ?? "unknown",
               };
 
-              diffAndUpdate(
-                { cell: valueCell, path: valuePath },
-                result,
-                log,
-                cause,
-              );
-
               const resultCell = getDoc<any[]>(
                 undefined as unknown as any[],
                 cause,
                 valueCell.space,
               );
               resultCell.send(result);
+
+              diffAndUpdate(
+                { cell: resultCell, path: [] },
+                result,
+                log,
+                cause,
+              );
 
               result = resultCell.getAsQueryResult([], log);
             }

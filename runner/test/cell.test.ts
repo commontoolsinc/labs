@@ -4,7 +4,13 @@ import { type DocImpl, getDoc, isDoc, isDocLink } from "../src/doc.ts";
 import { isCell } from "../src/cell.ts";
 import { isQueryResult } from "../src/query-result-proxy.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
-import { JSONSchema } from "@commontools/builder";
+import {
+  getTopFrame,
+  ID,
+  JSONSchema,
+  popFrame,
+  pushFrame,
+} from "@commontools/builder";
 import { addEventHandler, idle } from "../src/scheduler.ts";
 import { getSpace } from "../src/space.ts";
 
@@ -195,22 +201,119 @@ describe("createProxy", () => {
   });
 
   it("should support modifying array methods and log reads and writes", () => {
-    const c = getDoc<any>(
-      [],
+    const log: ReactivityLog = { reads: [], writes: [] };
+    const c = getDoc(
+      { array: [1, 2, 3] },
       "should support modifying array methods and log reads and writes",
       getSpace("test"),
     );
-    const log: ReactivityLog = { reads: [], writes: [] };
     const proxy = c.getAsQueryResult([], log);
-    proxy[0] = 1;
-    proxy.push(2);
-    expect(c.get()).toEqual([1, 2]);
+    expect(log.reads.length).toBe(1);
+    expect(proxy.array.length).toBe(3);
     // only read array, but not the elements
-    expect(log.reads.map((r) => r.path)).toEqual([[]]);
-    // writes to path ["0", "1"]
-    expect(log.writes.filter((w) => w.cell === c).map((w) => w.path)).toEqual([[
-      "0",
-    ], ["1"]]);
+    expect(log.reads.length).toBe(3);
+
+    proxy.array.push(4);
+    expect(proxy.array.length).toBe(4);
+    expect(proxy.array[3]).toBe(4);
+    expect(
+      log.writes.some((write) =>
+        write.path[0] === "array" && write.path[1] === "3"
+      ),
+    ).toBe(true);
+  });
+
+  it("should handle array methods on previously undefined arrays", () => {
+    const log: ReactivityLog = { reads: [], writes: [] };
+    const c = getDoc(
+      { data: {} },
+      "should handle array methods on previously undefined arrays",
+      getSpace("test"),
+    );
+    const proxy = c.getAsQueryResult([], log);
+
+    // Array doesn't exist yet
+    expect(proxy.data.array).toBeUndefined();
+
+    // Create an array using push
+    proxy.data.array = [];
+    proxy.data.array.push(1);
+    expect(proxy.data.array.length).toBe(1);
+    expect(proxy.data.array[0]).toBe(1);
+
+    // Add more items
+    proxy.data.array.push(2, 3);
+    expect(proxy.data.array.length).toBe(3);
+    expect(proxy.data.array[2]).toBe(3);
+
+    // Check that writes were logged
+    expect(
+      log.writes.some((write) =>
+        write.path[0] === "data" && write.path[1] === "array"
+      ),
+    ).toBe(true);
+  });
+
+  it("should handle array results from array methods", () => {
+    const c = getDoc(
+      { array: [1, 2, 3, 4, 5] },
+      "should handle array results from array methods",
+      getSpace("test"),
+    );
+    const proxy = c.getAsQueryResult();
+
+    // Methods that return arrays should return query result proxies
+    const mapped = proxy.array.map((n: number) => n * 2);
+    expect(isQueryResult(mapped)).toBe(false);
+    expect(mapped.length).toBe(5);
+    expect(mapped[0]).toBe(2);
+    expect(mapped[4]).toBe(10);
+
+    const filtered = proxy.array.filter((n: number) => n % 2 === 0);
+    expect(isQueryResult(filtered)).toBe(false);
+    expect(filtered.length).toBe(2);
+    expect(filtered[0]).toBe(2);
+    expect(filtered[1]).toBe(4);
+
+    const sliced = proxy.array.slice(1, 4);
+    expect(isQueryResult(sliced)).toBe(false);
+    expect(sliced.length).toBe(3);
+    expect(sliced[0]).toBe(2);
+    expect(sliced[2]).toBe(4);
+  });
+
+  it("should maintain reactivity with nested array operations", () => {
+    const c = getDoc(
+      { nested: { arrays: [[1, 2], [3, 4]] } },
+      "should maintain reactivity with nested array operations",
+      getSpace("test"),
+    );
+    const proxy = c.getAsQueryResult();
+
+    // Access a nested array through multiple levels
+    const firstInnerArray = proxy.nested.arrays[0];
+    expect(firstInnerArray).toEqual([1, 2]);
+    expect(isQueryResult(firstInnerArray)).toBe(true);
+
+    // Modify the deeply nested array
+    firstInnerArray.push(3);
+    expect(firstInnerArray).toEqual([1, 2, 3]);
+
+    // Verify the change is reflected in the original data
+    expect(proxy.nested.arrays[0]).toEqual([1, 2, 3]);
+    expect(c.get().nested.arrays[0]).toEqual([1, 2, 3]);
+
+    // Create a flattened array using array methods
+    const flattened = proxy.nested.arrays.flat();
+    expect(flattened).toEqual([1, 2, 3, 3, 4]);
+    expect(isQueryResult(flattened)).toBe(false);
+
+    // Modify the flattened result
+    flattened[0] = 10;
+    expect(flattened[0]).toBe(10);
+
+    // Original arrays should not be affected by modifying the flattened result
+    expect(proxy.nested.arrays[0][0]).toBe(1);
   });
 
   it("should support pop() and only read the popped element", () => {
@@ -301,6 +404,23 @@ describe("createProxy", () => {
       { cell: c, path: ["length"] },
       { cell: c, path: [2] },
       { cell: c, path: [3] },
+    ]);
+  });
+
+  it("should allow changig array by splicing", () => {
+    const c = getDoc(
+      [1, 2, 3],
+      "should allow changig array by splicing",
+      getSpace("test"),
+    );
+    const log: ReactivityLog = { reads: [], writes: [] };
+    const proxy = c.getAsQueryResult([], log);
+    proxy.splice(1, 1, 4, 5);
+    expect(c.get()).toEqual([1, 4, 5, 3]);
+    expect(log.writes).toEqual([
+      { cell: c, path: ["1"] },
+      { cell: c, path: ["2"] },
+      { cell: c, path: ["3"] },
     ]);
   });
 });
@@ -1070,14 +1190,36 @@ describe("asCell with schema", () => {
   it("should push values to array using push method", () => {
     const c = getDoc({ items: [1, 2, 3] }, "push-test", getSpace("test"));
     const arrayCell = c.asCell(["items"]);
-
+    expect(arrayCell.get()).toEqual([1, 2, 3]);
     arrayCell.push(4);
     expect(arrayCell.get()).toEqual([1, 2, 3, 4]);
 
     arrayCell.push(5);
     expect(arrayCell.get()).toEqual([1, 2, 3, 4, 5]);
+  });
 
-    expect(isDocLink(c.get().items[4])).toBeTruthy();
+  it("should throw when pushing values to `null`", () => {
+    const c = getDoc({ items: null }, "push-to-null", getSpace("test"));
+    const arrayCell = c.asCell(["items"]);
+    expect(arrayCell.get()).toBeNull();
+
+    expect(() => arrayCell.push(1)).toThrow();
+  });
+
+  it("should push values to undefined array with schema default", () => {
+    const schema = {
+      type: "array",
+      default: [10, 20],
+    } as JSONSchema;
+
+    const c = getDoc({}, "push-to-undefined-schema", getSpace("test"));
+    const arrayCell = c.asCell(["items"], undefined, schema);
+
+    arrayCell.push(30);
+    expect(arrayCell.get()).toEqual([10, 20, 30]);
+
+    arrayCell.push(40);
+    expect(arrayCell.get()).toEqual([10, 20, 30, 40]);
   });
 
   it("should push values that are already cells reusing the reference", () => {
@@ -1116,6 +1258,20 @@ describe("asCell with schema", () => {
     const cell = c.asCell(["value"]);
 
     expect(() => cell.push(42)).toThrow();
+  });
+
+  it("should create new entities when pushing to array in frame, but reuse IDs", () => {
+    const c = getDoc({ items: [] }, "push-with-id", getSpace("test"));
+    const arrayCell = c.asCell(["items"]);
+    const frame = pushFrame();
+    arrayCell.push({ value: 42 });
+    expect(frame.generatedIdCounter).toEqual(1);
+    arrayCell.push({ [ID]: "test", value: 43 });
+    expect(frame.generatedIdCounter).toEqual(1); // No increment = no ID generated from it
+    popFrame(frame);
+    expect(isDocLink(c.get().items[0])).toBe(true);
+    expect(isDocLink(c.get().items[1])).toBe(true);
+    expect(arrayCell.get()).toEqual([{ value: 42 }, { value: 43 }]);
   });
 });
 

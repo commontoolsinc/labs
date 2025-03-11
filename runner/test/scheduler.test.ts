@@ -16,6 +16,7 @@ import {
   unschedule,
 } from "../src/scheduler.ts";
 import { getSpace } from "../src/space.ts";
+
 describe("scheduler", () => {
   it("should run actions when cells change", async () => {
     let runCount = 0;

@@ -1,5 +1,5 @@
 import { isStreamAlias, TYPE } from "@commontools/builder";
-import { getTopFrame, type JSONSchema } from "@commontools/builder";
+import { getTopFrame, ID, type JSONSchema } from "@commontools/builder";
 import {
   type DeepKeyLookup,
   type DocImpl,
@@ -352,35 +352,43 @@ function createRegularCell<T>(
       // Follow aliases and references, since we want to get to an assumed
       // existing array.
       const ref = resolveLinkToValue(doc, path, log);
-      const array = ref.cell.getAtPath(ref.path) ?? [];
-      if (!Array.isArray(array)) {
+      const array = ref.cell.getAtPath(ref.path);
+      if (array !== undefined && !Array.isArray(array)) {
         throw new Error("Can't push into non-array value");
       }
 
-      // Every element pushed to the array should be it's own doc or link to
-      // one. So if it isn't already, make it one.
-      if (isCell(value)) {
-        value = value.getAsDocLink();
-      } else if (isDoc(value)) {
-        value = { cell: value, path: [] };
-      } else {
-        value = getDocLinkOrValue(value);
-        if (!isDocLink(value)) {
-          const cause = {
-            parent: doc.entityId,
-            path: path,
-            length: array.length,
-            // Context is the event id in event handlers, making this unique.
-            // TODO(seefeld): In this case it shouldn't depend on the length, maybe
-            // instead just call order in the current context.
-            context: getTopFrame()?.cause ?? "unknown",
-          };
-
-          value = { cell: getDoc<any>(value, cause, doc.space), path: [] };
-        }
+      // If this is an object and it doesn't have an ID, add one.
+      if (
+        !isCell(value) && !isDocLink(value) && !isDoc(value) &&
+        !Array.isArray(value) && typeof value === "object" && value !== null &&
+        !value[ID] && getTopFrame()
+      ) {
+        value = {
+          [ID]: getTopFrame()!.generatedIdCounter++,
+          ...value,
+        };
       }
 
-      ref.cell.setAtPath(ref.path, [...array, value], log);
+      // Implement push by overwriting the `length`s element.
+      if (array === undefined) {
+        // Let's create an array.
+        const defaultArray = Array.isArray(schema?.default)
+          ? schema.default
+          : [];
+        diffAndUpdate(
+          { cell: doc, path },
+          [...defaultArray, value],
+          log,
+          getTopFrame()?.cause,
+        );
+      } else {
+        diffAndUpdate(
+          { cell: doc, path: [...path, array.length] },
+          value,
+          log,
+          getTopFrame()?.cause,
+        );
+      }
     },
     equals: (other: Cell<any>) =>
       JSON.stringify(self) === JSON.stringify(other),

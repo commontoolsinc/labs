@@ -344,7 +344,13 @@ function factoryFromRecipe<T, R>(
 const frames: Frame[] = [];
 
 export function pushFrame(frame?: Frame): Frame {
-  if (!frame) frame = { parent: getTopFrame(), opaqueRefs: new Set() };
+  if (!frame) {
+    frame = {
+      parent: getTopFrame(),
+      opaqueRefs: new Set(),
+      generatedIdCounter: 0,
+    };
+  }
   frames.push(frame);
   return frame;
 }
@@ -356,6 +362,7 @@ export function pushFrameFromCause(
   const frame = {
     parent: getTopFrame(),
     cause,
+    generatedIdCounter: 0,
     opaqueRefs: new Set(),
     ...(unsafe_binding ? { unsafe_binding } : {}),
   };

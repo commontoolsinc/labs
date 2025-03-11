@@ -239,6 +239,7 @@ export type UnsafeBinding = {
 export type Frame = {
   parent?: Frame;
   cause?: any;
+  generatedIdCounter: number;
   opaqueRefs: Set<OpaqueRef<any>>;
   unsafe_binding?: UnsafeBinding;
 };
