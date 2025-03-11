@@ -1,4 +1,4 @@
-import { html, LitElement, PropertyValues } from "lit";
+import { css, html, LitElement, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
 import * as IPC from "./ipc.ts";
@@ -26,6 +26,15 @@ export class CommonIframeSandboxElement extends LitElement {
     this.src = "";
     this.context = undefined;
   }
+
+  static override styles = css`
+  :host {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    }
+  `;
 
   // Static id for this component for its lifetime.
   private frameId: number = ++FRAME_IDS;
