@@ -837,8 +837,8 @@ const CodeTab = () => {
             extensions={[javascript()]}
             onChange={setWorkingSrc}
             basicSetup={{
-              lineNumbers: false,
-              foldGutter: false,
+              lineNumbers: true,
+              foldGutter: true,
               indentOnInput: true,
             }}
             style={{ height: "100%", overflow: "auto" }}
@@ -897,12 +897,12 @@ const BottomSheet = ({
 
   return (
     <div
-      className="bottom-sheet border-t-2 border-black bg-white shadow-lg flex flex-col overflow-y-auto"
+      className="bottom-sheet border-t-2 border-black bg-white shadow-lg flex flex-col"
       style={{ height: `${sheetHeight}px` }}
     >
       {/* Resize Handle */}
       <div
-        className="resize-handle h-6 w-full cursor-ns-resize flex items-center justify-center border-b border-gray-200"
+        className="resize-handle h-6 w-full cursor-ns-resize flex items-center justify-center border-b border-gray-200 flex-shrink-0"
         onMouseDown={handleResizeStart}
         onTouchStart={handleTouchResizeStart}
       >
@@ -910,7 +910,7 @@ const BottomSheet = ({
       </div>
 
       {/* Tab Navigation */}
-      <div className="tabs flex gap-0 border-b border-gray-200">
+      <div className="tabs flex gap-0 border-b border-gray-200 flex-shrink-0">
         <button
           type="button"
           onClick={() => handleTabChange("iterate")}
@@ -946,8 +946,8 @@ const BottomSheet = ({
         </button>
       </div>
 
-      {/* Tab Content */}
-      <div className="tab-content flex-grow overflow-hidden">
+      {/* Content Area - This is the scrollable container */}
+      <div className="flex-1 overflow-auto">
         {children(activeTab, isResizing)}
       </div>
     </div>
