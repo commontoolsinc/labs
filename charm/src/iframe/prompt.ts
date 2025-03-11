@@ -34,7 +34,12 @@ export const buildPrompt = ({
   const messages: string[] = [];
   if (spec && src) {
     messages.push(spec);
-    messages.push("```javascript\n" + extractUserCode(src) + "\n```");
+    const extractedCode = extractUserCode(src);
+    if (extractedCode !== null) {
+      messages.push("```javascript\n" + extractedCode + "\n```");
+    } else {
+      messages.push("```html\n" + src + "\n```");
+    }
   }
 
   messages.push(
