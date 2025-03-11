@@ -220,7 +220,7 @@ export class CommonIframeSandboxElement extends LitElement {
         const instanceId = this.instanceId;
         promise.then((result: object) => {
           if (this.instanceId !== instanceId) {
-            // Inner frame was reloaded. This LLM response was
+            // Inner frame was reloaded. This response was
             // from a previous page. Abort.
             return;
           }
@@ -236,7 +236,7 @@ export class CommonIframeSandboxElement extends LitElement {
           });
         }, (error: any) => {
           if (this.instanceId !== instanceId) {
-            // Inner frame was reloaded. This LLM response was
+            // Inner frame was reloaded. This response was
             // from a previous page. Abort.
             return;
           }
