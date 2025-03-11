@@ -10,6 +10,7 @@ export interface IframeContextHandler {
   ): any;
   unsubscribe(context: any, receipt: any): void;
   onLLMRequest(context: any, payload: string): Promise<object>;
+  onReadWebpageRequest(context: any, payload: string): Promise<object>;
 }
 
 let IframeHandler: IframeContextHandler | null = null;

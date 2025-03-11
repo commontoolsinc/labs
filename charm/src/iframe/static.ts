@@ -99,6 +99,39 @@ window.llm = (() => {
   return llm;
 })();
 
+window.readWebpage = (() => {
+  const inflight = [];
+
+  async function readWebpage(url) {
+    return new Promise((resolve, reject) => {
+      let stringified = JSON.stringify(url);
+      inflight.push([stringified, resolve, reject]);
+      window.parent.postMessage({
+        type: "readwebpage-request",
+        data: stringified,
+      }, "*");
+    });
+  };
+
+  window.addEventListener("message", e => {
+    if (e.data.type !== "readwebpage-response") {
+      return;
+    }
+    let { request, data, error } = e.data;
+    let index = inflight.findIndex(([payload, res, rej]) => request === payload);
+    if (index !== -1) {
+      let [_, res, rej] = inflight[index];
+      inflight.splice(index, 1);
+      if (data) {
+        res(data);
+      } else {
+        rej(error);
+      }
+    }
+  });
+  return readWebpage;
+})();
+
 window.generateImage = function(prompt) {
   return '/api/ai/img?prompt=' + encodeURIComponent(prompt);
 }
@@ -479,7 +512,21 @@ async function fetchLLMResponse() {
 }
 \`\`\`
 
-## 3. generateImage Function
+## 3. readWebpage Function
+
+\`\`\`jsx
+async function fetchFromUrl() {
+  const url = 'https://twopm.studio';
+  try {
+    const result = await readWebpage(url);
+    console.log('Markdown:', result.content);
+  } catch (error) {
+    console.error('readWebpage error:', error);
+  }
+}
+\`\`\`
+
+## 4. generateImage Function
 
 \`\`\`jsx
 function ImageComponent() {
@@ -487,7 +534,7 @@ function ImageComponent() {
 }
 \`\`\`
 
-## 4. Using the Interface Functions
+## 5. Using the Interface Functions
 
 \`\`\`javascript
 // Request additional libraries as needed (optional)

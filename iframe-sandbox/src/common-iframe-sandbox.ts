@@ -213,6 +213,47 @@ export class CommonIframeSandboxElement extends LitElement {
         });
         return;
       }
+
+      case IPC.GuestMessageType.WebPageRequest: {
+        const payload = message.data;
+        const promise = IframeHandler.onReadWebpageRequest(this.context, payload);
+        const instanceId = this.instanceId;
+        promise.then((result: object) => {
+          if (this.instanceId !== instanceId) {
+            // Inner frame was reloaded. This LLM response was
+            // from a previous page. Abort.
+            return;
+          }
+          this.toGuest({
+            id: this.frameId,
+            type: IPC.IPCHostMessageType.Passthrough,
+            data: {
+              type: IPC.HostMessageType.ReadWebpageResponse,
+              request: payload,
+              data: result,
+              error: undefined,
+            },
+          });
+        }, (error: any) => {
+          if (this.instanceId !== instanceId) {
+            // Inner frame was reloaded. This LLM response was
+            // from a previous page. Abort.
+            return;
+          }
+          this.toGuest({
+            id: this.frameId,
+            type: IPC.IPCHostMessageType.Passthrough,
+            data: {
+              type: IPC.HostMessageType.ReadWebpageResponse,
+              request: payload,
+              data: null,
+              error,
+            },
+          });
+        });
+        return;
+      }
+
     }
   }
 
