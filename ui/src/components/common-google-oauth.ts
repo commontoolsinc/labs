@@ -42,8 +42,12 @@ export class CommonGoogleOauthElement extends LitElement {
     this.authResult = null;
 
     let authCellId = JSON.parse(JSON.stringify(this.auth, null, 2));
-    authCellId.space = location.pathname.split("/")[1];
+    authCellId.space = this.auth?.getAsDocLink().cell.space.uri!;
     authCellId = JSON.stringify(authCellId);
+
+    console.log("authCellId", authCellId);
+
+    // `ct://${spaceDid}/${cellId}`
 
     const payload = {
       authCellId,
