@@ -837,8 +837,8 @@ const CodeTab = () => {
             extensions={[javascript()]}
             onChange={setWorkingSrc}
             basicSetup={{
-              lineNumbers: false,
-              foldGutter: false,
+              lineNumbers: true,
+              foldGutter: true,
               indentOnInput: true,
             }}
             style={{ height: "100%", overflow: "auto" }}
