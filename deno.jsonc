@@ -21,7 +21,8 @@
   },
   "compilerOptions": {
     "jsx": "react-jsxdev",
-    "lib": ["deno.ns", "dom", "dom.iterable", "dom.asynciterable", "esnext"]
+    "lib": ["deno.ns", "dom", "dom.iterable", "dom.asynciterable", "esnext"],
+    "types": ["./jumble/src/global.d.ts"]
   },
   "lint": {
     "exclude": [

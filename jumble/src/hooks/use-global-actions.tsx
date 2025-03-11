@@ -1,5 +1,6 @@
 import "@commontools/ui";
-import { CharmRouteParams, useLocation, useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
+import { type CharmRouteParams } from "@/routes.ts";
 import { MdEdit, MdOutlineStar, MdShare } from "react-icons/md";
 
 import { useAction } from "@/contexts/ActionManagerContext.tsx";

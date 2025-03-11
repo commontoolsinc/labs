@@ -721,7 +721,8 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       group: "Action",
       predicate: !!deps.focusedCharmId,
       handler: () => handleExecuteCharmAction(deps),
-    }, {
+    },
+    {
       id: "open-in-stack",
       type: "action",
       title: "Open in Stack",
@@ -1123,4 +1124,22 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       ],
     },
   ];
+}
+
+export function isInputCommand(
+  cmd: CommandItem,
+): cmd is CommandItem & { type: "input" } {
+  return cmd.type === "input";
+}
+
+export function isTranscribeCommand(
+  cmd: CommandItem,
+): cmd is CommandItem & { type: "transcribe" } {
+  return cmd.type === "transcribe";
+}
+
+export function isConfirmCommand(
+  cmd: CommandItem,
+): cmd is CommandItem & { type: "confirm" } {
+  return cmd.type === "confirm";
 }

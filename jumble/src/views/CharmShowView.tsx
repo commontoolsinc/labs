@@ -1,5 +1,5 @@
-import { CharmRouteParams, useParams } from "react-router-dom";
-
+import { useParams } from "react-router-dom";
+import { type CharmRouteParams } from "@/routes.ts";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
 import { LoadingSpinner } from "@/components/Loader.tsx";
 import { useCharm } from "@/hooks/use-charm.ts";

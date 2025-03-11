@@ -54,7 +54,7 @@ export function NavPath({ replicaId, charmId }: NavPathProps) {
               <NavLink
                 to={`/${replicaId}/${charmId}`}
                 className="text-gray-700 font-bold"
-                aria-current="charm-title"
+                aria-roledescription="charm-link"
               >
                 {charmName}
               </NavLink>

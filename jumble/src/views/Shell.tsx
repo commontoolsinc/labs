@@ -1,6 +1,6 @@
 import "@commontools/ui";
-import { CharmRouteParams, Outlet, useParams } from "react-router-dom";
-
+import { Outlet, useParams } from "react-router-dom";
+import { type CharmRouteParams } from "@/routes.ts";
 import ShellHeader from "@/components/ShellHeader.tsx";
 import { CommandCenter } from "@/components/CommandCenter.tsx";
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";

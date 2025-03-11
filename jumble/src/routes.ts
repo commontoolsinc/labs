@@ -62,3 +62,12 @@ export function createPathWithHash<T extends keyof typeof ROUTES>(
 
   return `${path}#${hash}`;
 }
+
+export type CharmRouteParams = {
+  charmId: string;
+  replicaName?: string;
+};
+
+export type StackedCharmsRouteParams = {
+  charmIds: string;
+};

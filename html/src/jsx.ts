@@ -1,12 +1,11 @@
 import type { Cell, Stream } from "@commontools/runner";
-
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      [elemName: string]: any;
-    }
-  }
-}
+// declare global {
+//   namespace JSX {
+//     interface IntrinsicElements {
+//       [elemName: string]: any;
+//     }
+//   }
+// }
 
 export const Fragment = "Fragment";
 
@@ -47,7 +46,13 @@ export type Props = {
 };
 
 /** A child in a view can be one of a few things */
-export type Child = VNode | string | Cell<Child> | Array<Child>;
+export type Child =
+  | VNode
+  | string
+  | number
+  | boolean
+  | Cell<Child>
+  | Array<Child>;
 
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {

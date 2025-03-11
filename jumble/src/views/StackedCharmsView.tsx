@@ -1,5 +1,6 @@
 import React from "react";
-import { StackedCharmsRouteParams, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
+import { type StackedCharmsRouteParams } from "@/routes.ts";
 import { LoadingSpinner } from "@/components/Loader.tsx";
 import { useCharm, useCharms } from "@/hooks/use-charm.ts";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";

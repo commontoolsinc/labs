@@ -402,15 +402,49 @@ export function CommandCenter() {
                             // Only close if the handler doesn't return a Promise
                             // This allows async handlers that change mode to keep the palette open
                             const result = cmd.handler?.(context);
-                            if (
-                              !cmd.handler ||
-                              (!result && cmd.handler.length === 0)
-                            ) {
+                            if (!cmd.handler || (!result && cmd.handler.length === 0)) {
                               setOpen(false);
                             }
                           } else {
-                            // TODO(bf): need to refactor types
-                            setMode({ type: cmd.type, command: cmd });
+                            // Handle each command type explicitly
+                            switch (cmd.type) {
+                              case "input":
+                                setMode({
+                                  type: "input",
+                                  command: cmd,
+                                  placeholder: cmd.placeholder || "Enter input",
+                                });
+                                break;
+                              case "confirm":
+                                setMode({
+                                  type: "confirm",
+                                  command: cmd,
+                                  message: cmd.message || "Are you sure?",
+                                });
+                                break;
+                              case "select":
+                                setMode({
+                                  type: "select",
+                                  command: cmd,
+                                  options: [], // You'll need to provide the actual options here
+                                });
+                                break;
+                              case "transcribe":
+                                setMode({
+                                  type: "transcribe",
+                                  command: cmd,
+                                  placeholder: cmd.placeholder || "Speak now...",
+                                });
+                                break;
+                              case "placeholder":
+                                setMode({
+                                  type: "placeholder",
+                                });
+                                break;
+                              default:
+                                console.warn(`Unhandled command type: ${cmd.type}`);
+                                break;
+                            }
                           }
                         }}
                       >

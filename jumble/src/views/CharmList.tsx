@@ -261,7 +261,7 @@ export default function CharmList() {
   const { charmManager } = useCharmManager();
   const [pinned] = useCell(charmManager?.getPinned());
   const [charms] = useCell(charmManager?.getCharms());
-  const { isSyncing } = useSyncedStatus(charmManager);
+  const { isSyncing } = useSyncedStatus();
 
   if (!isSyncing && (!charms || charms.length === 0)) {
     return (
