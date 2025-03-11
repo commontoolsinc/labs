@@ -3,9 +3,9 @@ import { log } from "../storage.ts";
 import { BaseStorageProvider, type StorageValue } from "./base.ts";
 
 /**
- * In-memory storage provider. Just for testing.
+ * Volatile (in-memory) storage provider. Just for testing.
  *
- * It doesn't make much sense,  since it's just a copy of the in memory docs.
+ * It doesn't make much sense, since it's just a copy of the volatile docs.
  * But for testing we can create multiple instances that share the memory.
  */
 const spaceStorageMap = new Map<string, Map<string, StorageValue>>();
@@ -32,7 +32,7 @@ function getOrCreateSpaceSubscribers(
   return spaceSubscribersMap.get(spaceName)!;
 }
 
-export class InMemoryStorageProvider extends BaseStorageProvider {
+export class VolatileStorageProvider extends BaseStorageProvider {
   private handleStorageUpdateFn: (key: string, value: any) => void;
   private lastValues = new Map<string, string | undefined>();
   private spaceName: string;
@@ -62,7 +62,7 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
       const key = JSON.stringify(entityId);
       const valueString = JSON.stringify(value);
       if (this.lastValues.get(key) !== valueString) {
-        log(() => ["send in memory", this.spaceName, key, valueString]);
+        log(() => ["send volatile", this.spaceName, key, valueString]);
         this.lastValues.set(key, valueString);
         spaceStorage.set(key, value);
         spaceSubscribers.forEach((listener) => listener(key, value));
@@ -79,7 +79,7 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     const spaceStorage = getOrCreateSpaceStorage(this.spaceName);
     const key = JSON.stringify(entityId);
     log(
-      () => ["sync in memory", this.spaceName, key, this.lastValues.get(key)],
+      () => ["sync volatile", this.spaceName, key, this.lastValues.get(key)],
     );
     if (spaceStorage.has(key)) {
       this.lastValues.set(key, JSON.stringify(spaceStorage.get(key)!));
@@ -91,7 +91,7 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
 
   get<T>(entityId: EntityId): StorageValue<T> | undefined {
     const key = JSON.stringify(entityId);
-    log(() => ["get in memory", this.spaceName, key, this.lastValues.get(key)]);
+    log(() => ["get volatile", this.spaceName, key, this.lastValues.get(key)]);
     return this.lastValues.has(key)
       ? (JSON.parse(this.lastValues.get(key)!) as StorageValue)
       : undefined;

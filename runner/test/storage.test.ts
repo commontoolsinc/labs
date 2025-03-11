@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { storage } from "../src/storage.ts";
 import { StorageProvider } from "../src/storage/base.ts";
-import { InMemoryStorageProvider } from "../src/storage/memory.ts";
 import { CellLink, createRef, DocImpl, getDoc } from "@commontools/runner";
+import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 import { Identity } from "@commontools/identity";
 
 storage.setRemoteStorage(new URL("memory://"));
@@ -15,7 +15,7 @@ describe("Storage", () => {
   let n = 0;
 
   beforeEach(() => {
-    storage2 = new InMemoryStorageProvider("test");
+    storage2 = new VolatileStorageProvider("test");
     testDoc = getDoc<string>(
       undefined as unknown as string,
       `storage test cell ${n++}`,
