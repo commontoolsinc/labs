@@ -128,7 +128,7 @@ export const addCharm = async (toolshedUrl: string) => {
       "--space",
       space,
       "--recipeFile",
-      "recipes/simpleValue.tsx",
+      "../recipes/simpleValue.tsx",
       "--cause",
       "ci",
       "--quit",
