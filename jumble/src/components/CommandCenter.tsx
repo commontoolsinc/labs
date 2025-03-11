@@ -15,6 +15,9 @@ import {
 import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext.tsx";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
+import { Composer } from "@/components/Composer.tsx";
+import { charmId } from "@/utils/charms.ts";
+import { NAME } from "../../../builder/src/types.ts";
 
 function CommandProcessor({
   mode,
@@ -100,6 +103,36 @@ export function CommandCenter() {
     replicaMatch?.params.charmId ?? null;
   const focusedReplicaId = stackMatch?.params.replicaName ??
     replicaMatch?.params.replicaName ?? null;
+
+  const [charmMentions, setCharmMentions] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
+
+  // Fetch charms for mentions when the component mounts
+  useEffect(() => {
+    const fetchCharmMentions = async () => {
+      try {
+        const charms = charmManager.getCharms();
+        await charmManager.sync(charms);
+
+        const mentions = charms.get().map((charm) => {
+          const data = charm.get();
+          const name = data?.[NAME] ?? "Untitled";
+          const id = charmId(charm.entityId!)!;
+          return {
+            id,
+            name: `${name} (#${id.slice(-4)})`,
+          };
+        });
+
+        setCharmMentions(mentions);
+      } catch (error) {
+        console.error("Error fetching charm mentions:", error);
+      }
+    };
+
+    fetchCharmMentions();
+  }, [charmManager]);
 
   const allCommands = useMemo(
     () =>
@@ -325,7 +358,32 @@ export function CommandCenter() {
           />
         </div>
 
-        <Command.Input
+        <Composer
+          placeholder={mode.type === "confirm"
+            ? mode.message || "Are you sure?"
+            : mode.type === "input"
+            ? mode.placeholder
+            : "What would you like to do?"}
+          readOnly={mode.type === "confirm"}
+          value={search}
+          onValueChange={setSearch}
+          mentions={charmMentions}
+          onKeyDown={(e) => {
+            // Only handle Enter for input mode, ignore for select mode
+            if (mode.type === "input" && e.key === "Enter") {
+              e.preventDefault();
+              const command = mode.command;
+              command.handler?.(search);
+            }
+            // For select mode, prevent the default Enter behavior
+            if (mode.type === "select" && e.key === "Enter") {
+              e.preventDefault();
+            }
+          }}
+          style={{ flexGrow: 1 }}
+        />
+        {
+          /* <Command.Input
           placeholder={mode.type === "confirm"
             ? mode.message || "Are you sure?"
             : mode.type === "input"
@@ -347,7 +405,8 @@ export function CommandCenter() {
             }
           }}
           style={{ flexGrow: 1 }}
-        />
+        /> */
+        }
       </div>
 
       <Command.List>
