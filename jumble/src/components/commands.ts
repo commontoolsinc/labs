@@ -1247,7 +1247,7 @@ IMPORTANT:
 
         // Update our agent state with the plan
         agentState.plan.reasoning = plan.reasoning || "";
-        agentState.plan.steps = plan.steps.map((step) => ({
+        agentState.plan.steps = plan.steps.map((step: Step) => ({
           ...step,
           status: "pending",
         }));
@@ -1261,7 +1261,7 @@ IMPORTANT:
           log(`Reasoning: ${plan.reasoning}`);
         }
 
-        plan.steps.forEach((step, index) => {
+        plan.steps.forEach((step: Step, index: number) => {
           log(`Step ${index + 1}: ${step.description}`);
         });
 
@@ -1555,7 +1555,7 @@ IMPORTANT:
                 // Replace remaining steps with revised steps
                 const executedSteps = agentState.plan.steps.slice(0, index + 1);
                 const revisedStepsWithStatus = revision.revised_steps.map(
-                  (step) => ({
+                  (step: Step) => ({
                     ...step,
                     status: "pending",
                   }),
@@ -1648,88 +1648,12 @@ In your summary, mention which approach was used (modifying the current charm, e
         updateAgentUI();
       }
     } catch (error) {
-      console.error("Error parsing JSON:", error, "Raw JSON:", jsonString);
+      console.error("Error parsing JSON:", error, "Raw JSON:", response);
       log(
         `❌ JSON parsing error: ${
           error instanceof Error ? error.message : "Unknown error"
         }`,
       );
-
-      // Try as a last resort to use regex to extract keys and values directly
-      try {
-        log("Attempting to recover plan using regex...");
-
-        // Get reasoning using regex
-        const reasoningMatch = jsonString.match(/"reasoning"\s*:\s*"([^"]+)"/);
-        const reasoning = reasoningMatch ? reasoningMatch[1] : "";
-
-        // Extract steps using a simple regex pattern
-        const stepMatches = jsonString.match(
-          /"description"\s*:\s*"([^"]+)"[^}]+?"tool"\s*:\s*"([^"]+)"/g,
-        );
-
-        if (stepMatches && stepMatches.length > 0) {
-          // Create a manual plan
-          const steps = stepMatches.map((match) => {
-            const descMatch = match.match(/"description"\s*:\s*"([^"]+)"/);
-            const toolMatch = match.match(/"tool"\s*:\s*"([^"]+)"/);
-
-            return {
-              description: descMatch ? descMatch[1] : "Unknown step",
-              tool: toolMatch ? toolMatch[1] : undefined,
-              args: {},
-            };
-          });
-
-          // Update our agent state with the recovered plan
-          agentState.plan.reasoning = reasoning;
-          agentState.plan.steps = steps.map((step) => ({
-            ...step,
-            status: "pending",
-          }));
-          agentState.totalSteps = steps.length;
-          agentState.status = "executing";
-
-          log(`Recovered plan with ${steps.length} steps`);
-          log("Continuing with recovered plan...");
-
-          // Update UI
-          updateAgentUI();
-
-          // Continue with the execution (note: this is a simplified version)
-          for (const [index, step] of agentState.plan.steps.entries()) {
-            // Mark step as executing
-            step.status = "executing";
-            agentState.currentStep = index + 1;
-            updateAgentUI();
-
-            log(`Executing step ${index + 1}: ${step.description}`);
-
-            // Simplified execution - just log the step for now
-            const feedback = `Executed: ${
-              step.tool || "Unknown tool"
-            } (recovered plan)`;
-            log(feedback);
-            step.feedback = feedback;
-            step.status = "completed";
-            updateAgentUI();
-          }
-
-          // Complete the task
-          agentState.status = "completed";
-          log("✅ Task completed with recovered plan!");
-          updateAgentUI();
-
-          return;
-        }
-
-        throw new Error("Could not recover plan");
-      } catch (recoveryError) {
-        console.error("Recovery failed:", recoveryError);
-        agentState.status = "error";
-        log("❌ Could not recover from JSON parsing error");
-        updateAgentUI();
-      }
     }
   } catch (error) {
     console.error("Agent mode error:", error);
