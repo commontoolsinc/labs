@@ -30,7 +30,10 @@ window.onerror = function (message, source, lineno, colno, error) {
 };
 
 function useDoc(key, defaultValue = undefined) {
-  const [doc, setDocState] = React.useState(defaultValue);
+  // Track if we've received a response from the parent
+  const [received, setReceived] = React.useState(false);
+  // Initialize state with undefined
+  const [doc, setDocState] = React.useState(undefined);
 
   React.useEffect(() => {
     // Handler for document updates
@@ -40,13 +43,19 @@ function useDoc(key, defaultValue = undefined) {
         event.data.type === "update" &&
         event.data.data[0] === key
       ) {
-        setDocState(event.data.data[1] === undefined ? null : event.data.data[1]);
+        // Mark that we've received a response
+        setReceived(true);
+
+        // Update the state with the received value or null if undefined
+        const value = event.data.data[1] === undefined ? null : event.data.data[1];
+        console.log("useDoc", key, "updated", value);
+        setDocState(value);
       }
     }
 
     window.addEventListener("message", handleMessage);
 
-    // Subscribe to the root document if key is empty, otherwise subscribe to specific key
+    // Subscribe to the specific key
     window.parent.postMessage({ type: "subscribe", data: key }, "*");
 
     return () => {
@@ -55,15 +64,26 @@ function useDoc(key, defaultValue = undefined) {
     };
   }, [key]);
 
-  // Update function remains similar, but always targets the specific key
+  // After we've received a response, apply default value if needed
+  React.useEffect(() => {
+    if (received && doc === null && defaultValue !== undefined) {
+      // Only write the default value if we've confirmed no data exists
+      console.log("useDoc", key, "default", defaultValue);
+      window.parent.postMessage({ type: "write", data: [key, defaultValue] }, "*");
+    }
+  }, [received, doc, defaultValue, key]);
+
+  // Update function
   const updateDoc = (newValue) => {
     if (typeof newValue === "function") {
       newValue = newValue(doc);
     }
+    console.log("useDoc", key, "written", newValue);
     window.parent.postMessage({ type: "write", data: [key, newValue] }, "*");
   };
 
-  return [doc, updateDoc];
+  // Return the current document value or the default if we haven't received data yet
+  return [received ? (doc === null ? defaultValue : doc) : defaultValue, updateDoc];
 }
 
 window.llm = (() => {
