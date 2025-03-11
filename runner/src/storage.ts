@@ -248,8 +248,8 @@ class StorageImpl implements Storage {
     if (!provider) {
       // Default to "remote", but let either custom URL (used in tests) or
       // environment variable override this.
-      const type = this.remoteStorageUrl?.protocol === "memory:"
-        ? "memory"
+      const type = this.remoteStorageUrl?.protocol === "volatile:"
+        ? "volatile"
         : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "remote");
 
       if (type === "remote") {

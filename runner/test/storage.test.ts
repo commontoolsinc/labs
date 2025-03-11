@@ -6,7 +6,7 @@ import { CellLink, createRef, DocImpl, getDoc } from "@commontools/runner";
 import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 import { Identity } from "@commontools/identity";
 
-storage.setRemoteStorage(new URL("memory://"));
+storage.setRemoteStorage(new URL("volatile://"));
 storage.setSigner(await Identity.fromPassphrase("test operator"));
 
 describe("Storage", () => {
