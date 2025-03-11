@@ -179,7 +179,13 @@ async function main() {
   log(undefined, "Starting Google Updater");
 
   const identity = await Identity.fromPassphrase("common-cli");
-  manager = new CharmManager(space as string, identity);
+  const session = {
+    private: false,
+    name: "importer",
+    space: identity.did(),
+    as: identity,
+  };
+  manager = new CharmManager(session);
 
   if (charmId) {
     const charm = await manager?.get(charmId as string, false);
