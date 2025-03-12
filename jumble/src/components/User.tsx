@@ -220,7 +220,7 @@ export function User() {
         style={{
           position: "absolute",
           top: "-4px",
-          left: "-4.25px",
+          left: "-4px",
           opacity: 0,
           pointerEvents: "none",
         }}
@@ -232,7 +232,7 @@ export function User() {
           fill="none"
           stroke="#4285F4"
           strokeWidth="2.5"
-          strokeDasharray="6 4"
+          strokeDasharray="6 6"
           strokeLinecap="round"
         />
       </svg>
