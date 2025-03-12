@@ -5,13 +5,17 @@
  * I'm starting from the bottom (common memory) up and purposely calling
  * APIs that would normally call into common memory.
  */
-import { Charm, CharmManager } from "../charm/src/charm.ts";
+import { Charm, CharmManager, charmListSchema } from "../charm/src/charm.ts";
 import { Cell } from "../runner/src/cell.ts";
-import { DocImpl, getDoc } from "../runner/src/doc.ts";
-import { storage } from "../runner/src/storage.ts";
 import * as Session from "./session.ts";
+import { DocLink, DocImpl, getDoc } from "../runner/src/doc.ts";
+import { EntityId } from "../runner/src/doc-map.ts";
+import { storage } from "../runner/src/storage.ts";
+import { Identity } from "../identity/src/index.ts";
+import { getEntityId } from "../runner/src/doc-map.ts";
 
 const TOOLSHED_API_URL = "https://toolshed.saga-castor.ts.net/";
+const SPACE = "common-knowledge"; 
 
 // simple log function
 const log: <T>(s: T, prefix?: string) => void = (s, prefix?) =>
@@ -20,46 +24,83 @@ const log: <T>(s: T, prefix?: string) => void = (s, prefix?) =>
       JSON.stringify(s, null, 2),
   );
 
-function createCell(space: string): Cell<Charm> {
-  const myCharm: Charm = {
-    NAME: "mycharm",
-    UI: "someui",
-    somekey: "some value",
-  };
-
-  // make this a DocImpl<Charm> because we need to return a Cell<Charm> since
-  // that's what CharmManger.add() needs later on
-  const myDoc: DocImpl<Charm> = getDoc<Charm>(
-    myCharm,
-    crypto.randomUUID(),
-    space,
-  );
-  return myDoc.asCell();
-}
-
 async function main() {
-  // create a charm manager to start things off
   const session = await Session.create({
-    passphrase: "super secret",
-    name: "charm manager",
+    passphrase: "some passphrase",
+    name: "some name",
   });
-  const charmManager = new CharmManager(session);
-  log(charmManager, "charmManager");
 
-  // let's try to create a cell
-  const space = charmManager.getSpace();
-  const cell: Cell<Charm> = createCell(space);
-  log(cell.get(), "cell value from Cell.get()");
+  const authority = await Identity.fromPassphrase("charm manager");
 
   // this feels like magic and wrong,
-  // but we crash in the next CharmManager.add() if this isn't set
+  // but we crash when we call syncCell otherwise 
   storage.setRemoteStorage(
     new URL(TOOLSHED_API_URL),
   );
+  storage.setSigner(session.as);
 
-  // let's add the cell to the charmManager
-  // await charmManager.add([cell]);
-  // log(charmManager, "charmmanager after adding cell");
+  // get them charms, we can also call charmManager.getCharms()
+  // this way is to show what these objects really are
+  const charmsDoc: DocImpl<DocLink[]> = getDoc<DocLink[]>([], "charms", SPACE);
+
+  // start syncing on this document
+  // notice that we call syncCell on a DocImpl
+  storage.syncCell(charmsDoc);
+
+  // the list of charms
+  const charms: Cell<any> = charmsDoc.asCell([], undefined, charmListSchema); 
+  charms.sink((charmList) => {
+    if (charmList.length > 0) {
+      console.log(`\nFound ${charmList.length} charms`);
+  
+      // Print details for each charm
+      charmList.forEach((charm, index) => {
+        const id = getEntityId(charm)?.["/"] || "unknown-id";
+        const name = charm.get()?.NAME || "Unnamed";
+    
+        console.log(`${index}. ${name}`);
+        console.log(`   ID: ${id}`);
+        console.log("");
+      });
+    }
+  });
+
+  log(charms, "charms via getDoc");
 }
 
 main();
+
+//function bar() {
+    // get all the charms
+  // const charms = charmManager.getCharms();
+
+  // Create a promise that resolves when we receive the charms
+  // await new Promise<void>((resolve) => {
+  //   charms.sink((charmList) => {
+  //     console.log(`\nFound ${charmList.length} charms:`);
+      
+  //     // Print details for each charm
+  //     charmList.forEach((charm, index) => {
+  //       const id = getEntityId(charm)?.["/"] || "unknown-id";
+  //       const name = charm.get()?.NAME || "Unnamed";
+        
+  //       console.log(`${index + 1}. ${name}`);
+  //       console.log(`   ID: ${id}`);
+  //       console.log("");
+  //     });
+
+  //     if (charmList.length > 0) {
+  //       resolve();
+  //     }
+  //   });
+  // });
+//}
+
+// function foo() {
+//   this.space = getSpace(this.spaceId);
+//   this.charmsDoc = getDoc<DocLink[]>([], "charms", this.space);
+//   this.pinned = getDoc<DocLink[]>([], "pinned-charms", this.space);
+//   this.charms = this.charmsDoc.asCell([], undefined, charmListSchema);
+//   storage.setSigner(signer);
+//   this.pinnedCharms = this.pinned.asCell([], undefined, charmListSchema);
+// }
