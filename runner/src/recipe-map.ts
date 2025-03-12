@@ -9,20 +9,29 @@ const srcById = new Map<string, string>();
 const specById = new Map<string, string>();
 const parentsById = new Map<string, string[]>();
 
-export function addRecipe(
-  recipe: Recipe | Module,
+export function registerNewRecipe(
+  recipe: Recipe,
   src?: string,
   spec?: string,
-  parents?: string[],
-  id?: string
+  parents?: string[]
 ): string {
   if (idByRecipe.has(recipe)) return idByRecipe.get(recipe)!;
 
-  if (!id) {
-    id = src
-      ? createRef(src, "recipe source").toString()
-      : createRef(recipe, "recipe").toString();
-  }
+  const id = src
+    ? createRef(src, "recipe source").toString()
+    : createRef(recipe, "recipe").toString();
+
+  return registerRecipe(id, recipe, src, spec, parents);
+}
+
+export function registerRecipe(
+  id: string,
+  recipe: Recipe,
+  src?: string,
+  spec?: string,
+  parents?: string[]
+): string {
+  if (idByRecipe.has(recipe)) return idByRecipe.get(recipe)!;
 
   recipeById.set(id, recipe);
   idByRecipe.set(recipe, id);

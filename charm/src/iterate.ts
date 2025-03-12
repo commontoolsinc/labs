@@ -1,4 +1,4 @@
-import { addRecipe, Cell, EntityId } from "@commontools/runner";
+import { registerRecipe, Cell, EntityId } from "@commontools/runner";
 import { LLMClient } from "@commontools/llm-client";
 import { createJsonSchema, JSONSchema } from "@commontools/builder";
 
@@ -7,6 +7,7 @@ import { Charm, CharmManager } from "./charm.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import { injectUserCode } from "./iframe/static.ts";
+import { registerNewRecipe } from "../../runner/src/recipe-map.ts";
 
 const llm = new LLMClient(LLMClient.DEFAULT_URL);
 
@@ -178,7 +179,7 @@ export async function compileRecipe(
     return;
   }
   const parentsIds = parents?.map((id) => id.toString());
-  addRecipe(recipe, recipeSrc, spec, parentsIds);
+  registerNewRecipe(recipe, recipeSrc, spec, parentsIds);
   return recipe;
 }
 
