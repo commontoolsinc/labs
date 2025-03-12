@@ -57,6 +57,4 @@ jobs:
 
       - name: Run Integration
         working-directory: jumble
-        env:
-          ADDITIONAL_WAIT_TIME: 2000
         run: deno task integration
