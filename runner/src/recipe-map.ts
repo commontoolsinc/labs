@@ -14,12 +14,16 @@ export function addRecipe(
   src?: string,
   spec?: string,
   parents?: string[],
+  id?: string
 ): string {
   if (idByRecipe.has(recipe)) return idByRecipe.get(recipe)!;
 
-  const id = src
-    ? createRef(src, "recipe source").toString()
-    : createRef(recipe, "recipe").toString();
+  if (!id) {
+    id = src
+      ? createRef(src, "recipe source").toString()
+      : createRef(recipe, "recipe").toString();
+  }
+
   recipeById.set(id, recipe);
   idByRecipe.set(recipe, id);
 
