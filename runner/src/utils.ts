@@ -670,6 +670,43 @@ export function applyChangeSet(
   }
 }
 
+/**
+ * Translates `id` that React likes to create to our `ID` property, making sure
+ * in any given object it is never used twice.
+ *
+ * This mostly makes sense in a context where we ship entire JSON documents back
+ * and forth and can't express graphs, i.e. two places referring to the same
+ * underlying entity.
+ *
+ * We'll want to revisit once iframes become more sophisticated in what they can
+ * express, e.g. we could have the inner shim do some of this work instead.
+ */
+export function addCommonIDfromObjectID(obj: any, fieldName: string = "id") {
+  function traverse(obj: any) {
+    if (typeof obj == "object" && obj !== null) {
+      const seen = new Set();
+      Object.keys(obj).forEach((key: string) => {
+        if (
+          typeof obj[key] == "object" && obj[key] !== null &&
+          fieldName in obj[key]
+        ) {
+          let n = 0;
+          let id = obj[key][fieldName];
+          while (seen.has(id)) id = `${obj[key][fieldName]}-${++n}`;
+          seen.add(id);
+          obj[key][ID] = id;
+        }
+        traverse(obj[key]);
+      });
+    }
+  }
+
+  if (typeof obj == "object" && obj !== null && fieldName in obj) {
+    obj[ID] = obj[fieldName];
+  }
+  traverse(obj);
+}
+
 export function maybeUnwrapProxy(value: any): any {
   return isQueryResultForDereferencing(value)
     ? getDocLinkOrThrow(value)

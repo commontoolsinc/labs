@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { ID } from "@commontools/builder";
 import {
+  addCommonIDfromObjectID,
   applyChangeSet,
   diffAndUpdate,
   extractDefaultValues,
@@ -729,5 +730,41 @@ describe("normalizeAndDiff", () => {
     const changes2 = normalizeAndDiff(current, docA);
 
     expect(changes2.length).toBe(0);
+  });
+});
+
+describe("addCommonIDfromObjectID", () => {
+  it("should add ID to objects", () => {
+    const obj = { a: { id: "item1", name: "First Item" } };
+    addCommonIDfromObjectID(obj);
+    expect((obj.a as any)[ID]).toBe("item1");
+  });
+
+  it("should add ID to objects with nested objects", () => {
+    const obj = {
+      a: {
+        id: "item1",
+        name: "First Item",
+        nested: { id: "nested1", value: 1 },
+      },
+    };
+    addCommonIDfromObjectID(obj);
+    expect((obj.a as any)[ID]).toBe("item1");
+  });
+
+  it("should create different IDs for duplicate IDs", () => {
+    const obj = {
+      a: { id: "item1", name: "First Item" },
+      b: { id: "item1", name: "Second Item" },
+    };
+    addCommonIDfromObjectID(obj);
+    expect((obj.a as any)[ID]).toBe("item1");
+    expect((obj.b as any)[ID]).toBe("item1-1");
+  });
+
+  it("should handle arrays", () => {
+    const obj = { items: [{ id: "item1", name: "First Item" }] };
+    addCommonIDfromObjectID(obj);
+    expect((obj.items[0] as any)[ID]).toBe("item1");
   });
 });

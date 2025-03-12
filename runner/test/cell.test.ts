@@ -12,6 +12,7 @@ import {
   pushFrame,
 } from "@commontools/builder";
 import { addEventHandler, idle } from "../src/scheduler.ts";
+import { addCommonIDfromObjectID } from "../src/utils.ts";
 
 describe("Cell", () => {
   it("should create a cell with initial value", () => {
@@ -1245,6 +1246,87 @@ describe("asCell with schema", () => {
       { "value": 30 },
       { "value": 40 },
     ]);
+  });
+
+  it("should transparently update ids when context changes", () => {
+    const schema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+          nested: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { id: { type: "string" }, value: { type: "number" } },
+            },
+          },
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    const testDoc = getDoc<any>(
+      undefined,
+      "should transparently update ids when context changes",
+      "test",
+    );
+    const testCell = testDoc.asCell([], undefined, schema);
+
+    const initialData = [
+      {
+        id: "item1",
+        name: "First Item",
+        nested: [{ id: "nested1", value: 1 }, { id: "nested2", value: 2 }],
+      },
+      {
+        id: "item1",
+        name: "Second Item",
+        nested: [{ id: "nested1", value: 3 }, { id: "nested2", value: 4 }],
+      },
+    ];
+    const initialDataCopy = JSON.parse(JSON.stringify(initialData));
+    addCommonIDfromObjectID(initialDataCopy);
+
+    const frame1 = pushFrame({
+      generatedIdCounter: 0,
+      cause: "context 1",
+      opaqueRefs: new Set(),
+    });
+    testCell.set(initialDataCopy);
+    popFrame(frame1);
+
+    expect(isDocLink(testDoc.get()[0])).toBe(true);
+    expect(isDocLink(testDoc.get()[1])).toBe(true);
+    expect(testDoc.get()[0].cell.get().name).toEqual("First Item");
+    expect(testDoc.get()[1].cell.get().name).toEqual("Second Item");
+
+    const docFromContext1 = testDoc.get()[0].cell;
+
+    const returnedData = testCell.get();
+    addCommonIDfromObjectID(returnedData);
+
+    const frame2 = pushFrame({
+      generatedIdCounter: 0,
+      cause: "context 2",
+      opaqueRefs: new Set(),
+    });
+    testCell.set(returnedData);
+    popFrame(frame2);
+
+    expect(isDocLink(testDoc.get()[0])).toBe(true);
+    expect(isDocLink(testDoc.get()[1])).toBe(true);
+    expect(testDoc.get()[0].cell.get().name).toEqual("First Item");
+    expect(testDoc.get()[1].cell.get().name).toEqual("Second Item");
+
+    // Let's make sure we got a different doc with the different context
+    expect(testDoc.get()[0].cell).not.toBe(docFromContext1);
+    expect(testDoc.get()[0].cell.entityId.toString()).not.toBe(
+      docFromContext1.entityId.toString(),
+    );
+
+    expect(testCell.get()).toEqual(initialData);
   });
 
   it("should push values that are already cells reusing the reference", () => {
