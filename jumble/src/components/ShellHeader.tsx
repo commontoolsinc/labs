@@ -68,24 +68,6 @@ export function ShellHeader(
         <NavPath replicaId={session.name} charmId={charmId} />
       </div>
       <div className="header-end flex items-center gap-2">
-        <div className="relative group">
-          <div
-            className={`w-3 h-3 rounded-full ${
-              isSyncing ? "bg-yellow-400 animate-pulse" : "bg-green-500 "
-            }`}
-          />
-          <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
-            {isSyncing
-              ? lastSyncTime
-                ? `Pending since ${
-                  new Date(lastSyncTime).toLocaleTimeString()
-                })`
-                : "Pending..."
-              : lastSyncTime
-              ? `Connected`
-              : "Connected"}
-          </div>
-        </div>
         <User />
 
         <NavLink
