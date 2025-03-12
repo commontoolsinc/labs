@@ -1,5 +1,6 @@
 import {
   ID,
+  ID_FIELD,
   isAlias,
   isOpaqueRef,
   isStatic,
@@ -503,6 +504,46 @@ export function normalizeAndDiff(
 ): ChangeSet {
   const changes: ChangeSet = [];
 
+  // ID_FIELD redirects to an existing field and we do something like DOM
+  // diffing with it: We look at sibling entries and their value for that field,
+  // and if we find a match, we reuse that document. Otherwise we create a new
+  // one, but with a random id. It's random as opposed to causal like ID below,
+  // because we don't want to recycle a document that was removed and added
+  // back, we want to assume removing and adding with the same id is
+  // semantically a new item (in fact we otherwise run into compare-and-swap
+  // transaction errors).
+  if (
+    typeof newValue === "object" && newValue !== null &&
+    newValue[ID_FIELD] !== undefined
+  ) {
+    const { [ID_FIELD]: fieldName, ...rest } = newValue;
+    const id = newValue[fieldName];
+    if (current.path.length > 1) {
+      const parent = current.cell.getAtPath(current.path.slice(0, -1));
+      if (Array.isArray(parent)) {
+        for (const v of parent) {
+          if (isDocLink(v)) {
+            const sibling = v.cell.getAtPath(v.path);
+            if (
+              typeof sibling === "object" && sibling !== null &&
+              sibling[fieldName] === id
+            ) {
+              // We found a sibling with the same id, so ...
+              return [
+                // ... reuse the existing document
+                ...normalizeAndDiff(current, v, log, context),
+                // ... and update it to the new value
+                ...normalizeAndDiff(v, rest, log, context),
+              ];
+            }
+          }
+        }
+      }
+    }
+    // Fallback: A random id. Below this will create a new entity.
+    newValue = { [ID]: crypto.randomUUID(), ...rest };
+  }
+
   // Unwrap proxies and handle special types
   newValue = maybeUnwrapProxy(newValue);
   if (isDoc(newValue)) newValue = { cell: newValue, path: [] };
@@ -683,27 +724,20 @@ export function applyChangeSet(
  */
 export function addCommonIDfromObjectID(obj: any, fieldName: string = "id") {
   function traverse(obj: any) {
-    if (typeof obj == "object" && obj !== null) {
-      const seen = new Set();
-      Object.keys(obj).forEach((key: string) => {
-        if (
-          typeof obj[key] == "object" && obj[key] !== null &&
-          fieldName in obj[key]
-        ) {
-          let n = 0;
-          let id = obj[key][fieldName];
-          while (seen.has(id)) id = `${obj[key][fieldName]}-${++n}`;
-          seen.add(id);
-          obj[key][ID] = id;
-        }
-        traverse(obj[key]);
+    if (typeof obj === "object" && obj !== null && fieldName in obj) {
+      obj[ID_FIELD] = fieldName;
+    }
+
+    if (
+      typeof obj === "object" && obj !== null && !isCell(obj) &&
+      !isDocLink(obj) && !isDoc(obj)
+    ) {
+      Object.values(obj).forEach((v: any) => {
+        traverse(v);
       });
     }
   }
 
-  if (typeof obj == "object" && obj !== null && fieldName in obj) {
-    obj[ID] = obj[fieldName];
-  }
   traverse(obj);
 }
 
@@ -719,7 +753,7 @@ export function arrayEqual(a: PropertyKey[], b: PropertyKey[]): boolean {
   return true;
 }
 
-export function isEqualCellReferences(a: DocLink, b: DocLink): boolean {
+export function isEqualDocLink(a: DocLink, b: DocLink): boolean {
   return isDocLink(a) && isDocLink(b) && a.cell === b.cell &&
     arrayEqual(a.path, b.path);
 }

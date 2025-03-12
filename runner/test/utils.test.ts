@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { ID } from "@commontools/builder";
+import { ID, ID_FIELD } from "@commontools/builder";
 import {
   addCommonIDfromObjectID,
   applyChangeSet,
@@ -8,6 +8,7 @@ import {
   extractDefaultValues,
   followAliases,
   followCellReferences,
+  isEqualDocLink,
   mergeObjects,
   normalizeAndDiff,
   sendValueToBinding,
@@ -687,7 +688,51 @@ describe("normalizeAndDiff", () => {
     expect(testDoc.get().items[1].cell.get().name).toEqual("Second Value");
   });
 
-  it("it should treat different properties as different ID namespaces", () => {
+  it("should handle ID_FIELD redirects and reuse existing documents", () => {
+    const testSpace = "test";
+    const testDoc = getDoc<any>(
+      { items: [] },
+      "should handle ID_FIELD redirects",
+      testSpace,
+    );
+
+    // Create an initial item
+    const data = { id: "item1", name: "First Item" };
+    addCommonIDfromObjectID(data);
+    diffAndUpdate(
+      { cell: testDoc, path: ["items", 0] },
+      data,
+      undefined,
+      "test ID_FIELD redirects",
+    );
+
+    const initialDoc = testDoc.get().items[0].cell;
+
+    // Update with another item using ID_FIELD to point to the 'id' field
+    const newValue = {
+      items: [
+        { id: "item0", name: "New Item" },
+        { id: "item1", name: "Updated Item" },
+      ],
+    };
+    addCommonIDfromObjectID(newValue);
+
+    diffAndUpdate(
+      { cell: testDoc, path: [] },
+      newValue,
+      undefined,
+      "test ID_FIELD redirects",
+    );
+
+    // Verify that the second item reused the existing document
+    expect(isDocLink(testDoc.get().items[0])).toBe(true);
+    expect(isDocLink(testDoc.get().items[1])).toBe(true);
+    expect(testDoc.get().items[1].cell).toBe(initialDoc);
+    expect(testDoc.get().items[1].cell.get().name).toEqual("Updated Item");
+    expect(testDoc.get().items[0].cell.get().name).toEqual("New Item");
+  });
+
+  it("should treat different properties as different ID namespaces", () => {
     const testSpace = "test";
     const testDoc = getDoc<any>(
       undefined,
@@ -774,37 +819,41 @@ describe("normalizeAndDiff", () => {
 });
 
 describe("addCommonIDfromObjectID", () => {
-  it("should add ID to objects", () => {
-    const obj = { a: { id: "item1", name: "First Item" } };
-    addCommonIDfromObjectID(obj);
-    expect((obj.a as any)[ID]).toBe("item1");
-  });
-
-  it("should add ID to objects with nested objects", () => {
-    const obj = {
-      a: {
-        id: "item1",
-        name: "First Item",
-        nested: { id: "nested1", value: 1 },
-      },
-    };
-    addCommonIDfromObjectID(obj);
-    expect((obj.a as any)[ID]).toBe("item1");
-  });
-
-  it("should create different IDs for duplicate IDs", () => {
-    const obj = {
-      a: { id: "item1", name: "First Item" },
-      b: { id: "item1", name: "Second Item" },
-    };
-    addCommonIDfromObjectID(obj);
-    expect((obj.a as any)[ID]).toBe("item1");
-    expect((obj.b as any)[ID]).toBe("item1-1");
-  });
-
   it("should handle arrays", () => {
     const obj = { items: [{ id: "item1", name: "First Item" }] };
     addCommonIDfromObjectID(obj);
-    expect((obj.items[0] as any)[ID]).toBe("item1");
+    expect((obj.items[0] as any)[ID_FIELD]).toBe("id");
+  });
+
+  it("should reuse items", () => {
+    const itemDoc = getDoc(
+      { id: "item1", name: "Original Item" },
+      "addCommonIDfromObjectID reuse items",
+      "test",
+    );
+    const testDoc = getDoc(
+      { items: [{ cell: itemDoc, path: [] }] },
+      "addCommonIDfromObjectID arrays",
+      "test",
+    );
+
+    const data = {
+      items: [{ id: "item1", name: "New Item" }, itemDoc.asCell()],
+    };
+    addCommonIDfromObjectID(data);
+    diffAndUpdate(
+      { cell: testDoc, path: [] },
+      data,
+      undefined,
+      "addCommonIDfromObjectID reuse items",
+    );
+
+    const result = testDoc.get();
+    expect(isDocLink(result.items[0])).toBe(true);
+    expect(isDocLink(result.items[1])).toBe(true);
+    expect(isEqualDocLink(result.items[0] as any, result.items[1] as any)).toBe(
+      true,
+    );
+    expect(result.items[1].cell.get().name).toBe("New Item");
   });
 });
