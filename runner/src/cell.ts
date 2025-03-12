@@ -423,7 +423,9 @@ function createRegularCell<T>(
       subscribeToReferencedDocs(callback, doc, path, schema, rootSchema),
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
-    getAsDocLink: () => ({ cell: doc, path }) satisfies DocLink,
+    getAsDocLink: () =>
+      // Add space here, so that JSON.stringify() of this retains the space.
+      ({ space: doc.space, cell: doc, path }) satisfies DocLink,
     getSourceCell: (schema?: JSONSchema) =>
       doc.sourceCell?.asCell([], log, schema) as Cell<any>,
     toJSON: () =>

@@ -236,6 +236,7 @@ export type DocImpl<T> = {
  * Cells (DocImpl.asCell) expose these as other cells.
  */
 export type DocLink = {
+  space?: string;
   cell: DocImpl<any>;
   path: PropertyKey[];
 };

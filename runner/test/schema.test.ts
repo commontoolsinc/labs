@@ -237,6 +237,7 @@ describe("Schema Support", () => {
       expect(JSON.parse(JSON.stringify(current.getAsDocLink()))).toEqual({
         cell: doc.toJSON(),
         path: ["current", "label"],
+        space: "test",
       });
 
       // .get() the currently selected cell. This should not change when
@@ -258,6 +259,7 @@ describe("Schema Support", () => {
       expect(JSON.parse(JSON.stringify(first.getAsDocLink()))).toEqual({
         cell: initialDoc.toJSON(),
         path: ["foo"],
+        space: "test",
       });
       expect(log.reads.length).toEqual(4);
       expect(
