@@ -4,7 +4,6 @@ import { DocLink, getDoc } from "../src/doc.ts";
 import { type Cell, getImmutableCell, isCell, isStream } from "../src/cell.ts";
 import type { JSONSchema } from "@commontools/builder";
 import { idle } from "../src/scheduler.ts";
-import { getSpace } from "../src/space.ts";
 
 describe("Schema Support", () => {
   describe("Examples", () => {
@@ -19,7 +18,7 @@ describe("Schema Support", () => {
           tags: ["a", "b"],
         },
         "allows mapping of fields via interim cells 1",
-        getSpace("test"),
+        "test",
       );
 
       // This is what the system (or someone manually) would create to remap
@@ -36,7 +35,7 @@ describe("Schema Support", () => {
           tag: { cell: c, path: ["tags", 0] },
         },
         "allows mapping of fields via interim cells 2",
-        getSpace("test"),
+        "test",
       );
 
       // This schema is how the recipient specifies what they want
@@ -82,11 +81,11 @@ describe("Schema Support", () => {
           current: getDoc(
             { label: "first" },
             "should support nested sinks 1",
-            getSpace("test"),
+            "test",
           ).asCell().getAsDocLink(),
         },
         "should support nested sinks 2",
-        getSpace("test"),
+        "test",
       ).asCell([], undefined, schema);
 
       const rootValues: string[] = [];
@@ -134,7 +133,7 @@ describe("Schema Support", () => {
       const second = getDoc(
         { label: "second" },
         "should support nested sinks 3",
-        getSpace("test"),
+        "test",
       ).asCell();
       c.key("current").set(second);
 
@@ -192,13 +191,13 @@ describe("Schema Support", () => {
       const initialDoc = getDoc(
         { foo: { label: "first" } },
         "should support nested sinks via asCell with aliases 1",
-        getSpace("test"),
+        "test",
       );
       const initial = initialDoc.asCell();
       const linkDoc = getDoc(
         initial.getAsDocLink(),
         "should support nested sinks via asCell with aliases 2",
-        getSpace("test"),
+        "test",
       );
       const doc = getDoc(
         {
@@ -206,7 +205,7 @@ describe("Schema Support", () => {
           current: { $alias: { cell: linkDoc, path: ["foo"] } },
         },
         "should support nested sinks via asCell with aliases 3",
-        getSpace("test"),
+        "test",
       );
       const root = doc.asCell([], undefined, schema);
 
@@ -284,7 +283,7 @@ describe("Schema Support", () => {
       const second = getDoc(
         { foo: { label: "second" } },
         "should support nested sinks via asCell with aliases 4",
-        getSpace("test"),
+        "test",
       ).asCell();
       linkDoc.send(second.getAsDocLink());
 
@@ -325,7 +324,7 @@ describe("Schema Support", () => {
       const third = getDoc(
         { label: "third" },
         "should support nested sinks via asCell with aliases 5",
-        getSpace("test"),
+        "test",
       ).asCell();
       doc.setAtPath(["current"], {
         $alias: { cell: third.getAsDocLink().cell, path: [] },
@@ -383,7 +382,7 @@ describe("Schema Support", () => {
           bool: true,
         },
         "should handle primitive types 1",
-        getSpace("test"),
+        "test",
       );
 
       const schema = {
@@ -414,7 +413,7 @@ describe("Schema Support", () => {
           },
         },
         "should handle nested objects 1",
-        getSpace("test"),
+        "test",
       );
 
       const schema = {
@@ -448,7 +447,7 @@ describe("Schema Support", () => {
           items: [1, 2, 3],
         },
         "should handle arrays 1",
-        getSpace("test"),
+        "test",
       );
 
       const schema = {
@@ -479,7 +478,7 @@ describe("Schema Support", () => {
           },
         },
         "should return a Cell for reference properties 1",
-        getSpace("test"),
+        "test",
       );
 
       const schema = {
@@ -512,7 +511,7 @@ describe("Schema Support", () => {
           nested: { id: 2 },
         },
         "Should support a reference at the root 1",
-        getSpace("test"),
+        "test",
       );
 
       const schema = {
@@ -546,7 +545,7 @@ describe("Schema Support", () => {
           ],
         },
         "should handle self-references with $ref 1",
-        getSpace("test"),
+        "test",
       );
 
       const schema = {
@@ -582,7 +581,7 @@ describe("Schema Support", () => {
           },
         },
         "should preserve schema when using key 1",
-        getSpace("test"),
+        "test",
       );
 
       const schema = {
@@ -624,7 +623,7 @@ describe("Schema Support", () => {
       const c = getDoc(
         { value: 42 },
         "should select the correct candidate for primitive types (number) 1",
-        getSpace("test"),
+        "test",
       );
       const schema = {
         type: "object",
@@ -644,7 +643,7 @@ describe("Schema Support", () => {
       const c = getDoc(
         { value: "hello" },
         "should select the correct candidate for primitive types (string) 1",
-        getSpace("test"),
+        "test",
       );
       const schema = {
         type: "object",
@@ -664,7 +663,7 @@ describe("Schema Support", () => {
       const c = getDoc(
         { item: { a: 100, b: "merged" } },
         "should merge object candidates in anyOf 1",
-        getSpace("test"),
+        "test",
       );
       const schema = {
         type: "object",
@@ -697,7 +696,7 @@ describe("Schema Support", () => {
       const c = getDoc(
         { value: true },
         "should return undefined if no anyOf candidate matches 1",
-        getSpace("test"),
+        "test",
       );
       const schema = {
         type: "object",
@@ -717,7 +716,7 @@ describe("Schema Support", () => {
       const c = getDoc(
         { value: { a: 1 } },
         "should return undefined when value is an object 1",
-        getSpace("test"),
+        "test",
       );
       const schema = {
         type: "object",
@@ -737,7 +736,7 @@ describe("Schema Support", () => {
       const c = getDoc(
         { arr: [42, "test", true] },
         "should handle anyOf in array items 1",
-        getSpace("test"),
+        "test",
       );
       const schema = {
         type: "object",
@@ -764,7 +763,7 @@ describe("Schema Support", () => {
       const cObject = getDoc(
         { mixed: { foo: "bar" } },
         "should select the correct candidate when mixing 1",
-        getSpace("test"),
+        "test",
       );
       const schemaObject = {
         type: "object",
@@ -794,7 +793,7 @@ describe("Schema Support", () => {
       const cArray = getDoc(
         { mixed: ["bar", "baz"] },
         "should select the correct candidate when mixing 2",
-        getSpace("test"),
+        "test",
       );
       const schemaArray = {
         type: "object",
@@ -822,7 +821,7 @@ describe("Schema Support", () => {
         const c = getDoc(
           { data: [1, 2, 3] },
           "should handle multiple array type options 1",
-          getSpace("test"),
+          "test",
         );
         const schema = {
           type: "object",
@@ -845,7 +844,7 @@ describe("Schema Support", () => {
         const c = getDoc(
           { data: ["hello", 42, true] },
           "should merge item schemas when multiple array options 1",
-          getSpace("test"),
+          "test",
         );
         const schema = {
           type: "object",
@@ -874,7 +873,7 @@ describe("Schema Support", () => {
             ],
           },
           "should handle nested anyOf in array items 1",
-          getSpace("test"),
+          "test",
         );
         const schema = {
           type: "object",
@@ -915,7 +914,7 @@ describe("Schema Support", () => {
         const c = getDoc(
           { data: { key: "value" } },
           "should return empty array when no array options match 1",
-          getSpace("test"),
+          "test",
         );
         const schema = {
           type: "object",
@@ -950,7 +949,7 @@ describe("Schema Support", () => {
             ],
           },
           "should work for the vdom schema with $ref 1",
-          getSpace("test"),
+          "test",
         );
 
         const withLinks = getDoc(
@@ -962,7 +961,7 @@ describe("Schema Support", () => {
                 cell: getDoc(
                   { color: "red" },
                   "should work for the vdom schema with $ref 2",
-                  getSpace("test"),
+                  "test",
                 ),
                 path: [],
               },
@@ -977,13 +976,13 @@ describe("Schema Support", () => {
                       cell: getDoc(
                         { type: "text", value: "world" },
                         "should work for the vdom schema with $ref 4",
-                        getSpace("test"),
+                        "test",
                       ),
                       path: [],
                     },
                   ],
                   "should work for the vdom schema with $ref 5",
-                  getSpace("test"),
+                  "test",
                 ),
                 path: [],
               },
@@ -991,7 +990,7 @@ describe("Schema Support", () => {
             ],
           },
           "should work for the vdom schema with $ref 3",
-          getSpace("test"),
+          "test",
         );
 
         const vdomSchema = {
@@ -1058,7 +1057,7 @@ describe("Schema Support", () => {
           // age is not defined
         },
         "should use the default value when property is undefined 1",
-        getSpace("test"),
+        "test",
       );
 
       const schema = {
@@ -1083,7 +1082,7 @@ describe("Schema Support", () => {
           // profile is not defined
         },
         "should use the default value with asCell for objects 1",
-        getSpace("test"),
+        "test",
       );
 
       const schema = {
@@ -1128,7 +1127,7 @@ describe("Schema Support", () => {
           // tags is not defined
         },
         "should use the default value with asCell for arrays 1",
-        getSpace("test"),
+        "test",
       );
 
       const schema = {
@@ -1200,7 +1199,7 @@ describe("Schema Support", () => {
           },
         },
         "should use the default value with nested schema 1",
-        getSpace("test"),
+        "test",
       );
 
       const cell = c.asCell([], undefined, schema);
@@ -1224,7 +1223,7 @@ describe("Schema Support", () => {
           },
         },
         "should use the default value with nested schema 2",
-        getSpace("test"),
+        "test",
       );
 
       const cell2 = c2.asCell([], undefined, schema);
@@ -1284,7 +1283,7 @@ describe("Schema Support", () => {
           ],
         },
         "should use the default value for array items 1",
-        getSpace("test"),
+        "test",
       );
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
@@ -1298,7 +1297,7 @@ describe("Schema Support", () => {
       const c2 = getDoc(
         undefined,
         "should use the default value for array items 2",
-        getSpace("test"),
+        "test",
       );
       const cell2 = c2.asCell([], undefined, schema);
       const value2 = cell2.get();
@@ -1349,7 +1348,7 @@ describe("Schema Support", () => {
       const c = getDoc(
         undefined,
         "should handle default values with additionalProperties 1",
-        getSpace("test"),
+        "test",
       );
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
@@ -1392,7 +1391,7 @@ describe("Schema Support", () => {
       const c = getDoc(
         undefined,
         "should use the default value at the root level 1",
-        getSpace("test"),
+        "test",
       );
       const cell = c.asCell([], undefined, schema);
 
@@ -1408,7 +1407,7 @@ describe("Schema Support", () => {
 
       // Verify it can be updated
       cell.set(
-        getImmutableCell(getSpace("test"), {
+        getImmutableCell("test", {
           name: "Updated User",
           settings: { theme: "dark" },
         }),
@@ -1431,7 +1430,7 @@ describe("Schema Support", () => {
       const c = getDoc(
         undefined,
         "should make immutable cells if they provide the default value 1",
-        getSpace("test"),
+        "test",
       );
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
@@ -1439,7 +1438,7 @@ describe("Schema Support", () => {
       expect(value?.name?.get()).toBe("Default Name");
 
       cell.set(
-        getImmutableCell(getSpace("test"), { name: "Updated Name" }),
+        getImmutableCell("test", { name: "Updated Name" }),
       );
 
       // Expect the cell to be immutable
@@ -1458,14 +1457,14 @@ describe("Schema Support", () => {
       const c = getDoc(
         undefined,
         "should make mutable cells if parent provides the default value 1",
-        getSpace("test"),
+        "test",
       );
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
       expect(isCell(value.name)).toBe(true);
       expect(value.name.get()).toBe("First default name");
 
-      cell.set({ name: getImmutableCell(getSpace("test"), "Updated Name") });
+      cell.set({ name: getImmutableCell("test", "Updated Name") });
 
       // Expect the cell to be immutable
       expect(value.name.get()).toBe("Updated Name");
@@ -1480,7 +1479,7 @@ describe("Schema Support", () => {
           events: { $stream: true },
         },
         "should create a stream for properties marked with asStream 1",
-        getSpace("test"),
+        "test",
       );
 
       const schema = {
@@ -1515,7 +1514,7 @@ describe("Schema Support", () => {
           },
         },
         "should handle nested streams in objects 1",
-        getSpace("test"),
+        "test",
       );
 
       const schema = {
@@ -1553,7 +1552,7 @@ describe("Schema Support", () => {
           // Missing events property
         },
         "should not create a stream when property is missing 1",
-        getSpace("test"),
+        "test",
       );
 
       const schema = {
@@ -1581,7 +1580,7 @@ describe("Schema Support", () => {
           streamData: { $stream: true },
         },
         "should behave correctly when both asCell and asStream are in the schema 1",
-        getSpace("test"),
+        "test",
       );
 
       const schema = {

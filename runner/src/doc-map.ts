@@ -12,7 +12,6 @@ import {
 } from "./query-result-proxy.ts";
 import { isCell } from "./cell.ts";
 import { refer } from "merkle-reference";
-import { type Space } from "./space.ts";
 
 export type EntityId = {
   "/": string | Uint8Array;
@@ -107,9 +106,9 @@ export const getEntityId = (value: any): { "/": string } | undefined => {
  * A map that holds weak references to its values per space.
  */
 class SpaceAwareCleanableMap<T extends object> {
-  private maps = new Map<Space, CleanableMap<T>>();
+  private maps = new Map<string, CleanableMap<T>>();
 
-  set(space: Space, key: string, value: T) {
+  set(space: string, key: string, value: T) {
     let map = this.maps.get(space);
     if (!map) {
       map = new CleanableMap<T>();
@@ -118,7 +117,7 @@ class SpaceAwareCleanableMap<T extends object> {
     map.set(key, value);
   }
 
-  get(space: Space, key: string): T | undefined {
+  get(space: string, key: string): T | undefined {
     return this.maps.get(space)?.get(key);
   }
 }
@@ -170,7 +169,7 @@ class CleanableMap<T extends object> {
 }
 
 export function getDocByEntityId<T = any>(
-  space: Space,
+  space: string,
   entityId: EntityId | string,
   createIfNotFound = true,
   sourceIfCreated?: DocImpl<any>,
@@ -187,7 +186,7 @@ export function getDocByEntityId<T = any>(
 }
 
 export const setDocByEntityId = (
-  space: Space,
+  space: string,
   entityId: EntityId,
   doc: DocImpl<any>,
 ) => {

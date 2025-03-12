@@ -112,7 +112,7 @@ export async function startCharmIndexing(
 
       await Promise.all(
         batch.map((charm) =>
-          indexCharm(charm, jobId, context, charmManager.getReplica()!)
+          indexCharm(charm, jobId, context, charmManager.getSpace())
         ),
       );
 

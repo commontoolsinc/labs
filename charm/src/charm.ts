@@ -20,7 +20,7 @@ import {
   run,
   syncRecipeBlobby,
 } from "@commontools/runner";
-import { getSpace, storage } from "@commontools/runner";
+import { storage } from "@commontools/runner";
 import { DID, Identity } from "@commontools/identity";
 
 export type Charm = {
@@ -103,6 +103,7 @@ export interface Session {
 }
 
 export class CharmManager {
+  private space: string;
   private charmsDoc: DocImpl<DocLink[]>;
   private pinned: DocImpl<DocLink[]>;
 
@@ -112,6 +113,7 @@ export class CharmManager {
   constructor(
     private session: Session,
   ) {
+    this.space = this.session.space;
     this.charmsDoc = getDoc<DocLink[]>([], "charms", this.space);
     this.pinned = getDoc<DocLink[]>([], "pinned-charms", this.space);
     this.charms = this.charmsDoc.asCell([], undefined, charmListSchema);
@@ -120,12 +122,8 @@ export class CharmManager {
     this.pinnedCharms = this.pinned.asCell([], undefined, charmListSchema);
   }
 
-  get space() {
-    return getSpace(this.session.space);
-  }
-
-  getReplica(): string | undefined {
-    return this.space.uri;
+  getSpace(): string {
+    return this.space;
   }
 
   async synced(): Promise<void> {

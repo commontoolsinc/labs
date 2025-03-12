@@ -7,7 +7,6 @@ import {
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { idle } from "./scheduler.ts";
-import { Space } from "./space.ts";
 import { isStatic, markAsStatic } from "@commontools/builder";
 import { StorageProvider, StorageValue } from "./storage/base.ts";
 import { RemoteStorageProvider } from "./storage/remote.ts";
@@ -77,7 +76,7 @@ export interface Storage {
    * @returns Promise that resolves to the cell when it is loaded.
    */
   syncCellById<T = any>(
-    space: Space,
+    space: string,
     cell: EntityId | string,
     expectedInStorage?: boolean,
   ): Promise<DocImpl<T>> | DocImpl<T>;
@@ -147,7 +146,7 @@ class StorageImpl implements Storage {
   }
 
   // Map from space to storage provider. TODO: Push spaces to storage providers.
-  private storageProviders = new Map<Space, StorageProvider>();
+  private storageProviders = new Map<string, StorageProvider>();
   private remoteStorageUrl: URL | undefined;
 
   private signer: Signer | undefined;
@@ -200,7 +199,7 @@ class StorageImpl implements Storage {
   }
 
   syncCellById<T>(
-    space: Space,
+    space: string,
     id: EntityId | string,
     expectedInStorage: boolean = false,
   ): Promise<DocImpl<T>> | DocImpl<T> {
@@ -240,7 +239,7 @@ class StorageImpl implements Storage {
   }
 
   // TODO(seefeld,gozala): Should just be one again.
-  private _getStorageProviderForSpace(space: Space): StorageProvider {
+  private _getStorageProviderForSpace(space: string): StorageProvider {
     if (!space) throw new Error("No space set");
     if (!this.signer) throw new Error("No signer set");
 
@@ -260,11 +259,11 @@ class StorageImpl implements Storage {
 
         provider = new RemoteStorageProvider({
           address: new URL("/api/storage/memory", this.remoteStorageUrl!),
-          space: space.uri as `did:${string}:${string}`,
+          space: space as `did:${string}:${string}`,
           as: this.signer,
         });
       } else if (type === "memory") {
-        provider = new InMemoryStorageProvider(space.uri);
+        provider = new InMemoryStorageProvider(space);
       } else {
         throw new Error(`Unknown storage type: ${type}`);
       }
@@ -274,7 +273,7 @@ class StorageImpl implements Storage {
   }
 
   private _ensureIsSyncedById<T>(
-    space: Space,
+    space: string,
     id: EntityId | string,
     expectedInStorage: boolean = false,
   ): DocImpl<T> {
@@ -616,7 +615,7 @@ class StorageImpl implements Storage {
 
     // Sort storage jobs by space
     const storageJobsBySpace = new Map<
-      Space,
+      string,
       { entityId: EntityId; value: any }[]
     >();
     storageJobs.forEach((value, doc) => {

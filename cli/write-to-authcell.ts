@@ -1,10 +1,5 @@
 // Load .env file
-import {
-  type DocLink,
-  getCellFromDocLink,
-  getSpace,
-  storage,
-} from "@commontools/runner";
+import { type DocLink, getCellFromDocLink, storage } from "@commontools/runner";
 import { parseArgs } from "@std/cli/parse-args";
 
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ||
@@ -22,13 +17,13 @@ async function main(
     "/": "baedreiajxdvqjxmgpfzjix4h6vd4pl77unvet2k3acfvhb6ottafl7gpua",
   };
 
-  const doc = await storage.syncCellById(getSpace(replica), cellId, true);
+  const doc = await storage.syncCellById(replica, cellId, true);
   const authCellEntity = {
     cell: doc,
     path: ["argument", "auth"],
   } satisfies DocLink;
 
-  const authCell = getCellFromDocLink(getSpace(replica), authCellEntity);
+  const authCell = getCellFromDocLink(replica, authCellEntity);
   // authCell.set({ token: "wat" });
   await storage.synced();
 

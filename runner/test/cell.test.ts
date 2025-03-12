@@ -12,14 +12,13 @@ import {
   pushFrame,
 } from "@commontools/builder";
 import { addEventHandler, idle } from "../src/scheduler.ts";
-import { getSpace } from "../src/space.ts";
 
 describe("Cell", () => {
   it("should create a cell with initial value", () => {
     const c = getDoc(
       10,
       "should create a cell with initial value",
-      getSpace("test"),
+      "test",
     );
     expect(c.get()).toBe(10);
   });
@@ -28,7 +27,7 @@ describe("Cell", () => {
     const c = getDoc(
       10,
       "should update cell value using send",
-      getSpace("test"),
+      "test",
     );
     c.send(20);
     expect(c.get()).toBe(20);
@@ -38,7 +37,7 @@ describe("Cell", () => {
     const c = getDoc(
       { x: 1, y: 2 },
       "should create a proxy for the cell",
-      getSpace("test"),
+      "test",
     );
     const proxy = c.getAsQueryResult();
     expect(proxy.x).toBe(1);
@@ -49,7 +48,7 @@ describe("Cell", () => {
     const c = getDoc(
       { x: 1, y: 2 },
       "should update cell value through proxy",
-      getSpace("test"),
+      "test",
     );
     const proxy = c.getAsQueryResult();
     proxy.x = 10;
@@ -60,7 +59,7 @@ describe("Cell", () => {
     const c = getDoc(
       { a: { b: { c: 42 } } },
       "should get value at path",
-      getSpace("test"),
+      "test",
     );
     expect(c.getAtPath(["a", "b", "c"])).toBe(42);
   });
@@ -69,7 +68,7 @@ describe("Cell", () => {
     const c = getDoc(
       { a: { b: { c: 42 } } },
       "should set value at path",
-      getSpace("test"),
+      "test",
     );
     c.setAtPath(["a", "b", "c"], 100);
     expect(c.get()).toEqual({ a: { b: { c: 100 } } });
@@ -79,7 +78,7 @@ describe("Cell", () => {
     const c = getDoc(
       0,
       "should call updates callback when value changes",
-      getSpace("test"),
+      "test",
     );
     const values: number[] = [];
     const unsink = c.updates((value) => values.push(value));
@@ -94,13 +93,13 @@ describe("Cell", () => {
 
 describe("Cell utility functions", () => {
   it("should identify a cell", () => {
-    const c = getDoc(10, "should identify a cell", getSpace("test"));
+    const c = getDoc(10, "should identify a cell", "test");
     expect(isDoc(c)).toBe(true);
     expect(isDoc({})).toBe(false);
   });
 
   it("should identify a cell reference", () => {
-    const c = getDoc(10, "should identify a cell reference", getSpace("test"));
+    const c = getDoc(10, "should identify a cell reference", "test");
     const ref = { cell: c, path: ["x"] };
     expect(isDocLink(ref)).toBe(true);
     expect(isDocLink({})).toBe(false);
@@ -110,7 +109,7 @@ describe("Cell utility functions", () => {
     const c = getDoc(
       { x: 1 },
       "should identify a cell proxy",
-      getSpace("test"),
+      "test",
     );
     const proxy = c.getAsQueryResult();
     expect(isQueryResult(proxy)).toBe(true);
@@ -123,7 +122,7 @@ describe("createProxy", () => {
     const c = getDoc(
       { a: { b: { c: 42 } } },
       "should create a proxy for nested objects",
-      getSpace("test"),
+      "test",
     );
     const proxy = c.getAsQueryResult();
     expect(proxy.a.b.c).toBe(42);
@@ -133,7 +132,7 @@ describe("createProxy", () => {
     const c = getDoc(
       { x: 1 },
       "should support regular assigments",
-      getSpace("test"),
+      "test",
     );
     const proxy = c.getAsQueryResult();
     proxy.x = 2;
@@ -144,7 +143,7 @@ describe("createProxy", () => {
     const c = getDoc(
       { x: { $alias: { path: ["y"] } }, y: 42 },
       "should handle $alias in objects",
-      getSpace("test"),
+      "test",
     );
     const proxy = c.getAsQueryResult();
     expect(proxy.x).toBe(42);
@@ -154,7 +153,7 @@ describe("createProxy", () => {
     const c = getDoc(
       { x: { $alias: { path: ["y"] } }, y: 42 },
       "should handle aliases when writing",
-      getSpace("test"),
+      "test",
     );
     const proxy = c.getAsQueryResult();
     proxy.x = 100;
@@ -165,12 +164,12 @@ describe("createProxy", () => {
     const innerCell = getDoc(
       42,
       "should handle nested cells",
-      getSpace("test"),
+      "test",
     );
     const outerCell = getDoc(
       { x: innerCell },
       "should handle nested cells",
-      getSpace("test"),
+      "test",
     );
     const proxy = outerCell.getAsQueryResult();
     expect(proxy.x).toBe(42);
@@ -180,7 +179,7 @@ describe("createProxy", () => {
     const c = getDoc(
       { x: 42 },
       "should handle cell references",
-      getSpace("test"),
+      "test",
     );
     const ref = { cell: c, path: ["x"] };
     const proxy = c.getAsQueryResult();
@@ -192,7 +191,7 @@ describe("createProxy", () => {
     const c = getDoc(
       { x: 42 },
       "should handle infinite loops in cell references",
-      getSpace("test"),
+      "test",
     );
     const ref = { cell: c, path: ["x"] };
     const proxy = c.getAsQueryResult();
@@ -205,7 +204,7 @@ describe("createProxy", () => {
     const c = getDoc(
       { array: [1, 2, 3] },
       "should support modifying array methods and log reads and writes",
-      getSpace("test"),
+      "test",
     );
     const proxy = c.getAsQueryResult([], log);
     expect(log.reads.length).toBe(1);
@@ -228,7 +227,7 @@ describe("createProxy", () => {
     const c = getDoc(
       { data: {} },
       "should handle array methods on previously undefined arrays",
-      getSpace("test"),
+      "test",
     );
     const proxy = c.getAsQueryResult([], log);
 
@@ -258,7 +257,7 @@ describe("createProxy", () => {
     const c = getDoc(
       { array: [1, 2, 3, 4, 5] },
       "should handle array results from array methods",
-      getSpace("test"),
+      "test",
     );
     const proxy = c.getAsQueryResult();
 
@@ -286,7 +285,7 @@ describe("createProxy", () => {
     const c = getDoc(
       { nested: { arrays: [[1, 2], [3, 4]] } },
       "should maintain reactivity with nested array operations",
-      getSpace("test"),
+      "test",
     );
     const proxy = c.getAsQueryResult();
 
@@ -320,7 +319,7 @@ describe("createProxy", () => {
     const c = getDoc(
       { a: [] as number[] },
       "should support pop() and only read the popped element",
-      getSpace("test"),
+      "test",
     );
     const log: ReactivityLog = { reads: [], writes: [] };
     const proxy = c.getAsQueryResult([], log);
@@ -338,7 +337,7 @@ describe("createProxy", () => {
     const c = getDoc(
       { a: [] as number[] },
       "should correctly sort() with cell references",
-      getSpace("test"),
+      "test",
     );
     const log: ReactivityLog = { reads: [], writes: [] };
     const proxy = c.getAsQueryResult([], log);
@@ -352,7 +351,7 @@ describe("createProxy", () => {
     const c = getDoc<any>(
       [1, 2, 3],
       "should support readonly array methods and log reads",
-      getSpace("test"),
+      "test",
     );
     const log: ReactivityLog = { reads: [], writes: [] };
     const proxy = c.getAsQueryResult([], log);
@@ -367,7 +366,7 @@ describe("createProxy", () => {
     const c = getDoc(
       { a: [1, 2, 3] },
       "should support mapping over a proxied array",
-      getSpace("test"),
+      "test",
     );
     const log: ReactivityLog = { reads: [], writes: [] };
     const proxy = c.getAsQueryResult([], log);
@@ -386,7 +385,7 @@ describe("createProxy", () => {
     const c = getDoc(
       [1, 2, 3],
       "should allow changing array lengths by writing length",
-      getSpace("test"),
+      "test",
     );
     const log: ReactivityLog = { reads: [], writes: [] };
     const proxy = c.getAsQueryResult([], log);
@@ -411,7 +410,7 @@ describe("createProxy", () => {
     const c = getDoc(
       [1, 2, 3],
       "should allow changing array by splicing",
-      getSpace("test"),
+      "test",
     );
     const log: ReactivityLog = { reads: [], writes: [] };
     const proxy = c.getAsQueryResult([], log);
@@ -430,7 +429,7 @@ describe("asCell", () => {
     const c = getDoc(
       { x: 1, y: 2 },
       "should create a simple cell interface",
-      getSpace("test"),
+      "test",
     );
     const simpleCell = c.asCell();
 
@@ -447,7 +446,7 @@ describe("asCell", () => {
     const c = getDoc(
       { nested: { value: 42 } },
       "should create a simple cell for nested properties",
-      getSpace("test"),
+      "test",
     );
     const nestedCell = c.asCell(["nested", "value"]);
 
@@ -461,7 +460,7 @@ describe("asCell", () => {
     const c = getDoc(
       { a: { b: { c: 42 } } },
       "should support the key method for nested access",
-      getSpace("test"),
+      "test",
     );
     const simpleCell = c.asCell();
 
@@ -476,7 +475,7 @@ describe("asCell", () => {
     const c = getDoc(
       { stream: { $stream: true } },
       "should return a Sendable for stream aliases",
-      getSpace("test"),
+      "test",
     );
     const streamCell = c.asCell(["stream"]);
 
@@ -508,7 +507,7 @@ describe("asCell", () => {
     const c = getDoc(
       { a: { b: 42, c: 10 }, d: 5 },
       "should call sink only when the cell changes on the subpath",
-      getSpace("test"),
+      "test",
     );
     const values: number[] = [];
     c.asCell(["a", "b"]).sink((value) => {
@@ -541,7 +540,7 @@ describe("asCell with schema", () => {
         },
       },
       "should validate and transform according to schema",
-      getSpace("test"),
+      "test",
     );
 
     const schema = {
@@ -583,7 +582,7 @@ describe("asCell with schema", () => {
         },
       },
       "should return a Cell for reference properties",
-      getSpace("test"),
+      "test",
     );
 
     const schema = {
@@ -630,7 +629,7 @@ describe("asCell with schema", () => {
         ],
       },
       "should handle recursive schemas with $ref",
-      getSpace("test"),
+      "test",
     );
 
     const schema = {
@@ -671,7 +670,7 @@ describe("asCell with schema", () => {
         },
       },
       "should propagate schema through key() navigation",
-      getSpace("test"),
+      "test",
     );
 
     const schema = {
@@ -726,7 +725,7 @@ describe("asCell with schema", () => {
         },
       },
       "should fall back to query result proxy when no schema is present",
-      getSpace("test"),
+      "test",
     );
 
     const value = c.asCell().get();
@@ -746,7 +745,7 @@ describe("asCell with schema", () => {
         },
       },
       "should allow changing schema with asSchema",
-      getSpace("test"),
+      "test",
     );
 
     // Start with a schema that doesn't mark metadata as a reference
@@ -815,7 +814,7 @@ describe("asCell with schema", () => {
         },
       },
       "should handle objects with additional properties as references",
-      getSpace("test"),
+      "test",
     );
 
     const schema = {
@@ -861,7 +860,7 @@ describe("asCell with schema", () => {
         },
       },
       "should handle additional properties with just reference: true",
-      getSpace("test"),
+      "test",
     );
 
     const schema = {
@@ -896,7 +895,7 @@ describe("asCell with schema", () => {
     const innerCell = getDoc(
       { value: 42 },
       "should handle references in underlying cell",
-      getSpace("test"),
+      "test",
     );
 
     // Create a cell that uses that reference
@@ -907,7 +906,7 @@ describe("asCell with schema", () => {
         },
       },
       "should handle references in underlying cell",
-      getSpace("test"),
+      "test",
     );
 
     const schema = {
@@ -938,7 +937,7 @@ describe("asCell with schema", () => {
     const innerCell = getDoc(
       { value: 42 },
       "should handle all types of references in underlying cell: inner",
-      getSpace("test"),
+      "test",
     );
     const cellRef = { cell: innerCell, path: [] };
     const aliasRef = { $alias: { cell: innerCell, path: [] } };
@@ -953,7 +952,7 @@ describe("asCell with schema", () => {
         },
       },
       "should handle all types of references in underlying cell",
-      getSpace("test"),
+      "test",
     );
 
     const schema = {
@@ -992,14 +991,14 @@ describe("asCell with schema", () => {
     const innerCell = getDoc(
       { value: 42 },
       "should handle nested references: inner",
-      getSpace("test"),
+      "test",
     );
     const ref1 = { cell: innerCell, path: [] };
     const ref2 = {
       cell: getDoc(
         { ref: ref1 },
         "should handle nested references: ref2",
-        getSpace("test"),
+        "test",
       ),
       path: ["ref"],
     };
@@ -1007,7 +1006,7 @@ describe("asCell with schema", () => {
       cell: getDoc(
         { ref: ref2 },
         "should handle nested references: ref3",
-        getSpace("test"),
+        "test",
       ),
       path: ["ref"],
     };
@@ -1020,7 +1019,7 @@ describe("asCell with schema", () => {
         },
       },
       "should handle nested references",
-      getSpace("test"),
+      "test",
     );
 
     const schema = {
@@ -1063,7 +1062,7 @@ describe("asCell with schema", () => {
         ],
       },
       "should handle array schemas in key() navigation",
-      getSpace("test"),
+      "test",
     );
 
     const schema = {
@@ -1101,7 +1100,7 @@ describe("asCell with schema", () => {
         extra2: { value: 2 },
       },
       "should handle additionalProperties in key() navigation",
-      getSpace("test"),
+      "test",
     );
 
     const schema = {
@@ -1137,7 +1136,7 @@ describe("asCell with schema", () => {
         extra: { anything: "goes" },
       },
       "should handle additionalProperties: true in key() navigation",
-      getSpace("test"),
+      "test",
     );
 
     const schema = {
@@ -1167,7 +1166,7 @@ describe("asCell with schema", () => {
     const c = getDoc(
       { name: "test", age: 42, tags: ["a", "b"] },
       "should partially update object values using update method",
-      getSpace("test"),
+      "test",
     );
     const cell = c.asCell();
 
@@ -1188,7 +1187,7 @@ describe("asCell with schema", () => {
   });
 
   it("should push values to array using push method", () => {
-    const c = getDoc({ items: [1, 2, 3] }, "push-test", getSpace("test"));
+    const c = getDoc({ items: [1, 2, 3] }, "push-test", "test");
     const arrayCell = c.asCell(["items"]);
     expect(arrayCell.get()).toEqual([1, 2, 3]);
     arrayCell.push(4);
@@ -1199,7 +1198,7 @@ describe("asCell with schema", () => {
   });
 
   it("should throw when pushing values to `null`", () => {
-    const c = getDoc({ items: null }, "push-to-null", getSpace("test"));
+    const c = getDoc({ items: null }, "push-to-null", "test");
     const arrayCell = c.asCell(["items"]);
     expect(arrayCell.get()).toBeNull();
 
@@ -1212,7 +1211,7 @@ describe("asCell with schema", () => {
       default: [10, 20],
     } as JSONSchema;
 
-    const c = getDoc({}, "push-to-undefined-schema", getSpace("test"));
+    const c = getDoc({}, "push-to-undefined-schema", "test");
     const arrayCell = c.asCell(["items"], undefined, schema);
 
     arrayCell.push(30);
@@ -1226,14 +1225,14 @@ describe("asCell with schema", () => {
     const c = getDoc<{ items: { value: number }[] }>(
       { items: [] },
       "should push values that are already cells reusing the reference",
-      getSpace("test"),
+      "test",
     );
     const arrayCell = c.asCell().key("items");
 
     const d = getDoc<{ value: number }>(
       { value: 1 },
       "should push values that are already cells reusing the reference",
-      getSpace("test"),
+      "test",
     );
     const dCell = d.asCell();
 
@@ -1254,7 +1253,7 @@ describe("asCell with schema", () => {
     const c = getDoc(
       { value: "not an array" },
       "should handle push method on non-array values",
-      getSpace("test"),
+      "test",
     );
     const cell = c.asCell(["value"]);
 
@@ -1262,7 +1261,7 @@ describe("asCell with schema", () => {
   });
 
   it("should create new entities when pushing to array in frame, but reuse IDs", () => {
-    const c = getDoc({ items: [] }, "push-with-id", getSpace("test"));
+    const c = getDoc({ items: [] }, "push-with-id", "test");
     const arrayCell = c.asCell(["items"]);
     const frame = pushFrame();
     arrayCell.push({ value: 42 });
@@ -1278,11 +1277,11 @@ describe("asCell with schema", () => {
 
 describe("JSON.stringify bug", () => {
   it("should not modify the value of the cell", () => {
-    const c = getDoc({ result: { data: 1 } }, "json-test", getSpace("test"));
+    const c = getDoc({ result: { data: 1 } }, "json-test", "test");
     const d = getDoc(
       { internal: { "__#2": { cell: c, path: ["result"] } } },
       "json-test2",
-      getSpace("test"),
+      "test",
     );
     const e = getDoc(
       {
@@ -1291,7 +1290,7 @@ describe("JSON.stringify bug", () => {
         },
       },
       "json-test3",
-      getSpace("test"),
+      "test",
     );
     const proxy = e.getAsQueryResult();
     const json = JSON.stringify(proxy);

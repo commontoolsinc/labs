@@ -8,7 +8,6 @@ import {
 } from "../src/doc-map.ts";
 import { getDoc } from "../src/doc.ts";
 import { refer } from "merkle-reference";
-import { getSpace } from "../src/space.ts";
 
 describe("refer", () => {
   it("should create a reference that is equal to another reference with the same source", () => {
@@ -37,7 +36,7 @@ describe("cell-map", () => {
     });
 
     it("should return the entity ID for a cell", () => {
-      const c = getDoc({}, undefined, getSpace("test"));
+      const c = getDoc({}, undefined, "test");
       const id = getEntityId(c);
 
       expect(getEntityId(c)).toEqual(id);
@@ -47,7 +46,7 @@ describe("cell-map", () => {
     });
 
     it("should return a different entity ID for reference with paths", () => {
-      const c = getDoc({ foo: { bar: 42 } }, undefined, getSpace("test"));
+      const c = getDoc({ foo: { bar: 42 } }, undefined, "test");
       const id = getEntityId(c);
 
       expect(getEntityId(c.getAsQueryResult())).toEqual(id);
@@ -66,7 +65,7 @@ describe("cell-map", () => {
 
   describe("getCellByEntityId and setCellByEntityId", () => {
     it("should set and get a cell by entity ID", () => {
-      const c = getDoc({ value: 42 }, undefined, getSpace("test"));
+      const c = getDoc({ value: 42 }, undefined, "test");
 
       const retrievedCell = getDocByEntityId(c.space, c.entityId!);
 
@@ -75,14 +74,14 @@ describe("cell-map", () => {
 
     it("should return undefined for non-existent entity ID", () => {
       const nonExistentId = createRef() as EntityId;
-      expect(getDocByEntityId(getSpace("test"), nonExistentId, false))
+      expect(getDocByEntityId("test", nonExistentId, false))
         .toBeUndefined();
     });
   });
 
   describe("cells as JSON", () => {
     it("should serialize the entity ID", () => {
-      const c = getDoc({ value: 42 }, "cause", getSpace("test"));
+      const c = getDoc({ value: 42 }, "cause", "test");
       expect(JSON.stringify(c)).toEqual(JSON.stringify(c.entityId));
     });
   });

@@ -8,9 +8,7 @@
 import { Charm, CharmManager } from "../charm/src/charm.ts";
 import { Cell } from "../runner/src/cell.ts";
 import { DocImpl, getDoc } from "../runner/src/doc.ts";
-import { EntityId } from "../runner/src/doc-map.ts";
 import { storage } from "../runner/src/storage.ts";
-import { getSpace, Space } from "../runner/src/space.ts";
 import * as Session from "./session.ts";
 
 const TOOLSHED_API_URL = "https://toolshed.saga-castor.ts.net/";
@@ -22,7 +20,7 @@ const log: <T>(s: T, prefix?: string) => void = (s, prefix?) =>
       JSON.stringify(s, null, 2),
   );
 
-function createCell(space: Space): Cell<Charm> {
+function createCell(space: string): Cell<Charm> {
   const myCharm: Charm = {
     NAME: "mycharm",
     UI: "someui",
@@ -49,7 +47,7 @@ async function main() {
   log(charmManager, "charmManager");
 
   // let's try to create a cell
-  const space: Space = getSpace(session.space);
+  const space = charmManager.getSpace();
   const cell: Cell<Charm> = createCell(space);
   log(cell.get(), "cell value from Cell.get()");
 
