@@ -82,15 +82,16 @@ function log(charm?: Cell<Charm> | string, ...args: any[]) {
  * Updates a charm once by checking and refreshing auth token if needed
  * and triggering the googleUpdater flow
  */
-function updateOnce(charm: Cell<Charm>) {
-  const auth = charm.key("auth");
+function updateOnce(charm: Cell<Charm>, argument: Cell<any>) {
+  const auth = argument.key("auth");
   const googleUpdater = charm.key("googleUpdater");
 
   if (!isStream(googleUpdater) || !auth) return;
-
   const { token, expiresAt } = auth.get();
+  console.log({ token, expiresAt });
 
   if (token && expiresAt && Date.now() > expiresAt) {
+    console.log("refreshing");
     refreshAuthToken(auth, charm);
   } else if (token) {
     log(charm, "calling googleUpdater in charm");
@@ -151,17 +152,20 @@ async function watchCharm(charm: Cell<Charm>) {
   }
 
   const runningCharm = await manager?.get(charm, true);
-  if (!runningCharm) {
+  const argument = manager?.getArgument(charm);
+  if (!runningCharm || !argument) {
     log(charm, "charm not found");
     return;
   }
 
+  console.log("Watching new charm:", getEntityId(charm));
+
   // Initial update
-  updateOnce(runningCharm);
+  updateOnce(runningCharm, argument);
 
   // Schedule periodic updates
   setInterval(() => {
-    updateOnce(runningCharm);
+    updateOnce(runningCharm, argument);
   }, CHECK_INTERVAL);
 }
 
