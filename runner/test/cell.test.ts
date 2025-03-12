@@ -1243,7 +1243,7 @@ describe("asCell with schema", () => {
 
     expect(c.get().items).toEqual([
       { cell: d, path: [] },
-      { cell: d, path: [] },
+      dCell.getAsDocLink(),
       { cell: d, path: [] },
       { cell: d, path: [] },
     ]);
