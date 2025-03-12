@@ -8,7 +8,6 @@
 import { Charm, CharmManager } from "../charm/src/charm.ts";
 import { Cell } from "../runner/src/cell.ts";
 import { DocImpl, getDoc } from "../runner/src/doc.ts";
-import { EntityId } from "../runner/src/doc-map.ts";
 import { storage } from "../runner/src/storage.ts";
 import * as Session from "./session.ts";
 
@@ -48,7 +47,7 @@ async function main() {
   log(charmManager, "charmManager");
 
   // let's try to create a cell
-  const space: Space = manager.getSpace();
+  const space = charmManager.getSpace();
   const cell: Cell<Charm> = createCell(space);
   log(cell.get(), "cell value from Cell.get()");
 
