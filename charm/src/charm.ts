@@ -356,8 +356,8 @@ export class CharmManager {
     const resultDoc = run(recipe, inputs, doc);
 
     const charm = resultDoc.asCell([], undefined, charmSchema);
-    await this.add([charm]);
     await this.syncRecipe(charm);
+    await this.add([charm]);
     return charm;
   }
 
