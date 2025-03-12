@@ -39,13 +39,15 @@ export async function snapshot(page: Page | undefined, snapshotName: string) {
 export const sleep = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-export async function tryClick(
-  el?: ElementHandle | null,
-  page?: Page,
+// Waits for `selector` element to exist,
+// and then click.
+export async function waitForSelectorClick(
+  page: Page,
+  selector: string,
 ): Promise<void> {
-  await snapshot(page, "try_click_element");
-  assert(el, "Element does not exist or is not clickable");
-
+  console.log(`Waiting for "${selector}"...`);
+  const el = await page.waitForSelector(selector);
+  console.log(`Found "${selector}"! Clicking...`);
   await el.click();
 }
 
@@ -62,42 +64,44 @@ export const login = async (page: Page) => {
 
   // If not logged in, see if any credential data is
   // persisting. If so, destroy local data.
-  let button = await page.$("button[aria-label='clear-credentials']");
-  if (button) {
-    await tryClick(button, page);
+  await sleep(500);
+  const clearCredsButton = await page.$(
+    "button[aria-label='clear-credentials']",
+  );
+  if (clearCredsButton) {
+    await clearCredsButton.click();
   }
 
   // Try log in
   console.log("Logging in");
 
   // Click the first button, "register"
-  button = await page.$("button[aria-label='register']");
-  await tryClick(button, page);
+  await waitForSelectorClick(page, "button[aria-label='register']");
 
   // Click the first button, "register with passphrase"
-  button = await page.$("button[aria-label='register-with-passphrase']");
-  await tryClick(button, page);
+  await waitForSelectorClick(
+    page,
+    "button[aria-label='register-with-passphrase']",
+  );
 
   // Get the mnemonic from textarea.
-  let input = await page.$("textarea[aria-label='mnemonic']");
+  let input = await page.waitForSelector("textarea[aria-label='mnemonic']");
   const mnemonic = await input!.evaluate((textarea: HTMLInputElement) =>
     textarea.value
   );
 
   // Click the SECOND button, "continue to login"
-  button = await page.$("button[aria-label='continue-login']");
-  await tryClick(button, page);
+  await waitForSelectorClick(page, "button[aria-label='continue-login']");
 
   // Paste the mnemonic in the input.
-  input = await page.$("input[aria-label='enter-passphrase']");
+  input = await page.waitForSelector("input[aria-label='enter-passphrase']");
   await input!.evaluate(
     (input: HTMLInputElement, mnemonic: string) => input.value = mnemonic,
     { args: [mnemonic] },
   );
 
   // Click the only button, "login"
-  button = await page.$("button[aria-label='login']");
-  await tryClick(button, page);
+  await waitForSelectorClick(page, "button[aria-label='login']");
 };
 
 export const waitForSelectorWithText = async (
@@ -106,17 +110,13 @@ export const waitForSelectorWithText = async (
   text: string,
 ): Promise<ElementHandle> => {
   const retries = 30;
-  const timeout = 200;
-
+  const timeout = 1000;
   for (let i = 0; i < retries; i++) {
-    const el = await page.$(selector);
-    if (!el) {
-      await sleep(timeout);
-      continue;
-    }
+    const el = await page.waitForSelector(selector);
     if ((await el.innerText()) === text) {
       return el;
     }
+    await sleep(timeout);
   }
   throw new Error(`Timed out waiting for "${selector}" to have text "${text}"`);
 };

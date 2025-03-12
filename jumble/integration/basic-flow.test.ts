@@ -14,6 +14,7 @@ import {
   Mutable,
   sleep,
   snapshot,
+  waitForSelectorClick,
   waitForSelectorWithText,
 } from "./utils.ts";
 
@@ -145,10 +146,10 @@ Deno.test({
           await sleep(1000);
           console.log("Clicking button");
 
-          const button = await page.waitForSelector(
+          await waitForSelectorClick(
+            page,
             "div[aria-label='charm-content'] button",
           );
-          await button.click();
           await snapshot(page, "Button clicked");
 
           // Add more wait time after click
