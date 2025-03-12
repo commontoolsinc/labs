@@ -45,7 +45,8 @@ export function User() {
     return () => setDid(undefined);
   }, [session]);
 
-  let h = "0", s = "50%", l = "50%";
+  let h = "0", s = "50%";
+  const l = "50%";
   if (did) {
     const index = did.length - 4;
     h = `${did.charCodeAt(index) + did.charCodeAt(index + 1)}`;
@@ -101,7 +102,7 @@ export function User() {
       // Clean buffer - remove activities older than 2 seconds
       const now = Date.now();
       activityBufferRef.current = activityBufferRef.current.filter(
-        (activity) => now - activity.timestamp < 2000,
+        (activity: any) => now - activity.timestamp < 2000,
       );
 
       // Determine animation state based on buffer
@@ -109,12 +110,12 @@ export function User() {
 
       // Count receive and send activities
       const receiveActivities = activityBufferRef.current.filter(
-        (activity) =>
+        (activity: any) =>
           now - activity.timestamp < 1000 && activity.type === "receive",
       ).length;
 
       const sendActivities = activityBufferRef.current.filter(
-        (activity) =>
+        (activity: any) =>
           now - activity.timestamp < 1000 && activity.type === "send",
       ).length;
 
