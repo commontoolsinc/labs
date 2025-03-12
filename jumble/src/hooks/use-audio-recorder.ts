@@ -1,20 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-// Define NodeJS.Timeout for Deno compatibility
-declare global {
-  namespace NodeJS {
-    interface Timeout {
-      _idleTimeout: number;
-      _idlePrev: object;
-      _idleNext: object;
-      _idleStart: number;
-      _onTimeout: () => void;
-      _timerArgs: unknown[];
-      _repeat: number | null;
-    }
-  }
-}
-
 interface AudioRecorderOptions {
   transcribe?: boolean;
   url?: string;

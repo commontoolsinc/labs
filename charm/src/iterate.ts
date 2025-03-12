@@ -1,4 +1,4 @@
-import { addRecipe, Cell, EntityId } from "@commontools/runner";
+import { registerNewRecipe, Cell, EntityId } from "@commontools/runner";
 import { LLMClient } from "@commontools/llm-client";
 import { createJsonSchema, JSONSchema } from "@commontools/builder";
 
@@ -7,6 +7,7 @@ import { Charm, CharmManager } from "./charm.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import { injectUserCode } from "./iframe/static.ts";
+import { isCell } from "../../runner/src/cell.ts";
 
 const llm = new LLMClient(LLMClient.DEFAULT_URL);
 
@@ -32,31 +33,25 @@ const genSrc = async ({
     response = RESPONSE_PREFILL + response;
   }
 
-  const source = injectUserCode(response.split(RESPONSE_PREFILL)[1].split("\n```")[0]);
+  const source = injectUserCode(
+    response.split(RESPONSE_PREFILL)[1].split("\n```")[0],
+  );
   return source;
 };
 
 export async function iterate(
   charmManager: CharmManager,
-  charm: Cell<Charm> | null,
-  value: string,
+  charm: Cell<Charm>,
+  spec: string,
   shiftKey: boolean,
   model?: string,
-): Promise<EntityId | undefined> {
-  if (!charm) {
-    console.error("FIXME, no charm, what should we do?");
-    return;
-  }
-
+): Promise<Cell<Charm>> {
   const { iframe } = getIframeRecipe(charm);
   if (!iframe) {
-    console.error(
-      "Cannot iterate on a non-iframe. Must extend instead.",
-    );
-    return;
+    throw new Error("Cannot iterate on a non-iframe. Must extend instead.");
   }
 
-  const newSpec = shiftKey ? iframe.spec + "\n" + value : value;
+  const newSpec = shiftKey ? iframe.spec + "\n" + spec : spec;
 
   const newIFrameSrc = await genSrc({
     src: iframe.src,
@@ -66,21 +61,7 @@ export async function iterate(
     model: model,
   });
 
-  return saveNewRecipeVersion(charmManager, charm, newIFrameSrc, newSpec);
-}
-
-export async function extend(
-  charmManager: CharmManager,
-  charm: Cell<Charm> | null,
-  value: string,
-  model?: string,
-): Promise<EntityId | undefined> {
-  if (!charm) {
-    console.error("FIXME, no charm, what should we do?");
-    return;
-  }
-
-  return await castRecipeOnCell(charmManager, charm, value);
+  return generateNewRecipeVersion(charmManager, charm, newIFrameSrc, newSpec);
 }
 
 export function extractTitle(src: string, defaultTitle: string): string {
@@ -89,7 +70,7 @@ export function extractTitle(src: string, defaultTitle: string): string {
   return htmlTitleMatch || jsTitleMatch || defaultTitle;
 }
 
-export const saveNewRecipeVersion = async (
+export const generateNewRecipeVersion = (
   charmManager: CharmManager,
   charm: Cell<Charm>,
   newIFrameSrc: string,
@@ -98,11 +79,10 @@ export const saveNewRecipeVersion = async (
   const { recipeId, iframe } = getIframeRecipe(charm);
 
   if (!recipeId || !iframe) {
-    console.error("FIXME, no recipeId or iframe, what should we do?");
-    return;
+    throw new Error("FIXME, no recipeId or iframe, what should we do?");
   }
 
-  const name = extractTitle(newIFrameSrc, '<unknown>');
+  const name = extractTitle(newIFrameSrc, "<unknown>");
   const newRecipeSrc = buildFullRecipe({
     ...iframe,
     src: newIFrameSrc,
@@ -110,7 +90,7 @@ export const saveNewRecipeVersion = async (
     name,
   });
 
-  return await compileAndRunRecipe(
+  return compileAndRunRecipe(
     charmManager,
     newRecipeSrc,
     newSpec,
@@ -119,38 +99,17 @@ export const saveNewRecipeVersion = async (
   );
 };
 
-export async function castRecipeOnCell(
-  charmManager: CharmManager,
-  cell: Cell<any>,
-  newSpec: string,
-): Promise<EntityId | undefined> {
-  const schema = { ...cell.schema, description: newSpec };
-  console.log("schema", schema);
-
-  const newIFrameSrc = await genSrc({ newSpec, schema });
-  const name = extractTitle(newIFrameSrc, '<unknown>');
-  const newRecipeSrc = buildFullRecipe({
-    src: newIFrameSrc,
-    spec: newSpec,
-    argumentSchema: schema,
-    resultSchema: {},
-    name,
-  });
-
-  return await compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, cell);
-}
-
 export async function castNewRecipe(
   charmManager: CharmManager,
   data: any,
   newSpec: string,
-): Promise<EntityId | undefined> {
-  const schema = createJsonSchema({}, data);
+): Promise<Cell<Charm>> {
+  const schema = isCell(data) ? { ...data.schema } : createJsonSchema({}, data);
   schema.description = newSpec;
   console.log("schema", schema);
 
   const newIFrameSrc = await genSrc({ newSpec, schema });
-  const name = extractTitle(newIFrameSrc, '<unknown>');
+  const name = extractTitle(newIFrameSrc, "<unknown>");
   const newRecipeSrc = buildFullRecipe({
     src: newIFrameSrc,
     spec: newSpec,
@@ -159,7 +118,7 @@ export async function castNewRecipe(
     name,
   });
 
-  return await compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, data);
+  return compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, data);
 }
 
 export async function compileRecipe(
@@ -169,16 +128,14 @@ export async function compileRecipe(
 ) {
   const { exports, errors } = await tsToExports(recipeSrc);
   if (errors) {
-    console.error("Compilation errors in recipe:", errors);
-    return;
+    throw new Error("Compilation errors in recipe");
   }
   const recipe = exports.default;
   if (!recipe) {
-    console.error("No default recipe found in the compiled exports.");
-    return;
+    throw new Error("No default recipe found in the compiled exports.");
   }
   const parentsIds = parents?.map((id) => id.toString());
-  addRecipe(recipe, recipeSrc, spec, parentsIds);
+  registerNewRecipe(recipe, recipeSrc, spec, parentsIds);
   return recipe;
 }
 
@@ -188,15 +145,11 @@ export async function compileAndRunRecipe(
   spec: string,
   runOptions: any,
   parents?: string[],
-): Promise<EntityId | undefined> {
+): Promise<Cell<Charm>> {
   const recipe = await compileRecipe(recipeSrc, spec, parents);
   if (!recipe) {
-    return;
+    throw new Error("Failed to compile recipe");
   }
 
-  const newCharm = await charmManager.runPersistent(recipe, runOptions);
-  await charmManager.add([newCharm]);
-  await charmManager.syncRecipe(newCharm);
-
-  return newCharm.entityId;
+  return charmManager.runPersistent(recipe, runOptions);
 }

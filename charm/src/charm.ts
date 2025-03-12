@@ -161,6 +161,9 @@ export class CharmManager {
     return this.pinnedCharms;
   }
 
+  // FIXME(ja): this says it returns a list of charm, but it isn't! you will
+  // have to call .get() to get the actual charm (this is missing the schema)
+  // how can we fix the type here?
   getCharms(): Cell<Cell<Charm>[]> {
     // Start syncing if not already syncing. Will trigger a change to the list
     // once loaded.
@@ -168,7 +171,7 @@ export class CharmManager {
     return this.charms;
   }
 
-  async add(newCharms: Cell<Charm>[]) {
+  private async add(newCharms: Cell<Charm>[]) {
     await storage.syncCell(this.charmsDoc);
     await idle();
 
@@ -181,6 +184,8 @@ export class CharmManager {
     await idle();
   }
 
+  // FIXME(ja): if we are already running the charm, can we just return it?
+  // if a charm has sideeffects we might multiple versions...
   async get<T = Charm>(
     id: string | Cell<Charm>,
     runIt: boolean = true,
@@ -291,46 +296,6 @@ export class CharmManager {
   ): Promise<Cell<Charm>> {
     await idle();
 
-    // Fill in missing parameters from other charms. It's a simple match on
-    // hashtags: For each top-level argument prop that has a hashtag in the
-    // description, look for a charm that has a top-level output prop with the
-    // same hashtag in the description, or has the hashtag in its own description.
-    // If there is a match, assign the first one to the input property.
-
-    // TODO(seefeld,ben): This should be in spellcaster.
-    /*
-    if (
-      !isDoc(inputs) && // Adding to a cell input is not supported yet
-      !isDocLink(inputs) && // Neither for cell reference
-      recipe.argumentSchema &&
-      (recipe.argumentSchema as any).type === "object"
-    ) {
-      const properties = (recipe.argumentSchema as any).properties;
-      const inputProperties =
-        typeof inputs === "object" && inputs !== null ? Object.keys(inputs) : [];
-      for (const key in properties) {
-        if (!(key in inputProperties) && properties[key].description?.includes("#")) {
-          const hashtag = properties[key].description.match(/#(\w+)/)?.[1];
-          if (hashtag) {
-            this.charms.get().forEach((charm) => {
-              const type = charm.getAsDocLink().cell?.sourceCell?.get()?.[TYPE];
-              const recipe = getRecipe(type);
-              const charmProperties = (recipe?.resultSchema as any)?.properties as any;
-              const matchingProperty = Object.keys(charmProperties ?? {}).find((property) =>
-                charmProperties[property].description?.includes(`#${hashtag}`),
-              );
-              if (matchingProperty) {
-                inputs = {
-                  ...inputs,
-                  [key]: { $alias: { cell: charm.getAsDocLink().cell, path: [matchingProperty] } },
-                };
-              }
-            });
-          }
-        }
-      }
-    }*/
-
     const syncAllMentionedCells = (
       value: any,
       promises: any[] = [],
@@ -360,7 +325,7 @@ export class CharmManager {
   }
 
   // FIXME(JA): this really really really needs to be revisited
-  async syncRecipe(charm: Cell<Charm>): Promise<string | undefined> {
+  async syncRecipe(charm: Cell<Charm>): Promise<string> {
     const recipeId = charm.getSourceCell()?.get()?.[TYPE];
     if (!recipeId) throw new Error("charm missing recipe ID");
 
@@ -372,7 +337,7 @@ export class CharmManager {
   }
 
   async syncRecipeCells(recipeId: string) {
-    // NOTE(ja): I don't think this actually syncs the recipe
+    // NOTE(ja): this doesn't sync recipe to storage
     if (recipeId) await storage.syncCellById(this.space, { "/": recipeId });
   }
 

@@ -6,7 +6,6 @@
     "jsr:@db/sqlite@0.12": "0.12.0",
     "jsr:@deno-library/progress@^1.5.1": "1.5.1",
     "jsr:@denosaurs/plug@1": "1.0.6",
-    "jsr:@hono/hono@^4.6.9": "4.7.4",
     "jsr:@luca/esbuild-deno-loader@*": "0.11.1",
     "jsr:@std/assert@0.217": "0.217.0",
     "jsr:@std/assert@0.221": "0.221.0",
@@ -172,9 +171,6 @@
         "jsr:@std/fs@0.221",
         "jsr:@std/path@0.221"
       ]
-    },
-    "@hono/hono@4.7.4": {
-      "integrity": "c03c9cbe0fbfc4e51f3fee6502a7903aa4f9ef7c2c98635607b15eee14258825"
     },
     "@luca/esbuild-deno-loader@0.11.1": {
       "integrity": "dc020d16d75b591f679f6b9288b10f38bdb4f24345edb2f5732affa1d9885267",
@@ -6859,21 +6855,8 @@
       "memory": {
         "dependencies": [
           "jsr:@db/sqlite@0.12",
-          "jsr:@hono/hono@^4.6.9",
-          "jsr:@std/assert@1",
-          "jsr:@std/encoding@^1.0.5",
-          "jsr:@std/fs@^1.0.10",
-          "jsr:@std/path@^1.0.8",
-          "npm:@opentelemetry/api@^1.9.0",
-          "npm:merkle-reference@^2.0.1",
-          "npm:multiformats@^13.3.2"
-        ],
-        "packageJson": {
-          "dependencies": [
-            "npm:merkle-reference@^2.0.1",
-            "npm:multiformats@^13.3.2"
-          ]
-        }
+          "npm:@opentelemetry/api@^1.9.0"
+        ]
       },
       "toolshed": {
         "dependencies": [

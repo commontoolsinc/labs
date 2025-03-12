@@ -1,11 +1,6 @@
 export type DID = `did:${string}:${string}`;
 export type DIDKey = `did:key:${string}`;
 
-export type KeyPair = {
-  privateKey: Signer;
-  publicKey: Verifier;
-};
-
 /**
  * Some principal identified via DID identifier.
  */

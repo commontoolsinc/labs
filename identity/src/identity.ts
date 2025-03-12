@@ -1,5 +1,6 @@
 import { Ed25519Signer, Ed25519Verifier } from "./ed25519/index.ts";
 import { AsBytes, DIDKey, KeyPairRaw, Signer, Verifier } from "./interface.ts";
+import { base64pad } from "multiformats/bases/base64";
 import { hash } from "./utils.ts";
 
 const textEncoder = new TextEncoder();
@@ -8,10 +9,10 @@ const textEncoder = new TextEncoder();
 //
 // Additional keys can be deterministically derived from an identity.
 export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
-  private keypair: Ed25519Signer<ID>;
+  #keypair: Ed25519Signer<ID>;
   #verifier: VerifierIdentity<ID> | null = null;
   constructor(keypair: Ed25519Signer<ID>) {
-    this.keypair = keypair;
+    this.#keypair = keypair;
   }
 
   did() {
@@ -20,7 +21,7 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
 
   get verifier(): VerifierIdentity<ID> {
     if (!this.#verifier) {
-      this.#verifier = new VerifierIdentity(this.keypair.verifier);
+      this.#verifier = new VerifierIdentity(this.#keypair.verifier);
     }
 
     return this.#verifier;
@@ -28,12 +29,12 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
 
   // Sign `data` with this identity.
   sign<T>(payload: AsBytes<T>) {
-    return this.keypair.sign(payload);
+    return this.#keypair.sign(payload);
   }
 
   // Serialize this identity for storage.
   serialize(): KeyPairRaw {
-    return this.keypair.serialize();
+    return this.#keypair.serialize();
   }
 
   // Derive a new `Identity` given a seed string.
@@ -80,6 +81,12 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return new Identity(await Ed25519Signer.fromRaw<ID>(rawPrivateKey));
   }
 
+  static fromString<ID extends DIDKey>(
+    stringKey: string,
+  ): Promise<Identity<ID>> {
+    return Identity.fromRaw(base64pad.decode(stringKey));
+  }
+
   // Deserialize `input` from storage into an `Identity`.
   static async deserialize<ID extends DIDKey>(
     input: any,
@@ -89,18 +96,18 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
 }
 
 export class VerifierIdentity<ID extends DIDKey> implements Verifier<ID> {
-  private inner: Verifier<ID>;
+  #inner: Verifier<ID>;
 
   constructor(inner: Verifier<ID>) {
-    this.inner = inner;
+    this.#inner = inner;
   }
 
   verify(auth: { payload: Uint8Array; signature: Uint8Array }) {
-    return this.inner.verify(auth);
+    return this.#inner.verify(auth);
   }
 
   did(): ID {
-    return this.inner.did();
+    return this.#inner.did();
   }
 
   static async fromDid<ID extends DIDKey>(

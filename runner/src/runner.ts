@@ -38,7 +38,7 @@ import {
 import { getModuleByRef } from "./module.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
-import { addRecipe, getRecipe, getRecipeId } from "./recipe-map.ts";
+import { registerRecipe, getRecipe, getRecipeId, registerNewRecipe } from "./recipe-map.ts";
 import { isCell } from "./cell.ts";
 import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import { getDocLinkOrThrow } from "./query-result-proxy.ts";
@@ -138,7 +138,7 @@ export function run<T, R = any>(
     recipe = recipeOrModule as Recipe;
   }
 
-  recipeId ??= addRecipe(recipe);
+  recipeId ??= registerNewRecipe(recipe);
 
   if (cancels.has(resultCell)) {
     // If it's already running and no new recipe or argument are given,
@@ -175,10 +175,10 @@ export function run<T, R = any>(
     const ref = isDocLink(argument)
       ? argument
       : isCell(argument)
-      ? argument.getAsDocLink()
-      : isQueryResultForDereferencing(argument)
-      ? getDocLinkOrThrow(argument)
-      : ({ cell: argument, path: [] } satisfies DocLink);
+        ? argument.getAsDocLink()
+        : isQueryResultForDereferencing(argument)
+          ? getDocLinkOrThrow(argument)
+          : ({ cell: argument, path: [] } satisfies DocLink);
 
     // Get value, but just to get the keys. Throw if it isn't an object.
     const value = ref.cell.getAsQueryResult(ref.path);
@@ -464,11 +464,11 @@ function instantiateJavaScriptNode(
           resultRecipe,
           undefined,
           resultCell ??
-            getDoc(
-              undefined,
-              { resultFor: { inputs, outputs, fn: fn.toString() } },
-              processCell.space,
-            ),
+          getDoc(
+            undefined,
+            { resultFor: { inputs, outputs, fn: fn.toString() } },
+            processCell.space,
+          ),
         );
         addCancel(cancels.get(resultCell));
 

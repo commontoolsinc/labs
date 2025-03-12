@@ -1,13 +1,14 @@
 import { hc } from "@hono/hono/client";
 import { AppType } from "@/app.ts";
-import { Consumer, Principal } from "@commontools/memory";
+import { Consumer } from "@commontools/memory";
+import { Identity } from "@commontools/identity";
 import { Memory, memory } from "@/routes/storage/memory.ts";
 
 // Create a spellbook consumer.
 const spellbook = Consumer.open({
   // Principal is currently derived from `sha256("spellbook")`
-  as: Principal.ED25519Signer.fromString(
-    `MgCYyua1r3jXdanP3MpwJ+GeHk0astGjkoYr0ZL7tk+yCq+0BZORSYOUUzdrPhWEPuh+bjCyQlFtgel4F+kQds5xG45M=`,
+  as: await Identity.fromString(
+    "MMrmta9413Wpz9zKcCfhnh5NGrLRo5KGK9GS+7ZPsgqs=",
   ),
   session: memory.session(),
 });

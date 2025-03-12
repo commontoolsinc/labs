@@ -24,25 +24,25 @@ import { wordlist } from "@scure/bip39/wordlists/english";
 //
 // [0]: https://caniuse.com/mdn-api_subtlecrypto_sign_ed25519
 export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
-  private impl: NativeEd25519Signer<ID> | NobleEd25519Signer<ID>;
+  #impl: NativeEd25519Signer<ID> | NobleEd25519Signer<ID>;
   constructor(impl: NativeEd25519Signer<ID> | NobleEd25519Signer<ID>) {
-    this.impl = impl;
+    this.#impl = impl;
   }
 
   get verifier(): Verifier<ID> {
-    return this.impl.verifier;
+    return this.#impl.verifier;
   }
 
   serialize(): KeyPairRaw {
-    return this.impl.serialize();
+    return this.#impl.serialize();
   }
 
   did() {
-    return this.impl.did();
+    return this.#impl.did();
   }
 
   sign<T>(payload: AsBytes<T>) {
-    return this.impl.sign(payload);
+    return this.#impl.sign(payload);
   }
 
   static async fromRaw<ID extends DIDKey>(
@@ -93,17 +93,17 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
 }
 
 export class Ed25519Verifier<ID extends DIDKey> implements Verifier<ID> {
-  private impl: NativeEd25519Verifier<ID> | NobleEd25519Verifier<ID>;
+  #impl: NativeEd25519Verifier<ID> | NobleEd25519Verifier<ID>;
   constructor(impl: NativeEd25519Verifier<ID> | NobleEd25519Verifier<ID>) {
-    this.impl = impl;
+    this.#impl = impl;
   }
 
   verify(auth: { payload: Uint8Array; signature: Uint8Array }) {
-    return this.impl.verify(auth);
+    return this.#impl.verify(auth);
   }
 
   did() {
-    return this.impl.did();
+    return this.#impl.did();
   }
 
   static async fromDid<ID extends DIDKey>(
