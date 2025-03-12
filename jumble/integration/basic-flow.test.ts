@@ -28,7 +28,7 @@ console.log(`FRONTEND_URL=${FRONTEND_URL}`);
 describe("integration", () => {
   let browser: Browser | void = undefined;
   let page: Page | void = undefined;
-  let testCharm: { charmId: string; space: string } | void = undefined;
+  let testCharm: { charmId: string; name: string } | void = undefined;
 
   beforeAll(async () => {
     testCharm = await addCharm(TOOLSHED_API_URL);
@@ -61,7 +61,7 @@ describe("integration", () => {
     );
 
     await page.goto(
-      `${FRONTEND_URL}${testCharm.space}/${testCharm.charmId}`,
+      `${FRONTEND_URL}${testCharm.name}/${testCharm.charmId}`,
     );
     await snapshot(page, "Waiting for charm to render");
 
@@ -100,7 +100,7 @@ describe("integration", () => {
     console.log("Inspecting charm to verify updates propagated from browser.");
     const charm = await inspectCharm(
       TOOLSHED_API_URL,
-      testCharm.space,
+      testCharm.name,
       testCharm.charmId,
     );
 

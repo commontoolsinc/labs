@@ -73,3 +73,25 @@ test("Access.authorize <-> Access.claim", async () => {
 
   assertMatch(unauthorized?.error?.message ?? "", /Authorization does not/);
 });
+
+test("Fail authorization if issuer is not a subject", async () => {
+  const invocation: Invocation = {
+    iss: bob.did(),
+    cmd: "/test/run",
+    sub: alice.did(),
+    args: {},
+    prf: [],
+  };
+
+  const result = await Access.authorize([refer(invocation)], bob);
+  assert(result.ok, "authorization was issued");
+  const authorization = result.ok;
+
+  const claim = await Access.claim(invocation, authorization);
+  assertMatch(
+    claim.error?.message ?? "",
+    new RegExp(
+      `Principal ${bob.did()} has no authority over ${alice.did()} space`,
+    ),
+  );
+});

@@ -1017,8 +1017,8 @@ export function getCommands(deps: CommandContext): CommandItem[] {
         {
           id: "switch-replica",
           type: "input",
-          title: "Switch Replica",
-          placeholder: "Enter replica name",
+          title: "Switch Space",
+          placeholder: "Enter space name",
           handler: (input) => {
             if (input) {
               globalThis.location.href = `/${input}`;

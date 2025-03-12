@@ -42,7 +42,7 @@ Deno.test("test transaction", async (t) => {
   try {
     const memory = Consumer.connect({
       address,
-      as: alice,
+      as: space,
     });
     const home = memory.mount(space.did());
 
@@ -53,18 +53,14 @@ Deno.test("test transaction", async (t) => {
     });
 
     const transaction = TransactionBuilder.create({
-      issuer: alice.did(),
+      issuer: space.did(),
       subject: space.did(),
       changes: ChangesBuilder.from([hello]),
     });
 
-    console.log(">> transaction");
-
     const result = await home.transact({
       changes: ChangesBuilder.from([hello]),
     });
-
-    console.log("<< transaction");
 
     assertEquals(result, {
       ok: ChangesBuilder.from([

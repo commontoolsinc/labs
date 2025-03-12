@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useMemo } from "react";
+import React, { createContext, useContext, useEffect, useMemo } from "react";
 import { CharmManager } from "@commontools/charm";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { type CharmRouteParams } from "@/routes.ts";
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
 
@@ -18,13 +18,15 @@ export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = (
   { children },
 ) => {
   const { replicaName } = useParams<CharmRouteParams>();
-  const { user } = useAuthentication();
+  const { session } = useAuthentication();
 
   if (!replicaName) {
-    throw new Error("No replica name found, cannot create CharmManager");
+    throw new Error("No space name found, cannot create CharmManager");
   }
-  if (!user) {
-    throw new Error("No user found, cannot create CharmManager");
+  if (!session) {
+    throw new Error(
+      "Not authorization session found, cannot create CharmManager",
+    );
   }
 
   const charmManager = useMemo(() => {
@@ -34,8 +36,8 @@ export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = (
       localStorage.setItem("lastReplica", replicaName);
     }
 
-    return new CharmManager(replicaName, user);
-  }, [replicaName, user]);
+    return new CharmManager(session);
+  }, [replicaName, session]);
 
   return (
     <CharmManagerContext.Provider

@@ -11,7 +11,7 @@ import { DocImpl, getDoc } from "../runner/src/doc.ts";
 import { EntityId } from "../runner/src/doc-map.ts";
 import { storage } from "../runner/src/storage.ts";
 import { getSpace, Space } from "../runner/src/space.ts";
-import { Identity } from "../identity/src/index.ts";
+import * as Session from "./session.ts";
 
 const TOOLSHED_API_URL = "https://toolshed.saga-castor.ts.net/";
 
@@ -40,16 +40,16 @@ function createCell(space: Space): Cell<Charm> {
 }
 
 async function main() {
-  const authority = await Identity.fromPassphrase("charm manager");
   // create a charm manager to start things off
-  const charmManager = await CharmManager.open({
-    space: authority.did(),
-    signer: authority,
+  const session = await Session.create({
+    passphrase: "super secret",
+    name: "charm manager",
   });
+  const charmManager = new CharmManager(session);
   log(charmManager, "charmManager");
 
   // let's try to create a cell
-  const space: Space = getSpace(authority.did());
+  const space: Space = getSpace(session.space);
   const cell: Cell<Charm> = createCell(space);
   log(cell.get(), "cell value from Cell.get()");
 

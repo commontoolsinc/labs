@@ -118,15 +118,15 @@ export const waitForSelectorWithText = async (
 };
 
 export const addCharm = async (toolshedUrl: string) => {
-  const space = `ci-${Date.now()}-${
+  const name = `ci-${Date.now()}-${
     Math.random().toString(36).substring(2, 15)
   }`;
   const { success, stderr } = await (new Deno.Command(Deno.execPath(), {
     args: [
       "task",
       "start",
-      "--space",
-      space,
+      "--name",
+      name,
       "--recipeFile",
       "../recipes/simpleValue.tsx",
       "--cause",
@@ -136,6 +136,7 @@ export const addCharm = async (toolshedUrl: string) => {
     ],
     env: {
       "TOOLSHED_API_URL": toolshedUrl,
+      "OPERATOR_PASS": "common user",
     },
     cwd: COMMON_CLI_PATH,
   })).output();
@@ -146,21 +147,21 @@ export const addCharm = async (toolshedUrl: string) => {
 
   return {
     charmId: "baedreic5a2muxtlgvn6u36lmcp3tdoq5sih3nbachysw4srquvga5fjtem",
-    space,
+    name,
   };
 };
 
 export const inspectCharm = async (
   toolshedUrl: string,
-  space: string,
+  name: string,
   charmId: string,
 ) => {
   const { success, stdout, stderr } = await (new Deno.Command(Deno.execPath(), {
     args: [
       "task",
       "start",
-      "--space",
-      space,
+      "--name",
+      name,
       "--charmId",
       charmId,
       "--quit",
@@ -168,6 +169,7 @@ export const inspectCharm = async (
     ],
     env: {
       "TOOLSHED_API_URL": toolshedUrl,
+      "OPERATOR_PASS": "common user",
     },
     cwd: COMMON_CLI_PATH,
   })).output();

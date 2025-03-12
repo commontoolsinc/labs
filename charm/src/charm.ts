@@ -20,8 +20,8 @@ import {
   run,
   syncRecipeBlobby,
 } from "@commontools/runner";
-import { getSpace, Space, storage } from "@commontools/runner";
-import { DID, Identity, Signer } from "@commontools/identity";
+import { getSpace, storage } from "@commontools/runner";
+import { DID, Identity } from "@commontools/identity";
 
 export type Charm = {
   [NAME]?: string;
@@ -77,34 +77,51 @@ function filterOutEntity(
   return list.get().filter((charm) => !isSameEntity(charm, targetId));
 }
 
+/**
+ * Representation authorization session.
+ */
+export interface Session {
+  /**
+   * Whether session is for a private space vs public access space.
+   */
+  private: boolean;
+
+  /**
+   * Session name, which is pet name of the space session is for.
+   */
+  name: string;
+
+  /**
+   * DID identifier of the space this is a session for.
+   */
+  space: DID;
+
+  /**
+   * Identity used in this session.
+   */
+  as: Identity;
+}
+
 export class CharmManager {
-  private space: Space;
   private charmsDoc: DocImpl<DocLink[]>;
   private pinned: DocImpl<DocLink[]>;
 
   private charms: Cell<Cell<Charm>[]>;
   private pinnedCharms: Cell<Cell<Charm>[]>;
 
-  static async open(
-    { space, signer }: { space: DID; signer?: Signer },
-  ) {
-    return new this(
-      space,
-      signer ?? await Identity.fromPassphrase("charm manager"),
-    );
-  }
-
   constructor(
-    private spaceId: string,
-    private signer: Signer,
+    private session: Session,
   ) {
-    this.space = getSpace(this.spaceId);
     this.charmsDoc = getDoc<DocLink[]>([], "charms", this.space);
     this.pinned = getDoc<DocLink[]>([], "pinned-charms", this.space);
     this.charms = this.charmsDoc.asCell([], undefined, charmListSchema);
 
-    storage.setSigner(signer);
+    storage.setSigner(session.as);
     this.pinnedCharms = this.pinned.asCell([], undefined, charmListSchema);
+  }
+
+  get space() {
+    return getSpace(this.session.space);
   }
 
   getReplica(): string | undefined {

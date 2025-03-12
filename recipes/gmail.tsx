@@ -43,31 +43,21 @@ type Email = Schema<typeof EmailSchema>;
 const AuthSchema = {
   type: "object",
   properties: {
-    token: { type: "string" },
-    tokenType: { type: "string" },
-    scope: { type: "array", items: { type: "string" } },
-    expiresIn: { type: "number" },
-    expiresAt: { type: "number" },
-    refreshToken: { type: "string" },
+    token: { type: "string", default: "" },
+    tokenType: { type: "string", default: "" },
+    scope: { type: "array", items: { type: "string" }, default: [] },
+    expiresIn: { type: "number", default: 0 },
+    expiresAt: { type: "number", default: 0 },
+    refreshToken: { type: "string", default: "" },
     user: {
       type: "object",
       properties: {
-        email: { type: "string" },
-        name: { type: "string" },
-        picture: { type: "string" },
+        email: { type: "string", default: "" },
+        name: { type: "string", default: "" },
+        picture: { type: "string", default: "" },
       },
-      required: ["email", "name", "picture"],
     },
   },
-  required: [
-    "token",
-    "tokenType",
-    "scope",
-    "expiresIn",
-    "expiresAt",
-    "refreshToken",
-    "user",
-  ],
 } as const satisfies JSONSchema;
 type Auth = Schema<typeof AuthSchema>;
 
@@ -90,9 +80,9 @@ const GmailImporterInputs = {
       },
       required: ["labels", "limit"],
     },
+    auth: AuthSchema,
   },
-  required: ["settings"],
-  default: { settings: { labels: "INBOX", limit: 10 } },
+  required: ["settings", "auth"],
   description: "Gmail Importer",
 } as const satisfies JSONSchema;
 
@@ -117,17 +107,6 @@ const ResultSchema = {
       },
     },
     googleUpdater: { asStream: true, type: "object", properties: {} },
-    auth: {
-      type: "object",
-      properties: {
-        token: { type: "string" },
-        tokenType: { type: "string" },
-        scope: { type: "array", items: { type: "string" } },
-        expiresIn: { type: "number" },
-        expiresAt: { type: "number" },
-        refreshToken: { type: "string" },
-      },
-    },
   },
 } as const satisfies JSONSchema;
 
@@ -414,81 +393,71 @@ const updateLabels = handler<{ detail: { value: string } }, { labels: string }>(
   },
 );
 
-export default recipe(GmailImporterInputs, ResultSchema, ({ settings }) => {
-  const auth = cell<Auth>({
-    token: "",
-    tokenType: "",
-    scope: [],
-    expiresIn: 0,
-    expiresAt: 0,
-    refreshToken: "",
-    user: {
-      email: "",
-      name: "",
-      picture: "",
-    },
-  });
+export default recipe(
+  GmailImporterInputs,
+  ResultSchema,
+  ({ settings, auth }) => {
+    const emails = cell<Email[]>([]);
 
-  const emails = cell<Email[]>([]);
+    derive(emails, (emails) => {
+      console.log("emails", emails.length);
+    });
 
-  derive(emails, (emails) => {
-    console.log("emails", emails.length);
-  });
-
-  return {
-    [NAME]: str`GMail Importer ${
-      derive(auth, (auth) => auth?.user?.email || "unauthorized")
-    }`,
-    [UI]: (
-      <div>
-        <h1>
-          Gmail Importer: {derive(emails, (emails) => emails.length)} emails
-        </h1>
-        <common-hstack>
-          <label>Import Limit</label>
-          <common-input
-            value={settings.limit}
-            placeholder="count of emails to import"
-            oncommon-input={updateLimit({ limit: settings.limit })}
-          />
-        </common-hstack>
-        <common-hstack>
-          <label>Import Labels</label>
-          <common-input
-            value={settings.labels}
-            placeholder="comma separated list of labels"
-            oncommon-input={updateLabels({ labels: settings.labels })}
-          />
-        </common-hstack>
-        <common-google-oauth $auth={auth} />
+    return {
+      [NAME]: str`GMail Importer ${
+        derive(auth, (auth) => auth?.user?.email || "unauthorized")
+      }`,
+      [UI]: (
         <div>
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Subject</th>
-                <th>Label</th>
-              </tr>
-            </thead>
-            <tbody>
-              {emails.map((email) => (
+          <h1>
+            Gmail Importer: {derive(emails, (emails) => emails.length)} emails
+          </h1>
+          <common-hstack>
+            <label>Import Limit</label>
+            <common-input
+              value={settings.limit}
+              placeholder="count of emails to import"
+              oncommon-input={updateLimit({ limit: settings.limit })}
+            />
+          </common-hstack>
+          <common-hstack>
+            <label>Import Labels</label>
+            <common-input
+              value={settings.labels}
+              placeholder="comma separated list of labels"
+              oncommon-input={updateLabels({ labels: settings.labels })}
+            />
+          </common-hstack>
+          <common-google-oauth $auth={auth} />
+          <div>
+            <table>
+              <thead>
                 <tr>
-                  <td>&nbsp;{email.date}&nbsp;</td>
-                  <td>&nbsp;{email.subject}&nbsp;</td>
-                  <td>
-                    &nbsp;{derive(
-                      email,
-                      (email) => email.labelIds.join(", "),
-                    )}&nbsp;
-                  </td>
+                  <th>Date</th>
+                  <th>Subject</th>
+                  <th>Label</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {emails.map((email) => (
+                  <tr>
+                    <td>&nbsp;{email.date}&nbsp;</td>
+                    <td>&nbsp;{email.subject}&nbsp;</td>
+                    <td>
+                      &nbsp;{derive(
+                        email,
+                        (email) => email.labelIds.join(", "),
+                      )}&nbsp;
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
-    ),
-    emails,
-    googleUpdater: googleUpdater({ emails, auth, settings }),
-  };
-});
+      ),
+      emails,
+      googleUpdater: googleUpdater({ emails, auth, settings }),
+    };
+  },
+);

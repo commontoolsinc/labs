@@ -7,10 +7,11 @@ import {
   setBobbyServerUrl,
   storage,
 } from "@commontools/runner";
-import { Identity } from "@commontools/identity";
+import * as Session from "./session.ts";
+import type { DID } from "@commontools/identity";
 
-const { space, charmId, recipeFile, cause, quit } = parseArgs(Deno.args, {
-  string: ["space", "charmId", "recipeFile", "cause"],
+const { name, charmId, recipeFile, cause, quit } = parseArgs(Deno.args, {
+  string: ["name", "charmId", "recipeFile", "cause"],
   boolean: ["quit"],
   default: { quit: false },
 });
@@ -18,24 +19,26 @@ const { space, charmId, recipeFile, cause, quit } = parseArgs(Deno.args, {
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
 
+const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
+
 storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
 
 async function main() {
-  const identity = await Identity.fromPassphrase("common-cli");
+  const session = await Session.create({
+    passphrase: OPERATOR_PASS,
+    name: name!,
+  });
+
   console.log("params:", {
-    space,
-    identity,
+    session,
     charmId,
     recipeFile,
     cause,
     quit,
     toolshedUrl,
   });
-  const manager = await CharmManager.open({
-    space: (space as `did:key:${string}`) ?? identity.did(),
-    signer: identity,
-  });
+  const manager = new CharmManager(session);
   const charms = manager.getCharms();
   charms.sink((charms) => {
     console.log(

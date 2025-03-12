@@ -163,7 +163,8 @@ export async function getAuthCellAndStorage(docLink: DocLink | string) {
       : docLink;
 
     if (!signer) {
-      signer = await Identity.fromPassphrase("toolshed");
+      // FIXME(ja): we should load operator passphrase from env
+      signer = await Identity.fromPassphrase("implicit trust");
       storage.setSigner(signer);
     }
 

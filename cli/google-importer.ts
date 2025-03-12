@@ -9,7 +9,8 @@ import {
   storage,
 } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
-import { Identity } from "@commontools/identity";
+import type { DID } from "@commontools/identity";
+import * as Session from "./session.ts";
 
 /**
  * Display usage information
@@ -48,6 +49,8 @@ const CHECK_INTERVAL = parseInt(interval as string) * 1000;
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
 
+const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
+
 let manager: CharmManager | undefined;
 const checkedCharms = new Map<string, boolean>();
 // Initialize storage and Bobby server
@@ -79,15 +82,16 @@ function log(charm?: Cell<Charm> | string, ...args: any[]) {
  * Updates a charm once by checking and refreshing auth token if needed
  * and triggering the googleUpdater flow
  */
-function updateOnce(charm: Cell<Charm>) {
-  const auth = charm.key("auth");
+function updateOnce(charm: Cell<Charm>, argument: Cell<any>) {
+  const auth = argument.key("auth");
   const googleUpdater = charm.key("googleUpdater");
 
   if (!isStream(googleUpdater) || !auth) return;
-
   const { token, expiresAt } = auth.get();
+  console.log({ token, expiresAt });
 
   if (token && expiresAt && Date.now() > expiresAt) {
+    console.log("refreshing");
     refreshAuthToken(auth, charm);
   } else if (token) {
     log(charm, "calling googleUpdater in charm");
@@ -148,17 +152,20 @@ async function watchCharm(charm: Cell<Charm>) {
   }
 
   const runningCharm = await manager?.get(charm, true);
-  if (!runningCharm) {
+  const argument = manager?.getArgument(charm);
+  if (!runningCharm || !argument) {
     log(charm, "charm not found");
     return;
   }
 
+  console.log("Watching new charm:", getEntityId(charm));
+
   // Initial update
-  updateOnce(runningCharm);
+  updateOnce(runningCharm, argument);
 
   // Schedule periodic updates
   setInterval(() => {
-    updateOnce(runningCharm);
+    updateOnce(runningCharm, argument);
   }, CHECK_INTERVAL);
 }
 
@@ -178,8 +185,12 @@ function watchSpace(spaceName: string) {
 async function main() {
   log(undefined, "Starting Google Updater");
 
-  const identity = await Identity.fromPassphrase("common-cli");
-  manager = new CharmManager(space as string, identity);
+  const session = await Session.open({
+    passphrase: OPERATOR_PASS,
+    name: "~importer",
+    space: space as DID,
+  });
+  manager = new CharmManager(session);
 
   if (charmId) {
     const charm = await manager?.get(charmId as string, false);

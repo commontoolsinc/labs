@@ -5,16 +5,42 @@ import React, {
   useEffect,
   useState,
 } from "react";
-import { Identity, KeyStore, PassKey } from "@commontools/identity";
+import { DID, Identity, KeyStore, PassKey } from "@commontools/identity";
+import { matchSpace } from "@/routes.ts";
 
 // Location in storage of root key.
 const ROOT_KEY = "$ROOT_KEY";
-// "Name" of default persona derived from root key.
-const DEFAULT_PERSONA = "default";
+
+export const ANYONE = "common user";
+
+/**
+ * Representation authorization session.
+ */
+export interface Session {
+  /**
+   * Whether session is for a private space vs public access space.
+   */
+  private: boolean;
+
+  /**
+   * Session name, which is pet name of the space session is for.
+   */
+  name: string;
+
+  /**
+   * DID identifier of the space this is a session for.
+   */
+  space: DID;
+
+  /**
+   * Identity used in this session.
+   */
+  as: Identity;
+}
 
 interface AuthenticationContextType {
-  // The authenticated user/persona.
-  user: Identity | void;
+  // Active authorization session
+  session: Session | void;
   // Call PassKey registration.
   passkeyRegister: (name: string, displayName: string) => Promise<PassKey>;
   // Authenticate the user via passkey.
@@ -39,8 +65,10 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
   { children },
 ) => {
   const [keyStore, setKeyStore] = useState<KeyStore | void>(undefined);
-  const [user, setUser] = useState<Identity | void>(undefined);
+  const [session, setSession] = useState<Session | void>(undefined);
   const [root, setRoot] = useState<Identity | void>(undefined);
+
+  const { replicaName: spaceName } = matchSpace(location.pathname);
 
   // On load, open the KeyStore and find a root key.
   useEffect(() => {
@@ -64,22 +92,35 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
   // When root changes, update `user` to the default persona
   useEffect(() => {
     let ignore = false;
+
     async function setPersona() {
-      setUser(undefined);
-      if (!root) {
+      setSession(undefined);
+      if (!root || !spaceName) {
         return;
       }
-      const user = await root.derive(DEFAULT_PERSONA);
+
+      const account = isPrivateSpace(spaceName)
+        ? root
+        : await Identity.fromPassphrase(ANYONE);
+
+      const user = await account.derive(spaceName);
+
       if (!ignore) {
-        setUser(user);
+        setSession({
+          private: account.did() === root.did(),
+          name: spaceName,
+          space: user.did(),
+          as: user,
+        });
       }
     }
     setPersona();
+
     return () => {
       ignore = true;
-      setUser(undefined);
+      setSession(undefined);
     };
-  }, [root]);
+  }, [root, spaceName]);
 
   // This calls out to WebAuthn to register a user. The state of whether
   // a user has previously registered a passkey is not tracked (and could
@@ -141,13 +182,13 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
     }
     await keyStore.clear();
     setRoot(undefined);
-    setUser(undefined);
+    setSession(undefined);
   }, [keyStore]);
 
   return (
     <AuthenticationContext.Provider
       value={{
-        user,
+        session,
         passkeyAuthenticate,
         passkeyRegister,
         passphraseAuthenticate,
@@ -161,5 +202,7 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
     </AuthenticationContext.Provider>
   );
 };
+
+const isPrivateSpace = (name: string) => name.startsWith("~");
 
 export const useAuthentication = () => useContext(AuthenticationContext);

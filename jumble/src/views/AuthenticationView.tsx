@@ -245,7 +245,7 @@ export function AuthenticationView() {
     [flow, handleRegister, handleLogin],
   );
 
-  if (auth.user) {
+  if (auth.session) {
     throw new Error("Already authenticated");
   }
 
