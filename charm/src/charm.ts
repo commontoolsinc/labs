@@ -103,6 +103,7 @@ export interface Session {
 }
 
 export class CharmManager {
+  private space: string;
   private charmsDoc: DocImpl<DocLink[]>;
   private pinned: DocImpl<DocLink[]>;
 
@@ -112,6 +113,7 @@ export class CharmManager {
   constructor(
     private session: Session,
   ) {
+    this.space = this.session.space;
     this.charmsDoc = getDoc<DocLink[]>([], "charms", this.space);
     this.pinned = getDoc<DocLink[]>([], "pinned-charms", this.space);
     this.charms = this.charmsDoc.asCell([], undefined, charmListSchema);
@@ -120,11 +122,7 @@ export class CharmManager {
     this.pinnedCharms = this.pinned.asCell([], undefined, charmListSchema);
   }
 
-  get space() {
-    return getSpace(this.session.space);
-  }
-
-  getReplica(): string | undefined {
+  getSpace(): string {
     return this.space;
   }
 
