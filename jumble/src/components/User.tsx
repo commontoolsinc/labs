@@ -55,7 +55,6 @@ export function User() {
 
   // Listen for real events
   useStorageBroadcast((data: StorageEvent) => {
-    console.log("Received broadcast:", data);
     if (data.transact) {
       // Add send activity to buffer
       activityBufferRef.current.push({
@@ -71,19 +70,6 @@ export function User() {
     }
   });
 
-  // // For testing - simulate activity
-  // useEffect(() => {
-  //   const testInterval = setInterval(() => {
-  //     const type = Math.random() > 0.5 ? "send" : "receive";
-  //     console.log(`Simulating ${type} activity`);
-  //     activityBufferRef.current.push({
-  //       type,
-  //       timestamp: Date.now(),
-  //     });
-  //   }, 2000);
-
-  //   return () => clearInterval(testInterval);
-  // }, []);
   // Animation logic with requestAnimationFrame
   useEffect(() => {
     // Animation function
