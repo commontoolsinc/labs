@@ -103,7 +103,7 @@ function addCommonIDfromObjectID(obj: any) {
   function traverse(obj: any) {
     if (typeof obj == "object" && obj !== null) {
       const seen = new Set();
-      obj.keys().forEach((key: string) => {
+      Object.keys(obj).forEach((key: string) => {
         if ("id" in obj[key]) {
           let n = 0;
           let id = obj[key].id;
@@ -115,6 +115,7 @@ function addCommonIDfromObjectID(obj: any) {
       });
     }
   }
+
   if ("id" in obj) obj[ID] = obj.id;
   traverse(obj);
 }
