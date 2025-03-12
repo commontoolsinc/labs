@@ -1221,6 +1221,32 @@ describe("asCell with schema", () => {
     expect(arrayCell.get()).toEqual([10, 20, 30, 40]);
   });
 
+  it("should push values to undefined array with schema default has stable IDs", () => {
+    const schema = {
+      type: "array",
+      items: { type: "object", properties: { value: { type: "number" } } },
+      default: [{ [ID]: "test", "value": 10 }, { [ID]: "test2", "value": 20 }],
+    } as JSONSchema;
+
+    const c = getDoc({}, "push-to-undefined-schema-stable-id", "test");
+    const arrayCell = c.asCell(["items"], undefined, schema);
+
+    arrayCell.push({ [ID]: "test3", "value": 30 });
+    expect(arrayCell.get()).toEqual([
+      { "value": 10 },
+      { "value": 20 },
+      { "value": 30 },
+    ]);
+
+    arrayCell.push({ [ID]: "test", "value": 40 });
+    expect(arrayCell.get()).toEqual([
+      { "value": 40 }, // happens to overwrite, because IDs are the same
+      { "value": 20 },
+      { "value": 30 },
+      { "value": 40 },
+    ]);
+  });
+
   it("should push values that are already cells reusing the reference", () => {
     const c = getDoc<{ items: { value: number }[] }>(
       { items: [] },
