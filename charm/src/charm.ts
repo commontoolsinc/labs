@@ -333,18 +333,21 @@ export class CharmManager {
       }
     }*/
 
-    const syncAllMentionedCells = (value: any, promises: any[] = []) => {
+    const syncAllMentionedCells = (
+      value: any,
+      promises: any[] = [],
+    ) => {
       if (isCell(value)) {
         promises.push(storage.syncCell(value.getAsDocLink().cell));
       } else if (typeof value === "object" && value !== null) {
         for (const key in value) {
-          promises.push(syncAllMentionedCells(value[key], promises));
+          syncAllMentionedCells(value[key], promises);
         }
       }
       return promises;
     };
 
-    await syncAllMentionedCells(inputs);
+    await Promise.all(syncAllMentionedCells(inputs));
 
     const doc = await storage.syncCellById(
       this.space,
@@ -352,23 +355,22 @@ export class CharmManager {
     );
     const resultDoc = run(recipe, inputs, doc);
 
-    // FIXME(ja): should we add / sync explicitly here?
-    // await this.add([charm]);
-    // await this.storage.syncCell(this.charms, true);
-    return resultDoc.asCell([], undefined, charmSchema);
+    const charm = resultDoc.asCell([], undefined, charmSchema);
+    await this.add([charm]);
+    await this.syncRecipe(charm);
+    return charm;
   }
 
   // FIXME(JA): this really really really needs to be revisited
-  syncRecipe(charm: Cell<Charm>): Promise<string | undefined> {
+  async syncRecipe(charm: Cell<Charm>): Promise<string | undefined> {
     const recipeId = charm.getSourceCell()?.get()?.[TYPE];
-    if (!recipeId) return Promise.resolve(undefined);
+    if (!recipeId) throw new Error("charm missing recipe ID");
 
-    return Promise.all([
+    await Promise.all([
       this.syncRecipeCells(recipeId),
       this.syncRecipeBlobby(recipeId),
-    ]).then(
-      () => recipeId,
-    );
+    ]);
+    return recipeId;
   }
 
   async syncRecipeCells(recipeId: string) {
