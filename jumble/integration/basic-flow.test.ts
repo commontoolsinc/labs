@@ -30,162 +30,170 @@ console.log(`FRONTEND_URL=${FRONTEND_URL}`);
 let browser: Browser | void = undefined;
 let testCharm: { charmId: string; name: string } | void = undefined;
 
-Deno.test("integration tests", async (t) => {
-  let page: Page | void = undefined;
-  let proceed = true;
+Deno.test({
+  name: "integration tests",
+  fn: async (t) => {
+    let page: Page | void = undefined;
+    let failed = false;
+    const exceptions: string[] = [];
 
-  try {
-    proceed = await t.step({
-      name: "add charm via cli",
-      ignore: !proceed,
-      fn: async () => {
-        testCharm = await addCharm(TOOLSHED_API_URL);
-        console.log(`Charm added`, testCharm);
-      },
-    });
+    try {
+      failed = !await t.step({
+        name: "add charm via cli",
+        ignore: failed || exceptions.length > 0,
+        fn: async () => {
+          testCharm = await addCharm(TOOLSHED_API_URL);
+          console.log(`Charm added`, testCharm);
+        },
+      });
 
-    proceed = await t.step({
-      name: "renders homepage",
-      ignore: !proceed,
-      fn: async () => {
-        browser = await launch({ headless: HEADLESS });
-        await sleep(ADDITIONAL_WAIT_TIME);
+      failed = !await t.step({
+        name: "renders homepage",
+        ignore: failed || exceptions.length > 0,
+        fn: async () => {
+          browser = await launch({ headless: HEADLESS });
+          await sleep(ADDITIONAL_WAIT_TIME);
 
-        console.log(`Waiting to open website at ${FRONTEND_URL}`);
-        page = await browser!.newPage(FRONTEND_URL);
+          console.log(`Waiting to open website at ${FRONTEND_URL}`);
+          page = await browser!.newPage(FRONTEND_URL);
 
-        // Add console log listeners
-        page.addEventListener("console", (e: ConsoleEvent) => {
-          console.log(`Browser Console [${e.detail.type}]: ${e.detail.text}`);
-        });
+          // Add console log listeners
+          page.addEventListener("console", (e: ConsoleEvent) => {
+            console.log(`Browser Console [${e.detail.type}]: ${e.detail.text}`);
+          });
 
-        // Add error listeners
-        page.addEventListener("pageerror", (e: PageErrorEvent) => {
-          console.error("Browser Page Error:", e.detail.message);
-        });
+          // Add error listeners
+          page.addEventListener("pageerror", (e: PageErrorEvent) => {
+            console.error("Browser Page Error:", e.detail.message);
+            exceptions.push(e.detail.message);
+          });
 
-        // Add dialog listeners (for alerts, confirms, etc.)
-        page.addEventListener("dialog", async (e: DialogEvent) => {
-          const dialog = e.detail;
-          console.log(`Browser Dialog: ${dialog.type} - ${dialog.message}`);
-          await dialog.dismiss();
-        });
+          // Add dialog listeners (for alerts, confirms, etc.)
+          page.addEventListener("dialog", async (e: DialogEvent) => {
+            const dialog = e.detail;
+            console.log(`Browser Dialog: ${dialog.type} - ${dialog.message}`);
+            await dialog.dismiss();
+          });
 
-        await sleep(ADDITIONAL_WAIT_TIME);
-        console.log(`Opened website at ${FRONTEND_URL}`);
-      },
-    });
+          await sleep(ADDITIONAL_WAIT_TIME);
+          console.log(`Opened website at ${FRONTEND_URL}`);
+        },
+      });
 
-    proceed = await t.step({
-      name: "able to login to the app",
-      ignore: !proceed,
-      fn: async () => {
-        assert(page, "Page should be defined");
-        await login(page, ADDITIONAL_WAIT_TIME);
-      },
-    });
+      failed = !await t.step({
+        name: "able to login to the app",
+        ignore: failed || exceptions.length > 0,
+        fn: async () => {
+          assert(page, "Page should be defined");
+          await login(page, ADDITIONAL_WAIT_TIME);
+        },
+      });
 
-    proceed = await t.step({
-      name: "renders charm and verifies initial state",
-      ignore: !proceed,
-      fn: async () => {
-        assert(page, "Page should be defined");
-        assert(testCharm, "Test charm should be defined");
+      failed = !await t.step({
+        name: "renders charm and verifies initial state",
+        ignore: failed || exceptions.length > 0,
+        fn: async () => {
+          assert(page, "Page should be defined");
+          assert(testCharm, "Test charm should be defined");
 
-        await snapshot(page, "Initial state");
+          await snapshot(page, "Initial state");
 
-        const anchor = await page.waitForSelector("nav a");
-        assert(
-          (await anchor.innerText()) === "common-knowledge",
-          "Logged in and Common Knowledge title renders",
-        );
+          const anchor = await page.waitForSelector("nav a");
+          assert(
+            (await anchor.innerText()) === "common-knowledge",
+            "Logged in and Common Knowledge title renders",
+          );
 
-        await page.goto(
-          `${FRONTEND_URL}${testCharm.name}/${testCharm.charmId}`,
-        );
-        await snapshot(page, "Waiting for charm to render");
+          await page.goto(
+            `${FRONTEND_URL}${testCharm.name}/${testCharm.charmId}`,
+          );
+          await snapshot(page, "Waiting for charm to render");
 
-        await waitForSelectorWithText(
-          page,
-          "a[aria-roledescription='charm-link']",
-          "Simple Value: 1",
-        );
-        await snapshot(page, "Charm rendered.");
-        assert(true, "Charm rendered successfully");
-      },
-    });
+          await waitForSelectorWithText(
+            page,
+            "a[aria-roledescription='charm-link']",
+            "Simple Value: 1",
+          );
+          await snapshot(page, "Charm rendered.");
+          assert(true, "Charm rendered successfully");
+        },
+      });
 
-    proceed = await t.step({
-      name: "updates charm value via button click",
-      ignore: !proceed,
-      fn: async () => {
-        assert(page, "Page should be defined");
-        assert(testCharm, "Test charm should be defined");
+      failed = !await t.step({
+        name: "updates charm value via button click",
+        ignore: failed || exceptions.length > 0,
+        fn: async () => {
+          assert(page, "Page should be defined");
+          assert(testCharm, "Test charm should be defined");
 
-        await page.goto(
-          `${FRONTEND_URL}${testCharm.name}/${testCharm.charmId}`,
-        );
+          await page.goto(
+            `${FRONTEND_URL}${testCharm.name}/${testCharm.charmId}`,
+          );
 
-        // Wait for initial render
-        await waitForSelectorWithText(
-          page,
-          "a[aria-roledescription='charm-link']",
-          "Simple Value: 1",
-        );
+          // Wait for initial render
+          await waitForSelectorWithText(
+            page,
+            "a[aria-roledescription='charm-link']",
+            "Simple Value: 1",
+          );
 
-        await sleep(1000 + ADDITIONAL_WAIT_TIME);
-        console.log("Clicking button");
+          await sleep(1000 + ADDITIONAL_WAIT_TIME);
+          console.log("Clicking button");
 
-        const button = await page.waitForSelector(
-          "div[aria-label='charm-content'] button",
-        );
-        await button.click();
-        await snapshot(page, "Button clicked");
+          const button = await page.waitForSelector(
+            "div[aria-label='charm-content'] button",
+          );
+          await button.click();
+          await snapshot(page, "Button clicked");
 
-        // Add more wait time after click
-        await sleep(2000 + ADDITIONAL_WAIT_TIME);
+          // Add more wait time after click
+          await sleep(2000 + ADDITIONAL_WAIT_TIME);
 
-        console.log("Checking if title changed");
-        await waitForSelectorWithText(
-          page,
-          "a[aria-roledescription='charm-link']",
-          "Simple Value: 2",
-        );
+          console.log("Checking if title changed");
+          await waitForSelectorWithText(
+            page,
+            "a[aria-roledescription='charm-link']",
+            "Simple Value: 2",
+          );
 
-        await snapshot(page, "Title changed");
+          await snapshot(page, "Title changed");
 
-        // Add additional wait time for persistence
-        await sleep(2000 + ADDITIONAL_WAIT_TIME);
-      },
-    });
+          // Add additional wait time for persistence
+          await sleep(2000 + ADDITIONAL_WAIT_TIME);
+        },
+      });
 
-    proceed = await t.step({
-      name: "verifies charm updates are persisted",
-      ignore: !proceed,
-      fn: async () => {
-        assert(page, "Page should be defined");
-        assert(testCharm, "Test charm should be defined");
+      failed = !await t.step({
+        name: "verifies charm updates are persisted",
+        ignore: failed || exceptions.length > 0,
+        fn: async () => {
+          assert(page, "Page should be defined");
+          assert(testCharm, "Test charm should be defined");
 
-        // Add initial wait time before checking
-        await sleep(1000 + ADDITIONAL_WAIT_TIME);
+          // Add initial wait time before checking
+          await sleep(1000 + ADDITIONAL_WAIT_TIME);
 
-        console.log(
-          "Inspecting charm to verify updates propagated from browser.",
-        );
-        const charm = await inspectCharm(
-          TOOLSHED_API_URL,
-          testCharm.name,
-          testCharm.charmId,
-        );
+          console.log(
+            "Inspecting charm to verify updates propagated from browser.",
+          );
+          const charm = await inspectCharm(
+            TOOLSHED_API_URL,
+            testCharm.name,
+            testCharm.charmId,
+          );
 
-        console.log("Charm:", charm);
-        assert(
-          charm.includes("Simple Value: 2"),
-          "Charm updates propagated.",
-        );
-      },
-    });
-  } finally {
-    await browser!.close();
-  }
+          console.log("Charm:", charm);
+          assert(
+            charm.includes("Simple Value: 2"),
+            "Charm updates propagated.",
+          );
+        },
+      });
+    } finally {
+      exceptions.forEach((exception) => {
+        console.error("Failure due to browser error:", exception);
+      });
+      await browser!.close();
+    }
+  },
 });
