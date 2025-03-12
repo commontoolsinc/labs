@@ -29,19 +29,31 @@ export type Charm = {
   [key: string]: any;
 };
 
-export const charmSchema: JSONSchema = {
+export const charmSchema = {
   type: "object",
   properties: {
     [NAME]: { type: "string" },
     [UI]: { type: "object" },
   },
   required: [UI, NAME],
-} as const;
+} as const satisfies JSONSchema;
 
-export const charmListSchema: JSONSchema = {
+export const charmListSchema = {
   type: "array",
   items: { ...charmSchema, asCell: true },
-} as const;
+} as const satisfies JSONSchema;
+
+export const charmSourceCellSchema = {
+  type: "object",
+  properties: {
+    [TYPE]: { type: "string" },
+    parents: {
+      type: "array",
+      items: { type: "object", asCell: true },
+      default: [],
+    },
+  },
+} as const satisfies JSONSchema;
 
 export const processSchema = {
   type: "object",
