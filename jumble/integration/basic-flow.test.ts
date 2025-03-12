@@ -19,9 +19,6 @@ import {
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
   "http://localhost:8000/";
 const FRONTEND_URL = Deno.env.get("FRONTEND_URL") ?? "http://localhost:5173/";
-const ADDITIONAL_WAIT_TIME = parseInt(
-  Deno.env.get("ADDITIONAL_WAIT_TIME") ?? "0",
-);
 const HEADLESS = true;
 
 console.log(`TOOLSHED_API_URL=${TOOLSHED_API_URL}`);
@@ -52,7 +49,6 @@ Deno.test({
         ignore: failed || exceptions.length > 0,
         fn: async () => {
           browser = await launch({ headless: HEADLESS });
-          await sleep(ADDITIONAL_WAIT_TIME);
 
           console.log(`Waiting to open website at ${FRONTEND_URL}`);
           page = await browser!.newPage(FRONTEND_URL);
@@ -75,7 +71,6 @@ Deno.test({
             await dialog.dismiss();
           });
 
-          await sleep(ADDITIONAL_WAIT_TIME);
           console.log(`Opened website at ${FRONTEND_URL}`);
         },
       });
@@ -85,7 +80,7 @@ Deno.test({
         ignore: failed || exceptions.length > 0,
         fn: async () => {
           assert(page, "Page should be defined");
-          await login(page, ADDITIONAL_WAIT_TIME);
+          await login(page);
         },
       });
 
@@ -137,7 +132,7 @@ Deno.test({
             "Simple Value: 1",
           );
 
-          await sleep(1000 + ADDITIONAL_WAIT_TIME);
+          await sleep(1000);
           console.log("Clicking button");
 
           const button = await page.waitForSelector(
@@ -147,7 +142,7 @@ Deno.test({
           await snapshot(page, "Button clicked");
 
           // Add more wait time after click
-          await sleep(2000 + ADDITIONAL_WAIT_TIME);
+          await sleep(2000);
 
           console.log("Checking if title changed");
           await waitForSelectorWithText(
@@ -159,7 +154,7 @@ Deno.test({
           await snapshot(page, "Title changed");
 
           // Add additional wait time for persistence
-          await sleep(2000 + ADDITIONAL_WAIT_TIME);
+          await sleep(2000);
         },
       });
 
@@ -171,7 +166,7 @@ Deno.test({
           assert(testCharm, "Test charm should be defined");
 
           // Add initial wait time before checking
-          await sleep(1000 + ADDITIONAL_WAIT_TIME);
+          await sleep(1000);
 
           console.log(
             "Inspecting charm to verify updates propagated from browser.",

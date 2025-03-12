@@ -45,11 +45,11 @@ export async function tryClick(
   await el.click();
 }
 
-export const login = async (page: Page, additionalWaitTime: number) => {
+export const login = async (page: Page) => {
   // Wait a second :(
   // See if #user-avatar is rendered
   // Check if we're already logged in
-  await sleep(1000 + additionalWaitTime);
+  await sleep(1000);
   const avatar = await page.$("#user-avatar");
   if (avatar) {
     console.log("Already logged in");
