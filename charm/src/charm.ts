@@ -163,6 +163,7 @@ export class CharmManager {
 
   // FIXME(ja): this says it returns a list of charm, but it isn't! you will
   // have to call .get() to get the actual charm (this is missing the schema)
+  // how can we fix the type here?
   getCharms(): Cell<Cell<Charm>[]> {
     // Start syncing if not already syncing. Will trigger a change to the list
     // once loaded.
