@@ -215,6 +215,7 @@ const CharmTable = (
                       onClick={(e) => {
                         e.preventDefault();
                         if (
+                          e.shiftKey ||
                           globalThis.confirm(
                             "Are you sure you want to remove this charm?",
                           )
