@@ -292,24 +292,28 @@ async function handleSearchCharms(deps: CommandContext) {
   }
 }
 
-async function handleEditRecipe(
+function handleEditRecipe(
   deps: CommandContext,
   input: string | undefined,
 ) {
   if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
   deps.setLoading(true);
-  const newCharmPath = await iterateCharm(
+  iterateCharm(
     deps.charmManager,
     deps.focusedCharmId,
-    deps.focusedReplicaId,
     input,
     deps.preferredModel,
-  );
-  if (newCharmPath) {
-    deps.navigate(newCharmPath);
-  }
-  deps.setLoading(false);
-  deps.setOpen(false);
+  ).then((newCharm) => {
+    deps.navigate(createPath("charmShow", {
+      charmId: charmId(newCharm)!,
+      replicaName: deps.focusedReplicaId!,
+    }));
+  }).catch((error) => {
+    console.error("Error editing recipe:", error);
+  }).finally(() => {
+    deps.setLoading(false); // FIXME(ja): load status should update on exception
+    deps.setOpen(false);
+  });
 }
 
 async function handleExtendRecipe(
@@ -318,13 +322,15 @@ async function handleExtendRecipe(
 ) {
   if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
   deps.setLoading(true);
-  const newCharmPath = await extendCharm(
+  const newCharm = await extendCharm(
     deps.charmManager,
     deps.focusedCharmId,
-    deps.focusedReplicaId,
     input,
   );
-  deps.navigate(newCharmPath);
+  deps.navigate(createPath("charmShow", {
+    charmId: charmId(newCharm)!,
+    replicaName: deps.focusedReplicaId,
+  }));
   deps.setLoading(false);
   deps.setOpen(false);
 }

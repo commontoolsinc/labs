@@ -313,7 +313,7 @@ function useCharmOperation() {
 
   // Function that performs the selected operation (iterate or extend)
   const performOperation = useCallback(
-    async (
+    (
       charmId: string,
       replicaName: string,
       input: string,
@@ -321,18 +321,16 @@ function useCharmOperation() {
       model: string,
     ) => {
       if (operationType === "iterate") {
-        return await iterateCharm(
+        return iterateCharm(
           charmManager,
           charmId,
-          replicaName,
           input,
           model,
         );
       } else {
-        return await extendCharm(
+        return extendCharm(
           charmManager,
           charmId,
-          replicaName,
           input,
         );
       }
@@ -345,46 +343,30 @@ function useCharmOperation() {
     if (!input || !charm || !paramCharmId || !replicaName) return;
     setLoading(true);
 
-    const handleVariants = () => {
+    const handleVariants = async () => {
       setVariants([]);
       setSelectedVariant(charm);
 
-      try {
-        // For each model, start generating a variant
-        variantModels.forEach(async (model) => {
-          try {
-            const path = await performOperation(
-              charmId(charm)!,
-              replicaName!,
-              input,
-              false,
-              model,
-            );
-            if (path) {
-              const id = path.split("/").pop()!;
-              const newCharm = await charmManager.get(id);
-              if (newCharm) {
-                // Store the variant and keep track of which model was used
-                setVariants((prev) => [...prev, newCharm]);
-                setVariantModelsMap((prev) => ({
-                  ...prev,
-                  [charmId(newCharm) || ""]: model,
-                }));
-                // Set the first completed variant as selected if none selected
-                setSelectedVariant((current) =>
-                  current === charm ? newCharm : current
-                );
-              }
-            }
-          } catch (error) {
-            console.error(`Variant ${model} generation error:`, error);
-          }
-        });
-      } catch (error) {
-        console.error("Variants error:", error);
-      } finally {
-        setLoading(false);
-      }
+      const gens = variantModels.map(async (model) => {
+        const newCharm = await performOperation(
+          charmId(charm)!,
+          replicaName!,
+          input,
+          false,
+          model,
+        );
+        // Store the variant and keep track of which model was used
+        setVariants((prev) => [...prev, newCharm]);
+        setVariantModelsMap((prev) => ({
+          ...prev,
+          [charmId(newCharm) || ""]: model,
+        }));
+        // Set the first completed variant as selected if none selected
+        setSelectedVariant((current) => current === charm ? newCharm : current);
+      });
+
+      await Promise.allSettled(gens);
+      setLoading(false);
     };
 
     if (showVariants) {
@@ -393,16 +375,17 @@ function useCharmOperation() {
       handleVariants();
     } else {
       try {
-        const newPath = await performOperation(
+        const newCharm = await performOperation(
           charmId(charm)!,
-          replicaName!,
+          replicaName,
           input,
           false,
           selectedModel,
         );
-        if (newPath) {
-          navigate(newPath);
-        }
+        navigate(createPath("charmShow", {
+          charmId: charmId(newCharm)!,
+          replicaName,
+        }));
       } catch (error) {
         console.error(`${operationType} error:`, error);
       } finally {

@@ -22,10 +22,12 @@ export function hydratePrompt(prompt: string, context: any): string {
 export function parseTagFromResponse(
   response: string,
   tag: string,
-): string | null {
+): string {
   const escapedTag = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const regex = new RegExp(`<${escapedTag}>([\\s\\S]*?)</${escapedTag}>`);
   const match = response.trim().match(regex);
-
-  return match ? match[1].trim() : null;
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+  throw new Error(`Tag ${tag} not found in response`);
 }

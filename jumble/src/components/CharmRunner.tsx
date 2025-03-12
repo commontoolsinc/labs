@@ -6,7 +6,7 @@ import { fixItCharm } from "@/utils/charm-operations.ts";
 import { LuX } from "react-icons/lu";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import { createPath } from "@/routes.ts";
-
+import { charmId } from "@/utils/charms.ts";
 interface CharmLoaderProps {
   charmImport: () => Promise<any>;
   argument?: any;
@@ -86,16 +86,14 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
     if (!runtimeError || isFixing) return;
     setIsFixing(true);
     try {
-      const newPath = await fixItCharm(charmManager, charm, runtimeError);
-      if (newPath) {
-        setRuntimeError(null);
-        navigate(
-          createPath("charmShow", {
-            charmId: newPath,
-            replicaName: currentReplica,
-          }),
-        );
-      }
+      const newCharm = await fixItCharm(charmManager, charm, runtimeError);
+      setRuntimeError(null);
+      navigate(
+        createPath("charmShow", {
+          charmId: charmId(newCharm)!,
+          replicaName: currentReplica,
+        }),
+      );
     } catch (error) {
       console.error("Fix it error:", error);
     } finally {
