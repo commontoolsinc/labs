@@ -1,10 +1,7 @@
 import type { JSONSchema } from "@commontools/builder";
-import { refer } from "merkle-reference";
+import { createRef } from "./doc-map.ts";
 
-const schemaById = new Map<
-  string,
-  { schema: JSONSchema; rootSchema?: JSONSchema }
->();
+const schemaById = new Map<string, { schema: JSONSchema; rootSchema?: JSONSchema }>();
 const idBySchema = new WeakMap<JSONSchema, string>();
 
 /**
@@ -22,24 +19,23 @@ export function addSchema(
   // If we've already added this schema object, return its existing ID
   if (idBySchema.has(schema)) return idBySchema.get(schema)!;
 
-  // If the schema is the same as the root schema, don't store it
-  if (
-    schema === rootSchema ||
-    JSON.stringify(schema) === JSON.stringify(rootSchema)
-  ) {
-    rootSchema = undefined;
-  }
-
   // Generate a merkle reference ID from the schema itself
-  const id = refer({ schema, ...(rootSchema ? { rootSchema } : {}) })
-    .toString();
+  const id = createRef(schema, "schema").toString();
+
+  // If rootSchema is the same as schema, don't store it separately
+  if (rootSchema === schema) rootSchema = undefined;
 
   // Store the schema
   schemaById.set(id, { schema, rootSchema });
   idBySchema.set(schema, id);
 
-  // If a root schema is provided, store it and get/generate its ID
-  if (rootSchema) addSchema(rootSchema, undefined);
+  // If a root schema is provided, make sure it's also registered
+  if (rootSchema) {
+    // Make sure the root schema is also registered
+    if (!idBySchema.has(rootSchema)) {
+      addSchema(rootSchema);
+    }
+  }
 
   return id;
 }
@@ -47,11 +43,9 @@ export function addSchema(
 /**
  * Gets a schema by its ID
  * @param id The schema ID
- * @returns The schema and root schemaor undefined if not found
+ * @returns The schema or undefined if not found
  */
-export function getSchema(
-  id: string,
-): { schema: JSONSchema; rootSchema?: JSONSchema } | undefined {
+export function getSchema(id: string): { schema: JSONSchema; rootSchema?: JSONSchema } | undefined {
   return schemaById.get(id);
 }
 
@@ -62,4 +56,25 @@ export function getSchema(
  */
 export function getSchemaId(schema: JSONSchema): string | undefined {
   return idBySchema.get(schema);
+}
+
+/**
+ * Gets the root schema for a schema, if one was specified
+ * @param id The schema ID
+ * @returns The root schema or undefined if none was specified
+ */
+export function getRootSchema(id: string): JSONSchema | undefined {
+  const entry = schemaById.get(id);
+  return entry?.rootSchema;
+}
+
+/**
+ * Gets the root schema ID for a schema, if one was specified
+ * @param id The schema ID
+ * @returns The root schema ID or undefined if none was specified
+ */
+export function getRootSchemaId(id: string): string | undefined {
+  const entry = schemaById.get(id);
+  if (!entry?.rootSchema) return undefined;
+  return getSchemaId(entry.rootSchema);
 }
