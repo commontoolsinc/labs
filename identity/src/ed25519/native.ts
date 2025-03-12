@@ -58,30 +58,30 @@ export const isNativeEd25519Supported = (() => {
 })();
 
 export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
-  private keypair: CryptoKeyPair;
-  private _did: ID;
+  #keypair: CryptoKeyPair;
+  #did: ID;
   #verifier: Verifier<ID> | null = null;
   constructor(keypair: CryptoKeyPair, did: ID) {
-    this.keypair = keypair;
-    this._did = did;
+    this.#keypair = keypair;
+    this.#did = did;
   }
 
   did() {
-    return this._did;
+    return this.#did;
   }
 
   get verifier(): Verifier<ID> {
     if (!this.#verifier) {
       this.#verifier = new NativeEd25519Verifier<ID>(
-        this.keypair.publicKey,
-        this._did,
+        this.#keypair.publicKey,
+        this.#did,
       );
     }
     return this.#verifier;
   }
 
   serialize(): CryptoKeyPair {
-    return this.keypair;
+    return this.#keypair;
   }
 
   async sign<T>(payload: AsBytes<T>): Promise<Result<Signature<T>, Error>> {
@@ -89,7 +89,7 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
       const signature = new Uint8Array(
         await globalThis.crypto.subtle.sign(
           ED25519_ALG,
-          this.keypair.privateKey,
+          this.#keypair.privateKey,
           payload,
         ),
       );
@@ -148,15 +148,15 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
 }
 
 export class NativeEd25519Verifier<ID extends DIDKey> implements Verifier<ID> {
-  private publicKey: CryptoKey;
-  private _did: ID;
+  #publicKey: CryptoKey;
+  #did: ID;
   constructor(publicKey: CryptoKey, did: ID) {
-    this.publicKey = publicKey;
-    this._did = did;
+    this.#publicKey = publicKey;
+    this.#did = did;
   }
 
   did(): ID {
-    return this._did;
+    return this.#did;
   }
 
   async verify(
@@ -165,7 +165,7 @@ export class NativeEd25519Verifier<ID extends DIDKey> implements Verifier<ID> {
     if (
       await globalThis.crypto.subtle.verify(
         ED25519_ALG,
-        this.publicKey,
+        this.#publicKey,
         signature,
         payload,
       )
