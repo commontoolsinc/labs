@@ -7,7 +7,8 @@ const libraries = {
     "moment": "https://esm.sh/moment@2.29.4",
     "marked": "https://esm.sh/marked@15.0.7",
     "@react-spring/web": "https://esm.sh/@react-spring/web@9.7.3?external=react",
-    "@use-gesture/react": "https://esm.sh/@use-gesture/react@10.3.0?external=react"
+    "@use-gesture/react": "https://esm.sh/@use-gesture/react@10.3.0?external=react",
+    "uuid": "https://esm.sh/uuid@11.0.1"
   }
 };
 
