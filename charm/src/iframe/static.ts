@@ -1,285 +1,268 @@
+const libraries = {
+  "imports": {
+    "react": "https://esm.sh/react@18.3.0",
+    "react-dom": "https://esm.sh/react-dom@18.3.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.3.0/client",
+    "d3": "https://esm.sh/d3@7.8.5",
+    "moment": "https://esm.sh/moment@2.29.4",
+    "@react-spring/web": "https://esm.sh/@react-spring/web@9.7.3?external=react",
+    "@use-gesture/react": "https://esm.sh/@use-gesture/react@10.3.0?external=react"
+  }
+};
+
+
 // The HTML template that wraps the developer's code
 export const prefillHtml = `<html>
 <head>
 <script src="https://cdn.tailwindcss.com"></script>
 <script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@18.2.0",
-    "react-dom": "https://esm.sh/react-dom@18.2.0",
-    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-    "@react-spring/web": "https://esm.sh/@react-spring/web@9.7.3",
-    "@react-spring/three": "https://esm.sh/@react-spring/three@9.7.3",
-    "three": "https://esm.sh/three@0.159.0",
-    "@react-three/fiber": "https://esm.sh/@react-three/fiber@8.15.19",
-    "@react-three/drei": "https://esm.sh/@react-three/drei@9.102.5",
-    "react-use-measure": "https://esm.sh/react-use-measure@2.1.1",
-    "d3": "https://esm.sh/d3@7.8.5",
-    "moment": "https://esm.sh/moment@2.29.4",
-    "p5": "https://esm.sh/p5@1.11.3",
-    "react-draggable": "https://esm.sh/react-draggable@3.1.1"
-  }
-}
+${JSON.stringify(libraries)}
 </script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-<!-- Step 1: User code to be transformed by Babel -->
-<script type="text/babel" data-presets="react" id="user-code">
-// USER_CODE_PLACEHOLDER
+<!-- Bootstrap script that runs first to set up React and utility functions -->
+<script type="module" id="bootstrap">
+  // Import React immediately
+  import * as React from 'react';
+  import * as ReactDOM from 'react-dom/client';
 
-// Export the functions so we can access them after Babel transformation
-window.__app = { onLoad, onReady, title };
-</script>
+  // Make React available globally
+  window.React = React;
+  window.ReactDOM = ReactDOM;
 
-<script>
-window.onerror = function (message, source, lineno, colno, error) {
-  window.parent.postMessage(
-    {
-      type: "error",
-      data: {
-        description: message,
-        source: source,
-        lineno: lineno,
-        colno: colno,
-        stacktrace: error && error.stack ? error.stack : new Error().stack,
-      },
-    },
-    "*",
-  );
-  return false;
-};
+  // Now define all utility functions with React available
+  window.useDoc = function(key, defaultValue = null) {
+    // Track if we've received a response from the parent
+    const [received, setReceived] = React.useState(false);
+    // Initialize state with defaultValue
+    const [doc, setDocState] = React.useState(defaultValue);
 
-function useDoc(key, defaultValue = null) {
-  // Track if we've received a response from the parent
-  const [received, setReceived] = React.useState(false);
-  // Initialize state with defaultValue
-  const [doc, setDocState] = React.useState(defaultValue);
+    React.useEffect(() => {
+      // Handler for document updates
+      function handleMessage(event) {
+        if (
+          event.data &&
+          event.data.type === "update" &&
+          event.data.data[0] === key
+        ) {
+          // Mark that we've received a response
+          setReceived(true);
 
-  React.useEffect(() => {
-    // Handler for document updates
-    function handleMessage(event) {
-      if (
-        event.data &&
-        event.data.type === "update" &&
-        event.data.data[0] === key
-      ) {
-        // Mark that we've received a response
-        setReceived(true);
-
-        // Update the state with the received value or null if undefined
-        const value = event.data.data[1] === undefined ? null : event.data.data[1];
-        console.log("useDoc", key, "updated", value);
-        setDocState(value);
+          // Update the state with the received value or null if undefined
+          const value = event.data.data[1] === undefined ? null : event.data.data[1];
+          console.log("useDoc", key, "updated", value);
+          setDocState(value);
+        }
       }
-    }
 
-    window.addEventListener("message", handleMessage);
+      window.addEventListener("message", handleMessage);
 
-    // Subscribe to the specific key
-    window.parent.postMessage({ type: "subscribe", data: key }, "*");
-    window.parent.postMessage({ type: "read", data: key }, "*");
+      // Subscribe to the specific key
+      window.parent.postMessage({ type: "subscribe", data: key }, "*");
+      window.parent.postMessage({ type: "read", data: key }, "*");
 
-    return () => {
-      window.removeEventListener("message", handleMessage);
-      window.parent.postMessage({ type: "unsubscribe", data: key }, "*");
+      return () => {
+        window.removeEventListener("message", handleMessage);
+        window.parent.postMessage({ type: "unsubscribe", data: key }, "*");
+      };
+    }, [key]);
+
+    // After we've received a response, apply default value if needed
+    React.useEffect(() => {
+      if (received && doc === null && defaultValue !== undefined) {
+        // Only write the default value if we've confirmed no data exists
+        console.log("useDoc", key, "default", defaultValue);
+        window.parent.postMessage({ type: "write", data: [key, defaultValue] }, "*");
+      }
+    }, [received, doc, defaultValue, key]);
+
+    // Update function
+    const updateDoc = (newValue) => {
+      if (typeof newValue === "function") {
+        newValue = newValue(doc);
+      }
+      console.log("useDoc", key, "written", newValue);
+      window.parent.postMessage({ type: "write", data: [key, newValue] }, "*");
     };
-  }, [key]);
 
-  // After we've received a response, apply default value if needed
-  React.useEffect(() => {
-    if (received && doc === null && defaultValue !== undefined) {
-      // Only write the default value if we've confirmed no data exists
-      console.log("useDoc", key, "default", defaultValue);
-      window.parent.postMessage({ type: "write", data: [key, defaultValue] }, "*");
-    }
-  }, [received, doc, defaultValue, key]);
-
-  // Update function
-  const updateDoc = (newValue) => {
-    if (typeof newValue === "function") {
-      newValue = newValue(doc);
-    }
-    console.log("useDoc", key, "written", newValue);
-    window.parent.postMessage({ type: "write", data: [key, newValue] }, "*");
+    // Return the current document value or the default if we haven't received data yet
+    return [received ? (doc === null ? defaultValue : doc) : defaultValue, updateDoc];
   };
 
-  // Return the current document value or the default if we haven't received data yet
-  return [received ? (doc === null ? defaultValue : doc) : defaultValue, updateDoc];
-}
+  // Define llm utility with React available
+  window.llm = (function() {
+    const inflight = [];
 
-window.llm = (() => {
-  const inflight = [];
+    async function llm(payload) {
+      return new Promise((resolve, reject) => {
+        let stringified = JSON.stringify(payload);
+        inflight.push([stringified, resolve, reject]);
+        window.parent.postMessage({
+          type: "llm-request",
+          data: stringified,
+        }, "*");
+      });
+    };
 
-  async function llm(payload) {
-    return new Promise((resolve, reject) => {
-      let stringified = JSON.stringify(payload);
-      inflight.push([stringified, resolve, reject]);
-      window.parent.postMessage({
-        type: "llm-request",
-        data: stringified,
-      }, "*");
-    });
-  };
-
-  window.addEventListener("message", e => {
-    if (e.data.type !== "llm-response") {
-      return;
-    }
-    let { request, data, error } = e.data;
-    let index = inflight.findIndex(([payload, res, rej]) => request === payload);
-    if (index !== -1) {
-      let [_, res, rej] = inflight[index];
-      inflight.splice(index, 1);
-      if (data) {
-        res(data);
-      } else {
-        rej(data);
+    window.addEventListener("message", e => {
+      if (e.data.type !== "llm-response") {
+        return;
       }
-    }
-  });
-  return llm;
-})();
-
-window.readWebpage = (() => {
-  const inflight = [];
-
-  async function readWebpage(url) {
-    return new Promise((resolve, reject) => {
-      inflight.push([url, resolve, reject]);
-      window.parent.postMessage({
-        type: "readwebpage-request",
-        data: url,
-      }, "*");
-    });
-  };
-
-  window.addEventListener("message", e => {
-    if (e.data.type !== "readwebpage-response") {
-      return;
-    }
-    let { request, data, error } = e.data;
-    let index = inflight.findIndex(([payload, res, rej]) => request === payload);
-    if (index !== -1) {
-      let [_, res, rej] = inflight[index];
-      inflight.splice(index, 1);
-      if (data) {
-        res(data);
-      } else {
-        rej(error);
+      let { request, data, error } = e.data;
+      let index = inflight.findIndex(([payload, res, rej]) => request === payload);
+      if (index !== -1) {
+        let [_, res, rej] = inflight[index];
+        inflight.splice(index, 1);
+        if (data) {
+          res(data);
+        } else {
+          rej(data);
+        }
       }
-    }
-  });
-  return readWebpage;
-})();
+    });
+    return llm;
+  })();
 
-window.generateImage = function(prompt) {
-  return '/api/ai/img?prompt=' + encodeURIComponent(prompt);
-}
+  // Define readWebpage utility with React available
+  window.readWebpage = (function() {
+    const inflight = [];
 
-const sourceTimeout = 1000;
+    async function readWebpage(url) {
+      return new Promise((resolve, reject) => {
+        inflight.push([url, resolve, reject]);
+        window.parent.postMessage({
+          type: "readwebpage-request",
+          data: url,
+        }, "*");
+      });
+    };
 
-function LoadingUI() {
-  const mountPoint = document.createElement('div');
-  mountPoint.className = 'fixed inset-0 flex items-center justify-center bg-white bg-opacity-80 z-50';
+    window.addEventListener("message", e => {
+      if (e.data.type !== "readwebpage-response") {
+        return;
+      }
+      let { request, data, error } = e.data;
+      let index = inflight.findIndex(([payload, res, rej]) => request === payload);
+      if (index !== -1) {
+        let [_, res, rej] = inflight[index];
+        inflight.splice(index, 1);
+        if (data) {
+          res(data);
+        } else {
+          rej(error);
+        }
+      }
+    });
+    return readWebpage;
+  })();
 
-  const loadingState = {
-    status: 'Initializing...',
-    libraries: [],
-    errors: []
+  // Define generateImage utility with React available
+  window.generateImage = function(prompt) {
+    return '/api/ai/img?prompt=' + encodeURIComponent(prompt);
   };
 
-  function render() {
-    const libraryStatus = loadingState.libraries.map(lib =>
-      \`<li class="text-sm \${lib.loaded ? 'text-green-600' : lib.error ? 'text-red-600' : 'text-blue-600'}">
-         \${lib.url.split('/').pop()} \${lib.loaded ? '✓' : lib.error ? '✗' : '...'}
-      </li>\`
-    ).join('');
+  // Error handling
+  window.onerror = function (message, source, lineno, colno, error) {
+    window.parent.postMessage(
+      {
+        type: "error",
+        data: {
+          description: message,
+          source: source,
+          lineno: lineno,
+          colno: colno,
+          stacktrace: error && error.stack ? error.stack : new Error().stack,
+        },
+      },
+      "*"
+    );
+    return false;
+  };
 
-    const errorMessages = loadingState.errors
-      .map(err => \`<li class="text-sm text-red-600">\${err}</li>\`)
-      .join('');
+  // Define LoadingUI
+  window.LoadingUI = function() {
+    const mountPoint = document.createElement('div');
+    mountPoint.className = 'fixed inset-0 flex items-center justify-center bg-white bg-opacity-80 z-50';
 
-    mountPoint.innerHTML = \`
-      <div class="bg-white p-6 rounded-lg shadow-lg max-w-md">
-        <h2 class="text-xl font-bold mb-4">Loading Application</h2>
-        <p class="mb-2">\${loadingState.status}</p>
-        \${loadingState.libraries.length ?
-          \`<div class="mb-3">
-             <p class="font-semibold">Libraries:</p>
-             <ul class="ml-4">\${libraryStatus}</ul>
-           </div>\` : ''}
-           \${errorMessages ?
-          \`<div class="mb-3">
-             <p class="font-semibold text-red-600">Errors:</p>
-             <ul class="ml-4">\${errorMessages}</ul>
-           </div>\` : ''}
-      </div>
-    \`;
-  }
+    const loadingState = {
+      status: 'Initializing...',
+      libraries: [],
+      errors: []
+    };
 
-  function updateStatus(status) {
-    loadingState.status = status;
-    render();
-  }
+    function render() {
+      const libraryStatus = loadingState.libraries.map(lib =>
+        \`<li class="text-sm \${lib.loaded ? 'text-green-600' : lib.error ? 'text-red-600' : 'text-blue-600'}">
+           \${lib.url.split('/').pop()} \${lib.loaded ? '✓' : lib.error ? '✗' : '...'}
+        </li>\`
+      ).join('');
 
-  function addLibrary(url) {
-    loadingState.libraries.push({ url, loaded: false, error: false });
-    render();
-  }
+      const errorMessages = loadingState.errors
+        .map(err => \`<li class="text-sm text-red-600">\${err}</li>\`)
+        .join('');
 
-  function updateLibrary(url, loaded, error) {
-    const lib = loadingState.libraries.find(l => l.url === url);
-    if (lib) {
-      lib.loaded = loaded;
-      lib.error = error;
+      mountPoint.innerHTML = \`
+        <div class="bg-white p-6 rounded-lg shadow-lg max-w-md">
+          <h2 class="text-xl font-bold mb-4">Loading Application</h2>
+          <p class="mb-2">\${loadingState.status}</p>
+          \${loadingState.libraries.length ?
+            \`<div class="mb-3">
+               <p class="font-semibold">Libraries:</p>
+               <ul class="ml-4">\${libraryStatus}</ul>
+             </div>\` : ''}
+             \${errorMessages ?
+            \`<div class="mb-3">
+               <p class="font-semibold text-red-600">Errors:</p>
+               <ul class="ml-4">\${errorMessages}</ul>
+             </div>\` : ''}
+        </div>
+      \`;
+    }
+
+    function updateStatus(status) {
+      loadingState.status = status;
       render();
     }
-  }
 
-  function addError(error) {
-    loadingState.errors.push(error);
-    render();
-  }
-
-  function remove() {
-    if (mountPoint.parentNode) {
-      mountPoint.parentNode.removeChild(mountPoint);
+    function addLibrary(url) {
+      loadingState.libraries.push({ url, loaded: false, error: false });
+      render();
     }
-  }
 
-  document.body.appendChild(mountPoint);
-  render();
+    function updateLibrary(url, loaded, error) {
+      const lib = loadingState.libraries.find(l => l.url === url);
+      if (lib) {
+        lib.loaded = loaded;
+        lib.error = error;
+        render();
+      }
+    }
 
-  return {
-    updateStatus,
-    addLibrary,
-    updateLibrary,
-    addError,
-    remove
+    function addError(error) {
+      loadingState.errors.push(error);
+      render();
+    }
+
+    function remove() {
+      if (mountPoint.parentNode) {
+        mountPoint.parentNode.removeChild(mountPoint);
+      }
+    }
+
+    document.body.appendChild(mountPoint);
+    render();
+
+    return {
+      updateStatus,
+      addLibrary,
+      updateLibrary,
+      addError,
+      remove
+    };
   };
-}
 
-// Step 2: Module execution script that runs after Babel transformation
-document.addEventListener('DOMContentLoaded', () => {
-  // Create a container for the React app
-  const container = document.createElement('div');
-  container.id = 'app-container';
-  document.body.appendChild(container);
-
-  // Create loading UI
-  const loader = LoadingUI();
-
-  // Track loading states
-  const loadingStates = {
-    babelReady: false,
-    esmModulesReady: false,
-    sourceDataReady: false
-  };
-
-  let sourceData = null;
-
-  // Wait for Babel transformation to complete
-  function waitForBabel() {
+  // Helper functions
+  window.waitForBabel = function() {
     return new Promise(resolve => {
       function check() {
         if (window.__app) {
@@ -290,84 +273,24 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       check();
     });
-  }
+  };
 
-  function checkAllReady() {
-    if (loadingStates.babelReady && loadingStates.esmModulesReady) {
-      loader.updateStatus('All resources loaded, initializing application...');
-      setTimeout(() => {
-        loader.remove();
-        if (typeof window.__app.onReady === 'function') {
-          window.sourceData = sourceData;
-          window.__app.onReady(container, sourceData, window.loadedModules);
-        } else {
-          console.error('onReady function not defined or not a function');
-        }
-      }, 200); // Small delay to show the "All loaded" message
-    }
-  }
+  window.loadUserModules = async function() {
+    const loader = window.LoadingUI();
+    loader.updateStatus('Loading ESM modules...');
 
-  // Subscribe to source cell
-  function subscribeToSource() {
-    loader.updateStatus('Subscribing to source data...');
+    const modules = {
+      'react': React,
+      'react-dom': ReactDOM
+    };
 
-    function handleSourceMessage(event) {
-      if (
-        event.data &&
-        event.data.type === "update" &&
-        Array.isArray(event.data.data) &&
-        event.data.data[0] === "*" &&
-        event.data.data[1] != undefined
-      ) {
-        sourceData = event.data.data[1];
-        loadingStates.sourceDataReady = true;
-        loader.updateStatus('Source data received');
-        // Remove this listener once we have the data
-        window.removeEventListener("message", handleSourceMessage);
-      }
-    }
-
-    window.addEventListener("message", handleSourceMessage);
-    window.parent.postMessage({ type: "subscribe", data: "*" }, "*");
-    window.parent.postMessage({ type: "read", data: "*" }, "*");
-
-    // Set a timeout in case source data doesn't arrive
-    setTimeout(() => {
-      if (!loadingStates.sourceDataReady) {
-        loader.updateStatus('Source data timeout, continuing without it');
-        loader.addError('Source data not received');
-        loadingStates.sourceDataReady = true;
-      }
-    }, 3000);
-  }
-
-  // Load ESM modules
-  async function loadESMModules() {
     try {
-      loader.updateStatus('Loading ESM modules...');
-
-      // Import React and ReactDOM by default
-      const reactModule = await import('react');
-      const reactDomModule = await import('react-dom/client');
-
-      // Make them available globally
-      window.React = reactModule;
-      window.ReactDOM = reactDomModule;
-
-      // Initialize modules container
-      window.loadedModules = {
-        'react': reactModule,
-        'react-dom': reactDomModule
-      };
-
       // Get requested libraries from user code
       const requestedLibs = window.__app.onLoad ? window.__app.onLoad() : [];
 
       if (!requestedLibs || requestedLibs.length === 0) {
         loader.updateStatus('No additional libraries to load');
-        loadingStates.esmModulesReady = true;
-        checkAllReady();
-        return;
+        return modules;
       }
 
       // Load all modules in parallel
@@ -386,6 +309,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Wait for all modules to load
       const results = await Promise.all(modulePromises);
+      console.log('Loaded libraries:', results.map(result => result.name));
 
       // Process results
       let hasErrors = false;
@@ -393,8 +317,16 @@ document.addEventListener('DOMContentLoaded', () => {
       results.forEach(result => {
         if (result.error) {
           hasErrors = true;
+          console.error(\`Error loading module \${result.name}:\`, result.error);
         } else if (result.module) {
-          window.loadedModules[result.name] = result.module;
+          // Support both direct module exports and modules with default export
+          if (result.module.default && Object.keys(result.module).length === 1) {
+            modules[result.name] = result.module.default;
+          } else {
+            modules[result.name] = result.module;
+          }
+        } else {
+          console.warn(\`Unexpected module loading result for \${result.name}: Module loaded but is null or undefined\`);
         }
       });
 
@@ -404,37 +336,102 @@ document.addEventListener('DOMContentLoaded', () => {
         loader.updateStatus('All modules loaded successfully');
       }
 
-      loadingStates.esmModulesReady = true;
-      checkAllReady();
-
+      loader.remove();
+      return modules;
     } catch (error) {
       loader.addError(\`Error loading ESM modules: \${error.message}\`);
-      loadingStates.esmModulesReady = true; // Mark as ready even on error to continue
-      checkAllReady();
+      loader.remove();
+      return modules;
     }
-  }
+  };
 
-  // Main initialization
-  (async () => {
+  // Subscribe to source data
+  window.subscribeToSource = function() {
+    return new Promise((resolve) => {
+      function handleSourceMessage(event) {
+        if (
+          event.data &&
+          event.data.type === "update" &&
+          Array.isArray(event.data.data) &&
+          event.data.data[0] === "*" &&
+          event.data.data[1] != undefined
+        ) {
+          const sourceData = event.data.data[1];
+          // Remove this listener once we have the data
+          window.removeEventListener("message", handleSourceMessage);
+          resolve(sourceData);
+        }
+      }
+
+      window.addEventListener("message", handleSourceMessage);
+      window.parent.postMessage({ type: "subscribe", data: "*" }, "*");
+      window.parent.postMessage({ type: "read", data: "*" }, "*");
+
+      // Set a timeout in case source data doesn't arrive
+      setTimeout(() => {
+        window.removeEventListener("message", handleSourceMessage);
+        resolve(null);
+      }, 3000);
+    });
+  };
+
+  // Initialize the application
+  window.initializeApp = async function() {
+    const container = document.createElement('div');
+    container.id = 'app-container';
+    document.body.appendChild(container);
+
+    const loader = window.LoadingUI();
+
     try {
+      // Wait for Babel transformation to complete
       loader.updateStatus('Waiting for code transformation...');
-
-      // Wait for Babel to transform the user code
-      await waitForBabel();
-
+      await window.waitForBabel();
       loader.updateStatus('Code transformation complete');
-      loadingStates.babelReady = true;
 
-      // Start loading ESM modules and source data in parallel
-      loadESMModules();
-      subscribeToSource();
+      // Load modules and source data in parallel
+      const [modules, sourceData] = await Promise.all([
+        window.loadUserModules(),
+        window.subscribeToSource()
+      ]);
 
+      window.sourceData = sourceData;
+
+      // Initialize the app
+      loader.updateStatus('Initializing application...');
+      setTimeout(() => {
+        loader.remove();
+        if (typeof window.__app.onReady === 'function') {
+          console.group('App Initialization');
+          console.log('Container:', container);
+          console.log('Source Data:', sourceData);
+          console.log('Modules:', modules);
+          console.groupEnd();
+          window.__app.onReady(container, sourceData, modules);
+        } else {
+          console.error('onReady function not defined or not a function');
+        }
+      }, 200);
     } catch (error) {
       loader.addError(\`Initialization error: \${error.message}\`);
       console.error("Error initializing application:", error);
     }
-  })();
-});
+  };
+
+  // Start the initialization once DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', window.initializeApp);
+  } else {
+    window.initializeApp();
+  }
+</script>
+
+<!-- User code to be transformed by Babel -->
+<script type="text/babel" data-presets="react" id="user-code">
+// USER_CODE_PLACEHOLDER
+
+// Export the functions so we can access them after Babel transformation
+window.__app = { onLoad, onReady, title };
 </script>
 </head>
   <body class="bg-gray-50"></body>
@@ -461,7 +458,7 @@ export function extractUserCode(html: string): string | null {
   return html.substring(startIndex + startMarker.length, endIndex);
 }
 // Update the system message to reflect the new interface
-export const systemMd = `# React App Builder
+export const systemMd = `# React Component Builder
 
 Create an interactive React component that fulfills the user's request. Focus on delivering a clean, useful implementation with appropriate features.
 
@@ -478,14 +475,21 @@ Create an interactive React component that fulfills the user's request. Focus on
 5. For form handling, use \`onClick\` handlers instead of \`onSubmit\`
 
 ## Available APIs
-- **useDoc(key, defaultValue)** - Persistent data storage with real-time updates
+- **useDoc(key, defaultValue)** - Persistent data storage with real-time updates (follows React hook rules)
 - **llm(promptPayload)** - Send requests to the language model
 - **readWebpage(url)** - Fetch and parse external web content
 - **generateImage(prompt)** - Create AI-generated images
 
+## Important Note About useDoc
+- **useDoc is a React Hook** and must follow all React hook rules
+- Only call useDoc at the top level of your function components or custom hooks
+- Do not call useDoc inside loops, conditions, or nested functions
+- useDoc cannot be used outside of React components - it must be called during rendering
+
 ## Library Usage
 - Request additional libraries in \`onLoad\` by returning an array of module names
-- Available libraries: @react-spring/web, three, @react-three/fiber, @react-three/drei, react-use-measure, d3, moment, p5, react-draggable
+- Available libraries:
+  ${Object.entries(libraries).map(([k, v]) => `- ${k} : ${v}`).join('\n')}
 - Only use the explicitly provided libraries
 
 ## Security Restrictions
@@ -504,6 +508,11 @@ SCHEMA
 The \`useDoc\` hook subscribes to real-time updates for a given key and returns a tuple \`[doc, setDoc]\`:
 
 Any keys from the view-model-schema are valid for useDoc, any other keys will fail. Provide a default as the second argument, **do not set an initial value explicitly**.
+
+**Important**: useDoc is a React Hook and must follow React Hook Rules:
+- Only call useDoc at the top level of your function components or custom hooks
+- Do not call useDoc inside loops, conditions, or nested functions
+- It cannot be used outside React components
 
 For this schema:
 
@@ -524,8 +533,14 @@ For this schema:
 
 \`\`\`jsx
 function CounterComponent() {
+  // Correct: useDoc called at top level of component
   const [counter, setCounter] = useDoc("counter", -1); // default
   const [title, setTitle] = useDoc("title", "My Counter App"); // default
+
+  // Incorrect: would cause errors
+  // if(something) {
+  //   const [data, setData] = useDoc("data", {}); // Never do this!
+  // }
 
   return (
     <div>
@@ -580,15 +595,7 @@ function ImageComponent() {
 
 \`\`\`javascript
 // Import from modern ESM libraries:
-//   - @react-spring/web
-//   - three
-//   - @react-three/fiber
-//   - @react-three/drei
-//   - react-use-measure
-//   - d3
-//   - moment
-//   - p5
-//   - react-draggable
+${Object.keys(libraries.imports).map(lib => `//   - ${lib}`).join('\n')}
 function onLoad() {
   return ['@react-spring/web']; // Request the modules you need
 }
@@ -601,7 +608,7 @@ function onReady(mount, sourceData, libs) {
   const { useSpring, animated } = libs['@react-spring/web']; // Access imported module
 
   function MyApp() {
-    const [count, setCount] = useState(0);
+    const [count, setCount] = useDoc('count', 0);
     const props = useSpring({
       from: { opacity: 0 },
       to: { opacity: 1 }
