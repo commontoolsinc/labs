@@ -59,4 +59,5 @@ jobs:
         working-directory: jumble
         env:
           ADDITIONAL_WAIT_TIME: 5000
+          DENO_SLOW_TEST_TIMEOUT: 300000
         run: deno task integration
