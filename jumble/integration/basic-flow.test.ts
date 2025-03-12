@@ -42,6 +42,23 @@ describe("integration", () => {
   beforeEach(async () => {
     console.log(`Waiting to open website at ${FRONTEND_URL}`);
     page = await browser!.newPage(FRONTEND_URL);
+
+    // Add console log listeners
+    page.on("console", (msg) => {
+      console.log(`Browser Console [${msg.type()}]: ${msg.text()}`);
+    });
+
+    // Add error listeners
+    page.on("pageerror", (err) => {
+      console.error("Browser Page Error:", err);
+    });
+
+    // Add dialog listeners (for alerts, confirms, etc.)
+    page.on("dialog", async (dialog) => {
+      console.log(`Browser Dialog: ${dialog.type()} - ${dialog.message()}`);
+      await dialog.dismiss();
+    });
+
     await sleep(ADDITIONAL_WAIT_TIME);
     console.log(`Opened website at ${FRONTEND_URL}`);
     await login(page, ADDITIONAL_WAIT_TIME);
