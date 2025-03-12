@@ -135,8 +135,7 @@ export const castSpellAsCharm = async (
       recipe,
       argument,
     );
-    charmManager.add([charm]);
-    return charm.entityId;
+    return charm;
   }
   console.log("Failed to cast");
   return null;
@@ -304,7 +303,6 @@ async function handleEditRecipe(
     deps.focusedCharmId,
     deps.focusedReplicaId,
     input,
-    false,
     deps.preferredModel,
   );
   if (newCharmPath) {
@@ -325,12 +323,8 @@ async function handleExtendRecipe(
     deps.focusedCharmId,
     deps.focusedReplicaId,
     input,
-    false,
-    deps.preferredModel,
   );
-  if (newCharmPath) {
-    deps.navigate(newCharmPath);
-  }
+  deps.navigate(newCharmPath);
   deps.setLoading(false);
   deps.setOpen(false);
 }

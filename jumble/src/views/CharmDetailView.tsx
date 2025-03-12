@@ -1,8 +1,8 @@
 import {
   Charm,
+  generateNewRecipeVersion,
   getIframeRecipe,
   IFrameRecipe,
-  saveNewRecipeVersion,
 } from "@commontools/charm";
 import React, {
   createContext,
@@ -28,7 +28,7 @@ import {
   generateCharmSuggestions,
 } from "@/utils/prompt-library/charm-suggestions.ts";
 import { Cell } from "@commontools/runner";
-import { createPath, createPathWithHash } from "@/routes.ts";
+import { createPath } from "@/routes.ts";
 import JsonView from "@uiw/react-json-view";
 
 type Tab = "iterate" | "code" | "data";
@@ -264,7 +264,18 @@ function useCodeEditor(
 
   const saveChanges = useCallback(() => {
     if (workingSrc && iframeRecipe && charm) {
-      saveNewRecipeVersion(charmManager, charm, workingSrc, iframeRecipe.spec);
+      generateNewRecipeVersion(
+        charmManager,
+        charm,
+        workingSrc,
+        iframeRecipe.spec,
+      ).then((newCharm) => {
+        console.log("Fixme, navigate to new charm", newCharm);
+        // navigate(createPath("charmShow", {
+        //   charmId: charmId(newCharm)!,
+        //   replicaName: replicaName,
+        // }));
+      });
     }
   }, [workingSrc, iframeRecipe, charm]);
 
@@ -315,7 +326,6 @@ function useCharmOperation() {
           charmId,
           replicaName,
           input,
-          replace,
           model,
         );
       } else {
@@ -324,8 +334,6 @@ function useCharmOperation() {
           charmId,
           replicaName,
           input,
-          replace,
-          model,
         );
       }
     },

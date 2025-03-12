@@ -161,6 +161,8 @@ export class CharmManager {
     return this.pinnedCharms;
   }
 
+  // FIXME(ja): this says it returns a list of charm, but it isn't! you will
+  // have to call .get() to get the actual charm (this is missing the schema)
   getCharms(): Cell<Cell<Charm>[]> {
     // Start syncing if not already syncing. Will trigger a change to the list
     // once loaded.
@@ -168,7 +170,7 @@ export class CharmManager {
     return this.charms;
   }
 
-  async add(newCharms: Cell<Charm>[]) {
+  private async add(newCharms: Cell<Charm>[]) {
     await storage.syncCell(this.charmsDoc);
     await idle();
 
@@ -181,6 +183,8 @@ export class CharmManager {
     await idle();
   }
 
+  // FIXME(ja): if we are already running the charm, can we just return it?
+  // if a charm has sideeffects we might multiple versions...
   async get<T = Charm>(
     id: string | Cell<Charm>,
     runIt: boolean = true,
@@ -360,7 +364,7 @@ export class CharmManager {
   }
 
   // FIXME(JA): this really really really needs to be revisited
-  async syncRecipe(charm: Cell<Charm>): Promise<string | undefined> {
+  async syncRecipe(charm: Cell<Charm>): Promise<string> {
     const recipeId = charm.getSourceCell()?.get()?.[TYPE];
     if (!recipeId) throw new Error("charm missing recipe ID");
 
@@ -372,7 +376,7 @@ export class CharmManager {
   }
 
   async syncRecipeCells(recipeId: string) {
-    // NOTE(ja): I don't think this actually syncs the recipe
+    // NOTE(ja): this doesn't sync recipe to storage
     if (recipeId) await storage.syncCellById(this.space, { "/": recipeId });
   }
 
