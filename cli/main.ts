@@ -10,8 +10,8 @@ import {
 import * as Session from "./session.ts";
 import type { DID } from "@commontools/identity";
 
-const { space, charmId, recipeFile, cause, quit } = parseArgs(Deno.args, {
-  string: ["space", "charmId", "recipeFile", "cause"],
+const { name, charmId, recipeFile, cause, quit } = parseArgs(Deno.args, {
+  string: ["name", "charmId", "recipeFile", "cause"],
   boolean: ["quit"],
   default: { quit: false },
 });
@@ -25,14 +25,12 @@ storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
 
 async function main() {
-  const session = await Session.open({
+  const session = await Session.create({
     passphrase: OPERATOR_PASS,
-    space: space as DID,
-    name: `~${space}`,
+    name: name!,
   });
 
   console.log("params:", {
-    space,
     session,
     charmId,
     recipeFile,

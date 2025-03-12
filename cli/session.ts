@@ -24,6 +24,6 @@ export const create = async (
     private: name.startsWith("~"),
     name,
     space: space.did(),
-    as: account,
+    as: space,
   };
 };
