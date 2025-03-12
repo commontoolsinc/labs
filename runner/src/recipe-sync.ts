@@ -66,7 +66,9 @@ function saveRecipe(
 ): Promise<boolean> {
   // If the recipe is already known to storage, we don't need to save it again,
   // unless the user is trying to attach a spellbook title or tags.
-  if (recipesKnownToStorage.has(id) && !spellbookTitle) return;
+  if (recipesKnownToStorage.has(id) && !spellbookTitle) {
+    return Promise.resolve(true);
+  }
   recipesKnownToStorage.add(id);
 
   const data = {
