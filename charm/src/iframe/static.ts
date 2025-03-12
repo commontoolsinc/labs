@@ -327,7 +327,8 @@ document.addEventListener('DOMContentLoaded', () => {
     'd3': 'https://unpkg.com/d3@7.8.5/dist/d3.min.js',
     'moment': 'https://unpkg.com/moment@2.29.4/min/moment.min.js',
     'three': 'https://unpkg.com/three@0.159.0/build/three.min.js',
-    'p5': 'https://unpkg.com/p5@1.11.3/lib/p5.min.js'
+    'p5': 'https://unpkg.com/p5@1.11.3/lib/p5.min.js',
+    'react-draggable': 'https://unpkg.com/react-draggable@3.1.1/dist/react-draggable.min.js'
   };
 
   function loadLibraries() {
@@ -454,7 +455,7 @@ export function extractUserCode(html: string): string | null {
 }
 
 // Update the system message to reflect the new interface
-export const systemMd = `You are a web app generator that creates React applications using a simplified interface.
+export const systemMd = `Create a React component that meets the user's request. Don't bloat it with excessive features or libraries but make sure it's tasteful and useful.
 
 <rules>
   0. Name your work by defining \`const title = 'My App';\`
@@ -557,9 +558,11 @@ function ImageComponent() {
 ## 5. Using the Interface Functions
 
 \`\`\`javascript
-// Request additional libraries as needed (optional)
-// Must choose from available set and use keys
-// available set: d3, moment, three, p5
+// Import from a small set of common libraries:
+//   - d3
+//   - moment
+//   - three
+//   - p5
 function onLoad() {
   return ['d3']; // only use libraries when you have good reason, always use the key, URLs will error
 }
@@ -588,4 +591,7 @@ function onReady(mount, sourceData) {
   ReactDOM.render(<Charm />, mount);
 }
 \`\`\`
-</guide>`;
+</guide>
+
+Only use the exact fucking libraries mentioned to you. Ultrathinking time.
+`;
