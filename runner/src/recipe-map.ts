@@ -13,12 +13,12 @@ export function registerNewRecipe(
   recipe: Recipe,
   src?: string,
   spec?: string,
-  parents?: string[]
+  parents?: string[],
 ): string {
   if (idByRecipe.has(recipe)) return idByRecipe.get(recipe)!;
 
   const id = src
-    ? createRef(src, "recipe source").toString()
+    ? createRef({ src }, "recipe source").toString()
     : createRef(recipe, "recipe").toString();
 
   return registerRecipe(id, recipe, src, spec, parents);
@@ -29,7 +29,7 @@ export function registerRecipe(
   recipe: Recipe,
   src?: string,
   spec?: string,
-  parents?: string[]
+  parents?: string[],
 ): string {
   if (idByRecipe.has(recipe)) return idByRecipe.get(recipe)!;
 

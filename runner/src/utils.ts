@@ -565,7 +565,7 @@ export function normalizeAndDiff(
       path = path.slice(0, -1);
     }
 
-    const entityId = createRef(id, { parent: current.cell, path, context });
+    const entityId = createRef({ id }, { parent: current.cell, path, context });
     const doc = getDocByEntityId(
       current.cell.space,
       entityId,

@@ -643,6 +643,46 @@ describe("normalizeAndDiff", () => {
       "should update the same document with ID-based entity objects",
     );
 
+    expect(testDoc.get().items[0].cell).not.toBe(newDoc);
+    expect(testDoc.get().items[0].cell.get().name).toEqual("Inserted before");
+    expect(testDoc.get().items[1].cell).toBe(newDoc);
+    expect(testDoc.get().items[1].cell.get().name).toEqual("Second Value");
+  });
+
+  it("should update the same document with numeric ID-based entity objects", () => {
+    const testSpace = "test";
+    const testDoc = getDoc<any>(
+      { items: [] },
+      "should update the same document with ID-based entity objects",
+      testSpace,
+    );
+    const current: DocLink = { cell: testDoc, path: ["items", 0] };
+
+    const newValue = { [ID]: 1, name: "First Item" };
+    diffAndUpdate(
+      current,
+      newValue,
+      undefined,
+      "should update the same document with ID-based entity objects",
+    );
+
+    const newDoc = testDoc.get().items[0].cell;
+
+    const newValue2 = {
+      items: [
+        { [ID]: 0, name: "Inserted before" },
+        { [ID]: 1, name: "Second Value" },
+      ],
+    };
+    diffAndUpdate(
+      { cell: testDoc, path: [] },
+      newValue2,
+      undefined,
+      "should update the same document with ID-based entity objects",
+    );
+
+    expect(testDoc.get().items[0].cell).not.toBe(newDoc);
+    expect(testDoc.get().items[0].cell.get().name).toEqual("Inserted before");
     expect(testDoc.get().items[1].cell).toBe(newDoc);
     expect(testDoc.get().items[1].cell.get().name).toEqual("Second Value");
   });
