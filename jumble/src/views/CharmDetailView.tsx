@@ -357,6 +357,7 @@ function useCharmOperation() {
         );
         // Store the variant and keep track of which model was used
         setVariants((prev) => [...prev, newCharm]);
+        setLoading(false);
         setVariantModelsMap((prev) => ({
           ...prev,
           [charmId(newCharm) || ""]: model,
@@ -366,7 +367,6 @@ function useCharmOperation() {
       });
 
       await Promise.allSettled(gens);
-      setLoading(false);
     };
 
     if (showVariants) {

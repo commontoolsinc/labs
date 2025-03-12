@@ -7,10 +7,7 @@ import {
   iterate,
 } from "@commontools/charm";
 import { Cell } from "@commontools/runner";
-
-import { charmId } from "@/utils/charms.ts";
 import { fixRecipePrompt } from "@/utils/prompt-library/recipe-fix.ts";
-import { createPath } from "@/routes.ts";
 
 export async function fixItCharm(
   charmManager: CharmManager,
