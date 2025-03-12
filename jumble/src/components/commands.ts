@@ -698,6 +698,40 @@ async function handleUseSpellOnOtherData(deps: CommandContext) {
   }
 }
 
+async function handleAddGmailImporter(deps: CommandContext, filename: string) {
+  deps.setLoading(true);
+  try {
+    const response = await fetch(
+      `https://raw.githubusercontent.com/commontoolsinc/labs/refs/heads/main/recipes/${filename}`,
+    );
+    const src = await response.text();
+
+    const newCharm = await compileAndRunRecipe(
+      deps.charmManager,
+      src,
+      "GMail Importer",
+      {},
+    );
+
+    const id = charmId(newCharm);
+    if (!id || !deps.focusedReplicaId) {
+      throw new Error("Missing charm ID or replica name");
+    }
+
+    deps.navigate(
+      createPath("charmShow", {
+        charmId: id,
+        replicaName: deps.focusedReplicaId,
+      }),
+    );
+  } catch (error) {
+    console.error(`Error loading ${filename}:`, error);
+  } finally {
+    deps.setLoading(false);
+    deps.setOpen(false);
+  }
+}
+
 export function getCommands(deps: CommandContext): CommandItem[] {
   return [
     {
@@ -1025,6 +1059,18 @@ export function getCommands(deps: CommandContext): CommandItem[] {
             }
             deps.setOpen(false);
           },
+        },
+        {
+          id: "add-gmail-importer",
+          type: "action",
+          title: "Add Gmail Importer",
+          handler: () => handleAddGmailImporter(deps, "gmail.tsx"),
+        },
+        {
+          id: "add-gcal-importer",
+          type: "action",
+          title: "Add GCal Importer",
+          handler: () => handleAddGmailImporter(deps, "gcal.tsx"),
         },
       ],
     },
