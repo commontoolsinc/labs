@@ -511,7 +511,21 @@ export function normalizeAndDiff(
   // Get current value to compare against
   const currentValue = current.cell.getAtPath(current.path);
 
-  // Handle alias in current value
+  // A new alias can overwrite a previous alias. No-op if the same.
+  if (isAlias(newValue)) {
+    if (
+      isAlias(currentValue) &&
+      newValue.$alias.cell === currentValue.$alias.cell &&
+      arrayEqual(newValue.$alias.path, currentValue.$alias.path)
+    ) {
+      return [];
+    } else {
+      changes.push({ location: current, value: newValue });
+      return changes;
+    }
+  }
+
+  // Handle alias in current value (at this point: if newValue is not an alias)
   if (isAlias(currentValue)) {
     // Log reads of the alias, so that changing aliases cause refreshes
     log?.reads.push({ cell: current.cell, path: current.path });
@@ -519,8 +533,9 @@ export function normalizeAndDiff(
     return normalizeAndDiff(ref, newValue, log, context);
   }
 
-  if (isDocLink(currentValue) && isDocLink(newValue)) {
+  if (isDocLink(newValue)) {
     if (
+      isDocLink(currentValue) &&
       currentValue.cell === newValue.cell &&
       arrayEqual(currentValue.path, newValue.path)
     ) {
@@ -538,11 +553,19 @@ export function normalizeAndDiff(
     newValue[ID] !== undefined
   ) {
     const { [ID]: id, ...rest } = newValue;
-    const entityId = createRef(id, {
-      parent: current.cell,
-      path: current.path,
-      context: context,
-    });
+    let path = current.path;
+
+    // If we're setting an array element, make the array the context for the
+    // derived id, not the array index. If it's a nested array, take the parent
+    // array as context, recursively.
+    while (
+      path.length > 0 &&
+      Array.isArray(current.cell.getAtPath(path.slice(0, -1)))
+    ) {
+      path = path.slice(0, -1);
+    }
+
+    const entityId = createRef(id, { parent: current.cell, path, context });
     const doc = getDocByEntityId(
       current.cell.space,
       entityId,
@@ -559,7 +582,12 @@ export function normalizeAndDiff(
   }
 
   // Handle arrays
-  if (Array.isArray(newValue) && Array.isArray(currentValue)) {
+  if (Array.isArray(newValue)) {
+    // If the current value is not an array, set it to an empty array
+    if (!Array.isArray(currentValue)) {
+      changes.push({ location: current, value: [] });
+    }
+
     for (let i = 0; i < newValue.length; i++) {
       const nestedChanges = normalizeAndDiff(
         { cell: current.cell, path: [...current.path, i.toString()] },
@@ -571,7 +599,7 @@ export function normalizeAndDiff(
     }
 
     // Handle array length changes
-    if (currentValue.length > newValue.length) {
+    if (Array.isArray(currentValue) && currentValue.length > newValue.length) {
       changes.push({
         location: { cell: current.cell, path: [...current.path, "length"] },
         value: newValue.length,
@@ -582,13 +610,16 @@ export function normalizeAndDiff(
   }
 
   // Handle objects
-  if (
-    typeof newValue === "object" && newValue !== null &&
-    typeof currentValue === "object" && currentValue !== null &&
-    !Array.isArray(newValue) && !Array.isArray(currentValue) &&
-    !isDocLink(newValue) && !isDocLink(currentValue) &&
-    !isAlias(newValue) && !isAlias(currentValue)
-  ) {
+  if (typeof newValue === "object" && newValue !== null) {
+    // If the current value is not a (regular) object, set it to an empty object
+    // Note that the alias case is handled above
+    if (
+      typeof currentValue !== "object" || currentValue === null ||
+      isDocLink(currentValue)
+    ) {
+      changes.push({ location: current, value: {} });
+    }
+
     for (const key in newValue) {
       const nestedChanges = normalizeAndDiff(
         { cell: current.cell, path: [...current.path, key] },
