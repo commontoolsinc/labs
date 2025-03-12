@@ -87,7 +87,6 @@ function throttle(context: any, key: string, callback: () => void): void {
     }
   }
 }
-
 /**
  * Translates `id` that React likes to create to our `ID` property, making sure
  * in any given object it is never used twice.
@@ -118,7 +117,7 @@ function addCommonIDfromObjectID(obj: any) {
     }
   }
 
-  if ("id" in obj) obj[ID] = obj.id;
+  if (typeof obj == "object" && obj !== null && "id" in obj) obj[ID] = obj.id;
   traverse(obj);
 }
 

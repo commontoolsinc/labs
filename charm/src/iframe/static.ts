@@ -2,15 +2,31 @@
 export const prefillHtml = `<html>
 <head>
 <script src="https://cdn.tailwindcss.com"></script>
-<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.3.1",
+    "react-dom": "https://esm.sh/react-dom@18.3.1",
+    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+    "@react-spring/web": "https://esm.sh/@react-spring/web@9.7.3",
+    "three": "https://esm.sh/three@0.159.0",
+    "d3": "https://esm.sh/d3@7.8.5",
+    "moment": "https://esm.sh/moment@2.29.4",
+    "p5": "https://esm.sh/p5@1.11.3",
+    "react-draggable": "https://esm.sh/react-draggable@3.1.1"
+  }
+}
+</script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script type="text/babel" data-presets="react" data-type="module">
+
+<!-- Step 1: User code to be transformed by Babel -->
+<script type="text/babel" data-presets="react" id="user-code">
 // USER_CODE_PLACEHOLDER
 
 // Export the functions so we can access them after Babel transformation
 window.__app = { onLoad, onReady, title };
 </script>
+
 <script>
 window.onerror = function (message, source, lineno, colno, error) {
   window.parent.postMessage(
@@ -239,6 +255,7 @@ function LoadingUI() {
   };
 }
 
+// Step 2: Module execution script that runs after Babel transformation
 document.addEventListener('DOMContentLoaded', () => {
   // Create a container for the React app
   const container = document.createElement('div');
@@ -251,43 +268,40 @@ document.addEventListener('DOMContentLoaded', () => {
   // Track loading states
   const loadingStates = {
     babelReady: false,
-    sourceDataReady: false,
-    librariesReady: false
+    esmModulesReady: false,
+    sourceDataReady: false
   };
 
   let sourceData = null;
 
+  // Wait for Babel transformation to complete
+  function waitForBabel() {
+    return new Promise(resolve => {
+      function check() {
+        if (window.__app) {
+          resolve();
+        } else {
+          setTimeout(check, 50);
+        }
+      }
+      check();
+    });
+  }
+
   function checkAllReady() {
-    if (loadingStates.babelReady && loadingStates.librariesReady) {
+    if (loadingStates.babelReady && loadingStates.esmModulesReady) {
       loader.updateStatus('All resources loaded, initializing application...');
       setTimeout(() => {
         loader.remove();
         if (typeof window.__app.onReady === 'function') {
           window.sourceData = sourceData;
-          window.__app.onReady(container, sourceData);
+          window.__app.onReady(container, sourceData, window.loadedModules);
         } else {
           console.error('onReady function not defined or not a function');
         }
       }, 200); // Small delay to show the "All loaded" message
     }
   }
-
-  // Check if Babel has finished transforming
-  function checkBabelReady() {
-    loader.updateStatus('Waiting for code transformation...');
-
-    if (window.__app) {
-      loader.updateStatus('Code transformation complete');
-      loadingStates.babelReady = true;
-      loadLibraries(); // Start loading libraries
-      subscribeToSource(); // Start subscribing to source data in parallel
-      checkAllReady(); // This will check if everything is ready
-    } else {
-      // If not ready yet, check again in a short while
-      setTimeout(checkBabelReady, 20);
-    }
-  }
-
 
   // Subscribe to source cell
   function subscribeToSource() {
@@ -323,110 +337,99 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 3000);
   }
 
-  const knownLibraries = {
-    'd3': 'https://unpkg.com/d3@7.8.5/dist/d3.min.js',
-    'moment': 'https://unpkg.com/moment@2.29.4/min/moment.min.js',
-    'three': 'https://unpkg.com/three@0.159.0/build/three.min.js',
-    'p5': 'https://unpkg.com/p5@1.11.3/lib/p5.min.js',
-    'react-draggable': 'https://unpkg.com/react-draggable@3.1.1/dist/react-draggable.min.js'
-  };
+  // Load ESM modules
+  async function loadESMModules() {
+    try {
+      loader.updateStatus('Loading ESM modules...');
 
-  function loadLibraries() {
-    const requestedLibraries = window.__app.onLoad ? window.__app.onLoad() : [];
+      // Import React and ReactDOM by default
+      const reactModule = await import('react');
+      const reactDomModule = await import('react-dom/client');
 
-    if (!requestedLibraries || requestedLibraries.length === 0) {
-      loader.updateStatus('No additional libraries to load');
-      loadingStates.librariesReady = true;
-      checkAllReady();
-      return;
-    }
+      // Make them available globally
+      window.React = reactModule;
+      window.ReactDOM = reactDomModule;
 
-    // Validate libraries against known library list
-    const librariesToLoad = [];
-    const invalidLibraries = [];
-
-    requestedLibraries.forEach(libName => {
-      if (knownLibraries[libName]) {
-        librariesToLoad.push({
-          name: libName,
-          url: knownLibraries[libName]
-        });
-      } else {
-        invalidLibraries.push(libName);
-      }
-    });
-
-    // Report any invalid libraries
-    invalidLibraries.forEach(libName => {
-      loader.addError(\`Unknown library: "\${libName}". Only these libraries are available: \${Object.keys(knownLibraries).join(', ')}\`);
-    });
-
-    if (librariesToLoad.length === 0) {
-      if (invalidLibraries.length > 0) {
-        loader.updateStatus('No valid libraries to load');
-      } else {
-        loader.updateStatus('No libraries to load');
-      }
-      loadingStates.librariesReady = true;
-      checkAllReady();
-      return;
-    }
-
-    loader.updateStatus(\`Loading \${librariesToLoad.length} libraries...\`);
-
-    // Track loaded libraries
-    let loadedCount = 0;
-    let hasErrors = false;
-    const totalLibraries = librariesToLoad.length;
-
-    // Load all libraries in parallel
-    librariesToLoad.forEach(lib => {
-      loader.addLibrary(lib.url);
-
-      const script = document.createElement('script');
-      script.src = lib.url;
-
-      script.onload = () => {
-        loadedCount++;
-        loader.updateLibrary(lib.url, true, false);
-        loader.updateStatus(\`Loaded \${ loadedCount }/\${totalLibraries} libraries\`);
-
-        if (loadedCount === totalLibraries) {
-          // Add a small delay after all libraries have loaded
-          // This gives them time to initialize properly
-          setTimeout(() => {
-            if (!hasErrors) {
-              loadingStates.librariesReady = true;
-              checkAllReady();
-            } else {
-              // Don't set librariesReady to true if there were errors
-              loader.updateStatus('Cannot initialize application due to library loading errors');
-            }
-          }, 300);
-        }
+      // Initialize modules container
+      window.loadedModules = {
+        'react': reactModule,
+        'react-dom': reactDomModule
       };
 
-      script.onerror = (e) => {
-        loadedCount++;
-        hasErrors = true;
-        loader.updateLibrary(lib.url, false, true);
-        loader.addError(\`Failed to load: \${lib.name}\`);
+      // Get requested libraries from user code
+      const requestedLibs = window.__app.onLoad ? window.__app.onLoad() : [];
 
-        if (loadedCount === totalLibraries) {
-          // Show permanent error message
-          setTimeout(() => {
-            loader.updateStatus('Cannot initialize application due to library loading errors');
-            // Never set librariesReady to true
-          }, 300);
+      if (!requestedLibs || requestedLibs.length === 0) {
+        loader.updateStatus('No additional libraries to load');
+        loadingStates.esmModulesReady = true;
+        checkAllReady();
+        return;
+      }
+
+      // Load all modules in parallel
+      const modulePromises = requestedLibs.map(async (libName) => {
+        try {
+          loader.addLibrary(libName);
+          const module = await import(libName);
+          loader.updateLibrary(libName, true, false);
+          return { name: libName, module, error: null };
+        } catch (err) {
+          loader.updateLibrary(libName, false, true);
+          loader.addError(\`Failed to load ESM module: \${libName}\`);
+          return { name: libName, module: null, error: err };
         }
-      };
+      });
 
-      document.head.appendChild(script);
-    });
+      // Wait for all modules to load
+      const results = await Promise.all(modulePromises);
+
+      // Process results
+      let hasErrors = false;
+
+      results.forEach(result => {
+        if (result.error) {
+          hasErrors = true;
+        } else if (result.module) {
+          window.loadedModules[result.name] = result.module;
+        }
+      });
+
+      if (hasErrors) {
+        loader.updateStatus('Some modules failed to load');
+      } else {
+        loader.updateStatus('All modules loaded successfully');
+      }
+
+      loadingStates.esmModulesReady = true;
+      checkAllReady();
+
+    } catch (error) {
+      loader.addError(\`Error loading ESM modules: \${error.message}\`);
+      loadingStates.esmModulesReady = true; // Mark as ready even on error to continue
+      checkAllReady();
+    }
   }
 
-// Start checking for Babel readiness
-checkBabelReady();
+  // Main initialization
+  (async () => {
+    try {
+      loader.updateStatus('Waiting for code transformation...');
+
+      // Wait for Babel to transform the user code
+      await waitForBabel();
+
+      loader.updateStatus('Code transformation complete');
+      loadingStates.babelReady = true;
+
+      // Start loading ESM modules and source data in parallel
+      loadESMModules();
+      subscribeToSource();
+
+    } catch (error) {
+      loader.addError(\`Initialization error: \${error.message}\`);
+      console.error("Error initializing application:", error);
+    }
+  })();
 });
 </script>
 </head>
@@ -554,41 +557,52 @@ function ImageComponent() {
   return <img src={generateImage("A beautiful sunset over mountains")} alt="Generated landscape" />;
 }
 \`\`\`
-
 ## 5. Using the Interface Functions
 
 \`\`\`javascript
-// Import from a small set of common libraries:
+// Import from modern ESM libraries:
+//   - @react-spring/web
 //   - d3
 //   - moment
 //   - three
 //   - p5
+//   - react-draggable
 function onLoad() {
-  return ['d3']; // only use libraries when you have good reason, always use the key, URLs will error
+  return ['@react-spring/web']; // Request the modules you need
 }
 
-const title = 'My Application';
+const title = 'My ESM App';
 
-// Main application code
-function onReady(mount, sourceData) {
-  function CoolButton({ label }) {
-    return <button className="cool-button">{label}</button>;
+// Main application code with modules passed as third parameter
+function onReady(mount, sourceData, libs) {
+  const { useState, useEffect } = React; // React is available globally
+  const { useSpring, animated } = libs['@react-spring/web']; // Access imported module
+
+  function MyApp() {
+    const [count, setCount] = useState(0);
+    const props = useSpring({
+      from: { opacity: 0 },
+      to: { opacity: 1 }
+    });
+
+    return (
+      <div className="p-4">
+        <animated.div style={props}>
+          <h1 className="text-2xl font-bold">Hello ESM World!</h1>
+          <button
+            className="mt-2 px-4 py-2 bg-blue-500 text-white rounded"
+            onClick={() => setCount(count + 1)}
+          >
+            Clicks: {count}
+          </button>
+        </animated.div>
+      </div>
+    );
   }
 
-  function Charm() {
-    const [count, setCount] = React.useState(0);
-    const onClick = React.useCallback(() => {
-      console.log('clicky!');
-      setCount(count + 1);
-    }, [count]);
-
-    return <div>
-      My Application
-      <CoolButton label={"Clicks: " + count} />
-    </div>;
-  }
-
-  ReactDOM.render(<Charm />, mount);
+  // Use the client API for React 18
+  const root = ReactDOM.createRoot(mount);
+  root.render(<MyApp />);
 }
 \`\`\`
 </guide>
