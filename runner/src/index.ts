@@ -42,13 +42,7 @@ export {
   getRecipeSpec,
   getRecipeSrc,
 } from "./recipe-map.ts";
-export {
-  addSchema,
-  getRootSchema,
-  getRootSchemaId,
-  getSchema,
-  getSchemaId,
-} from "./schema-map.ts";
+export { addSchema, getSchema, getSchemaId } from "./schema-map.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export { getSpace, type Space } from "./space.ts";
 export { storage } from "./storage.ts";
