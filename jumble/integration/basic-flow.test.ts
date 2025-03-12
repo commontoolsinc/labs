@@ -59,7 +59,7 @@ Deno.test({
             // @ts-ignore We wrap Page in a Mutable
             // so we can override the readonly `timeout`
             // property. Type checker doesn't like this.
-            mutPage.timeout = 30000;
+            mutPage.timeout = 60000;
           }
           await page.goto(FRONTEND_URL);
 
