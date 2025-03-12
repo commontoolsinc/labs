@@ -41,7 +41,10 @@ function createCell(space: Space): Cell<Charm> {
 
 async function main() {
   // create a charm manager to start things off
-  const session = await Session.open({ name: "charm manager" });
+  const session = await Session.create({
+    passphrase: "super secret",
+    name: "charm manager",
+  });
   const charmManager = new CharmManager(session);
   log(charmManager, "charmManager");
 
