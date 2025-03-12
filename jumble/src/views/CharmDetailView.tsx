@@ -270,7 +270,7 @@ function useCodeEditor(
         workingSrc,
         iframeRecipe.spec,
       ).then((newCharm) => {
-        console.log("Fixme, navigate to new charm", newCharm);
+        console.log("Fixme, navigate to editted charm", newCharm);
         // navigate(createPath("charmShow", {
         //   charmId: charmId(newCharm)!,
         //   replicaName: replicaName,
