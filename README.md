@@ -1,5 +1,7 @@
 # Common Labs
 
+foo
+
 Radioactive experiments. Turn back! You will find no API stability here.
 
 ![A loom, by Midjourney](./docs/images/loom.jpg)
