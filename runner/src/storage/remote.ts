@@ -59,6 +59,8 @@ export interface RemoteStorageProviderOptions {
   space?: MemorySpace;
   the?: string;
   settings?: RemoteStorageProviderSettings;
+
+  inspector?: BroadcastChannel;
 }
 
 const defaultSettings: RemoteStorageProviderSettings = {
@@ -73,6 +75,8 @@ export class RemoteStorageProvider implements StorageProvider {
   state: Map<MemorySpace, MemoryState> = new Map();
   session: Memory.MemorySession<MemorySpace>;
   settings: RemoteStorageProviderSettings;
+
+  inspector: BroadcastChannel;
 
   /**
    * queue that holds commands that we read from the session, but could not
@@ -93,11 +97,13 @@ export class RemoteStorageProvider implements StorageProvider {
     space = HOME,
     the = "application/json",
     settings = defaultSettings,
+    inspector = new BroadcastChannel("storage/remote"),
   }: RemoteStorageProviderOptions) {
     this.address = address;
     this.workspace = space;
     this.the = the;
     this.settings = settings;
+    this.inspector = inspector;
 
     const session = Memory.create({ as });
 
@@ -241,7 +247,11 @@ export class RemoteStorageProvider implements StorageProvider {
       facts.push(fact);
     }
 
-    const result = await memory.transact({ changes: Changes.from(facts) });
+    const transaction = { changes: Changes.from(facts) };
+
+    this.inspector.postMessage({ transact: transaction });
+
+    const result = await memory.transact(transaction);
 
     // Once we have a result of the transaction we clear out local facts we
     // created, we need to do this otherwise subsequent transactions will
@@ -273,8 +283,21 @@ export class RemoteStorageProvider implements StorageProvider {
     return result;
   }
 
+  parse(source: string): Memory.ProviderCommand<Memory.Protocol> {
+    return Codec.Receipt.fromString(source);
+  }
+
   receive(data: string) {
-    return this.writer.write(Codec.Receipt.fromString(data));
+    return this.writer.write(
+      this.inspect({ receive: this.parse(data) }).receive,
+    );
+  }
+
+  inspect<T>(
+    message: T,
+  ): T {
+    this.inspector.postMessage(message);
+    return message;
   }
 
   handleEvent(event: MessageEvent) {
@@ -326,6 +349,7 @@ export class RemoteStorageProvider implements StorageProvider {
     while (this.connection === socket) {
       // First drain the queued commands if we have them.
       for (const command of queue) {
+        this.inspect({ send: command });
         socket.send(Codec.UCAN.toString(command));
         queue.delete(command);
       }
