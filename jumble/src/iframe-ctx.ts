@@ -2,11 +2,11 @@ import { setIframeContextHandler } from "@commontools/iframe-sandbox";
 import {
   Action,
   addAction,
+  addCommonIDfromObjectID,
   isCell,
   ReactivityLog,
   removeAction,
 } from "@commontools/runner";
-import { ID } from "@commontools/builder";
 import { llm } from "@/utils/llm.ts";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
@@ -86,39 +86,6 @@ function throttle(context: any, key: string, callback: () => void): void {
       }, THROTTLED_WRITE_INTERVAL_MS);
     }
   }
-}
-/**
- * Translates `id` that React likes to create to our `ID` property, making sure
- * in any given object it is never used twice.
- *
- * This mostly makes sense in a context where we ship entire JSON documents back
- * and forth and can't express graphs, i.e. two places referring to the same
- * underlying entity.
- *
- * We'll want to revisit once iframes become more sophisticated in what they can
- * express, e.g. we could have the inner shim do some of this work instead.
- */
-function addCommonIDfromObjectID(obj: any) {
-  function traverse(obj: any) {
-    if (typeof obj == "object" && obj !== null) {
-      const seen = new Set();
-      Object.keys(obj).forEach((key: string) => {
-        if (
-          typeof obj[key] == "object" && obj[key] !== null && "id" in obj[key]
-        ) {
-          let n = 0;
-          let id = obj[key].id;
-          while (seen.has(id)) id = `${obj[key].id}-${++n}`;
-          seen.add(id);
-          obj[key][ID] = id;
-        }
-        traverse(obj[key]);
-      });
-    }
-  }
-
-  if (typeof obj == "object" && obj !== null && "id" in obj) obj[ID] = obj.id;
-  traverse(obj);
 }
 
 export const setupIframe = () =>

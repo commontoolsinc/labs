@@ -33,8 +33,6 @@ export {
   getEntityId,
 } from "./doc-map.ts";
 export {
-  registerRecipe,
-  registerNewRecipe,
   allRecipesByName,
   getRecipe,
   getRecipeId,
@@ -42,6 +40,8 @@ export {
   getRecipeParents,
   getRecipeSpec,
   getRecipeSrc,
+  registerNewRecipe,
+  registerRecipe,
 } from "./recipe-map.ts";
 export { addSchema, getSchema, getSchemaId } from "./schema-map.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
@@ -54,3 +54,4 @@ export {
   saveToBlobby,
   setBlobbyServerUrl,
 } from "./blobby-storage.ts";
+export { addCommonIDfromObjectID } from "./utils.ts";

@@ -1,4 +1,7 @@
 export const ID: symbol = Symbol("ID, unique to the context");
+export const ID_FIELD: symbol = Symbol(
+  "ID_FIELD, name of sibling that contains id",
+);
 
 // Should be Symbol("UI") or so, but this makes repeat() use these when
 // iterating over recipes.

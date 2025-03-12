@@ -358,7 +358,9 @@ function createRegularCell<T>(
       // Follow aliases and references, since we want to get to an assumed
       // existing array.
       const ref = resolveLinkToValue(doc, path, log);
-      const array = ref.cell.getAtPath(ref.path);
+      const cause = getTopFrame()?.cause;
+
+      let array = ref.cell.getAtPath(ref.path);
       if (array !== undefined && !Array.isArray(array)) {
         throw new Error("Can't push into non-array value");
       }
@@ -380,14 +382,16 @@ function createRegularCell<T>(
         }
       });
 
-      // Implement push by overwriting the `length`s element.
-      const defaultArray = Array.isArray(schema?.default) ? schema.default : [];
-      diffAndUpdate(
-        { cell: doc, path },
-        [...(array === undefined ? defaultArray : array), ...valuesToWrite],
-        log,
-        getTopFrame()?.cause,
-      );
+      // If there is no array yet, create it first. We have to do this as a
+      // separate operation, so that in the next steps [ID] is properly anchored
+      // in the array.
+      if (array === undefined) {
+        diffAndUpdate(ref, [], log, cause);
+        array = Array.isArray(schema?.default) ? schema.default : [];
+      }
+
+      // Append the new values to the array.
+      diffAndUpdate(ref, [...array, ...valuesToWrite], log, cause);
     },
     equals: (other: Cell<any>) =>
       JSON.stringify(self) === JSON.stringify(other),

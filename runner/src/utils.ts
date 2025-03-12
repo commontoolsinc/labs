@@ -1,5 +1,6 @@
 import {
   ID,
+  ID_FIELD,
   isAlias,
   isOpaqueRef,
   isStatic,
@@ -503,6 +504,46 @@ export function normalizeAndDiff(
 ): ChangeSet {
   const changes: ChangeSet = [];
 
+  // ID_FIELD redirects to an existing field and we do something like DOM
+  // diffing with it: We look at sibling entries and their value for that field,
+  // and if we find a match, we reuse that document. Otherwise we create a new
+  // one, but with a random id. It's random as opposed to causal like ID below,
+  // because we don't want to recycle a document that was removed and added
+  // back, we want to assume removing and adding with the same id is
+  // semantically a new item (in fact we otherwise run into compare-and-swap
+  // transaction errors).
+  if (
+    typeof newValue === "object" && newValue !== null &&
+    newValue[ID_FIELD] !== undefined
+  ) {
+    const { [ID_FIELD]: fieldName, ...rest } = newValue;
+    const id = newValue[fieldName];
+    if (current.path.length > 1) {
+      const parent = current.cell.getAtPath(current.path.slice(0, -1));
+      if (Array.isArray(parent)) {
+        for (const v of parent) {
+          if (isDocLink(v)) {
+            const sibling = v.cell.getAtPath(v.path);
+            if (
+              typeof sibling === "object" && sibling !== null &&
+              sibling[fieldName] === id
+            ) {
+              // We found a sibling with the same id, so ...
+              return [
+                // ... reuse the existing document
+                ...normalizeAndDiff(current, v, log, context),
+                // ... and update it to the new value
+                ...normalizeAndDiff(v, rest, log, context),
+              ];
+            }
+          }
+        }
+      }
+    }
+    // Fallback: A random id. Below this will create a new entity.
+    newValue = { [ID]: crypto.randomUUID(), ...rest };
+  }
+
   // Unwrap proxies and handle special types
   newValue = maybeUnwrapProxy(newValue);
   if (isDoc(newValue)) newValue = { cell: newValue, path: [] };
@@ -511,7 +552,21 @@ export function normalizeAndDiff(
   // Get current value to compare against
   const currentValue = current.cell.getAtPath(current.path);
 
-  // Handle alias in current value
+  // A new alias can overwrite a previous alias. No-op if the same.
+  if (isAlias(newValue)) {
+    if (
+      isAlias(currentValue) &&
+      newValue.$alias.cell === currentValue.$alias.cell &&
+      arrayEqual(newValue.$alias.path, currentValue.$alias.path)
+    ) {
+      return [];
+    } else {
+      changes.push({ location: current, value: newValue });
+      return changes;
+    }
+  }
+
+  // Handle alias in current value (at this point: if newValue is not an alias)
   if (isAlias(currentValue)) {
     // Log reads of the alias, so that changing aliases cause refreshes
     log?.reads.push({ cell: current.cell, path: current.path });
@@ -519,8 +574,9 @@ export function normalizeAndDiff(
     return normalizeAndDiff(ref, newValue, log, context);
   }
 
-  if (isDocLink(currentValue) && isDocLink(newValue)) {
+  if (isDocLink(newValue)) {
     if (
+      isDocLink(currentValue) &&
       currentValue.cell === newValue.cell &&
       arrayEqual(currentValue.path, newValue.path)
     ) {
@@ -538,11 +594,19 @@ export function normalizeAndDiff(
     newValue[ID] !== undefined
   ) {
     const { [ID]: id, ...rest } = newValue;
-    const entityId = createRef(id, {
-      parent: current.cell,
-      path: current.path,
-      context: context,
-    });
+    let path = current.path;
+
+    // If we're setting an array element, make the array the context for the
+    // derived id, not the array index. If it's a nested array, take the parent
+    // array as context, recursively.
+    while (
+      path.length > 0 &&
+      Array.isArray(current.cell.getAtPath(path.slice(0, -1)))
+    ) {
+      path = path.slice(0, -1);
+    }
+
+    const entityId = createRef({ id }, { parent: current.cell, path, context });
     const doc = getDocByEntityId(
       current.cell.space,
       entityId,
@@ -559,7 +623,12 @@ export function normalizeAndDiff(
   }
 
   // Handle arrays
-  if (Array.isArray(newValue) && Array.isArray(currentValue)) {
+  if (Array.isArray(newValue)) {
+    // If the current value is not an array, set it to an empty array
+    if (!Array.isArray(currentValue)) {
+      changes.push({ location: current, value: [] });
+    }
+
     for (let i = 0; i < newValue.length; i++) {
       const nestedChanges = normalizeAndDiff(
         { cell: current.cell, path: [...current.path, i.toString()] },
@@ -571,7 +640,7 @@ export function normalizeAndDiff(
     }
 
     // Handle array length changes
-    if (currentValue.length > newValue.length) {
+    if (Array.isArray(currentValue) && currentValue.length > newValue.length) {
       changes.push({
         location: { cell: current.cell, path: [...current.path, "length"] },
         value: newValue.length,
@@ -582,13 +651,16 @@ export function normalizeAndDiff(
   }
 
   // Handle objects
-  if (
-    typeof newValue === "object" && newValue !== null &&
-    typeof currentValue === "object" && currentValue !== null &&
-    !Array.isArray(newValue) && !Array.isArray(currentValue) &&
-    !isDocLink(newValue) && !isDocLink(currentValue) &&
-    !isAlias(newValue) && !isAlias(currentValue)
-  ) {
+  if (typeof newValue === "object" && newValue !== null) {
+    // If the current value is not a (regular) object, set it to an empty object
+    // Note that the alias case is handled above
+    if (
+      typeof currentValue !== "object" || currentValue === null ||
+      isDocLink(currentValue)
+    ) {
+      changes.push({ location: current, value: {} });
+    }
+
     for (const key in newValue) {
       const nestedChanges = normalizeAndDiff(
         { cell: current.cell, path: [...current.path, key] },
@@ -639,6 +711,36 @@ export function applyChangeSet(
   }
 }
 
+/**
+ * Translates `id` that React likes to create to our `ID` property, making sure
+ * in any given object it is never used twice.
+ *
+ * This mostly makes sense in a context where we ship entire JSON documents back
+ * and forth and can't express graphs, i.e. two places referring to the same
+ * underlying entity.
+ *
+ * We'll want to revisit once iframes become more sophisticated in what they can
+ * express, e.g. we could have the inner shim do some of this work instead.
+ */
+export function addCommonIDfromObjectID(obj: any, fieldName: string = "id") {
+  function traverse(obj: any) {
+    if (typeof obj === "object" && obj !== null && fieldName in obj) {
+      obj[ID_FIELD] = fieldName;
+    }
+
+    if (
+      typeof obj === "object" && obj !== null && !isCell(obj) &&
+      !isDocLink(obj) && !isDoc(obj)
+    ) {
+      Object.values(obj).forEach((v: any) => {
+        traverse(v);
+      });
+    }
+  }
+
+  traverse(obj);
+}
+
 export function maybeUnwrapProxy(value: any): any {
   return isQueryResultForDereferencing(value)
     ? getDocLinkOrThrow(value)
@@ -651,7 +753,7 @@ export function arrayEqual(a: PropertyKey[], b: PropertyKey[]): boolean {
   return true;
 }
 
-export function isEqualCellReferences(a: DocLink, b: DocLink): boolean {
+export function isEqualDocLink(a: DocLink, b: DocLink): boolean {
   return isDocLink(a) && isDocLink(b) && a.cell === b.cell &&
     arrayEqual(a.path, b.path);
 }

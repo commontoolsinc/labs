@@ -29,6 +29,7 @@ export {
   type Alias,
   type Frame,
   ID,
+  ID_FIELD,
   isAlias,
   isModule,
   isOpaqueRef,

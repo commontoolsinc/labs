@@ -1,18 +1,21 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { ID } from "@commontools/builder";
+import { ID, ID_FIELD } from "@commontools/builder";
 import {
+  addCommonIDfromObjectID,
   applyChangeSet,
+  diffAndUpdate,
   extractDefaultValues,
   followAliases,
   followCellReferences,
+  isEqualDocLink,
   mergeObjects,
   normalizeAndDiff,
   sendValueToBinding,
   setNestedValue,
   unwrapOneLevelAndBindtoDoc,
 } from "../src/utils.ts";
-import { DocLink, getDoc } from "../src/doc.ts";
+import { DocLink, getDoc, isDocLink } from "../src/doc.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 
 describe("extractDefaultValues", () => {
@@ -537,7 +540,7 @@ describe("normalizeAndDiff", () => {
     applyChangeSet(changes2);
 
     expect(changes2.length).toBe(1);
-    expect(changes2[0].location).toEqual({ cell: testCell, path: ["value"] });
+    expect(changes2[0].location).toEqual({ cell: testCell, path: ["alias"] });
     expect(changes2[0].value).toEqual({ $alias: { path: ["value2"] } });
 
     const changes3 = normalizeAndDiff(current, 300);
@@ -586,7 +589,7 @@ describe("normalizeAndDiff", () => {
     const testSpace = "test";
     const testCell = getDoc(
       { items: [] },
-      "normalizeAndDiff ID-based entity objects",
+      "should handle ID-based entity objects",
       testSpace,
     );
     const current: DocLink = { cell: testCell, path: ["items", 0] };
@@ -596,53 +599,164 @@ describe("normalizeAndDiff", () => {
       current,
       newValue,
       undefined,
-      "normalizeAndDiff ID-based entity objects",
+      "should handle ID-based entity objects",
     );
 
     // Should create an entity and return changes to that entity
+    expect(changes.length).toBe(3);
     expect(changes[0].location.cell).toBe(testCell);
     expect(changes[0].location.path).toEqual(["items", 0]);
-    expect(changes.length).toBe(2);
-    expect(changes[1].location.cell).not.toBe(changes[0].value);
+    expect(changes[1].location.cell).not.toBe(changes[0].location.cell);
     expect(changes[1].location.path).toEqual([]);
+    expect(changes[2].location.cell).toBe(changes[1].location.cell);
+    expect(changes[2].location.path).toEqual(["name"]);
   });
 
   it("should update the same document with ID-based entity objects", () => {
     const testSpace = "test";
-    const testCell = getDoc<any>(
+    const testDoc = getDoc<any>(
       { items: [] },
-      "normalizeAndDiff ID-based entity objects",
+      "should update the same document with ID-based entity objects",
       testSpace,
     );
-    const current: DocLink = { cell: testCell, path: ["items", 0] };
+    const current: DocLink = { cell: testDoc, path: ["items", 0] };
 
     const newValue = { [ID]: "item1", name: "First Item" };
-    const changes = normalizeAndDiff(
+    diffAndUpdate(
       current,
       newValue,
       undefined,
-      "normalizeAndDiff ID-based entity objects with updates",
+      "should update the same document with ID-based entity objects",
     );
 
-    applyChangeSet(changes);
+    const newDoc = testDoc.get().items[0].cell;
 
-    const newDoc = testCell.get().items[0].cell;
-
-    const newValue2 = { [ID]: "item1", name: "Second Value" };
-    const changes2 = normalizeAndDiff(
-      current,
+    const newValue2 = {
+      items: [
+        { [ID]: "item0", name: "Inserted before" },
+        { [ID]: "item1", name: "Second Value" },
+      ],
+    };
+    diffAndUpdate(
+      { cell: testDoc, path: [] },
       newValue2,
       undefined,
-      "normalizeAndDiff ID-based entity objects with updates",
+      "should update the same document with ID-based entity objects",
     );
 
-    applyChangeSet(changes2);
+    expect(testDoc.get().items[0].cell).not.toBe(newDoc);
+    expect(testDoc.get().items[0].cell.get().name).toEqual("Inserted before");
+    expect(testDoc.get().items[1].cell).toBe(newDoc);
+    expect(testDoc.get().items[1].cell.get().name).toEqual("Second Value");
+  });
 
-    // Should create an entity and return changes to that entity
-    expect(changes2.length).toBe(1);
-    expect(changes2[0].location.cell).toBe(newDoc);
-    expect(changes2[0].location.path).toEqual(["name"]);
-    expect(changes2[0].value).toEqual("Second Value");
+  it("should update the same document with numeric ID-based entity objects", () => {
+    const testSpace = "test";
+    const testDoc = getDoc<any>(
+      { items: [] },
+      "should update the same document with ID-based entity objects",
+      testSpace,
+    );
+    const current: DocLink = { cell: testDoc, path: ["items", 0] };
+
+    const newValue = { [ID]: 1, name: "First Item" };
+    diffAndUpdate(
+      current,
+      newValue,
+      undefined,
+      "should update the same document with ID-based entity objects",
+    );
+
+    const newDoc = testDoc.get().items[0].cell;
+
+    const newValue2 = {
+      items: [
+        { [ID]: 0, name: "Inserted before" },
+        { [ID]: 1, name: "Second Value" },
+      ],
+    };
+    diffAndUpdate(
+      { cell: testDoc, path: [] },
+      newValue2,
+      undefined,
+      "should update the same document with ID-based entity objects",
+    );
+
+    expect(testDoc.get().items[0].cell).not.toBe(newDoc);
+    expect(testDoc.get().items[0].cell.get().name).toEqual("Inserted before");
+    expect(testDoc.get().items[1].cell).toBe(newDoc);
+    expect(testDoc.get().items[1].cell.get().name).toEqual("Second Value");
+  });
+
+  it("should handle ID_FIELD redirects and reuse existing documents", () => {
+    const testSpace = "test";
+    const testDoc = getDoc<any>(
+      { items: [] },
+      "should handle ID_FIELD redirects",
+      testSpace,
+    );
+
+    // Create an initial item
+    const data = { id: "item1", name: "First Item" };
+    addCommonIDfromObjectID(data);
+    diffAndUpdate(
+      { cell: testDoc, path: ["items", 0] },
+      data,
+      undefined,
+      "test ID_FIELD redirects",
+    );
+
+    const initialDoc = testDoc.get().items[0].cell;
+
+    // Update with another item using ID_FIELD to point to the 'id' field
+    const newValue = {
+      items: [
+        { id: "item0", name: "New Item" },
+        { id: "item1", name: "Updated Item" },
+      ],
+    };
+    addCommonIDfromObjectID(newValue);
+
+    diffAndUpdate(
+      { cell: testDoc, path: [] },
+      newValue,
+      undefined,
+      "test ID_FIELD redirects",
+    );
+
+    // Verify that the second item reused the existing document
+    expect(isDocLink(testDoc.get().items[0])).toBe(true);
+    expect(isDocLink(testDoc.get().items[1])).toBe(true);
+    expect(testDoc.get().items[1].cell).toBe(initialDoc);
+    expect(testDoc.get().items[1].cell.get().name).toEqual("Updated Item");
+    expect(testDoc.get().items[0].cell.get().name).toEqual("New Item");
+  });
+
+  it("should treat different properties as different ID namespaces", () => {
+    const testSpace = "test";
+    const testDoc = getDoc<any>(
+      undefined,
+      "it should treat different properties as different ID namespaces",
+      testSpace,
+    );
+    const current: DocLink = { cell: testDoc, path: [] };
+
+    const newValue = {
+      a: { [ID]: "item1", name: "First Item" },
+      b: { [ID]: "item1", name: "Second Item" }, // Same ID, different namespace
+    };
+    diffAndUpdate(
+      current,
+      newValue,
+      undefined,
+      "it should treat different properties as different ID namespaces",
+    );
+
+    expect(isDocLink(testDoc.get().a)).toBe(true);
+    expect(isDocLink(testDoc.get().b)).toBe(true);
+    expect(testDoc.get().a.cell).not.toBe(testDoc.get().b.cell);
+    expect(testDoc.get().a.cell.get().name).toEqual("First Item");
+    expect(testDoc.get().b.cell.get().name).toEqual("Second Item");
   });
 
   it("should return empty array when no changes", () => {
@@ -701,5 +815,45 @@ describe("normalizeAndDiff", () => {
     const changes2 = normalizeAndDiff(current, docA);
 
     expect(changes2.length).toBe(0);
+  });
+});
+
+describe("addCommonIDfromObjectID", () => {
+  it("should handle arrays", () => {
+    const obj = { items: [{ id: "item1", name: "First Item" }] };
+    addCommonIDfromObjectID(obj);
+    expect((obj.items[0] as any)[ID_FIELD]).toBe("id");
+  });
+
+  it("should reuse items", () => {
+    const itemDoc = getDoc(
+      { id: "item1", name: "Original Item" },
+      "addCommonIDfromObjectID reuse items",
+      "test",
+    );
+    const testDoc = getDoc(
+      { items: [{ cell: itemDoc, path: [] }] },
+      "addCommonIDfromObjectID arrays",
+      "test",
+    );
+
+    const data = {
+      items: [{ id: "item1", name: "New Item" }, itemDoc.asCell()],
+    };
+    addCommonIDfromObjectID(data);
+    diffAndUpdate(
+      { cell: testDoc, path: [] },
+      data,
+      undefined,
+      "addCommonIDfromObjectID reuse items",
+    );
+
+    const result = testDoc.get();
+    expect(isDocLink(result.items[0])).toBe(true);
+    expect(isDocLink(result.items[1])).toBe(true);
+    expect(isEqualDocLink(result.items[0] as any, result.items[1] as any)).toBe(
+      true,
+    );
+    expect(result.items[1].cell.get().name).toBe("New Item");
   });
 });
