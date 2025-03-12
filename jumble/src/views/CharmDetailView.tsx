@@ -252,7 +252,9 @@ function useCodeEditor(
   iframeRecipe: IFrameRecipe | null,
 ) {
   const { charmManager } = useCharmManager();
+  const navigate = useNavigate();
   const [workingSrc, setWorkingSrc] = useState<string | undefined>(undefined);
+  const { replicaName } = useParams<CharmRouteParams>();
 
   useEffect(() => {
     if (charm && iframeRecipe) {
@@ -270,14 +272,13 @@ function useCodeEditor(
         workingSrc,
         iframeRecipe.spec,
       ).then((newCharm) => {
-        console.log("Fixme, navigate to editted charm", newCharm);
-        // navigate(createPath("charmShow", {
-        //   charmId: charmId(newCharm)!,
-        //   replicaName: replicaName,
-        // }));
+        navigate(createPath("charmShow", {
+          charmId: charmId(newCharm)!,
+          replicaName: replicaName!,
+        }));
       });
     }
-  }, [workingSrc, iframeRecipe, charm]);
+  }, [workingSrc, iframeRecipe, charm, navigate, replicaName]);
 
   return {
     workingSrc,
@@ -810,9 +811,35 @@ const CodeTab = () => {
       iframeRecipe,
     );
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        if (hasUnsavedChanges) {
+          saveChanges();
+        }
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [hasUnsavedChanges, saveChanges]);
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="p-4 flex-grow flex flex-col overflow-hidden">
+        {hasUnsavedChanges && (
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={saveChanges}
+              className="px-4 py-2 bg-black text-white border-2 border-black disabled:opacity-50"
+            >
+              Save Changes
+            </button>
+          </div>
+        )}
+
         <div className="flex-grow overflow-hidden border border-black h-full">
           <CodeMirror
             value={workingSrc || ""}
@@ -826,16 +853,6 @@ const CodeTab = () => {
             }}
             style={{ height: "100%", overflow: "auto" }}
           />
-        </div>
-        <div className="mt-4 flex justify-end">
-          <button
-            type="button"
-            onClick={saveChanges}
-            disabled={!hasUnsavedChanges}
-            className="px-4 py-2 bg-black text-white border-2 border-black disabled:opacity-50"
-          >
-            {hasUnsavedChanges ? "Save Changes" : "Saved"}
-          </button>
         </div>
       </div>
     </div>
