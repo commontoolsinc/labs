@@ -293,6 +293,7 @@ ${JSON.stringify(libraries)}
 
       if (!requestedLibs || requestedLibs.length === 0) {
         loader.updateStatus('No additional libraries to load');
+        loader.remove(); // Remove the loading overlay immediately if no libraries to load
         return modules;
       }
 
