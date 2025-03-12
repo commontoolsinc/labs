@@ -11,8 +11,10 @@ import {
   addCharm,
   inspectCharm,
   login,
+  Mutable,
   sleep,
   snapshot,
+  waitForSelectorClick,
   waitForSelectorWithText,
 } from "./utils.ts";
 
@@ -50,8 +52,17 @@ Deno.test({
         fn: async () => {
           browser = await launch({ headless: HEADLESS });
 
+          console.log(`Opening empty page...`);
+          page = await browser!.newPage();
           console.log(`Waiting to open website at ${FRONTEND_URL}`);
-          page = await browser!.newPage(FRONTEND_URL);
+          {
+            const mutPage: Mutable<Page> = page;
+            // @ts-ignore We wrap Page in a Mutable
+            // so we can override the readonly `timeout`
+            // property. Type checker doesn't like this.
+            mutPage.timeout = 60000;
+          }
+          await page.goto(FRONTEND_URL);
 
           // Add console log listeners
           page.addEventListener("console", (e: ConsoleEvent) => {
@@ -135,10 +146,10 @@ Deno.test({
           await sleep(1000);
           console.log("Clicking button");
 
-          const button = await page.waitForSelector(
+          await waitForSelectorClick(
+            page,
             "div[aria-label='charm-content'] button",
           );
-          await button.click();
           await snapshot(page, "Button clicked");
 
           // Add more wait time after click

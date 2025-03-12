@@ -1,6 +1,7 @@
 const SCRIPT_CDNS = [
   "https://unpkg.com",
   "https://cdn.tailwindcss.com",
+  "https://esm.sh",
 ];
 
 // In Chromium browsers, "'self'" selects the top frame origin from

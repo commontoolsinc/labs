@@ -11,5 +11,4 @@ export * as Fact from "./fact.ts";
 export * as ChangesBuilder from "./changes.ts";
 export * as TransactionBuilder from "./transaction.ts";
 export * as CommitBuilder from "./commit.ts";
-export * as Principal from "./principal.ts";
 export * as Telemetry from "./telemetry.ts";
