@@ -1,7 +1,7 @@
 import { Cell, registerNewRecipe, tsToExports } from "@commontools/runner";
 import { client as llm } from "@commontools/llm";
 import { createJsonSchema, JSONSchema } from "@commontools/builder";
-import { Charm, CharmManager } from "./charm.ts";
+import { Charm, CharmManager, charmSourceCellSchema } from "./charm.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import { injectUserCode } from "./iframe/static.ts";
@@ -66,13 +66,13 @@ export function extractTitle(src: string, defaultTitle: string): string {
   return htmlTitleMatch || jsTitleMatch || defaultTitle;
 }
 
-export const generateNewRecipeVersion = (
+export const generateNewRecipeVersion = async (
   charmManager: CharmManager,
-  charm: Cell<Charm>,
+  parent: Cell<Charm>,
   newIFrameSrc: string,
   newSpec: string,
 ) => {
-  const { recipeId, iframe } = getIframeRecipe(charm);
+  const { recipeId, iframe } = getIframeRecipe(parent);
 
   if (!recipeId || !iframe) {
     throw new Error("FIXME, no recipeId or iframe, what should we do?");
@@ -86,13 +86,17 @@ export const generateNewRecipeVersion = (
     name,
   });
 
-  return compileAndRunRecipe(
+  const newCharm = await compileAndRunRecipe(
     charmManager,
     newRecipeSrc,
     newSpec,
-    charm.getSourceCell()?.key("argument"),
+    parent.getSourceCell()?.key("argument"),
     recipeId ? [recipeId] : undefined,
   );
+
+  newCharm.getSourceCell(charmSourceCellSchema)?.key("parents").push(parent);
+
+  return newCharm;
 };
 
 export async function castNewRecipe(
