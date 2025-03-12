@@ -33,7 +33,8 @@ export {
   getEntityId,
 } from "./doc-map.ts";
 export {
-  addRecipe,
+  registerRecipe,
+  registerNewRecipe,
   allRecipesByName,
   getRecipe,
   getRecipeId,

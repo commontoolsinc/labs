@@ -1,4 +1,4 @@
-import { addRecipe, Cell, EntityId } from "@commontools/runner";
+import { registerNewRecipe, Cell, EntityId } from "@commontools/runner";
 import { LLMClient } from "@commontools/llm-client";
 import { createJsonSchema, JSONSchema } from "@commontools/builder";
 
@@ -178,7 +178,7 @@ export async function compileRecipe(
     return;
   }
   const parentsIds = parents?.map((id) => id.toString());
-  addRecipe(recipe, recipeSrc, spec, parentsIds);
+  registerNewRecipe(recipe, recipeSrc, spec, parentsIds);
   return recipe;
 }
 

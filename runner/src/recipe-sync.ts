@@ -1,5 +1,5 @@
 import {
-  addRecipe,
+  registerRecipe,
   getRecipe,
   getRecipeName,
   getRecipeParents,
@@ -49,11 +49,8 @@ export async function syncRecipeBlobby(id: string) {
   const { recipe, errors } = await buildRecipe(src);
   if (errors) throw new Error(errors);
 
-  const recipeId = addRecipe(recipe!, src, spec, parents);
-  if (id !== recipeId) {
-    throw new Error(`Recipe ID mismatch: ${id} !== ${recipeId}`);
-  }
-  recipesKnownToStorage.add(recipeId);
+  registerRecipe(id, recipe!, src, spec, parents);
+  recipesKnownToStorage.add(id);
 }
 
 function saveRecipe(
