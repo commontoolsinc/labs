@@ -1,5 +1,6 @@
 import { Ed25519Signer, Ed25519Verifier } from "./ed25519/index.ts";
 import { AsBytes, DIDKey, KeyPairRaw, Signer, Verifier } from "./interface.ts";
+import { base64pad } from "multiformats/bases/base64";
 import { hash } from "./utils.ts";
 
 const textEncoder = new TextEncoder();
@@ -78,6 +79,12 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
   ): Promise<Identity<ID>> {
     const rawPrivateKey = await hash(new TextEncoder().encode(passphrase));
     return new Identity(await Ed25519Signer.fromRaw<ID>(rawPrivateKey));
+  }
+
+  static fromString<ID extends DIDKey>(
+    stringKey: string,
+  ): Promise<Identity<ID>> {
+    return Identity.fromRaw(base64pad.decode(stringKey));
   }
 
   // Deserialize `input` from storage into an `Identity`.

@@ -6,6 +6,10 @@ import { join } from "@std/path";
 
 const COMMON_CLI_PATH = path.join(import.meta.dirname!, "../../cli");
 
+export type Mutable<T> = {
+  -readonly [k in keyof T]: T[k];
+};
+
 export const decode = (() => {
   const decoder = new TextDecoder();
   return (buffer: Uint8Array): string => decoder.decode(buffer);
