@@ -1,4 +1,4 @@
-import { registerRecipe, Cell, EntityId } from "@commontools/runner";
+import { registerNewRecipe, Cell, EntityId } from "@commontools/runner";
 import { LLMClient } from "@commontools/llm-client";
 import { createJsonSchema, JSONSchema } from "@commontools/builder";
 
@@ -7,7 +7,6 @@ import { Charm, CharmManager } from "./charm.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import { injectUserCode } from "./iframe/static.ts";
-import { registerNewRecipe } from "../../runner/src/recipe-map.ts";
 
 const llm = new LLMClient(LLMClient.DEFAULT_URL);
 

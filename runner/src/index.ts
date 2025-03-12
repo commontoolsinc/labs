@@ -34,6 +34,7 @@ export {
 } from "./doc-map.ts";
 export {
   registerRecipe,
+  registerNewRecipe,
   allRecipesByName,
   getRecipe,
   getRecipeId,
