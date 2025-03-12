@@ -7,7 +7,6 @@ import { fromString, refer } from "./reference.ts";
 import { unclaimed } from "./fact.ts";
 import { from as toChanges, set } from "./changes.ts";
 import { create as createCommit, the as COMMIT_THE } from "./commit.ts";
-import { fromDID as parseDID } from "./principal.ts";
 import {
   addMemoryAttributes,
   recordResult,
@@ -233,12 +232,11 @@ const readAddress = (
       : base;
     span.setAttribute("space.did_candidate", did);
 
-    const { ok: principal, error } = parseDID(did);
-    if (error) {
+    if (!did.startsWith("did:key:")) {
       // ℹ️ We suppress error for now as we don't want to break clients that
       // use non did identifiers. We will make things stricter in the next
       // iteration
-      console.error(error);
+      console.error("Invalid DID key.");
       span.setAttribute("space.did_parse_error", true);
       return {
         ok: {
@@ -252,7 +250,7 @@ const readAddress = (
     return {
       ok: {
         address: url.protocol === "file:" ? url : null,
-        subject: principal.did(),
+        subject: did as DIDKey,
       },
     };
   });

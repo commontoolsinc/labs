@@ -378,7 +378,11 @@ export type SessionTask<Space extends MemorySpace> =
   | UnwatchTask<Space>
   | WatchTask<Space>;
 
-export type Receipt<Command extends NonNullable<unknown>, Result extends NonNullable<unknown> | null, Effect> =
+export type Receipt<
+  Command extends NonNullable<unknown>,
+  Result extends NonNullable<unknown> | null,
+  Effect,
+> =
   | {
     the: "task/return";
     of: InvocationURL<Reference<Command>>;
@@ -397,7 +401,10 @@ export type Effect<Of extends NonNullable<unknown>, Command> = {
   is?: undefined;
 };
 
-export type Return<Of extends NonNullable<unknown>, Result extends NonNullable<unknown> | null> = {
+export type Return<
+  Of extends NonNullable<unknown>,
+  Result extends NonNullable<unknown> | null,
+> = {
   of: Reference<Of>;
   is: Result;
   run?: undefined;
