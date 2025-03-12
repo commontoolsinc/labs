@@ -76,7 +76,7 @@ export class RemoteStorageProvider implements StorageProvider {
   session: Memory.MemorySession<MemorySpace>;
   settings: RemoteStorageProviderSettings;
 
-  inspector: BroadcastChannel;
+  inspector?: BroadcastChannel;
 
   /**
    * queue that holds commands that we read from the session, but could not
@@ -97,7 +97,9 @@ export class RemoteStorageProvider implements StorageProvider {
     space = HOME,
     the = "application/json",
     settings = defaultSettings,
-    inspector = new BroadcastChannel("storage/remote"),
+    inspector = globalThis.BroadcastChannel
+      ? new BroadcastChannel("storage/remote")
+      : undefined,
   }: RemoteStorageProviderOptions) {
     this.address = address;
     this.workspace = space;
@@ -249,7 +251,7 @@ export class RemoteStorageProvider implements StorageProvider {
 
     const transaction = { changes: Changes.from(facts) };
 
-    this.inspector.postMessage({ transact: transaction });
+    this.inspector?.postMessage({ transact: transaction });
 
     const result = await memory.transact(transaction);
 
@@ -296,7 +298,7 @@ export class RemoteStorageProvider implements StorageProvider {
   inspect<T>(
     message: T,
   ): T {
-    this.inspector.postMessage(message);
+    this.inspector?.postMessage(message);
     return message;
   }
 
