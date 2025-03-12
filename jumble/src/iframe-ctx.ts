@@ -104,7 +104,9 @@ function addCommonIDfromObjectID(obj: any) {
     if (typeof obj == "object" && obj !== null) {
       const seen = new Set();
       Object.keys(obj).forEach((key: string) => {
-        if ("id" in obj[key]) {
+        if (
+          typeof obj[key] == "object" && obj[key] !== null && "id" in obj[key]
+        ) {
           let n = 0;
           let id = obj[key].id;
           while (seen.has(id)) id = `${obj[key].id}-${++n}`;
@@ -123,7 +125,7 @@ function addCommonIDfromObjectID(obj: any) {
 export const setupIframe = () =>
   setIframeContextHandler({
     read(context: any, key: string): any {
-      const data = isCell(context) ? context.key(key).get() : context?.[key];
+      const data = isCell(context) ? context.key(key).get?.() : context?.[key];
       const serialized = serializeProxyObjects(data);
       return serialized;
     },
