@@ -11,31 +11,32 @@ import {
 import { AuthorizationError, bytesToDid, didToBytes } from "./utils.ts";
 
 export class NobleEd25519Signer<ID extends DIDKey> implements Signer<ID> {
-  private keypair: InsecureCryptoKeyPair;
+  #keypair: InsecureCryptoKeyPair;
   #verifier: NobleEd25519Verifier<ID> | null = null;
   constructor(keypair: InsecureCryptoKeyPair) {
-    this.keypair = keypair;
+    this.#keypair = keypair;
   }
+
   did() {
     return this.verifier.did();
   }
 
   get verifier(): NobleEd25519Verifier<ID> {
     if (!this.#verifier) {
-      this.#verifier = new NobleEd25519Verifier(this.keypair.publicKey);
+      this.#verifier = new NobleEd25519Verifier(this.#keypair.publicKey);
     }
     return this.#verifier;
   }
 
   serialize(): InsecureCryptoKeyPair {
-    return this.keypair;
+    return this.#keypair;
   }
 
   async sign<T>(payload: AsBytes<T>): Promise<Result<Signature<T>, Error>> {
     try {
       const signature = await ed25519.signAsync(
         payload,
-        this.keypair.privateKey,
+        this.#keypair.privateKey,
       );
 
       return { ok: signature as Signature<T> };
@@ -62,17 +63,17 @@ export class NobleEd25519Signer<ID extends DIDKey> implements Signer<ID> {
 }
 
 export class NobleEd25519Verifier<ID extends DIDKey> implements Verifier<ID> {
-  private publicKey: Uint8Array;
-  private _did: ID;
+  #publicKey: Uint8Array;
+  #did: ID;
   constructor(publicKey: Uint8Array) {
-    this.publicKey = publicKey;
-    this._did = bytesToDid(publicKey) as ID;
+    this.#publicKey = publicKey;
+    this.#did = bytesToDid(publicKey) as ID;
   }
 
   async verify(
     { signature, payload }: { payload: Uint8Array; signature: Uint8Array },
   ) {
-    if (await ed25519.verifyAsync(signature, payload, this.publicKey)) {
+    if (await ed25519.verifyAsync(signature, payload, this.#publicKey)) {
       return { ok: {} };
     } else {
       return { error: new AuthorizationError("Invalid signature") };
@@ -80,7 +81,7 @@ export class NobleEd25519Verifier<ID extends DIDKey> implements Verifier<ID> {
   }
 
   did(): ID {
-    return this._did;
+    return this.#did;
   }
 
   static async fromDid<ID extends DIDKey>(
