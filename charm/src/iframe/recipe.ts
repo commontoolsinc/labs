@@ -56,7 +56,6 @@ function parseIframeRecipe(source: string): IFrameRecipe {
 
 export const getIframeRecipe = (charm: Cell<Charm>) => {
   const { src, recipeId } = getRecipeFrom(charm);
-
   return { recipeId, iframe: parseIframeRecipe(src) };
 };
 
