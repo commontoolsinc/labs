@@ -5,11 +5,15 @@ export const prefillHtml = `<html>
 <script type="importmap">
 {
   "imports": {
-    "react": "https://esm.sh/react@18.3.1",
-    "react-dom": "https://esm.sh/react-dom@18.3.1",
-    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom": "https://esm.sh/react-dom@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
     "@react-spring/web": "https://esm.sh/@react-spring/web@9.7.3",
+    "@react-spring/three": "https://esm.sh/@react-spring/three@9.7.3",
     "three": "https://esm.sh/three@0.159.0",
+    "@react-three/fiber": "https://esm.sh/@react-three/fiber@8.15.19",
+    "@react-three/drei": "https://esm.sh/@react-three/drei@9.102.5",
+    "react-use-measure": "https://esm.sh/react-use-measure@2.1.1",
     "d3": "https://esm.sh/d3@7.8.5",
     "moment": "https://esm.sh/moment@2.29.4",
     "p5": "https://esm.sh/p5@1.11.3",
@@ -456,23 +460,37 @@ export function extractUserCode(html: string): string | null {
 
   return html.substring(startIndex + startMarker.length, endIndex);
 }
-
 // Update the system message to reflect the new interface
-export const systemMd = `Create a React component that meets the user's request. Don't bloat it with excessive features or libraries but make sure it's tasteful and useful.
+export const systemMd = `# React App Builder
 
-<rules>
-  0. Name your work by defining \`const title = 'My App';\`
-  1. Your output should be JavaScript code that implements the \`onLoad\` and \`onReady\` functions.
-  2. \`React\`, \`ReactDOM\` and Tailwind CSS are already imported - do not import them again.
-    2.a. All react hooks must be namespaced: \`React.useState\`, \`React.useEffect\` etc.
-    2.b. Remember, follow the rules of hooks and never nest or make conditional calls
-  3. Banned functions: \`prompt()\`, \`alert()\`, \`confirm()\`
-  4. Use Tailwind for styling with tasteful, minimal defaults, customizable per user request.
-  5. You can request additional libraries in the \`onLoad\` function by returning an array of CDN URLs.
-  6. Use the provided \`useDoc\`, \`llm\`, and \`generateImage\` functions for data handling, AI requests, and image generation.
-  7. Your React components should be defined within the \`onReady\` function, it will be transformed using babel at runtime.
-  8. You cannot use onSubmit={} calls, use onClick handlers instead.
-</rules>
+Create an interactive React component that fulfills the user's request. Focus on delivering a clean, useful implementation with appropriate features.
+
+## Required Elements
+- Define a title with \`const title = 'Your App Name';\`
+- Implement both \`onLoad\` and \`onReady\` functions
+- Use Tailwind CSS for styling with tasteful defaults
+
+## Code Structure
+1. React and ReactDOM are pre-imported - don't import them again
+2. All React hooks must be namespaced (e.g., \`React.useState\`, \`React.useEffect\`)
+3. Follow React hooks rules - never nest or conditionally call hooks
+4. Define components within the \`onReady\` function
+5. For form handling, use \`onClick\` handlers instead of \`onSubmit\`
+
+## Available APIs
+- **useDoc(key, defaultValue)** - Persistent data storage with real-time updates
+- **llm(promptPayload)** - Send requests to the language model
+- **readWebpage(url)** - Fetch and parse external web content
+- **generateImage(prompt)** - Create AI-generated images
+
+## Library Usage
+- Request additional libraries in \`onLoad\` by returning an array of module names
+- Available libraries: @react-spring/web, three, @react-three/fiber, @react-three/drei, react-use-measure, d3, moment, p5, react-draggable
+- Only use the explicitly provided libraries
+
+## Security Restrictions
+- Do not use browser dialog functions (\`prompt()\`, \`alert()\`, \`confirm()\`)
+- Avoid any methods that could compromise security or user experience
 
 <view-model-schema>
 SCHEMA
@@ -507,6 +525,7 @@ For this schema:
 \`\`\`jsx
 function CounterComponent() {
   const [counter, setCounter] = useDoc("counter", -1); // default
+  const [title, setTitle] = useDoc("title", "My Counter App"); // default
 
   return (
     <div>
@@ -562,9 +581,12 @@ function ImageComponent() {
 \`\`\`javascript
 // Import from modern ESM libraries:
 //   - @react-spring/web
+//   - three
+//   - @react-three/fiber
+//   - @react-three/drei
+//   - react-use-measure
 //   - d3
 //   - moment
-//   - three
 //   - p5
 //   - react-draggable
 function onLoad() {
@@ -606,6 +628,4 @@ function onReady(mount, sourceData, libs) {
 }
 \`\`\`
 </guide>
-
-Only use the exact fucking libraries mentioned to you. Ultrathinking time.
 `;
