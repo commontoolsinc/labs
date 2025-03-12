@@ -4,8 +4,7 @@ export {
   castNewRecipe,
   compileAndRunRecipe,
   compileRecipe,
-  extend,
+  generateNewRecipeVersion,
   iterate,
-  saveNewRecipeVersion,
 } from "./iterate.ts";
 export { getIframeRecipe, type IFrameRecipe } from "./iframe/recipe.ts";

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 
-# DISABLED
 deno check \
   builder \
   charm \

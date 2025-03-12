@@ -72,8 +72,6 @@ async function main() {
       const recipeSrc = await Deno.readTextFile(recipeFile);
       const recipe = await compileRecipe(recipeSrc, "recipe", []);
       const charm = await manager.runPersistent(recipe, undefined, cause);
-      await manager.syncRecipe(charm);
-      manager.add([charm]);
       const charmWithSchema = (await manager.get(charm))!;
       charmWithSchema.sink((value) => {
         console.log("running charm:", getEntityId(charm), value);

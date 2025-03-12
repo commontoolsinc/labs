@@ -58,8 +58,8 @@ async function main() {
   );
 
   // let's add the cell to the charmManager
-  await charmManager.add([cell]);
-  log(charmManager, "charmmanager after adding cell");
+  // await charmManager.add([cell]);
+  // log(charmManager, "charmmanager after adding cell");
 }
 
 main();

@@ -41,54 +41,28 @@ export const buildFullRecipe = (iframe: IFrameRecipe) => {
   `;
 };
 
-function parseIframeRecipe(source: string): IFrameRecipe | undefined {
+function parseIframeRecipe(source: string): IFrameRecipe {
   // Extract content between IFRAME-V0 comments
   const match = source.match(
     /\/\* IFRAME-V0 \*\/([\s\S]*?)\/\* IFRAME-V0 \*\//,
   );
-  if (!match) {
-    console.warn("no IFRAME-V0 section in source");
-    return undefined;
+
+  if (!match || !match[1]) {
+    throw new Error("Could not find IFRAME-V0 recipe content in source");
   }
 
   return JSON.parse(match[1]) as IFrameRecipe;
 }
 
 export const getIframeRecipe = (charm: Cell<Charm>) => {
-  const recipeId = charm.getSourceCell(processSchema)?.get()?.[TYPE];
-  if (!recipeId) {
-    console.error("FIXME, no recipeId, what should we do?");
-    return {};
-  }
-
-  const recipe = getRecipe(recipeId);
-  if (!recipe) {
-    console.error("FIXME, no recipe, what should we do?");
-    return {};
-  }
-  const src = getRecipeSrc(recipeId);
-  if (!src) {
-    console.error("FIXME, no src, what should we do?");
-    return {};
-  }
-
+  const { src, recipeId } = getRecipeFrom(charm);
   return { recipeId, iframe: parseIframeRecipe(src) };
 };
 
 export const getRecipeFrom = (charm: Cell<Charm>) => {
   const recipeId = charm.getSourceCell(processSchema)?.get()?.[TYPE];
-  if (!recipeId) {
-    throw new Error("No recipeId found");
-  }
-
-  const recipe = getRecipe(recipeId);
-  if (!recipe) {
-    throw new Error("No recipe found for recipeId");
-  }
-  const src = getRecipeSrc(recipeId);
-  if (!src) {
-    throw new Error("No source found for recipeId");
-  }
+  const recipe = getRecipe(recipeId)!;
+  const src = getRecipeSrc(recipeId)!;
 
   return { recipeId, recipe, src };
 };

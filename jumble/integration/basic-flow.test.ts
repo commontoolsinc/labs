@@ -1,12 +1,12 @@
-import { Browser, launch, Page } from "@astral/astral";
 import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  it,
-} from "@std/testing/bdd";
+  Browser,
+  ConsoleEvent,
+  DialogEvent,
+  launch,
+  Page,
+  PageErrorEvent,
+} from "@astral/astral";
+import { assert } from "@std/assert";
 import {
   addCharm,
   inspectCharm,
@@ -15,7 +15,6 @@ import {
   snapshot,
   waitForSelectorWithText,
 } from "./utils.ts";
-import { assert } from "@std/assert";
 
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
   "http://localhost:8000/";
@@ -25,96 +24,171 @@ const HEADLESS = true;
 console.log(`TOOLSHED_API_URL=${TOOLSHED_API_URL}`);
 console.log(`FRONTEND_URL=${FRONTEND_URL}`);
 
-describe("integration", () => {
-  let browser: Browser | void = undefined;
-  let page: Page | void = undefined;
-  let testCharm: { charmId: string; name: string } | void = undefined;
+let browser: Browser | void = undefined;
+let testCharm: { charmId: string; name: string } | void = undefined;
 
-  beforeAll(async () => {
-    testCharm = await addCharm(TOOLSHED_API_URL);
-    console.log(`Charm added`, testCharm);
-    browser = await launch({ headless: HEADLESS });
-  });
-  beforeEach(async () => {
-    console.log(`Waiting to open website at ${FRONTEND_URL}`);
-    page = await browser!.newPage(FRONTEND_URL);
-    console.log(`Opened website at ${FRONTEND_URL}`);
-    await login(page);
-  });
-  afterEach(async () => {
-    await page!.close();
-  });
-  afterAll(async () => {
-    await browser!.close();
-  });
+Deno.test({
+  name: "integration tests",
+  fn: async (t) => {
+    let page: Page | void = undefined;
+    let failed = false;
+    const exceptions: string[] = [];
 
-  it("renders a new charm", async () => {
-    assert(page, "Page should be defined");
-    assert(testCharm, "Test charm should be defined");
+    try {
+      failed = !await t.step({
+        name: "add charm via cli",
+        ignore: failed || exceptions.length > 0,
+        fn: async () => {
+          testCharm = await addCharm(TOOLSHED_API_URL);
+          console.log(`Charm added`, testCharm);
+        },
+      });
 
-    await snapshot(page, "Initial state");
+      failed = !await t.step({
+        name: "renders homepage",
+        ignore: failed || exceptions.length > 0,
+        fn: async () => {
+          browser = await launch({ headless: HEADLESS });
 
-    const anchor = await page.waitForSelector("nav a");
-    assert(
-      (await anchor.innerText()) === "common-knowledge",
-      "Logged in and Common Knowledge title renders",
-    );
+          console.log(`Waiting to open website at ${FRONTEND_URL}`);
+          page = await browser!.newPage(FRONTEND_URL);
 
-    await page.goto(
-      `${FRONTEND_URL}${testCharm.name}/${testCharm.charmId}`,
-    );
-    await snapshot(page, "Waiting for charm to render");
+          // Add console log listeners
+          page.addEventListener("console", (e: ConsoleEvent) => {
+            console.log(`Browser Console [${e.detail.type}]: ${e.detail.text}`);
+          });
 
-    await waitForSelectorWithText(
-      page,
-      "a[aria-roledescription='charm-link']",
-      "Simple Value: 1",
-    );
-    await snapshot(page, "Charm rendered.");
-    assert(
-      true,
-      "Charm rendered successfully",
-    );
+          // Add error listeners
+          page.addEventListener("pageerror", (e: PageErrorEvent) => {
+            console.error("Browser Page Error:", e.detail.message);
+            exceptions.push(e.detail.message);
+          });
 
-    console.log("Clicking button");
-    // Sometimes clicking this button throws:
-    // https://jsr.io/@astral/astral/0.5.2/src/element_handle.ts#L192
-    // As if the reference was invalidated by a spurious re-render between
-    // getting an element handle, and clicking it.
-    await sleep(1000);
-    const button = await page.waitForSelector(
-      "div[aria-label='charm-content'] button",
-    );
-    await button.click();
-    await snapshot(page, "Button clicked");
+          // Add dialog listeners (for alerts, confirms, etc.)
+          page.addEventListener("dialog", async (e: DialogEvent) => {
+            const dialog = e.detail;
+            console.log(`Browser Dialog: ${dialog.type} - ${dialog.message}`);
+            await dialog.dismiss();
+          });
 
-    console.log("Checking if title changed");
-    await waitForSelectorWithText(
-      page,
-      "a[aria-roledescription='charm-link']",
-      "Simple Value: 2",
-    );
+          console.log(`Opened website at ${FRONTEND_URL}`);
+        },
+      });
 
-    await snapshot(page, "Title changed");
+      failed = !await t.step({
+        name: "able to login to the app",
+        ignore: failed || exceptions.length > 0,
+        fn: async () => {
+          assert(page, "Page should be defined");
+          await login(page);
+        },
+      });
 
-    console.log("Inspecting charm to verify updates propagated from browser.");
-    const charm = await inspectCharm(
-      TOOLSHED_API_URL,
-      testCharm.name,
-      testCharm.charmId,
-    );
+      failed = !await t.step({
+        name: "renders charm and verifies initial state",
+        ignore: failed || exceptions.length > 0,
+        fn: async () => {
+          assert(page, "Page should be defined");
+          assert(testCharm, "Test charm should be defined");
 
-    console.log("Charm:", charm);
-    assert(
-      charm.includes("Simple Value: 2"),
-      "Charm updates propagated.",
-    );
-  });
+          await snapshot(page, "Initial state");
 
-  // Placeholder test ensuring browser can be used
-  // across multiple tests (replace when we have more integration tests!)
-  it("[placeholder]", () => {
-    assert(page, "Page should be defined");
-    assert(testCharm, "Test charm should be defined");
-  });
+          const anchor = await page.waitForSelector("nav a");
+          assert(
+            (await anchor.innerText()) === "common-knowledge",
+            "Logged in and Common Knowledge title renders",
+          );
+
+          await page.goto(
+            `${FRONTEND_URL}${testCharm.name}/${testCharm.charmId}`,
+          );
+          await snapshot(page, "Waiting for charm to render");
+
+          await waitForSelectorWithText(
+            page,
+            "a[aria-roledescription='charm-link']",
+            "Simple Value: 1",
+          );
+          await snapshot(page, "Charm rendered.");
+          assert(true, "Charm rendered successfully");
+        },
+      });
+
+      failed = !await t.step({
+        name: "updates charm value via button click",
+        ignore: failed || exceptions.length > 0,
+        fn: async () => {
+          assert(page, "Page should be defined");
+          assert(testCharm, "Test charm should be defined");
+
+          await page.goto(
+            `${FRONTEND_URL}${testCharm.name}/${testCharm.charmId}`,
+          );
+
+          // Wait for initial render
+          await waitForSelectorWithText(
+            page,
+            "a[aria-roledescription='charm-link']",
+            "Simple Value: 1",
+          );
+
+          await sleep(1000);
+          console.log("Clicking button");
+
+          const button = await page.waitForSelector(
+            "div[aria-label='charm-content'] button",
+          );
+          await button.click();
+          await snapshot(page, "Button clicked");
+
+          // Add more wait time after click
+          await sleep(2000);
+
+          console.log("Checking if title changed");
+          await waitForSelectorWithText(
+            page,
+            "a[aria-roledescription='charm-link']",
+            "Simple Value: 2",
+          );
+
+          await snapshot(page, "Title changed");
+
+          // Add additional wait time for persistence
+          await sleep(2000);
+        },
+      });
+
+      failed = !await t.step({
+        name: "verifies charm updates are persisted",
+        ignore: failed || exceptions.length > 0,
+        fn: async () => {
+          assert(page, "Page should be defined");
+          assert(testCharm, "Test charm should be defined");
+
+          // Add initial wait time before checking
+          await sleep(1000);
+
+          console.log(
+            "Inspecting charm to verify updates propagated from browser.",
+          );
+          const charm = await inspectCharm(
+            TOOLSHED_API_URL,
+            testCharm.name,
+            testCharm.charmId,
+          );
+
+          console.log("Charm:", charm);
+          assert(
+            charm.includes("Simple Value: 2"),
+            "Charm updates propagated.",
+          );
+        },
+      });
+    } finally {
+      exceptions.forEach((exception) => {
+        console.error("Failure due to browser error:", exception);
+      });
+      await browser!.close();
+    }
+  },
 });
