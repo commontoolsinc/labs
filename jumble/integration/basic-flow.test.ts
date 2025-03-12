@@ -20,6 +20,9 @@ import { assert } from "@std/assert";
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
   "http://localhost:8000/";
 const FRONTEND_URL = Deno.env.get("FRONTEND_URL") ?? "http://localhost:5173/";
+const ADDITIONAL_WAIT_TIME = parseInt(
+  Deno.env.get("ADDITIONAL_WAIT_TIME") ?? "0",
+);
 const HEADLESS = true;
 
 console.log(`TOOLSHED_API_URL=${TOOLSHED_API_URL}`);
@@ -34,12 +37,14 @@ describe("integration", () => {
     testCharm = await addCharm(TOOLSHED_API_URL);
     console.log(`Charm added`, testCharm);
     browser = await launch({ headless: HEADLESS });
+    await sleep(ADDITIONAL_WAIT_TIME);
   });
   beforeEach(async () => {
     console.log(`Waiting to open website at ${FRONTEND_URL}`);
     page = await browser!.newPage(FRONTEND_URL);
+    await sleep(ADDITIONAL_WAIT_TIME);
     console.log(`Opened website at ${FRONTEND_URL}`);
-    await login(page);
+    await login(page, ADDITIONAL_WAIT_TIME);
   });
   afterEach(async () => {
     await page!.close();
@@ -76,17 +81,20 @@ describe("integration", () => {
       "Charm rendered successfully",
     );
 
-    console.log("Clicking button");
     // Sometimes clicking this button throws:
     // https://jsr.io/@astral/astral/0.5.2/src/element_handle.ts#L192
     // As if the reference was invalidated by a spurious re-render between
     // getting an element handle, and clicking it.
-    await sleep(1000);
+    await sleep(1000 + ADDITIONAL_WAIT_TIME);
+    console.log("Clicking button");
+
     const button = await page.waitForSelector(
       "div[aria-label='charm-content'] button",
     );
     await button.click();
     await snapshot(page, "Button clicked");
+
+    await sleep(ADDITIONAL_WAIT_TIME);
 
     console.log("Checking if title changed");
     await waitForSelectorWithText(
@@ -97,6 +105,7 @@ describe("integration", () => {
 
     await snapshot(page, "Title changed");
 
+    await sleep(ADDITIONAL_WAIT_TIME);
     console.log("Inspecting charm to verify updates propagated from browser.");
     const charm = await inspectCharm(
       TOOLSHED_API_URL,
