@@ -811,6 +811,20 @@ const CodeTab = () => {
       iframeRecipe,
     );
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        if (hasUnsavedChanges) {
+          saveChanges();
+        }
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [hasUnsavedChanges, saveChanges]);
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="p-4 flex-grow flex flex-col overflow-hidden">
