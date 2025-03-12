@@ -18,6 +18,7 @@ import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
 import { Composer, parseMentionsInDocument } from "@/components/Composer.tsx";
 import { charmId } from "@/utils/charms.ts";
 import { NAME } from "../../../builder/src/types.ts";
+import { CharmManager } from "../../../charm/src/index.ts";
 
 function CommandProcessor({
   mode,
@@ -84,26 +85,8 @@ function CommandProcessor({
   }
 }
 
-export function CommandCenter() {
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [mode, setMode] = useState<CommandMode>({ type: "main" });
-  const [commandPathIds, setCommandPathIds] = useState<string[]>([]);
-  const [search, setSearch] = useState("");
-  const { modelId, setPreferredModel } = usePreferredLanguageModel();
-  const { stopJob, startJob, addJobMessage, listJobs, updateJobProgress } =
-    useBackgroundTasks();
-
+export function useCharmMentions() {
   const { charmManager } = useCharmManager();
-  const navigate = useNavigate();
-  // TODO(bf): matchesRoute?
-  const replicaMatch = useMatch("/:replicaName/:charmId?/*");
-  const stackMatch = useMatch("/:replicaName/stack/:charmIds/*");
-  const focusedCharmId = stackMatch?.params.charmIds ??
-    replicaMatch?.params.charmId ?? null;
-  const focusedReplicaId = stackMatch?.params.replicaName ??
-    replicaMatch?.params.replicaName ?? null;
-
   const [charmMentions, setCharmMentions] = useState<
     Array<{ id: string; name: string }>
   >([]);
@@ -133,6 +116,59 @@ export function CommandCenter() {
 
     fetchCharmMentions();
   }, [charmManager]);
+
+  return charmMentions;
+}
+
+export async function formatPromptWithMentions(
+  prompt: string,
+  charmManager: CharmManager,
+) {
+  const payload = await parseMentionsInDocument(
+    prompt,
+    charmManager,
+  );
+  const finalText = `${payload.text}\n\n<sources>
+${
+    Object.entries(payload.bibliography).map(([id, source]) =>
+      `<source id="${id}">
+${
+        JSON.stringify({
+          ...source,
+          body: typeof source.body === "string"
+            ? source.body
+            : JSON.stringify(source.body),
+        })
+      }
+</source>`
+    ).join("\n")
+  }
+</sources>`;
+
+  return finalText;
+}
+
+export function CommandCenter() {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState<CommandMode>({ type: "main" });
+  const [commandPathIds, setCommandPathIds] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
+  const { modelId, setPreferredModel } = usePreferredLanguageModel();
+  const { stopJob, startJob, addJobMessage, listJobs, updateJobProgress } =
+    useBackgroundTasks();
+
+  const { charmManager } = useCharmManager();
+  const navigate = useNavigate();
+  // TODO(bf): matchesRoute?
+  const replicaMatch = useMatch("/:replicaName/:charmId?/*");
+  const stackMatch = useMatch("/:replicaName/stack/:charmIds/*");
+  const focusedCharmId = stackMatch?.params.charmIds ??
+    replicaMatch?.params.charmId ?? null;
+  const focusedReplicaId = stackMatch?.params.replicaName ??
+    replicaMatch?.params.replicaName ?? null;
+
+  const charmMentions = useCharmMentions();
 
   const allCommands = useMemo(
     () =>
@@ -373,26 +409,10 @@ export function CommandCenter() {
             if (mode.type === "input" && e.key === "Enter") {
               e.preventDefault();
               const command = mode.command;
-              const payload = await parseMentionsInDocument(
+              const finalText = await formatPromptWithMentions(
                 search,
                 charmManager,
               );
-              const finalText = `${payload.text}\n\n<sources>
-${
-                Object.entries(payload.bibliography).map(([id, source]) =>
-                  `<source id="${id}">
-  ${
-                    JSON.stringify({
-                      ...source,
-                      body: typeof source.body === "string"
-                        ? source.body
-                        : JSON.stringify(source.body),
-                    })
-                  }
-</source>`
-                ).join("\n")
-              }
-</sources>`;
               command.handler?.(finalText);
             }
             // For select mode, prevent the default Enter behavior
