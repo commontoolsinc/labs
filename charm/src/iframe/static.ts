@@ -5,6 +5,7 @@ const libraries = {
     "react-dom/client": "https://esm.sh/react-dom@18.3.0/client",
     "d3": "https://esm.sh/d3@7.8.5",
     "moment": "https://esm.sh/moment@2.29.4",
+    "marked": "https://esm.sh/marked@15.0.7",
     "@react-spring/web": "https://esm.sh/@react-spring/web@9.7.3?external=react",
     "@use-gesture/react": "https://esm.sh/@use-gesture/react@10.3.0?external=react"
   }
