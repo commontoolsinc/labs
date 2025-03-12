@@ -8,7 +8,8 @@ const libraries = {
     "marked": "https://esm.sh/marked@15.0.7",
     "@react-spring/web": "https://esm.sh/@react-spring/web@9.7.3?external=react",
     "@use-gesture/react": "https://esm.sh/@use-gesture/react@10.3.0?external=react",
-    "uuid": "https://esm.sh/uuid@11.0.1"
+    "uuid": "https://esm.sh/uuid@11.0.1",
+    "tone": "https://esm.sh/tone@15.0.4"
   }
 };
 
