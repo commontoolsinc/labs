@@ -38,11 +38,23 @@ export const charmSchema = {
     [UI]: { type: "object" },
   },
   required: [UI, NAME],
-} as const satisfies JSONSchema;
+} as const satisfies JSONSchema satisfies JSONSchema;
 
 export const charmListSchema = {
   type: "array",
   items: { ...charmSchema, asCell: true },
+} as const satisfies JSONSchema satisfies JSONSchema;
+
+export const charmSourceCellSchema = {
+  type: "object",
+  properties: {
+    [TYPE]: { type: "string" },
+    parents: {
+      type: "array",
+      items: { type: "object", asCell: true },
+      default: [],
+    },
+  },
 } as const satisfies JSONSchema;
 
 export const processSchema = {
