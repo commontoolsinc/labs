@@ -25,6 +25,7 @@ const EmailSchema = {
     date: { type: "string" },
     to: { type: "string" },
     plainText: { type: "string" },
+    htmlContent: { type: "string" },
   },
   required: [
     "id",
@@ -36,6 +37,7 @@ const EmailSchema = {
     "date",
     "to",
     "plainText",
+    "htmlContent",
   ],
 } as const as JSONSchema;
 type Email = Schema<typeof EmailSchema>;
@@ -117,6 +119,7 @@ const ResultSchema = {
           date: { type: "string" },
           to: { type: "string" },
           plainText: { type: "string" },
+          htmlContent: { type: "string" },
         },
       },
     },
@@ -278,17 +281,49 @@ Accept: application/json
       const date = getHeader(messageHeaders, "Date");
 
       let plainText = "";
+      let htmlContent = "";
+
       if (
         messageData.payload.parts && Array.isArray(messageData.payload.parts)
       ) {
+        // Look for plainText part
         const textPart = messageData.payload.parts.find(
           (part: any) => part.mimeType === "text/plain",
         );
         if (textPart?.body?.data) {
           plainText = decodeBase64(textPart.body.data);
         }
+
+        // Look for HTML part
+        const htmlPart = messageData.payload.parts.find(
+          (part: any) => part.mimeType === "text/html",
+        );
+        if (htmlPart?.body?.data) {
+          htmlContent = decodeBase64(htmlPart.body.data);
+        }
+
+        // Handle multipart messages - check for nested parts
+        if (htmlContent === "") {
+          for (const part of messageData.payload.parts) {
+            if (part.parts && Array.isArray(part.parts)) {
+              const nestedHtmlPart = part.parts.find(
+                (nestedPart: any) => nestedPart.mimeType === "text/html",
+              );
+              if (nestedHtmlPart?.body?.data) {
+                htmlContent = decodeBase64(nestedHtmlPart.body.data);
+                break;
+              }
+            }
+          }
+        }
       } else if (messageData.payload.body?.data) {
-        plainText = decodeBase64(messageData.payload.body.data);
+        // Handle single part messages
+        const bodyData = decodeBase64(messageData.payload.body.data);
+        if (messageData.payload.mimeType === "text/html") {
+          htmlContent = bodyData;
+        } else {
+          plainText = bodyData;
+        }
       }
 
       return {
@@ -301,6 +336,7 @@ Accept: application/json
         date,
         to: extractEmailAddress(to),
         plainText,
+        htmlContent,
       };
     } catch (error) {
       console.error("Error processing message part:", error);
@@ -426,11 +462,7 @@ export async function fetchEmail(
         console.log(`Adding ${newEmails.length} new emails`);
         newEmails.forEach((email) => {
           email[ID] = email.id;
-          // console.log("#########################");
-          // console.log(email);
-          // console.log("#########################");
         });
-        // NOTE: This is where we need to set the html
         state.emails.push(...newEmails);
       } else {
         console.log("No new emails found");
