@@ -1,4 +1,11 @@
-import { Browser, launch, Page } from "@astral/astral";
+import {
+  Browser,
+  ConsoleEvent,
+  DialogEvent,
+  launch,
+  Page,
+  PageErrorEvent,
+} from "@astral/astral";
 import {
   afterAll,
   afterEach,
@@ -44,18 +51,19 @@ describe("integration", () => {
     page = await browser!.newPage(FRONTEND_URL);
 
     // Add console log listeners
-    page.on("console", (msg) => {
-      console.log(`Browser Console [${msg.type()}]: ${msg.text()}`);
+    page.addEventListener("console", (e: ConsoleEvent) => {
+      console.log(`Browser Console [${e.detail.type}]: ${e.detail.text}`);
     });
 
     // Add error listeners
-    page.on("pageerror", (err) => {
-      console.error("Browser Page Error:", err);
+    page.addEventListener("pageerror", (e: PageErrorEvent) => {
+      console.error("Browser Page Error:", e.detail.message);
     });
 
     // Add dialog listeners (for alerts, confirms, etc.)
-    page.on("dialog", async (dialog) => {
-      console.log(`Browser Dialog: ${dialog.type()} - ${dialog.message()}`);
+    page.addEventListener("dialog", async (e: DialogEvent) => {
+      const dialog = e.detail;
+      console.log(`Browser Dialog: ${dialog.type} - ${dialog.message}`);
       await dialog.dismiss();
     });
 
