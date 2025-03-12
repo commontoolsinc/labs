@@ -30,6 +30,116 @@ import {
   withReact,
 } from "slate-react";
 import { createPortal } from "react-dom";
+import { CharmManager } from "../../../charm/src/index.ts";
+
+// Function to parse Slate document and extract mention references
+export async function parseMentionsInDocument(
+  serializedDocument: string,
+  charmManager: CharmManager,
+): Promise<{
+  text: string;
+  mentions: string[];
+  bibliography: { [id: string]: { title: string; body: any } };
+}> {
+  try {
+    const document = JSON.parse(serializedDocument) as Descendant[];
+    let fullText = "";
+    const mentions: string[] = [];
+    const bibliography: { [id: string]: { title: string; body: string } } = {};
+    const mentionIndices: Record<string, number> = {};
+
+    const processNode = async (node: any) => {
+      if (node.type === "mention") {
+        if (node.id) {
+          // Add to mentions list if not already present
+          if (!mentionIndices[node.id]) {
+            mentions.push(node.id);
+
+            // Create bibliography entry
+            const bibIndex = Object.keys(bibliography).length + 1;
+            const charm = await charmManager.get(node.id);
+            const data = charm?.getSourceCell().get().argument;
+            bibliography[node.id] = {
+              title: node.character || `Reference ${bibIndex}`,
+              body: data,
+            };
+
+            mentionIndices[node.id] = bibIndex;
+          }
+
+          // Insert reference number in text with mustache placeholders
+          const refIndex = mentionIndices[node.id];
+          fullText += `{{${node.id}}}`;
+        } else {
+          // Fallback for backward compatibility
+          const match = node.character.match(/\(#([a-z0-9]+)\)$/);
+          if (match && match[1]) {
+            const referenceId = match[1];
+
+            if (!mentionIndices[referenceId]) {
+              mentions.push(referenceId);
+
+              const bibIndex = Object.keys(bibliography).length + 1;
+              const charm = await charmManager.get(referenceId);
+              const data = charm?.getSourceCell().get().argument;
+              bibliography[node.id] = {
+                title: node.character || `Reference ${bibIndex}`,
+                body: data,
+              };
+
+              mentionIndices[referenceId] = bibIndex;
+            }
+
+            const refIndex = mentionIndices[referenceId];
+            fullText += `{{${referenceId}}}`;
+          } else {
+            fullText += `@${node.character}`;
+          }
+        }
+      } else if (node.text !== undefined) {
+        fullText += node.text;
+      } else if (node.children) {
+        for (const child of node.children) {
+          await processNode(child);
+        }
+      }
+    };
+
+    // Process each node sequentially with await
+    for (const node of document) {
+      await processNode(node);
+    }
+
+    return {
+      text: fullText,
+      mentions,
+      bibliography,
+    };
+  } catch (error) {
+    console.error("Failed to parse document:", error);
+    return { text: "", mentions: [], bibliography: {} };
+  }
+}
+
+// Helper function to replace mentions with their actual content
+export function replaceMentionsWithContent(
+  parsedDocument: { text: string; mentions: string[] },
+  mentionContent: Record<string, any>,
+): string {
+  let result = parsedDocument.text;
+
+  // Replace each mention with its content
+  for (const mentionId of parsedDocument.mentions) {
+    const content = mentionContent[mentionId];
+    if (content) {
+      // Find the mention pattern in the text and replace it with content
+      const mentionRegex = new RegExp(`@[^@]+(#${mentionId})\\)`, "g");
+      result = result.replace(mentionRegex, content);
+    }
+  }
+
+  return result;
+}
 
 // Define our custom types
 interface MentionElement extends BaseElement {
@@ -139,7 +249,11 @@ export function Composer({
           case "Enter":
             event.preventDefault();
             Transforms.select(editor, target);
-            insertMention(editor, filteredMentions[index].name);
+            insertMention(
+              editor,
+              filteredMentions[index].id,
+              filteredMentions[index].name,
+            );
             setTarget(null);
             break;
           case "Escape":
@@ -235,14 +349,17 @@ export function Composer({
                 boxShadow: "0 1px 5px rgba(0,0,0,.2)",
               }}
             >
-              {filteredMentions.map((mention, i: number) => (
+              {filteredMentions.map((
+                mention: { id: string; name: string },
+                i: number,
+              ) => (
                 <div
                   key={mention.id}
                   onClick={(e: ReactMouseEvent) => {
                     e.preventDefault();
                     e.stopPropagation();
                     Transforms.select(editor, target);
-                    insertMention(editor, mention.name);
+                    insertMention(editor, mention.id, mention.name);
                     setTarget(null);
                   }}
                   style={{
@@ -281,10 +398,11 @@ const withMentions = (editor: CustomEditor) => {
   return editor;
 };
 
-const insertMention = (editor: CustomEditor, character: string) => {
-  const mention: MentionElement = {
+const insertMention = (editor: CustomEditor, id: string, character: string) => {
+  const mention: MentionElement & { id: string } = {
     type: "mention",
     character,
+    id,
     children: [{ text: "" }],
   };
   Transforms.insertNodes(editor, mention);

@@ -15,7 +15,7 @@ import {
 import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext.tsx";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
-import { Composer } from "@/components/Composer.tsx";
+import { Composer, parseMentionsInDocument } from "@/components/Composer.tsx";
 import { charmId } from "@/utils/charms.ts";
 import { NAME } from "../../../builder/src/types.ts";
 
@@ -368,12 +368,32 @@ export function CommandCenter() {
           value={search}
           onValueChange={setSearch}
           mentions={charmMentions}
-          onKeyDown={(e) => {
+          onKeyDown={async (e) => {
             // Only handle Enter for input mode, ignore for select mode
             if (mode.type === "input" && e.key === "Enter") {
               e.preventDefault();
               const command = mode.command;
-              command.handler?.(search);
+              const payload = await parseMentionsInDocument(
+                search,
+                charmManager,
+              );
+              const finalText = `${payload.text}\n\n<sources>
+${
+                Object.entries(payload.bibliography).map(([id, source]) =>
+                  `<source id="${id}">
+  ${
+                    JSON.stringify({
+                      ...source,
+                      body: typeof source.body === "string"
+                        ? source.body
+                        : JSON.stringify(source.body),
+                    })
+                  }
+</source>`
+                ).join("\n")
+              }
+</sources>`;
+              command.handler?.(finalText);
             }
             // For select mode, prevent the default Enter behavior
             if (mode.type === "select" && e.key === "Enter") {
