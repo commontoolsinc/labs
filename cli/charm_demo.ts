@@ -41,7 +41,7 @@ async function main() {
 
   // get them charms, we can also call charmManager.getCharms()
   // this way is to show what these objects really are
-  const charmsDoc: DocImpl<DocLink[]> = getDoc<DocLink[]>([], "charms", SPACE);
+  const charmsDoc: DocImpl<CellLink[]> = getDoc<CellLink[]>([], "charms", SPACE);
 
   // start syncing on this document
   // notice that we call syncCell on a DocImpl
@@ -98,8 +98,8 @@ main();
 
 // function foo() {
 //   this.space = getSpace(this.spaceId);
-//   this.charmsDoc = getDoc<DocLink[]>([], "charms", this.space);
-//   this.pinned = getDoc<DocLink[]>([], "pinned-charms", this.space);
+//   this.charmsDoc = getDoc<CellLink[]>([], "charms", this.space);
+//   this.pinned = getDoc<CellLink[]>([], "pinned-charms", this.space);
 //   this.charms = this.charmsDoc.asCell([], undefined, charmListSchema);
 //   storage.setSigner(signer);
 //   this.pinnedCharms = this.pinned.asCell([], undefined, charmListSchema);
