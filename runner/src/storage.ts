@@ -11,7 +11,7 @@ import { isStatic, markAsStatic } from "@commontools/builder";
 import { StorageProvider, StorageValue } from "./storage/base.ts";
 import { RemoteStorageProvider } from "./storage/remote.ts";
 import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
-import { InMemoryStorageProvider } from "./storage/memory.ts";
+import { VolatileStorageProvider } from "./storage/volatile.ts";
 import { Signer } from "@commontools/identity";
 import { isBrowser } from "@commontools/utils/env";
 
@@ -248,8 +248,8 @@ class StorageImpl implements Storage {
     if (!provider) {
       // Default to "remote", but let either custom URL (used in tests) or
       // environment variable override this.
-      const type = this.remoteStorageUrl?.protocol === "memory:"
-        ? "memory"
+      const type = this.remoteStorageUrl?.protocol === "volatile:"
+        ? "volatile"
         : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "remote");
 
       if (type === "remote") {
@@ -262,8 +262,8 @@ class StorageImpl implements Storage {
           space: space as `did:${string}:${string}`,
           as: this.signer,
         });
-      } else if (type === "memory") {
-        provider = new InMemoryStorageProvider(space);
+      } else if (type === "volatile") {
+        provider = new VolatileStorageProvider(space);
       } else {
         throw new Error(`Unknown storage type: ${type}`);
       }
