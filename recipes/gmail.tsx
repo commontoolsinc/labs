@@ -409,10 +409,13 @@ export async function fetchEmail(
     state.emails.get().map((email) => email.id),
   );
 
-  // First, get the list of message IDs from the inbox
+  const query = labelIds
+    .map((label) => `label:${label}`)
+    .join(" OR ");
+
   const listResponse = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=${
-      labelIds.map(encodeURIComponent).join(",")
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${
+      encodeURIComponent(query)
     }&maxResults=${maxResults}`,
     {
       headers: {
