@@ -13,8 +13,8 @@ export type { ReactivityLog } from "./scheduler.ts";
 export { getDoc, isDoc } from "./doc.ts";
 export {
   getCell,
-  getCellFromCellLink,
   getCellFromEntityId,
+  getCellFromLink,
   getImmutableCell,
   isCell,
   isCellLink,
