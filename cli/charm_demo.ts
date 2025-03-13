@@ -8,7 +8,7 @@
 import { Charm, CharmManager, charmListSchema } from "../charm/src/charm.ts";
 import { Cell } from "../runner/src/cell.ts";
 import * as Session from "./session.ts";
-import { DocLink, DocImpl, getDoc } from "../runner/src/doc.ts";
+import { type DocLink, DocImpl, getDoc } from "../runner/src/doc.ts";
 import { EntityId } from "../runner/src/doc-map.ts";
 import { storage } from "../runner/src/storage.ts";
 import { Identity } from "../identity/src/index.ts";
@@ -54,7 +54,7 @@ async function main() {
       console.log(`\nFound ${charmList.length} charms`);
   
       // Print details for each charm
-      charmList.forEach((charm, index) => {
+      charmList.forEach((charm: any, index: number) => {
         const id = getEntityId(charm)?.["/"] || "unknown-id";
         const name = charm.get()?.NAME || "Unnamed";
     
