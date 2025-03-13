@@ -6,13 +6,14 @@ const libraries = {
     "d3": "https://esm.sh/d3@7.8.5",
     "moment": "https://esm.sh/moment@2.29.4",
     "marked": "https://esm.sh/marked@15.0.7",
-    "@react-spring/web": "https://esm.sh/@react-spring/web@9.7.3?external=react",
-    "@use-gesture/react": "https://esm.sh/@use-gesture/react@10.3.0?external=react",
+    "@react-spring/web":
+      "https://esm.sh/@react-spring/web@9.7.3?external=react",
+    "@use-gesture/react":
+      "https://esm.sh/@use-gesture/react@10.3.0?external=react",
     "uuid": "https://esm.sh/uuid@11.0.1",
-    "tone": "https://esm.sh/tone@15.0.4"
-  }
+    "tone": "https://esm.sh/tone@15.0.4",
+  },
 };
-
 
 // The HTML template that wraps the developer's code
 export const prefillHtml = `<html>
@@ -85,6 +86,7 @@ ${JSON.stringify(libraries)}
         newValue = newValue(doc);
       }
       console.log("useDoc", key, "written", newValue);
+      setDocState(newValue);
       window.parent.postMessage({ type: "write", data: [key, newValue] }, "*");
     };
 
@@ -445,13 +447,13 @@ window.__app = { onLoad, onReady, title };
 export function injectUserCode(userCode: string) {
   // Add comment fences around the user code for later extraction
   const fencedUserCode = `// BEGIN_USER_CODE\n${userCode}\n// END_USER_CODE`;
-  return prefillHtml.replace('// USER_CODE_PLACEHOLDER', fencedUserCode);
+  return prefillHtml.replace("// USER_CODE_PLACEHOLDER", fencedUserCode);
 }
 
 // Function to extract the user code from HTML with fences
 export function extractUserCode(html: string): string | null {
-  const startMarker = '// BEGIN_USER_CODE\n';
-  const endMarker = '\n// END_USER_CODE';
+  const startMarker = "// BEGIN_USER_CODE\n";
+  const endMarker = "\n// END_USER_CODE";
 
   const startIndex = html.indexOf(startMarker);
   if (startIndex === -1) return null;
@@ -493,7 +495,7 @@ Create an interactive React component that fulfills the user's request. Focus on
 ## Library Usage
 - Request additional libraries in \`onLoad\` by returning an array of module names
 - Available libraries:
-  ${Object.entries(libraries).map(([k, v]) => `- ${k} : ${v}`).join('\n')}
+  ${Object.entries(libraries).map(([k, v]) => `- ${k} : ${v}`).join("\n")}
 - Only use the explicitly provided libraries
 
 ## Security Restrictions
@@ -599,7 +601,7 @@ function ImageComponent() {
 
 \`\`\`javascript
 // Import from modern ESM libraries:
-${Object.keys(libraries.imports).map(lib => `//   - ${lib}`).join('\n')}
+${Object.keys(libraries.imports).map((lib) => `//   - ${lib}`).join("\n")}
 function onLoad() {
   return ['@react-spring/web']; // Request the modules you need
 }
