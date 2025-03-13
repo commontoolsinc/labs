@@ -1,9 +1,6 @@
-import { llm } from "@/utils/llm.ts";
-import {
-  hydratePrompt,
-  parseTagFromResponse,
-} from "@/utils/prompt-library/prompting.ts";
-import { recipeGuidePrompt } from "@/utils/prompt-library/recipe-guide.ts";
+import { client } from "../client.ts";
+import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
+import { recipeGuidePrompt } from "./recipe-guide.ts";
 
 const SYSTEM_PROMPT = `
 You are a code debugging and fixing assistant. Your task is to analyze buggy code that has caused errors and crashes, and then generate fixed code based on the original specifications. The code runs inside an iframe, and errors bubble up from there.
@@ -82,7 +79,7 @@ export async function fixRecipePrompt(
   });
   const prompt =
     `Please fix the code, do not be lazy, or leave comments about code you didn't include. Include all of the code.`;
-  const response = await llm.sendRequest({
+  const response = await client.sendRequest({
     model,
     system,
     stream: false,

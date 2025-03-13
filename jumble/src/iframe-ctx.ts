@@ -7,7 +7,7 @@ import {
   ReactivityLog,
   removeAction,
 } from "@commontools/runner";
-import { llm } from "@/utils/llm.ts";
+import { client as llm } from "@commontools/llm";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 // This is to prepare Proxy objects to be serialized

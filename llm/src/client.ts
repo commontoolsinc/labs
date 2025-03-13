@@ -15,7 +15,7 @@ type TypedContent =
     url: string;
   };
 
-const DEFAULT_LLM_URL = typeof globalThis.location !== "undefined"
+export const DEFAULT_LLM_URL = typeof globalThis.location !== "undefined"
   ? globalThis.location.protocol + "//" + globalThis.location.host +
     "/api/ai/llm"
   : "//api/ai/llm";
@@ -157,3 +157,5 @@ function processMessage(
   }
   return m;
 }
+
+export const client = new LLMClient(DEFAULT_LLM_URL);

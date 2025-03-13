@@ -1,5 +1,9 @@
 import { type DocImpl, getDoc } from "../doc.ts";
-import { makeClient, SimpleContent, SimpleMessage } from "../llm-client.ts";
+import {
+  client,
+  type SimpleContent,
+  type SimpleMessage,
+} from "@commontools/llm";
 import { type Action, idle } from "../scheduler.ts";
 import { refer } from "merkle-reference";
 import { type ReactivityLog } from "../scheduler.ts";
@@ -136,7 +140,7 @@ export function llm(
       partial.setAtPath([], text, log);
     };
 
-    const resultPromise = makeClient().sendRequest(llmParams, updatePartial);
+    const resultPromise = client.sendRequest(llmParams, updatePartial);
 
     resultPromise
       .then(async (text) => {

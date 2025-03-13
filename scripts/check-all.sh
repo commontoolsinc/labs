@@ -4,12 +4,13 @@ deno check \
   builder \
   charm \
   cli \
+  deno-web-test \
   html \
   identity \
   iframe-sandbox \
+  llm \
   jumble \
   memory \
   runner \
-  ui \
-  llm-client \
-  deno-web-test
+  toolshed \
+  ui

@@ -1,14 +1,11 @@
 import { Cell, registerNewRecipe, tsToExports } from "@commontools/runner";
-import { LLMClient } from "@commontools/llm-client";
+import { client as llm } from "@commontools/llm";
 import { createJsonSchema, JSONSchema } from "@commontools/builder";
-
 import { Charm, CharmManager } from "./charm.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import { injectUserCode } from "./iframe/static.ts";
-import { isCell } from "../../runner/src/cell.ts";
-
-const llm = new LLMClient(LLMClient.DEFAULT_URL);
+import { isCell } from "@commontools/runner";
 
 const genSrc = async ({
   src,

@@ -1,10 +1,6 @@
 import JSON5 from "json5";
-
-import {
-  hydratePrompt,
-  parseTagFromResponse,
-} from "@/utils/prompt-library/prompting.ts";
-import { llm } from "@/utils/llm.ts";
+import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
+import { client } from "../client.ts";
 
 const SYSTEM_PROMPT = `
 You are an expert JSON data generator AI. Your task is to design and generate a JSON blob that models and illustrates the data structure that would enable a product feature or idea described by a user.
@@ -56,7 +52,7 @@ export async function generateJSON(
   const system = hydratePrompt(SYSTEM_PROMPT, {
     PRODUCT_DESCRIPTION: description,
   });
-  const response = await llm.sendRequest({
+  const response = await client.sendRequest({
     model,
     system,
     stream: false,
