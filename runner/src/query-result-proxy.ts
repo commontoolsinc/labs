@@ -1,5 +1,6 @@
 import { getTopFrame, toOpaqueRef } from "@commontools/builder";
-import { type DocImpl, type DocLink, getDoc, makeOpaqueRef } from "./doc.ts";
+import { type DocImpl, getDoc, makeOpaqueRef } from "./doc.ts";
+import { type CellLink } from "./cell.ts";
 import { queueEvent, type ReactivityLog } from "./scheduler.ts";
 import { diffAndUpdate, resolveLinkToValue, setNestedValue } from "./utils.ts";
 
@@ -65,7 +66,7 @@ export function createQueryResultProxy<T>(
     get: (target, prop, receiver) => {
       if (typeof prop === "symbol") {
         if (prop === getDocLink) {
-          return { cell: valueCell, path: valuePath } satisfies DocLink;
+          return { cell: valueCell, path: valuePath } satisfies CellLink;
         } else if (prop === toOpaqueRef) {
           return () => makeOpaqueRef(valueCell, valuePath);
         }
@@ -248,9 +249,9 @@ function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
  * Get doc link or return values as is if not a cell value proxy.
  *
  * @param {any} value - The value to get the doc link or value from.
- * @returns {DocLink | any}
+ * @returns {CellLink | any}
  */
-export function getDocLinkOrValue(value: any): DocLink {
+export function getDocLinkOrValue(value: any): CellLink {
   if (isQueryResult(value)) return value[getDocLink];
   else return value;
 }
@@ -259,10 +260,10 @@ export function getDocLinkOrValue(value: any): DocLink {
  * Get doc link or throw if not a cell value proxy.
  *
  * @param {any} value - The value to get the doc link from.
- * @returns {DocLink}
+ * @returns {CellLink}
  * @throws {Error} If the value is not a cell value proxy.
  */
-export function getDocLinkOrThrow(value: any): DocLink {
+export function getDocLinkOrThrow(value: any): CellLink {
   if (isQueryResult(value)) return value[getDocLink];
   else throw new Error("Value is not a cell proxy");
 }
@@ -294,7 +295,7 @@ export function isQueryResultForDereferencing(
 }
 
 export type QueryResultInternals = {
-  [getDocLink]: DocLink;
+  [getDocLink]: CellLink;
 };
 
 export type QueryResult<T> = T & QueryResultInternals;

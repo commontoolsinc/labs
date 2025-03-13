@@ -11,12 +11,12 @@ import {
   unsafe_parentRecipe,
   UnsafeBinding,
 } from "@commontools/builder";
-import { type DocImpl, type DocLink, getDoc, isDoc, isDocLink } from "./doc.ts";
+import { type DocImpl, getDoc, isDoc } from "./doc.ts";
 import {
   getDocLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { isCell } from "./cell.ts";
+import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { createRef, getDocByEntityId } from "./doc-map.ts";
 
@@ -60,7 +60,7 @@ export function mergeObjects(...objects: any[]): any {
       obj === null ||
       Array.isArray(obj) ||
       isAlias(obj) ||
-      isDocLink(obj) ||
+      isCellLink(obj) ||
       isDoc(obj) ||
       isCell(obj) ||
       isStatic(obj)
@@ -135,7 +135,7 @@ export function setNestedValue(
     value !== null &&
     Array.isArray(value) === Array.isArray(destValue) &&
     !isDoc(value) &&
-    !isDocLink(value) &&
+    !isCellLink(value) &&
     !isCell(value)
   ) {
     let success = true;
@@ -160,7 +160,7 @@ export function setNestedValue(
     }
 
     return success;
-  } else if (isDocLink(value) && isDocLink(destValue)) {
+  } else if (isCellLink(value) && isCellLink(destValue)) {
     if (
       value.cell !== destValue.cell || !arrayEqual(value.path, destValue.path)
     ) {
@@ -274,8 +274,8 @@ export function unsafe_createParentBindings(
 export function findAllAliasedDocs(
   binding: any,
   doc: DocImpl<any>,
-): DocLink[] {
-  const docs: DocLink[] = [];
+): CellLink[] {
+  const docs: CellLink[] = [];
   function find(binding: any, origDoc: DocImpl<any>) {
     if (isAlias(binding)) {
       // Numbered docs are yet to be unwrapped nested recipes. Ignore them.
@@ -290,7 +290,7 @@ export function findAllAliasedDocs(
     } else if (
       typeof binding === "object" &&
       binding !== null &&
-      !isDocLink(binding) &&
+      !isCellLink(binding) &&
       !isDoc(binding) &&
       !isCell(binding)
     ) {
@@ -305,8 +305,8 @@ export function resolveLinkToValue(
   doc: DocImpl<any>,
   path: PropertyKey[],
   log?: ReactivityLog,
-  seen: DocLink[] = [],
-): DocLink {
+  seen: CellLink[] = [],
+): CellLink {
   const ref = resolvePath(doc, path, log, seen);
   return followLinks(ref, seen, log);
 }
@@ -315,8 +315,8 @@ export function resolvePath(
   doc: DocImpl<any>,
   path: PropertyKey[],
   log?: ReactivityLog,
-  seen: DocLink[] = [],
-): DocLink {
+  seen: CellLink[] = [],
+): CellLink {
   // Follow aliases, doc links, etc. in path, so that we end up on the right
   // doc, meaning the one that contains the value we want to access without any
   // redirects in between.
@@ -333,7 +333,7 @@ export function resolvePath(
   // Doc: { foo: { link } }, path: ["foo"] --> no change
   // Doc: { foo: { link } }, path: ["foo", "bar"] --> follow link, path: ["bar"]
 
-  let ref: DocLink = { cell: doc, path: [] };
+  let ref: CellLink = { cell: doc, path: [] };
 
   const keys = [...path];
   while (keys.length) {
@@ -358,11 +358,11 @@ export function resolvePath(
 // log all taken links, so not the returned one, and thus nothing if the ref
 // already pointed to a value.
 export function followLinks(
-  ref: DocLink,
-  seen: DocLink[] = [],
+  ref: CellLink,
+  seen: CellLink[] = [],
   log?: ReactivityLog,
-): DocLink {
-  let nextRef: DocLink | undefined;
+): CellLink {
+  let nextRef: CellLink | undefined;
 
   do {
     ref = resolvePath(ref.cell, ref.path, log, seen);
@@ -372,14 +372,14 @@ export function followLinks(
     if (isQueryResultForDereferencing(target)) {
       nextRef = getDocLinkOrThrow(target);
     } else if (isCell(target)) nextRef = target.getAsDocLink();
-    else if (isDocLink(target)) nextRef = target;
+    else if (isCellLink(target)) nextRef = target;
     else if (isDoc(target)) {
-      nextRef = { cell: target, path: [] } satisfies DocLink;
+      nextRef = { cell: target, path: [] } satisfies CellLink;
     } else if (isAlias(target)) {
       nextRef = {
         cell: target.$alias.cell ?? ref.cell,
         path: target.$alias.path,
-      } satisfies DocLink;
+      } satisfies CellLink;
     }
 
     if (nextRef) {
@@ -407,13 +407,13 @@ export function followLinks(
 
 // Follows cell references and returns the last one
 export function followCellReferences(
-  reference: DocLink,
+  reference: CellLink,
   log?: ReactivityLog,
 ): any {
-  const seen = new Set<DocLink>();
+  const seen = new Set<CellLink>();
   let result = reference;
 
-  while (isDocLink(reference)) {
+  while (isCellLink(reference)) {
     log?.reads.push({ cell: reference.cell, path: reference.path });
     result = reference;
     if (seen.has(reference)) throw new Error("Reference cycle detected");
@@ -430,9 +430,9 @@ export function followAliases(
   alias: any,
   cell: DocImpl<any>,
   log?: ReactivityLog,
-): DocLink {
+): CellLink {
   const seen = new Set<any>();
-  let result: DocLink;
+  let result: CellLink;
 
   while (isAlias(alias)) {
     if (alias.$alias.cell) cell = alias.$alias.cell;
@@ -463,7 +463,7 @@ export function followAliases(
  * @returns Whether any changes were made.
  */
 export function diffAndUpdate(
-  current: DocLink,
+  current: CellLink,
   newValue: any,
   log?: ReactivityLog,
   context?: any,
@@ -473,7 +473,7 @@ export function diffAndUpdate(
   return changes.length > 0;
 }
 
-export type ChangeSet = { location: DocLink; value: any }[];
+export type ChangeSet = { location: CellLink; value: any }[];
 
 /**
  * Traverses objects and returns an array of changes that should be written. An
@@ -497,7 +497,7 @@ export type ChangeSet = { location: DocLink; value: any }[];
  * @returns An array of changes that should be written.
  */
 export function normalizeAndDiff(
-  current: DocLink,
+  current: CellLink,
   newValue: any,
   log?: ReactivityLog,
   context?: any,
@@ -522,7 +522,7 @@ export function normalizeAndDiff(
       const parent = current.cell.getAtPath(current.path.slice(0, -1));
       if (Array.isArray(parent)) {
         for (const v of parent) {
-          if (isDocLink(v)) {
+          if (isCellLink(v)) {
             const sibling = v.cell.getAtPath(v.path);
             if (
               typeof sibling === "object" && sibling !== null &&
@@ -574,9 +574,9 @@ export function normalizeAndDiff(
     return normalizeAndDiff(ref, newValue, log, context);
   }
 
-  if (isDocLink(newValue)) {
+  if (isCellLink(newValue)) {
     if (
-      isDocLink(currentValue) &&
+      isCellLink(currentValue) &&
       currentValue.cell === newValue.cell &&
       arrayEqual(currentValue.path, newValue.path)
     ) {
@@ -656,7 +656,7 @@ export function normalizeAndDiff(
     // Note that the alias case is handled above
     if (
       typeof currentValue !== "object" || currentValue === null ||
-      isDocLink(currentValue)
+      isCellLink(currentValue)
     ) {
       changes.push({ location: current, value: {} });
     }
@@ -730,7 +730,7 @@ export function addCommonIDfromObjectID(obj: any, fieldName: string = "id") {
 
     if (
       typeof obj === "object" && obj !== null && !isCell(obj) &&
-      !isDocLink(obj) && !isDoc(obj)
+      !isCellLink(obj) && !isDoc(obj)
     ) {
       Object.values(obj).forEach((v: any) => {
         traverse(v);
@@ -753,8 +753,8 @@ export function arrayEqual(a: PropertyKey[], b: PropertyKey[]): boolean {
   return true;
 }
 
-export function isEqualDocLink(a: DocLink, b: DocLink): boolean {
-  return isDocLink(a) && isDocLink(b) && a.cell === b.cell &&
+export function isEqualDocLink(a: CellLink, b: CellLink): boolean {
+  return isCellLink(a) && isCellLink(b) && a.cell === b.cell &&
     arrayEqual(a.path, b.path);
 }
 

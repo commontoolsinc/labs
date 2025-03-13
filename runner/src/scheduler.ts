@@ -1,12 +1,13 @@
-import type { DocImpl, DocLink } from "./doc.ts";
+import type { DocImpl } from "./doc.ts";
 import type { Cancel } from "./cancel.ts";
+import { type CellLink } from "./cell.ts";
 
 export type Action = (log: ReactivityLog) => any;
 export type EventHandler = (event: any) => any;
 
 const pending = new Set<Action>();
 const eventQueue: (() => void)[] = [];
-const eventHandlers: [DocLink, EventHandler][] = [];
+const eventHandlers: [CellLink, EventHandler][] = [];
 const dirty = new Set<DocImpl<any>>();
 const dependencies = new WeakMap<Action, ReactivityLog>();
 const cancels = new WeakMap<Action, Cancel[]>();
@@ -25,8 +26,8 @@ const MAX_ITERATIONS_PER_RUN = 100;
  * dependencies and to topologically sort pending actions before executing them.
  */
 export type ReactivityLog = {
-  reads: DocLink[];
-  writes: DocLink[];
+  reads: CellLink[];
+  writes: CellLink[];
 };
 
 export function schedule(action: Action, log: ReactivityLog): Cancel {
@@ -114,7 +115,7 @@ export function onError(fn: (error: Error) => void) {
   errorHandlers.add(fn);
 }
 
-export function queueEvent(eventRef: DocLink, event: any) {
+export function queueEvent(eventRef: CellLink, event: any) {
   for (const [ref, handler] of eventHandlers) {
     if (
       ref.cell === eventRef.cell &&
@@ -127,7 +128,7 @@ export function queueEvent(eventRef: DocLink, event: any) {
   }
 }
 
-export function addEventHandler(handler: EventHandler, ref: DocLink): Cancel {
+export function addEventHandler(handler: EventHandler, ref: CellLink): Cancel {
   eventHandlers.push([ref, handler]);
   return () => {
     const index = eventHandlers.findIndex(([r, h]) =>
@@ -309,7 +310,7 @@ function topologicalSort(
 }
 
 // Remove longer paths already covered by shorter paths
-export function compactifyPaths(entries: DocLink[]): DocLink[] {
+export function compactifyPaths(entries: CellLink[]): CellLink[] {
   // First group by doc via a Map
   const docToPaths = new Map<DocImpl<any>, PropertyKey[][]>();
   for (const { cell: doc, path } of entries) {
@@ -320,7 +321,7 @@ export function compactifyPaths(entries: DocLink[]): DocLink[] {
 
   // For each cell, sort the paths by length, then only return those that don't
   // have a prefix earlier in the list
-  const result: DocLink[] = [];
+  const result: CellLink[] = [];
   for (const [doc, paths] of docToPaths.entries()) {
     paths.sort((a, b) => a.length - b.length);
     for (let i = 0; i < paths.length; i++) {
