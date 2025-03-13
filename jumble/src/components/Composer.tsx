@@ -36,8 +36,8 @@ import { CharmManager } from "../../../charm/src/index.ts";
 import { Module, Recipe, TYPE } from "@commontools/builder";
 import { Cell, getRecipe } from "@commontools/runner";
 
-// First define a basic interface with just the extension methods
-interface EditorWithExtensions extends BaseEditor {
+// First define a basic interface with the required ReactEditor methods plus our extensions
+interface EditorWithExtensions extends BaseEditor, ReactEditor {
   isInline: (element: SlateElement) => boolean;
   isVoid: (element: SlateElement) => boolean;
   markableVoid: (element: SlateElement) => boolean;
@@ -418,7 +418,7 @@ export function Composer({
   const [currentValue, setCurrentValue] = useState<Descendant[]>(initialValue);
 
   const renderElement = useCallback(
-    (props: RenderElementProps) => <Element {...props} />,
+    (props: RenderElementProps) => <ElementComponent {...props} />,
     [],
   );
 
@@ -430,15 +430,15 @@ export function Composer({
   const editor = useMemo(
     () => {
       // Start with the base editor
-      let ed = createEditor() as CustomEditor;
+      let ed = createEditor();
 
       // Apply plugins in the correct order
-      ed = withHistory(ed) as CustomEditor;
-      ed = withReact(ed) as CustomEditor;
-      ed = withMentions(ed); // Apply mentions capabilities
-      ed = withShortcuts(ed); // Apply markdown shortcuts
+      ed = withHistory(ed);
+      ed = withReact(ed);
+      ed = withMentions(ed as CustomEditor); // Apply mentions capabilities
+      ed = withShortcuts(ed as CustomEditor); // Apply markdown shortcuts
 
-      return ed;
+      return ed as CustomEditor;
     },
     [],
   );
@@ -706,9 +706,11 @@ const Leaf = ({ attributes, children, leaf }: RenderLeafProps) => {
 };
 
 // Element renderer
-const Element = (props: RenderElementProps) => {
+const ElementComponent = (props: RenderElementProps) => {
   const { attributes, children, element } = props;
-  switch ((element as BaseElement & { type?: string }).type) {
+  const elementType = element.type;
+
+  switch (elementType) {
     case "mention":
       return <Mention {...props as RenderElementPropsFor<MentionElement>} />;
     case "block-quote":
