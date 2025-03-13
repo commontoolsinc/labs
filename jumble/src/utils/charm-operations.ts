@@ -39,10 +39,10 @@ export async function fixItCharm(
 export async function extendCharm(
   charmManager: CharmManager,
   focusedCharmId: string,
-  spec: string,
+  goal: string,
 ): Promise<Cell<Charm>> {
   const charm = (await charmManager.get(focusedCharmId, false))!;
-  return castNewRecipe(charmManager, charm, spec);
+  return castNewRecipe(charmManager, goal, charm);
 }
 
 export async function iterateCharm(

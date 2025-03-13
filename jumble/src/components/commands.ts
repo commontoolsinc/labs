@@ -228,9 +228,8 @@ async function handleNewCharm(deps: CommandContext, input: string | undefined) {
   if (!input) return;
   deps.setLoading(true);
   try {
-    // Generate JSON blob with an LLM
-    const dummyData = await generateJSON(input);
-    const newCharm = await castNewRecipe(deps.charmManager, dummyData, input);
+    // Pass the goal directly to castNewRecipe, which will handle the two-phase process
+    const newCharm = await castNewRecipe(deps.charmManager, input);
     if (!newCharm) {
       throw new Error("Failed to cast charm");
     }
@@ -413,7 +412,7 @@ async function handleImportJSON(deps: CommandContext) {
     const title = prompt("Enter a title for your imported recipe:");
     if (!title) return;
 
-    const newCharm = await castNewRecipe(deps.charmManager, data, title);
+    const newCharm = await castNewRecipe(deps.charmManager, title, data);
     if (!newCharm) throw new Error("Failed to create new charm");
 
     const id = charmId(newCharm);

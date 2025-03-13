@@ -7,6 +7,7 @@ export type IFrameRecipe = {
   argumentSchema: JSONSchema;
   resultSchema: JSONSchema;
   spec: string;
+  enhancedSpec?: string;
   name: string;
 };
 
@@ -20,6 +21,7 @@ export const buildFullRecipe = (iframe: IFrameRecipe) => {
     argumentSchema: JSONSchema,
     resultSchema: JSONSchema,
     spec: string,
+    enhancedSpec?: string,
     name: string,
   }
 

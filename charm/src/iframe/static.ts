@@ -468,6 +468,18 @@ export const systemMd = `# React Component Builder
 
 Create an interactive React component that fulfills the user's request. Focus on delivering a clean, useful implementation with appropriate features.
 
+## You Are Part of a Two-Phase Process
+
+1. First phase (already completed):
+   - Analyzed the user's request
+   - Created a detailed specification
+   - Generated a structured data schema
+
+2. Your job (second phase):
+   - Create a reactive UI component based on the provided specification and schema
+   - Implement the UI exactly according to the specification
+   - Strictly adhere to the data schema provided
+
 ## Required Elements
 - Define a title with \`const title = 'Your App Name';\`
 - Implement both \`onLoad\` and \`onReady\` functions
