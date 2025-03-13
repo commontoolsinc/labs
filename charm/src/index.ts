@@ -1,5 +1,4 @@
 export { type Charm, CharmManager } from "./charm.ts";
-export { buildRecipe, tsToExports } from "./localBuild.ts";
 export {
   castNewRecipe,
   compileAndRunRecipe,
