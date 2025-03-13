@@ -20,9 +20,8 @@ function showHelp() {
   console.log("");
   console.log("Options:");
   console.log(
-    "  --space=<space>       Space to update (default: common-knowledge)",
+    "  --charms=(<space>/<charm>),* Space/charm to update",
   );
-  console.log("  --charmId=<id>        Specific charm ID to update");
   console.log(
     "  --interval=<seconds>  Update interval in seconds (default: 30)",
   );
@@ -32,23 +31,21 @@ function showHelp() {
 
 // Parse command line arguments
 const flags = parseArgs(Deno.args, {
-  string: ["space", "charmId", "interval"],
+  string: ["charms", "interval"],
   boolean: ["help"],
   default: { interval: "30" },
 });
 
-const { space, charmId, interval, help } = flags;
+const { charms, interval, help } = flags;
 
 if (help) {
   showHelp();
   Deno.exit(0);
 }
 
-// Configuration
-const CHECK_INTERVAL = parseInt(interval as string) * 1000;
+const CHECK_INTERVAL = parseInt(interval as string, 10) * 1000;
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
-
 const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
 
 let manager: CharmManager | undefined;
@@ -82,7 +79,7 @@ function log(charm?: Cell<Charm> | string, ...args: any[]) {
  * Updates a charm once by checking and refreshing auth token if needed
  * and triggering the googleUpdater flow
  */
-function updateOnce(charm: Cell<Charm>, argument: Cell<any>) {
+function updateOnce(charm: Cell<Charm>, argument: Cell<any>, space: DID) {
   const auth = argument.key("auth");
   const googleUpdater = charm.key("googleUpdater");
 
@@ -92,7 +89,7 @@ function updateOnce(charm: Cell<Charm>, argument: Cell<any>) {
 
   if (token && expiresAt && Date.now() > expiresAt) {
     console.log("refreshing");
-    refreshAuthToken(auth, charm);
+    refreshAuthToken(auth, charm, space);
   } else if (token) {
     log(charm, "calling googleUpdater in charm");
     googleUpdater.send({});
@@ -102,7 +99,11 @@ function updateOnce(charm: Cell<Charm>, argument: Cell<any>) {
 /**
  * Refreshes an expired authentication token
  */
-async function refreshAuthToken(auth: Cell<any>, charm: Cell<Charm>) {
+async function refreshAuthToken(
+  auth: Cell<any>,
+  charm: Cell<Charm>,
+  space: DID,
+) {
   const authCellId = JSON.parse(JSON.stringify(auth.getAsCellLink()));
   authCellId.space = space as string;
   log(charm, `token expired, refreshing: ${authCellId}`);
@@ -146,7 +147,7 @@ function isIgnoredCharm(charm: Cell<Charm>): boolean {
   return !isGoogleUpdaterCharm(charm);
 }
 
-async function watchCharm(charm: Cell<Charm>) {
+async function watchCharm(charm: Cell<Charm>, space: DID) {
   if (isIgnoredCharm(charm)) {
     return;
   }
@@ -161,46 +162,50 @@ async function watchCharm(charm: Cell<Charm>) {
   console.log("Watching new charm:", getEntityId(charm));
 
   // Initial update
-  updateOnce(runningCharm, argument);
+  updateOnce(runningCharm, argument, space);
 
   // Schedule periodic updates
   setInterval(() => {
-    updateOnce(runningCharm, argument);
+    updateOnce(runningCharm, argument, space);
   }, CHECK_INTERVAL);
 }
 
-/**
- * Watches all charms in a space
- */
-function watchSpace(spaceName: string) {
-  log(undefined, `Watching all charms in space: ${spaceName}`);
-
-  const charms = manager?.getCharms();
-  charms?.sink((charms) => {
-    log(undefined, `Checking ${charms.length} charms in space: ${spaceName}`);
-    charms.forEach(watchCharm);
+// Parses input in the form:
+// `did:key:abc../xyzcharmid,did:key:def.../zyxcharmid`
+function parseCharmsInput(
+  charms: string,
+): ({ space: DID; charmId: string })[] {
+  return charms.split(",").map((entry) => {
+    const [space, charmId] = entry.split("/");
+    return { space: space as DID, charmId };
   });
 }
 
 async function main() {
   log(undefined, "Starting Google Updater");
 
-  const session = await Session.open({
-    passphrase: OPERATOR_PASS,
-    name: "~importer",
-    space: space as DID,
-  });
-  manager = new CharmManager(session);
+  if (!charms) {
+    console.error("google-importer.ts requires the --charms flag.");
+    Deno.exit(1);
+    return;
+  }
 
-  if (charmId) {
+  const addresses = parseCharmsInput(charms);
+  for (const { space, charmId } of addresses) {
+    log(undefined, `Watching ${space}/${charmId}...`);
+    const session = await Session.open({
+      passphrase: OPERATOR_PASS,
+      name: "~importer",
+      space,
+    });
+    manager = new CharmManager(session);
+
     const charm = await manager?.get(charmId as string, false);
     if (charm) {
-      watchCharm(charm);
+      watchCharm(charm, space);
     } else {
       log(charmId, "charm not found");
     }
-  } else {
-    watchSpace(space as string);
   }
 }
 

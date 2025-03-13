@@ -9,6 +9,7 @@ import {
 import { assert } from "@std/assert";
 import {
   addCharm,
+  copyLLMCache,
   inspectCharm,
   login,
   Mutable,
@@ -193,6 +194,43 @@ Deno.test({
             charm.includes("Simple Value: 2"),
             "Charm updates propagated.",
           );
+        },
+      });
+
+      failed = !await t.step({
+        name: "extend charm using llm",
+        ignore: failed || exceptions.length > 0,
+        fn: async () => {
+          assert(page, "Page should be defined");
+
+          copyLLMCache();
+
+          await page.keyboard.down("ControlLeft");
+          await page.keyboard.press("k");
+          await page.keyboard.up("ControlLeft");
+          await sleep(1000);
+
+          await page.keyboard.type("extend");
+          await sleep(1000);
+          await page.keyboard.press("Enter");
+
+          await sleep(1000);
+          await page.keyboard.type("count of values");
+          await sleep(1000);
+          await page.keyboard.press("Enter");
+          await sleep(1000);
+
+          // check that we see the new charm
+          await waitForSelectorWithText(
+            page,
+            "a[aria-roledescription='charm-link']",
+            "Value Counter",
+          );
+
+          // FIXME(ja): how to look at the actual iframe content?
+          // https://github.com/lino-levan/astral/issues/77
+          // should see: "Total Values: 3"
+          // <div class="flex justify-between items-center"><h2 class="text-lg font-semibold">Total Values</h2><span class="bg-blue-500 text-white px-3 py-1 rounded-full font-bold">3</span></div>
         },
       });
     } finally {

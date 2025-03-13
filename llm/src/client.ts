@@ -30,12 +30,10 @@ export type LLMRequest = {
 };
 
 export class LLMClient {
-  static DEFAULT_URL = DEFAULT_LLM_URL;
+  private serverUrl: string = DEFAULT_LLM_URL;
 
-  private serverUrl: string;
-
-  constructor(serverUrl: string) {
-    this.serverUrl = serverUrl;
+  public setServerUrl(toolshedUrl: string) {
+    this.serverUrl = new URL("/api/ai/llm", toolshedUrl).toString();
   }
 
   async sendRequest(
@@ -158,4 +156,4 @@ function processMessage(
   return m;
 }
 
-export const client = new LLMClient(DEFAULT_LLM_URL);
+export const client = new LLMClient();

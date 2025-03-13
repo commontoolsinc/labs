@@ -218,14 +218,19 @@ export class CharmManager {
     }
 
     // Make sure we have the recipe so we can run it!
-    const recipeId = await this.syncRecipe(charm);
-    const recipe = recipeId ? getRecipe(recipeId) : undefined;
-
-    if (!recipe || charm.get() === undefined) {
+    let recipeId: string | undefined;
+    let recipe: Recipe | Module | undefined;
+    try {
+      recipeId = await this.syncRecipe(charm);
+      recipe = getRecipe(recipeId!)!;
+    } catch (e) {
       console.warn("recipeId", recipeId);
       console.warn("recipe", recipe);
       console.warn("charm", charm.get());
-      console.warn(`Not a charm: ${JSON.stringify(getEntityId(charm))}`);
+      console.warn(
+        `Not a charm (check toolshed?): ${JSON.stringify(getEntityId(charm))}`,
+      );
+      throw e;
     }
 
     let resultSchema: JSONSchema | undefined = recipe?.resultSchema;

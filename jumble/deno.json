@@ -1,6 +1,7 @@
 {
   "tasks": {
     "dev": "deno run -A --node-modules-dir=auto npm:vite",
+    "dev-local": "TOOLSHED_API_URL=http://localhost:8000 deno run -A --node-modules-dir=auto npm:vite",
     "build": "deno run -A --node-modules-dir=auto npm:vite build",
     "preview": "deno run -A --node-modules-dir=auto npm:vite preview",
     "test": "echo 'No tests to run.'",

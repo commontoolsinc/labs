@@ -20,6 +20,7 @@ import {
   unsafe_originalRecipe,
 } from "./types.ts";
 import { getTopFrame } from "./recipe.ts";
+import { type CellLink, isCell, isCellLink, isDoc } from "@commontools/runner";
 
 /**
  * Traverse a value, _not_ entering cells
@@ -217,35 +218,50 @@ export function toJSONWithAliases(
 }
 
 export function createJsonSchema(
-  defaultValues: any,
-  referenceValues: any,
+  example: any,
+  addDefaults = false,
 ): JSONSchemaWritable {
-  function analyzeType(value: any, defaultValue: any): JSONSchema {
-    if (isAlias(value)) {
-      const path = value.$alias.path;
-      return analyzeType(
-        getValueAtPath(defaultValues, path),
-        getValueAtPath(referenceValues, path),
-      );
+  function analyzeType(value: any): JSONSchema {
+    if (isCell(value)) {
+      if (value.schema) {
+        return value.schema;
+      } else {
+        value = value.get();
+      }
     }
 
-    const type = typeof (value ?? defaultValue);
+    if (isDoc(value)) value = { cell: value, path: [] } satisfies CellLink;
+
+    if (isCellLink(value)) {
+      value = value.cell.getAtPath(value.path);
+      return analyzeType(value);
+    }
+
+    if (isAlias(value)) {
+      if (isDoc(value.$alias.cell)) {
+        value = value.$alias.cell.getAtPath(value.$alias.path);
+      } else {
+        value = getValueAtPath(example, value.$alias.path);
+      }
+      return analyzeType(value);
+    }
+
+    const type = typeof value;
     const schema: JSONSchemaWritable = {};
 
     switch (type) {
       case "object":
-        if (Array.isArray(value ?? defaultValue)) {
+        if (Array.isArray(value)) {
           schema.type = "array";
-          if ((value ?? defaultValue).length > 0) {
+          if (value.length > 0) {
             const properties: { [key: string]: any } = {};
-            for (let i = 0; i < (value ?? defaultValue).length; i++) {
-              const item = value?.[i] ?? defaultValue?.[i];
+            for (let i = 0; i < value.length; i++) {
+              const item = value?.[i];
               if (typeof item === "object" && item !== null) {
                 Object.keys(item).forEach((key) => {
                   if (!(key in properties)) {
                     properties[key] = analyzeType(
                       value?.[i]?.[key],
-                      defaultValue?.[i]?.[key],
                     );
                   }
                 });
@@ -256,28 +272,20 @@ export function createJsonSchema(
               properties,
             };
           }
-        } else if (value ?? defaultValue !== null) {
+        } else if (value !== null) {
           schema.type = "object";
           schema.properties = {};
           for (
-            const key of new Set([
-              ...Object.keys(value ?? {}),
-              ...Object.keys(defaultValue ?? {}),
-            ])
+            const key of new Set([...Object.keys(value ?? {})])
           ) {
-            (schema.properties as any)[key] = analyzeType(
-              value?.[key],
-              defaultValue?.[key],
-            );
+            (schema.properties as any)[key] = analyzeType(value?.[key]);
           }
         } else {
           schema.type = "null";
         }
         break;
       case "number":
-        schema.type = Number.isInteger(value ?? defaultValue)
-          ? "integer"
-          : "number";
+        schema.type = Number.isInteger(value) ? "integer" : "number";
         break;
       case "undefined":
         break;
@@ -286,14 +294,15 @@ export function createJsonSchema(
         break;
     }
 
-    if (defaultValue !== undefined && schema.type !== "object") {
-      schema.default = defaultValue;
+    // Put the defaults on the leaves
+    if (addDefaults && value !== undefined && schema.type !== "object") {
+      schema.default = value;
     }
 
     return schema;
   }
 
-  return analyzeType(referenceValues, defaultValues);
+  return analyzeType(example);
 }
 
 export function moduleToJSON(module: Module) {
