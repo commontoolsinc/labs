@@ -10,6 +10,10 @@ interface StorageEvent {
     of: string;
     is: Record<string, any>;
   };
+  connectionStatus?: "connected" | "disconnected";
+  connectionCount?: number;
+  timestamp?: string;
+  reason?: string;
 }
 
 export function useStorageBroadcast(callback: (data: any) => void) {
@@ -26,6 +30,9 @@ export function useStorageBroadcast(callback: (data: any) => void) {
 export function User() {
   const { session, clearAuthentication } = useAuthentication();
   const [did, setDid] = useState<string | undefined>(undefined);
+  const [connectionStatus, setConnectionStatus] = useState<
+    "connected" | "disconnected" | null
+  >(null);
 
   // Animation refs
   const svgRef = useRef<SVGSVGElement>(null);
@@ -55,6 +62,18 @@ export function User() {
 
   // Listen for real events
   useStorageBroadcast((data: StorageEvent) => {
+    // Handle connection status events
+    if (data.connectionStatus) {
+      setConnectionStatus(data.connectionStatus);
+
+      // If connection state changes, add to activity buffer to show visual feedback
+      activityBufferRef.current.push({
+        type: data.connectionStatus === "connected" ? "receive" : "send",
+        timestamp: Date.now(),
+      });
+    }
+
+    // Handle existing events
     if (data.transact) {
       // Add send activity to buffer
       activityBufferRef.current.push({
@@ -105,8 +124,27 @@ export function User() {
           now - activity.timestamp < 1000 && activity.type === "send",
       ).length;
 
-      // Check for transact (send) events - they should have priority
-      if (sendActivities > 0) {
+      // Check for disconnected state - this has priority over all
+      if (connectionStatus === "disconnected") {
+        // Make ring visible for disconnected state
+        opacityRef.current = 0.9;
+
+        // Slow pulsing rotation for disconnected state
+        rotationRef.current += 0.5;
+
+        // Set red color for disconnected state
+        circle.setAttribute("stroke", "#FF0000"); // Red color for offline
+
+        // Use dashed stroke for disconnected state
+        circle.setAttribute("strokeDasharray", "2 4");
+        circle.setAttribute("strokeWidth", "3");
+
+        // Add red error glow to avatar
+        if (avatarRef.current) {
+          avatarRef.current.style.boxShadow = "0 0 8px #FF0000";
+        }
+      } // Check for transact (send) events - they have second priority
+      else if (sendActivities > 0) {
         // Make ring visible with faster increase for transact events
         opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
 
@@ -116,6 +154,7 @@ export function User() {
 
         // Set bright orange color for transact events instead of purple
         circle.setAttribute("stroke", "#FF5722"); // Bright orange color for transact
+        circle.setAttribute("strokeDasharray", "6 6");
 
         // Make stroke width thicker for better visibility
         circle.setAttribute("strokeWidth", "3");
@@ -143,6 +182,7 @@ export function User() {
 
         // Make sure the ring color is green for receive events
         circle.setAttribute("stroke", "#00BF57"); // Less bright green
+        circle.setAttribute("strokeDasharray", "6 6");
 
         // Reset stroke width
         circle.setAttribute("strokeWidth", "2.5");
@@ -163,6 +203,7 @@ export function User() {
 
         // Reset stroke width
         circle.setAttribute("strokeWidth", "2.5");
+        circle.setAttribute("strokeDasharray", "6 6");
 
         // Reduce bounce
         bounceRef.current = Math.max(bounceRef.current - 0.2, 0);
@@ -194,7 +235,7 @@ export function User() {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, []);
+  }, [connectionStatus]);
 
   return (
     <div className="relative">
@@ -238,8 +279,10 @@ export function User() {
         }}
         className="relative group flex items-center rounded-full text-sm cursor-pointer"
       >
-        <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
-          Click to log out
+        <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[1000]">
+          {connectionStatus === "disconnected"
+            ? "Offline - Reconnecting..."
+            : "Click to log out"}
         </div>
       </div>
     </div>

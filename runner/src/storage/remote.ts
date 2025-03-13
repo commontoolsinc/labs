@@ -164,6 +164,16 @@ export class RemoteStorageProvider implements StorageProvider {
         subscription = new Subscription(query, new Set());
         // store subscription so it can be reused.
         local.remote.set(of, subscription);
+
+        // Log subscription creation to inspector
+        this.inspector?.postMessage({
+          subscription: {
+            entity: of,
+            subscriberCount: subscription.subscribers.size,
+            totalSubscriptions: local.remote.size
+          },
+          timestamp: new Date().toISOString()
+        });
       }
     }
 
@@ -183,7 +193,7 @@ export class RemoteStorageProvider implements StorageProvider {
       console.warn(
         `⚠️ Reached maximum subscription limit on ${this.workspace}. Call to .sink is ignored`,
       );
-      return () => {};
+      return () => { };
     }
   }
   async sync(entityId: EntityId): Promise<void> {
@@ -198,7 +208,7 @@ export class RemoteStorageProvider implements StorageProvider {
       console.warn(
         `⚠️ Reached maximum subscription limit on ${this.workspace}. Call to .sync is ignored`,
       );
-      return new Promise(() => {});
+      return new Promise(() => { });
     }
   }
 
@@ -206,7 +216,7 @@ export class RemoteStorageProvider implements StorageProvider {
    * Subscriber used by the .sync. We use the same one so we'll have at most one
    * per `.sync` per query.
    */
-  static sync(_value: JSONValue | undefined) {}
+  static sync(_value: JSONValue | undefined) { }
 
   get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
     const of = RemoteStorageProvider.toEntity(entityId);
@@ -254,6 +264,15 @@ export class RemoteStorageProvider implements StorageProvider {
     this.inspector?.postMessage({ transact: transaction });
 
     const result = await memory.transact(transaction);
+    // Report memory state metrics after transaction
+    this.inspector?.postMessage({
+      state: {
+        spaces: this.state.size,
+        subscriptions: remote.size,
+        localChanges: local.size
+      },
+      timestamp: new Date().toISOString()
+    });
 
     // Once we have a result of the transaction we clear out local facts we
     // created, we need to do this otherwise subsequent transactions will
@@ -339,6 +358,13 @@ export class RemoteStorageProvider implements StorageProvider {
   async open(socket: WebSocket) {
     const { reader, queue } = this;
 
+    // Report connection to inspector
+    this.inspector?.postMessage({
+      connectionStatus: 'connected',
+      connectionCount: this.connectionCount,
+      timestamp: new Date().toISOString()
+    });
+
     // If we did have connection
     if (this.connectionCount > 1) {
       for (const local of this.state.values()) {
@@ -383,6 +409,13 @@ export class RemoteStorageProvider implements StorageProvider {
     // If connection is `null` provider was closed and we do nothing on
     // disconnect.
     if (this.connection === socket) {
+      // Report disconnection to inspector
+      this.inspector?.postMessage({
+        connectionStatus: 'disconnected',
+        reason: event.type,
+        timestamp: new Date().toISOString()
+      });
+
       this.connect();
     }
   }
