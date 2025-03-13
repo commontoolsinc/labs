@@ -78,20 +78,20 @@ export class CommonInputElement extends LitElement {
     value: { type: String },
     placeholder: { type: String },
     appearance: { type: String },
-    style: { type: String },
+    customStyle: { type: String },
   };
 
   declare value: string;
   declare placeholder: string;
   declare appearance: string;
-  declare style: string;
+  declare customStyle: string;
 
   constructor() {
     super();
     this.value = "";
     this.placeholder = "";
     this.appearance = "default";
-    this.style = "";
+    this.customStyle = "";
   }
 
   override render() {
@@ -127,7 +127,7 @@ export class CommonInputElement extends LitElement {
           @blur="${onblur}"
           .value="${this.value}"
           .placeholder="${this.placeholder}"
-          style="${this.style}"
+          style="${this.customStyle}"
           type="text"
         />
       </div>

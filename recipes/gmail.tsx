@@ -524,7 +524,7 @@ export default recipe(
               <div>
                 <label>Import Limit</label>
                 <common-input
-                  style="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
+                  customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.limit}
                   placeholder="count of emails to import"
                   oncommon-input={updateLimit({ limit: settings.limit })}
@@ -534,7 +534,7 @@ export default recipe(
               <div>
                 <label>Gmail Filter Query</label>
                 <common-input
-                  style="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
+                  customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.gmailFilterQuery}
                   placeholder="in:INBOX"
                   oncommon-input={updateGmailFilterQuery({
