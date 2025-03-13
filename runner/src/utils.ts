@@ -13,7 +13,7 @@ import {
 } from "@commontools/builder";
 import { type DocImpl, getDoc, isDoc } from "./doc.ts";
 import {
-  getDocLinkOrThrow,
+  getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
@@ -370,8 +370,8 @@ export function followLinks(
 
     nextRef = undefined;
     if (isQueryResultForDereferencing(target)) {
-      nextRef = getDocLinkOrThrow(target);
-    } else if (isCell(target)) nextRef = target.getAsDocLink();
+      nextRef = getCellLinkOrThrow(target);
+    } else if (isCell(target)) nextRef = target.getAsCellLink();
     else if (isCellLink(target)) nextRef = target;
     else if (isDoc(target)) {
       nextRef = { cell: target, path: [] } satisfies CellLink;
@@ -547,7 +547,7 @@ export function normalizeAndDiff(
   // Unwrap proxies and handle special types
   newValue = maybeUnwrapProxy(newValue);
   if (isDoc(newValue)) newValue = { cell: newValue, path: [] };
-  if (isCell(newValue)) newValue = newValue.getAsDocLink();
+  if (isCell(newValue)) newValue = newValue.getAsCellLink();
 
   // Get current value to compare against
   const currentValue = current.cell.getAtPath(current.path);
@@ -743,7 +743,7 @@ export function addCommonIDfromObjectID(obj: any, fieldName: string = "id") {
 
 export function maybeUnwrapProxy(value: any): any {
   return isQueryResultForDereferencing(value)
-    ? getDocLinkOrThrow(value)
+    ? getCellLinkOrThrow(value)
     : value;
 }
 
@@ -753,7 +753,7 @@ export function arrayEqual(a: PropertyKey[], b: PropertyKey[]): boolean {
   return true;
 }
 
-export function isEqualDocLink(a: CellLink, b: CellLink): boolean {
+export function isEqualCellLink(a: CellLink, b: CellLink): boolean {
   return isCellLink(a) && isCellLink(b) && a.cell === b.cell &&
     arrayEqual(a.path, b.path);
 }
@@ -768,7 +768,7 @@ export function containsOpaqueRef(value: any): boolean {
 
 export function deepCopy(value: any): any {
   if (isQueryResultForDereferencing(value)) {
-    return deepCopy(getDocLinkOrThrow(value));
+    return deepCopy(getCellLinkOrThrow(value));
   }
   if (isDoc(value) || isCell(value)) return value;
   if (typeof value === "object" && value !== null) {

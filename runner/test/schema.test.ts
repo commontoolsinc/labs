@@ -88,7 +88,7 @@ describe("Schema Support", () => {
             { label: "first" },
             "should support nested sinks 1",
             "test",
-          ).asCell().getAsDocLink(),
+          ).asCell().getAsCellLink(),
         },
         "should support nested sinks 2",
         "test",
@@ -201,7 +201,7 @@ describe("Schema Support", () => {
       );
       const initial = initialDoc.asCell();
       const linkDoc = getDoc(
-        initial.getAsDocLink(),
+        initial.getAsCellLink(),
         "should support nested sinks via asCell with aliases 2",
         "test",
       );
@@ -240,7 +240,7 @@ describe("Schema Support", () => {
 
       // Make sure the schema is correct and it is still anchored at the root
       expect(current.schema).toEqual({ type: "string" });
-      expect(JSON.parse(JSON.stringify(current.getAsDocLink()))).toEqual({
+      expect(JSON.parse(JSON.stringify(current.getAsCellLink()))).toEqual({
         cell: doc.toJSON(),
         path: ["current", "label"],
         space: "test",
@@ -262,7 +262,7 @@ describe("Schema Support", () => {
       const first = root.key("current").withLog(log).get();
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqual({ label: "first" });
-      expect(JSON.parse(JSON.stringify(first.getAsDocLink()))).toEqual({
+      expect(JSON.parse(JSON.stringify(first.getAsCellLink()))).toEqual({
         cell: initialDoc.toJSON(),
         path: ["foo"],
         space: "test",
@@ -293,7 +293,7 @@ describe("Schema Support", () => {
         "should support nested sinks via asCell with aliases 4",
         "test",
       ).asCell();
-      linkDoc.send(second.getAsDocLink());
+      linkDoc.send(second.getAsCellLink());
 
       await idle();
 
@@ -335,7 +335,7 @@ describe("Schema Support", () => {
         "test",
       ).asCell();
       doc.setAtPath(["current"], {
-        $alias: { cell: third.getAsDocLink().cell, path: [] },
+        $alias: { cell: third.getAsCellLink().cell, path: [] },
       });
 
       await idle();

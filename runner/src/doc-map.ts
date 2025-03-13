@@ -1,7 +1,7 @@
 import { isOpaqueRef } from "@commontools/builder";
 import { createDoc, type DocImpl, isDoc } from "./doc.ts";
 import {
-  getDocLinkOrThrow,
+  getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
@@ -47,7 +47,7 @@ export const createRef = (
 
     if (isQueryResultForDereferencing(obj)) {
       // It'll traverse this and call .toJSON on the doc in the reference.
-      obj = getDocLinkOrThrow(obj);
+      obj = getCellLinkOrThrow(obj);
     }
 
     // If referencing other docs, return their ids (or random as fallback).
@@ -82,9 +82,9 @@ export const getEntityId = (value: any): { "/": string } | undefined => {
 
   let ref: CellLink | undefined = undefined;
 
-  if (isQueryResultForDereferencing(value)) ref = getDocLinkOrThrow(value);
+  if (isQueryResultForDereferencing(value)) ref = getCellLinkOrThrow(value);
   else if (isCellLink(value)) ref = value;
-  else if (isCell(value)) ref = value.getAsDocLink();
+  else if (isCell(value)) ref = value.getAsCellLink();
   else if (isDoc(value)) ref = { cell: value, path: [] };
 
   if (!ref?.cell.entityId) return undefined;

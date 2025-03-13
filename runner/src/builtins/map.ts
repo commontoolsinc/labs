@@ -1,6 +1,6 @@
 import { type Recipe } from "@commontools/builder";
 import { type DocImpl, getDoc } from "../doc.ts";
-import { getDocLinkOrThrow } from "../query-result-proxy.ts";
+import { getCellLinkOrThrow } from "../query-result-proxy.ts";
 import { type ReactivityLog } from "../scheduler.ts";
 import { cancels, run } from "../runner.ts";
 import { type Action } from "../scheduler.ts";
@@ -73,13 +73,13 @@ export function map(
     }
 
     // Hack to get to underlying array that lists doc links, etc.
-    const listRef = getDocLinkOrThrow(list);
+    const listRef = getCellLinkOrThrow(list);
 
     // Same for op, but here it's so that the proxy doesn't follow the aliases
     // in the recipe instead of returning the recipe.
     // TODO(seefeld): Instead we should reify the recipe as a NodeFactory and
     // teach the query result proxy to not enter those.
-    const opRef = getDocLinkOrThrow(op);
+    const opRef = getCellLinkOrThrow(op);
     op = opRef.cell.getAtPath(opRef.path);
 
     // Add values that have been appended

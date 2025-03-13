@@ -196,7 +196,7 @@ export class CharmManager {
     // Unless there is a non-object schema, add UI and NAME properties if present
     if (!resultSchema || resultSchema.type === "object") {
       const { [UI]: hasUI, [NAME]: hasName } =
-        charm.getAsDocLink().cell.get() ?? {};
+        charm.getAsCellLink().cell.get() ?? {};
       if (hasUI || hasName) {
         // Copy the original schema, so we can modify properties without
         // affecting other uses of the same spell.
@@ -218,7 +218,7 @@ export class CharmManager {
     if (runIt) {
       // Make sure the charm is running. This is re-entrant and has no effect if
       // the charm is already running.
-      return run(undefined, undefined, charm.getAsDocLink().cell!).asCell(
+      return run(undefined, undefined, charm.getAsCellLink().cell!).asCell(
         [],
         undefined,
         resultSchema,
@@ -318,7 +318,7 @@ export class CharmManager {
 
     const syncAllMentionedCells = (value: any, promises: any[] = []) => {
       if (isCell(value)) {
-        promises.push(storage.syncCell(value.getAsDocLink().cell));
+        promises.push(storage.syncCell(value.getAsCellLink().cell));
       } else if (typeof value === "object" && value !== null) {
         for (const key in value) {
           promises.push(syncAllMentionedCells(value[key], promises));

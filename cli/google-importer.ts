@@ -103,7 +103,7 @@ function updateOnce(charm: Cell<Charm>, argument: Cell<any>) {
  * Refreshes an expired authentication token
  */
 async function refreshAuthToken(auth: Cell<any>, charm: Cell<Charm>) {
-  const authCellId = JSON.parse(JSON.stringify(auth.getAsDocLink()));
+  const authCellId = JSON.parse(JSON.stringify(auth.getAsCellLink()));
   authCellId.space = space as string;
   log(charm, `token expired, refreshing: ${authCellId}`);
 

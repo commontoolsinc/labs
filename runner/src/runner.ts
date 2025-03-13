@@ -46,7 +46,7 @@ import {
 } from "./recipe-map.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
-import { getDocLinkOrThrow } from "./query-result-proxy.ts";
+import { getCellLinkOrThrow } from "./query-result-proxy.ts";
 
 export const cancels = new WeakMap<DocImpl<any>, Cancel>();
 
@@ -180,9 +180,9 @@ export function run<T, R = any>(
     const ref = isCellLink(argument)
       ? argument
       : isCell(argument)
-      ? argument.getAsDocLink()
+      ? argument.getAsCellLink()
       : isQueryResultForDereferencing(argument)
-      ? getDocLinkOrThrow(argument)
+      ? getCellLinkOrThrow(argument)
       : ({ cell: argument, path: [] } satisfies CellLink);
 
     // Get value, but just to get the keys. Throw if it isn't an object.

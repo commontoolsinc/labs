@@ -64,7 +64,7 @@ import { type Schema } from "@commontools/builder";
  * @param {ReactivityLog} log - Optional reactivity log.
  * @returns {QueryResult<DeepKeyLookup<T, Path>>}
  *
- * @method getAsDocLink Returns a document link for the cell.
+ * @method getAsCellLink Returns a cell link for the cell.
  * @returns {CellLink}
  *
  * @method getSourceCell Returns the source cell with optional schema.
@@ -77,7 +77,7 @@ import { type Schema } from "@commontools/builder";
  * @method value Returns the current value of the cell.
  * @returns {T}
  *
- * @property docLink The document link representing this cell.
+ * @property cellLink The cell link representing this cell.
  * @returns {CellLink}
  *
  * @property entityId Returns the current entity ID of the cell.
@@ -118,7 +118,7 @@ export interface Cell<T> {
     path?: Path,
     log?: ReactivityLog,
   ): QueryResult<DeepKeyLookup<T, Path>>;
-  getAsDocLink(): CellLink;
+  getAsCellLink(): CellLink;
   getSourceCell<T>(
     schema?: JSONSchema,
   ): Cell<
@@ -140,7 +140,7 @@ export interface Cell<T> {
   >;
   toJSON(): { cell: { "/": string } | undefined; path: PropertyKey[] };
   value: T;
-  docLink: CellLink;
+  cellLink: CellLink;
   entityId: EntityId | undefined;
   [isCellMarker]: true;
   copyTrap: boolean;
@@ -214,19 +214,19 @@ export function getCellFromEntityId(
   return createCell(doc, path, log, schema);
 }
 
-export function getCellFromDocLink<T>(
+export function getCellFromCellLink<T>(
   space: string,
   docLink: CellLink,
   schema?: JSONSchema,
   log?: ReactivityLog,
 ): Cell<T>;
-export function getCellFromDocLink<S extends JSONSchema = JSONSchema>(
+export function getCellFromCellLink<S extends JSONSchema = JSONSchema>(
   space: string,
   docLink: CellLink,
   schema: S,
   log?: ReactivityLog,
 ): Cell<Schema<S>>;
-export function getCellFromDocLink(
+export function getCellFromCellLink(
   space: string, // TODO(seefeld): Read from DocLink once it's defined there
   docLink: CellLink,
   schema?: JSONSchema,
@@ -421,7 +421,7 @@ function createRegularCell<T>(
       subscribeToReferencedDocs(callback, doc, path, schema, rootSchema),
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
-    getAsDocLink: () =>
+    getAsCellLink: () =>
       // Add space here, so that JSON.stringify() of this retains the space.
       ({ space: doc.space, cell: doc, path }) satisfies CellLink,
     getSourceCell: (schema?: JSONSchema) =>
@@ -435,11 +435,11 @@ function createRegularCell<T>(
     get value(): T {
       return self.get();
     },
-    get docLink(): CellLink {
-      return { cell: doc, path };
+    get cellLink(): CellLink {
+      return { space: doc.space, cell: doc, path };
     },
     get entityId(): EntityId | undefined {
-      return getEntityId(self.getAsDocLink());
+      return getEntityId(self.getAsCellLink());
     },
     [isCellMarker]: true,
     get copyTrap(): boolean {

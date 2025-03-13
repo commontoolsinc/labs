@@ -1,7 +1,7 @@
 // Load .env file
 import {
   type CellLink,
-  getCellFromDocLink,
+  getCellFromCellLink,
   storage,
 } from "@commontools/runner";
 import { parseArgs } from "@std/cli/parse-args";
@@ -27,7 +27,7 @@ async function main(
     path: ["argument", "auth"],
   } satisfies CellLink;
 
-  const authCell = getCellFromDocLink(replica, authCellEntity);
+  const authCell = getCellFromCellLink(replica, authCellEntity);
   // authCell.set({ token: "wat" });
   await storage.synced();
 

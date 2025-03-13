@@ -65,7 +65,7 @@ export function createQueryResultProxy<T>(
   return new Proxy(target as object, {
     get: (target, prop, receiver) => {
       if (typeof prop === "symbol") {
-        if (prop === getDocLink) {
+        if (prop === getCellLink) {
           return { cell: valueCell, path: valuePath } satisfies CellLink;
         } else if (prop === toOpaqueRef) {
           return () => makeOpaqueRef(valueCell, valuePath);
@@ -177,7 +177,7 @@ export function createQueryResultProxy<T>(
       return createQueryResultProxy(valueCell, [...valuePath, prop], log);
     },
     set: (target, prop, value) => {
-      if (isQueryResult(value)) value = value[getDocLink];
+      if (isQueryResult(value)) value = value[getCellLink];
 
       if (Array.isArray(target) && prop === "length") {
         const oldLength = target.length;
@@ -246,25 +246,25 @@ function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
 }
 
 /**
- * Get doc link or return values as is if not a cell value proxy.
+ * Get cell link or return values as is if not a cell value proxy.
  *
- * @param {any} value - The value to get the doc link or value from.
+ * @param {any} value - The value to get the cell link or value from.
  * @returns {CellLink | any}
  */
-export function getDocLinkOrValue(value: any): CellLink {
-  if (isQueryResult(value)) return value[getDocLink];
+export function getCellLinkOrValue(value: any): CellLink {
+  if (isQueryResult(value)) return value[getCellLink];
   else return value;
 }
 
 /**
- * Get doc link or throw if not a cell value proxy.
+ * Get cell link or throw if not a cell value proxy.
  *
- * @param {any} value - The value to get the doc link from.
+ * @param {any} value - The value to get the cell link from.
  * @returns {CellLink}
  * @throws {Error} If the value is not a cell value proxy.
  */
-export function getDocLinkOrThrow(value: any): CellLink {
-  if (isQueryResult(value)) return value[getDocLink];
+export function getCellLinkOrThrow(value: any): CellLink {
+  if (isQueryResult(value)) return value[getCellLink];
   else throw new Error("Value is not a cell proxy");
 }
 
@@ -276,10 +276,10 @@ export function getDocLinkOrThrow(value: any): CellLink {
  */
 export function isQueryResult(value: any): value is QueryResult<any> {
   return typeof value === "object" && value !== null &&
-    value[getDocLink] !== undefined;
+    value[getCellLink] !== undefined;
 }
 
-const getDocLink = Symbol("isQueryResultProxy");
+const getCellLink = Symbol("isQueryResultProxy");
 
 /**
  * Check if value is a cell value proxy. Return as type that allows
@@ -295,7 +295,7 @@ export function isQueryResultForDereferencing(
 }
 
 export type QueryResultInternals = {
-  [getDocLink]: CellLink;
+  [getCellLink]: CellLink;
 };
 
 export type QueryResult<T> = T & QueryResultInternals;

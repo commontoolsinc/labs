@@ -13,7 +13,7 @@ export type { ReactivityLog } from "./scheduler.ts";
 export { getDoc, isDoc } from "./doc.ts";
 export {
   getCell,
-  getCellFromDocLink,
+  getCellFromCellLink,
   getCellFromEntityId,
   getImmutableCell,
   isCell,
@@ -21,8 +21,8 @@ export {
   isStream,
 } from "./cell.ts";
 export {
-  getDocLinkOrThrow,
-  getDocLinkOrValue,
+  getCellLinkOrThrow,
+  getCellLinkOrValue,
   isQueryResult,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";

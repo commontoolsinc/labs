@@ -3,7 +3,7 @@ import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { Cell, type CellLink, isCell, isCellLink } from "./cell.ts";
 import { type EntityId, getDocByEntityId } from "./doc-map.ts";
 import {
-  getDocLinkOrThrow,
+  getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { idle } from "./scheduler.ts";
@@ -287,7 +287,7 @@ class StorageImpl implements Storage {
     doc: DocImpl<T> | Cell<any>,
     expectedInStorage: boolean = false,
   ): DocImpl<T> {
-    if (isCell(doc)) doc = doc.getAsDocLink().cell;
+    if (isCell(doc)) doc = doc.getAsCellLink().cell;
     if (!isDoc(doc)) {
       throw new Error("Invalid subject: " + JSON.stringify(doc));
     }
@@ -353,7 +353,7 @@ class StorageImpl implements Storage {
 
       // If it's a query result proxy, make it a doc link
       if (isQueryResultForDereferencing(value)) {
-        value = getDocLinkOrThrow(value);
+        value = getCellLinkOrThrow(value);
       }
 
       // If it's a doc link, convert it to a doc link with an id

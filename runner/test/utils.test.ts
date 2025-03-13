@@ -8,7 +8,7 @@ import {
   extractDefaultValues,
   followAliases,
   followCellReferences,
-  isEqualDocLink,
+  isEqualCellLink,
   mergeObjects,
   normalizeAndDiff,
   sendValueToBinding,
@@ -852,9 +852,10 @@ describe("addCommonIDfromObjectID", () => {
     const result = testDoc.get();
     expect(isCellLink(result.items[0])).toBe(true);
     expect(isCellLink(result.items[1])).toBe(true);
-    expect(isEqualDocLink(result.items[0] as any, result.items[1] as any)).toBe(
-      true,
-    );
+    expect(isEqualCellLink(result.items[0] as any, result.items[1] as any))
+      .toBe(
+        true,
+      );
     expect(result.items[1].cell.get().name).toBe("New Item");
   });
 });

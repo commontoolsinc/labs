@@ -2,7 +2,7 @@ import { OAuth2Client } from "@cmd-johnson/oauth2-client";
 import env from "@/env.ts";
 import {
   type CellLink,
-  getCellFromDocLink,
+  getCellFromCellLink,
   storage,
 } from "@commontools/runner";
 import { Context } from "@hono/hono";
@@ -171,7 +171,7 @@ export async function getAuthCellAndStorage(docLink: CellLink | string) {
 
     // FIXME(ja): the space should be inferred from the doclink - but it isn't there yet
     // FIXME(ja): add the authcell schema!
-    const authCell = getCellFromDocLink(
+    const authCell = getCellFromCellLink(
       parsedDocLink.space, // FIXME(ja): the space should be inferred from the doclink - but it isn't there yet
       parsedDocLink,
       undefined,
