@@ -78,10 +78,10 @@ const GmailImporterInputs = {
     settings: {
       type: "object",
       properties: {
-        labels: {
+        gmailFilterQuery: {
           type: "string",
-          description: "comma separated list of labels",
-          default: "INBOX",
+          description: "gmail filter query",
+          default: "in:INBOX",
         },
         limit: {
           type: "number",
@@ -171,17 +171,14 @@ const googleUpdater = handler(
       return;
     }
 
-    const labels = state.settings.labels
-      .split(",")
-      .map((label) => label.trim())
-      .filter(Boolean);
+    const gmailFilterQuery = state.settings.gmailFilterQuery;
 
-    console.log("labels", labels);
+    console.log("gmailFilterQuery", gmailFilterQuery);
 
     fetchEmail(
       state.auth.token,
       state.settings.limit,
-      labels,
+      gmailFilterQuery,
       state,
     );
 
@@ -399,7 +396,7 @@ async function fetchLabels(
 export async function fetchEmail(
   accessToken: string,
   maxResults: number = 10,
-  labelIds: string[] = ["INBOX"],
+  gmailFilterQuery: string = "in:INBOX",
   state: {
     emails: Cell<Email[]>;
   },
@@ -408,13 +405,9 @@ export async function fetchEmail(
     state.emails.get().map((email) => email.id),
   );
 
-  const query = labelIds
-    .map((label) => `label:${label}`)
-    .join(" OR ");
-
   const listResponse = await fetch(
     `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${
-      encodeURIComponent(query)
+      encodeURIComponent(gmailFilterQuery)
     }&maxResults=${maxResults}`,
     {
       headers: {
@@ -489,9 +482,12 @@ export async function fetchEmail(
   return { messages: allDetailedMessages };
 }
 
-const updateLabels = handler<{ detail: { value: string } }, { labels: string }>(
+const updateGmailFilterQuery = handler<
+  { detail: { value: string } },
+  { gmailFilterQuery: string }
+>(
   ({ detail }, state) => {
-    state.labels = detail?.value ?? "INBOX";
+    state.gmailFilterQuery = detail?.value ?? "in:INBOX";
   },
 );
 
@@ -528,11 +524,13 @@ export default recipe(
             />
           </common-hstack>
           <common-hstack>
-            <label>Import Labels</label>
+            <label>Gmail Filter Query</label>
             <common-input
-              value={settings.labels}
-              placeholder="comma separated list of labels"
-              oncommon-input={updateLabels({ labels: settings.labels })}
+              value={settings.gmailFilterQuery}
+              placeholder="in:INBOX"
+              oncommon-input={updateGmailFilterQuery({
+                gmailFilterQuery: settings.gmailFilterQuery,
+              })}
             />
           </common-hstack>
           <common-google-oauth $auth={auth} />
