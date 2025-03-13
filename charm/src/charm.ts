@@ -110,6 +110,11 @@ export class CharmManager {
   private charms: Cell<Cell<Charm>[]>;
   private pinnedCharms: Cell<Cell<Charm>[]>;
 
+  /**
+   * Promise resolved when the charm manager gets the charm list.
+   */
+  ready: Promise<void>;
+
   constructor(
     private session: Session,
   ) {
@@ -120,6 +125,17 @@ export class CharmManager {
 
     storage.setSigner(session.as);
     this.pinnedCharms = this.pinned.asCell([], undefined, charmListSchema);
+
+    this.ready = Promise.all(
+      this.primaryDocs.map((doc) => storage.syncCell(doc)),
+    ).then();
+  }
+
+  get primaryDocs() {
+    return [
+      this.charmsDoc,
+      this.pinned,
+    ];
   }
 
   getSpace(): string {
@@ -127,6 +143,7 @@ export class CharmManager {
   }
 
   async synced(): Promise<void> {
+    await this.ready;
     return await storage.synced();
   }
 

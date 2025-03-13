@@ -262,9 +262,14 @@ export default function CharmList() {
   const { charmManager } = useCharmManager();
   const [pinned] = useCell(charmManager.getPinned());
   const [charms] = useCell(charmManager.getCharms());
-  const { isSyncing } = useSyncedStatus();
 
-  if (!isSyncing && (!charms || charms.length === 0)) {
+  const { lastSyncTime } = useSyncedStatus();
+
+  if (lastSyncTime == null) {
+    return <div>Trying to connect, please wait</div>;
+  }
+
+  if (!charms || charms.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-[70vh] text-center p-8">
         <div className="mb-6">

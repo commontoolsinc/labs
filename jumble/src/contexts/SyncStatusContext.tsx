@@ -24,9 +24,9 @@ interface SyncStatusProviderProps {
 
 export function SyncStatusProvider({
   children,
-  intervalMs = 5000,
+  intervalMs = 50,
 }: SyncStatusProviderProps) {
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(true);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const { charmManager } = useCharmManager();
   const isCheckingSyncRef = useRef(false);
