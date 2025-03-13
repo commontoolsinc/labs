@@ -30,7 +30,7 @@ import {
 import { Cell } from "@commontools/runner";
 import { createPath } from "@/routes.ts";
 import JsonView from "@uiw/react-json-view";
-import { Composer, parseMentionsInDocument } from "@/components/Composer.tsx";
+import { Composer, parseComposerDocument } from "@/components/Composer.tsx";
 import {
   formatPromptWithMentions,
   useCharmMentions,

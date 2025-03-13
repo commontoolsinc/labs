@@ -15,6 +15,7 @@ import {
   Descendant,
   Editor,
   Element as SlateElement,
+  Point,
   Range,
   Transforms,
 } from "slate";
@@ -31,9 +32,8 @@ import {
 } from "slate-react";
 import { createPortal } from "react-dom";
 import { CharmManager } from "../../../charm/src/index.ts";
-
 // Function to parse Slate document and extract mention references
-export async function parseMentionsInDocument(
+export async function parseComposerDocument(
   serializedDocument: string,
   charmManager: CharmManager,
 ): Promise<{
@@ -48,7 +48,14 @@ export async function parseMentionsInDocument(
     const bibliography: { [id: string]: { title: string; body: string } } = {};
     const mentionIndices: Record<string, number> = {};
 
-    const processNode = async (node: any) => {
+    // Helper to add markdown styling based on node type
+    const processNode = async (
+      node: any,
+      currentList: { type: string | null; level: number } = {
+        type: null,
+        level: 0,
+      },
+    ) => {
       if (node.type === "mention") {
         if (node.id) {
           // Add to mentions list if not already present
@@ -67,9 +74,8 @@ export async function parseMentionsInDocument(
             mentionIndices[node.id] = bibIndex;
           }
 
-          // Insert reference number in text with mustache placeholders
-          const refIndex = mentionIndices[node.id];
-          fullText += `{{${node.id}}}`;
+          // Add reference in markdown format
+          fullText += `[${node.character}](charm://${node.id})`;
         } else {
           // Fallback for backward compatibility
           const match = node.character.match(/\(#([a-z0-9]+)\)$/);
@@ -82,7 +88,7 @@ export async function parseMentionsInDocument(
               const bibIndex = Object.keys(bibliography).length + 1;
               const charm = await charmManager.get(referenceId);
               const data = charm?.getSourceCell().get().argument;
-              bibliography[node.id] = {
+              bibliography[referenceId] = {
                 title: node.character || `Reference ${bibIndex}`,
                 body: data,
               };
@@ -90,17 +96,66 @@ export async function parseMentionsInDocument(
               mentionIndices[referenceId] = bibIndex;
             }
 
-            const refIndex = mentionIndices[referenceId];
-            fullText += `{{${referenceId}}}`;
+            // Add reference in markdown format
+            fullText += `[${node.character}](charm://${referenceId})`;
           } else {
             fullText += `@${node.character}`;
           }
         }
       } else if (node.text !== undefined) {
-        fullText += node.text;
+        // Handle text with formatting
+        let textContent = node.text;
+        if (node.bold) textContent = `**${textContent}**`;
+        if (node.italic) textContent = `*${textContent}*`;
+        fullText += textContent;
       } else if (node.children) {
+        // Handle block elements with markdown syntax
+        switch (node.type) {
+          case "heading-one":
+            fullText += "# ";
+            break;
+          case "heading-two":
+            fullText += "## ";
+            break;
+          case "heading-three":
+            fullText += "### ";
+            break;
+          case "heading-four":
+            fullText += "#### ";
+            break;
+          case "heading-five":
+            fullText += "##### ";
+            break;
+          case "heading-six":
+            fullText += "###### ";
+            break;
+          case "block-quote":
+            fullText += "> ";
+            break;
+          case "bulleted-list":
+            // Just process children - the list items will add the markers
+            for (const child of node.children) {
+              await processNode(child, {
+                type: "bulleted-list",
+                level: currentList.level + 1,
+              });
+            }
+            return; // Skip the default children processing below
+          case "list-item":
+            fullText += "* ";
+            break;
+        }
+
+        // Process children
         for (const child of node.children) {
-          await processNode(child);
+          await processNode(child, currentList);
+        }
+
+        // Add appropriate line breaks after block elements
+        if (node.type && node.type !== "list-item") {
+          fullText += "\n\n";
+        } else if (node.type === "list-item") {
+          fullText += "\n";
         }
       }
     };
@@ -111,7 +166,7 @@ export async function parseMentionsInDocument(
     }
 
     return {
-      text: fullText,
+      text: fullText.trim(), // Remove extra whitespace
       mentions,
       bibliography,
     };
@@ -148,6 +203,32 @@ interface MentionElement extends BaseElement {
   children: { text: string; bold?: boolean; italic?: boolean }[];
 }
 
+interface BulletedListElement extends BaseElement {
+  type: "bulleted-list";
+  children: Descendant[];
+}
+
+interface HeadingElement extends BaseElement {
+  type:
+    | "heading-one"
+    | "heading-two"
+    | "heading-three"
+    | "heading-four"
+    | "heading-five"
+    | "heading-six";
+  children: Descendant[];
+}
+
+interface BlockQuoteElement extends BaseElement {
+  type: "block-quote";
+  children: Descendant[];
+}
+
+interface ListItemElement extends BaseElement {
+  type: "list-item";
+  children: Descendant[];
+}
+
 interface CustomEditor extends Editor {
   isInline: (element: SlateElement) => boolean;
   isVoid: (element: SlateElement) => boolean;
@@ -161,6 +242,114 @@ interface RenderElementPropsFor<T extends BaseElement>
 
 const Portal = ({ children }: { children: React.ReactNode }) => {
   return createPortal(children, document.body);
+};
+
+const SHORTCUTS: Record<string, string> = {
+  "*": "list-item",
+  "-": "list-item",
+  "+": "list-item",
+  ">": "block-quote",
+  "#": "heading-one",
+  "##": "heading-two",
+  "###": "heading-three",
+  "####": "heading-four",
+  "#####": "heading-five",
+  "######": "heading-six",
+} as const;
+
+const withShortcuts = (editor: CustomEditor) => {
+  const { deleteBackward, insertText } = editor;
+
+  editor.insertText = (text) => {
+    const { selection } = editor;
+
+    if (text.endsWith(" ") && selection && Range.isCollapsed(selection)) {
+      const { anchor } = selection;
+      const block = Editor.above(editor, {
+        match: (n) => SlateElement.isElement(n) && Editor.isBlock(editor, n),
+      });
+      const path = block ? block[1] : [];
+      const start = Editor.start(editor, path);
+      const range = { anchor, focus: start };
+      const beforeText = Editor.string(editor, range) + text.slice(0, -1);
+      const type = SHORTCUTS[beforeText];
+
+      if (type) {
+        Transforms.select(editor, range);
+
+        if (!Range.isCollapsed(range)) {
+          Transforms.delete(editor);
+        }
+
+        const newProperties: Partial<SlateElement> = {
+          type,
+        };
+        Transforms.setNodes<SlateElement>(editor, newProperties, {
+          match: (n) => SlateElement.isElement(n) && Editor.isBlock(editor, n),
+        });
+
+        if (type === "list-item") {
+          const list: BulletedListElement = {
+            type: "bulleted-list",
+            children: [],
+          };
+          Transforms.wrapNodes(editor, list, {
+            match: (n) =>
+              !Editor.isEditor(n) &&
+              SlateElement.isElement(n) &&
+              n.type === "list-item",
+          });
+        }
+
+        return;
+      }
+    }
+
+    insertText(text);
+  };
+
+  editor.deleteBackward = (...args) => {
+    const { selection } = editor;
+
+    if (selection && Range.isCollapsed(selection)) {
+      const match = Editor.above(editor, {
+        match: (n) => SlateElement.isElement(n) && Editor.isBlock(editor, n),
+      });
+
+      if (match) {
+        const [block, path] = match;
+        const start = Editor.start(editor, path);
+
+        if (
+          !Editor.isEditor(block) &&
+          SlateElement.isElement(block) &&
+          block.type !== "paragraph" &&
+          Point.equals(selection.anchor, start)
+        ) {
+          const newProperties: Partial<SlateElement> = {
+            type: "paragraph",
+          };
+          Transforms.setNodes(editor, newProperties);
+
+          if (block.type === "list-item") {
+            Transforms.unwrapNodes(editor, {
+              match: (n) =>
+                !Editor.isEditor(n) &&
+                SlateElement.isElement(n) &&
+                n.type === "bulleted-list",
+              split: true,
+            });
+          }
+
+          return;
+        }
+      }
+
+      deleteBackward(...args);
+    }
+  };
+
+  return editor;
 };
 
 export function Composer({
@@ -209,7 +398,18 @@ export function Composer({
   );
 
   const editor = useMemo(
-    () => withMentions(withReact(withHistory(createEditor()))) as CustomEditor,
+    () => {
+      // Start with the base editor
+      let ed = createEditor();
+
+      // Apply plugins in the correct order
+      ed = withHistory(ed);
+      ed = withReact(ed);
+      ed = withMentions(ed); // Apply mentions capabilities
+      ed = withShortcuts(ed); // Apply markdown shortcuts
+
+      return ed as CustomEditor;
+    },
     [],
   );
 
@@ -220,6 +420,42 @@ export function Composer({
         mention.name.toLowerCase().includes(search.toLowerCase())
       )
       .slice(0, 10), [mentions, search]);
+
+  const handleDOMBeforeInput = useCallback(
+    (e: InputEvent) => {
+      queueMicrotask(() => {
+        const pendingDiffs = ReactEditor.androidPendingDiffs(editor);
+
+        const scheduleFlush = pendingDiffs?.some(({ diff, path }) => {
+          if (!diff.text.endsWith(" ")) {
+            return false;
+          }
+
+          const { text } = Editor.node(editor, path)[0] as any;
+          const beforeText = text.slice(0, diff.start) + diff.text.slice(0, -1);
+          if (!(beforeText in SHORTCUTS)) {
+            return;
+          }
+
+          const blockEntry = Editor.above(editor, {
+            at: path,
+            match: (n) => Editor.isBlock(editor, n),
+          });
+          if (!blockEntry) {
+            return false;
+          }
+
+          const [, blockPath] = blockEntry;
+          return Editor.isStart(editor, Editor.start(editor, path), blockPath);
+        });
+
+        if (scheduleFlush) {
+          ReactEditor.androidScheduleFlush(editor);
+        }
+      });
+    },
+    [editor],
+  );
 
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -246,7 +482,7 @@ export function Composer({
             break;
           }
           case "Tab":
-          case "Enter":
+            // case "Enter":
             event.preventDefault();
             Transforms.select(editor, target);
             insertMention(
@@ -322,17 +558,21 @@ export function Composer({
     // Update the current value
     setCurrentValue(editor.children);
   }, [editor]);
-
   return (
     <>
       <Slate editor={editor} initialValue={currentValue} onChange={onChange}>
         <Editable
+          className="border border-gray-400 p-2"
           readOnly={readOnly}
           renderElement={renderElement}
           renderLeaf={renderLeaf}
           onKeyDown={handleKeyDown}
+          onDOMBeforeInput={handleDOMBeforeInput}
           placeholder={placeholder || "Enter some text..."}
-          style={style}
+          style={{
+            ...style,
+            overflowY: "auto",
+          }}
         />
         {target && filteredMentions.length > 0 && (
           <Portal>
@@ -428,8 +668,96 @@ const Element = (props: RenderElementProps) => {
   switch ((element as BaseElement & { type?: string }).type) {
     case "mention":
       return <Mention {...props as RenderElementPropsFor<MentionElement>} />;
+    case "block-quote":
+      return (
+        <blockquote
+          {...attributes}
+          className="border-l-4 border-gray-300 pl-4 italic text-gray-700 my-2"
+        >
+          {children}
+        </blockquote>
+      );
+    case "bulleted-list":
+      return (
+        <ul
+          {...attributes}
+          className="list-disc pl-5 "
+        >
+          {children}
+        </ul>
+      );
+    case "heading-one":
+      return (
+        <h1
+          {...attributes}
+          className="text-3xl font-bold leading-tight"
+        >
+          {children}
+        </h1>
+      );
+    case "heading-two":
+      return (
+        <h2
+          {...attributes}
+          className="text-2xl font-bold leading-tight"
+        >
+          {children}
+        </h2>
+      );
+    case "heading-three":
+      return (
+        <h3
+          {...attributes}
+          className="text-xl font-bold leading-snug"
+        >
+          {children}
+        </h3>
+      );
+    case "heading-four":
+      return (
+        <h4
+          {...attributes}
+          className="text-lg font-bold leading-snug"
+        >
+          {children}
+        </h4>
+      );
+    case "heading-five":
+      return (
+        <h5
+          {...attributes}
+          className="text-base font-bold leading-normal"
+        >
+          {children}
+        </h5>
+      );
+    case "heading-six":
+      return (
+        <h6
+          {...attributes}
+          className="text-sm font-bold leading-normal"
+        >
+          {children}
+        </h6>
+      );
+    case "list-item":
+      return (
+        <li
+          {...attributes}
+          className="mb-1.5 leading-relaxed"
+        >
+          {children}
+        </li>
+      );
     default:
-      return <p {...attributes}>{children}</p>;
+      return (
+        <p
+          {...attributes}
+          className="leading-relaxed"
+        >
+          {children}
+        </p>
+      );
   }
 };
 
@@ -446,16 +774,9 @@ const Mention = ({
     <span
       {...attributes}
       contentEditable={false}
-      style={{
-        padding: "3px 3px 2px",
-        margin: "0 1px",
-        verticalAlign: "baseline",
-        display: "inline-block",
-        borderRadius: "4px",
-        backgroundColor: "#eee",
-        fontSize: "0.9em",
-        boxShadow: selected && focused ? "0 0 0 2px #B4D5FF" : "none",
-      }}
+      className={`px-1.5 py-1 mx-0.5 inline-block rounded bg-gray-200 text-sm ${
+        selected && focused ? "ring-2 ring-blue-300" : ""
+      }`}
     >
       <span contentEditable={false}>
         @{element.character}

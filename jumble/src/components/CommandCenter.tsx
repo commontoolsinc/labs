@@ -15,7 +15,7 @@ import {
 import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext.tsx";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
-import { Composer, parseMentionsInDocument } from "@/components/Composer.tsx";
+import { Composer, parseComposerDocument } from "@/components/Composer.tsx";
 import { charmId } from "@/utils/charms.ts";
 import { NAME } from "../../../builder/src/types.ts";
 import { CharmManager } from "../../../charm/src/index.ts";
@@ -124,7 +124,7 @@ export async function formatPromptWithMentions(
   prompt: string,
   charmManager: CharmManager,
 ) {
-  const payload = await parseMentionsInDocument(
+  const payload = await parseComposerDocument(
     prompt,
     charmManager,
   );
