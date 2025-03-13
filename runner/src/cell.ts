@@ -1,16 +1,8 @@
 import { isStreamAlias, TYPE } from "@commontools/builder";
 import { getTopFrame, ID, type JSONSchema } from "@commontools/builder";
-import {
-  type DeepKeyLookup,
-  type DocImpl,
-  type DocLink,
-  getDoc,
-  isDoc,
-  isDocLink,
-} from "./doc.ts";
+import { type DeepKeyLookup, type DocImpl, getDoc, isDoc } from "./doc.ts";
 import {
   createQueryResultProxy,
-  getDocLinkOrValue,
   type QueryResult,
 } from "./query-result-proxy.ts";
 import { diffAndUpdate, resolveLinkToValue, resolvePath } from "./utils.ts";
@@ -41,7 +33,7 @@ import { type Schema } from "@commontools/builder";
  * @returns {void}
  *
  * @method push Adds an item to the end of an array cell.
- * @param {U | DocImpl<U> | DocLink} value - The value to add, where U is the
+ * @param {U | DocImpl<U> | CellLink} value - The value to add, where U is the
  * array element type.
  * @returns {void}
  *
@@ -73,7 +65,7 @@ import { type Schema } from "@commontools/builder";
  * @returns {QueryResult<DeepKeyLookup<T, Path>>}
  *
  * @method getAsDocLink Returns a document link for the cell.
- * @returns {DocLink}
+ * @returns {CellLink}
  *
  * @method getSourceCell Returns the source cell with optional schema.
  * @param {JSONSchema} schema - Optional schema to apply.
@@ -86,7 +78,7 @@ import { type Schema } from "@commontools/builder";
  * @returns {T}
  *
  * @property docLink The document link representing this cell.
- * @returns {DocLink}
+ * @returns {CellLink}
  *
  * @property entityId Returns the current entity ID of the cell.
  * @returns {EntityId | undefined}
@@ -103,7 +95,7 @@ export interface Cell<T> {
     ...value: Array<
       | (T extends Array<infer U> ? U : any)
       | DocImpl<T extends Array<infer U> ? U : any>
-      | DocLink
+      | CellLink
       | Cell<T extends Array<infer U> ? U : any>
     >
   ): void;
@@ -126,7 +118,7 @@ export interface Cell<T> {
     path?: Path,
     log?: ReactivityLog,
   ): QueryResult<DeepKeyLookup<T, Path>>;
-  getAsDocLink(): DocLink;
+  getAsDocLink(): CellLink;
   getSourceCell<T>(
     schema?: JSONSchema,
   ): Cell<
@@ -148,18 +140,13 @@ export interface Cell<T> {
   >;
   toJSON(): { cell: { "/": string } | undefined; path: PropertyKey[] };
   value: T;
-  docLink: DocLink;
+  docLink: CellLink;
   entityId: EntityId | undefined;
   [isCellMarker]: true;
   copyTrap: boolean;
   schema?: JSONSchema;
   rootSchema?: JSONSchema;
 }
-
-type TypeOrSchema<T, S extends JSONSchema | undefined = JSONSchema> = T extends
-  never ? S extends JSONSchema ? Schema<S>
-  : any
-  : T;
 
 export interface Stream<T> {
   send(event: T): void;
@@ -168,6 +155,17 @@ export interface Stream<T> {
   rootSchema?: JSONSchema;
   [isStreamMarker]: true;
 }
+
+/**
+ * Cell link.
+ *
+ * A cell link is a doc and a path within that doc.
+ */
+export type CellLink = {
+  space?: string;
+  cell: DocImpl<any>;
+  path: PropertyKey[];
+};
 
 export function getCell<T>(
   space: string,
@@ -218,19 +216,19 @@ export function getCellFromEntityId(
 
 export function getCellFromDocLink<T>(
   space: string,
-  docLink: DocLink,
+  docLink: CellLink,
   schema?: JSONSchema,
   log?: ReactivityLog,
 ): Cell<T>;
 export function getCellFromDocLink<S extends JSONSchema = JSONSchema>(
   space: string,
-  docLink: DocLink,
+  docLink: CellLink,
   schema: S,
   log?: ReactivityLog,
 ): Cell<Schema<S>>;
 export function getCellFromDocLink(
   space: string, // TODO(seefeld): Read from DocLink once it's defined there
-  docLink: DocLink,
+  docLink: CellLink,
   schema?: JSONSchema,
   log?: ReactivityLog,
 ): Cell<any> {
@@ -351,7 +349,7 @@ function createRegularCell<T>(
       ...values: Array<
         | (T extends Array<infer U> ? U : any)
         | DocImpl<T extends Array<infer U> ? U : any>
-        | DocLink
+        | CellLink
         | Cell<T extends Array<infer U> ? U : any>
       >
     ) => {
@@ -368,7 +366,7 @@ function createRegularCell<T>(
       // If this is an object and it doesn't have an ID, add one.
       const valuesToWrite = values.map((value: any) => {
         if (
-          !isCell(value) && !isDocLink(value) && !isDoc(value) &&
+          !isCell(value) && !isCellLink(value) && !isDoc(value) &&
           !Array.isArray(value) && typeof value === "object" &&
           value !== null &&
           value[ID] === undefined && getTopFrame()
@@ -425,7 +423,7 @@ function createRegularCell<T>(
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
     getAsDocLink: () =>
       // Add space here, so that JSON.stringify() of this retains the space.
-      ({ space: doc.space, cell: doc, path }) satisfies DocLink,
+      ({ space: doc.space, cell: doc, path }) satisfies CellLink,
     getSourceCell: (schema?: JSONSchema) =>
       doc.sourceCell?.asCell([], log, schema) as Cell<any>,
     toJSON: () =>
@@ -437,7 +435,7 @@ function createRegularCell<T>(
     get value(): T {
       return self.get();
     },
-    get docLink(): DocLink {
+    get docLink(): CellLink {
       return { cell: doc, path };
     },
     get entityId(): EntityId | undefined {
@@ -517,3 +515,16 @@ export function isStream(value: any): value is Stream<any> {
 }
 
 const isStreamMarker = Symbol("isStream");
+
+/**
+ * Check if value is a cell link.
+ *
+ * @param {any} value - The value to check.
+ * @returns {boolean}
+ */
+export function isCellLink(value: any): value is CellLink {
+  return (
+    typeof value === "object" && value !== null && isDoc(value.cell) &&
+    Array.isArray(value.path)
+  );
+}

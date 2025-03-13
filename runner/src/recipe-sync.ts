@@ -1,12 +1,12 @@
 import {
-  registerRecipe,
   getRecipe,
   getRecipeName,
   getRecipeParents,
   getRecipeSpec,
   getRecipeSrc,
+  registerRecipe,
 } from "./recipe-map.ts";
-import { buildRecipe } from "../../charm/src/localBuild.ts";
+import { buildRecipe } from "./local-build.ts";
 import {
   createItemsKnownToStorageSet,
   getBlobbyServerUrl,

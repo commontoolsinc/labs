@@ -15,7 +15,8 @@ import {
   setNestedValue,
   unwrapOneLevelAndBindtoDoc,
 } from "../src/utils.ts";
-import { DocLink, getDoc, isDocLink } from "../src/doc.ts";
+import { getDoc } from "../src/doc.ts";
+import { CellLink, isCellLink } from "../src/cell.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 
 describe("extractDefaultValues", () => {
@@ -302,7 +303,7 @@ describe("followCellReferences", () => {
       "should follow a simple cell reference 1",
       "test",
     );
-    const reference: DocLink = { cell: testCell, path: ["value"] };
+    const reference: CellLink = { cell: testCell, path: ["value"] };
     const result = followCellReferences(reference);
     expect(result.cell.getAtPath(result.path)).toBe(42);
   });
@@ -320,7 +321,7 @@ describe("followCellReferences", () => {
       "should follow nested cell references 2",
       "test",
     );
-    const reference: DocLink = { cell: outerCell, path: ["outer"] };
+    const reference: CellLink = { cell: outerCell, path: ["outer"] };
     const result = followCellReferences(reference);
     expect(result.cell.getAtPath(result.path)).toBe(10);
   });
@@ -338,7 +339,7 @@ describe("followCellReferences", () => {
     );
     cellA.send({ ref: { cell: cellB, path: ["ref"] } });
     cellB.send({ ref: { cell: cellA, path: ["ref"] } });
-    const reference: DocLink = { cell: cellA, path: ["ref"] };
+    const reference: CellLink = { cell: cellA, path: ["ref"] };
     expect(() => followCellReferences(reference)).toThrow(
       "Reference cycle detected",
     );
@@ -402,7 +403,7 @@ describe("normalizeAndDiff", () => {
       "normalizeAndDiff simple value changes",
       "test",
     );
-    const current: DocLink = { cell: testCell, path: ["value"] };
+    const current: CellLink = { cell: testCell, path: ["value"] };
     const changes = normalizeAndDiff(current, 100);
 
     expect(changes.length).toBe(1);
@@ -416,7 +417,7 @@ describe("normalizeAndDiff", () => {
       "normalizeAndDiff object property changes",
       "test",
     );
-    const current: DocLink = { cell: testCell, path: ["user"] };
+    const current: CellLink = { cell: testCell, path: ["user"] };
     const changes = normalizeAndDiff(current, { name: "Jane", age: 30 });
 
     expect(changes.length).toBe(1);
@@ -433,7 +434,7 @@ describe("normalizeAndDiff", () => {
       "normalizeAndDiff added object properties",
       "test",
     );
-    const current: DocLink = { cell: testCell, path: ["user"] };
+    const current: CellLink = { cell: testCell, path: ["user"] };
     const changes = normalizeAndDiff(current, { name: "John", age: 30 });
 
     expect(changes.length).toBe(1);
@@ -450,7 +451,7 @@ describe("normalizeAndDiff", () => {
       "normalizeAndDiff removed object properties",
       "test",
     );
-    const current: DocLink = { cell: testCell, path: ["user"] };
+    const current: CellLink = { cell: testCell, path: ["user"] };
     const changes = normalizeAndDiff(current, { name: "John" });
 
     expect(changes.length).toBe(1);
@@ -467,7 +468,7 @@ describe("normalizeAndDiff", () => {
       "normalizeAndDiff array length changes",
       "test",
     );
-    const current: DocLink = { cell: testCell, path: ["items"] };
+    const current: CellLink = { cell: testCell, path: ["items"] };
     const changes = normalizeAndDiff(current, [1, 2]);
 
     expect(changes.length).toBe(1);
@@ -484,7 +485,7 @@ describe("normalizeAndDiff", () => {
       "normalizeAndDiff array element changes",
       "test",
     );
-    const current: DocLink = { cell: testCell, path: ["items"] };
+    const current: CellLink = { cell: testCell, path: ["items"] };
     const changes = normalizeAndDiff(current, [1, 5, 3]);
 
     expect(changes.length).toBe(1);
@@ -504,7 +505,7 @@ describe("normalizeAndDiff", () => {
       "normalizeAndDiff follow aliases",
       "test",
     );
-    const current: DocLink = { cell: testCell, path: ["alias"] };
+    const current: CellLink = { cell: testCell, path: ["alias"] };
     const changes = normalizeAndDiff(current, 100);
 
     // Should follow alias to value and change it there
@@ -523,7 +524,7 @@ describe("normalizeAndDiff", () => {
       "normalizeAndDiff update aliases",
       "test",
     );
-    const current: DocLink = { cell: testCell, path: ["alias"] };
+    const current: CellLink = { cell: testCell, path: ["alias"] };
     const changes = normalizeAndDiff(current, 100);
 
     // Should follow alias to value and change it there
@@ -567,7 +568,7 @@ describe("normalizeAndDiff", () => {
       "normalizeAndDiff nested changes",
       "test",
     );
-    const current: DocLink = { cell: testCell, path: ["user", "profile"] };
+    const current: CellLink = { cell: testCell, path: ["user", "profile"] };
     const changes = normalizeAndDiff(current, {
       details: {
         address: {
@@ -592,7 +593,7 @@ describe("normalizeAndDiff", () => {
       "should handle ID-based entity objects",
       testSpace,
     );
-    const current: DocLink = { cell: testCell, path: ["items", 0] };
+    const current: CellLink = { cell: testCell, path: ["items", 0] };
 
     const newValue = { [ID]: "item1", name: "First Item" };
     const changes = normalizeAndDiff(
@@ -619,7 +620,7 @@ describe("normalizeAndDiff", () => {
       "should update the same document with ID-based entity objects",
       testSpace,
     );
-    const current: DocLink = { cell: testDoc, path: ["items", 0] };
+    const current: CellLink = { cell: testDoc, path: ["items", 0] };
 
     const newValue = { [ID]: "item1", name: "First Item" };
     diffAndUpdate(
@@ -657,7 +658,7 @@ describe("normalizeAndDiff", () => {
       "should update the same document with ID-based entity objects",
       testSpace,
     );
-    const current: DocLink = { cell: testDoc, path: ["items", 0] };
+    const current: CellLink = { cell: testDoc, path: ["items", 0] };
 
     const newValue = { [ID]: 1, name: "First Item" };
     diffAndUpdate(
@@ -725,8 +726,8 @@ describe("normalizeAndDiff", () => {
     );
 
     // Verify that the second item reused the existing document
-    expect(isDocLink(testDoc.get().items[0])).toBe(true);
-    expect(isDocLink(testDoc.get().items[1])).toBe(true);
+    expect(isCellLink(testDoc.get().items[0])).toBe(true);
+    expect(isCellLink(testDoc.get().items[1])).toBe(true);
     expect(testDoc.get().items[1].cell).toBe(initialDoc);
     expect(testDoc.get().items[1].cell.get().name).toEqual("Updated Item");
     expect(testDoc.get().items[0].cell.get().name).toEqual("New Item");
@@ -739,7 +740,7 @@ describe("normalizeAndDiff", () => {
       "it should treat different properties as different ID namespaces",
       testSpace,
     );
-    const current: DocLink = { cell: testDoc, path: [] };
+    const current: CellLink = { cell: testDoc, path: [] };
 
     const newValue = {
       a: { [ID]: "item1", name: "First Item" },
@@ -752,8 +753,8 @@ describe("normalizeAndDiff", () => {
       "it should treat different properties as different ID namespaces",
     );
 
-    expect(isDocLink(testDoc.get().a)).toBe(true);
-    expect(isDocLink(testDoc.get().b)).toBe(true);
+    expect(isCellLink(testDoc.get().a)).toBe(true);
+    expect(isCellLink(testDoc.get().b)).toBe(true);
     expect(testDoc.get().a.cell).not.toBe(testDoc.get().b.cell);
     expect(testDoc.get().a.cell.get().name).toEqual("First Item");
     expect(testDoc.get().b.cell.get().name).toEqual("Second Item");
@@ -765,7 +766,7 @@ describe("normalizeAndDiff", () => {
       "normalizeAndDiff no changes",
       "test",
     );
-    const current: DocLink = { cell: testCell, path: ["value"] };
+    const current: CellLink = { cell: testCell, path: ["value"] };
     const changes = normalizeAndDiff(current, 42);
 
     expect(changes.length).toBe(0);
@@ -783,7 +784,7 @@ describe("normalizeAndDiff", () => {
       "test",
     );
 
-    const current: DocLink = { cell: docB, path: ["value"] };
+    const current: CellLink = { cell: docB, path: ["value"] };
     const changes = normalizeAndDiff(current, docA);
 
     expect(changes.length).toBe(1);
@@ -803,7 +804,7 @@ describe("normalizeAndDiff", () => {
       "test",
     );
 
-    const current: DocLink = { cell: docB, path: ["value"] };
+    const current: CellLink = { cell: docB, path: ["value"] };
     const changes = normalizeAndDiff(current, docA);
 
     expect(changes.length).toBe(1);
@@ -849,8 +850,8 @@ describe("addCommonIDfromObjectID", () => {
     );
 
     const result = testDoc.get();
-    expect(isDocLink(result.items[0])).toBe(true);
-    expect(isDocLink(result.items[1])).toBe(true);
+    expect(isCellLink(result.items[0])).toBe(true);
+    expect(isCellLink(result.items[1])).toBe(true);
     expect(isEqualDocLink(result.items[0] as any, result.items[1] as any)).toBe(
       true,
     );

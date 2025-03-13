@@ -225,22 +225,6 @@ export type DocImpl<T> = {
   ): void;
 };
 
-/**
- * Doc link.
- *
- * A doc link is a doc and a path within that doc.
- *
- * Values proxies (DocImpl.getAsProxy) transparently follow these references
- * and create them when assigning a value from another cell.
- *
- * Cells (DocImpl.asCell) expose these as other cells.
- */
-export type DocLink = {
-  space?: string;
-  cell: DocImpl<any>;
-  path: PropertyKey[];
-};
-
 export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
   : Path extends [infer First, ...infer Rest]
     ? First extends keyof T
@@ -445,16 +429,3 @@ export function isDoc(value: any): value is DocImpl<any> {
 }
 
 const isDocMarker = Symbol("isDoc");
-
-/**
- * Check if value is a cell reference.
- *
- * @param {any} value - The value to check.
- * @returns {boolean}
- */
-export function isDocLink(value: any): value is DocLink {
-  return (
-    typeof value === "object" && value !== null && isDoc(value.cell) &&
-    Array.isArray(value.path)
-  );
-}

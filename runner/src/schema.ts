@@ -1,6 +1,12 @@
 import { isAlias, JSONSchema } from "@commontools/builder";
-import { type DocImpl, type DocLink, getDoc, isDocLink } from "./doc.ts";
-import { createCell, getImmutableCell, isCell } from "./cell.ts";
+import { type DocImpl, getDoc } from "./doc.ts";
+import {
+  type CellLink,
+  createCell,
+  getImmutableCell,
+  isCell,
+  isCellLink,
+} from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followLinks, resolvePath } from "./utils.ts";
 
@@ -255,7 +261,7 @@ export function validateAndTransform(
   schema?: JSONSchema,
   log?: ReactivityLog,
   rootSchema: JSONSchema | undefined = schema,
-  seen: DocLink[] = [],
+  seen: CellLink[] = [],
 ): any {
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based of this value, as that
@@ -293,7 +299,7 @@ export function validateAndTransform(
           "Unexpected alias in path, should have been handled by resolvePath",
         );
       }
-      if (isDocLink(value)) {
+      if (isCellLink(value)) {
         log?.reads.push({ cell: doc, path: path.slice(0, i + 1) });
         return createCell(
           value.cell,
@@ -424,7 +430,7 @@ export function validateAndTransform(
 
       // Merge all the object extractions
       let merged: Record<string, any> = {};
-      const extraReads: DocLink[] = [];
+      const extraReads: CellLink[] = [];
       for (const { result, extraLog } of candidates) {
         if (isCell(result)) {
           log?.reads.push(...extraLog.reads);

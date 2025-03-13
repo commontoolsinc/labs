@@ -1,6 +1,6 @@
-import { type DocImpl, type DocLink, isDoc, isDocLink } from "./doc.ts";
+import { type DocImpl, isDoc } from "./doc.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
-import { Cell, isCell } from "./cell.ts";
+import { Cell, type CellLink, isCell, isCellLink } from "./cell.ts";
 import { type EntityId, getDocByEntityId } from "./doc-map.ts";
 import {
   getDocLinkOrThrow,
@@ -349,7 +349,7 @@ class StorageImpl implements Storage {
       processStatic: boolean = false,
     ): any => {
       // If it's a doc, make it a doc link
-      if (isDoc(value)) value = { cell: value, path: [] } satisfies DocLink;
+      if (isDoc(value)) value = { cell: value, path: [] } satisfies CellLink;
 
       // If it's a query result proxy, make it a doc link
       if (isQueryResultForDereferencing(value)) {
@@ -357,7 +357,7 @@ class StorageImpl implements Storage {
       }
 
       // If it's a doc link, convert it to a doc link with an id
-      if (isDocLink(value)) {
+      if (isCellLink(value)) {
         dependencies.add(this._ensureIsSynced(value.cell));
         return { ...value, cell: value.cell.toJSON() /* = the id */ };
       } else if (isStatic(value) && !processStatic) {
