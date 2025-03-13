@@ -1,12 +1,12 @@
 import { h } from "@commontools/html";
 import {
-  recipe,
-  handler,
-  UI,
-  NAME,
   derive,
-  Schema,
+  handler,
   JSONSchema,
+  NAME,
+  recipe,
+  Schema,
+  UI,
 } from "@commontools/builder";
 
 const TodoItemSchema = {
@@ -42,7 +42,7 @@ const TodoListSchema = {
 const ResultSchema = {
   type: "object",
   properties: {
-    items: { type: "array", items: TodoItemSchema.properties.items },
+    items: { type: "array", items: TodoItemSchema.properties?.items },
     addItem: {
       asStream: true,
       type: "object",
@@ -65,25 +65,27 @@ const addTask = handler<{ detail: { message: string } }, { items: TodoItem[] }>(
   (event, { items }) => {
     const task = event.detail?.message?.trim();
     if (task) items.push({ title: task, done: false });
-  }
+  },
 );
 
 const addItem = handler(
   { type: "object", properties: { title: { type: "string" } } },
   {
     type: "object",
-    properties: { items: { asCell: true, ...TodoItemSchema.properties.items } },
+    properties: {
+      items: { asCell: true, ...TodoItemSchema.properties?.items },
+    },
     default: { items: [] },
   },
   ({ title }, { items }) => {
     items.push({ title, done: false });
-  }
+  },
 );
 
 const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
   ({ detail }, state) => {
     state.title = detail?.value ?? "untitled";
-  }
+  },
 );
 
 const updateItem = handler<
@@ -96,9 +98,9 @@ const updateItem = handler<
 
 const deleteItem = handler<{}, { items: TodoItem[]; item: TodoItem }>(
   ({}, { item, items }) => {
-    let idx = items.findIndex((i) => i.title === item.title);
+    const idx = items.findIndex((i) => i.title === item.title);
     if (idx !== -1) items.splice(idx, 1);
-  }
+  },
 );
 
 export default recipe(TodoListSchema, ResultSchema, ({ title, items }) => {
@@ -128,7 +130,7 @@ export default recipe(TodoListSchema, ResultSchema, ({ title, items }) => {
                       ontodo-input={updateItem({ item })}
                     />
                   ),
-                }))
+                })),
               )}
             >
               <common-hstack>
@@ -166,15 +168,15 @@ export default recipe(TodoListSchema, ResultSchema, ({ title, items }) => {
         console.log("todo drag handler", event);
         event.forEach((item) => {
           let newItem;
-          if (typeof item === "object" && item !== null && "title" in item)
+          if (typeof item === "object" && item !== null && "title" in item) {
             newItem = item;
-          else if (typeof item === "string")
+          } else if (typeof item === "string") {
             newItem = { title: item, done: false };
-          else newItem = { title: item.toString(), done: false };
+          } else newItem = { title: item.toString(), done: false };
           console.log("todo drag handler newItem", newItem, item);
           items.push(newItem);
         });
-      }
+      },
     )({ items }),
   };
 });
