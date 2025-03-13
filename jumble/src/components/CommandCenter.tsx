@@ -17,6 +17,8 @@ import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
 import { Composer } from "@/components/Composer.tsx";
 import { charmId } from "@/utils/charms.ts";
+import { formatPromptWithMentions } from "@/utils/format.ts";
+import { NAME } from "@commontools/builder";
 
 function CommandProcessor({
   mode,
@@ -96,7 +98,7 @@ export function useCharmMentions() {
         const charms = charmManager.getCharms();
         await charmManager.sync(charms);
 
-        const mentions = charms.get().map((charm) => {
+        const mentions = charms.get().map((charm: any) => {
           const data = charm.get();
           const name = data?.[NAME] ?? "Untitled";
           const id = charmId(charm.entityId!)!;

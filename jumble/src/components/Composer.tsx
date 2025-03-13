@@ -8,6 +8,7 @@ import React, {
   useState,
 } from "react";
 import {
+  BaseEditor,
   BaseElement,
   BaseSelection,
   BaseText,
@@ -32,8 +33,45 @@ import {
 } from "slate-react";
 import { createPortal } from "react-dom";
 import { CharmManager } from "../../../charm/src/index.ts";
-import { Recipe, TYPE } from "@commontools/builder";
+import { Module, Recipe, TYPE } from "@commontools/builder";
 import { Cell, getRecipe } from "@commontools/runner";
+
+// First define a basic interface with just the extension methods
+interface EditorWithExtensions extends BaseEditor {
+  isInline: (element: SlateElement) => boolean;
+  isVoid: (element: SlateElement) => boolean;
+  markableVoid: (element: SlateElement) => boolean;
+  insertText: (text: string) => void;
+  deleteBackward: (...args: any[]) => void;
+}
+
+// Update the module declaration without referring to Editor directly
+declare module "slate" {
+  interface CustomTypes {
+    Editor: EditorWithExtensions;
+    Element:
+      | MentionElement
+      | BulletedListElement
+      | HeadingElement
+      | BlockQuoteElement
+      | ListItemElement
+      | { type: "paragraph"; children: Descendant[] };
+    Text: BaseText & {
+      bold?: boolean;
+      italic?: boolean;
+    };
+  }
+}
+
+// Define CustomEditor for local usage
+type CustomEditor = Editor & EditorWithExtensions;
+
+interface MentionElement extends BaseElement {
+  type: "mention";
+  character: string;
+  id?: string; // Make sure id is included in the type
+  children: { text: string; bold?: boolean; italic?: boolean }[];
+}
 
 // Function to parse Slate document and extract mention references
 export async function parseComposerDocument(
@@ -42,14 +80,16 @@ export async function parseComposerDocument(
 ): Promise<{
   text: string;
   mentions: string[];
-  sources: { [id: string]: { name: string; cell: Cell<any>; recipe: Recipe } };
+  sources: {
+    [id: string]: { name: string; cell: Cell<any>; recipe?: Recipe | Module };
+  };
 }> {
   try {
     const document = JSON.parse(serializedDocument) as Descendant[];
     let fullText = "";
     const mentions: string[] = [];
     const sources: {
-      [id: string]: { name: string; cell: Cell<any>; recipe: Recipe };
+      [id: string]: { name: string; cell: Cell<any>; recipe?: Recipe | Module };
     } = {};
     const mentionIndices: Record<string, number> = {};
 
@@ -189,13 +229,6 @@ export function replaceMentionsWithContent(
   return result;
 }
 
-// Define our custom types
-interface MentionElement extends BaseElement {
-  type: "mention";
-  character: string;
-  children: { text: string; bold?: boolean; italic?: boolean }[];
-}
-
 interface BulletedListElement extends BaseElement {
   type: "bulleted-list";
   children: Descendant[];
@@ -222,14 +255,8 @@ interface ListItemElement extends BaseElement {
   children: Descendant[];
 }
 
-interface CustomEditor extends Editor {
-  isInline: (element: SlateElement) => boolean;
-  isVoid: (element: SlateElement) => boolean;
-  markableVoid: (element: SlateElement) => boolean;
-}
-
-interface RenderElementPropsFor<T extends BaseElement>
-  extends RenderElementProps {
+// Fix the RenderElementPropsFor interface
+interface RenderElementPropsFor<T> extends Omit<RenderElementProps, "element"> {
   element: T;
 }
 
@@ -237,7 +264,17 @@ const Portal = ({ children }: { children: React.ReactNode }) => {
   return createPortal(children, document.body);
 };
 
-const SHORTCUTS: Record<string, string> = {
+const SHORTCUTS: Record<
+  string,
+  | "list-item"
+  | "block-quote"
+  | "heading-one"
+  | "heading-two"
+  | "heading-three"
+  | "heading-four"
+  | "heading-five"
+  | "heading-six"
+> = {
   "*": "list-item",
   "-": "list-item",
   "+": "list-item",
@@ -248,12 +285,12 @@ const SHORTCUTS: Record<string, string> = {
   "####": "heading-four",
   "#####": "heading-five",
   "######": "heading-six",
-} as const;
+};
 
 const withShortcuts = (editor: CustomEditor) => {
   const { deleteBackward, insertText } = editor;
 
-  editor.insertText = (text) => {
+  editor.insertText = (text: string) => {
     const { selection } = editor;
 
     if (text.endsWith(" ") && selection && Range.isCollapsed(selection)) {
@@ -265,7 +302,7 @@ const withShortcuts = (editor: CustomEditor) => {
       const start = Editor.start(editor, path);
       const range = { anchor, focus: start };
       const beforeText = Editor.string(editor, range) + text.slice(0, -1);
-      const type = SHORTCUTS[beforeText];
+      const type = SHORTCUTS[beforeText as keyof typeof SHORTCUTS];
 
       if (type) {
         Transforms.select(editor, range);
@@ -301,7 +338,7 @@ const withShortcuts = (editor: CustomEditor) => {
     insertText(text);
   };
 
-  editor.deleteBackward = (...args) => {
+  editor.deleteBackward = (...args: any[]) => {
     const { selection } = editor;
 
     if (selection && Range.isCollapsed(selection)) {
@@ -393,15 +430,15 @@ export function Composer({
   const editor = useMemo(
     () => {
       // Start with the base editor
-      let ed = createEditor();
+      let ed = createEditor() as CustomEditor;
 
       // Apply plugins in the correct order
-      ed = withHistory(ed);
-      ed = withReact(ed);
+      ed = withHistory(ed) as CustomEditor;
+      ed = withReact(ed) as CustomEditor;
       ed = withMentions(ed); // Apply mentions capabilities
       ed = withShortcuts(ed); // Apply markdown shortcuts
 
-      return ed as CustomEditor;
+      return ed;
     },
     [],
   );
@@ -415,7 +452,7 @@ export function Composer({
       .slice(0, 10), [mentions, search]);
 
   const handleDOMBeforeInput = useCallback(
-    (e: InputEvent) => {
+    (_: InputEvent) => {
       queueMicrotask(() => {
         const pendingDiffs = ReactEditor.androidPendingDiffs(editor);
 
@@ -432,7 +469,8 @@ export function Composer({
 
           const blockEntry = Editor.above(editor, {
             at: path,
-            match: (n) => Editor.isBlock(editor, n),
+            match: (n) =>
+              SlateElement.isElement(n) && Editor.isBlock(editor, n),
           });
           if (!blockEntry) {
             return false;
@@ -613,7 +651,7 @@ export function Composer({
   );
 }
 
-const withMentions = (editor: CustomEditor) => {
+const withMentions = (editor: CustomEditor): CustomEditor => {
   const { isInline, isVoid, markableVoid } = editor;
 
   editor.isInline = (element: SlateElement) => {
