@@ -100,7 +100,7 @@ export async function castNewRecipe(
   data: any,
   newSpec: string,
 ): Promise<Cell<Charm>> {
-  const schema = isCell(data) ? { ...data.schema } : createJsonSchema({}, data);
+  const schema = isCell(data) ? { ...data.schema } : createJsonSchema(data);
   schema.description = newSpec;
   console.log("schema", schema);
 
