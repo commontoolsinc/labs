@@ -275,6 +275,14 @@ const sanitizeScripts = (node: VNode): VNode | null => {
   if (node.name === "script") {
     return null;
   }
+  if (
+    !isCell(node.props) && typeof node.props !== "object" && node.props !== null
+  ) {
+    node = { ...node, props: {} };
+  }
+  if (!isCell(node.children) && Array.isArray(node.children)) {
+    node = { ...node, children: [] };
+  }
   return node;
 };
 
