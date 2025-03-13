@@ -6,9 +6,9 @@
  * APIs that would normally call into common memory.
  */
 import { Charm, CharmManager, charmListSchema } from "../charm/src/charm.ts";
-import { Cell } from "../runner/src/cell.ts";
+import { type CellLink, Cell } from "../runner/src/cell.ts";
 import * as Session from "./session.ts";
-import { type DocLink, DocImpl, getDoc } from "../runner/src/doc.ts";
+import { DocImpl, getDoc } from "../runner/src/doc.ts";
 import { EntityId } from "../runner/src/doc-map.ts";
 import { storage } from "../runner/src/storage.ts";
 import { Identity } from "../identity/src/index.ts";
