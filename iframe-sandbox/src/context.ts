@@ -7,6 +7,7 @@ export interface IframeContextHandler {
     context: any,
     key: string,
     callback: (key: string, value: any) => void,
+    doNotSendMyDataBack: boolean,
   ): any;
   unsubscribe(context: any, receipt: any): void;
   onLLMRequest(context: any, payload: string): Promise<object>;

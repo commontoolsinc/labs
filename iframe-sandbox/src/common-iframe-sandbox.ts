@@ -157,29 +157,46 @@ export class CommonIframeSandboxElement extends LitElement {
       }
 
       case IPC.GuestMessageType.Subscribe: {
-        const key = message.data;
+        const keys = typeof message.data === "string"
+          ? [message.data]
+          : message.data;
 
-        if (this.subscriptions.has(key)) {
-          console.warn("common-iframe-sandbox: Already subscribed to `${key}`");
-          return;
+        // TODO(seefeld): Remove this and make this default true on 3/31/2025 or
+        // whenever we delete all charms anyway. This is just a stopgap to not
+        // break existing charms.
+        const doNotSendMyDataBack = Array.isArray(message.data);
+
+        for (const key of keys) {
+          if (this.subscriptions.has(key)) {
+            console.warn(
+              "common-iframe-sandbox: Already subscribed to `${key}`",
+            );
+            continue;
+          }
+          const receipt = IframeHandler.subscribe(
+            this.context,
+            key,
+            (key, value) => this.notifySubscribers(key, value),
+            doNotSendMyDataBack,
+          );
+          this.subscriptions.set(key, receipt);
         }
-        const receipt = IframeHandler.subscribe(
-          this.context,
-          key,
-          (key, value) => this.notifySubscribers(key, value),
-        );
-        this.subscriptions.set(key, receipt);
         return;
       }
 
       case IPC.GuestMessageType.Unsubscribe: {
-        const key = message.data;
-        const receipt = this.subscriptions.get(key);
-        if (!receipt) {
-          return;
+        const keys = typeof message.data === "string"
+          ? [message.data]
+          : message.data;
+
+        for (const key of keys) {
+          const receipt = this.subscriptions.get(key);
+          if (!receipt) {
+            continue;
+          }
+          IframeHandler.unsubscribe(this.context, receipt);
+          this.subscriptions.delete(key);
         }
-        IframeHandler.unsubscribe(this.context, receipt);
-        this.subscriptions.delete(key);
         return;
       }
 
@@ -229,7 +246,10 @@ export class CommonIframeSandboxElement extends LitElement {
 
         let result, error;
         try {
-          result = await IframeHandler.onReadWebpageRequest(this.context, payload);
+          result = await IframeHandler.onReadWebpageRequest(
+            this.context,
+            payload,
+          );
         } catch (e) {
           error = e;
         }
@@ -252,7 +272,6 @@ export class CommonIframeSandboxElement extends LitElement {
         });
         return;
       }
-
     }
   }
 
