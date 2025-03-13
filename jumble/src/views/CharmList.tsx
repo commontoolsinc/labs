@@ -264,7 +264,6 @@ export default function CharmList() {
   const [charms] = useCell(charmManager.getCharms());
 
   const { isSyncing } = useSyncedStatus();
-  console.log(charmManager, isSyncing);
 
   if (isSyncing) {
     return <div>Trying to connect, please wait</div>;

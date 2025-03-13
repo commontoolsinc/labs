@@ -109,6 +109,10 @@ export class CharmManager {
 
   private charms: Cell<Cell<Charm>[]>;
   private pinnedCharms: Cell<Cell<Charm>[]>;
+
+  /**
+   * Promise resolved when the charm manager gets the charm list.
+   */
   ready: Promise<unknown>;
 
   constructor(

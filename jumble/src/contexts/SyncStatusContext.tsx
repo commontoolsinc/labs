@@ -32,22 +32,15 @@ export function SyncStatusProvider({
   const isCheckingSyncRef = useRef(false);
 
   useEffect(() => {
-    console.log("sync status useEffect", charmManager);
     let isMounted = true;
 
     const checkSyncStatus = async () => {
-      console.log("check sync status", {
-        charmManager,
-        isMounted,
-        isCheckingSyncRef,
-      });
       if (!isMounted || isCheckingSyncRef.current || !charmManager) return;
 
       isCheckingSyncRef.current = true;
       setIsSyncing(true);
 
       try {
-        console.log("sync status provider");
         await charmManager.synced();
 
         if (isMounted) {
