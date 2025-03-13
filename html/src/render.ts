@@ -8,6 +8,7 @@ import {
   useCancelGroup,
 } from "@commontools/runner";
 import { JSONSchema } from "@commontools/builder";
+import { isObj } from "@commontools/utils";
 import * as logger from "./logger.ts";
 
 const vdomSchema: JSONSchema = {
@@ -275,6 +276,13 @@ const sanitizeScripts = (node: VNode): VNode | null => {
   if (node.name === "script") {
     return null;
   }
+  if (!isCell(node.props) && !isObj(node.props)) {
+    node = { ...node, props: {} };
+  }
+  if (!isCell(node.children) && !Array.isArray(node.children)) {
+    node = { ...node, children: [] };
+  }
+
   return node;
 };
 
