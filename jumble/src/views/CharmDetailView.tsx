@@ -729,7 +729,7 @@ const OperationTab = () => {
             mentions={mentions}
             value={input}
             onValueChange={setInput}
-            onKeyDown={async (e) => {
+            onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
 
