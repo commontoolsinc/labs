@@ -1,6 +1,6 @@
 import { CharmManager } from "@commontools/charm";
 import { Cell } from "@commontools/runner";
-import { Recipe } from "@commontools/builder";
+import { Module, Recipe } from "@commontools/builder";
 import { parseComposerDocument } from "@/components/Composer.tsx";
 
 export function formatCell(
@@ -36,7 +36,7 @@ export function formatCell(
   }
 }
 
-export function formatRecipe(recipe: Recipe) {
+export function formatRecipe(recipe: Recipe | Module) {
   if (!recipe) return null;
 
   try {
