@@ -113,7 +113,7 @@ export class CharmManager {
   /**
    * Promise resolved when the charm manager gets the charm list.
    */
-  ready: Promise<unknown>;
+  ready: Promise<void>;
 
   constructor(
     private session: Session,
@@ -128,7 +128,7 @@ export class CharmManager {
 
     this.ready = Promise.all(
       this.primaryDocs.map((doc) => storage.syncCell(doc)),
-    );
+    ).then();
   }
 
   get primaryDocs() {
