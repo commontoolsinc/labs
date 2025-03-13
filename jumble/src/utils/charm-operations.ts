@@ -7,7 +7,7 @@ import {
   iterate,
 } from "@commontools/charm";
 import { Cell } from "@commontools/runner";
-import { fixRecipePrompt } from "@/utils/prompt-library/recipe-fix.ts";
+import { fixRecipePrompt } from "@commontools/llm";
 
 export async function fixItCharm(
   charmManager: CharmManager,

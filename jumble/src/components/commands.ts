@@ -19,7 +19,7 @@ import {
 import { extendCharm, iterateCharm } from "@/utils/charm-operations.ts";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext.tsx";
 import { startCharmIndexing } from "@/utils/indexing.ts";
-import { generateJSON } from "@/utils/prompt-library/json-gen.ts";
+import { generateJSON } from "@commontools/llm";
 import { createPath, createPathWithHash, ROUTES } from "@/routes.ts";
 
 export type CommandType =

@@ -1,0 +1,10 @@
+{
+  "name": "@commontools/llm",
+  "tasks": {
+    "test": "echo 'No tests to run.'"
+  },
+  "exports": "./src/index.ts",
+  "imports": {
+    "json5": "npm:json5@^2.2.3"
+  }
+}

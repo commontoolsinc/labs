@@ -1,5 +1,5 @@
 import { JSONSchema } from "@commontools/builder";
-import { LLMRequest } from "@commontools/llm-client";
+import { type LLMRequest } from "@commontools/llm";
 
 import { extractUserCode, prefillHtml, systemMd } from "./static.ts";
 
@@ -43,7 +43,8 @@ export const buildPrompt = ({
   }
 
   messages.push(
-    `The user asked you to ${spec ? "update" : "create"
+    `The user asked you to ${
+      spec ? "update" : "create"
     } the source code with the following comments:
 \`\`\`
 ${newSpec}

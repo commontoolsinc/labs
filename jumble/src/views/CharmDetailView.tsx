@@ -26,7 +26,7 @@ import { DitheredCube } from "@/components/DitherCube.tsx";
 import {
   type CharmSuggestion,
   generateCharmSuggestions,
-} from "@/utils/prompt-library/charm-suggestions.ts";
+} from "@commontools/llm";
 import { Cell } from "@commontools/runner";
 import { createPath } from "@/routes.ts";
 import JsonView from "@uiw/react-json-view";

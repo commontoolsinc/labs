@@ -1,7 +1,7 @@
 import { CharmManager } from "@commontools/charm";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext.tsx";
 import { charmId } from "./charms.ts";
-import { llm } from "./llm.ts";
+import { client as llm } from "@commontools/llm";
 import { Cell } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
 interface IndexingContext {
