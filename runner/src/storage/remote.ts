@@ -376,12 +376,10 @@ export class RemoteStorageProvider implements StorageProvider {
 
     while (this.connection === socket) {
       // First drain the queued commands if we have them.
-      if (queue.size > 0) {
-        for (const command of queue) {
-          this.inspect({ send: command });
-          socket.send(Codec.UCAN.toString(command));
-          queue.delete(command);
-        }
+      for (const command of queue) {
+        this.inspect({ send: command });
+        socket.send(Codec.UCAN.toString(command));
+        queue.delete(command);
       }
 
       // Next read next command from the session.
