@@ -23,6 +23,7 @@ export const buildPrompt = ({
   spec,
   newSpec,
   schema,
+  enhancedSpec,
   model,
 }: {
   src?: string;
@@ -48,18 +49,12 @@ export const buildPrompt = ({
       spec ? "update" : "create"
     } the source code with the following specification:
 \`\`\`
-${newSpec}
+GOAL: ${newSpec}
+
+${enhancedSpec ?? ""}
 \`\`\``,
   );
-  
-  // Add the schema information explicitly to help with code generation
-  messages.push(
-    `The data schema for this component is:
-\`\`\`json
-${JSON.stringify(schema, null, 2)}
-\`\`\`
-Please ensure your implementation correctly handles all properties defined in the schema.`
-  );
+
   messages.push(RESPONSE_PREFILL);
 
   const system = systemMd.replace("SCHEMA", JSON.stringify(schema, null, 2));
