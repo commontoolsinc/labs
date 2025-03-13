@@ -4,14 +4,14 @@ import type { JSONSchema, JSONSchemaWritable } from "@commontools/builder";
 
 // Prompt for generating schema and specification from a goal
 export const SCHEMA_FROM_GOAL_PROMPT = `
-You are an expert system designer that creates detailed specifications, implementation plans, and data schemas based on user goals.
+You are creating a simple minimal viable product (MVP) based on a user's goal. Focus on the simplest implementation that works.
 
-Given a user's feature or product goal, you will:
+Given a user's feature request, you will:
 1. Create a short title (2-5 words) that names the artifact
 2. Create a one-sentence description in the format "A <artifact> to <goal>"
-3. Create a detailed specification that expands on the user's goal
-4. Generate a brief implementation plan
-5. Design a JSON schema that represents the data model for this feature
+3. Create a concise specification (3-5 sentences max)
+4. Generate a brief implementation plan (3 steps max)
+5. Design a minimal JSON schema that represents the core data model
 
 Your response must be structured as follows:
 
@@ -24,86 +24,77 @@ Your response must be structured as follows:
 </description>
 
 <spec>
-[Detailed specification that expands on the user's goal]
+[Concise specification that captures only the essential requirements]
 </spec>
 
 <plan>
-[Brief implementation plan]
+[Brief 3-step implementation plan]
 </plan>
 
 <schema>
-[JSON Schema in valid JSON format]
+[Minimal JSON Schema in valid JSON format]
 </schema>
 
 <example_data>
-[Optional: Example data that conforms to the schema, in valid JSON format]
+[Simple example data that conforms to the schema]
 </example_data>
 
 SCHEMA GUIDELINES:
-1. The schema MUST:
-   - Include reasonable default values for ALL required fields
-   - Include descriptive titles for every property and object
-   - Include detailed descriptions for each property explaining its purpose and usage
-   - Use appropriate types, formats, and constraints
-   - Mark important fields as required
+1. Keep it minimal:
+   - Include only essential fields (5-7 properties max)
+   - Focus on the core functionality
+   - If user requested complex features, simplify for this first version
    
-2. Property Details:
-   - For each property, include a "title" that is a concise, human-readable label
-   - For each property, include a "description" that explains its purpose, constraints, and usage
-   - For each property, provide a sensible default value in the "default" field
+2. Each property should have:
+   - A descriptive "title" field
+   - A brief "description" field
+   - A sensible default value where appropriate
    
-3. Example:
+3. Example of a simple schema:
 \`\`\`json
 {
   "type": "object",
-  "title": "Task Item",
-  "description": "Represents a single task in the task management system",
+  "title": "Note",
+  "description": "A simple note for the user",
   "properties": {
-    "id": {
-      "type": "string",
-      "title": "Task ID",
-      "description": "Unique identifier for the task",
-      "default": "task-1"
-    },
     "title": {
       "type": "string",
-      "title": "Task Title",
-      "description": "Short, descriptive title of the task",
-      "default": "Complete project report"
+      "title": "Title",
+      "description": "Title of the note",
+      "default": "New Note"
     },
-    "completed": {
-      "type": "boolean",
-      "title": "Completion Status",
-      "description": "Whether the task has been completed",
-      "default": false
-    },
-    "priority": {
+    "content": {
       "type": "string",
-      "title": "Task Priority",
-      "description": "The importance level of the task",
-      "enum": ["low", "medium", "high"],
-      "default": "medium"
+      "title": "Content",
+      "description": "Content of the note"
+    },
+    "created": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Created Date",
+      "description": "When the note was created",
     }
   },
-  "required": ["id", "title"]
+  "required": ["title", "content"]
 }
 \`\`\`
 
-OTHER GUIDELINES:
-- The title should be concise and descriptive (e.g., "Task Manager", "Recipe Browser")
-- The description should be a single sentence that clearly states what the artifact does
-- The schema should be comprehensive but not overly complex
+IMPORTANT:
+- Focus on the simplest working version
+- Aim for fewer fields rather than more
+- But still capture all the important state the user is creating
+- Remember, the user can always iterate and improve the solution later
 `;
 
 // Prompt for generating specification from a goal and existing schema
 export const SPEC_FROM_SCHEMA_PROMPT = `
-You are an expert system designer that creates detailed specifications based on user goals and existing data schemas.
+You are creating a simple MVP based on the user's goal, using an existing data schema. Focus on the simplest implementation that works with the provided schema.
 
-Given a user's feature or product goal and an existing data schema, you will:
+Given a user's feature request and an existing data schema, you will:
 1. Create a short title (2-5 words) that names the artifact
 2. Create a one-sentence description in the format "A <artifact> to <goal>"
-3. Create a detailed specification that expands on the user's goal
-4. Generate a brief implementation plan
+3. Create a concise specification (3-5 sentences max) that works with the existing schema
+4. Generate a brief implementation plan (3 steps max)
 
 Your response must be structured as follows:
 
@@ -116,18 +107,22 @@ Your response must be structured as follows:
 </description>
 
 <spec>
-[Detailed specification that expands on the user's goal, taking into account the existing schema]
+[Concise specification that captures only the essential requirements]
 </spec>
 
 <plan>
-[Brief implementation plan based on the existing schema]
+[Brief 3-step implementation plan using the existing schema]
 </plan>
 
 GUIDELINES:
-- The title should be concise and descriptive (e.g., "Task Manager", "Recipe Browser")
-- The description should be a single sentence that clearly states what the artifact does
-- The specification should take into account the structure and capabilities of the existing schema
-- Focus on what functionality can be built with the given schema
+- Aim for the simplest possible solution that works with the existing schema
+- The specification should take into account the existing schema structure
+- Focus on what can be achieved quickly with the existing data model
+- Avoid suggesting modifications to the schema if possible
+
+IMPORTANT:
+- Focus on the simplest working version
+- The user can always iterate and improve the solution later
 `;
 
 /**
