@@ -49,9 +49,13 @@ export const buildPrompt = ({
       spec ? "update" : "create"
     } the source code with the following specification:
 \`\`\`
-GOAL: ${newSpec}
-
-${enhancedSpec ?? ""}
+${
+      enhancedSpec
+        ? `GOAL: ${newSpec}
+        
+${enhancedSpec}`
+        : newSpec
+    }
 \`\`\``,
   );
 
