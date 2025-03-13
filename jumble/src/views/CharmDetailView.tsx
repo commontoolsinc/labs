@@ -720,23 +720,25 @@ const OperationTab = () => {
           </button>
         </div>
 
-        <Composer
-          placeholder={operationType === "iterate"
-            ? "Tweak your charm"
-            : "Add new features to your charm"}
-          readOnly={false}
-          mentions={mentions}
-          value={input}
-          onValueChange={setInput}
-          onKeyDown={async (e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
+        <div className="border border-gray-300">
+          <Composer
+            placeholder={operationType === "iterate"
+              ? "Tweak your charm"
+              : "Add new features to your charm"}
+            readOnly={false}
+            mentions={mentions}
+            value={input}
+            onValueChange={setInput}
+            onKeyDown={async (e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
 
-              handlePerformOperation();
-            }
-          }}
-          style={{ width: "100%", height: "96px" }}
-        />
+                handlePerformOperation();
+              }
+            }}
+            style={{ width: "100%", height: "96px" }}
+          />
+        </div>
 
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center">

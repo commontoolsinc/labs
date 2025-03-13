@@ -366,59 +366,47 @@ export function CommandCenter() {
           />
         </div>
 
-        <Composer
-          placeholder={mode.type === "confirm"
-            ? mode.message || "Are you sure?"
-            : mode.type === "input"
-            ? mode.placeholder
-            : "What would you like to do?"}
-          readOnly={mode.type === "confirm"}
-          value={search}
-          onValueChange={setSearch}
-          mentions={charmMentions}
-          onKeyDown={async (e) => {
-            // Only handle Enter for input mode, ignore for select mode
-            if (mode.type === "input" && e.key === "Enter") {
-              e.preventDefault();
-              const command = mode.command;
-              const finalText = await formatPromptWithMentions(
-                search,
-                charmManager,
-              );
-              command.handler?.(finalText);
-            }
-            // For select mode, prevent the default Enter behavior
-            if (mode.type === "select" && e.key === "Enter") {
-              e.preventDefault();
-            }
-          }}
-          style={{ flexGrow: 1 }}
-        />
-        {
-          /* <Command.Input
-          placeholder={mode.type === "confirm"
-            ? mode.message || "Are you sure?"
-            : mode.type === "input"
-            ? mode.placeholder
-            : "What would you like to do?"}
-          readOnly={mode.type === "confirm"}
-          value={search}
-          onValueChange={setSearch}
-          onKeyDown={(e) => {
-            // Only handle Enter for input mode, ignore for select mode
-            if (mode.type === "input" && e.key === "Enter") {
-              e.preventDefault();
-              const command = mode.command;
-              command.handler?.(search);
-            }
-            // For select mode, prevent the default Enter behavior
-            if (mode.type === "select" && e.key === "Enter") {
-              e.preventDefault();
-            }
-          }}
-          style={{ flexGrow: 1 }}
-        /> */
-        }
+        {/* Use Composer only for input mode, standard Command.Input otherwise */}
+        {mode.type === "input"
+          ? (
+            <Composer
+              placeholder={mode.placeholder || "Enter input"}
+              value={search}
+              onValueChange={setSearch}
+              mentions={charmMentions}
+              onKeyDown={async (e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  const command = mode.command;
+                  const finalText = await formatPromptWithMentions(
+                    search,
+                    charmManager,
+                  );
+                  command.handler?.(finalText);
+                }
+              }}
+              style={{ flexGrow: 1 }}
+            />
+          )
+          : (
+            <Command.Input
+              placeholder={mode.type === "confirm"
+                ? mode.message || "Are you sure?"
+                : mode.type === "input"
+                ? mode.placeholder || "Enter input"
+                : "What would you like to do?"}
+              readOnly={mode.type === "confirm"}
+              value={search}
+              onValueChange={setSearch}
+              onKeyDown={(e) => {
+                // For select mode, prevent the default Enter behavior
+                if (mode.type === "select" && e.key === "Enter") {
+                  e.preventDefault();
+                }
+              }}
+              style={{ flexGrow: 1 }}
+            />
+          )}
       </div>
 
       <Command.List>

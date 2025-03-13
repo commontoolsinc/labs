@@ -593,16 +593,28 @@ export function Composer({
     <>
       <Slate editor={editor} initialValue={currentValue} onChange={onChange}>
         <Editable
-          className="border border-gray-400 p-2"
+          className="p-2"
           readOnly={readOnly}
           renderElement={renderElement}
           renderLeaf={renderLeaf}
           onKeyDown={handleKeyDown}
           onDOMBeforeInput={handleDOMBeforeInput}
           placeholder={placeholder || "Enter some text..."}
+          renderPlaceholder={({
+            children,
+            attributes,
+          }) => (
+            <div {...attributes} className="p-2">
+              <p>{children}</p>
+            </div>
+          )}
           style={{
             ...style,
             overflowY: "auto",
+            minHeight: "36px",
+            maxHeight: "200px",
+            height: "auto",
+            resize: "none",
           }}
         />
         {target && filteredMentions.length > 0 && (
