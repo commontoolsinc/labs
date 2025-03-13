@@ -15,10 +15,7 @@ type TypedContent =
     url: string;
   };
 
-export const DEFAULT_LLM_URL = typeof globalThis.location !== "undefined"
-  ? globalThis.location.protocol + "//" + globalThis.location.host +
-    "/api/ai/llm"
-  : "//api/ai/llm";
+export const DEFAULT_LLM_URL = "https://toolshed.saga-castor.ts.net/api/ai/llm";
 
 export type LLMRequest = {
   messages: SimpleMessage[] | SimpleContent[];
@@ -30,11 +27,9 @@ export type LLMRequest = {
 };
 
 export class LLMClient {
-  static DEFAULT_URL = DEFAULT_LLM_URL;
-
   private serverUrl: string;
 
-  constructor(serverUrl: string) {
+  constructor(serverUrl: string = DEFAULT_LLM_URL) {
     this.serverUrl = serverUrl;
   }
 
