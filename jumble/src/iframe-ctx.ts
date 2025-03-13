@@ -126,6 +126,7 @@ export const setupIframe = () =>
       context: any,
       key: string,
       callback: (key: string, value: any) => void,
+      doNotSendMyDataBack: boolean,
     ): any {
       const action: Action = (log: ReactivityLog) => {
         const data = key === "*"
@@ -137,7 +138,7 @@ export const setupIframe = () =>
         const serialized = removeNonJsonData(data);
         const serializedString = JSON.stringify(serialized);
         const previousValue = getPreviousValue(context, key);
-        if (serializedString !== previousValue) {
+        if (serializedString !== previousValue || !doNotSendMyDataBack) {
           console.log("subscribe", key, serialized, previousValue);
           setPreviousValue(context, key, serializedString);
           callback(key, serialized);

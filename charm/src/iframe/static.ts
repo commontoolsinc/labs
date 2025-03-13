@@ -53,7 +53,7 @@ ${JSON.stringify(libraries)}
           setReceived(true);
 
           // Update the state with the received value or null if undefined
-          const value = event.data.data[1] === undefined ? null : event.data.data[1];
+          const value = event.data.data[1];
           console.log("useDoc", key, "updated", value);
           setDocState(value);
         }
@@ -62,18 +62,18 @@ ${JSON.stringify(libraries)}
       window.addEventListener("message", handleMessage);
 
       // Subscribe to the specific key
-      window.parent.postMessage({ type: "subscribe", data: key }, "*");
+      window.parent.postMessage({ type: "subscribe", data: [key] }, "*");
       window.parent.postMessage({ type: "read", data: key }, "*");
 
       return () => {
         window.removeEventListener("message", handleMessage);
-        window.parent.postMessage({ type: "unsubscribe", data: key }, "*");
+        window.parent.postMessage({ type: "unsubscribe", data: [key] }, "*");
       };
     }, [key]);
 
     // After we've received a response, apply default value if needed
     React.useEffect(() => {
-      if (received && doc === null && defaultValue !== undefined) {
+      if (received && doc === undefined && defaultValue !== undefined) {
         // Only write the default value if we've confirmed no data exists
         console.log("useDoc", key, "default", defaultValue);
         window.parent.postMessage({ type: "write", data: [key, defaultValue] }, "*");
@@ -91,7 +91,7 @@ ${JSON.stringify(libraries)}
     };
 
     // Return the current document value or the default if we haven't received data yet
-    return [received ? (doc === null ? defaultValue : doc) : defaultValue, updateDoc];
+    return [received ? (doc === undefined ? defaultValue : doc) : defaultValue, updateDoc];
   };
 
   // Define llm utility with React available
