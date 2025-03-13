@@ -242,6 +242,7 @@ const CharmTable = (
               </th>
               <th scope="col" className="px-6 py-3">Name</th>
               <th scope="col" className="px-6 py-3">ID</th>
+              <th scope="col" className="px-6 py-3">Parents</th>
               <th scope="col" className="px-6 py-3">Actions</th>
             </tr>
           </thead>
@@ -277,6 +278,9 @@ const CharmTable = (
                     <NavLink to={`/${replicaName}/${id}`}>
                       #{id}
                     </NavLink>
+                  </td>
+                  <td className="px-6 py-4">
+                    {JSON.stringify(charmManager.getParents(charm))}
                   </td>
                   <td className="px-6 py-4">
                     <button

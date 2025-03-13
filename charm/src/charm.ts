@@ -327,6 +327,11 @@ export class CharmManager {
     }
   }
 
+  getParents(charm: Cell<Charm>): Cell<Charm>[] {
+    return charm.getSourceCell(charmSourceCellSchema)?.key("parents").get() ??
+      [];
+  }
+
   async getCellById<T>(
     id: EntityId | string,
     path: string[] = [],
