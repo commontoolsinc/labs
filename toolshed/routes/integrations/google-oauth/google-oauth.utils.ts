@@ -1,10 +1,6 @@
 import { OAuth2Client } from "@cmd-johnson/oauth2-client";
 import env from "@/env.ts";
-import {
-  type CellLink,
-  getCellFromCellLink,
-  storage,
-} from "@commontools/runner";
+import { type CellLink, getCellFromLink, storage } from "@commontools/runner";
 import { Context } from "@hono/hono";
 import { Identity, Signer } from "@commontools/identity";
 // Types
@@ -169,10 +165,8 @@ export async function getAuthCellAndStorage(docLink: CellLink | string) {
 
     storage.setRemoteStorage(new URL("http://localhost:8000"));
 
-    // FIXME(ja): the space should be inferred from the doclink - but it isn't there yet
     // FIXME(ja): add the authcell schema!
-    const authCell = getCellFromCellLink(
-      parsedDocLink.space, // FIXME(ja): the space should be inferred from the doclink - but it isn't there yet
+    const authCell = getCellFromLink(
       parsedDocLink,
       undefined,
     );

@@ -214,27 +214,27 @@ export function getCellFromEntityId(
   return createCell(doc, path, log, schema);
 }
 
-export function getCellFromCellLink<T>(
-  space: string,
+export function getCellFromLink<T>(
   docLink: CellLink,
   schema?: JSONSchema,
   log?: ReactivityLog,
 ): Cell<T>;
-export function getCellFromCellLink<S extends JSONSchema = JSONSchema>(
-  space: string,
+export function getCellFromLink<S extends JSONSchema = JSONSchema>(
   docLink: CellLink,
   schema: S,
   log?: ReactivityLog,
 ): Cell<Schema<S>>;
-export function getCellFromCellLink(
-  space: string, // TODO(seefeld): Read from DocLink once it's defined there
+export function getCellFromLink(
   docLink: CellLink,
   schema?: JSONSchema,
   log?: ReactivityLog,
 ): Cell<any> {
+  if (!docLink.space) {
+    throw new Error("Cell link has no space");
+  }
   const doc = isDoc(docLink.cell)
     ? docLink.cell
-    : getDocByEntityId(space, getEntityId(docLink.cell)!, true)!;
+    : getDocByEntityId(docLink.space, getEntityId(docLink.cell)!, true)!;
   return createCell(doc, docLink.path, log, schema);
 }
 
