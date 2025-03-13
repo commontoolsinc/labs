@@ -1,8 +1,7 @@
-import { registerNewRecipe, Cell, EntityId } from "@commontools/runner";
+import { Cell, registerNewRecipe, tsToExports } from "@commontools/runner";
 import { LLMClient } from "@commontools/llm-client";
 import { createJsonSchema, JSONSchema } from "@commontools/builder";
 
-import { tsToExports } from "./localBuild.ts";
 import { Charm, CharmManager } from "./charm.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
