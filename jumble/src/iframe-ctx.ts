@@ -14,7 +14,7 @@ import { client as llm } from "@commontools/llm";
 // before sent between frame boundaries via structured clone algorithm.
 // There should be a more efficient generalized method for doing
 // so instead of an extra JSON parse/stringify cycle.
-const serializeProxyObjects = (proxy: any) => {
+const removeNonJsonData = (proxy: any) => {
   return proxy == undefined ? undefined : JSON.parse(JSON.stringify(proxy));
 };
 
@@ -88,15 +88,32 @@ function throttle(context: any, key: string, callback: () => void): void {
   }
 }
 
+const previousValues = new Map<any, Map<string, any>>();
+
+function getPreviousValue(context: any, key: string) {
+  return previousValues.get(context)?.get(key);
+}
+
+function setPreviousValue(context: any, key: string, value: any) {
+  if (!previousValues.has(context)) {
+    previousValues.set(context, new Map());
+  }
+  previousValues.get(context)!.set(key, value);
+}
+
 export const setupIframe = () =>
   setIframeContextHandler({
     read(context: any, key: string): any {
       const data = isCell(context) ? context.key(key).get?.() : context?.[key];
-      const serialized = serializeProxyObjects(data);
+      const serialized = removeNonJsonData(data);
+      console.log("read", key, serialized, JSON.stringify(serialized));
+      setPreviousValue(context, key, JSON.stringify(serialized));
       return serialized;
     },
     write(context: any, key: string, value: any) {
+      setPreviousValue(context, key, JSON.stringify(value));
       throttle(context, key, () => {
+        console.log("write", key, value, JSON.stringify(value));
         if (isCell(context)) {
           addCommonIDfromObjectID(value);
           context.key(key).set(value);
@@ -110,8 +127,6 @@ export const setupIframe = () =>
       key: string,
       callback: (key: string, value: any) => void,
     ): any {
-      let previousValue: any;
-
       const action: Action = (log: ReactivityLog) => {
         const data = key === "*"
           ? (isCell(context) ? context.withLog(log).get() : context)
@@ -119,9 +134,12 @@ export const setupIframe = () =>
             // get?.() because streams don't have a get, set undefined for those
             ? context.withLog(log).key(key).get?.()
             : context?.[key]);
-        const serialized = serializeProxyObjects(data);
-        if (serialized !== previousValue) {
-          previousValue = serialized;
+        const serialized = removeNonJsonData(data);
+        const serializedString = JSON.stringify(serialized);
+        const previousValue = getPreviousValue(context, key);
+        if (serializedString !== previousValue) {
+          console.log("subscribe", key, serialized, previousValue);
+          setPreviousValue(context, key, serializedString);
           callback(key, serialized);
         }
       };
