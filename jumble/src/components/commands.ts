@@ -702,7 +702,7 @@ async function handleAddGmailImporter(deps: CommandContext, filename: string) {
   deps.setLoading(true);
   try {
     const response = await fetch(
-      `https://raw.githubusercontent.com/commontoolsinc/labs/refs/heads/main/recipes/${filename}`,
+      `https://raw.githubusercontent.com/commontoolsinc/labs/refs/heads/main/recipes/${filename}?${Date.now()}`,
     );
     const src = await response.text();
 
