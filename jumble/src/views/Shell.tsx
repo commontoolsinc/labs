@@ -9,6 +9,7 @@ import { AuthenticationView } from "@/views/AuthenticationView.tsx";
 import { ActionBar } from "@/components/ActionBar.tsx";
 import { CharmPublisher } from "@/components/Publish.tsx";
 import { useGlobalActions } from "@/hooks/use-global-actions.tsx";
+import { SyncStatusProvider } from "@/contexts/SyncStatusContext.tsx";
 
 export default function Shell() {
   const { charmId } = useParams<CharmRouteParams>();
@@ -21,17 +22,19 @@ export default function Shell() {
 
   return (
     <CharmsManagerProvider>
-      <div className="flex flex-col shell h-full bg-gray-50 border-2 border-black">
-        <ShellHeader session={session} charmId={charmId} />
+      <SyncStatusProvider>
+        <div className="flex flex-col shell h-full bg-gray-50 border-2 border-black">
+          <ShellHeader session={session} charmId={charmId} />
 
-        <div className="relative h-full overflow-y-auto">
-          <Outlet />
+          <div className="relative h-full overflow-y-auto">
+            <Outlet />
+          </div>
+
+          <ActionBar />
+          <CharmPublisher />
+          <CommandCenter />
         </div>
-
-        <ActionBar />
-        <CharmPublisher />
-        <CommandCenter />
-      </div>
+      </SyncStatusProvider>
     </CharmsManagerProvider>
   );
 }

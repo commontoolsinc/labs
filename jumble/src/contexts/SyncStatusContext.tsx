@@ -24,23 +24,30 @@ interface SyncStatusProviderProps {
 
 export function SyncStatusProvider({
   children,
-  intervalMs = 5000,
+  intervalMs = 50,
 }: SyncStatusProviderProps) {
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(true);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const { charmManager } = useCharmManager();
   const isCheckingSyncRef = useRef(false);
 
   useEffect(() => {
+    console.log("sync status useEffect", charmManager);
     let isMounted = true;
 
     const checkSyncStatus = async () => {
+      console.log("check sync status", {
+        charmManager,
+        isMounted,
+        isCheckingSyncRef,
+      });
       if (!isMounted || isCheckingSyncRef.current || !charmManager) return;
 
       isCheckingSyncRef.current = true;
       setIsSyncing(true);
 
       try {
+        console.log("sync status provider");
         await charmManager.synced();
 
         if (isMounted) {

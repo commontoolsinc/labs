@@ -262,7 +262,13 @@ export default function CharmList() {
   const { charmManager } = useCharmManager();
   const [pinned] = useCell(charmManager.getPinned());
   const [charms] = useCell(charmManager.getCharms());
+
   const { isSyncing } = useSyncedStatus();
+  console.log(charmManager, isSyncing);
+
+  if (isSyncing) {
+    return <div>Trying to connect, please wait</div>;
+  }
 
   if (!isSyncing && (!charms || charms.length === 0)) {
     return (
