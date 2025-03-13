@@ -41,9 +41,7 @@ export class CommonGoogleOauthElement extends LitElement {
     this.authStatus = "Initiating OAuth flow...";
     this.authResult = null;
 
-    let authCellId = JSON.parse(JSON.stringify(this.auth, null, 2));
-    authCellId.space = this.auth?.getAsCellLink().cell.space;
-    authCellId = JSON.stringify(authCellId);
+    const authCellId = JSON.stringify(this.auth?.getAsCellLink());
 
     console.log("authCellId", authCellId);
 
