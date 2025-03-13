@@ -266,9 +266,8 @@ function factoryFromRecipe<T, R>(
   let argumentSchema: JSONSchemaWritable;
 
   if (typeof argumentSchemaArg === "string") {
-    // TODO(seefeld): initial is likely not needed anymore
-    // TODO(seefeld): But we need a derived schema for the result
-    argumentSchema = createJsonSchema(defaults, {});
+    // TODO(seefeld): We still need a derived schema for the result
+    argumentSchema = createJsonSchema(defaults, true);
     argumentSchema.description = argumentSchemaArg;
 
     delete (argumentSchema.properties as any)?.[UI]; // TODO(seefeld): This should be a schema for views
