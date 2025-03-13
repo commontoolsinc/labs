@@ -92,7 +92,7 @@ export class CommonGoogleOauthElement extends LitElement {
       const authWindow = globalThis.open(
         resp.url,
         "_blank",
-        "width=800,height=600,left=200,top=200",
+        "width=800,height=800,left=200,top=200",
       );
 
       // Check for window closure

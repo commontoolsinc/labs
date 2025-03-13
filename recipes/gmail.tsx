@@ -78,10 +78,10 @@ const GmailImporterInputs = {
     settings: {
       type: "object",
       properties: {
-        labels: {
+        gmailFilterQuery: {
           type: "string",
-          description: "comma separated list of labels",
-          default: "INBOX",
+          description: "gmail filter query",
+          default: "in:INBOX",
         },
         limit: {
           type: "number",
@@ -171,17 +171,14 @@ const googleUpdater = handler(
       return;
     }
 
-    const labels = state.settings.labels
-      .split(",")
-      .map((label) => label.trim())
-      .filter(Boolean);
+    const gmailFilterQuery = state.settings.gmailFilterQuery;
 
-    console.log("labels", labels);
+    console.log("gmailFilterQuery", gmailFilterQuery);
 
     fetchEmail(
       state.auth.token,
       state.settings.limit,
-      labels,
+      gmailFilterQuery,
       state,
     );
 
@@ -399,7 +396,7 @@ async function fetchLabels(
 export async function fetchEmail(
   accessToken: string,
   maxResults: number = 10,
-  labelIds: string[] = ["INBOX"],
+  gmailFilterQuery: string = "in:INBOX",
   state: {
     emails: Cell<Email[]>;
   },
@@ -408,13 +405,9 @@ export async function fetchEmail(
     state.emails.get().map((email) => email.id),
   );
 
-  const query = labelIds
-    .map((label) => `label:${label}`)
-    .join(" OR ");
-
   const listResponse = await fetch(
     `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${
-      encodeURIComponent(query)
+      encodeURIComponent(gmailFilterQuery)
     }&maxResults=${maxResults}`,
     {
       headers: {
@@ -489,9 +482,12 @@ export async function fetchEmail(
   return { messages: allDetailedMessages };
 }
 
-const updateLabels = handler<{ detail: { value: string } }, { labels: string }>(
+const updateGmailFilterQuery = handler<
+  { detail: { value: string } },
+  { gmailFilterQuery: string }
+>(
   ({ detail }, state) => {
-    state.labels = detail?.value ?? "INBOX";
+    state.gmailFilterQuery = detail?.value ?? "in:INBOX";
   },
 );
 
@@ -515,42 +511,59 @@ export default recipe(
         derive(auth, (auth) => auth?.user?.email || "unauthorized")
       }`,
       [UI]: (
-        <div>
-          <h1>
-            Gmail Importer: {derive(emails, (emails) => emails.length)} emails
-          </h1>
-          <common-hstack>
-            <label>Import Limit</label>
-            <common-input
-              value={settings.limit}
-              placeholder="count of emails to import"
-              oncommon-input={updateLimit({ limit: settings.limit })}
-            />
-          </common-hstack>
-          <common-hstack>
-            <label>Import Labels</label>
-            <common-input
-              value={settings.labels}
-              placeholder="comma separated list of labels"
-              oncommon-input={updateLabels({ labels: settings.labels })}
-            />
+        <div style="display: flex; gap: 10px; flex-direction: column; padding: 25px;">
+          <h2 style="font-size: 20px; font-weight: bold;">
+            {auth?.user?.email}
+          </h2>
+          <h2 style="font-size: 20px; font-weight: bold;">
+            Imported email count: {derive(emails, (emails) => emails.length)}
+          </h2>
+
+          <common-hstack gap="sm">
+            <common-vstack gap="sm">
+              <div>
+                <label>Import Limit</label>
+                <common-input
+                  customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
+                  value={settings.limit}
+                  placeholder="count of emails to import"
+                  oncommon-input={updateLimit({ limit: settings.limit })}
+                />
+              </div>
+
+              <div>
+                <label>Gmail Filter Query</label>
+                <common-input
+                  customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
+                  value={settings.gmailFilterQuery}
+                  placeholder="in:INBOX"
+                  oncommon-input={updateGmailFilterQuery({
+                    gmailFilterQuery: settings.gmailFilterQuery,
+                  })}
+                />
+              </div>
+            </common-vstack>
           </common-hstack>
           <common-google-oauth $auth={auth} />
           <div>
             <table>
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Subject</th>
-                  <th>Label</th>
+                  <th style="padding: 10px;">DATE</th>
+                  <th style="padding: 10px;">SUBJECT</th>
+                  <th style="padding: 10px;">LABEL</th>
                 </tr>
               </thead>
               <tbody>
                 {emails.map((email) => (
                   <tr>
-                    <td>&nbsp;{email.date}&nbsp;</td>
-                    <td>&nbsp;{email.subject}&nbsp;</td>
-                    <td>
+                    <td style="border: 1px solid black; padding: 10px;">
+                      &nbsp;{email.date}&nbsp;
+                    </td>
+                    <td style="border: 1px solid black; padding: 10px;">
+                      &nbsp;{email.subject}&nbsp;
+                    </td>
+                    <td style="border: 1px solid black; padding: 10px;">
                       &nbsp;{derive(
                         email,
                         (email) => email.labelIds.join(", "),

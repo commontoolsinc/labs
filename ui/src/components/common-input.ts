@@ -53,12 +53,6 @@ export class CommonInputElement extends LitElement {
         --height: 24px;
       }
 
-      .input-wrapper {
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-      }
-
       .input {
         appearance: none;
         border: 0;
@@ -84,17 +78,20 @@ export class CommonInputElement extends LitElement {
     value: { type: String },
     placeholder: { type: String },
     appearance: { type: String },
+    customStyle: { type: String },
   };
 
   declare value: string;
   declare placeholder: string;
   declare appearance: string;
+  declare customStyle: string;
 
   constructor() {
     super();
     this.value = "";
     this.placeholder = "";
     this.appearance = "default";
+    this.customStyle = "";
   }
 
   override render() {
@@ -130,6 +127,7 @@ export class CommonInputElement extends LitElement {
           @blur="${onblur}"
           .value="${this.value}"
           .placeholder="${this.placeholder}"
+          style="${this.customStyle}"
           type="text"
         />
       </div>
