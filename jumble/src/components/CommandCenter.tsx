@@ -392,8 +392,6 @@ export function CommandCenter() {
             <Command.Input
               placeholder={mode.type === "confirm"
                 ? mode.message || "Are you sure?"
-                : mode.type === "input"
-                ? mode.placeholder || "Enter input"
                 : "What would you like to do?"}
               readOnly={mode.type === "confirm"}
               value={search}
