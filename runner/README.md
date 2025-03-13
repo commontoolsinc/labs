@@ -24,19 +24,11 @@ purposes:
 
 - `src/index.ts`: The main entry point that exports the public API
 - `src/cell.ts`: Defines the `Cell` abstraction and its implementation
-- `src/doc.ts`: Implements `DocImpl` which represents stored documents in storage
+- `src/doc.ts`: Implements `DocImpl` which represents stored documents in
+  storage
 - `src/runner.ts`: Provides the runtime for executing recipes
 - `src/schema.ts`: Handles schema validation and transformation
 - `src/storage.ts`: Manages persistence and synchronization
-
-### Key Abstractions
-
-- **Storage**: `src/storage/` - Base interface and implementations for persistence
-- **Modules**: `src/module.ts` - Module system for loading recipes and dependencies
-- **Reactivity**: `src/reactivity.ts` - Core reactivity primitives
-- **DocMap**: `src/doc-map.ts` - Handles mappings between document structures
-- **Schema Map**: `src/schema-map.ts` - Maps schema concepts to storage representations
-- **Recipe Map**: `src/recipe-map.ts` - Manages recipe execution mapping
 
 ## Core Concepts
 
@@ -45,22 +37,22 @@ purposes:
 One of the most important concepts to understand in the Runner is the
 relationship between documents and cells:
 
-- **DocImpl**: Represents raw documents stored in storage. These are the actual 
+- **DocImpl**: Represents raw documents stored in storage. These are the actual
   persistence units that get saved and synchronized.
-  
-- **Cell**: The user-facing abstraction that provides a reactive view over one 
+
+- **Cell**: The user-facing abstraction that provides a reactive view over one
   or more documents. Cells are defined by schemas and can traverse document
   relationships through cell links and aliases.
-  
-While DocImpl handles the low-level storage concerns, Cells provide the 
-higher-level programming model with schema validation, reactivity, and 
-relationship traversal. When you're working with data in the Runner, you'll 
+
+While DocImpl handles the low-level storage concerns, Cells provide the
+higher-level programming model with schema validation, reactivity, and
+relationship traversal. When you're working with data in the Runner, you'll
 almost always interact with Cells rather than directly with DocImpl instances.
 
 ### Schema and Validation
 
-The schema system defines both the structure of data and how it's represented
-in storage:
+The schema system defines both the structure of data and how it's represented in
+storage:
 
 - Schemas are based on JSON Schema with extensions for reactivity and references
 - Each Cell has an associated schema that validates its data
@@ -71,7 +63,8 @@ in storage:
 
 Cells can reference other cells through links and aliases:
 
-- **CellLink**: A reference to another cell, containing a space ID and document ID
+- **CellLink**: A reference to another cell, containing a space ID and document
+  ID
 - **Aliases**: Named references within documents that point to other documents
 - These mechanisms allow building complex, interconnected data structures
 - The system automatically traverses links when needed
@@ -93,7 +86,8 @@ The storage system handles persistence and synchronization:
 - Document-based persistence model
 - Identity-based access control
 - Synchronization through a publish/subscribe mechanism
-- Conflict resolution strategies
+- Primitives for conflict resolution strategies, although right now only
+  compare-and-swap is implemented and failed transactions just reset the data
 
 ### Reactivity System
 
@@ -102,7 +96,6 @@ The reactivity system is what makes the Runner dynamic:
 - Based on observable patterns and subscriptions
 - Changes automatically propagate through the system
 - Fine-grained updates minimize unnecessary recalculations
-- Supports both push-based and pull-based reactivity models
 
 ### Scheduler
 
@@ -503,10 +496,12 @@ catch errors at compile time.
 
 ## Data Flow in the Runner
 
-Understanding the data flow in the Runner helps visualize how different components interact:
+Understanding the data flow in the Runner helps visualize how different
+components interact:
 
 1. **Input** → Data enters the system through Cell updates or recipe executions
-2. **Validation** → Schema validation ensures data conforms to expected structure
+2. **Validation** → Schema validation ensures data conforms to expected
+   structure (so far only on get, not yet on write)
 3. **Processing** → Recipes transform data according to their logic
 4. **Reactivity** → Changes propagate to dependent cells and recipes
 5. **Storage** → Updated data is persisted to storage if configured
@@ -514,26 +509,6 @@ Understanding the data flow in the Runner helps visualize how different componen
 
 This flow happens automatically once set up, allowing developers to focus on
 business logic rather than managing data flow manually.
-
-## Common Patterns and Best Practices
-
-### Working with Complex Data Structures
-
-- Use nested schemas with `asCell: true` for better organization
-- Reference other cells using CellLinks for relationships
-- Use aliases for semantic connections between documents
-
-### Optimizing Performance
-
-- Keep recipes small and focused on specific transformations
-- Use immutable cells for static data
-- Set up subscriptions at the appropriate level of granularity
-
-### Synchronization Strategies
-
-- Only sync cells that need to be shared across clients
-- Use the `synced()` method to wait for synchronization to complete
-- Handle conflicts appropriately in the UI layer
 
 ## Contributing
 
