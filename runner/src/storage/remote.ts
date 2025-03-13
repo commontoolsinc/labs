@@ -6,6 +6,7 @@ import type {
   JSONValue,
   MemorySpace,
   Protocol,
+  Query,
   UCAN,
 } from "@commontools/memory/interface";
 import * as Memory from "@commontools/memory/consumer";
@@ -160,8 +161,11 @@ export class RemoteStorageProvider implements StorageProvider {
       if (local.remote.size < this.settings.maxSubscriptionsPerSpace) {
         // If we do not have a subscription yet we create a query and
         // subscribe to it.
-        const query = local.memory.query({ select: { [of]: { [the]: {} } } });
-        subscription = new Subscription(query, new Set());
+        subscription = Subscription.spawn(
+          local.memory,
+          { select: { [of]: { [the]: {} } } },
+        );
+
         // store subscription so it can be reused.
         local.remote.set(of, subscription);
 
@@ -170,9 +174,9 @@ export class RemoteStorageProvider implements StorageProvider {
           subscription: {
             entity: of,
             subscriberCount: subscription.subscribers.size,
-            totalSubscriptions: local.remote.size
+            totalSubscriptions: local.remote.size,
           },
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
         });
       }
     }
@@ -193,7 +197,7 @@ export class RemoteStorageProvider implements StorageProvider {
       console.warn(
         `⚠️ Reached maximum subscription limit on ${this.workspace}. Call to .sink is ignored`,
       );
-      return () => { };
+      return () => {};
     }
   }
   async sync(entityId: EntityId): Promise<void> {
@@ -208,7 +212,7 @@ export class RemoteStorageProvider implements StorageProvider {
       console.warn(
         `⚠️ Reached maximum subscription limit on ${this.workspace}. Call to .sync is ignored`,
       );
-      return new Promise(() => { });
+      return new Promise(() => {});
     }
   }
 
@@ -216,7 +220,7 @@ export class RemoteStorageProvider implements StorageProvider {
    * Subscriber used by the .sync. We use the same one so we'll have at most one
    * per `.sync` per query.
    */
-  static sync(_value: JSONValue | undefined) { }
+  static sync(_value: JSONValue | undefined) {}
 
   get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
     const of = RemoteStorageProvider.toEntity(entityId);
@@ -269,9 +273,9 @@ export class RemoteStorageProvider implements StorageProvider {
       state: {
         spaces: this.state.size,
         subscriptions: remote.size,
-        localChanges: local.size
+        localChanges: local.size,
       },
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
 
     // Once we have a result of the transaction we clear out local facts we
@@ -308,7 +312,7 @@ export class RemoteStorageProvider implements StorageProvider {
     return Codec.Receipt.fromString(source);
   }
 
-  receive(data: string) {
+  onReceive(data: string) {
     return this.writer.write(
       this.inspect({ receive: this.parse(data) }).receive,
     );
@@ -324,13 +328,13 @@ export class RemoteStorageProvider implements StorageProvider {
   handleEvent(event: MessageEvent) {
     switch (event.type) {
       case "message":
-        return this.receive(event.data);
+        return this.onReceive(event.data);
       case "open":
-        return this.open(event.target as WebSocket);
+        return this.onOpen(event.target as WebSocket);
       case "close":
-        return this.disconnect(event);
+        return this.onDisconnect(event);
       case "error":
-        return this.disconnect(event);
+        return this.onDisconnect(event);
     }
   }
   connect() {
@@ -355,14 +359,14 @@ export class RemoteStorageProvider implements StorageProvider {
     this.connectionCount += 1;
   }
 
-  async open(socket: WebSocket) {
+  async onOpen(socket: WebSocket) {
     const { reader, queue } = this;
 
     // Report connection to inspector
     this.inspector?.postMessage({
-      connectionStatus: 'connected',
+      connectionStatus: "connected",
       connectionCount: this.connectionCount,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
 
     // If we did have connection
@@ -404,16 +408,16 @@ export class RemoteStorageProvider implements StorageProvider {
     }
   }
 
-  disconnect(event: Event) {
+  onDisconnect(event: Event) {
     const socket = event.target as WebSocket;
     // If connection is `null` provider was closed and we do nothing on
     // disconnect.
     if (this.connection === socket) {
       // Report disconnection to inspector
       this.inspector?.postMessage({
-        connectionStatus: 'disconnected',
+        connectionStatus: "disconnected",
         reason: event.type,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
 
       this.connect();
@@ -491,13 +495,34 @@ export interface Subscriber {
 }
 
 class Subscription<Space extends MemorySpace> {
-  reader: ReadableStreamDefaultReader;
+  reader!: ReadableStreamDefaultReader;
+  query!: Memory.QueryView<Space, Protocol<Space>>;
+
+  static spawn<Space extends MemorySpace>(
+    session: Memory.MemorySpaceSession<Space>,
+    selector: Query["args"],
+  ) {
+    return new Subscription(session, selector);
+  }
   constructor(
-    public query: Memory.QueryView<Space, Protocol<Space>>,
+    public session: Memory.MemorySpaceSession<Space>,
+    public selector: Query["args"],
     public subscribers: Set<Subscriber> = new Set(),
   ) {
-    this.reader = query.subscribe().getReader();
+    this.connect();
+  }
+
+  connect() {
+    const query = this.session.query(this.selector);
+    const reader = query.subscribe().getReader();
+    this.query = query;
+    this.reader = reader;
+
+    // TODO(gozala): Need to do this cleaner, but for now we just
+    // broadcast when query returns so cell circuitry picks up changes.
+    query.promise.then(() => this.broadcast());
     this.poll();
+    return this;
   }
   get value(): JSONValue | undefined {
     return this.query.facts?.[0]?.is;
@@ -527,8 +552,7 @@ class Subscription<Space extends MemorySpace> {
   reconnect() {
     // TODO(gozala): We could make it possible to rerun the subscription
     this.reader.cancel();
-    this.reader = this.query.subscribe().getReader();
-    this.poll();
+    this.connect();
   }
 
   subscribe(subscriber: Subscriber): Cancel {
