@@ -25,6 +25,7 @@ const EmailSchema = {
     date: { type: "string" },
     to: { type: "string" },
     plainText: { type: "string" },
+    htmlContent: { type: "string" },
   },
   required: [
     "id",
@@ -36,6 +37,7 @@ const EmailSchema = {
     "date",
     "to",
     "plainText",
+    "htmlContent",
   ],
 } as const as JSONSchema;
 type Email = Schema<typeof EmailSchema>;
@@ -60,6 +62,15 @@ const AuthSchema = {
   },
 } as const satisfies JSONSchema;
 type Auth = Schema<typeof AuthSchema>;
+
+const LabelSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    name: { type: "string" },
+  },
+} as const satisfies JSONSchema;
+type Label = Schema<typeof LabelSchema>;
 
 const GmailImporterInputs = {
   type: "object",
@@ -89,6 +100,10 @@ const GmailImporterInputs = {
 const ResultSchema = {
   type: "object",
   properties: {
+    labels: {
+      type: "array",
+      items: LabelSchema,
+    },
     emails: {
       type: "array",
       items: {
@@ -103,6 +118,7 @@ const ResultSchema = {
           date: { type: "string" },
           to: { type: "string" },
           plainText: { type: "string" },
+          htmlContent: { type: "string" },
         },
       },
     },
@@ -139,8 +155,9 @@ const googleUpdater = handler(
       emails: { type: "array", items: EmailSchema, default: [], asCell: true },
       auth: AuthSchema,
       settings: GmailImporterInputs.properties.settings,
+      labels: { type: "array", items: LabelSchema, default: [], asCell: true },
     },
-    required: ["emails", "auth", "settings"],
+    required: ["emails", "auth", "settings", "labels"],
   },
   (_event, state) => {
     console.log("googleUpdater!");
@@ -167,6 +184,8 @@ const googleUpdater = handler(
       labels,
       state,
     );
+
+    fetchLabels(state.auth.token, state);
   },
 );
 
@@ -261,17 +280,49 @@ Accept: application/json
       const date = getHeader(messageHeaders, "Date");
 
       let plainText = "";
+      let htmlContent = "";
+
       if (
         messageData.payload.parts && Array.isArray(messageData.payload.parts)
       ) {
+        // Look for plainText part
         const textPart = messageData.payload.parts.find(
           (part: any) => part.mimeType === "text/plain",
         );
         if (textPart?.body?.data) {
           plainText = decodeBase64(textPart.body.data);
         }
+
+        // Look for HTML part
+        const htmlPart = messageData.payload.parts.find(
+          (part: any) => part.mimeType === "text/html",
+        );
+        if (htmlPart?.body?.data) {
+          htmlContent = decodeBase64(htmlPart.body.data);
+        }
+
+        // Handle multipart messages - check for nested parts
+        if (htmlContent === "") {
+          for (const part of messageData.payload.parts) {
+            if (part.parts && Array.isArray(part.parts)) {
+              const nestedHtmlPart = part.parts.find(
+                (nestedPart: any) => nestedPart.mimeType === "text/html",
+              );
+              if (nestedHtmlPart?.body?.data) {
+                htmlContent = decodeBase64(nestedHtmlPart.body.data);
+                break;
+              }
+            }
+          }
+        }
       } else if (messageData.payload.body?.data) {
-        plainText = decodeBase64(messageData.payload.body.data);
+        // Handle single part messages
+        const bodyData = decodeBase64(messageData.payload.body.data);
+        if (messageData.payload.mimeType === "text/html") {
+          htmlContent = bodyData;
+        } else {
+          plainText = bodyData;
+        }
       }
 
       return {
@@ -284,6 +335,7 @@ Accept: application/json
         date,
         to: extractEmailAddress(to),
         plainText,
+        htmlContent,
       };
     } catch (error) {
       console.error("Error processing message part:", error);
@@ -297,22 +349,72 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function fetchLabels(
+  accessToken: string,
+  state: {
+    labels: Cell<Label[]>;
+  },
+) {
+  const existingLabels = new Set(
+    state.labels.get().map((label) => label.id),
+  );
+
+  try {
+    console.log("Fetching Gmail labels...");
+    const response = await fetch(
+      "https://gmail.googleapis.com/gmail/v1/users/me/labels",
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      },
+    );
+
+    const data = await response.json();
+
+    const labelData = data.labels.map((
+      label: { id: string; name: string },
+    ) => ({
+      id: label.id,
+      name: label.name,
+    }));
+
+    const newLabels = labelData.filter(
+      (label: { id: string }) => !existingLabels.has(label.id),
+    );
+
+    if (newLabels.length === 0) {
+      console.log("No new labels to fetch");
+      return { labels: [] };
+    }
+    state.labels.push(...newLabels);
+
+    return state.labels || [];
+  } catch (error) {
+    console.error("Error fetching Gmail labels:", error);
+    return [];
+  }
+}
+
 export async function fetchEmail(
   accessToken: string,
   maxResults: number = 10,
   labelIds: string[] = ["INBOX"],
-  state: { emails: Cell<Email[]> },
+  state: {
+    emails: Cell<Email[]>;
+  },
 ) {
   const existingEmailIds = new Set(
     state.emails.get().map((email) => email.id),
   );
 
-  console.log("existing email ids", existingEmailIds);
+  const query = labelIds
+    .map((label) => `label:${label}`)
+    .join(" OR ");
 
-  // First, get the list of message IDs from the inbox
   const listResponse = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=${
-      labelIds.map(encodeURIComponent).join(",")
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${
+      encodeURIComponent(query)
     }&maxResults=${maxResults}`,
     {
       headers: {
@@ -398,9 +500,14 @@ export default recipe(
   ResultSchema,
   ({ settings, auth }) => {
     const emails = cell<Email[]>([]);
+    const labels = cell<Label[]>([]);
 
     derive(emails, (emails) => {
       console.log("emails", emails.length);
+    });
+
+    derive(labels, (labels) => {
+      console.log("labels results", labels.length);
     });
 
     return {
@@ -457,7 +564,8 @@ export default recipe(
         </div>
       ),
       emails,
-      googleUpdater: googleUpdater({ emails, auth, settings }),
+      labels,
+      googleUpdater: googleUpdater({ emails, auth, settings, labels }),
     };
   },
 );
