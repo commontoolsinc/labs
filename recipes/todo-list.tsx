@@ -16,7 +16,7 @@ const TodoItemSchema = {
     done: { type: "boolean" },
   },
   required: ["title", "done"],
-} as const as JSONSchema;
+} as const satisfies JSONSchema;
 
 export type TodoItem = Schema<typeof TodoItemSchema>;
 
@@ -29,20 +29,17 @@ const TodoListSchema = {
     },
     items: {
       type: "array",
-      items: { $ref: "#/definitions/TodoItem" },
+      items: TodoItemSchema,
       default: [],
     },
   },
   required: ["title", "items"],
-  definitions: {
-    TodoItem: TodoItemSchema,
-  },
-} as const as JSONSchema;
+} as const satisfies JSONSchema;
 
 const ResultSchema = {
   type: "object",
   properties: {
-    items: { type: "array", items: TodoItemSchema.properties?.items },
+    items: { type: "array", items: TodoItemSchema },
     addItem: {
       asStream: true,
       type: "object",
@@ -56,10 +53,7 @@ const ResultSchema = {
     "/action/drop/handler": { asStream: true, type: "string" },
   },
   required: ["items", "/action/drop/schema", "/action/drop/handler"],
-  definitions: {
-    TodoItem: TodoItemSchema,
-  },
-} as const as JSONSchema;
+} as const satisfies JSONSchema;
 
 const addTask = handler<{ detail: { message: string } }, { items: TodoItem[] }>(
   (event, { items }) => {
@@ -69,11 +63,15 @@ const addTask = handler<{ detail: { message: string } }, { items: TodoItem[] }>(
 );
 
 const addItem = handler(
-  { type: "object", properties: { title: { type: "string" } } },
+  {
+    type: "object",
+    properties: { title: { type: "string" } },
+    required: ["title"],
+  },
   {
     type: "object",
     properties: {
-      items: { asCell: true, ...TodoItemSchema.properties?.items },
+      items: { asCell: true, ...TodoListSchema.properties.items },
     },
     default: { items: [] },
   },
@@ -92,12 +90,12 @@ const updateItem = handler<
   { detail: { checked: boolean; value: string } },
   { item: TodoItem }
 >(({ detail }, { item }) => {
-  item.done = detail.checked;
-  item.title = detail.value;
+  (item as any).done = detail.checked;
+  (item as any).title = detail.value;
 });
 
-const deleteItem = handler<{}, { items: TodoItem[]; item: TodoItem }>(
-  ({}, { item, items }) => {
+const deleteItem = handler<never, { items: TodoItem[]; item: TodoItem }>(
+  (_, { item, items }) => {
     const idx = items.findIndex((i) => i.title === item.title);
     if (idx !== -1) items.splice(idx, 1);
   },
