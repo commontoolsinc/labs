@@ -1,7 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { DocLink, getDoc } from "../src/doc.ts";
-import { type Cell, getImmutableCell, isCell, isStream } from "../src/cell.ts";
+import { getDoc } from "../src/doc.ts";
+import {
+  type Cell,
+  CellLink,
+  getImmutableCell,
+  isCell,
+  isStream,
+} from "../src/cell.ts";
 import type { JSONSchema } from "@commontools/builder";
 import { idle } from "../src/scheduler.ts";
 
@@ -263,7 +269,7 @@ describe("Schema Support", () => {
       });
       expect(log.reads.length).toEqual(4);
       expect(
-        log.reads.map((r: DocLink) => ({
+        log.reads.map((r: CellLink) => ({
           cell: r.cell.toJSON(),
           path: r.path,
         })),

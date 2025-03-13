@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { storage } from "../src/storage.ts";
 import { StorageProvider } from "../src/storage/base.ts";
 import { InMemoryStorageProvider } from "../src/storage/memory.ts";
-import { createRef, DocImpl, DocLink, getDoc } from "@commontools/runner";
+import { CellLink, createRef, DocImpl, getDoc } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 
 storage.setRemoteStorage(new URL("memory://"));

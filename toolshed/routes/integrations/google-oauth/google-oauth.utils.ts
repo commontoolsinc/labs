@@ -1,6 +1,10 @@
 import { OAuth2Client } from "@cmd-johnson/oauth2-client";
 import env from "@/env.ts";
-import { type DocLink, getCellFromDocLink, storage } from "@commontools/runner";
+import {
+  type CellLink,
+  getCellFromDocLink,
+  storage,
+} from "@commontools/runner";
 import { Context } from "@hono/hono";
 import { Identity, Signer } from "@commontools/identity";
 // Types
@@ -150,7 +154,7 @@ export async function fetchUserInfo(accessToken: string): Promise<UserInfo> {
 let signer: Signer | undefined;
 
 // Helper function to get auth cell and storage
-export async function getAuthCellAndStorage(docLink: DocLink | string) {
+export async function getAuthCellAndStorage(docLink: CellLink | string) {
   try {
     // Parse string to docLink if needed
     const parsedDocLink = typeof docLink === "string"
@@ -187,7 +191,7 @@ export async function getAuthCellAndStorage(docLink: DocLink | string) {
 export async function persistTokens(
   oauthToken: OAuth2Tokens,
   userInfo: UserInfo,
-  authCellDocLink: string | DocLink,
+  authCellDocLink: string | CellLink,
 ) {
   try {
     const { authCell, storage } = await getAuthCellAndStorage(authCellDocLink);
@@ -226,7 +230,9 @@ export async function persistTokens(
 }
 
 // Get tokens from the auth cell
-export async function getTokensFromAuthCell(authCellDocLink: string | DocLink) {
+export async function getTokensFromAuthCell(
+  authCellDocLink: string | CellLink,
+) {
   try {
     const { authCell } = await getAuthCellAndStorage(authCellDocLink);
 
@@ -310,7 +316,7 @@ export function createRefreshErrorResponse(
 }
 
 // Clears authentication data from the auth cell
-export async function clearAuthData(authCellDocLink: string | DocLink) {
+export async function clearAuthData(authCellDocLink: string | CellLink) {
   try {
     const { authCell, storage } = await getAuthCellAndStorage(authCellDocLink);
 

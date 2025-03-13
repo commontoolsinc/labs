@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { type DocImpl, getDoc, isDoc, isDocLink } from "../src/doc.ts";
-import { isCell } from "../src/cell.ts";
+import { type DocImpl, getDoc, isDoc } from "../src/doc.ts";
+import { isCell, isCellLink } from "../src/cell.ts";
 import { isQueryResult } from "../src/query-result-proxy.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import {
@@ -102,8 +102,8 @@ describe("Cell utility functions", () => {
   it("should identify a cell reference", () => {
     const c = getDoc(10, "should identify a cell reference", "test");
     const ref = { cell: c, path: ["x"] };
-    expect(isDocLink(ref)).toBe(true);
-    expect(isDocLink({})).toBe(false);
+    expect(isCellLink(ref)).toBe(true);
+    expect(isCellLink({})).toBe(false);
   });
 
   it("should identify a cell proxy", () => {
@@ -1297,8 +1297,8 @@ describe("asCell with schema", () => {
     testCell.set(initialDataCopy);
     popFrame(frame1);
 
-    expect(isDocLink(testDoc.get()[0])).toBe(true);
-    expect(isDocLink(testDoc.get()[1])).toBe(true);
+    expect(isCellLink(testDoc.get()[0])).toBe(true);
+    expect(isCellLink(testDoc.get()[1])).toBe(true);
     expect(testDoc.get()[0].cell.get().name).toEqual("First Item");
     expect(testDoc.get()[1].cell.get().name).toEqual("Second Item");
 
@@ -1315,8 +1315,8 @@ describe("asCell with schema", () => {
     testCell.set(returnedData);
     popFrame(frame2);
 
-    expect(isDocLink(testDoc.get()[0])).toBe(true);
-    expect(isDocLink(testDoc.get()[1])).toBe(true);
+    expect(isCellLink(testDoc.get()[0])).toBe(true);
+    expect(isCellLink(testDoc.get()[1])).toBe(true);
     expect(testDoc.get()[0].cell.get().name).toEqual("First Item");
     expect(testDoc.get()[1].cell.get().name).toEqual("Second Item");
 
@@ -1377,8 +1377,8 @@ describe("asCell with schema", () => {
     arrayCell.push({ [ID]: "test", value: 43 });
     expect(frame.generatedIdCounter).toEqual(1); // No increment = no ID generated from it
     popFrame(frame);
-    expect(isDocLink(c.get().items[0])).toBe(true);
-    expect(isDocLink(c.get().items[1])).toBe(true);
+    expect(isCellLink(c.get().items[0])).toBe(true);
+    expect(isCellLink(c.get().items[1])).toBe(true);
     expect(arrayCell.get()).toEqual([{ value: 42 }, { value: 43 }]);
   });
 });

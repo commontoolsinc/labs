@@ -16,7 +16,7 @@ import {
   unsafe_originalRecipe,
   type UnsafeBinding,
 } from "@commontools/builder";
-import { type DocImpl, type DocLink, getDoc, isDoc, isDocLink } from "./doc.ts";
+import { type DocImpl, getDoc, isDoc } from "./doc.ts";
 import {
   Action,
   addEventHandler,
@@ -38,8 +38,13 @@ import {
 import { getModuleByRef } from "./module.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
-import { registerRecipe, getRecipe, getRecipeId, registerNewRecipe } from "./recipe-map.ts";
-import { isCell } from "./cell.ts";
+import {
+  getRecipe,
+  getRecipeId,
+  registerNewRecipe,
+  registerRecipe,
+} from "./recipe-map.ts";
+import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import { getDocLinkOrThrow } from "./query-result-proxy.ts";
 
@@ -167,18 +172,18 @@ export function run<T, R = any>(
   // TODO(seefeld): Note why we need this. Is it still needed?
   if (
     isDoc(argument) ||
-    isDocLink(argument) ||
+    isCellLink(argument) ||
     isCell(argument) ||
     isQueryResultForDereferencing(argument)
   ) {
     // If it's a cell, turn it into a cell reference
-    const ref = isDocLink(argument)
+    const ref = isCellLink(argument)
       ? argument
       : isCell(argument)
-        ? argument.getAsDocLink()
-        : isQueryResultForDereferencing(argument)
-          ? getDocLinkOrThrow(argument)
-          : ({ cell: argument, path: [] } satisfies DocLink);
+      ? argument.getAsDocLink()
+      : isQueryResultForDereferencing(argument)
+      ? getDocLinkOrThrow(argument)
+      : ({ cell: argument, path: [] } satisfies CellLink);
 
     // Get value, but just to get the keys. Throw if it isn't an object.
     const value = ref.cell.getAsQueryResult(ref.path);
@@ -355,7 +360,7 @@ function instantiateJavaScriptNode(
   }
 
   // Check if any of the read cells is a stream alias
-  let streamRef: DocLink | undefined = undefined;
+  let streamRef: CellLink | undefined = undefined;
   for (const key in inputs) {
     let doc = processCell;
     let path: PropertyKey[] = [key];
@@ -464,11 +469,11 @@ function instantiateJavaScriptNode(
           resultRecipe,
           undefined,
           resultCell ??
-          getDoc(
-            undefined,
-            { resultFor: { inputs, outputs, fn: fn.toString() } },
-            processCell.space,
-          ),
+            getDoc(
+              undefined,
+              { resultFor: { inputs, outputs, fn: fn.toString() } },
+              processCell.space,
+            ),
         );
         addCancel(cancels.get(resultCell));
 

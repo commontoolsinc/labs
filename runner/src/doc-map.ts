@@ -1,16 +1,10 @@
 import { isOpaqueRef } from "@commontools/builder";
-import {
-  createDoc,
-  type DocImpl,
-  type DocLink,
-  isDoc,
-  isDocLink,
-} from "./doc.ts";
+import { createDoc, type DocImpl, isDoc } from "./doc.ts";
 import {
   getDocLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { isCell } from "./cell.ts";
+import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { refer } from "merkle-reference";
 
 export type EntityId = {
@@ -86,10 +80,10 @@ export const getEntityId = (value: any): { "/": string } | undefined => {
     return JSON.parse(JSON.stringify(value));
   }
 
-  let ref: DocLink | undefined = undefined;
+  let ref: CellLink | undefined = undefined;
 
   if (isQueryResultForDereferencing(value)) ref = getDocLinkOrThrow(value);
-  else if (isDocLink(value)) ref = value;
+  else if (isCellLink(value)) ref = value;
   else if (isCell(value)) ref = value.getAsDocLink();
   else if (isDoc(value)) ref = { cell: value, path: [] };
 

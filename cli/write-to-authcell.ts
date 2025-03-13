@@ -1,5 +1,9 @@
 // Load .env file
-import { type DocLink, getCellFromDocLink, storage } from "@commontools/runner";
+import {
+  type CellLink,
+  getCellFromDocLink,
+  storage,
+} from "@commontools/runner";
 import { parseArgs } from "@std/cli/parse-args";
 
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ||
@@ -21,7 +25,7 @@ async function main(
   const authCellEntity = {
     cell: doc,
     path: ["argument", "auth"],
-  } satisfies DocLink;
+  } satisfies CellLink;
 
   const authCell = getCellFromDocLink(replica, authCellEntity);
   // authCell.set({ token: "wat" });
