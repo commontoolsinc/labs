@@ -11,6 +11,11 @@ import {
 import { Charm } from "@commontools/charm";
 import type { DID } from "@commontools/identity";
 import * as Session from "./session.ts";
+import {
+  CharmEntry,
+  getGmailIntegrationCharms,
+  initializeGmailIntegrationCharmsCell,
+} from "@commontools/utils";
 
 /**
  * Display usage information
@@ -25,6 +30,9 @@ function showHelp() {
   console.log(
     "  --interval=<seconds>  Update interval in seconds (default: 30)",
   );
+  console.log(
+    "  --setup               Initialize Gmail integration charms cell",
+  );
   console.log("  --help                Show this help message");
   Deno.exit(0);
 }
@@ -32,11 +40,11 @@ function showHelp() {
 // Parse command line arguments
 const flags = parseArgs(Deno.args, {
   string: ["charms", "interval"],
-  boolean: ["help"],
+  boolean: ["help", "setup"],
   default: { interval: "30" },
 });
 
-const { charms, interval, help } = flags;
+const { charms, interval, help, setup } = flags;
 
 if (help) {
   showHelp();
@@ -53,6 +61,68 @@ const checkedCharms = new Map<string, boolean>();
 // Initialize storage and Bobby server
 storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
+
+/**
+ * Load Gmail integration charms
+ */
+async function loadGmailIntegrationCharms() {
+  log(undefined, "Loading Gmail integration charms...");
+
+  try {
+    // If --setup flag is present, initialize the cell
+    if (setup) {
+      const initialized = await initializeGmailIntegrationCharmsCell();
+      if (initialized) {
+        log(
+          undefined,
+          "Initialized Gmail integration charms cell with empty array",
+        );
+      } else {
+        log(
+          undefined,
+          "Gmail integration charms cell already exists, skipping initialization",
+        );
+        const charms = await getGmailIntegrationCharms();
+        log(undefined, "Loaded Gmail integration charms:", { charms });
+      }
+      return;
+    }
+
+    // Get charms from the Gmail integration charms cell
+    const charms = await getGmailIntegrationCharms();
+    log(undefined, "Loaded Gmail integration charms:", { charms });
+
+    // Process each charm
+    if (charms.length > 0) {
+      for (const { space, charmId } of charms) {
+        log(
+          undefined,
+          `Watching Gmail integration charm ${space}/${charmId}...`,
+        );
+
+        // We need a new session for each space
+        const charmSession = await Session.open({
+          passphrase: OPERATOR_PASS,
+          name: "~importer",
+          space: space as DID,
+        });
+
+        manager = new CharmManager(charmSession);
+
+        const charm = await manager?.get(charmId as string, false);
+        if (charm) {
+          watchCharm(charm, space as DID);
+        } else {
+          log(charmId, "charm not found");
+        }
+      }
+    } else {
+      log(undefined, "No Gmail integration charms configured");
+    }
+  } catch (error) {
+    log(undefined, "Error loading Gmail integration charms:", error);
+  }
+}
 
 /**
  * Custom logger that includes timestamp and charm ID (last 10 chars) when available
@@ -185,8 +255,7 @@ async function main() {
   log(undefined, "Starting Google Updater");
 
   if (!charms) {
-    console.error("google-importer.ts requires the --charms flag.");
-    Deno.exit(1);
+    await loadGmailIntegrationCharms();
     return;
   }
 
