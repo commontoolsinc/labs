@@ -15,10 +15,8 @@ import {
 import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext.tsx";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
-import { Composer, parseComposerDocument } from "@/components/Composer.tsx";
+import { Composer } from "@/components/Composer.tsx";
 import { charmId } from "@/utils/charms.ts";
-import { NAME } from "../../../builder/src/types.ts";
-import { CharmManager } from "../../../charm/src/index.ts";
 
 function CommandProcessor({
   mode,
@@ -118,34 +116,6 @@ export function useCharmMentions() {
   }, [charmManager]);
 
   return charmMentions;
-}
-
-export async function formatPromptWithMentions(
-  prompt: string,
-  charmManager: CharmManager,
-) {
-  const payload = await parseComposerDocument(
-    prompt,
-    charmManager,
-  );
-  const finalText = `${payload.text}\n\n<sources>
-${
-    Object.entries(payload.bibliography).map(([id, source]) =>
-      `<source id="${id}">
-${
-        JSON.stringify({
-          ...source,
-          body: typeof source.body === "string"
-            ? source.body
-            : JSON.stringify(source.body),
-        })
-      }
-</source>`
-    ).join("\n")
-  }
-</sources>`;
-
-  return finalText;
 }
 
 export function CommandCenter() {

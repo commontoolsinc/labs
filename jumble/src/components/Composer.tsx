@@ -32,6 +32,9 @@ import {
 } from "slate-react";
 import { createPortal } from "react-dom";
 import { CharmManager } from "../../../charm/src/index.ts";
+import { Recipe, TYPE } from "@commontools/builder";
+import { Cell, getRecipe } from "@commontools/runner";
+
 // Function to parse Slate document and extract mention references
 export async function parseComposerDocument(
   serializedDocument: string,
@@ -39,13 +42,15 @@ export async function parseComposerDocument(
 ): Promise<{
   text: string;
   mentions: string[];
-  bibliography: { [id: string]: { title: string; body: any } };
+  sources: { [id: string]: { name: string; cell: Cell<any>; recipe: Recipe } };
 }> {
   try {
     const document = JSON.parse(serializedDocument) as Descendant[];
     let fullText = "";
     const mentions: string[] = [];
-    const bibliography: { [id: string]: { title: string; body: string } } = {};
+    const sources: {
+      [id: string]: { name: string; cell: Cell<any>; recipe: Recipe };
+    } = {};
     const mentionIndices: Record<string, number> = {};
 
     // Helper to add markdown styling based on node type
@@ -63,12 +68,22 @@ export async function parseComposerDocument(
             mentions.push(node.id);
 
             // Create bibliography entry
-            const bibIndex = Object.keys(bibliography).length + 1;
+            const bibIndex = Object.keys(sources).length + 1;
             const charm = await charmManager.get(node.id);
-            const data = charm?.getSourceCell().get().argument;
-            bibliography[node.id] = {
-              title: node.character || `Reference ${bibIndex}`,
-              body: data,
+            if (!charm) {
+              throw new Error(`Charm not found for mention ${node.id}`);
+            }
+
+            const recipeId = charm.getSourceCell().get()[TYPE];
+            if (!recipeId) {
+              throw new Error(`Recipe ID not found for charm ${node.id}`);
+            }
+            const recipe = getRecipe(recipeId);
+
+            sources[node.id] = {
+              name: node.character || `Reference ${bibIndex}`,
+              cell: charm.getSourceCell(),
+              recipe: recipe,
             };
 
             mentionIndices[node.id] = bibIndex;
@@ -77,30 +92,8 @@ export async function parseComposerDocument(
           // Add reference in markdown format
           fullText += `[${node.character}](charm://${node.id})`;
         } else {
-          // Fallback for backward compatibility
-          const match = node.character.match(/\(#([a-z0-9]+)\)$/);
-          if (match && match[1]) {
-            const referenceId = match[1];
-
-            if (!mentionIndices[referenceId]) {
-              mentions.push(referenceId);
-
-              const bibIndex = Object.keys(bibliography).length + 1;
-              const charm = await charmManager.get(referenceId);
-              const data = charm?.getSourceCell().get().argument;
-              bibliography[referenceId] = {
-                title: node.character || `Reference ${bibIndex}`,
-                body: data,
-              };
-
-              mentionIndices[referenceId] = bibIndex;
-            }
-
-            // Add reference in markdown format
-            fullText += `[${node.character}](charm://${referenceId})`;
-          } else {
-            fullText += `@${node.character}`;
-          }
+          // Handle mentions without explicit IDs (plain text mentions)
+          fullText += `@${node.character}`;
         }
       } else if (node.text !== undefined) {
         // Handle text with formatting
@@ -168,11 +161,11 @@ export async function parseComposerDocument(
     return {
       text: fullText.trim(), // Remove extra whitespace
       mentions,
-      bibliography,
+      sources,
     };
   } catch (error) {
     console.error("Failed to parse document:", error);
-    return { text: "", mentions: [], bibliography: {} };
+    return { text: "", mentions: [], sources: {} };
   }
 }
 

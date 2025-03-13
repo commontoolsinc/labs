@@ -30,11 +30,9 @@ import {
 import { Cell } from "@commontools/runner";
 import { createPath } from "@/routes.ts";
 import JsonView from "@uiw/react-json-view";
-import { Composer, parseComposerDocument } from "@/components/Composer.tsx";
-import {
-  formatPromptWithMentions,
-  useCharmMentions,
-} from "@/components/CommandCenter.tsx";
+import { Composer } from "@/components/Composer.tsx";
+import { useCharmMentions } from "@/components/CommandCenter.tsx";
+import { formatPromptWithMentions } from "@/utils/format.ts";
 
 type Tab = "iterate" | "code" | "data";
 type OperationType = "iterate" | "extend";
