@@ -25,19 +25,16 @@ const log: <T>(s: T, prefix?: string) => void = (s, prefix?) =>
   );
 
 async function main() {
-  const session = await Session.create({
-    passphrase: "some passphrase",
-    name: "some name",
-  });
-
-  const authority = await Identity.fromPassphrase("charm manager");
-
+  const account = await Identity.fromPassphrase("some passphrase");
+  const as_space = await account.derive("some name");
+  const space_did = as_space.did()
+  
   // this feels like magic and wrong,
   // but we crash when we call syncCell otherwise 
   storage.setRemoteStorage(
     new URL(TOOLSHED_API_URL),
   );
-  storage.setSigner(session.as);
+  storage.setSigner(as_space);
 
   // get them charms, we can also call charmManager.getCharms()
   // this way is to show what these objects really are
@@ -64,8 +61,6 @@ async function main() {
       });
     }
   });
-
-  log(charms, "charms via getDoc");
 }
 
 main();
