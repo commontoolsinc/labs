@@ -103,7 +103,6 @@ const ResultSchema = {
     labels: {
       type: "array",
       items: LabelSchema,
-      default: [{ id: "INBOX", name: "INBOX" }],
     },
     emails: {
       type: "array",
