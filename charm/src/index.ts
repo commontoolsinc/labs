@@ -1,4 +1,10 @@
-export { type Charm, CharmManager } from "./charm.ts";
+export {
+  type Charm,
+  charmListSchema,
+  CharmManager,
+  charmSchema,
+  processSchema,
+} from "./charm.ts";
 export {
   castNewRecipe,
   compileAndRunRecipe,
