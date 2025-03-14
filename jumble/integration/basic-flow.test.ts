@@ -221,6 +221,14 @@ Deno.test({
           await sleep(1000);
           await page.keyboard.press("Enter");
           await sleep(1000);
+        },
+      });
+
+      failed = !await t.step({
+        name: "check that we see the new charm",
+        ignore: failed || exceptions.length > 0,
+        fn: async () => {
+          assert(page, "Page should be defined");
 
           // check that we see the new charm
           await waitForSelectorWithText(
@@ -235,10 +243,20 @@ Deno.test({
           // <div class="flex justify-between items-center"><h2 class="text-lg font-semibold">Total Values</h2><span class="bg-blue-500 text-white px-3 py-1 rounded-full font-bold">3</span></div>
         },
       });
-    } finally {
-      exceptions.forEach((exception) => {
-        console.error("Failure due to browser error:", exception);
+
+      failed = !await t.step({
+        name: "no errors in the console",
+        fn: () => {
+          assert(page, "Page should be defined");
+
+          exceptions.forEach((exception) => {
+            console.error("Failure due to browser error:", exception);
+          });
+
+          assert(exceptions.length === 0, "No errors in the console");
+        },
       });
+    } finally {
       await browser!.close();
     }
   },
