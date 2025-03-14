@@ -50,7 +50,7 @@ export interface ActionCommandItem extends BaseCommandItem {
 export interface InputCommandItem extends BaseCommandItem {
   type: "input";
   placeholder?: string;
-  handler: (input: string, context?: CommandContext) => Promise<void> | void;
+  handler: (input: string, sources?: any) => Promise<void> | void;
   validate?: (input: string) => boolean;
 }
 
@@ -58,7 +58,7 @@ export interface InputCommandItem extends BaseCommandItem {
 export interface ConfirmCommandItem extends BaseCommandItem {
   type: "confirm";
   message: string;
-  handler: () => Promise<void> | void;
+  handler: (context: CommandContext) => Promise<void> | void;
 }
 
 // Select command

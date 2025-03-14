@@ -1,6 +1,10 @@
 import { useEffect } from "react";
 import { useAudioRecorder } from "@/hooks/use-audio-recorder.ts";
-import { CommandContext, CommandItem } from "./commands.ts";
+import {
+  CommandContext,
+  CommandItem,
+  TranscribeCommandItem,
+} from "./commands.ts";
 import { DitheredCube } from "./DitherCube.tsx";
 
 interface TranscribeInputProps {
@@ -19,7 +23,9 @@ export function TranscribeInput({ mode, context }: TranscribeInputProps) {
     transcribe: true,
     onRecording: (recording) => {
       if (recording.transcription) {
-        mode.command.handler?.(recording.transcription);
+        (mode.command as TranscribeCommandItem).handler?.(
+          recording.transcription,
+        );
       }
     },
   });
