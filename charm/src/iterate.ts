@@ -169,6 +169,7 @@ export async function compileRecipe(
 ) {
   const { exports, errors } = await tsToExports(recipeSrc);
   if (errors) {
+    console.error(errors);
     throw new Error("Compilation errors in recipe");
   }
   const recipe = exports.default;
