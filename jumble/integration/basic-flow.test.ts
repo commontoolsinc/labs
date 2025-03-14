@@ -234,7 +234,7 @@ Deno.test({
           await waitForSelectorWithText(
             page,
             "a[aria-roledescription='charm-link']",
-            "Values Counter",
+            "Value Counter",
           );
 
           // FIXME(ja): how to look at the actual iframe content?
