@@ -89,7 +89,7 @@ export async function parseComposerDocument(
     let fullText = "";
     const mentions: string[] = [];
     const sources: {
-      [id: string]: { name: string; cell: Cell<any>; recipe?: Recipe | Module };
+      [id: string]: { name: string; cell: Cell<any> };
     } = {};
     const mentionIndices: Record<string, number> = {};
 
@@ -114,16 +114,9 @@ export async function parseComposerDocument(
               throw new Error(`Charm not found for mention ${node.id}`);
             }
 
-            const recipeId = charm.getSourceCell().get()[TYPE];
-            if (!recipeId) {
-              throw new Error(`Recipe ID not found for charm ${node.id}`);
-            }
-            const recipe = getRecipe(recipeId);
-
             sources[node.id] = {
               name: node.character || `Reference ${bibIndex}`,
-              cell: charm.getSourceCell(),
-              recipe: recipe,
+              cell: charm,
             };
 
             mentionIndices[node.id] = bibIndex;
