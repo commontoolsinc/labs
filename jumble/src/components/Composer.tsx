@@ -592,16 +592,39 @@ export function Composer({
 
   useEffect(() => {
     if (autoFocus && editor) {
-      // Simple approach with a single timeout instead of an interval
-      setTimeout(() => {
+      // Make sure editor is mounted and has a DOM representation
+      if (ReactEditor.hasTarget(editor, globalThis.document)) {
         try {
-          if (ReactEditor.hasTarget(editor, globalThis.document)) {
-            ReactEditor.focus(editor);
-          }
+          ReactEditor.focus(editor);
         } catch (error) {
-          console.error("Failed to focus editor:", error);
+          console.warn("Could not focus editor immediately, trying with delay");
+          // If immediate focus fails, try with a delay
+          setTimeout(() => {
+            try {
+              if (ReactEditor.hasTarget(editor, globalThis.document)) {
+                ReactEditor.focus(editor);
+              }
+            } catch (focusError) {
+              console.error("Failed to focus editor:", focusError);
+            }
+          }, 100);
         }
-      }, 100);
+      } else {
+        // Editor not yet mounted, wait for it
+        const checkInterval = setInterval(() => {
+          if (ReactEditor.hasTarget(editor, globalThis.document)) {
+            try {
+              ReactEditor.focus(editor);
+              clearInterval(checkInterval);
+            } catch (error) {
+              console.error("Failed to focus editor after delay:", error);
+            }
+          }
+        }, 50);
+
+        // Clean up interval if component unmounts
+        return () => clearInterval(checkInterval);
+      }
     }
   }, [autoFocus, editor]);
 
