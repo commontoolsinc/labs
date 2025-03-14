@@ -34,6 +34,7 @@ import {
   sendValueToBinding,
   unsafe_noteParentOnRecipes,
   unwrapOneLevelAndBindtoDoc,
+  diffAndUpdate,
 } from "./utils.ts";
 import { getModuleByRef } from "./module.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
@@ -95,8 +96,6 @@ export function run<T, R = any>(
 
   if (resultCell.sourceCell !== undefined) {
     processCell = resultCell.sourceCell;
-    // TODO(seefeld): Allow keeping of previous argument but still supply defaults
-    argument = argument ?? (processCell.get()?.argument as T);
   } else {
     processCell = getDoc(
       undefined,
@@ -163,9 +162,6 @@ export function run<T, R = any>(
   const [cancel, addCancel] = useCancelGroup();
   cancels.set(resultCell, cancel);
 
-  // Walk the recipe's schema and extract all default values
-  const defaults = extractDefaultValues(recipe.argumentSchema);
-
   // If the bindings are a cell, doc or doc link, convert them to an object
   // where each property is a doc link.
   // TODO(seefeld): If new keys are added after first load, this won't work.
@@ -201,24 +197,24 @@ export function run<T, R = any>(
     }
   }
 
+  // Walk the recipe's schema and extract all default values
+  const defaults = extractDefaultValues(recipe.argumentSchema);
+
   const internal = {
     ...(deepCopy(defaults) as { internal: any })?.internal,
     ...(recipe.initial as { internal: any } | void)?.internal,
     ...processCell.get()?.internal,
   };
 
-  // Ensure static data is converted to doc link, e.g. for arrays
-  argument = deepCopy(maybeUnwrapProxy(argument));
-
-  // TODO(seefeld): Move up, only do this if it's not from the sourceCell
-  if (defaults) argument = mergeObjects(argument, deepCopy(defaults));
-
   processCell.send({
+    ...processCell.get(),
     [TYPE]: recipeId,
-    argument,
-    internal,
     resultRef: { cell: resultCell, path: [] },
+    internal,
   });
+  if (argument) {
+    diffAndUpdate({ cell: processCell, path: [argument] }, argument, undefined, processCell);
+  }
 
   // Send "query" to results to the result doc
   resultCell.send(
