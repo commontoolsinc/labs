@@ -246,8 +246,16 @@ Deno.test({
 
       failed = !await t.step({
         name: "no errors in the console",
-        fn: () => {
+        fn: async () => {
           assert(page, "Page should be defined");
+
+          if (exceptions.length > 0) {
+            const html = await page.evaluate(() => {
+              return document.body.innerHTML;
+            });
+
+            console.log(html);
+          }
 
           exceptions.forEach((exception) => {
             console.error("Failure due to browser error:", exception);
