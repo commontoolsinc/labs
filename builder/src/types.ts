@@ -127,7 +127,7 @@ export type JSONSchema = {
   readonly additionalProperties?: Readonly<JSONSchema> | boolean;
 };
 
-type Writable<T> = {
+export type Writable<T> = {
   -readonly [P in keyof T]: T[P] extends ReadonlyArray<infer U> ? Writable<U>[]
     : T[P] extends Readonly<infer U> ? Writable<U>
     : T[P];

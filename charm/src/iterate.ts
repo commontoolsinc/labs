@@ -1,11 +1,23 @@
-import { Cell, registerNewRecipe, tsToExports } from "@commontools/runner";
+import {
+  Cell,
+  isCell,
+  isStream,
+  registerNewRecipe,
+  tsToExports,
+} from "@commontools/runner";
 import { client as llm } from "@commontools/llm";
-import { createJsonSchema, JSONSchema } from "@commontools/builder";
+import { isObj } from "@commontools/utils";
+import {
+  createJsonSchema,
+  JSONSchema,
+  schema,
+  type Writable,
+} from "@commontools/builder";
 import { Charm, CharmManager } from "./charm.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
+import { generateSpecAndSchema } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
-import { isCell } from "@commontools/runner";
 
 const genSrc = async ({
   src,
@@ -95,26 +107,129 @@ export const generateNewRecipeVersion = (
   );
 };
 
+// FIXME(ja): this should handle multiple depths and/or
+// a single depth - eg if you send { calendar: result1, email: result2 }
+// it should scrub the result1 and result2 and
+// return { calendar: scrub(result1), email: scrub(result2) }
+// FIXME(seefeld): might be able to use asSchema here...
+function scrub(data: any): any {
+  if (isCell(data)) {
+    if (data.schema) {
+      if (data.schema.type === "object" && data.schema.properties) {
+        const scrubbed = Object.fromEntries(
+          Object.entries(data.schema.properties).filter(([key]) =>
+            !key.startsWith("$")
+          ),
+        );
+        return { ...data.schema, properties: scrubbed };
+      }
+      // else no-op
+    } else {
+      const value = data.get();
+      if (isObj(value)) {
+        return {
+          type: "object",
+          properties: Object.fromEntries(
+            Object.keys(value).filter(([key, value]) =>
+              !key.startsWith("$") && !isStream(value)
+            ).map(
+              (key) => [key, {}],
+            ),
+          ),
+        };
+      }
+    }
+  } else if (isObj(data)) {
+    return Object.fromEntries(
+      Object.entries(data).map(([key, value]) => [key, scrub(value)]),
+    );
+  } else {
+    return data;
+  }
+}
+
+/**
+ * Cast a new recipe from a goal and data
+ *
+ * @param charmManager Charm manager representing the space this will be generated in
+ * @param goal A user level goal for the new recipe, can reference specific data via `key`
+ * @param data Data passed to the recipe, can be a combination of data and cells
+ * @returns A new recipe cell
+ */
 export async function castNewRecipe(
   charmManager: CharmManager,
-  data: any,
-  newSpec: string,
+  goal: string,
+  cells?: any,
 ): Promise<Cell<Charm>> {
-  const schema = isCell(data) ? { ...data.schema } : createJsonSchema(data);
-  schema.description = newSpec;
-  console.log("schema", schema);
+  console.log("Processing goal:", goal, cells);
 
+  // Remove $UI, $NAME, and any streams from the cells
+  const scrubbed = scrub(cells);
+
+  // First, extract any existing schema if we have data
+  const existingSchema = createJsonSchema(scrubbed);
+
+  // Phase 1: Generate spec/plan and schema based on goal and possibly existing schema
+  const {
+    spec,
+    resultSchema,
+    title,
+    description,
+    plan,
+  } = await generateSpecAndSchema(goal, existingSchema);
+
+  console.log("resultSchema", resultSchema);
+
+  const newSpec =
+    `<GOAL>${goal}</GOAL>\n<PLAN>${plan}</PLAN>\n<SPEC>${spec}</SPEC>`;
+
+  console.log("newSpec", newSpec);
+
+  // NOTE(ja): we put the result schema in the argument schema
+  // as a hack to work around iframes not supporting results schemas
+  const schema = {
+    ...existingSchema,
+    title,
+    description,
+  } as Writable<JSONSchema>;
+
+  if (!schema.type) {
+    schema.type = "object";
+  }
+
+  if (schema.type === "object" && !schema.properties) {
+    schema.properties = {};
+  }
+
+  // FIXME(ja): we shouldn't just throw results into the argument schema
+  // as this is a hack...
+  if (schema.type === "object") {
+    const props = resultSchema.properties ?? {};
+    Object.keys(props).forEach((key) => {
+      if (schema.properties && schema.properties[key]) {
+        console.error(`skipping ${key} already in the argument schema`);
+      } else {
+        (schema.properties as Record<string, JSONSchema>)[key] = props[key];
+      }
+    });
+  }
+
+  // Phase 2: Generate UI code using the schema and enhanced spec
   const newIFrameSrc = await genSrc({ newSpec, schema });
-  const name = extractTitle(newIFrameSrc, "<unknown>");
+  const name = extractTitle(newIFrameSrc, title); // Use the generated title as fallback
   const newRecipeSrc = buildFullRecipe({
     src: newIFrameSrc,
-    spec: newSpec,
+    spec,
+    plan,
+    goal,
     argumentSchema: schema,
-    resultSchema: {},
+    resultSchema,
     name,
   });
 
-  return compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, data);
+  // FIXME(ja): we should send the scrubbed data here - otherwise you
+  // will get $UI $NAME and any streams in the inputs...
+  return compileAndRunRecipe(charmManager, newRecipeSrc, goal, scrubbed);
 }
 
 export async function compileRecipe(
@@ -124,6 +239,7 @@ export async function compileRecipe(
 ) {
   const { exports, errors } = await tsToExports(recipeSrc);
   if (errors) {
+    console.error(errors);
     throw new Error("Compilation errors in recipe");
   }
   const recipe = exports.default;

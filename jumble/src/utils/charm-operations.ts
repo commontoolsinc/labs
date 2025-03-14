@@ -8,6 +8,7 @@ import {
 } from "@commontools/charm";
 import { Cell } from "@commontools/runner";
 import { fixRecipePrompt } from "@commontools/llm";
+import { grabCells, SourceSet } from "@/utils/format.ts";
 
 export async function fixItCharm(
   charmManager: CharmManager,
@@ -39,10 +40,12 @@ export async function fixItCharm(
 export async function extendCharm(
   charmManager: CharmManager,
   focusedCharmId: string,
-  spec: string,
+  goal: string,
+  cells?: any,
 ): Promise<Cell<Charm>> {
   const charm = (await charmManager.get(focusedCharmId, false))!;
-  return castNewRecipe(charmManager, charm, spec);
+  cells.this = charm;
+  return castNewRecipe(charmManager, goal, cells);
 }
 
 export async function iterateCharm(

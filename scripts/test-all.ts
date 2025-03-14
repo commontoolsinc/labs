@@ -2,37 +2,13 @@
 import * as path from "@std/path";
 
 const decoder = new TextDecoder();
-const workspaceCwd = Deno.cwd();
-const manifest = JSON.parse(await Deno.readTextFile("./deno.jsonc"));
-const members: string[] = manifest.workspace;
 
-const DISABLED = [
+export const ALL_DISABLED = [
   "deno-vite-plugin", // Do not test vendored code
   "toolshed", // Requires extra configuration to run (e.g. redis)
 ];
 
-let success = true;
-for (const memberPath of members) {
-  // Convert "./memory" to "memory"
-  const packageName = memberPath.substring(2);
-  if (DISABLED.includes(packageName)) {
-    continue;
-  }
-  console.log(`Testing ${packageName}...`);
-  const packagePath = path.join(workspaceCwd, packageName);
-  if (!await testPackage(packagePath)) {
-    success = false;
-  }
-}
-
-if (success) {
-  console.log("All tests passing!");
-} else {
-  console.error("One or more tests failed.");
-  Deno.exit(1);
-}
-
-async function testPackage(packagePath: string): Promise<boolean> {
+export async function testPackage(packagePath: string): Promise<boolean> {
   const result = await new Deno.Command(Deno.execPath(), {
     args: ["task", "test"],
     cwd: packagePath,
@@ -48,4 +24,39 @@ async function testPackage(packagePath: string): Promise<boolean> {
     console.error(stderr);
   }
   return result.success;
+}
+
+export async function runTests(disabledPackages: string[]): Promise<boolean> {
+  const workspaceCwd = Deno.cwd();
+  const manifest = JSON.parse(await Deno.readTextFile("./deno.jsonc"));
+  const members: string[] = manifest.workspace;
+
+  let success = true;
+  for (const memberPath of members) {
+    // Convert "./memory" to "memory"
+    const packageName = memberPath.substring(2);
+
+    if (disabledPackages.includes(packageName)) {
+      continue;
+    }
+    console.log(`Testing ${packageName}...`);
+    const packagePath = path.join(workspaceCwd, packageName);
+    if (!await testPackage(packagePath)) {
+      success = false;
+    }
+  }
+
+  if (success) {
+    console.log("All tests passing!");
+  } else {
+    console.error("One or more tests failed.");
+    Deno.exit(1);
+  }
+
+  return success;
+}
+
+// Only run if this is the main module
+if (import.meta.main) {
+  await runTests(ALL_DISABLED);
 }

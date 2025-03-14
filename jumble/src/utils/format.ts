@@ -53,31 +53,47 @@ export function formatRecipe(recipe: Recipe | Module) {
 export async function formatPromptWithMentions(
   prompt: string,
   charmManager: CharmManager,
-) {
+): Promise<{ text: string; sources: Record<string, any> }> {
   const payload = await parseComposerDocument(
     prompt,
     charmManager,
   );
 
-  // Check if there are any sources before adding the sources section
-  const hasSources = payload.sources && Object.keys(payload.sources).length > 0;
+  // Create a mapping of IDs to source objects
+  const sourcesMap: Record<string, any> = {};
 
-  let finalText = payload.text;
+  // Process the text to inject IDs where mentions are
+  let processedText = payload.text;
 
-  // Only add sources section if there are actual sources
-  if (hasSources) {
-    finalText += `\n\n<sources>
-    ${
-      Object.entries(payload.sources).map(([id, source]) =>
-        `<source id="${id}">
-    ${`<title>${source.name || "Untitled"}</title>
-    ${source.cell ? formatCell(source.cell) : ""}
-    ${source.recipe ? formatRecipe(source.recipe) : ""}
-    </source>`}`
-      ).join("\n")
-    }
-    </sources>`;
+  // Check if there are any sources to process
+  if (payload.sources && Object.keys(payload.sources).length > 0) {
+    // Add each source to the map
+    Object.entries(payload.sources).forEach(([id, source]) => {
+      sourcesMap[id] = source;
+
+      // Replace the markdown link mention with the ID
+      // Format: [character](charm://id)
+      processedText = processedText.replace(
+        new RegExp(`\\[(.*?)\\]\\(charm://${id}\\)`, "g"),
+        `\`${id}\``,
+      );
+    });
   }
 
-  return finalText;
+  return {
+    text: processedText,
+    sources: sourcesMap,
+  };
+}
+
+export type SourceSet = { [id: string]: { name: string; cell: Cell<any> } };
+
+export function grabCells(sources?: SourceSet) {
+  const cells: { [id: string]: Cell<any> } = sources
+    ? Object.entries(sources).reduce((acc, [id, source]) => {
+      acc[id] = source.cell;
+      return acc;
+    }, {} as { [id: string]: Cell<any> })
+    : {};
+  return cells;
 }

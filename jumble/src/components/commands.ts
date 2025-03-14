@@ -19,8 +19,8 @@ import {
 import { extendCharm, iterateCharm } from "@/utils/charm-operations.ts";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext.tsx";
 import { startCharmIndexing } from "@/utils/indexing.ts";
-import { generateJSON } from "@commontools/llm";
 import { createPath, createPathWithHash, ROUTES } from "@/routes.ts";
+import { grabCells, SourceSet } from "@/utils/format.ts";
 
 export type CommandType =
   | "action"
@@ -31,18 +31,69 @@ export type CommandType =
   | "transcribe"
   | "placeholder";
 
-export interface CommandItem {
+// Base interface with common properties
+interface BaseCommandItem {
   id: string;
   type: CommandType;
-  title: string; // No longer needs to be a function
-  placeholder?: string;
+  title: string;
   group?: string;
-  children?: CommandItem[]; // No longer needs to be a function
-  handler?: (value?: any) => Promise<void> | void; // No context param needed
-  validate?: (input: string) => boolean;
-  message?: string;
-  predicate?: boolean; // Can be computed value instead of function
+  predicate?: boolean;
 }
+
+// Action command
+export interface ActionCommandItem extends BaseCommandItem {
+  type: "action";
+  handler: () => Promise<void> | void;
+}
+
+// Input command
+export interface InputCommandItem extends BaseCommandItem {
+  type: "input";
+  placeholder?: string;
+  handler: (input: string, sources?: any) => Promise<void> | void;
+  validate?: (input: string) => boolean;
+}
+
+// Confirm command
+export interface ConfirmCommandItem extends BaseCommandItem {
+  type: "confirm";
+  message: string;
+  handler: (context: CommandContext) => Promise<void> | void;
+}
+
+// Select command
+export interface SelectCommandItem extends BaseCommandItem {
+  type: "select";
+  handler: (selected: any) => Promise<void> | void;
+}
+
+// Menu command
+export interface MenuCommandItem extends BaseCommandItem {
+  type: "menu";
+  children: CommandItem[];
+}
+
+// Transcribe command
+export interface TranscribeCommandItem extends BaseCommandItem {
+  type: "transcribe";
+  placeholder?: string;
+  handler: (transcription: string) => Promise<void> | void;
+}
+
+// Placeholder command
+export interface PlaceholderCommandItem extends BaseCommandItem {
+  type: "placeholder";
+}
+
+// Union type for all command types
+export type CommandItem =
+  | ActionCommandItem
+  | InputCommandItem
+  | ConfirmCommandItem
+  | SelectCommandItem
+  | MenuCommandItem
+  | TranscribeCommandItem
+  | PlaceholderCommandItem;
 
 export interface Recipe {
   argumentSchema: any; // Schema type from jsonschema
@@ -224,13 +275,20 @@ async function handleExecuteCharmAction(deps: CommandContext) {
 }
 
 // Command handlers
-async function handleNewCharm(deps: CommandContext, input: string | undefined) {
-  if (!input) return;
+async function handleNewCharm(
+  deps: CommandContext,
+  input: string,
+  sources?: SourceSet,
+) {
   deps.setLoading(true);
+
   try {
-    // Generate JSON blob with an LLM
-    const dummyData = await generateJSON(input);
-    const newCharm = await castNewRecipe(deps.charmManager, dummyData, input);
+    // Pass the goal directly to castNewRecipe, which will handle the two-phase process
+    const newCharm = await castNewRecipe(
+      deps.charmManager,
+      input,
+      grabCells(sources),
+    );
     if (!newCharm) {
       throw new Error("Failed to cast charm");
     }
@@ -318,7 +376,8 @@ function handleEditRecipe(
 
 async function handleExtendRecipe(
   deps: CommandContext,
-  input: string | undefined,
+  input?: string,
+  sources?: SourceSet,
 ) {
   if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
   deps.setLoading(true);
@@ -326,6 +385,7 @@ async function handleExtendRecipe(
     deps.charmManager,
     deps.focusedCharmId,
     input,
+    grabCells(sources),
   );
   deps.navigate(createPath("charmShow", {
     charmId: charmId(newCharm)!,
@@ -413,7 +473,7 @@ async function handleImportJSON(deps: CommandContext) {
     const title = prompt("Enter a title for your imported recipe:");
     if (!title) return;
 
-    const newCharm = await castNewRecipe(deps.charmManager, data, title);
+    const newCharm = await castNewRecipe(deps.charmManager, title, data);
     if (!newCharm) throw new Error("Failed to create new charm");
 
     const id = charmId(newCharm);
@@ -739,7 +799,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       type: "input",
       title: "New Charm",
       group: "Create",
-      handler: (input) => handleNewCharm(deps, input),
+      handler: (input, data) => handleNewCharm(deps, input, data),
     },
     {
       id: "search-charms",
@@ -851,7 +911,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       group: "Edit",
       predicate: !!deps.focusedCharmId,
       placeholder: "What you like to see?",
-      handler: (input) => handleExtendRecipe(deps, input),
+      handler: (input, data) => handleExtendRecipe(deps, input, data),
     },
     {
       id: "delete-charm",

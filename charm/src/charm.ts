@@ -22,6 +22,7 @@ import {
 } from "@commontools/runner";
 import { storage } from "@commontools/runner";
 import { DID, Identity } from "@commontools/identity";
+import { isObj } from "@commontools/utils";
 
 export type Charm = {
   [NAME]?: string;
@@ -206,6 +207,7 @@ export class CharmManager {
   async get<T = Charm>(
     id: string | Cell<Charm>,
     runIt: boolean = true,
+    asSchema?: JSONSchema,
   ): Promise<Cell<T> | undefined> {
     // Load the charm from storage.
     let charm: Cell<Charm> | undefined;
@@ -235,25 +237,18 @@ export class CharmManager {
 
     let resultSchema: JSONSchema | undefined = recipe?.resultSchema;
 
-    // Unless there is a non-object schema, add UI and NAME properties if present
-    if (!resultSchema || resultSchema.type === "object") {
-      const { [UI]: hasUI, [NAME]: hasName } =
-        charm.getAsCellLink().cell.get() ?? {};
-      if (hasUI || hasName) {
-        // Copy the original schema, so we can modify properties without
-        // affecting other uses of the same spell.
+    // If there is no result schema, create one from top level properties that omits UI, NAME
+    if (!resultSchema) {
+      const resultValue = charm.get();
+      if (isObj(resultValue)) {
         resultSchema = {
-          ...resultSchema,
-          properties: {
-            ...resultSchema?.properties,
-          },
+          type: "object",
+          properties: Object.fromEntries(
+            Object.keys(resultValue).filter((key) => !key.startsWith("$")).map((
+              key,
+            ) => [key, {}]), // Empty schema == any
+          ),
         };
-        if (hasUI && !resultSchema.properties![UI]) {
-          (resultSchema.properties as any)[UI] = { type: "object" }; // TODO(seefeld): make this the vdom schema
-        }
-        if (hasName && !resultSchema.properties![NAME]) {
-          (resultSchema.properties as any)[NAME] = { type: "string" };
-        }
       }
     }
 
@@ -263,10 +258,10 @@ export class CharmManager {
       return run(undefined, undefined, charm.getAsCellLink().cell!).asCell(
         [],
         undefined,
-        resultSchema,
+        asSchema ?? resultSchema,
       );
     } else {
-      return charm.asSchema<T>(resultSchema);
+      return charm.asSchema<T>(asSchema ?? resultSchema);
     }
   }
 

@@ -1,7 +1,7 @@
 import { JSONSchema } from "@commontools/builder";
 import { type LLMRequest } from "@commontools/llm";
 
-import { extractUserCode, prefillHtml, systemMd } from "./static.ts";
+import { extractUserCode, systemMd } from "./static.ts";
 
 export const RESPONSE_PREFILL = "```javascript\n";
 
@@ -45,11 +45,12 @@ export const buildPrompt = ({
   messages.push(
     `The user asked you to ${
       spec ? "update" : "create"
-    } the source code with the following comments:
+    } the source code with the following specification:
 \`\`\`
 ${newSpec}
 \`\`\``,
   );
+
   messages.push(RESPONSE_PREFILL);
 
   const system = systemMd.replace("SCHEMA", JSON.stringify(schema, null, 2));
