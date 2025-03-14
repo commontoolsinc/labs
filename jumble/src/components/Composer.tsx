@@ -380,19 +380,19 @@ export function Composer({
   readOnly,
   value,
   onValueChange,
-  onKeyDown: externalOnKeyDown,
   style,
   mentions = [],
   autoFocus = false,
+  onSubmit,
 }: {
   placeholder?: string;
   readOnly?: boolean;
   value: string;
   onValueChange: (value: string) => void;
-  onKeyDown?: (e: React.KeyboardEvent) => void;
   style?: React.CSSProperties;
   mentions?: Array<{ id: string; name: string }>;
   autoFocus?: boolean;
+  onSubmit?: () => void;
 }) {
   // Convert string value to Slate value format if needed
   const initialValue: Descendant[] = useMemo(() => {
@@ -485,10 +485,7 @@ export function Composer({
 
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
-      if (externalOnKeyDown) {
-        externalOnKeyDown(event as any);
-      }
-
+      // Handle mention selection navigation
       if (target && filteredMentions.length > 0) {
         switch (event.key) {
           case "ArrowDown": {
@@ -508,7 +505,7 @@ export function Composer({
             break;
           }
           case "Tab":
-            // case "Enter":
+          case "Enter": // Allow Enter to select a mention when the mention menu is open
             event.preventDefault();
             Transforms.select(editor, target);
             insertMention(
@@ -523,9 +520,17 @@ export function Composer({
             setTarget(null);
             break;
         }
+      } else if (event.key === "Enter" && !event.shiftKey && onSubmit) {
+        // Only trigger onSubmit when:
+        // 1. Enter is pressed
+        // 2. Shift isn't pressed (to allow line breaks)
+        // 3. The mention menu is closed
+        // 4. There's an onSubmit handler
+        event.preventDefault();
+        onSubmit();
       }
     },
-    [filteredMentions, editor, index, target, externalOnKeyDown],
+    [filteredMentions, editor, index, target, onSubmit],
   );
 
   useEffect(() => {
@@ -584,6 +589,20 @@ export function Composer({
     // Update the current value
     setCurrentValue(editor.children);
   }, [editor]);
+
+  useEffect(() => {
+    if (autoFocus && editor) {
+      // Small delay to ensure the editor is fully mounted
+      setTimeout(() => {
+        try {
+          ReactEditor.focus(editor);
+        } catch (error) {
+          console.warn("Failed to focus editor:", error);
+        }
+      }, 100);
+    }
+  }, [autoFocus, editor]);
+
   return (
     <>
       <Slate editor={editor} initialValue={currentValue} onChange={onChange}>
@@ -612,21 +631,18 @@ export function Composer({
             height: "auto",
             resize: "none",
           }}
-          autoFocus={autoFocus}
         />
         {target && filteredMentions.length > 0 && (
           <Portal>
             <div
               ref={ref}
+              className="absolute z-[9999] bg-white rounded-md shadow-md p-1 max-h-[200px] overflow-y-auto"
               style={{
                 top: "-9999px",
                 left: "-9999px",
                 position: "absolute",
-                zIndex: 9999,
-                padding: "3px",
-                background: "white",
-                borderRadius: "4px",
-                boxShadow: "0 1px 5px rgba(0,0,0,.2)",
+                maxHeight: "200px",
+                pointerEvents: "auto",
               }}
             >
               {filteredMentions.map((
@@ -642,11 +658,11 @@ export function Composer({
                     insertMention(editor, mention.id, mention.name);
                     setTarget(null);
                   }}
-                  style={{
-                    padding: "1px 3px",
-                    borderRadius: "3px",
-                    cursor: "pointer",
-                    background: i === index ? "#B4D5FF" : "transparent",
+                  className={`px-3 py-1.5 rounded-sm cursor-pointer transition-colors duration-150
+                    ${i === index ? "bg-blue-100" : "hover:bg-gray-100"}`}
+                  onMouseDown={(e) => {
+                    // Prevent the click from dismissing the command palette
+                    e.stopPropagation();
                   }}
                 >
                   {mention.name}
@@ -709,7 +725,11 @@ const ElementComponent = (props: RenderElementProps) => {
 
   switch (elementType) {
     case "mention":
-      return <Mention {...props as RenderElementPropsFor<MentionElement>} />;
+      return (
+        <Mention {...props as RenderElementPropsFor<MentionElement>}>
+          {children}
+        </Mention>
+      );
     case "block-quote":
       return (
         <blockquote
