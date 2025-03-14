@@ -542,6 +542,16 @@ export default recipe(
                   })}
                 />
               </div>
+              <button
+                onClick={googleUpdater({
+                  emails,
+                  auth,
+                  settings,
+                  labels,
+                })}
+              >
+                Fetch Emails
+              </button>
             </common-vstack>
           </common-hstack>
           <common-google-oauth $auth={auth} />
