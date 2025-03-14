@@ -69,14 +69,7 @@ export async function formatPromptWithMentions(
   if (payload.sources && Object.keys(payload.sources).length > 0) {
     // Add each source to the map
     Object.entries(payload.sources).forEach(([id, source]) => {
-      const cell = source.cell.asSchema(charmSchema);
-      const name = cell.key(NAME).get();
-
-      let shadowId = toCamelCase(name);
-      let num = 0;
-      while (shadowId in sourcesMap) {
-        shadowId = toCamelCase(name) + `${++num}`;
-      }
+      const shadowId = getCharmNameAsCamelCase(source.cell, sourcesMap);
       sourcesMap[shadowId] = source;
 
       // Replace the markdown link mention with the ID
@@ -92,6 +85,20 @@ export async function formatPromptWithMentions(
     text: processedText,
     sources: sourcesMap,
   };
+}
+
+export function getCharmNameAsCamelCase(
+  cell: Cell<any>,
+  usedKeys: Record<string, any>,
+): string {
+  const charmName = toCamelCase(cell.asSchema(charmSchema).key(NAME).get());
+
+  let name = charmName;
+  let num = 0;
+
+  while (name in usedKeys) name = charmName + `${++num}`;
+
+  return name;
 }
 
 /**
