@@ -4,6 +4,28 @@ import env from "@/env.ts";
 
 export const CACHE_DIR = `${env.CACHE_DIR}/llm-api-cache`;
 
+async function validateCache() {
+  // Ensure cache directory exists and count files on startup
+  await ensureDir(CACHE_DIR);
+  let cacheCount = 0;
+  try {
+    for await (const entry of Deno.readDir(CACHE_DIR)) {
+      if (entry.isFile) {
+        cacheCount++;
+      }
+    }
+    console.log(
+      `${timestamp()} ${colors.green}📦 Cache contains${colors.reset} ${cacheCount} files`,
+    );
+  } catch (error) {
+    console.error(
+      `${timestamp()} ${colors.red}❌ Error reading cache directory:${colors.reset}`,
+      error,
+    );
+  }
+}
+validateCache();
+
 interface CacheItem {
   messages: Array<{ role: string; content: string }>;
   model?: string;
