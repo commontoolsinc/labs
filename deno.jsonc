@@ -18,7 +18,8 @@
   ],
   "tasks": {
     "check": "./scripts/check-all.sh",
-    "test-all": "./scripts/test-all.ts"
+    "test-all": "./scripts/test-all.ts",
+    "build-artifact": "./scripts/build-artifact.ts"
   },
   "compilerOptions": {
     "jsx": "react-jsxdev",
@@ -92,7 +93,7 @@
     "@std/testing": "jsr:@std/testing@^1",
     "@vercel/otel": "npm:@vercel/otel@^1.10.1",
     "typescript": "npm:typescript",
-    "vite": "npm:vite@^6.0.11",
+    "vite": "npm:vite@^6.2.1",
     "@web/test-runner": "npm:@web/test-runner",
     "zod": "npm:zod@^3.24.1",
     "zod-to-json-schema": "npm:zod-to-json-schema@^3.24.1"
