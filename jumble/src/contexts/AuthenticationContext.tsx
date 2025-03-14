@@ -189,6 +189,10 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
     setSession(undefined);
   }, [keyStore]);
 
+  if (!keyStore) {
+    return <div>Awaiting Key Store...</div>;
+  }
+
   return (
     <AuthenticationContext.Provider
       value={{
