@@ -129,7 +129,7 @@ IMPORTANT:
  * Generates a complete specification, schema, and plan from a goal.
  * @param goal The user's goal or request
  * @param existingSchema Optional existing schema to use as a basis
- * @returns Object containing title, description, specification, schema, and optional data
+ * @returns Object containing title, description, specification, schema
  */
 export async function generateSpecAndSchema(
   goal: string,
@@ -139,7 +139,6 @@ export async function generateSpecAndSchema(
   description: string;
   spec: string;
   schema: JSONSchema;
-  data?: any;
 }> {
   let systemPrompt, userContent;
 
@@ -184,7 +183,6 @@ Based on this goal and the existing schema, please provide a title, description,
 
   // If we have an existing schema, use it; otherwise parse the generated schema
   let schema: JSONSchemaWritable;
-  let data;
 
   if (existingSchema) {
     // Use the existing schema, no need to parse one
@@ -201,13 +199,6 @@ Based on this goal and the existing schema, please provide a title, description,
       // Fallback to an empty schema
       schema = {};
     }
-
-    // Parse example data if provided
-    try {
-      data = exampleData ? JSON.parse(exampleData) : undefined;
-    } catch (error) {
-      console.error("Error parsing example data:", error);
-    }
   }
 
   // Add title and description to schema
@@ -219,6 +210,5 @@ Based on this goal and the existing schema, please provide a title, description,
     description,
     spec,
     schema,
-    data,
   };
 }
