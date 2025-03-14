@@ -206,8 +206,11 @@ export function run<T, R = any>(
     ...processCell.get()?.internal,
   };
 
-  // Still necessary until we consistently use schema for defaults
-  argument = mergeObjects(argument, defaults);
+  // Still necessary until we consistently use schema for defaults.
+  // Only do it on first load.
+  if (!processCell.get()?.argument) {
+    argument = mergeObjects(argument, defaults);
+  }
 
   processCell.send({
     ...processCell.get(),
