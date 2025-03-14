@@ -112,21 +112,30 @@ export const generateNewRecipeVersion = (
 // it should scrub the result1 and result2 and
 // return { calendar: scrub(result1), email: scrub(result2) }
 // FIXME(seefeld): might be able to use asSchema here...
-function scrub(data: any): any {
+export function scrub(data: any): any {
+  console.log("scrubbing", data);
   if (isCell(data)) {
     if (data.schema?.type === "object") {
+      // If there are properties, remove $UI and $NAME and any streams
       if (data.schema.properties) {
         const scrubbed = Object.fromEntries(
-          Object.entries(data.schema.properties).filter(([key]) =>
-            !key.startsWith("$")
+          Object.entries(data.schema.properties).filter(([key, value]) =>
+            !key.startsWith("$") && (!isObj(value) || !value.asStream)
           ),
         );
-        return data.asSchema({ ...data.schema, properties: scrubbed });
+        console.log("scrubbed modified schema", scrubbed, data.schema);
+        // If this resulted in an empty schema, return without a schema
+        return data.asSchema(
+          Object.keys(scrubbed).length > 0
+            ? { ...data.schema, properties: scrubbed }
+            : undefined,
+        );
       } else return data;
     } else {
-      const value = data.get();
+      const value = data.asSchema().get();
       if (isObj(value)) {
-        const schema = {
+        // Generate a new schema for all properties except $UI and $NAME and streams
+        const scrubbed = {
           type: "object",
           properties: Object.fromEntries(
             Object.keys(value).filter(([key, value]) =>
@@ -136,7 +145,11 @@ function scrub(data: any): any {
             ),
           ),
         } as JSONSchema;
-        return data.asSchema(schema);
+        console.log("scrubbed generated schema", scrubbed);
+        // Only if we found any properties, return the scrubbed schema
+        return Object.keys(scrubbed).length > 0
+          ? data.asSchema(scrubbed)
+          : data;
       } else return data;
     }
   } else if (Array.isArray(data)) {
