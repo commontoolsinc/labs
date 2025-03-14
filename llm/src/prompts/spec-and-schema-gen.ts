@@ -31,9 +31,9 @@ Your response must be structured as follows:
 [Brief 3-step implementation plan]
 </plan>
 
-<schema>
-[Minimal JSON Schema in valid JSON format]
-</schema>
+<argument_schema>
+[Minimal JSON Schema in valid JSON format that represents the core data model]
+</argument_schema>
 
 <example_data>
 [Simple example data that conforms to the schema]
@@ -95,6 +95,7 @@ Given a user's feature request and an existing data schema, you will:
 2. Create a one-sentence description in the format "A <artifact> to <goal>"
 3. Create a concise specification (3-5 sentences max) that works with the existing schema
 4. Generate a brief implementation plan (3 steps max)
+5. Design a minimal JSON schema that represents the core data model
 
 Your response must be structured as follows:
 
@@ -114,6 +115,49 @@ Your response must be structured as follows:
 [Brief 3-step implementation plan using the existing schema]
 </plan>
 
+<result_schema>
+[Minimal JSON Schema in valid JSON format that represents data created by the artifact]
+</result_schema>
+
+SCHEMA GUIDELINES:
+1. Keep it minimal:
+   - Include only essential fields (5-7 properties max)
+   - Focus on the core functionality
+   - If user requested complex features, simplify for this first version
+   
+2. Each property should have:
+   - A descriptive "title" field
+   - A brief "description" field
+   - A sensible default value where appropriate
+   
+3. Example of a simple schema:
+\`\`\`json
+{
+  "type": "object",
+  "title": "Note",
+  "description": "A simple note for the user",
+  "properties": {
+    "title": {
+      "type": "string",
+      "title": "Title",
+      "description": "Title of the note",
+      "default": "New Note"
+    },
+    "content": {
+      "type": "string",
+      "title": "Content",
+      "description": "Content of the note"
+    },
+    "created": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Created Date",
+      "description": "When the note was created",
+    }
+  },
+  "required": ["title", "content"]
+}
+
 GUIDELINES:
 - Aim for the simplest possible solution that works with the existing schema
 - The specification should take into account the existing schema structure
@@ -122,6 +166,8 @@ GUIDELINES:
 
 IMPORTANT:
 - Focus on the simplest working version
+- Aim for fewer fields rather than more
+- But still capture all the important state the user is creating
 - The user can always iterate and improve the solution later
 `;
 
@@ -135,11 +181,12 @@ export async function generateSpecAndSchema(
   goal: string,
   existingSchema?: JSONSchema,
 ): Promise<{
-  title: string;
-  description: string;
   spec: string;
   plan: string;
-  schema: JSONSchema;
+  title: string;
+  description: string;
+  resultSchema: JSONSchema;
+  argumentSchema: JSONSchema;
 }> {
   let systemPrompt, userContent;
 
@@ -154,7 +201,7 @@ Existing Schema:
 ${JSON.stringify(existingSchema, null, 2)}
 \`\`\`
 
-Based on this goal and the existing schema, please provide a title, description, detailed specification, and implementation plan.
+Based on this goal and the existing schema, please provide a title, description, any additional schema,detailed specification, and implementation plan.
 `;
   } else {
     // When generating from scratch, use the full schema generation prompt
@@ -183,33 +230,40 @@ Based on this goal and the existing schema, please provide a title, description,
   const plan = parseTagFromResponse(response, "plan");
 
   // If we have an existing schema, use it; otherwise parse the generated schema
-  let schema: JSONSchemaWritable;
+  let resultSchema: JSONSchemaWritable;
+  let argumentSchema: JSONSchemaWritable;
 
-  if (existingSchema) {
-    // Use the existing schema, no need to parse one
-    schema = { ...existingSchema };
-  } else {
-    // Parse the generated schema
-    const schemaJson = parseTagFromResponse(response, "schema");
+  try {
+    const resultSchemaJson = parseTagFromResponse(response, "result_schema");
+    resultSchema = resultSchemaJson ? JSON.parse(resultSchemaJson) : {};
+  } catch (error) {
+    console.error("Error parsing schema:", error);
+    // Fallback to an empty schema
+    resultSchema = {};
+  }
 
-    try {
-      schema = schemaJson ? JSON.parse(schemaJson) : {};
-    } catch (error) {
-      console.error("Error parsing schema:", error);
-      // Fallback to an empty schema
-      schema = {};
-    }
+  try {
+    const argumentSchemaJson = parseTagFromResponse(
+      response,
+      "argument_schema",
+    );
+    argumentSchema = argumentSchemaJson ? JSON.parse(argumentSchemaJson) : {};
+  } catch (error) {
+    console.error("Error parsing schema:", error);
+    // Fallback to an empty schema
+    argumentSchema = {};
   }
 
   // Add title and description to schema
-  schema.title = title;
-  schema.description = description;
+  argumentSchema.title = title;
+  argumentSchema.description = description;
 
   return {
+    spec,
+    resultSchema,
     title,
     description,
-    spec,
-    schema,
+    argumentSchema,
     plan,
   };
 }

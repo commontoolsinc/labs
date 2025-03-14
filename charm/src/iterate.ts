@@ -6,7 +6,11 @@ import {
   tsToExports,
 } from "@commontools/runner";
 import { client as llm } from "@commontools/llm";
-import { createJsonSchema, JSONSchema } from "@commontools/builder";
+import {
+  createJsonSchema,
+  JSONSchema,
+  type Writable,
+} from "@commontools/builder";
 import { Charm, CharmManager } from "./charm.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
@@ -134,39 +138,44 @@ export async function castNewRecipe(
 
   // Phase 1: Generate spec/plan and schema based on goal and possibly existing schema
   const {
-    spec: enhancedSpec,
+    spec,
+    resultSchema,
     title,
     description,
-    schema: generatedSchema,
     plan,
   } = await generateSpecAndSchema(goal, existingSchema);
 
-  // FIXME(ja): why do we use title and description here only when existing schema?
-  const schema = existingSchema
-    ? {
-      ...existingSchema,
-      title: title,
-      description: description,
-    }
-    : generatedSchema;
-
-  console.log("schema", schema);
+  console.log("resultSchema", resultSchema);
 
   const newSpec =
-    `<GOAL>${goal}</GOAL>\n<PLAN>${plan}</PLAN>\n<SPEC>${enhancedSpec}</SPEC>`;
+    `<GOAL>${goal}</GOAL>\n<PLAN>${plan}</PLAN>\n<SPEC>${spec}</SPEC>`;
 
   console.log("newSpec", newSpec);
+
+  // NOTE(ja): we put the result schema in the argument schema
+  // as a hack to work around iframes not supporting results schemas
+  const schema = {
+    ...existingSchema,
+    title,
+    description,
+  } as Writable<JSONSchema>;
+
+  // FIXME(ja): this might overwrite existing properties!!!
+  // we should probaly throw a warning here...
+  Object.keys(resultSchema.properties ?? {}).forEach((key) => {
+    schema.properties[key] = resultSchema.properties![key];
+  });
 
   // Phase 2: Generate UI code using the schema and enhanced spec
   const newIFrameSrc = await genSrc({ newSpec, schema });
   const name = extractTitle(newIFrameSrc, title); // Use the generated title as fallback
   const newRecipeSrc = buildFullRecipe({
     src: newIFrameSrc,
-    spec: enhancedSpec,
-    plan: plan,
-    goal: goal,
+    spec,
+    plan,
+    goal,
     argumentSchema: schema,
-    resultSchema: {},
+    resultSchema,
     name,
   });
 

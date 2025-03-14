@@ -13,6 +13,10 @@ export type IFrameRecipe = {
 };
 
 export const buildFullRecipe = (iframe: IFrameRecipe) => {
+  const result = Object.keys(iframe.resultSchema.properties ?? {}).map((key) =>
+    `    ${key}: data.${key},\n`
+  ).join("\n");
+
   return `import { h } from "@commontools/html";
   import { recipe, UI, NAME } from "@commontools/builder";
   import type { JSONSchema } from "@commontools/builder";
@@ -31,14 +35,13 @@ export const buildFullRecipe = (iframe: IFrameRecipe) => {
     JSON.stringify(iframe, null, 2)
   } /* IFRAME-V0 */
 
-
   const runIframeRecipe = ({ argumentSchema, resultSchema, src, name }: IFrameRecipe) =>
   recipe(argumentSchema, resultSchema, (data) => ({
     [NAME]: name,
     [UI]: (
       <common-iframe src={src} $context={data}></common-iframe>
     ),
-    // FIXME: add resultSchema to the result
+${result}
   }));
 
   export default runIframeRecipe(inst);
