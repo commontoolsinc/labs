@@ -44,6 +44,7 @@ export async function hashKey(key: string): Promise<string> {
 export async function loadItem(key: string): Promise<CacheItem | null> {
   const hash = await hashKey(key);
   const filePath = `${CACHE_DIR}/${hash}.json`;
+  console.log("checking cache file:", filePath);
   try {
     const cacheData = await Deno.readTextFile(filePath);
     console.log(
@@ -53,8 +54,10 @@ export async function loadItem(key: string): Promise<CacheItem | null> {
         )
       }`,
     );
+    console.log("returning data:", cacheData);
     return JSON.parse(cacheData);
   } catch {
+    console.log("cache file not found:", filePath);
     return null;
   }
 }
