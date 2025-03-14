@@ -47,8 +47,13 @@ export class CommonGoogleOauthElement extends LitElement {
 
     // `ct://${spaceDid}/${cellId}`
 
+    // FIXME(jake): This is a hack to get the charm id that mounts this web component.
+    // Once we have multi-charm urls, this will break!
+    // It would be nice if our common ui web components knew which charm is mounting them...
+    const integrationCharmId = globalThis.location.pathname.split("/").pop();
     const payload = {
       authCellId,
+      integrationCharmId,
     };
 
     try {

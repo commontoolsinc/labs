@@ -15,10 +15,14 @@ export const login = createRoute({
           schema: z
             .object({
               authCellId: z.string().describe("The authentication cell ID"),
+              integrationCharmId: z
+                .string()
+                .describe("The charm ID of the integration charm"),
             })
             .openapi({
               example: {
                 authCellId: "auth-cell-123",
+                integrationCharmId: "integration-charm-123",
               },
             }),
         },

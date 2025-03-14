@@ -24,6 +24,9 @@ import {
   getTokensFromAuthCell,
   persistTokens,
 } from "./google-oauth.utils.ts";
+import { addCharmToGmailIntegrations } from "@commontools/utils";
+
+import { type CellLink } from "@commontools/runner";
 
 /**
  * Google OAuth Login Handler
@@ -42,7 +45,7 @@ export const login: AppRouteHandler<LoginRoute> = async (c) => {
     }
 
     // Encode the auth cell ID as state parameter
-    const authIdParam = btoa(JSON.stringify(payload.authCellId));
+    const statePayload = btoa(JSON.stringify(payload));
     const redirectUri = `${
       getBaseUrl(c.req.url)
     }/api/integrations/google-oauth/callback`;
@@ -57,12 +60,12 @@ export const login: AppRouteHandler<LoginRoute> = async (c) => {
 
     // Add state parameter and other required params to the URL
     const authUrl = new URL(uri.toString());
-    authUrl.searchParams.set("state", authIdParam);
+    authUrl.searchParams.set("state", statePayload);
     authUrl.searchParams.set("access_type", "offline");
     authUrl.searchParams.set("prompt", "consent");
 
     // Store the code verifier for later use in the callback
-    codeVerifiers.set(authIdParam, codeVerifier);
+    codeVerifiers.set(statePayload, codeVerifier);
 
     logger.info({ authUrl: authUrl.toString() }, "Generated OAuth URL");
 
@@ -111,7 +114,10 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
     }
 
     // Decode and parse the state parameter (contains the auth cell ID)
-    let decodedState: string;
+    let decodedState: {
+      authCellId: string;
+      integrationCharmId: string;
+    };
     try {
       decodedState = JSON.parse(atob(state));
       logger.info({ decodedState }, "Decoded state parameter");
@@ -166,9 +172,46 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
 
     // Fetch user info to verify the token
     const userInfo = await fetchUserInfo(tokens.accessToken);
+    const authCellLink = JSON.parse(decodedState?.authCellId) as CellLink;
 
     // Save tokens to auth cell
-    const tokenData = await persistTokens(tokens, userInfo, decodedState);
+    const tokenData = await persistTokens(tokens, userInfo, authCellLink);
+
+    // Add this charm to the Gmail integration charms cell
+    try {
+      // Get the charm ID and space from the decodedState (which is the auth cell ID)
+      const space = authCellLink.space;
+      const integrationCharmId = decodedState?.integrationCharmId;
+
+      if (space && integrationCharmId) {
+        logger.info(
+          { space, integrationCharmId },
+          "Adding Google integration charm to Gmail integrations",
+        );
+
+        const added = await addCharmToGmailIntegrations(
+          space,
+          integrationCharmId,
+        );
+
+        if (added) {
+          logger.info("Added charm to Gmail integrations");
+        } else {
+          logger.info("Charm already exists in Gmail integrations");
+        }
+      } else {
+        logger.warn(
+          { decodedState },
+          "Could not extract space and charm ID from auth cell",
+        );
+      }
+    } catch (error) {
+      // Don't fail the main operation if this fails, just log it
+      logger.error(
+        { error },
+        "Failed to add charm to Gmail integrations, continuing anyway",
+      );
+    }
 
     // Prepare and return the success response
     const callbackResult: CallbackResult = {
