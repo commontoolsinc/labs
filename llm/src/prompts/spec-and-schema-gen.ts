@@ -190,7 +190,7 @@ export async function generateSpecAndSchema(
 }> {
   let systemPrompt, userContent;
 
-  if (existingSchema) {
+  if (existingSchema && Object.keys(existingSchema).length > 0) {
     // When we have an existing schema, focus on generating specification
     systemPrompt = SPEC_FROM_SCHEMA_PROMPT;
     userContent = `
@@ -237,7 +237,7 @@ Based on this goal and the existing schema, please provide a title, description,
     const resultSchemaJson = parseTagFromResponse(response, "result_schema");
     resultSchema = resultSchemaJson ? JSON.parse(resultSchemaJson) : {};
   } catch (error) {
-    console.error("Error parsing schema:", error);
+    console.warn("Error parsing schema:", error);
     // Fallback to an empty schema
     resultSchema = {};
   }
@@ -249,7 +249,7 @@ Based on this goal and the existing schema, please provide a title, description,
     );
     argumentSchema = argumentSchemaJson ? JSON.parse(argumentSchemaJson) : {};
   } catch (error) {
-    console.error("Error parsing schema:", error);
+    console.warn("Error parsing schema:", error);
     // Fallback to an empty schema
     argumentSchema = {};
   }
