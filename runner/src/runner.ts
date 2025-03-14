@@ -206,6 +206,9 @@ export function run<T, R = any>(
     ...processCell.get()?.internal,
   };
 
+  // Still necessary until we consistently use schema for defaults
+  argument = mergeObjects(argument, defaults);
+
   processCell.send({
     ...processCell.get(),
     [TYPE]: recipeId,
