@@ -114,20 +114,19 @@ export const generateNewRecipeVersion = (
 // FIXME(seefeld): might be able to use asSchema here...
 function scrub(data: any): any {
   if (isCell(data)) {
-    if (data.schema) {
-      if (data.schema.type === "object" && data.schema.properties) {
+    if (data.schema?.type === "object") {
+      if (data.schema.properties) {
         const scrubbed = Object.fromEntries(
           Object.entries(data.schema.properties).filter(([key]) =>
             !key.startsWith("$")
           ),
         );
         return data.asSchema({ ...data.schema, properties: scrubbed });
-      }
-      // else no-op
+      } else return data;
     } else {
       const value = data.get();
       if (isObj(value)) {
-        return data.asSchema({
+        const schema = {
           type: "object",
           properties: Object.fromEntries(
             Object.keys(value).filter(([key, value]) =>
@@ -136,17 +135,17 @@ function scrub(data: any): any {
               (key) => [key, {}],
             ),
           ),
-        });
-      }
+        } as JSONSchema;
+        return data.asSchema(schema);
+      } else return data;
     }
-    return data;
+  } else if (Array.isArray(data)) {
+    return data.map((value) => scrub(value));
   } else if (isObj(data)) {
     return Object.fromEntries(
       Object.entries(data).map(([key, value]) => [key, scrub(value)]),
     );
-  } else {
-    return data;
-  }
+  } else return data;
 }
 
 /**
