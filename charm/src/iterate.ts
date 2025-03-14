@@ -176,11 +176,16 @@ export async function castNewRecipe(
     schema.properties = {};
   }
 
-  // FIXME(ja): this might overwrite existing properties!!!
-  // we should probaly throw a warning here...
+  // FIXME(ja): we shouldn't just throw results into the argument schema
+  // as this is a hack...
   if (schema.type === "object") {
-    Object.keys(resultSchema.properties ?? {}).forEach((key) => {
-      schema.properties[key] = resultSchema.properties![key];
+    const props = resultSchema.properties ?? {};
+    Object.keys(props).forEach((key) => {
+      if (schema.properties && schema.properties[key]) {
+        console.error(`skipping ${key} already in the argument schema`);
+      } else {
+        (schema.properties as Record<string, JSONSchema>)[key] = props[key];
+      }
     });
   }
 
