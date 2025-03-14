@@ -79,14 +79,18 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
     let ignore = false;
     async function getKeyStoreAndRoot() {
       const keyStore = await KeyStore.open();
+      console.log("KeyStore set:", keyStore);
       const root = await keyStore.get(ROOT_KEY);
+      console.log("Root set:", root);
       if (!ignore) {
+        console.log("Setting KeyStore and Root", keyStore, root);
         setKeyStore(keyStore);
         setRoot(root);
       }
     }
     getKeyStoreAndRoot();
     return () => {
+      console.log("Unmounting");
       ignore = true;
       setKeyStore(undefined);
       setRoot(undefined);
