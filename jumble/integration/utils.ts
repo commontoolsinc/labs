@@ -101,6 +101,8 @@ export const login = async (page: Page) => {
 
   // Click the only button, "login"
   await waitForSelectorClick(page, "button[aria-label='login']");
+
+  await page.waitForSelector("#user-avatar");
 };
 
 export const waitForSelectorWithText = async (
