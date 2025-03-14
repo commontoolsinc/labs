@@ -721,7 +721,11 @@ const ElementComponent = (props: RenderElementProps) => {
 
   switch (elementType) {
     case "mention":
-      return <Mention {...props as RenderElementPropsFor<MentionElement>} />;
+      return (
+        <Mention {...props as RenderElementPropsFor<MentionElement>}>
+          {children}
+        </Mention>
+      );
     case "block-quote":
       return (
         <blockquote
