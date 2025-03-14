@@ -44,8 +44,11 @@ export async function extendCharm(
   cells?: any,
 ): Promise<Cell<Charm>> {
   const charm = (await charmManager.get(focusedCharmId, false))!;
-  cells.this = charm;
-  return castNewRecipe(charmManager, goal, cells);
+  return castNewRecipe(
+    charmManager,
+    goal,
+    cells ? { ...cells, "this": charm } : charm,
+  );
 }
 
 export async function iterateCharm(
