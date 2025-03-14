@@ -68,10 +68,6 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
   const [session, setSession] = useState<Session | void>(undefined);
   const [root, setRoot] = useState<Identity | void>(undefined);
 
-  console.log("Root:", root);
-  console.log("KeyStore:", keyStore);
-  console.log("Session:", session);
-
   const { replicaName: spaceName } = matchSpace(location.pathname);
 
   // On load, open the KeyStore and find a root key.
@@ -79,18 +75,14 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
     let ignore = false;
     async function getKeyStoreAndRoot() {
       const keyStore = await KeyStore.open();
-      console.log("KeyStore set:", keyStore);
       const root = await keyStore.get(ROOT_KEY);
-      console.log("Root set:", root);
       if (!ignore) {
-        console.log("Setting KeyStore and Root", keyStore, root);
         setKeyStore(keyStore);
         setRoot(root);
       }
     }
     getKeyStoreAndRoot();
     return () => {
-      console.log("Unmounting");
       ignore = true;
       setKeyStore(undefined);
       setRoot(undefined);
