@@ -121,13 +121,13 @@ function scrub(data: any): any {
             !key.startsWith("$")
           ),
         );
-        return { ...data.schema, properties: scrubbed };
+        return data.asSchema({ ...data.schema, properties: scrubbed });
       }
       // else no-op
     } else {
       const value = data.get();
       if (isObj(value)) {
-        return {
+        return data.asSchema({
           type: "object",
           properties: Object.fromEntries(
             Object.keys(value).filter(([key, value]) =>
@@ -136,7 +136,7 @@ function scrub(data: any): any {
               (key) => [key, {}],
             ),
           ),
-        };
+        });
       }
     }
   } else if (isObj(data)) {
