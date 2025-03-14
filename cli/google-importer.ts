@@ -31,7 +31,7 @@ function showHelp() {
     "  --interval=<seconds>  Update interval in seconds (default: 30)",
   );
   console.log(
-    "  --setup               Initialize Gmail integration charms cell",
+    "  --initialize             Initialize Gmail integration charms cell",
   );
   console.log("  --help                Show this help message");
   Deno.exit(0);
@@ -40,11 +40,11 @@ function showHelp() {
 // Parse command line arguments
 const flags = parseArgs(Deno.args, {
   string: ["charms", "interval"],
-  boolean: ["help", "setup"],
+  boolean: ["help", "initialize"],
   default: { interval: "30" },
 });
 
-const { charms, interval, help, setup } = flags;
+const { charms, interval, help, initialize } = flags;
 
 if (help) {
   showHelp();
@@ -69,8 +69,8 @@ async function loadGmailIntegrationCharms() {
   log(undefined, "Loading Gmail integration charms...");
 
   try {
-    // If --setup flag is present, initialize the cell
-    if (setup) {
+    // If --initialize flag is present, initialize the cell
+    if (initialize) {
       const initialized = await initializeGmailIntegrationCharmsCell();
       if (initialized) {
         log(
