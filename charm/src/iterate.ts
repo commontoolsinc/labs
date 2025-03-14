@@ -6,9 +6,11 @@ import {
   tsToExports,
 } from "@commontools/runner";
 import { client as llm } from "@commontools/llm";
+import { isObj } from "@commontools/utils";
 import {
   createJsonSchema,
   JSONSchema,
+  schema,
   type Writable,
 } from "@commontools/builder";
 import { Charm, CharmManager } from "./charm.ts";
@@ -110,19 +112,41 @@ export const generateNewRecipeVersion = (
 // it should scrub the result1 and result2 and
 // return { calendar: scrub(result1), email: scrub(result2) }
 // FIXME(seefeld): might be able to use asSchema here...
-const scrub = (data: any) => {
-  if (!data || !isCell(data)) return data;
-
-  const rv: any = {};
-  Object.keys(data.get()).forEach((key) => {
-    const value = data.key(key);
-    if (!key.startsWith("$") && !isStream(value)) {
-      rv[key] = value;
+function scrub(data: any): any {
+  if (isCell(data)) {
+    if (data.schema) {
+      if (data.schema.type === "object" && data.schema.properties) {
+        const scrubbed = Object.fromEntries(
+          Object.entries(data.schema.properties).filter(([key]) =>
+            !key.startsWith("$")
+          ),
+        );
+        return { ...data.schema, properties: scrubbed };
+      }
+      // else no-op
+    } else {
+      const value = data.get();
+      if (isObj(value)) {
+        return {
+          type: "object",
+          properties: Object.fromEntries(
+            Object.keys(value).filter(([key, value]) =>
+              !key.startsWith("$") && !isStream(value)
+            ).map(
+              (key) => [key, {}],
+            ),
+          ),
+        };
+      }
     }
-  });
-
-  return rv;
-};
+  } else if (isObj(data)) {
+    return Object.fromEntries(
+      Object.entries(data).map(([key, value]) => [key, scrub(value)]),
+    );
+  } else {
+    return data;
+  }
+}
 
 /**
  * Cast a new recipe from a goal and data
@@ -139,6 +163,7 @@ export async function castNewRecipe(
 ): Promise<Cell<Charm>> {
   console.log("Processing goal:", goal, cells);
 
+  // Remove $UI, $NAME, and any streams from the cells
   const scrubbed = scrub(cells);
 
   // First, extract any existing schema if we have data
@@ -204,7 +229,7 @@ export async function castNewRecipe(
 
   // FIXME(ja): we should send the scrubbed data here - otherwise you
   // will get $UI $NAME and any streams in the inputs...
-  return compileAndRunRecipe(charmManager, newRecipeSrc, goal, cells);
+  return compileAndRunRecipe(charmManager, newRecipeSrc, goal, scrubbed);
 }
 
 export async function compileRecipe(
