@@ -75,7 +75,7 @@ export async function formatPromptWithMentions(
       // Format: [character](charm://id)
       processedText = processedText.replace(
         new RegExp(`\\[(.*?)\\]\\(charm://${id}\\)`, "g"),
-        `ID:${id}`,
+        `\`${id}\``,
       );
     });
   }
