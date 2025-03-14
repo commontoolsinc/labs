@@ -319,12 +319,12 @@ function useCharmOperation() {
   const performOperation = useCallback(
     (
       charmId: string,
-      replicaName: string,
       input: string,
-      replace: boolean,
       model: string,
+      data: any,
     ) => {
       if (operationType === "iterate") {
+        // TODO(bf): do we use @-ref data for iterate?
         return iterateCharm(
           charmManager,
           charmId,
@@ -336,6 +336,7 @@ function useCharmOperation() {
           charmManager,
           charmId,
           input,
+          data,
         );
       }
     },
@@ -347,7 +348,7 @@ function useCharmOperation() {
     if (!input || !charm || !paramCharmId || !replicaName) return;
     setLoading(true);
 
-    const finalText = await formatPromptWithMentions(
+    const { text, sources } = await formatPromptWithMentions(
       input,
       charmManager,
     );
@@ -359,10 +360,9 @@ function useCharmOperation() {
       const gens = variantModels.map(async (model) => {
         const newCharm = await performOperation(
           charmId(charm)!,
-          replicaName!,
-          finalText,
-          false,
+          text,
           model,
+          sources,
         );
         // Store the variant and keep track of which model was used
         setVariants((prev) => [...prev, newCharm]);
@@ -386,10 +386,9 @@ function useCharmOperation() {
       try {
         const newCharm = await performOperation(
           charmId(charm)!,
-          replicaName,
-          finalText,
-          false,
+          text,
           selectedModel,
+          sources,
         );
         navigate(createPath("charmShow", {
           charmId: charmId(newCharm)!,

@@ -127,11 +127,11 @@ const scrub = (data: any) => {
 export async function castNewRecipe(
   charmManager: CharmManager,
   goal: string,
-  data?: any,
+  cells?: any,
 ): Promise<Cell<Charm>> {
-  console.log("Processing goal:", goal);
+  console.log("Processing goal:", goal, cells);
 
-  const scrubbed = scrub(data);
+  const scrubbed = scrub(cells);
 
   // First, extract any existing schema if we have data
   const existingSchema = createJsonSchema(scrubbed);
@@ -181,7 +181,7 @@ export async function castNewRecipe(
 
   // FIXME(ja): we should send the scrubbed data here - otherwise you
   // will get $UI $NAME and any streams in the inputs...
-  return compileAndRunRecipe(charmManager, newRecipeSrc, goal, data);
+  return compileAndRunRecipe(charmManager, newRecipeSrc, goal, cells);
 }
 
 export async function compileRecipe(
