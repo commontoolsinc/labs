@@ -48,20 +48,14 @@ export async function extendCharm(
   goal: string,
   cells?: Record<string, Cell<any>>,
 ): Promise<Cell<Charm>> {
-  const charm = (await charmManager.get(focusedCharmId, false, charmSchema))!;
+  const charm = (await charmManager.get(focusedCharmId, false))!;
 
-  let argument;
-  if (cells) {
-    const shadowId = getCharmNameAsCamelCase(charm, cells);
-    argument = { ...cells, [shadowId]: charm };
-  } else {
-    argument = charm;
-  }
+  const shadowId = getCharmNameAsCamelCase(charm, cells ?? {});
 
   return castNewRecipe(
     charmManager,
     goal,
-    argument,
+    { ...cells, [shadowId]: charm },
   );
 }
 
