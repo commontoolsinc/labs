@@ -30,7 +30,8 @@
     "./fact": "./fact.ts",
     "./changes": "./changes.ts",
     "./consumer": "./consumer.ts",
-    "./codec": "./codec.ts"
+    "./codec": "./codec.ts",
+    "./reference": "./reference.ts"
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",

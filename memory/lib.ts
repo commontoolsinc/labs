@@ -12,3 +12,4 @@ export * as ChangesBuilder from "./changes.ts";
 export * as TransactionBuilder from "./transaction.ts";
 export * as CommitBuilder from "./commit.ts";
 export * as Telemetry from "./telemetry.ts";
+export * as Reference from "./reference.ts";
