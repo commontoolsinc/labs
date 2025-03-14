@@ -71,20 +71,31 @@ import { type Schema } from "@commontools/builder";
  * @param {JSONSchema} schema - Optional schema to apply.
  * @returns {Cell<T & {[TYPE]: string | undefined} & {argument: any}>}
  *
- * @method toJSON Returns a serializable doclink (not the contents) to the cell.
+ * @method toJSON Returns a serializable cell link (not the contents) to the
+ * cell. This is used e.g. when creating merkle references that refer to cells.
+ * It currentlly doesn't contain the space. We'll eventually want to get a
+ * relative link here, but that will require context toJSON doesn't get.
  * @returns {{cell: {"/": string} | undefined, path: PropertyKey[]}}
- *
- * @method value Returns the current value of the cell.
- * @returns {T}
- *
- * @property cellLink The cell link representing this cell.
- * @returns {CellLink}
  *
  * @property entityId Returns the current entity ID of the cell.
  * @returns {EntityId | undefined}
  *
  * @property schema Optional schema for the cell.
  * @returns {JSONSchema | undefined}
+ *
+ * @property rootSchema Optional root schema for cell's schema. This differs
+ * from `schema` when the cell represents a child of the original cell (e.g. via
+ * `key()`). We need to keep the root schema to resolve `$ref` in the schema.
+ * @returns {JSONSchema | undefined}
+ *
+ * The following are just for debugging and might disappear: (This allows
+ * clicking on a property in the debugger and getting the value)
+ *
+ * @method value Returns the current value of the cell.
+ * @returns {T}
+ *
+ * @property cellLink The cell link representing this cell.
+ * @returns {CellLink}
  */
 export interface Cell<T> {
   get(): T;
@@ -139,13 +150,13 @@ export interface Cell<T> {
       : { argument: any })
   >;
   toJSON(): { cell: { "/": string } | undefined; path: PropertyKey[] };
+  schema?: JSONSchema;
+  rootSchema?: JSONSchema;
   value: T;
   cellLink: CellLink;
   entityId: EntityId | undefined;
   [isCellMarker]: true;
   copyTrap: boolean;
-  schema?: JSONSchema;
-  rootSchema?: JSONSchema;
 }
 
 export interface Stream<T> {
