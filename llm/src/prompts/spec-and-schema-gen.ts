@@ -138,6 +138,7 @@ export async function generateSpecAndSchema(
   title: string;
   description: string;
   spec: string;
+  plan: string;
   schema: JSONSchema;
 }> {
   let systemPrompt, userContent;
@@ -190,7 +191,6 @@ Based on this goal and the existing schema, please provide a title, description,
   } else {
     // Parse the generated schema
     const schemaJson = parseTagFromResponse(response, "schema");
-    const exampleData = parseTagFromResponse(response, "example_data");
 
     try {
       schema = schemaJson ? JSON.parse(schemaJson) : {};
@@ -210,5 +210,6 @@ Based on this goal and the existing schema, please provide a title, description,
     description,
     spec,
     schema,
+    plan,
   };
 }

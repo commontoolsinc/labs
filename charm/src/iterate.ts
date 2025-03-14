@@ -1,16 +1,11 @@
 import { Cell, registerNewRecipe, tsToExports } from "@commontools/runner";
 import { client as llm } from "@commontools/llm";
-import {
-  createJsonSchema,
-  JSONSchema,
-  JSONSchemaWritable,
-} from "@commontools/builder";
+import { createJsonSchema, JSONSchema } from "@commontools/builder";
 import { Charm, CharmManager } from "./charm.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import { generateSpecAndSchema } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
-import { isCell } from "@commontools/runner";
 
 const genSrc = async ({
   src,
@@ -18,23 +13,14 @@ const genSrc = async ({
   newSpec,
   schema,
   model,
-  enhancedSpec,
 }: {
   src?: string;
   spec?: string;
   newSpec: string;
   schema: JSONSchema;
   model?: string;
-  enhancedSpec?: string;
 }) => {
-  const request = buildPrompt({
-    src,
-    spec,
-    newSpec,
-    schema,
-    enhancedSpec,
-    model,
-  });
+  const request = buildPrompt({ src, spec, newSpec, schema, model });
 
   let response = await llm.sendRequest(request);
 
@@ -120,40 +106,36 @@ export async function castNewRecipe(
   const existingSchema = createJsonSchema(data);
 
   // Phase 1: Generate spec/plan and schema based on goal and possibly existing schema
-  const firstPhaseResult = await generateSpecAndSchema(goal, existingSchema);
+  const {
+    spec: enhancedSpec,
+    title,
+    description,
+    schema: generatedSchema,
+    plan,
+  } = await generateSpecAndSchema(goal, existingSchema);
 
-  // Extract the results from the first phase
-  const enhancedSpec = firstPhaseResult.spec;
-  const title = firstPhaseResult.title;
-  const description = firstPhaseResult.description;
-
-  // Determine the final schema to use
-  let schema;
-  if (existingSchema) {
-    // If we had an existing schema, enhance it with the new metadata
-    schema = {
+  // FIXME(ja): why do we use title and description here only when existing schema?
+  const schema = existingSchema
+    ? {
       ...existingSchema,
       title: title,
       description: description,
-    };
-  } else {
-    // Otherwise use the generated schema
-    schema = firstPhaseResult.schema;
-  }
+    }
+    : generatedSchema;
 
   console.log("schema", schema);
 
+  const newSpec =
+    `<GOAL>${goal}</GOAL>\n<PLAN>${plan}</PLAN>\n<SPEC>${enhancedSpec}</SPEC>`;
+
   // Phase 2: Generate UI code using the schema and enhanced spec
-  const newIFrameSrc = await genSrc({
-    newSpec: enhancedSpec,
-    enhancedSpec: enhancedSpec,
-    schema,
-  });
+  const newIFrameSrc = await genSrc({ newSpec, schema });
   const name = extractTitle(newIFrameSrc, title); // Use the generated title as fallback
   const newRecipeSrc = buildFullRecipe({
     src: newIFrameSrc,
-    spec: goal, // Original goal
-    enhancedSpec: enhancedSpec, // Store the detailed spec
+    spec: enhancedSpec,
+    plan: plan,
+    goal: goal,
     argumentSchema: schema,
     resultSchema: {},
     name,

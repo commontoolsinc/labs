@@ -1,7 +1,7 @@
 import { JSONSchema } from "@commontools/builder";
 import { type LLMRequest } from "@commontools/llm";
 
-import { extractUserCode, prefillHtml, systemMd } from "./static.ts";
+import { extractUserCode, systemMd } from "./static.ts";
 
 export const RESPONSE_PREFILL = "```javascript\n";
 
@@ -23,14 +23,12 @@ export const buildPrompt = ({
   spec,
   newSpec,
   schema,
-  enhancedSpec,
   model,
 }: {
   src?: string;
   spec?: string;
   newSpec: string;
   schema: JSONSchema;
-  enhancedSpec?: string;
   model?: string;
 }): LLMRequest => {
   const messages: string[] = [];
@@ -49,13 +47,7 @@ export const buildPrompt = ({
       spec ? "update" : "create"
     } the source code with the following specification:
 \`\`\`
-${
-      enhancedSpec
-        ? `GOAL: ${newSpec}
-        
-${enhancedSpec}`
-        : newSpec
-    }
+${newSpec}
 \`\`\``,
   );
 
