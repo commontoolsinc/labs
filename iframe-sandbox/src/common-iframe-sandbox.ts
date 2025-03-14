@@ -333,6 +333,7 @@ export class CommonIframeSandboxElement extends LitElement {
     return html`
       <iframe
         ${ref(this.iframeRef)}
+        allow="clipboard-write"
         sandbox="allow-scripts allow-pointer-lock"
         .srcdoc=${OuterFrame}
         height="100%"
