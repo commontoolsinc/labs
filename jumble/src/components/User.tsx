@@ -126,22 +126,25 @@ export function User() {
 
       // Check for disconnected state - this has priority over all
       if (connectionStatus === "disconnected") {
-        // Make ring visible for disconnected state
-        opacityRef.current = 0.9;
+        // Create pulsing effect using sine wave
+        const pulseIntensity = (Math.sin(now / 100) + 1) / 2; // Values between 0 and 1
+        opacityRef.current = 0.3 + (pulseIntensity * 0.6); // Pulse between 0.3 and 0.9 opacity
 
-        // Slow pulsing rotation for disconnected state
-        rotationRef.current += 0.5;
+        // Stop rotation for disconnected state
+        rotationRef.current = 0;
 
         // Set red color for disconnected state
-        circle.setAttribute("stroke", "#FF0000"); // Red color for offline
+        circle.setAttribute("stroke", "#ffffff");
 
-        // Use dashed stroke for disconnected state
-        circle.setAttribute("strokeDasharray", "2 4");
-        circle.setAttribute("strokeWidth", "3");
+        // Use solid stroke for disconnected state
+        circle.setAttribute("strokeDasharray", "none");
+        circle.setAttribute("strokeWidth", String(2 + pulseIntensity)); // Pulse stroke width too
 
-        // Add red error glow to avatar
+        // Add pulsing red glow to avatar
         if (avatarRef.current) {
-          avatarRef.current.style.boxShadow = "0 0 8px #FF0000";
+          avatarRef.current.style.boxShadow = `0 0 ${
+            8 * pulseIntensity
+          }px #FF0000`;
         }
       } // Check for transact (send) events - they have second priority
       else if (sendActivities > 0) {
