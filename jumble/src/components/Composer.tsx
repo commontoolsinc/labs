@@ -594,7 +594,11 @@ export function Composer({
     if (autoFocus && editor) {
       // Small delay to ensure the editor is fully mounted
       setTimeout(() => {
-        ReactEditor.focus(editor);
+        try {
+          ReactEditor.focus(editor);
+        } catch (error) {
+          console.warn("Failed to focus editor:", error);
+        }
       }, 100);
     }
   }, [autoFocus, editor]);
