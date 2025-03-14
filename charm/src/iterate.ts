@@ -115,22 +115,20 @@ export const generateNewRecipeVersion = (
 export function scrub(data: any): any {
   console.log("scrubbing", data);
   if (isCell(data)) {
-    if (data.schema?.type === "object") {
+    if (data.schema?.type === "object" && data.schema.properties) {
       // If there are properties, remove $UI and $NAME and any streams
-      if (data.schema.properties) {
-        const scrubbed = Object.fromEntries(
-          Object.entries(data.schema.properties).filter(([key, value]) =>
-            !key.startsWith("$") && (!isObj(value) || !value.asStream)
-          ),
-        );
-        console.log("scrubbed modified schema", scrubbed, data.schema);
-        // If this resulted in an empty schema, return without a schema
-        return data.asSchema(
-          Object.keys(scrubbed).length > 0
-            ? { ...data.schema, properties: scrubbed }
-            : undefined,
-        );
-      } else return data;
+      const scrubbed = Object.fromEntries(
+        Object.entries(data.schema.properties).filter(([key, value]) =>
+          !key.startsWith("$") && (!isObj(value) || !value.asStream)
+        ),
+      );
+      console.log("scrubbed modified schema", scrubbed, data.schema);
+      // If this resulted in an empty schema, return without a schema
+      return data.asSchema(
+        Object.keys(scrubbed).length > 0
+          ? { ...data.schema, properties: scrubbed }
+          : undefined,
+      );
     } else {
       const value = data.asSchema().get();
       if (isObj(value)) {
