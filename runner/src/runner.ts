@@ -26,6 +26,7 @@ import {
 import {
   containsOpaqueRef,
   deepCopy,
+  diffAndUpdate,
   extractDefaultValues,
   findAllAliasedDocs,
   followAliases,
@@ -34,7 +35,6 @@ import {
   sendValueToBinding,
   unsafe_noteParentOnRecipes,
   unwrapOneLevelAndBindtoDoc,
-  diffAndUpdate,
 } from "./utils.ts";
 import { getModuleByRef } from "./module.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
@@ -213,7 +213,12 @@ export function run<T, R = any>(
     internal,
   });
   if (argument) {
-    diffAndUpdate({ cell: processCell, path: [argument] }, argument, undefined, processCell);
+    diffAndUpdate(
+      { cell: processCell, path: ["argument"] },
+      argument,
+      undefined,
+      processCell,
+    );
   }
 
   // Send "query" to results to the result doc
