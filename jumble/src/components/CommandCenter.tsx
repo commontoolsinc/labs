@@ -30,6 +30,10 @@ function CommandProcessor({
   context: CommandContext;
   onComplete: () => void;
 }) {
+  const { charmManager } = context;
+  const [inputValue, setInputValue] = useState("");
+  const charmMentions = useCharmMentions();
+
   if (context.loading) {
     return (
       <Command.Group>
@@ -42,7 +46,26 @@ function CommandProcessor({
 
   switch (mode.type) {
     case "input":
-      return null;
+      return (
+          <Composer
+            style={{ width: "100%", height: "96px" }}
+            placeholder={mode.placeholder || "Enter input"}
+            value={inputValue}
+            onValueChange={setInputValue}
+            mentions={charmMentions}
+            autoFocus
+            onKeyDown={async (e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                const finalText = await formatPromptWithMentions(
+                  inputValue,
+                  charmManager,
+                );
+                mode.command.handler?.(finalText);
+              }
+            }}
+          />
+      );
 
     case "confirm":
       return (
@@ -352,60 +375,36 @@ export function CommandCenter() {
         </DialogDescription>
       </VisuallyHidden>
 
-      <div
-        className="flex items-center gap-2"
-        style={{ display: mode.type == "transcribe" ? "none" : "flex" }}
-      >
-        <div className="w-10 h-10 flex-shrink-0">
-          <DitheredCube
-            animationSpeed={loading ? 2 : 1}
-            width={40}
-            height={40}
-            animate={loading}
-            cameraZoom={loading ? 12 : 14}
+      {/* Only show the standard input field when not in input or transcribe mode */}
+      {mode.type !== "input" && mode.type !== "transcribe" && (
+        <div className="flex items-center gap-2">
+          <div className="w-10 h-10 flex-shrink-0">
+            <DitheredCube
+              animationSpeed={loading ? 2 : 1}
+              width={40}
+              height={40}
+              animate={loading}
+              cameraZoom={loading ? 12 : 14}
+            />
+          </div>
+
+          <Command.Input
+            placeholder={mode.type === "confirm"
+              ? mode.message || "Are you sure?"
+              : "What would you like to do?"}
+            readOnly={mode.type === "confirm"}
+            value={search}
+            onValueChange={setSearch}
+            onKeyDown={(e) => {
+              // For select mode, prevent the default Enter behavior
+              if (mode.type === "select" && e.key === "Enter") {
+                e.preventDefault();
+              }
+            }}
+            style={{ flexGrow: 1 }}
           />
         </div>
-
-        {/* Use Composer only for input mode, standard Command.Input otherwise */}
-        {mode.type === "input"
-          ? (
-            <Composer
-              placeholder={mode.placeholder || "Enter input"}
-              value={search}
-              onValueChange={setSearch}
-              mentions={charmMentions}
-              onKeyDown={async (e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  const command = mode.command;
-                  const finalText = await formatPromptWithMentions(
-                    search,
-                    charmManager,
-                  );
-                  command.handler?.(finalText);
-                }
-              }}
-              style={{ flexGrow: 1 }}
-            />
-          )
-          : (
-            <Command.Input
-              placeholder={mode.type === "confirm"
-                ? mode.message || "Are you sure?"
-                : "What would you like to do?"}
-              readOnly={mode.type === "confirm"}
-              value={search}
-              onValueChange={setSearch}
-              onKeyDown={(e) => {
-                // For select mode, prevent the default Enter behavior
-                if (mode.type === "select" && e.key === "Enter") {
-                  e.preventDefault();
-                }
-              }}
-              style={{ flexGrow: 1 }}
-            />
-          )}
-      </div>
+      )}
 
       <Command.List>
         {!loading && mode.type != "input" && mode.type != "transcribe" && (

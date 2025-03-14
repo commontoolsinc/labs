@@ -390,6 +390,7 @@ export function Composer({
   onKeyDown: externalOnKeyDown,
   style,
   mentions = [],
+  autoFocus = false,
 }: {
   placeholder?: string;
   readOnly?: boolean;
@@ -398,6 +399,7 @@ export function Composer({
   onKeyDown?: (e: React.KeyboardEvent) => void;
   style?: React.CSSProperties;
   mentions?: Array<{ id: string; name: string }>;
+  autoFocus?: boolean;
 }) {
   // Convert string value to Slate value format if needed
   const initialValue: Descendant[] = useMemo(() => {
@@ -593,6 +595,7 @@ export function Composer({
     <>
       <Slate editor={editor} initialValue={currentValue} onChange={onChange}>
         <Editable
+          id="composer"
           className="p-2"
           readOnly={readOnly}
           renderElement={renderElement}
@@ -604,9 +607,9 @@ export function Composer({
             children,
             attributes,
           }) => (
-            <div {...attributes} className="p-2">
-              <p>{children}</p>
-            </div>
+            <span {...attributes} className="p-2 inline-block text-gray-400">
+              {children}
+            </span>
           )}
           style={{
             ...style,
@@ -616,6 +619,7 @@ export function Composer({
             height: "auto",
             resize: "none",
           }}
+          autoFocus={autoFocus}
         />
         {target && filteredMentions.length > 0 && (
           <Portal>
