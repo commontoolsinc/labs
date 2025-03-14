@@ -68,6 +68,10 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
   const [session, setSession] = useState<Session | void>(undefined);
   const [root, setRoot] = useState<Identity | void>(undefined);
 
+  console.log("Root:", root);
+  console.log("KeyStore:", keyStore);
+  console.log("Session:", session);
+
   const { replicaName: spaceName } = matchSpace(location.pathname);
 
   // On load, open the KeyStore and find a root key.

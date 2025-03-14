@@ -89,6 +89,8 @@ export const login = async (page: Page) => {
     textarea.value
   );
 
+  console.log("MNEMONIC:", mnemonic);
+
   // Click the SECOND button, "continue to login"
   await waitForSelectorClick(page, "button[aria-label='continue-login']");
 
