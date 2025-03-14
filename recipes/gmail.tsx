@@ -543,6 +543,7 @@ export default recipe(
                 />
               </div>
               <button
+                type="button"
                 onClick={googleUpdater({
                   emails,
                   auth,
