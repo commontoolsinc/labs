@@ -1,4 +1,10 @@
-import { Cell, registerNewRecipe, tsToExports } from "@commontools/runner";
+import {
+  Cell,
+  isCell,
+  isStream,
+  registerNewRecipe,
+  tsToExports,
+} from "@commontools/runner";
 import { client as llm } from "@commontools/llm";
 import { createJsonSchema, JSONSchema } from "@commontools/builder";
 import { Charm, CharmManager } from "./charm.ts";
@@ -95,6 +101,25 @@ export const generateNewRecipeVersion = (
   );
 };
 
+// FIXME(ja): this should handle multiple depths and/or
+// a single depth - eg if you send { calendar: result1, email: result2 }
+// it should scrub the result1 and result2 and
+// return { calendar: scrub(result1), email: scrub(result2) }
+// FIXME(seefeld): might be able to use asSchema here...
+const scrub = (data: any) => {
+  if (!data || !isCell(data)) return data;
+
+  const rv: any = {};
+  Object.keys(data.get()).forEach((key) => {
+    const value = data.key(key);
+    if (!key.startsWith("$") && !isStream(value)) {
+      rv[key] = value;
+    }
+  });
+
+  return rv;
+};
+
 export async function castNewRecipe(
   charmManager: CharmManager,
   goal: string,
@@ -102,8 +127,10 @@ export async function castNewRecipe(
 ): Promise<Cell<Charm>> {
   console.log("Processing goal:", goal);
 
+  const scrubbed = scrub(data);
+
   // First, extract any existing schema if we have data
-  const existingSchema = createJsonSchema(data);
+  const existingSchema = createJsonSchema(scrubbed);
 
   // Phase 1: Generate spec/plan and schema based on goal and possibly existing schema
   const {
@@ -128,6 +155,8 @@ export async function castNewRecipe(
   const newSpec =
     `<GOAL>${goal}</GOAL>\n<PLAN>${plan}</PLAN>\n<SPEC>${enhancedSpec}</SPEC>`;
 
+  console.log("newSpec", newSpec);
+
   // Phase 2: Generate UI code using the schema and enhanced spec
   const newIFrameSrc = await genSrc({ newSpec, schema });
   const name = extractTitle(newIFrameSrc, title); // Use the generated title as fallback
@@ -141,6 +170,8 @@ export async function castNewRecipe(
     name,
   });
 
+  // FIXME(ja): we should send the scrubbed data here - otherwise you
+  // will get $UI $NAME and any streams in the inputs...
   return compileAndRunRecipe(charmManager, newRecipeSrc, goal, data);
 }
 
