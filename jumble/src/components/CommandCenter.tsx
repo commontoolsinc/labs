@@ -15,6 +15,10 @@ import {
 import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext.tsx";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
+import { Composer } from "@/components/Composer.tsx";
+import { charmId } from "@/utils/charms.ts";
+import { formatPromptWithMentions } from "@/utils/format.ts";
+import { NAME } from "@commontools/builder";
 
 function CommandProcessor({
   mode,
@@ -26,6 +30,10 @@ function CommandProcessor({
   context: CommandContext;
   onComplete: () => void;
 }) {
+  const { charmManager } = context;
+  const [inputValue, setInputValue] = useState("");
+  const charmMentions = useCharmMentions();
+
   if (context.loading) {
     return (
       <Command.Group>
@@ -38,7 +46,26 @@ function CommandProcessor({
 
   switch (mode.type) {
     case "input":
-      return null;
+      return (
+          <Composer
+            style={{ width: "100%", height: "96px" }}
+            placeholder={mode.placeholder || "Enter input"}
+            value={inputValue}
+            onValueChange={setInputValue}
+            mentions={charmMentions}
+            autoFocus
+            onKeyDown={async (e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                const finalText = await formatPromptWithMentions(
+                  inputValue,
+                  charmManager,
+                );
+                mode.command.handler?.(finalText);
+              }
+            }}
+          />
+      );
 
     case "confirm":
       return (
@@ -81,6 +108,41 @@ function CommandProcessor({
   }
 }
 
+export function useCharmMentions() {
+  const { charmManager } = useCharmManager();
+  const [charmMentions, setCharmMentions] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
+
+  // Fetch charms for mentions when the component mounts
+  useEffect(() => {
+    const fetchCharmMentions = async () => {
+      try {
+        const charms = charmManager.getCharms();
+        await charmManager.sync(charms);
+
+        const mentions = charms.get().map((charm: any) => {
+          const data = charm.get();
+          const name = data?.[NAME] ?? "Untitled";
+          const id = charmId(charm.entityId!)!;
+          return {
+            id,
+            name: `${name} (#${id.slice(-4)})`,
+          };
+        });
+
+        setCharmMentions(mentions);
+      } catch (error) {
+        console.error("Error fetching charm mentions:", error);
+      }
+    };
+
+    fetchCharmMentions();
+  }, [charmManager]);
+
+  return charmMentions;
+}
+
 export function CommandCenter() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -100,6 +162,8 @@ export function CommandCenter() {
     replicaMatch?.params.charmId ?? null;
   const focusedReplicaId = stackMatch?.params.replicaName ??
     replicaMatch?.params.replicaName ?? null;
+
+  const charmMentions = useCharmMentions();
 
   const allCommands = useMemo(
     () =>
@@ -311,44 +375,36 @@ export function CommandCenter() {
         </DialogDescription>
       </VisuallyHidden>
 
-      <div
-        className="flex items-center gap-2"
-        style={{ display: mode.type == "transcribe" ? "none" : "flex" }}
-      >
-        <div className="w-10 h-10 flex-shrink-0">
-          <DitheredCube
-            animationSpeed={loading ? 2 : 1}
-            width={40}
-            height={40}
-            animate={loading}
-            cameraZoom={loading ? 12 : 14}
+      {/* Only show the standard input field when not in input or transcribe mode */}
+      {mode.type !== "input" && mode.type !== "transcribe" && (
+        <div className="flex items-center gap-2">
+          <div className="w-10 h-10 flex-shrink-0">
+            <DitheredCube
+              animationSpeed={loading ? 2 : 1}
+              width={40}
+              height={40}
+              animate={loading}
+              cameraZoom={loading ? 12 : 14}
+            />
+          </div>
+
+          <Command.Input
+            placeholder={mode.type === "confirm"
+              ? mode.message || "Are you sure?"
+              : "What would you like to do?"}
+            readOnly={mode.type === "confirm"}
+            value={search}
+            onValueChange={setSearch}
+            onKeyDown={(e) => {
+              // For select mode, prevent the default Enter behavior
+              if (mode.type === "select" && e.key === "Enter") {
+                e.preventDefault();
+              }
+            }}
+            style={{ flexGrow: 1 }}
           />
         </div>
-
-        <Command.Input
-          placeholder={mode.type === "confirm"
-            ? mode.message || "Are you sure?"
-            : mode.type === "input"
-            ? mode.placeholder
-            : "What would you like to do?"}
-          readOnly={mode.type === "confirm"}
-          value={search}
-          onValueChange={setSearch}
-          onKeyDown={(e) => {
-            // Only handle Enter for input mode, ignore for select mode
-            if (mode.type === "input" && e.key === "Enter") {
-              e.preventDefault();
-              const command = mode.command;
-              command.handler?.(search);
-            }
-            // For select mode, prevent the default Enter behavior
-            if (mode.type === "select" && e.key === "Enter") {
-              e.preventDefault();
-            }
-          }}
-          style={{ flexGrow: 1 }}
-        />
-      </div>
+      )}
 
       <Command.List>
         {!loading && mode.type != "input" && mode.type != "transcribe" && (

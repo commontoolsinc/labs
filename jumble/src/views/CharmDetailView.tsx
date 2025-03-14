@@ -30,6 +30,9 @@ import {
 import { Cell } from "@commontools/runner";
 import { createPath } from "@/routes.ts";
 import JsonView from "@uiw/react-json-view";
+import { Composer } from "@/components/Composer.tsx";
+import { useCharmMentions } from "@/components/CommandCenter.tsx";
+import { formatPromptWithMentions } from "@/utils/format.ts";
 
 type Tab = "iterate" | "code" | "data";
 type OperationType = "iterate" | "extend";
@@ -344,6 +347,11 @@ function useCharmOperation() {
     if (!input || !charm || !paramCharmId || !replicaName) return;
     setLoading(true);
 
+    const finalText = await formatPromptWithMentions(
+      input,
+      charmManager,
+    );
+
     const handleVariants = async () => {
       setVariants([]);
       setSelectedVariant(charm);
@@ -352,7 +360,7 @@ function useCharmOperation() {
         const newCharm = await performOperation(
           charmId(charm)!,
           replicaName!,
-          input,
+          finalText,
           false,
           model,
         );
@@ -379,7 +387,7 @@ function useCharmOperation() {
         const newCharm = await performOperation(
           charmId(charm)!,
           replicaName,
-          input,
+          finalText,
           false,
           selectedModel,
         );
@@ -681,6 +689,9 @@ const OperationTab = () => {
     handlePerformOperation,
   } = useCharmOperationContext();
 
+  const mentions = useCharmMentions();
+  const { charmManager } = useCharmManager();
+
   return (
     <div className="flex flex-col p-4">
       <div className="flex flex-col gap-3">
@@ -709,20 +720,25 @@ const OperationTab = () => {
           </button>
         </div>
 
-        <textarea
-          placeholder={operationType === "iterate"
-            ? "Tweak your charm"
-            : "Add new features to your charm"}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              handlePerformOperation();
-            }
-          }}
-          className="w-full h-24 p-2 border-2 border-black resize-none"
-        />
+        <div className="border border-gray-300">
+          <Composer
+            placeholder={operationType === "iterate"
+              ? "Tweak your charm"
+              : "Add new features to your charm"}
+            readOnly={false}
+            mentions={mentions}
+            value={input}
+            onValueChange={setInput}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+
+                handlePerformOperation();
+              }
+            }}
+            style={{ width: "100%", height: "96px" }}
+          />
+        </div>
 
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center">

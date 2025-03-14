@@ -213,6 +213,8 @@ Deno.test({
           await page.keyboard.type("extend");
           await sleep(1000);
           await page.keyboard.press("Enter");
+          await sleep(1000);
+          await page.keyboard.press("Tab");
 
           await sleep(1000);
           await page.keyboard.type("count of values");
