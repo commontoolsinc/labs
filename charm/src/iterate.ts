@@ -139,6 +139,7 @@ function scrub(data: any): any {
         });
       }
     }
+    return data;
   } else if (isObj(data)) {
     return Object.fromEntries(
       Object.entries(data).map(([key, value]) => [key, scrub(value)]),
