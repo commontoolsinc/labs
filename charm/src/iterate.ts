@@ -124,6 +124,14 @@ const scrub = (data: any) => {
   return rv;
 };
 
+/**
+ * Cast a new recipe from a goal and data
+ *
+ * @param charmManager Charm manager representing the space this will be generated in
+ * @param goal A user level goal for the new recipe, can reference specific data via `key`
+ * @param data Data passed to the recipe, can be a combination of data and cells
+ * @returns A new recipe cell
+ */
 export async function castNewRecipe(
   charmManager: CharmManager,
   goal: string,
@@ -160,11 +168,21 @@ export async function castNewRecipe(
     description,
   } as Writable<JSONSchema>;
 
+  if (!schema.type) {
+    schema.type = "object";
+  }
+
+  if (schema.type === "object" && !schema.properties) {
+    schema.properties = {};
+  }
+
   // FIXME(ja): this might overwrite existing properties!!!
   // we should probaly throw a warning here...
-  Object.keys(resultSchema.properties ?? {}).forEach((key) => {
-    schema.properties[key] = resultSchema.properties![key];
-  });
+  if (schema.type === "object") {
+    Object.keys(resultSchema.properties ?? {}).forEach((key) => {
+      schema.properties[key] = resultSchema.properties![key];
+    });
+  }
 
   // Phase 2: Generate UI code using the schema and enhanced spec
   const newIFrameSrc = await genSrc({ newSpec, schema });
