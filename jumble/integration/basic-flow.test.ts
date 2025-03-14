@@ -249,13 +249,11 @@ Deno.test({
         fn: async () => {
           assert(page, "Page should be defined");
 
-          if (exceptions.length > 0) {
-            const html = await page.evaluate(() => {
-              return document.body.innerHTML;
-            });
+          const html = await page.evaluate(() => {
+            return document.body.innerHTML;
+          });
 
-            console.log(html);
-          }
+          console.log(html);
 
           exceptions.forEach((exception) => {
             console.error("Failure due to browser error:", exception);
