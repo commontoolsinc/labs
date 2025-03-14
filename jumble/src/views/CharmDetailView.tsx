@@ -728,12 +728,8 @@ const OperationTab = () => {
             mentions={mentions}
             value={input}
             onValueChange={setInput}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-
-                handlePerformOperation();
-              }
+            onSubmit={() => {
+              handlePerformOperation();
             }}
             style={{ width: "100%", height: "96px" }}
           />
