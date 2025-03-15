@@ -10,6 +10,7 @@ import { ActionBar } from "@/components/ActionBar.tsx";
 import { CharmPublisher } from "@/components/Publish.tsx";
 import { useGlobalActions } from "@/hooks/use-global-actions.tsx";
 import { SyncStatusProvider } from "@/contexts/SyncStatusContext.tsx";
+import { reportState } from "@/utils/instrumentation.ts";
 
 export default function Shell() {
   const { charmId } = useParams<CharmRouteParams>();
@@ -19,6 +20,8 @@ export default function Shell() {
   if (!session) {
     return <AuthenticationView />;
   }
+
+  reportState("firstShellRender", true);
 
   return (
     <CharmsManagerProvider>

@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import { DID, Identity, KeyStore, PassKey } from "@commontools/identity";
 import { matchSpace } from "@/routes.ts";
+import { reportState } from "@/utils/instrumentation.ts";
 
 // Location in storage of root key.
 const ROOT_KEY = "$ROOT_KEY";
@@ -73,10 +74,13 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
   // On load, open the KeyStore and find a root key.
   useEffect(() => {
     let ignore = false;
+    reportState('keyStore', undefined);
+
     async function getKeyStoreAndRoot() {
       const keyStore = await KeyStore.open();
       const root = await keyStore.get(ROOT_KEY);
       if (!ignore) {
+        reportState('keyStore', keyStore);
         setKeyStore(keyStore);
         setRoot(root);
       }
@@ -84,6 +88,7 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
     getKeyStoreAndRoot();
     return () => {
       ignore = true;
+      reportState('keyStore', undefined);
       setKeyStore(undefined);
       setRoot(undefined);
     };
