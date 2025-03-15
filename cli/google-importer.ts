@@ -57,13 +57,12 @@ const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
 const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
 
 let manager: CharmManager | undefined;
-const checkedCharms = new Map<string, boolean>();
 // Initialize storage and Bobby server
 storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
 
 /**
- * Load Gmail integration charms
+ * Load Gmail integration charms and process them
  */
 async function loadGmailIntegrationCharms() {
   log(undefined, "Loading Gmail integration charms...");
@@ -94,33 +93,58 @@ async function loadGmailIntegrationCharms() {
 
     // Process each charm
     if (charms.length > 0) {
-      for (const { space, charmId } of charms) {
-        log(
-          undefined,
-          `Watching Gmail integration charm ${space}/${charmId}...`,
-        );
+      const validCharms = charms.filter(({ space, charmId }) => {
+        // Validate space is a proper DID
+        if (!isValidDID(space as string)) {
+          log(undefined, `Skipping invalid space ID: ${space}. Must be a valid DID.`);
+          return false;
+        }
+        
+        // Validate charmId is a proper merkle ID
+        if (!isValidCharmId(charmId)) {
+          log(undefined, `Skipping invalid charm ID: ${charmId}. Must be a valid merkle ID.`);
+          return false;
+        }
+        
+        return true;
+      });
+      
+      log(undefined, `Found ${validCharms.length} valid charms out of ${charms.length} total`);
+      
+      for (const { space, charmId } of validCharms) {
+        try {
+          log(
+            undefined,
+            `Processing Gmail integration charm ${space}/${charmId}...`,
+          );
 
-        // We need a new session for each space
-        const charmSession = await Session.open({
-          passphrase: OPERATOR_PASS,
-          name: "~importer",
-          space: space as DID,
-        });
+          // We need a new session for each space
+          const charmSession = await Session.open({
+            passphrase: OPERATOR_PASS,
+            name: "~importer",
+            space: space as DID,
+          });
 
-        manager = new CharmManager(charmSession);
+          manager = new CharmManager(charmSession);
 
-        const charm = await manager?.get(charmId as string, false);
-        if (charm) {
-          watchCharm(charm, space as DID);
-        } else {
-          log(charmId, "charm not found");
+          const charm = await manager?.get(charmId as string, false);
+          if (charm) {
+            await watchCharm(charm, space as DID);
+          } else {
+            log(charmId, "charm not found");
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          log(undefined, `Error processing charm ${space}/${charmId}: ${errorMessage}`);
+          // Continue with next charm even if this one fails
         }
       }
     } else {
       log(undefined, "No Gmail integration charms configured");
     }
   } catch (error) {
-    log(undefined, "Error loading Gmail integration charms:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    log(undefined, `Error loading Gmail integration charms: ${errorMessage}`);
   }
 }
 
@@ -204,15 +228,13 @@ const isGoogleUpdaterCharm = (charm: Cell<Charm>): boolean => {
 };
 
 /**
- * Sets up watching for a charm and schedules periodic updates
+ * Sets up watching for a charm
  */
 function isIgnoredCharm(charm: Cell<Charm>): boolean {
   const charmId = getEntityId(charm)?.["/"];
-  if (!charmId || checkedCharms.has(charmId)) {
+  if (!charmId) {
     return true;
   }
-
-  checkedCharms.set(charmId, true);
 
   return !isGoogleUpdaterCharm(charm);
 }
@@ -229,53 +251,139 @@ async function watchCharm(charm: Cell<Charm>, space: DID) {
     return;
   }
 
-  console.log("Watching new charm:", getEntityId(charm));
+  const charmId = getEntityId(charm)?.["/"];
+  console.log("Updating charm:", charmId);
 
-  // Initial update
+  // Update the charm
   updateOnce(runningCharm, argument, space);
-
-  // Schedule periodic updates
-  setInterval(() => {
-    updateOnce(runningCharm, argument, space);
-  }, CHECK_INTERVAL);
 }
 
-// Parses input in the form:
-// `did:key:abc../xyzcharmid,did:key:def.../zyxcharmid`
+/**
+ * Validates if a string is a valid DID (did:key:... format)
+ */
+function isValidDID(did: string): boolean {
+  return did?.startsWith("did:key:") && did.length > 10;
+}
+
+/**
+ * Validates if a string looks like a valid merkle ID
+ */
+function isValidCharmId(id: string): boolean {
+  // Basic validation - non-empty string of reasonable length
+  return !!id && id.length === 59;
+}
+
+/**
+ * Parses input in the form:
+ * `did:key:abc../xyzcharmid,did:key:def.../zyxcharmid`
+ * and validates the format of each space and charm ID
+ */
 function parseCharmsInput(
   charms: string,
 ): ({ space: DID; charmId: string })[] {
-  return charms.split(",").map((entry) => {
-    const [space, charmId] = entry.split("/");
-    return { space: space as DID, charmId };
+  const result: ({ space: DID; charmId: string })[] = [];
+  
+  charms.split(",").forEach((entry) => {
+    const parts = entry.split("/");
+    if (parts.length !== 2) {
+      log(undefined, `Invalid charm format: ${entry}. Expected format: space/charmId`);
+      return; // Skip this entry
+    }
+    
+    const [space, charmId] = parts;
+    
+    if (!isValidDID(space)) {
+      log(undefined, `Invalid space ID: ${space}. Must be a valid DID.`);
+      return; // Skip this entry
+    }
+    
+    if (!isValidCharmId(charmId)) {
+      log(undefined, `Invalid charm ID: ${charmId}. Must be a valid merkle ID.`);
+      return; // Skip this entry
+    }
+    
+    result.push({ space: space as DID, charmId });
   });
+  
+  return result;
+}
+
+/**
+ * Process command-line specified charms
+ */
+async function processCmdLineCharms() {
+  if (!charms) return false;
+  
+  log(undefined, "Processing command-line specified charms");
+  const addresses = parseCharmsInput(charms);
+  
+  async function processCharms() {
+    for (const { space, charmId } of addresses) {
+      try {
+        log(undefined, `Processing charm ${space}/${charmId}...`);
+        const session = await Session.open({
+          passphrase: OPERATOR_PASS,
+          name: "~importer",
+          space,
+        });
+        manager = new CharmManager(session);
+
+        const charm = await manager?.get(charmId as string, false);
+        if (charm) {
+          await watchCharm(charm, space);
+        } else {
+          log(charmId, "charm not found");
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        log(undefined, `Error processing charm ${space}/${charmId}: ${errorMessage}`);
+        // Continue with next charm even if this one fails
+      }
+    }
+  }
+  
+  // Process charms initially
+  await processCharms();
+  
+  // Set up interval to periodically process the same charms
+  log(undefined, `Setting up check interval for ${CHECK_INTERVAL} seconds`);
+  setInterval(async () => {
+    try {
+      log(undefined, "Running scheduled check for command-line specified charms");
+      await processCharms();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      log(undefined, `Error in command-line charms interval: ${errorMessage}`);
+      // Keep the interval going even if there's an error
+    }
+  }, CHECK_INTERVAL);
+  
+  return true;
 }
 
 async function main() {
   log(undefined, "Starting Google Updater");
 
-  if (!charms) {
-    await loadGmailIntegrationCharms();
-    return;
+  // If command-line charms are specified, process those
+  if (await processCmdLineCharms()) {
+    return; // Never exit, let the interval run
   }
 
-  const addresses = parseCharmsInput(charms);
-  for (const { space, charmId } of addresses) {
-    log(undefined, `Watching ${space}/${charmId}...`);
-    const session = await Session.open({
-      passphrase: OPERATOR_PASS,
-      name: "~importer",
-      space,
-    });
-    manager = new CharmManager(session);
-
-    const charm = await manager?.get(charmId as string, false);
-    if (charm) {
-      watchCharm(charm, space);
-    } else {
-      log(charmId, "charm not found");
+  // Initial load of Gmail integration charms
+  await loadGmailIntegrationCharms();
+  
+  // Set up interval to periodically reload charms
+  log(undefined, `Setting up check interval for ${CHECK_INTERVAL} seconds`);
+  setInterval(async () => {
+    try {
+      log(undefined, "Running scheduled check for Gmail integration charms");
+      await loadGmailIntegrationCharms();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      log(undefined, `Error in Gmail integration interval: ${errorMessage}`);
+      // Keep the interval going even if there's an error
     }
-  }
+  }, CHECK_INTERVAL);
 }
 
 main();
