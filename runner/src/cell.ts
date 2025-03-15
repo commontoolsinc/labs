@@ -333,12 +333,12 @@ function createRegularCell<T>(
   path: PropertyKey[],
   log?: ReactivityLog,
   schema?: JSONSchema,
-  rootSchema?: JSONSchema,
+  contextSchema?: JSONSchema,
 ): Cell<T> {
-  if (schema) doc.registerSchemaUse(path, schema, rootSchema);
+  if (schema) doc.registerSchemaUse(path, schema, contextSchema);
 
   const self = {
-    get: () => validateAndTransform(doc, path, schema, log, rootSchema),
+    get: () => validateAndTransform(doc, path, schema, log, contextSchema),
     set: (newValue: T) =>
       diffAndUpdate(
         resolvePath(doc, path, log),
@@ -420,16 +420,16 @@ function createRegularCell<T>(
         [...path, valueKey],
         log,
         currentSchema,
-        rootSchema,
+        contextSchema,
       ) as T extends Cell<infer S> ? Cell<S[K & keyof S]> : Cell<T[K]>;
     },
 
     asSchema: (newSchema?: JSONSchema) =>
       createCell(doc, path, log, newSchema, newSchema),
     withLog: (newLog: ReactivityLog) =>
-      createCell(doc, path, newLog, schema, rootSchema),
+      createCell(doc, path, newLog, schema, contextSchema),
     sink: (callback: (value: T) => Cancel | undefined) =>
-      subscribeToReferencedDocs(callback, doc, path, schema, rootSchema),
+      subscribeToReferencedDocs(callback, doc, path, schema, contextSchema),
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
     getAsCellLink: () =>
@@ -459,7 +459,7 @@ function createRegularCell<T>(
       );
     },
     schema,
-    rootSchema,
+    rootSchema: contextSchema,
   } as Cell<T>;
 
   return self;
