@@ -699,12 +699,14 @@ export type GraphSubscription<Space extends MemorySpace = MemorySpace> =
   Invocation<
     "/memory/graph/subscribe@0.1",
     Space,
-    GraphQuery<Space>
+    { select: GraphSelector; since?: number }
   >;
 
-export type GraphQuery<Space extends MemorySpace = MemorySpace> = {
-  select: GraphSelector;
-};
+export type GraphQuery<Space extends MemorySpace = MemorySpace> = Invocation<
+  "/memory/graph/query@0.1",
+  Space,
+  { select: GraphSelector; since?: number }
+>;
 
 export type GraphSelector = {
   [of: Entity]: {
@@ -797,7 +799,7 @@ export type ObjectSelector = {
   // Full graph selection
   properties?: Record<string, JSONSelector>;
   // If some match it means subset.
-  additionalProperties: boolean | JSONSelector;
+  additionalProperties?: boolean | JSONSelector;
 };
 
 export type ArraySelector = {

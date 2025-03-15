@@ -28,6 +28,7 @@ import type {
   Entity,
   Fact,
   FactSelection,
+  GraphQuery,
   GraphSubscription,
   JSONObject,
   JSONValue,
@@ -194,6 +195,17 @@ class Space<Subject extends MemorySpace = MemorySpace>
       });
 
       return query(this, source);
+    });
+  }
+
+  queryGraph(source: GraphQuery<Subject>) {
+    return traceSync("space.instance.query", (span) => {
+      addMemoryAttributes(span, {
+        operation: "query",
+        space: this.subject,
+      });
+
+      return queryGraph(this, source);
     });
   }
 
@@ -460,7 +472,7 @@ export const isPointer = (value: JSONValue): value is Pointer => {
 export const selectGraph = <Space extends MemorySpace>(
   session: Session<Space>,
   { select }: GraphSubscription["args"],
-) => {
+): Selection<Space>[Space] => {
   const selection = {};
   const selector = Object.entries(select);
   for (const [of, attributes] of selector) {
@@ -476,7 +488,7 @@ export const selectGraph = <Space extends MemorySpace>(
             selection,
             [fact.of, fact.the],
             fact.cause,
-            fact.is === undefined ? { is: fact.is } : {},
+            fact.is !== undefined ? { is: fact.is } : {},
           );
           // Root selector case
           if (Array.isArray(branches)) {
@@ -489,13 +501,14 @@ export const selectGraph = <Space extends MemorySpace>(
       }
     }
   }
+  return selection;
 };
 
 function* collect(
   session: Session<MemorySpace>,
   value: JSONValue,
   selector: NodeSelector,
-) {
+): any {
   if (Array.isArray(selector)) {
     for (const { select, context } of selector) {
       switch (select.type) {
@@ -520,11 +533,14 @@ function* collect(
         if (member) {
           yield* collect(session, member, branches);
         } else if (typeof value === "object") {
-          const member = value[key];
+          // FIXME: robin - commented out to avoid error
+          //const member = value[key];
         }
       }
       if (typeof value === "object") {
-        yield* collect(session, fact, branches);
+        // FIXME: robin - changed this from fact to value,
+        // but unclear what it should be
+        yield* collect(session, value, branches);
       }
     }
   }
@@ -781,16 +797,26 @@ export const query = <Space extends MemorySpace>(
 
 export const queryGraph = <Space extends MemorySpace>(
   session: Session<Space>,
-  command: GraphSubscription<Space>,
-): Result<{}, QueryError> => {
-  const { select: selector } = command.args;
-  const result = session.store.transaction(selectGraph)(session, command.args);
+  command: GraphQuery<Space>,
+): Result<Selection<Space>, QueryError> => {
+  try {
+    const result = session.store.transaction(selectGraph)(
+      session,
+      command.args,
+    );
 
-  return {
-    error: Error.query(
-      command.sub,
-      command.args.select as any,
-      new SyntaxError("Not implemented") as SqliteError,
-    ),
-  };
+    return {
+      ok: {
+        [command.sub]: result,
+      } as Selection<Space>,
+    };
+  } catch (error) {
+    return {
+      error: Error.query(
+        command.sub,
+        command.args.select,
+        error as SqliteError,
+      ),
+    };
+  }
 };
