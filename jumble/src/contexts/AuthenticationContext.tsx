@@ -74,9 +74,13 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
   useEffect(() => {
     let ignore = false;
     async function getKeyStoreAndRoot() {
+      console.log("GET KEY STORE AND ROOT", performance.now());
+      //await new Promise((r) => setTimeout(r, 10000));
       const keyStore = await KeyStore.open();
+      console.log("GOT KEY STORE", keyStore && keyStore.toString(), performance.now());
       const root = await keyStore.get(ROOT_KEY);
       if (!ignore) {
+        console.log("SET KEY STORE", keyStore && keyStore.toString(), performance.now());
         setKeyStore(keyStore);
         setRoot(root);
       }
@@ -84,6 +88,7 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
     getKeyStoreAndRoot();
     return () => {
       ignore = true;
+      console.log("SET KEY STORE", undefined, performance.now());
       setKeyStore(undefined);
       setRoot(undefined);
     };
