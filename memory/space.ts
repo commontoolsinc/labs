@@ -17,6 +17,8 @@ import type {
   Assert,
   Assertion,
   AsyncResult,
+  BranchSelector,
+  Cause,
   Claim,
   Commit,
   CommitData,
@@ -25,8 +27,14 @@ import type {
   DIDKey,
   Entity,
   Fact,
+  FactSelection,
+  GraphSubscription,
+  JSONObject,
   JSONValue,
+  LeafSelector,
   MemorySpace,
+  NodeSelector,
+  Pointer,
   Principal,
   Query,
   QueryError,
@@ -405,6 +413,123 @@ const select = <Space extends MemorySpace>(
   return selection;
 };
 
+export type FactSelector = {
+  the: The | "_";
+  of: Entity | "_";
+  cause: Cause | "_";
+  is?: undefined | {};
+  since?: number;
+};
+
+export type SelectedFact = {
+  the: The;
+  of: Entity;
+  cause: Cause;
+  is?: JSONValue;
+};
+
+export const SelectAll = "_";
+export const selectFacts = function* <Space extends MemorySpace>(
+  { store }: Session<Space>,
+  { the, of, cause, is, since }: FactSelector,
+): Iterable<SelectedFact> {
+  const rows = store.prepare(EXPORT).all({
+    the: the === SelectAll ? null : the,
+    of: of === SelectAll ? null : of,
+    cause: cause === SelectAll ? null : cause,
+    is: is === undefined ? null : {},
+    since: since ?? null,
+  }) as StateRow[];
+
+  for (const row of rows) {
+    yield {
+      the: row.the,
+      of: row.of,
+      cause: row.cause ?? refer(unclaimed(row)).toString() as Cause,
+      is: row.is ? JSON.parse(row.is) as JSONValue : undefined,
+    };
+  }
+};
+
+export const isPointer = (value: JSONValue): value is Pointer => {
+  const source = value as Partial<Pointer>;
+  return typeof source?.$alias?.cell?.["/"] === "string" ||
+    typeof source?.cell?.["/"] === "string";
+};
+
+export const selectGraph = <Space extends MemorySpace>(
+  session: Session<Space>,
+  { select }: GraphSubscription["args"],
+) => {
+  const selection = {};
+  const selector = Object.entries(select);
+  for (const [of, attributes] of selector) {
+    const selector = Object.entries(attributes);
+    for (const [the, revisions] of selector) {
+      const selector = Object.entries(revisions);
+      for (const [cause, branches] of selector) {
+        for (
+          const fact of selectFacts(session, { the, of: of as Entity, cause })
+        ) {
+          // Save the top level fact into the selection.
+          set(
+            selection,
+            [fact.of, fact.the],
+            fact.cause,
+            fact.is === undefined ? { is: fact.is } : {},
+          );
+          // Root selector case
+          if (Array.isArray(branches)) {
+            for (const branch of branches) {
+            }
+          } // Traversal case
+          else {
+          }
+        }
+      }
+    }
+  }
+};
+
+function* collect(
+  session: Session<MemorySpace>,
+  value: JSONValue,
+  selector: NodeSelector,
+) {
+  if (Array.isArray(selector)) {
+    for (const { select, context } of selector) {
+      switch (select.type) {
+        case "object": {
+          break;
+        }
+        case "array": {
+          break;
+        }
+        case undefined: {
+          if (select.$ref) {
+          } else if (select.anyOf) {
+          } else {
+          }
+        }
+      }
+    }
+  } else {
+    for (const [key, branches] of Object.entries(selector)) {
+      if (Array.isArray(value)) {
+        const member = value[key as unknown as number] as JSONValue | undefined;
+        if (member) {
+          yield* collect(session, member, branches);
+        } else if (typeof value === "object") {
+          const member = value[key];
+        }
+      }
+      if (typeof value === "object") {
+        yield* collect(session, fact, branches);
+      }
+    }
+  }
+}
+
 /**
  * Imports datum into the `datum` table. If `datum` is undefined we return
  * special `"undefined"` for which `datum` table will have row with `NULL`
@@ -654,4 +779,18 @@ export const query = <Space extends MemorySpace>(
   });
 };
 
-const SelectAll = "_";
+export const queryGraph = <Space extends MemorySpace>(
+  session: Session<Space>,
+  command: GraphSubscription<Space>,
+): Result<{}, QueryError> => {
+  const { select: selector } = command.args;
+  const result = session.store.transaction(selectGraph)(session, command.args);
+
+  return {
+    error: Error.query(
+      command.sub,
+      command.args.select as any,
+      new SyntaxError("Not implemented") as SqliteError,
+    ),
+  };
+};

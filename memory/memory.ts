@@ -11,6 +11,7 @@ import {
 import {
   AsyncResult,
   ConnectionError,
+  GraphSubscription,
   MemorySession,
   MemorySpace as Subject,
   Query,

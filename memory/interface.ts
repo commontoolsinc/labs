@@ -695,6 +695,129 @@ export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
   { source: InvocationURL<Reference<Subscribe<Space>>> }
 >;
 
+export type GraphSubscription<Space extends MemorySpace = MemorySpace> =
+  Invocation<
+    "/memory/graph/subscribe@0.1",
+    Space,
+    GraphQuery<Space>
+  >;
+
+export type GraphQuery<Space extends MemorySpace = MemorySpace> = {
+  select: GraphSelector;
+};
+
+export type GraphSelector = {
+  [of: Entity]: {
+    [the: The]: {
+      [cause: Cause]: NodeSelector;
+    };
+  };
+};
+
+export type BranchSelector = {
+  [at: string]: NodeSelector;
+};
+
+export type NodeSelector = LeafSelectorGroup | BranchSelector;
+
+// Acts like a join
+export type LeafSelectorGroup = LeafSelector[];
+
+// {
+//   a: {
+//     b: [{
+//       schema: { type: 'string' },
+//       context: { type: 'string' }
+//     }]
+//   }
+// }
+export type LeafSelector = {
+  select: JSONSelector;
+
+  /**
+   * Represents schema referenced by {@link SelfSelector}
+   */
+  context: JSONSelector;
+};
+
+export type GraphSelectorConjunct = {
+  /**
+   * Path within the JSON value to be extracted.
+   */
+  at: string[];
+
+  value: JSONSelector;
+
+  /**
+   * Represents schema referenced by {@link SelfSelector}
+   */
+  context: JSONSelector;
+};
+
+export type Pointer =
+  | PointerV0
+  | PointerV1;
+
+export type PathEntry = string | number;
+export type PointerCell = { "/": string };
+
+export type PointerV0 = {
+  $alias?: void;
+  cell: PointerCell;
+  path: PathEntry[];
+};
+
+export type PointerV1 = {
+  cell?: void;
+  $alias: {
+    cell?: PointerCell;
+    path: PathEntry[];
+  };
+};
+
+/**
+ * Simplification of JSONSchema only concerned with selection.
+ */
+export type JSONSelector =
+  | ScalarSelector
+  | SelfSelector
+  | ObjectSelector
+  | ArraySelector
+  | ConjunctSelector;
+
+export type ScalarSelector =
+  | { type: "null" }
+  | { type: "boolean" }
+  | { type: "string" }
+  | { type: "integer" }
+  | { type: "number" };
+
+export type ObjectSelector = {
+  type: "object";
+  // Full graph selection
+  properties?: Record<string, JSONSelector>;
+  // If some match it means subset.
+  additionalProperties: boolean | JSONSelector;
+};
+
+export type ArraySelector = {
+  type: "array";
+  // Match any full traversal
+  items?: JSONSelector;
+};
+
+export type ConjunctSelector = {
+  type?: undefined;
+  $ref?: undefined;
+  // Join behavior
+  anyOf: JSONSelector[];
+};
+
+export type SelfSelector = {
+  type?: undefined;
+  $ref: "#";
+};
+
 export type Operation = Transaction | Query | Subscribe | Unsubscribe;
 
 export type QueryResult<Space extends MemorySpace = MemorySpace> = AwaitResult<
