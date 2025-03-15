@@ -61,6 +61,17 @@ export const login = async (page: Page) => {
     return;
   }
 
+  console.log("Looking for keyStore");
+  // Wait for the keyStore to be available
+  await page.waitForFunction(() => {
+    try {
+      return (globalThis as any)?._common?._instrumentedState?.keyStore;
+    } catch (e) {
+      return false;
+    }
+  });
+  console.log("Found keyStore");
+
   // If not logged in, see if any credential data is
   // persisting. If so, destroy local data.
   await sleep(500);
@@ -89,6 +100,8 @@ export const login = async (page: Page) => {
     textarea.value
   );
 
+  console.log("MNEMONIC:", mnemonic);
+
   // Click the SECOND button, "continue to login"
   await waitForSelectorClick(page, "button[aria-label='continue-login']");
 
@@ -101,6 +114,8 @@ export const login = async (page: Page) => {
 
   // Click the only button, "login"
   await waitForSelectorClick(page, "button[aria-label='login']");
+
+  await page.waitForSelector("#user-avatar");
 };
 
 export const waitForSelectorWithText = async (

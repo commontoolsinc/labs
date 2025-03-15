@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import { DID, Identity, KeyStore, PassKey } from "@commontools/identity";
 import { matchSpace } from "@/routes.ts";
+import { reportState } from "@/utils/instrumentation.ts";
 
 // Location in storage of root key.
 const ROOT_KEY = "$ROOT_KEY";
@@ -73,19 +74,26 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
   // On load, open the KeyStore and find a root key.
   useEffect(() => {
     let ignore = false;
+    let currentKeyStore: KeyStore | undefined;
+    reportState('keyStore', undefined);
+
     async function getKeyStoreAndRoot() {
       const keyStore = await KeyStore.open();
+      currentKeyStore = keyStore; // Keep a reference to avoid losing it
       const root = await keyStore.get(ROOT_KEY);
       if (!ignore) {
+        reportState('keyStore', keyStore);
         setKeyStore(keyStore);
         setRoot(root);
       }
     }
     getKeyStoreAndRoot();
+
     return () => {
       ignore = true;
-      setKeyStore(undefined);
-      setRoot(undefined);
+      // Don't unset keyStore in the cleanup function
+      // This prevents the bug where it gets unset and never set back in React dev mode
+      reportState('keyStore', undefined);
     };
   }, []);
 
