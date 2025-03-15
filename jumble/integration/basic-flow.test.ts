@@ -63,7 +63,6 @@ Deno.test({
             // property. Type checker doesn't like this.
             mutPage.timeout = 60000;
           }
-          await page.goto(FRONTEND_URL);
 
           // Add console log listeners
           page.addEventListener("console", (e: ConsoleEvent) => {
@@ -83,6 +82,7 @@ Deno.test({
             await dialog.dismiss();
           });
 
+          await page.goto(FRONTEND_URL);
           console.log(`Opened website at ${FRONTEND_URL}`);
         },
       });
