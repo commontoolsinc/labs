@@ -74,10 +74,12 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
   // On load, open the KeyStore and find a root key.
   useEffect(() => {
     let ignore = false;
+    let currentKeyStore: KeyStore | undefined;
     reportState('keyStore', undefined);
 
     async function getKeyStoreAndRoot() {
       const keyStore = await KeyStore.open();
+      currentKeyStore = keyStore; // Keep a reference to avoid losing it
       const root = await keyStore.get(ROOT_KEY);
       if (!ignore) {
         reportState('keyStore', keyStore);
@@ -86,12 +88,12 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
       }
     }
     getKeyStoreAndRoot();
+
     return () => {
       ignore = true;
-      console.log('WHYYYY????????');
+      // Don't unset keyStore in the cleanup function
+      // This prevents the bug where it gets unset and never set back in React dev mode
       reportState('keyStore', undefined);
-      setKeyStore(undefined);
-      setRoot(undefined);
     };
   }, []);
 
