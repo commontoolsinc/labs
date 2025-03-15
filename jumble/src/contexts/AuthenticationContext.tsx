@@ -88,6 +88,7 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
     getKeyStoreAndRoot();
     return () => {
       ignore = true;
+      console.log('WHYYYY????????');
       reportState('keyStore', undefined);
       setKeyStore(undefined);
       setRoot(undefined);
