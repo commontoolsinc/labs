@@ -1,6 +1,6 @@
-import { CharmManager } from "@commontools/charm";
+import { CharmManager, charmSchema } from "@commontools/charm";
 import { Cell } from "@commontools/runner";
-import { Module, Recipe } from "@commontools/builder";
+import { Module, NAME, Recipe } from "@commontools/builder";
 import { parseComposerDocument } from "@/components/Composer.tsx";
 
 export function formatCell(
@@ -69,13 +69,14 @@ export async function formatPromptWithMentions(
   if (payload.sources && Object.keys(payload.sources).length > 0) {
     // Add each source to the map
     Object.entries(payload.sources).forEach(([id, source]) => {
-      sourcesMap[id] = source;
+      const shadowId = getCharmNameAsCamelCase(source.cell, sourcesMap);
+      sourcesMap[shadowId] = source;
 
       // Replace the markdown link mention with the ID
       // Format: [character](charm://id)
       processedText = processedText.replace(
         new RegExp(`\\[(.*?)\\]\\(charm://${id}\\)`, "g"),
-        `\`${id}\``,
+        `\`${shadowId}\``,
       );
     });
   }
@@ -84,6 +85,50 @@ export async function formatPromptWithMentions(
     text: processedText,
     sources: sourcesMap,
   };
+}
+
+export function getCharmNameAsCamelCase(
+  cell: Cell<any>,
+  usedKeys: Record<string, any>,
+): string {
+  const charmName = toCamelCase(cell.asSchema(charmSchema).key(NAME).get());
+
+  let name = charmName;
+  let num = 0;
+
+  while (name in usedKeys) name = charmName + `${++num}`;
+
+  return name;
+}
+
+/**
+ * Converts a string of multiple words into camelCase format
+ * @param input - The string to convert
+ * @returns The camelCased string
+ *
+ * Examples:
+ * - "hello world" -> "helloWorld"
+ * - "The quick brown FOX" -> "theQuickBrownFox"
+ * - "this-is-a-test" -> "thisIsATest"
+ * - "already_camel_case" -> "alreadyCamelCase"
+ */
+function toCamelCase(input: string): string {
+  // Handle empty string case
+  if (!input) return "";
+
+  // Split the input string by non-alphanumeric characters
+  return input
+    .split(/[^a-zA-Z0-9]/)
+    .filter((word) => word.length > 0) // Remove empty strings
+    .map((word, index) => {
+      // First word should be all lowercase
+      if (index === 0) {
+        return word.toLowerCase();
+      }
+      // Other words should have their first letter capitalized and the rest lowercase
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join("");
 }
 
 export type SourceSet = { [id: string]: { name: string; cell: Cell<any> } };

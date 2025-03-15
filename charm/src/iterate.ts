@@ -112,22 +112,28 @@ export const generateNewRecipeVersion = (
 // it should scrub the result1 and result2 and
 // return { calendar: scrub(result1), email: scrub(result2) }
 // FIXME(seefeld): might be able to use asSchema here...
-function scrub(data: any): any {
+export function scrub(data: any): any {
+  console.log("scrubbing", data);
   if (isCell(data)) {
-    if (data.schema) {
-      if (data.schema.type === "object" && data.schema.properties) {
-        const scrubbed = Object.fromEntries(
-          Object.entries(data.schema.properties).filter(([key]) =>
-            !key.startsWith("$")
-          ),
-        );
-        return { ...data.schema, properties: scrubbed };
-      }
-      // else no-op
+    if (data.schema?.type === "object" && data.schema.properties) {
+      // If there are properties, remove $UI and $NAME and any streams
+      const scrubbed = Object.fromEntries(
+        Object.entries(data.schema.properties).filter(([key, value]) =>
+          !key.startsWith("$") && (!isObj(value) || !value.asStream)
+        ),
+      );
+      console.log("scrubbed modified schema", scrubbed, data.schema);
+      // If this resulted in an empty schema, return without a schema
+      return data.asSchema(
+        Object.keys(scrubbed).length > 0
+          ? { ...data.schema, properties: scrubbed }
+          : undefined,
+      );
     } else {
-      const value = data.get();
+      const value = data.asSchema().get();
       if (isObj(value)) {
-        return {
+        // Generate a new schema for all properties except $UI and $NAME and streams
+        const scrubbed = {
           type: "object",
           properties: Object.fromEntries(
             Object.keys(value).filter(([key, value]) =>
@@ -136,16 +142,21 @@ function scrub(data: any): any {
               (key) => [key, {}],
             ),
           ),
-        };
-      }
+        } as JSONSchema;
+        console.log("scrubbed generated schema", scrubbed);
+        // Only if we found any properties, return the scrubbed schema
+        return Object.keys(scrubbed).length > 0
+          ? data.asSchema(scrubbed)
+          : data;
+      } else return data;
     }
+  } else if (Array.isArray(data)) {
+    return data.map((value) => scrub(value));
   } else if (isObj(data)) {
     return Object.fromEntries(
       Object.entries(data).map(([key, value]) => [key, scrub(value)]),
     );
-  } else {
-    return data;
-  }
+  } else return data;
 }
 
 /**
