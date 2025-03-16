@@ -56,8 +56,15 @@ export class BackgroundCharmService {
       const errorMessage = event.reason instanceof Error
         ? event.reason.message
         : String(event.reason);
-
-      log(`⚠️ Caught unhandled promise rejection: ${errorMessage}`);
+      
+      // Print more error details if available
+      if (event.reason instanceof Error && event.reason.stack) {
+        log(`⚠️ Caught unhandled promise rejection: ${errorMessage}`);
+        log(`Stack trace: ${event.reason.stack.split("\n").slice(0, 5).join("\n")}`);
+      } else {
+        log(`⚠️ Caught unhandled promise rejection: ${errorMessage}`);
+        log(`Full rejection data: ${JSON.stringify(event.reason, null, 2)}`);
+      }
 
       // Prevent the error from crashing the process
       event.preventDefault();
@@ -660,7 +667,29 @@ export class BackgroundCharmService {
       try {
         // Wrap the stream.send call in a try/catch to handle immediate errors
         log(`About to send message to stream for charm: ${charmId}`);
-        updaterStream.send({});
+        
+        // Use Promise.race with a timeout to prevent hanging on send
+        await Promise.race([
+          new Promise<void>((resolve) => {
+            try {
+              // Send the message and consider it successful
+              updaterStream.send({});
+              resolve();
+            } catch (immediateError) {
+              // Handle synchronous errors
+              const errorMessage = immediateError instanceof Error
+                ? immediateError.message
+                : String(immediateError);
+              log(`Immediate error in charm stream.send for ${charmId}: ${errorMessage}`);
+              throw immediateError;
+            }
+          }),
+          // Set a timeout to prevent hanging indefinitely
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error("Charm execution timed out")), 30000)
+          )
+        ]);
+        
         log(`Stream message sent successfully for charm: ${charmId}`);
 
         return {
@@ -725,8 +754,19 @@ export class BackgroundCharmService {
     for (const name of streamNames) {
       const stream = charm.key(name);
       if (isStream(stream)) {
+        // Log which stream we found to help debugging
+        log(`Found stream '${name}' in charm ${charm.entityId ? charm.entityId["/"] : "unknown"}`);
         return stream;
       }
+    }
+
+    // If no stream found, log all available keys in the charm
+    const charmId = charm.entityId ? charm.entityId["/"] : "unknown";
+    try {
+      const keys = Object.keys(charm.toJSON());
+      log(`No updater stream found in charm ${charmId}. Available keys: ${keys.join(", ")}`);
+    } catch (error) {
+      log(`No updater stream found in charm ${charmId} and could not enumerate keys`);
     }
 
     return null;
