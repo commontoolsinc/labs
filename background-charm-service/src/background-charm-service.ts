@@ -26,6 +26,7 @@ export class BackgroundCharmService {
   private intervalId?: number;
   private running = false;
   private managerCache = new Map<string, CharmManager>();
+  private globalErrorHandlerInstalled = false;
 
   constructor(private config: CharmServiceConfig) {
     this.stateManager = new StateManager(config.logIntervalSeconds);
@@ -38,6 +39,41 @@ export class BackgroundCharmService {
         config.integrationCells.map((i) => i.name).join(", ")
       }`,
     );
+    
+    // Install global error handlers
+    this.installGlobalErrorHandlers();
+  }
+  
+  /**
+   * Install global error handlers to catch unhandled errors
+   * This prevents errors from crashing the service
+   */
+  private installGlobalErrorHandlers(): void {
+    if (this.globalErrorHandlerInstalled) return;
+    
+    // Handle unhandled promise rejections
+    self.addEventListener("unhandledrejection", (event) => {
+      const errorMessage = event.reason instanceof Error 
+        ? event.reason.message 
+        : String(event.reason);
+        
+      log(`⚠️ Caught unhandled promise rejection: ${errorMessage}`);
+      
+      // Prevent the error from crashing the process
+      event.preventDefault();
+    });
+    
+    // Handle uncaught exceptions
+    self.addEventListener("error", (event) => {
+      log(`⚠️ Caught uncaught exception: ${event.message}`);
+      log(`Location: ${event.filename}:${event.lineno}:${event.colno}`);
+      
+      // Prevent the error from crashing the process
+      event.preventDefault();
+    });
+    
+    this.globalErrorHandlerInstalled = true;
+    log("Global error handlers installed");
   }
 
   /**
@@ -52,22 +88,86 @@ export class BackgroundCharmService {
     this.running = true;
     log("Starting Background Charm Service");
 
-    // Run immediately
-    await this.runCycle();
+    // Run immediately as a detached process, completely separate
+    // from the timing mechanism - do NOT await this
+    this.runDetachedCycle();
 
-    // Set up interval
-    this.intervalId = setInterval(() => {
-      this.runCycle().catch((error) => {
-        const errorMessage = error instanceof Error
-          ? error.message
-          : String(error);
-        log(`Error in run cycle: ${errorMessage}`);
+    // Set up a completely independent timer that runs regardless of
+    // the cycles executing or failing
+    this.setupIntervalTimer();
+    
+    // Set up a periodic check for charms that should be disabled
+    this.setupDisableChecker();
+
+    log(`Background Charm Service started with ${this.config.intervalSeconds}s interval`);
+  }
+  
+  /**
+   * Set up a periodic checker that evaluates which charms should be disabled
+   * This ensures that even if something goes wrong with the main execution flow,
+   * problematic charms will eventually be disabled
+   */
+  private setupDisableChecker(): void {
+    // Run this check every minute
+    setInterval(() => {
+      if (!this.running) return;
+      
+      // Get all charms from all cells
+      Promise.all(this.config.integrationCells.map(async (cell) => {
+        try {
+          const charms = await cell.fetchCharms();
+          
+          // Check each charm's state
+          for (const { space, charmId } of charms) {
+            // Get the state for this charm
+            const state = this.stateManager.getCharmState(space, charmId, cell.id);
+            
+            // If enabled but has too many consecutive failures, disable it
+            if (state.enabled && state.consecutiveFailures >= this.config.maxConsecutiveFailures) {
+              log(`Disable checker: Disabling charm ${space}/${charmId} with ${state.consecutiveFailures} consecutive failures`);
+              this.stateManager.disableCharm(space, charmId);
+            }
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          log(`Error in disable checker for cell ${cell.id}: ${errorMessage}`);
+        }
+      })).catch(error => {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        log(`Error in disable checker: ${errorMessage}`);
       });
+    }, 60000); // Check every minute
+  }
+  
+  /**
+   * Run a cycle in a completely detached way
+   * This ensures errors can't possibly affect the timing mechanism
+   */
+  private runDetachedCycle(): void {
+    Promise.resolve().then(() => {
+      return this.runCycle();
+    }).catch(error => {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      log(`Error in detached cycle: ${errorMessage}`);
+    });
+    
+    // Important: No .finally() or .then() here to ensure
+    // this promise chain is completely detached from any timing mechanism
+  }
+  
+  /**
+   * Set up a timer that runs independently of cycle execution
+   * This is a bulletproof approach that ensures the timer always fires
+   */
+  private setupIntervalTimer(): void {
+    // Use a true setInterval that runs independently of cycle execution
+    this.intervalId = setInterval(() => {
+      log(`Timer interval fired, launching new cycle`);
+      
+      // Run a new cycle completely detached from this timer
+      this.runDetachedCycle();
+      
     }, this.config.intervalSeconds * 1000) as unknown as number;
-
-    log(
-      `Background Charm Service started with ${this.config.intervalSeconds}s interval`,
-    );
   }
 
   /**
@@ -94,21 +194,89 @@ export class BackgroundCharmService {
    */
   private async runCycle(): Promise<void> {
     log("Starting charm execution cycle");
+    const startTime = Date.now();
 
+    try {
+      // Process all cells with safety timeout
+      await Promise.race([
+        // Process cells with timeout protection
+        this.processCellsWithTimeout(),
+        
+        // Global cycle timeout of 5 minutes
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Cycle timed out after 5 minutes")), 300000)
+        )
+      ]);
+      
+      const duration = Date.now() - startTime;
+      log(`Charm execution cycle completed in ${duration}ms`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      log(`Cycle failed or timed out: ${errorMessage}`);
+    }
+  }
+  
+  /**
+   * Process all cells with timeout protection
+   */
+  private async processCellsWithTimeout(): Promise<void> {
+    // Process all cells in series to avoid overwhelming the system
     for (const integrationCell of this.config.integrationCells) {
       try {
-        await this.processIntegrationCell(integrationCell);
+        log(`Processing cell ${integrationCell.id} with timeout protection`);
+        
+        // Add a timeout for each cell
+        await Promise.race([
+          this.processIntegrationCell(integrationCell),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error(`Cell ${integrationCell.id} processing timed out`)), 120000)
+          )
+        ]);
       } catch (error) {
-        const errorMessage = error instanceof Error
-          ? error.message
-          : String(error);
-        log(
-          `Error processing integration cell ${integrationCell.id}: ${errorMessage}`,
-        );
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        log(`Error or timeout processing cell ${integrationCell.id}: ${errorMessage}`);
+        
+        // When a cell times out, we need to increment failure counts for all charms in the cell
+        try {
+          // Attempt to fetch charms one more time
+          const charms = await integrationCell.fetchCharms();
+          
+          // Record a timeout failure for each charm in this cell
+          for (const { space, charmId } of charms) {
+            // Only update state for enabled charms
+            if (this.stateManager.isCharmEnabled(space, charmId)) {
+              log(`Recording timeout failure for charm ${space}/${charmId} due to cell timeout`);
+              
+              // Create a timeout error with the cell timeout message
+              const timeoutError = new Error(`Cell ${integrationCell.id} processing timed out`);
+              
+              // Update the state with a failure
+              this.stateManager.updateAfterExecution(
+                space,
+                charmId,
+                integrationCell.id,
+                {
+                  success: false,
+                  executionTimeMs: 0,
+                  error: timeoutError
+                }
+              );
+              
+              // Check if the charm should be disabled after this failure
+              const state = this.stateManager.getCharmState(space, charmId, integrationCell.id);
+              if (state.consecutiveFailures >= this.config.maxConsecutiveFailures) {
+                log(`Disabling charm ${space}/${charmId} after ${state.consecutiveFailures} consecutive failures`);
+                this.stateManager.disableCharm(space, charmId);
+              }
+            }
+          }
+        } catch (fetchError) {
+          // If we can't even fetch the charms list, just log the error
+          const fetchErrorMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
+          log(`Could not fetch charms to update failure state: ${fetchErrorMsg}`);
+        }
       }
     }
-
-    log("Charm execution cycle completed");
   }
 
   /**
@@ -170,8 +338,45 @@ export class BackgroundCharmService {
     charmId: string,
     integrationCell: IntegrationCellConfig,
   ): Promise<void> {
-    log(`Processing charm: ${space}/${charmId}`);
-
+    const charmKey = `${space}/${charmId}`;
+    log(`Processing charm: ${charmKey}`);
+    
+    try {
+      // Add a timeout to ensure charm processing can't hang forever
+      // We use Promise.race to either complete the processing or timeout
+      await Promise.race([
+        this.processCharmWithTimeout(space, charmId, integrationCell),
+        new Promise((_, reject) => setTimeout(() => {
+          reject(new Error(`Charm processing timed out after 2 minutes: ${charmKey}`));
+        }, 120000)) // 2 minute timeout
+      ]);
+    } catch (error) {
+      // Catch timeout or other errors
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      log(`Error or timeout processing charm ${charmKey}: ${errorMessage}`);
+      
+      // Track this as a failed execution in the state manager
+      this.stateManager.updateAfterExecution(
+        space, 
+        charmId,
+        integrationCell.id,
+        {
+          success: false,
+          executionTimeMs: 0,
+          error: error instanceof Error ? error : new Error(String(error))
+        }
+      );
+    }
+  }
+  
+  /**
+   * Inner method to process a charm with its own error handling
+   */
+  private async processCharmWithTimeout(
+    space: DID,
+    charmId: string,
+    integrationCell: IntegrationCellConfig,
+  ): Promise<void> {
     // Get or create manager for this space
     const manager = await this.getManagerForSpace(space);
 
@@ -276,17 +481,36 @@ export class BackgroundCharmService {
         };
       }
 
-      // Execute the charm
+      // Execute the charm with better error handling
       log(`Calling updater stream in charm`, { charm });
-      updaterStream.send({});
-
-      return {
-        success: true,
-        executionTimeMs: Date.now() - startTime,
-        metadata: {
-          tokenRefreshed: expiresAt && Date.now() > expiresAt,
-        },
-      };
+      
+      try {
+        // Wrap the stream.send call in a try/catch to handle immediate errors
+        updaterStream.send({});
+        
+        return {
+          success: true,
+          executionTimeMs: Date.now() - startTime,
+          metadata: {
+            tokenRefreshed: expiresAt && Date.now() > expiresAt,
+          },
+        };
+      } catch (userCodeError) {
+        // This handles synchronous errors from the user code
+        const errorMessage = userCodeError instanceof Error 
+          ? userCodeError.message 
+          : String(userCodeError);
+          
+        log(`Error in charm user code: ${errorMessage}`);
+        
+        return {
+          success: false,
+          executionTimeMs: Date.now() - startTime,
+          error: userCodeError instanceof Error 
+            ? userCodeError 
+            : new Error(String(userCodeError)),
+        };
+      }
     } catch (error) {
       const errorMessage = error instanceof Error
         ? error.message
