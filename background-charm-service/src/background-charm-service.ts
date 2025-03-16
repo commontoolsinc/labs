@@ -165,7 +165,16 @@ export class BackgroundCharmService {
    * Run a cycle in a completely detached way
    * This ensures errors can't possibly affect the timing mechanism
    */
+  private cycleRunning = false;
   private runDetachedCycle(): void {
+    // Prevent multiple cycles from running at the same time
+    if (this.cycleRunning) {
+      log("Skipping cycle - previous cycle still running");
+      return;
+    }
+
+    this.cycleRunning = true;
+    
     Promise.resolve().then(() => {
       return this.runCycle();
     }).catch((error) => {
@@ -173,10 +182,10 @@ export class BackgroundCharmService {
         ? error.message
         : String(error);
       log(`Error in detached cycle: ${errorMessage}`);
+    }).finally(() => {
+      // Make sure to set cycleRunning to false when done
+      this.cycleRunning = false;
     });
-
-    // Important: No .finally() or .then() here to ensure
-    // this promise chain is completely detached from any timing mechanism
   }
 
   /**
@@ -247,10 +256,18 @@ export class BackgroundCharmService {
   /**
    * Process all cells with timeout protection
    */
+  private processingCells = new Set<string>();
   private async processCellsWithTimeout(): Promise<void> {
     // Process all cells in series to avoid overwhelming the system
     for (const integrationCell of this.config.integrationCells) {
+      // Skip cells that are already being processed
+      if (this.processingCells.has(integrationCell.id)) {
+        log(`Skipping cell ${integrationCell.id} - already being processed`);
+        continue;
+      }
+      
       try {
+        this.processingCells.add(integrationCell.id);
         log(`Processing cell ${integrationCell.id} with timeout protection`);
 
         // Add a timeout for each cell
@@ -276,8 +293,16 @@ export class BackgroundCharmService {
 
         // When a cell times out, we need to increment failure counts for all charms in the cell
         try {
-          // Attempt to fetch charms one more time
-          const charms = await integrationCell.fetchCharms();
+          // Attempt to fetch charms one more time with a shorter timeout
+          const fetchPromise = integrationCell.fetchCharms();
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error("Quick fetch timed out")), 10000)
+          );
+          
+          const charms = await Promise.race([fetchPromise, timeoutPromise]) as {
+            space: DID;
+            charmId: string;
+          }[];
 
           // Record a timeout failure for each charm in this cell
           for (const { space, charmId } of charms) {
@@ -329,6 +354,9 @@ export class BackgroundCharmService {
             `Could not fetch charms to update failure state: ${fetchErrorMsg}`,
           );
         }
+      } finally {
+        // Always remove the cell from processing set
+        this.processingCells.delete(integrationCell.id);
       }
     }
   }
@@ -461,6 +489,7 @@ export class BackgroundCharmService {
   /**
    * Process a single charm - unified method with detailed logging
    */
+  private processingCharms = new Set<string>();
   private async processCharm(
     space: DID,
     charmId: string,
@@ -468,6 +497,14 @@ export class BackgroundCharmService {
   ): Promise<void> {
     const startTime = Date.now();
     const charmKey = `${space}/${charmId}`;
+    
+    // Skip charms that are already being processed
+    if (this.processingCharms.has(charmKey)) {
+      log(`Skipping charm ${charmKey} - already being processed`);
+      return;
+    }
+    
+    this.processingCharms.add(charmKey);
     log(`Processing charm: ${charmKey}`);
 
     try {
@@ -607,6 +644,9 @@ export class BackgroundCharmService {
         );
         this.stateManager.disableCharm(space, charmId);
       }
+    } finally {
+      // Always remove the charm from the processing set
+      this.processingCharms.delete(charmKey);
     }
   }
 
