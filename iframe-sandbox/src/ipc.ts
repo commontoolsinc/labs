@@ -160,7 +160,7 @@ export function isGuestMessage(message: any): message is GuestMessage {
     case GuestMessageType.Unsubscribe: {
       return typeof message.data === "string" ||
         (Array.isArray(message.data) &&
-          message.data.every((d) => typeof d === "string"));
+          message.data.every((key: any) => typeof key === "string"));
     }
     case GuestMessageType.Write: {
       return Array.isArray(message.data) &&
