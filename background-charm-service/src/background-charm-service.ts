@@ -375,107 +375,156 @@ export class BackgroundCharmService {
       log(`Fetching charms for integration: ${integrationCell.name}`);
 
       log(`Starting fetchCharms for integration: ${integrationCell.name}`);
-      // Store the fetch promise so we can access it if it times out
-      const fetchPromise = integrationCell.fetchCharms();
-
-      // Create a timeout with more detailed error
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => {
-          log(
-            `WARNING: fetchCharms for ${integrationCell.name} is taking too long (60 second timeout)`,
-          );
-          reject(
-            new Error(
-              `Fetching charms timed out after 60 seconds for ${integrationCell.name}`,
-            ),
-          );
-        }, 60000);
-      });
-
-      // Race the fetch against a timeout
-      log(`Waiting for fetchCharms or timeout for: ${integrationCell.name}`);
-      const charms = await Promise.race([fetchPromise, timeoutPromise]) as {
-        space: DID;
-        charmId: string;
-      }[];
-      log(`fetchCharms completed successfully for: ${integrationCell.name}`);
-
-      log(`Fetched charms in ${Date.now() - fetchStartTime}ms`);
-
-      if (charms.length === 0) {
-        log(`No charms found for integration cell: ${integrationCell.name}`);
-        return;
-      }
-
-      log(
-        `Found ${charms.length} charms for integration: ${integrationCell.name}`,
-      );
-      log(`Charms: ${charms.map((c) => `${c.space}/${c.charmId}`).join(", ")}`);
-
-      // Process each charm in sequence with individual timeouts
-      for (const { space, charmId } of charms) {
-        const charmKey = `${space}/${charmId}`;
-
-        // Skip disabled charms
-        if (!this.stateManager.isCharmEnabled(space, charmId)) {
-          log(`Skipping disabled charm: ${charmKey}`);
-          continue;
+      
+      // Create an AbortController to abort the fetch if it times out
+      const controller = new AbortController();
+      const abortSignal = controller.signal;
+      
+      // Create a timeout that will abort the fetch (10 seconds should be plenty)
+      const timeoutId = setTimeout(() => {
+        log(`WARNING: fetchCharms for ${integrationCell.name} is taking too long (10 second timeout)`);
+        controller.abort();
+      }, 10000);
+      
+      try {
+        // Race the fetch against a timeout with abort capability
+        log(`Waiting for fetchCharms or timeout for: ${integrationCell.name}`);
+        
+        // Create the fetch as a promise that can be aborted
+        const fetchWithAbort = new Promise<{space: DID; charmId: string}[]>((resolve, reject) => {
+          // Start the fetch
+          Promise.resolve().then(async () => {
+            try {
+              const result = await integrationCell.fetchCharms();
+              if (!abortSignal.aborted) {
+                resolve(result);
+              }
+            } catch (error) {
+              if (!abortSignal.aborted) {
+                reject(error);
+              }
+            }
+          });
+          
+          // Listen for abort
+          abortSignal.addEventListener('abort', () => {
+            reject(new Error(`Fetching charms timed out after 30 seconds for ${integrationCell.name}`));
+          });
+        });
+        
+        // Wait for the fetch to complete or time out
+        const charms = await fetchWithAbort;
+        
+        // Clear the timeout since we're done
+        clearTimeout(timeoutId);
+        
+        log(`fetchCharms completed successfully for: ${integrationCell.name}`);
+        log(`Fetched charms in ${Date.now() - fetchStartTime}ms`);
+        
+        if (charms.length === 0) {
+          log(`No charms found for integration cell: ${integrationCell.name}`);
+          return;
         }
 
-        log(`Starting to process charm: ${charmKey}`);
+        log(
+          `Found ${charms.length} charms for integration: ${integrationCell.name}`,
+        );
+        log(`Charms: ${charms.map((c) => `${c.space}/${c.charmId}`).join(", ")}`);
 
-        try {
-          // Process with timeout for each charm
-          await Promise.race([
-            this.processCharm(space, charmId, integrationCell),
-            new Promise((_, reject) => {
-              setTimeout(
-                () =>
-                  reject(
-                    new Error(
-                      `Processing charm ${charmKey} timed out after 60 seconds`,
-                    ),
-                  ),
-                60000,
-              );
-            }),
-          ]);
+        // Process each charm in sequence with individual timeouts
+        for (const { space, charmId } of charms) {
+          const charmKey = `${space}/${charmId}`;
 
-          log(`Successfully processed charm: ${charmKey}`);
-        } catch (error) {
-          const errorMessage = error instanceof Error
-            ? error.message
-            : String(error);
-          log(`Error processing charm ${charmKey}: ${errorMessage}`);
+          // Skip disabled charms
+          if (!this.stateManager.isCharmEnabled(space, charmId)) {
+            log(`Skipping disabled charm: ${charmKey}`);
+            continue;
+          }
 
-          // Make sure to count this as a failure
-          this.stateManager.updateAfterExecution(
-            space,
-            charmId,
-            integrationCell.id,
-            {
-              success: false,
-              executionTimeMs: 0,
-              error: error instanceof Error ? error : new Error(String(error)),
-            },
-          );
+          log(`Starting to process charm: ${charmKey}`);
 
-          // Check if we should disable this charm
-          const state = this.stateManager.getCharmState(
-            space,
-            charmId,
-            integrationCell.id,
-          );
-          if (state.consecutiveFailures >= this.config.maxConsecutiveFailures) {
-            log(
-              `Disabling charm ${charmKey} after ${state.consecutiveFailures} consecutive failures`,
+          // Create an AbortController for this charm execution
+          const charmController = new AbortController();
+          const charmSignal = charmController.signal;
+          const charmTimeoutId = setTimeout(() => {
+            log(`WARNING: Processing charm ${charmKey} is taking too long (60 second timeout)`);
+            charmController.abort();
+          }, 60000);
+          
+          try {
+            // Process the charm with abort capability
+            await new Promise<void>((resolve, reject) => {
+              // Start charm processing
+              Promise.resolve().then(async () => {
+                try {
+                  await this.processCharm(space, charmId, integrationCell);
+                  if (!charmSignal.aborted) {
+                    resolve();
+                  }
+                } catch (error) {
+                  if (!charmSignal.aborted) {
+                    reject(error);
+                  }
+                }
+              });
+              
+              // Listen for abort
+              charmSignal.addEventListener('abort', () => {
+                reject(new Error(`Processing charm ${charmKey} timed out after 60 seconds`));
+              });
+            });
+
+            // Clear the charm timeout as we're done
+            clearTimeout(charmTimeoutId);
+            
+            log(`Successfully processed charm: ${charmKey}`);
+          } catch (error) {
+            // Always clear the timeout
+            clearTimeout(charmTimeoutId);
+            
+            const errorMessage = error instanceof Error
+              ? error.message
+              : String(error);
+            log(`Error processing charm ${charmKey}: ${errorMessage}`);
+
+            // Make sure to count this as a failure
+            this.stateManager.updateAfterExecution(
+              space,
+              charmId,
+              integrationCell.id,
+              {
+                success: false,
+                executionTimeMs: 0,
+                error: error instanceof Error ? error : new Error(String(error)),
+              },
             );
-            this.stateManager.disableCharm(space, charmId);
+
+            // Check if we should disable this charm
+            const state = this.stateManager.getCharmState(
+              space,
+              charmId,
+              integrationCell.id,
+            );
+            if (state.consecutiveFailures >= this.config.maxConsecutiveFailures) {
+              log(
+                `Disabling charm ${charmKey} after ${state.consecutiveFailures} consecutive failures`,
+              );
+              this.stateManager.disableCharm(space, charmId);
+            }
           }
         }
-      }
 
-      log(`Completed processing all charms for ${integrationCell.name}`);
+        log(`Completed processing all charms for ${integrationCell.name}`);
+      } catch (innerError) {
+        // Clear the timeout
+        clearTimeout(timeoutId);
+        
+        const innerErrorMessage = innerError instanceof Error
+          ? innerError.message
+          : String(innerError);
+        log(`Error during charm processing for ${integrationCell.name}: ${innerErrorMessage}`);
+        throw innerError; // Re-throw for outer catch
+      }
     } catch (error) {
       const errorMessage = error instanceof Error
         ? error.message
@@ -704,6 +753,21 @@ export class BackgroundCharmService {
       const charmId = charm.entityId ? charm.entityId["/"] : "unknown";
       log(`Calling updater stream in charm: ${charmId}`);
 
+      // Track if we've seen any unhandled rejections for this charm
+      let sawUnhandledRejection = false;
+      const errorHandler = (event: PromiseRejectionEvent | ErrorEvent) => {
+        // Mark that we've seen an unhandled rejection for this charm
+        sawUnhandledRejection = true;
+        log(`Charm ${charmId} generated an unhandled error/rejection - marking for early completion`);
+        
+        // Don't prevent the default handler from also logging the error
+        // event.preventDefault() is called by the global handler
+      };
+
+      // Install temporary error handlers specifically for this charm
+      self.addEventListener("unhandledrejection", errorHandler);
+      self.addEventListener("error", errorHandler);
+
       try {
         // Wrap the stream.send call in a try/catch to handle immediate errors
         log(`About to send message to stream for charm: ${charmId}`);
@@ -712,7 +776,8 @@ export class BackgroundCharmService {
         await Promise.race([
           new Promise<void>((resolve) => {
             try {
-              // Send the message and consider it successful
+              // Send the message and consider it successful immediately
+              // Don't wait for the result since it may generate async errors
               updaterStream.send({});
               resolve();
             } catch (immediateError) {
@@ -724,13 +789,35 @@ export class BackgroundCharmService {
               throw immediateError;
             }
           }),
-          // Set a timeout to prevent hanging indefinitely
+          // Set a timeout to prevent hanging indefinitely (shorten to 15 seconds)
           new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error("Charm execution timed out")), 30000)
-          )
+            setTimeout(() => reject(new Error("Charm execution timed out after 15 seconds")), 15000)
+          ),
+          // Add a third promise that resolves early if we see an unhandled rejection
+          new Promise<void>((resolve) => {
+            const checkInterval = setInterval(() => {
+              if (sawUnhandledRejection) {
+                log(`Detected unhandled rejection in charm ${charmId}, ending execution early`);
+                clearInterval(checkInterval);
+                resolve();
+              }
+            }, 100); // Check every 100ms
+            
+            // Ensure we clean up this interval eventually
+            setTimeout(() => clearInterval(checkInterval), 15000);
+          })
         ]);
         
         log(`Stream message sent successfully for charm: ${charmId}`);
+
+        // If we completed because of an unhandled rejection, return failure
+        if (sawUnhandledRejection) {
+          return {
+            success: false,
+            executionTimeMs: Date.now() - startTime,
+            error: new Error("Charm generated unhandled promise rejection"),
+          };
+        }
 
         return {
           success: true,
@@ -762,6 +849,10 @@ export class BackgroundCharmService {
             ? userCodeError
             : new Error(String(userCodeError)),
         };
+      } finally {
+        // Remove our temporary error handlers
+        self.removeEventListener("unhandledrejection", errorHandler);
+        self.removeEventListener("error", errorHandler);
       }
     } catch (error) {
       const errorMessage = error instanceof Error
