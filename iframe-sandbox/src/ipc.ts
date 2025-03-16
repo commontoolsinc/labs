@@ -153,10 +153,14 @@ export function isGuestMessage(message: any): message is GuestMessage {
     }
     case GuestMessageType.LLMRequest:
     case GuestMessageType.WebpageRequest:
-    case GuestMessageType.Read:
+    case GuestMessageType.Read: {
+      return typeof message.data === "string";
+    }
     case GuestMessageType.Subscribe:
     case GuestMessageType.Unsubscribe: {
-      return typeof message.data === "string";
+      return typeof message.data === "string" ||
+        (Array.isArray(message.data) &&
+          message.data.every((d) => typeof d === "string"));
     }
     case GuestMessageType.Write: {
       return Array.isArray(message.data) &&
