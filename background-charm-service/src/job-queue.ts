@@ -221,6 +221,9 @@ export class JobQueue {
       const job = entry.value;
       if (job.status === "pending") {
         pendingJobs.push(job);
+        
+        // Get versionstamp for later usage
+        job._versionstamp = entry.versionstamp;
       }
     }
     
@@ -239,18 +242,26 @@ export class JobQueue {
     // Pick the highest priority job
     const job = pendingJobs[0];
     
-    // Mark as processing using atomic operations to avoid race conditions
-    const result = await this.kv.atomic()
-      .check({ key: [...KV_PREFIXES.JOB_QUEUE, job.id], versionstamp: null })
-      .set([...KV_PREFIXES.JOB_QUEUE, job.id], { ...job, status: "processing" })
-      .commit();
+    try {
+      // Mark as processing using atomic operations to avoid race conditions
+      const jobKey = [...KV_PREFIXES.JOB_QUEUE, job.id];
+      const result = await this.kv.atomic()
+        .check({ key: jobKey, versionstamp: job._versionstamp as string })
+        .set(jobKey, { ...job, status: "processing" })
+        .commit();
+        
+      if (!result.ok) {
+        // Job was modified by another process
+        return null;
+      }
       
-    if (!result.ok) {
-      log(`Failed to mark job as processing: ${job.id}`);
+      // Remove internal versionstamp property
+      const { _versionstamp, ...cleanJob } = job;
+      return { ...cleanJob, status: "processing" };
+    } catch (error) {
+      log(`Error marking job ${job.id} as processing: ${error.message}`);
       return null;
     }
-    
-    return { ...job, status: "processing" };
   }
   
   /**
@@ -290,58 +301,86 @@ export class JobQueue {
       error = e instanceof Error ? e.message : String(e);
       log(`Job ${job.id} (${job.type}) failed: ${error}`);
       
-      // Update job status based on retry policy
-      if (job.retryCount < job.maxRetries) {
-        // Retry the job
-        const updatedJob = { 
-          ...job, 
-          retryCount: job.retryCount + 1,
-          status: "pending" as JobStatus
-        };
+      try {
+        // Get fresh copy of job in case it was updated
+        const jobKey = [...KV_PREFIXES.JOB_QUEUE, job.id];
+        const freshJobResult = await this.kv.get<Job>(jobKey);
+        const freshJob = freshJobResult.value;
         
-        // Add exponential backoff delay
-        const backoffMs = Math.min(30000, 1000 * Math.pow(2, job.retryCount));
-        log(`Retrying job ${job.id} after ${backoffMs}ms (attempt ${updatedJob.retryCount} of ${job.maxRetries})`);
+        if (!freshJob) {
+          log(`Job ${job.id} no longer exists, skipping update`);
+          return;
+        }
         
-        setTimeout(() => {
-          this.kv.set([...KV_PREFIXES.JOB_QUEUE, job.id], updatedJob)
-            .catch(err => log(`Error scheduling job retry: ${err.message}`));
-        }, backoffMs);
-      } else {
-        // Mark as failed
-        const failedJob = { ...job, status: "failed" as JobStatus };
-        await this.kv.set([...KV_PREFIXES.JOB_QUEUE, job.id], failedJob);
-        
-        // Store failed job result
-        const jobResult: JobResult = {
-          jobId: job.id,
-          success: false,
-          error,
-          completedAt: Date.now(),
-          executionTimeMs: Date.now() - startTime,
-        };
-        
-        await this.kv.set([...KV_PREFIXES.JOB_RESULTS, job.id], jobResult);
-        log(`Job ${job.id} permanently failed after ${job.maxRetries} attempts`);
+        // Update job status based on retry policy
+        if (freshJob.retryCount < freshJob.maxRetries) {
+          // Retry the job
+          const updatedJob = { 
+            ...freshJob, 
+            retryCount: freshJob.retryCount + 1,
+            status: "pending" as JobStatus
+          };
+          
+          // Add exponential backoff delay
+          const backoffMs = Math.min(30000, 1000 * Math.pow(2, freshJob.retryCount));
+          log(`Retrying job ${job.id} after ${backoffMs}ms (attempt ${updatedJob.retryCount} of ${freshJob.maxRetries})`);
+          
+          setTimeout(() => {
+            this.kv.set(jobKey, updatedJob)
+              .catch(err => log(`Error scheduling job retry: ${err.message}`));
+          }, backoffMs);
+        } else {
+          // Mark as failed
+          const failedJob = { ...freshJob, status: "failed" as JobStatus };
+          await this.kv.set(jobKey, failedJob);
+          
+          // Store failed job result
+          const jobResult: JobResult = {
+            jobId: job.id,
+            success: false,
+            error,
+            completedAt: Date.now(),
+            executionTimeMs: Date.now() - startTime,
+          };
+          
+          await this.kv.set([...KV_PREFIXES.JOB_RESULTS, job.id], jobResult);
+          log(`Job ${job.id} permanently failed after ${freshJob.maxRetries} attempts`);
+        }
+      } catch (updateError) {
+        log(`Error updating job status: ${updateError.message}`);
       }
       
       return;
     }
     
-    // Job completed successfully
-    const completedJob = { ...job, status: "completed" as JobStatus };
-    await this.kv.set([...KV_PREFIXES.JOB_QUEUE, job.id], completedJob);
-    
-    // Store result
-    const jobResult: JobResult = {
-      jobId: job.id,
-      success: true,
-      data: resultData,
-      completedAt: Date.now(),
-      executionTimeMs: Date.now() - startTime,
-    };
-    
-    await this.kv.set([...KV_PREFIXES.JOB_RESULTS, job.id], jobResult);
+    try {
+      // Get fresh copy of job in case it was updated
+      const jobKey = [...KV_PREFIXES.JOB_QUEUE, job.id];
+      const freshJobResult = await this.kv.get<Job>(jobKey);
+      const freshJob = freshJobResult.value;
+      
+      if (!freshJob) {
+        log(`Job ${job.id} no longer exists, skipping update`);
+        return;
+      }
+      
+      // Job completed successfully
+      const completedJob = { ...freshJob, status: "completed" as JobStatus };
+      await this.kv.set(jobKey, completedJob);
+      
+      // Store result
+      const jobResult: JobResult = {
+        jobId: job.id,
+        success: true,
+        data: resultData,
+        completedAt: Date.now(),
+        executionTimeMs: Date.now() - startTime,
+      };
+      
+      await this.kv.set([...KV_PREFIXES.JOB_RESULTS, job.id], jobResult);
+    } catch (updateError) {
+      log(`Error updating job status: ${updateError.message}`);
+    }
   }
   
   /**

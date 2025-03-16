@@ -330,8 +330,17 @@ export class KVStateManager {
    * Set an integration configuration
    */
   async setIntegrationConfig(integrationId: string, config: IntegrationCellConfig): Promise<void> {
+    // Store a serializable version of the config without function references
+    const serializableConfig = {
+      id: config.id,
+      name: config.name,
+      spaceId: config.spaceId,
+      cellId: config.cellId,
+      // Don't store functions - they'll be provided by the integration when needed
+    };
+    
     const key = [...KV_PREFIXES.INTEGRATION_CONFIG, integrationId];
-    await this.kv.set(key, config);
+    await this.kv.set(key, serializableConfig);
   }
   
   /**

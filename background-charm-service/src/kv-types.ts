@@ -31,6 +31,8 @@ export interface Job {
   retryCount: number;
   maxRetries: number;
   status: JobStatus;
+  // Internal property for tracking KV entry version
+  _versionstamp?: string;
 }
 
 // Scan integration job

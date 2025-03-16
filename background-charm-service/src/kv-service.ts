@@ -6,7 +6,7 @@ import {
   KV_PREFIXES, 
   KVServiceOptions 
 } from "./kv-types.ts";
-import { loadIntegrations } from "./integrations/index.ts";
+import { loadIntegrations, getAvailableIntegrations } from "./integrations/index.ts";
 import { log } from "./utils.ts";
 
 /**
@@ -80,8 +80,11 @@ export class KVBackgroundCharmService {
     // Initialize KV schema
     await this.stateManager.initialize();
     
-    // Register integrations
-    for (const integration of await loadIntegrations()) {
+    // Load integrations
+    await loadIntegrations();
+    
+    // Register all available integrations
+    for (const integration of getAvailableIntegrations()) {
       await this.registerIntegration(integration);
     }
     
@@ -169,17 +172,18 @@ export class KVBackgroundCharmService {
     log("Starting cycle");
     
     try {
-      // Queue a maintenance job for statistics
-      await this.queue.addMaintenanceJob("stats", 10);
+      // Queue a maintenance job for statistics (lowest priority)
+      await this.queue.addMaintenanceJob("stats", 1);
       
-      // Queue a maintenance job for cleanup
-      await this.queue.addMaintenanceJob("cleanup", 1);
+      // Queue a maintenance job for cleanup (low priority)
+      await this.queue.addMaintenanceJob("cleanup", 2);
       
-      // Queue a maintenance job for resetting disabled charms
-      await this.queue.addMaintenanceJob("reset", 2);
+      // Queue a maintenance job for resetting disabled charms (medium-low priority)
+      await this.queue.addMaintenanceJob("reset", 3);
       
-      // Queue scan jobs for each integration
+      // Queue scan jobs for each integration (medium-high priority)
       for (const [id, integration] of this.integrations.entries()) {
+        // Scan integrations have medium-high priority (5)
         await this.queue.addScanIntegrationJob(id, 5);
       }
       

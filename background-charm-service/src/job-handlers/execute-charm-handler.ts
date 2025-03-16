@@ -6,6 +6,7 @@ import * as Session from "../session.ts";
 import { Cell, isStream } from "@commontools/runner";
 import { Charm, CharmManager } from "@commontools/charm";
 import type { DID } from "@commontools/identity";
+import { getIntegration } from "../integrations/index.ts";
 
 /**
  * Handler for execute charm jobs
@@ -62,10 +63,16 @@ export class ExecuteCharmHandler implements JobHandler {
         throw new Error(`Charm not properly loaded: ${charmId}`);
       }
       
-      // Validate charm belongs to this integration
-      const integrationConfig = await this.stateManager.getIntegrationConfig(integrationId);
+      // Get the integration to validate the charm
+      const integration = getIntegration(integrationId);
+      if (!integration) {
+        throw new Error(`Integration not found: ${integrationId}`);
+      }
+      
+      // Get integration config with validation function
+      const integrationConfig = integration.getIntegrationConfig();
       if (
-        integrationConfig?.isValidIntegrationCharm &&
+        integrationConfig.isValidIntegrationCharm &&
         !integrationConfig.isValidIntegrationCharm(runningCharm)
       ) {
         throw new Error(`Charm does not match integration type ${integrationId}`);
@@ -75,18 +82,45 @@ export class ExecuteCharmHandler implements JobHandler {
       log(`Executing charm: ${charmId}`);
       const result = await this.executeCharmWithTimeout(runningCharm, argument, spaceId as DID);
       
-      // Update state
+      // Update state based on success/failure
       const executionTimeMs = Date.now() - startTime;
-      await this.stateManager.updateAfterExecution(
-        spaceId,
-        charmId,
-        integrationId,
-        true, // success
-        executionTimeMs
-      );
       
-      log(`Successfully executed charm: ${charmId} (${executionTimeMs}ms)`);
-      return { success: true, executionTimeMs };
+      if (result.success) {
+        // Success case
+        await this.stateManager.updateAfterExecution(
+          spaceId,
+          charmId,
+          integrationId,
+          true, // success
+          executionTimeMs
+        );
+        
+        log(`Successfully executed charm: ${charmId} (${executionTimeMs}ms)`);
+        return { success: true, executionTimeMs };
+      } else {
+        // Failure case
+        const error = new Error(result.error || "Unknown error during charm execution");
+        const state = await this.stateManager.updateAfterExecution(
+          spaceId,
+          charmId,
+          integrationId,
+          false, // failure
+          executionTimeMs,
+          error
+        );
+        
+        // Check if we should disable this charm
+        if (state.consecutiveFailures >= 5) { // TODO: Make configurable
+          log(`Disabling charm ${spaceId}/${charmId} after ${state.consecutiveFailures} consecutive failures`);
+          await this.stateManager.disableCharm(spaceId, charmId, integrationId);
+        }
+        
+        log(`Error executing charm: ${charmId} - ${error.message} (${executionTimeMs}ms)`);
+        
+        // CRITICAL FIX: Throw an error instead of returning failure
+        // This ensures the job is properly marked as failed
+        throw error;
+      }
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -125,19 +159,19 @@ export class ExecuteCharmHandler implements JobHandler {
     charm: Cell<Charm>,
     argument: Cell<any>,
     space: DID,
-  ): Promise<void> {
+  ): Promise<{ success: boolean; error?: string }> {
     const charmId = charm.entityId ? charm.entityId["/"] : "unknown";
     
     // Find updater stream
     const updaterStream = this.findUpdaterStream(charm);
     if (!updaterStream) {
-      throw new Error("No updater stream found in charm");
+      return { success: false, error: "No updater stream found in charm" };
     }
     
     // Check auth
     const auth = argument.key("auth");
     if (!auth) {
-      throw new Error("Missing auth in charm argument");
+      return { success: false, error: "Missing auth in charm argument" };
     }
     
     const { token, expiresAt } = auth.get();
@@ -145,9 +179,14 @@ export class ExecuteCharmHandler implements JobHandler {
     // Refresh token if needed
     if (token && expiresAt && Date.now() > expiresAt) {
       log(`Token expired, refreshing for charm: ${charmId}`);
-      await this.refreshAuthToken(auth, charm, space);
+      try {
+        await this.refreshAuthToken(auth, charm, space);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        return { success: false, error: `Failed to refresh token: ${errorMsg}` };
+      }
     } else if (!token) {
-      throw new Error("Missing authentication token");
+      return { success: false, error: "Missing authentication token" };
     }
     
     // Create abort controller for timeout
@@ -174,28 +213,39 @@ export class ExecuteCharmHandler implements JobHandler {
     try {
       // Execute with timeout
       await Promise.race([
-        new Promise<void>((resolve) => {
+        new Promise<void>((resolve, reject) => {
           // Send the message to the stream
-          updaterStream.send({});
+          try {
+            updaterStream.send({});
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            reject(new Error(`Error sending message to stream: ${errorMsg}`));
+            return;
+          }
           
           // Check for unhandled rejections every 50ms
           const checkInterval = setInterval(() => {
             if (sawUnhandledRejection || signal.aborted) {
               clearInterval(checkInterval);
               if (sawUnhandledRejection) {
-                throw new Error("Charm generated unhandled rejection");
+                reject(new Error("Charm generated unhandled rejection"));
+                return;
               }
               if (signal.aborted) {
-                throw new Error("Charm execution timed out");
+                reject(new Error("Charm execution timed out"));
+                return;
               }
-              resolve();
             }
           }, 50);
           
           // Always resolve after a short period
           setTimeout(() => {
             clearInterval(checkInterval);
-            resolve();
+            if (sawUnhandledRejection) {
+              reject(new Error("Charm generated unhandled rejection"));
+            } else {
+              resolve();
+            }
           }, 1000);
         }),
         new Promise<never>((_, reject) => {
@@ -205,8 +255,22 @@ export class ExecuteCharmHandler implements JobHandler {
         })
       ]);
       
-      // If we got here with no errors, consider it successful
-      return;
+      // If we got here without unhandled rejections, consider it successful
+      if (sawUnhandledRejection) {
+        return { 
+          success: false, 
+          error: "Charm generated unhandled rejection" 
+        };
+      }
+      
+      return { success: true };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      log(`Error executing charm ${charmId}: ${errorMsg}`);
+      return { 
+        success: false, 
+        error: errorMsg 
+      };
     } finally {
       // Clean up
       clearTimeout(timeoutId);

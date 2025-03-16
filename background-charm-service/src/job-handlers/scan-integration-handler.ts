@@ -36,35 +36,75 @@ export class ScanIntegrationHandler implements JobHandler {
       throw new Error(`Integration not found: ${integrationId}`);
     }
     
-    // Get the integration config
+    // Get the integration config (with functions)
     const config = integration.getIntegrationConfig();
     
-    // Fetch charms
+    // Fetch charms with a strict timeout
     log(`Fetching charms for integration: ${integrationId}`);
-    const charms = await config.fetchCharms();
-    log(`Found ${charms.length} charms for integration: ${integrationId}`);
+    
+    try {
+      // Use Promise.race to add a strict timeout
+      const fetchPromise = config.fetchCharms();
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(`Fetch charms timeout for ${integrationId}`)), 5000);
+      });
+      
+      // Use a cached result if available to prevent repeated timeouts
+      const cachedCharms = this.getCachedCharms(integrationId);
+      
+      try {
+        // Try to get fresh charms with timeout
+        const charms = await Promise.race([fetchPromise, timeoutPromise]);
+        log(`Found ${charms.length} charms for integration: ${integrationId}`);
+        
+        // Save successful result to cache
+        this.setCachedCharms(integrationId, charms);
+        return this.processCharms(charms, integrationId);
+      } catch (timeoutError) {
+        // If timeout, use cached charms if available
+        if (cachedCharms && cachedCharms.length > 0) {
+          log(`Fetch timed out, using ${cachedCharms.length} cached charms for integration: ${integrationId}`);
+          return this.processCharms(cachedCharms, integrationId);
+        }
+        
+        // Re-throw if no cached charms available
+        throw timeoutError;
+      }
+    } catch (error) {
+      log(`Error fetching charms for ${integrationId}: ${error.message}`);
+      throw error;
+    }
     
     // Create a job queue to add execute jobs
     const jobQueue = new JobQueue(this.kv);
     
     // Queue execution jobs for each charm
     const queuedJobs: string[] = [];
+    const disabledCharms: string[] = [];
+    
     for (const { space, charmId } of charms) {
       // Check if charm is disabled
       const isDisabled = await this.stateManager.isCharmDisabled(space, charmId, integrationId);
       if (isDisabled) {
         log(`Skipping disabled charm: ${space}/${charmId}`);
+        disabledCharms.push(`${space}/${charmId}`);
         continue;
       }
       
-      // Queue execution job
+      // Queue execution job with higher priority for reliability
       const jobId = await jobQueue.addExecuteCharmJob(
         integrationId,
         space,
-        charmId
+        charmId,
+        8 // Higher priority than maintenance jobs
       );
       
       queuedJobs.push(jobId);
+    }
+    
+    // Log summary
+    if (disabledCharms.length > 0) {
+      log(`Skipped ${disabledCharms.length} disabled charm(s): ${disabledCharms.join(", ")}`);
     }
     
     return {
