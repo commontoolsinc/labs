@@ -2,8 +2,12 @@
   "tasks": {
     "start": "deno run --allow-read --allow-env --allow-net src/cli.ts",
     "gmail": "deno run --allow-read --allow-env --allow-net src/cli.ts --integration=gmail --interval=60",
+    // "gcal": "deno run --allow-read --allow-env --allow-net src/cli.ts --integration=gcal --interval=60",
     "initialize": "deno run --allow-read --allow-env --allow-net src/cli.ts --initialize",
-    "test": "deno test"
+    "initialize:gmail": "deno run --allow-read --allow-env --allow-net src/cli.ts --integration=gmail --initialize",
+    "initialize:gcal": "deno run --allow-read --allow-env --allow-net src/cli.ts --integration=gcal --initialize",
+    "test": "deno test",
+    "check": "deno check src/**/*.ts"
   },
   "imports": {}
 }

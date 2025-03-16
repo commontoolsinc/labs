@@ -94,3 +94,20 @@ export interface CharmServiceStats {
   startTime: number;
   charmsProcessed: Set<string>;
 }
+
+/**
+ * Integration interface for external services
+ */
+export interface Integration {
+  // Unique identifier for the integration
+  id: string;
+  
+  // User-friendly name for the integration
+  name: string;
+  
+  // Initialize the integration
+  initialize: () => Promise<void>;
+  
+  // Get integration cell configuration
+  getIntegrationConfig: () => IntegrationCellConfig;
+}

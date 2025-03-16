@@ -6,10 +6,7 @@ import { CharmServiceConfig, IntegrationCellConfig } from "./types.ts";
 import { isValidCharmId, isValidDID, log, parseCharmsInput } from "./utils.ts";
 import { setBobbyServerUrl, storage } from "@commontools/runner";
 import type { DID } from "@commontools/identity";
-import {
-  getGmailIntegrationCharms,
-  initializeGmailIntegrationCharmsCell,
-} from "@commontools/utils";
+import { getAvailableIntegrationIds, getIntegration } from "./integrations/index.ts";
 
 // Constants
 const TOOLSHED_URL = Deno.env.get("TOOLSHED_API_URL") ??
@@ -24,6 +21,9 @@ setBobbyServerUrl(TOOLSHED_URL);
  * Display usage information
  */
 function showHelp() {
+  // Get available integrations for help message
+  const availableIntegrations = getAvailableIntegrationIds();
+  
   console.log("Background Charm Service");
   console.log(
     "A robust service for running charms in the background with health monitoring",
@@ -45,42 +45,18 @@ function showHelp() {
     "  --log-interval=<seconds>   Log status interval in seconds (default: 300)",
   );
   console.log(
-    "  --integration=<name>       Integration to run (default: gmail)",
+    `  --integration=<name>       Integration to run (default: gmail)`,
   );
+  
+  if (availableIntegrations.length > 0) {
+    console.log(`                            Available: ${availableIntegrations.join(", ")}`);
+  } else {
+    console.log("                            No integrations available");
+  }
+  
   console.log("  --initialize               Initialize integration cell");
   console.log("  --help                     Show this help message");
   Deno.exit(0);
-}
-
-/**
- * Wrapper function to convert CharmEntry[] to the expected format with properly typed DIDs
- */
-async function fetchGmailIntegrationCharms(): Promise<
-  { space: DID; charmId: string }[]
-> {
-  const charms = await getGmailIntegrationCharms();
-  return charms.map((entry) => ({
-    space: entry.space as DID,
-    charmId: entry.charmId,
-  }));
-}
-
-/**
- * Creates a Gmail integration cell configuration
- */
-function createGmailIntegrationCell(): IntegrationCellConfig {
-  return {
-    id: "gmail",
-    name: "Gmail Integration",
-    spaceId: "system", // This would be updated with correct values
-    cellId: "gmail-integration-charms",
-    fetchCharms: fetchGmailIntegrationCharms,
-    isValidIntegrationCharm: (charm) => {
-      const googleUpdater = charm.key("googleUpdater");
-      const auth = charm.key("auth");
-      return !!(googleUpdater && auth);
-    },
-  };
 }
 
 /**
@@ -118,15 +94,33 @@ async function main() {
     Deno.exit(0);
   }
 
+  // Get integration from the integration flag
+  const integrationId = args.integration as string;
+  const integration = getIntegration(integrationId);
+  
+  if (!integration && integrationId !== "manual") {
+    const availableIntegrations = getAvailableIntegrationIds();
+    log(`Error: Integration "${integrationId}" not found`);
+    
+    if (availableIntegrations.length > 0) {
+      log(`Available integrations: ${availableIntegrations.join(", ")}`);
+    } else {
+      log("No integrations available");
+    }
+    
+    log("Run with --help for more information");
+    Deno.exit(1);
+  }
+
   // Handle initialization if requested
   if (args.initialize) {
-    if (args.integration === "gmail") {
-      await initializeGmailIntegrationCharmsCell();
-      log("Initialized Gmail integration charms cell with empty array");
+    if (integration) {
+      await integration.initialize();
+      Deno.exit(0);
     } else {
-      log(`Initialization not supported for integration: ${args.integration}`);
+      log(`Initialization not supported for integration: ${integrationId}`);
+      Deno.exit(1);
     }
-    Deno.exit(0);
   }
 
   // Create integration cell configurations
@@ -135,16 +129,12 @@ async function main() {
   if (args.charms) {
     // Manual charm configuration
     integrationCells.push(createManualIntegrationCell(args.charms as string));
+  } else if (integration) {
+    // Get configuration from the integration
+    integrationCells.push(integration.getIntegrationConfig());
   } else {
-    // Integration-specific cells
-    switch (args.integration) {
-      case "gmail":
-        integrationCells.push(createGmailIntegrationCell());
-        break;
-      default:
-        log(`Unknown integration: ${args.integration}, defaulting to Gmail`);
-        integrationCells.push(createGmailIntegrationCell());
-    }
+    log("No valid integration or charms specified");
+    Deno.exit(1);
   }
 
   // Create service configuration
