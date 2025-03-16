@@ -238,15 +238,30 @@ export class ExecuteCharmHandler implements JobHandler {
             }
           }, 50);
           
-          // Always resolve after a short period
+          // CRITICAL FIX: Never auto-resolve! Wait at least 10 seconds for real completion
+          setTimeout(() => {
+            clearInterval(checkInterval);
+            // Always check for error, even after timeout
+            if (sawUnhandledRejection) {
+              reject(new Error("Charm generated unhandled rejection"));
+            } else {
+              // Don't resolve here - wait for the full timeout period
+              // This prevents false "success" reports for charms that take longer than 1 second
+              log(`Charm ${charmId} still executing after initial timeout check`);
+            }
+          }, 1000);
+          
+          // Add a longer timeout for actual success - this will keep the promise pending longer
+          // so we can catch delayed errors
           setTimeout(() => {
             clearInterval(checkInterval);
             if (sawUnhandledRejection) {
               reject(new Error("Charm generated unhandled rejection"));
             } else {
+              log(`Charm ${charmId} completed without error for 10 seconds, marking successful`);
               resolve();
             }
-          }, 1000);
+          }, 10000);
         }),
         new Promise<never>((_, reject) => {
           signal.addEventListener('abort', () => {

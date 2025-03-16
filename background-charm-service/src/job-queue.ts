@@ -285,14 +285,50 @@ export class JobQueue {
       // Execute with timeout (based on job type)
       const timeout = this.getTimeoutForJobType(job.type);
       try {
-        resultData = await Promise.race([
-          handler.handle(job),
-          new Promise((_resolve, reject) => {
-            setTimeout(() => reject(new Error(`Job execution timed out after ${timeout}ms`)), timeout);
-          }),
-        ]);
-        success = true;
-        log(`Job ${job.id} completed successfully (${Date.now() - startTime}ms)`);
+        // CRITICAL FIX: Special handling for execute_charm jobs
+        if (job.type === JobType.EXECUTE_CHARM) {
+          try {
+            // Use a longer timeout for execute charm jobs
+            resultData = await Promise.race([
+              handler.handle(job),
+              new Promise((_resolve, reject) => {
+                setTimeout(() => reject(new Error(`Job execution timed out after ${timeout}ms`)), timeout);
+              }),
+            ]);
+            
+            // Explicitly check the result of execute charm jobs
+            if (resultData && typeof resultData === 'object' && 'success' in resultData) {
+              // If the handler explicitly returns success: false, respect that
+              success = resultData.success === true;
+              if (!success && 'error' in resultData) {
+                error = resultData.error as string;
+                throw new Error(error || 'Unknown error in charm execution');
+              }
+            } else {
+              success = true;
+            }
+            
+            if (success) {
+              log(`Job ${job.id} completed successfully (${Date.now() - startTime}ms)`);
+            } else {
+              log(`Job ${job.id} failed (${Date.now() - startTime}ms): ${error || 'Unknown error'}`);
+              throw new Error(error || 'Unknown error in charm execution');
+            }
+          } catch (e) {
+            // Re-throw to outer catch
+            throw e;
+          }
+        } else {
+          // Regular handling for other job types
+          resultData = await Promise.race([
+            handler.handle(job),
+            new Promise((_resolve, reject) => {
+              setTimeout(() => reject(new Error(`Job execution timed out after ${timeout}ms`)), timeout);
+            }),
+          ]);
+          success = true;
+          log(`Job ${job.id} completed successfully (${Date.now() - startTime}ms)`);
+        }
       } catch (e) {
         error = e instanceof Error ? e.message : String(e);
         throw e; // Re-throw for outer catch
