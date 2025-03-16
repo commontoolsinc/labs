@@ -4,6 +4,7 @@ import { KVStateManager } from "../kv-state-manager.ts";
 import { JobQueue } from "../job-queue.ts";
 import { log } from "../utils.ts";
 import { getIntegration } from "../integrations/index.ts";
+import type { DID } from "@commontools/identity";
 
 /**
  * Handler for scan integration jobs
@@ -11,10 +12,80 @@ import { getIntegration } from "../integrations/index.ts";
 export class ScanIntegrationHandler implements JobHandler {
   private kv: Deno.Kv;
   private stateManager: KVStateManager;
+  private charmCache: Map<string, Array<{space: DID; charmId: string}>> = new Map();
+  private cacheTimestamp: Map<string, number> = new Map();
+  private CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
   
   constructor(kv: Deno.Kv) {
     this.kv = kv;
     this.stateManager = new KVStateManager(kv);
+  }
+  
+  /**
+   * Get cached charms for an integration
+   */
+  private getCachedCharms(integrationId: string): Array<{space: DID; charmId: string}> | null {
+    const charms = this.charmCache.get(integrationId);
+    const timestamp = this.cacheTimestamp.get(integrationId);
+    
+    // Return null if no cache or cache expired
+    if (!charms || !timestamp || Date.now() - timestamp > this.CACHE_TTL_MS) {
+      return null;
+    }
+    
+    return charms;
+  }
+  
+  /**
+   * Set cached charms for an integration
+   */
+  private setCachedCharms(integrationId: string, charms: Array<{space: DID; charmId: string}>): void {
+    this.charmCache.set(integrationId, charms);
+    this.cacheTimestamp.set(integrationId, Date.now());
+  }
+  
+  /**
+   * Process charms and queue jobs
+   */
+  private async processCharms(charms: Array<{space: DID; charmId: string}>, integrationId: string): Promise<unknown> {
+    // Create a job queue to add execute jobs
+    const jobQueue = new JobQueue(this.kv);
+    
+    // Queue execution jobs for each charm
+    const queuedJobs: string[] = [];
+    const disabledCharms: string[] = [];
+    
+    for (const { space, charmId } of charms) {
+      // Check if charm is disabled
+      const isDisabled = await this.stateManager.isCharmDisabled(space, charmId, integrationId);
+      if (isDisabled) {
+        log(`Skipping disabled charm: ${space}/${charmId}`);
+        disabledCharms.push(`${space}/${charmId}`);
+        continue;
+      }
+      
+      // Queue execution job with higher priority for reliability
+      const jobId = await jobQueue.addExecuteCharmJob(
+        integrationId,
+        space,
+        charmId,
+        8 // Higher priority than maintenance jobs
+      );
+      
+      queuedJobs.push(jobId);
+    }
+    
+    // Log summary
+    if (disabledCharms.length > 0) {
+      log(`Skipped ${disabledCharms.length} disabled charm(s): ${disabledCharms.join(", ")}`);
+    }
+    
+    return {
+      integrationId,
+      charmsFound: charms.length,
+      charmsQueued: queuedJobs.length,
+      queuedJobIds: queuedJobs,
+    };
   }
   
   /**
@@ -74,44 +145,5 @@ export class ScanIntegrationHandler implements JobHandler {
       log(`Error fetching charms for ${integrationId}: ${error.message}`);
       throw error;
     }
-    
-    // Create a job queue to add execute jobs
-    const jobQueue = new JobQueue(this.kv);
-    
-    // Queue execution jobs for each charm
-    const queuedJobs: string[] = [];
-    const disabledCharms: string[] = [];
-    
-    for (const { space, charmId } of charms) {
-      // Check if charm is disabled
-      const isDisabled = await this.stateManager.isCharmDisabled(space, charmId, integrationId);
-      if (isDisabled) {
-        log(`Skipping disabled charm: ${space}/${charmId}`);
-        disabledCharms.push(`${space}/${charmId}`);
-        continue;
-      }
-      
-      // Queue execution job with higher priority for reliability
-      const jobId = await jobQueue.addExecuteCharmJob(
-        integrationId,
-        space,
-        charmId,
-        8 // Higher priority than maintenance jobs
-      );
-      
-      queuedJobs.push(jobId);
-    }
-    
-    // Log summary
-    if (disabledCharms.length > 0) {
-      log(`Skipped ${disabledCharms.length} disabled charm(s): ${disabledCharms.join(", ")}`);
-    }
-    
-    return {
-      integrationId,
-      charmsFound: charms.length,
-      charmsQueued: queuedJobs.length,
-      queuedJobIds: queuedJobs,
-    };
   }
 }
