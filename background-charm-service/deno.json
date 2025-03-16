@@ -1,0 +1,9 @@
+{
+  "tasks": {
+    "start": "deno run --allow-read --allow-env --allow-net src/cli.ts",
+    "gmail": "deno run --allow-read --allow-env --allow-net src/cli.ts --integration=gmail --interval=60",
+    "initialize": "deno run --allow-read --allow-env --allow-net src/cli.ts --initialize",
+    "test": "deno test"
+  },
+  "imports": {}
+}
