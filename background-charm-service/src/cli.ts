@@ -2,6 +2,7 @@
 // CLI entry point for the Background Charm Service
 import { parseArgs } from "@std/cli/parse-args";
 import { BackgroundCharmService } from "./background-charm-service.ts";
+import { KVBackgroundCharmService } from "./kv-service.ts";
 import { CharmServiceConfig, IntegrationCellConfig } from "./types.ts";
 import { isValidCharmId, isValidDID, log, parseCharmsInput } from "./utils.ts";
 import { setBobbyServerUrl, storage } from "@commontools/runner";
@@ -45,7 +46,7 @@ function showHelp() {
     "  --log-interval=<seconds>   Log status interval in seconds (default: 300)",
   );
   console.log(
-    `  --integration=<name>       Integration to run (default: gmail)`,
+    `  --integration=<name>          Integration to run (default: gmail)`,
   );
   
   if (availableIntegrations.length > 0) {
@@ -55,6 +56,8 @@ function showHelp() {
   }
   
   console.log("  --initialize               Initialize integration cell");
+  console.log("  --mode=<legacy|kv>         Service mode (default: legacy)");
+  console.log("  --max-concurrent=<number>  Max concurrent jobs for KV mode (default: 5)");
   console.log("  --help                     Show this help message");
   Deno.exit(0);
 }
@@ -78,13 +81,15 @@ function createManualIntegrationCell(
 async function main() {
   // Parse command line arguments
   const args = parseArgs(Deno.args, {
-    string: ["charms", "integration", "interval", "failures", "log-interval"],
+    string: ["charms", "integration", "interval", "failures", "log-interval", "mode", "max-concurrent"],
     boolean: ["help", "initialize"],
     default: {
       interval: 60,
       failures: 5,
       "log-interval": 300,
       integration: "gmail",
+      mode: "legacy",
+      "max-concurrent": 5,
     },
   });
 
@@ -123,6 +128,56 @@ async function main() {
     }
   }
 
+  // Check service mode
+  const mode = args.mode as string;
+  if (mode !== "legacy" && mode !== "kv") {
+    log(`Invalid mode: ${mode}. Valid modes are "legacy" or "kv"`);
+    Deno.exit(1);
+  }
+
+  // Handle KV mode
+  if (mode === "kv") {
+    log("Starting in KV mode");
+    
+    // Open KV database
+    const kv = await Deno.openKv();
+    
+    // Create service
+    const kvService = new KVBackgroundCharmService({
+      kv,
+      cycleIntervalMs: (args.interval as number) * 1000,
+      maxConcurrentJobs: parseInt(args["max-concurrent"] as string, 10),
+      logIntervalMs: (args["log-interval"] as number) * 1000,
+    });
+    
+    // Initialize service
+    await kvService.initialize();
+    
+    // Handle graceful shutdown
+    const shutdown = () => {
+      console.log("Shutting down KV service...");
+      kvService.stop().then(() => {
+        kv.close();
+        Deno.exit(0);
+      });
+    };
+    
+    // Register signal handlers
+    Deno.addSignalListener("SIGINT", shutdown);
+    Deno.addSignalListener("SIGTERM", shutdown);
+    
+    // Start the service
+    await kvService.start();
+    
+    log("KV Background Charm Service started successfully");
+    log("Press Ctrl+C to stop");
+    
+    return;
+  }
+
+  // Legacy mode handling
+  log("Starting in legacy mode");
+  
   // Create integration cell configurations
   const integrationCells: IntegrationCellConfig[] = [];
 
@@ -150,7 +205,7 @@ async function main() {
 
   // Handle graceful shutdown
   const shutdown = () => {
-    console.log("Shutting down...");
+    console.log("Shutting down legacy service...");
     service.stop();
     Deno.exit(0);
   };
@@ -162,7 +217,7 @@ async function main() {
   // Start the service
   await service.start();
 
-  log("Background Charm Service started successfully");
+  log("Legacy Background Charm Service started successfully");
   log("Press Ctrl+C to stop");
 }
 
