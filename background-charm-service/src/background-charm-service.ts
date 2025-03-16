@@ -166,14 +166,39 @@ export class BackgroundCharmService {
    * This ensures errors can't possibly affect the timing mechanism
    */
   private cycleRunning = false;
+  private cycleTimeout: number | undefined;
   private runDetachedCycle(): void {
     // Prevent multiple cycles from running at the same time
     if (this.cycleRunning) {
       log("Skipping cycle - previous cycle still running");
+      
+      // FORCE CYCLE TERMINATION AFTER MAX TIME (3 minutes)
+      // This is a safety valve to ensure cycles can't get permanently stuck
+      const currentCycleTime = Date.now() - (this.cycleStartTime || 0);
+      if (currentCycleTime > 180000) { // 3 minutes max cycle time
+        log("⚠️ EMERGENCY CYCLE TERMINATION - Cycle has been running for over 3 minutes");
+        if (this.cycleTimeout) {
+          clearTimeout(this.cycleTimeout);
+          this.cycleTimeout = undefined;
+        }
+        this.cycleRunning = false;
+        this.processingCells.clear();
+        this.processingCharms.clear();
+        log("Forcefully reset all cycle flags. Next cycle will run immediately.");
+      }
       return;
     }
 
     this.cycleRunning = true;
+    this.cycleStartTime = Date.now();
+    
+    // Set a global timeout for the entire cycle (2 minutes)
+    this.cycleTimeout = setTimeout(() => {
+      log("⚠️ Global cycle timeout reached (2 minutes). Forcefully ending cycle.");
+      this.cycleRunning = false;
+      this.processingCells.clear();
+      this.processingCharms.clear();
+    }, 120000) as unknown as number;
     
     Promise.resolve().then(() => {
       return this.runCycle();
@@ -183,10 +208,16 @@ export class BackgroundCharmService {
         : String(error);
       log(`Error in detached cycle: ${errorMessage}`);
     }).finally(() => {
-      // Make sure to set cycleRunning to false when done
+      // Clear the timeout and reset the running flag
+      if (this.cycleTimeout) {
+        clearTimeout(this.cycleTimeout);
+        this.cycleTimeout = undefined;
+      }
       this.cycleRunning = false;
     });
   }
+  
+  private cycleStartTime: number = 0;
 
   /**
    * Set up a timer that runs independently of cycle execution
@@ -539,6 +570,8 @@ export class BackgroundCharmService {
    * Process a single charm - unified method with detailed logging
    */
   private processingCharms = new Set<string>();
+  // Track failed charms by a simple flag
+  private failedCharmFlag = false;
   private async processCharm(
     space: DID,
     charmId: string,
@@ -552,6 +585,33 @@ export class BackgroundCharmService {
       log(`Skipping charm ${charmKey} - already being processed`);
       return;
     }
+    
+    // Reset failure flag
+    this.failedCharmFlag = false;
+    
+    // Set up a promise rejection listener for this specific charm
+    const rejectionHandler = (event: PromiseRejectionEvent) => {
+      if (this.processingCharms.has(charmKey)) {
+        log(`Global unhandled rejection detected during charm execution: ${charmKey}`);
+        this.failedCharmFlag = true;
+      }
+    };
+    
+    // Add the listener
+    self.addEventListener("unhandledrejection", rejectionHandler);
+    
+    // Create a strong timeout for this charm - much shorter than before (15 seconds)
+    // This is in addition to the AbortController
+    const charmStrictTimeout = setTimeout(() => {
+      log(`⚠️ STRICT TIMEOUT - Forcefully ending charm execution for ${charmKey} after 15 seconds`);
+      this.failedCharmFlag = true;
+      
+      // Forcibly mark this charm as no longer processing after the strict timeout
+      if (this.processingCharms.has(charmKey)) {
+        this.processingCharms.delete(charmKey);
+        log(`Charm processing flag forcefully reset for ${charmKey}`);
+      }
+    }, 15000);
     
     this.processingCharms.add(charmKey);
     log(`Processing charm: ${charmKey}`);
@@ -716,8 +776,11 @@ export class BackgroundCharmService {
         this.stateManager.disableCharm(space, charmId);
       }
     } finally {
-      // Always remove the charm from the processing set
+      // Clean up all resources
       this.processingCharms.delete(charmKey);
+      clearTimeout(charmStrictTimeout);
+      self.removeEventListener("unhandledrejection", rejectionHandler);
+      log(`Charm ${charmKey} processing complete. Resources cleaned up.`);
     }
   }
 
@@ -827,26 +890,32 @@ export class BackgroundCharmService {
           // Add a promise that resolves early if we see an unhandled rejection or abort
           new Promise<void>((resolve) => {
             const checkInterval = setInterval(() => {
-              if (sawUnhandledRejection) {
-                log(`Detected early termination condition for charm ${charmId}, ending execution`);
+              // Check both local and global rejection tracking
+              if (sawUnhandledRejection || this.failedCharmFlag) {
+                log(`Detected early termination condition for charm ${charmId}, ending execution immediately`);
                 clearInterval(checkInterval);
                 resolve();
               }
-            }, 100); // Check every 100ms
+            }, 50); // Check even more frequently - every 50ms
             
             // Ensure we clean up this interval eventually
-            setTimeout(() => clearInterval(checkInterval), 5000);
+            setTimeout(() => {
+              clearInterval(checkInterval);
+              // Always resolve eventually to prevent hanging
+              resolve();
+            }, 1000); // Very short timeout
           })
         ]);
         
         log(`Stream message sent successfully for charm: ${charmId}`);
 
-        // If we completed because of an unhandled rejection, return failure
-        if (sawUnhandledRejection) {
+        // If we completed because of an unhandled rejection (either local or global), return failure
+        if (sawUnhandledRejection || this.failedCharmFlag) {
+          log(`Charm ${charmId} execution failed due to unhandled rejection`);
           return {
             success: false,
             executionTimeMs: Date.now() - startTime,
-            error: new Error("Charm generated unhandled promise rejection"),
+            error: new Error("Charm generated unhandled promise rejection - execution aborted"),
           };
         }
 
