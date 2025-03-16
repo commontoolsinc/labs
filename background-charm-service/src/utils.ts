@@ -3,13 +3,18 @@ import { Charm } from "@commontools/charm";
 import type { DID } from "@commontools/identity";
 
 /**
- * Custom logger that includes timestamp and charm ID
+ * Custom logger that includes timestamp and optionally charm ID
+ * @param message - The message to log
+ * @param options - Optional parameters
+ * @param options.charm - Charm cell or ID to include in the log
+ * @param args - Additional arguments to log
  */
-export function log(charm?: Cell<Charm> | string, ...args: any[]) {
+export function log(message: any, options?: { charm?: Cell<Charm> | string }, ...args: any[]) {
   const timestamp = new Date().toISOString();
   let charmIdSuffix = "";
   
-  if (charm) {
+  if (options?.charm) {
+    const charm = options.charm;
     if (typeof charm === "string") {
       charmIdSuffix = ` [${charm.slice(-10)}]`;
     } else {
@@ -20,7 +25,7 @@ export function log(charm?: Cell<Charm> | string, ...args: any[]) {
     }
   }
   
-  console.log(`${timestamp}${charmIdSuffix}`, ...args);
+  console.log(`${timestamp}${charmIdSuffix}`, message, ...args);
 }
 
 /**
@@ -49,19 +54,19 @@ export function parseCharmsInput(
   charms.split(",").forEach((entry) => {
     const parts = entry.split("/");
     if (parts.length !== 2) {
-      log(undefined, `Invalid charm format: ${entry}. Expected format: space/charmId`);
+      log(`Invalid charm format: ${entry}. Expected format: space/charmId`);
       return; // Skip this entry
     }
     
     const [space, charmId] = parts;
     
     if (!isValidDID(space)) {
-      log(undefined, `Invalid space ID: ${space}. Must be a valid DID.`);
+      log(`Invalid space ID: ${space}. Must be a valid DID.`);
       return; // Skip this entry
     }
     
     if (!isValidCharmId(charmId)) {
-      log(undefined, `Invalid charm ID: ${charmId}. Must be a valid merkle ID.`);
+      log(`Invalid charm ID: ${charmId}. Must be a valid merkle ID.`);
       return; // Skip this entry
     }
     

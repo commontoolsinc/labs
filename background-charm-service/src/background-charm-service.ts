@@ -30,14 +30,10 @@ export class BackgroundCharmService {
   constructor(private config: CharmServiceConfig) {
     this.stateManager = new StateManager(config.logIntervalSeconds);
 
-    log(undefined, "Background Charm Service initialized with configuration:");
-    log(undefined, `- Interval: ${config.intervalSeconds} seconds`);
+    log("Background Charm Service initialized with configuration:");
+    log(`- Interval: ${config.intervalSeconds} seconds`);
+    log(`- Max consecutive failures: ${config.maxConsecutiveFailures}`);
     log(
-      undefined,
-      `- Max consecutive failures: ${config.maxConsecutiveFailures}`,
-    );
-    log(
-      undefined,
       `- Integration cells: ${
         config.integrationCells.map((i) => i.name).join(", ")
       }`,
@@ -49,12 +45,12 @@ export class BackgroundCharmService {
    */
   async start(): Promise<void> {
     if (this.running) {
-      log(undefined, "Background Charm Service is already running");
+      log("Background Charm Service is already running");
       return;
     }
 
     this.running = true;
-    log(undefined, "Starting Background Charm Service");
+    log("Starting Background Charm Service");
 
     // Run immediately
     await this.runCycle();
@@ -65,12 +61,11 @@ export class BackgroundCharmService {
         const errorMessage = error instanceof Error
           ? error.message
           : String(error);
-        log(undefined, `Error in run cycle: ${errorMessage}`);
+        log(`Error in run cycle: ${errorMessage}`);
       });
     }, this.config.intervalSeconds * 1000) as unknown as number;
 
     log(
-      undefined,
       `Background Charm Service started with ${this.config.intervalSeconds}s interval`,
     );
   }
@@ -80,7 +75,7 @@ export class BackgroundCharmService {
    */
   stop(): void {
     if (!this.running) {
-      log(undefined, "Background Charm Service is not running");
+      log("Background Charm Service is not running");
       return;
     }
 
@@ -90,7 +85,7 @@ export class BackgroundCharmService {
       this.intervalId = undefined;
     }
 
-    log(undefined, "Background Charm Service stopped");
+    log("Background Charm Service stopped");
     this.stateManager.logStates();
   }
 
@@ -98,7 +93,7 @@ export class BackgroundCharmService {
    * Run a single execution cycle for all integration cells
    */
   private async runCycle(): Promise<void> {
-    log(undefined, "Starting charm execution cycle");
+    log("Starting charm execution cycle");
 
     for (const integrationCell of this.config.integrationCells) {
       try {
@@ -108,13 +103,12 @@ export class BackgroundCharmService {
           ? error.message
           : String(error);
         log(
-          undefined,
           `Error processing integration cell ${integrationCell.id}: ${errorMessage}`,
         );
       }
     }
 
-    log(undefined, "Charm execution cycle completed");
+    log("Charm execution cycle completed");
   }
 
   /**
@@ -123,21 +117,19 @@ export class BackgroundCharmService {
   private async processIntegrationCell(
     integrationCell: IntegrationCellConfig,
   ): Promise<void> {
-    log(undefined, `Processing integration cell: ${integrationCell.name}`);
+    log(`Processing integration cell: ${integrationCell.name}`);
 
     try {
       // Fetch charms for this integration cell
       const charms = await integrationCell.fetchCharms();
       if (charms.length === 0) {
         log(
-          undefined,
           `No charms found for integration cell: ${integrationCell.name}`,
         );
         return;
       }
 
       log(
-        undefined,
         `Found ${charms.length} charms for integration: ${integrationCell.name}`,
       );
 
@@ -145,7 +137,7 @@ export class BackgroundCharmService {
       for (const { space, charmId } of charms) {
         // Skip disabled charms
         if (!this.stateManager.isCharmEnabled(space, charmId)) {
-          log(undefined, `Skipping disabled charm: ${space}/${charmId}`);
+          log(`Skipping disabled charm: ${space}/${charmId}`);
           continue;
         }
 
@@ -156,7 +148,6 @@ export class BackgroundCharmService {
             ? error.message
             : String(error);
           log(
-            undefined,
             `Error processing charm ${space}/${charmId}: ${errorMessage}`,
           );
         }
@@ -166,7 +157,6 @@ export class BackgroundCharmService {
         ? error.message
         : String(error);
       log(
-        undefined,
         `Error fetching charms for integration ${integrationCell.name}: ${errorMessage}`,
       );
     }
@@ -180,7 +170,7 @@ export class BackgroundCharmService {
     charmId: string,
     integrationCell: IntegrationCellConfig,
   ): Promise<void> {
-    log(undefined, `Processing charm: ${space}/${charmId}`);
+    log(`Processing charm: ${space}/${charmId}`);
 
     // Get or create manager for this space
     const manager = await this.getManagerForSpace(space);
@@ -188,7 +178,7 @@ export class BackgroundCharmService {
     // Get the charm
     const charm = await manager.get(charmId, false);
     if (!charm) {
-      log(charmId, "Charm not found");
+      log(`Charm not found: id ${charmId}`);
       return;
     }
 
@@ -197,7 +187,7 @@ export class BackgroundCharmService {
     const argument = manager.getArgument(charm);
 
     if (!runningCharm || !argument) {
-      log(charm, "Charm not properly loaded");
+      log("Charm not properly loaded", { charm });
       return;
     }
 
@@ -206,7 +196,9 @@ export class BackgroundCharmService {
       integrationCell.isValidIntegrationCharm &&
       !integrationCell.isValidIntegrationCharm(runningCharm)
     ) {
-      log(charm, `Charm does not match integration type ${integrationCell.id}`);
+      log(`Charm does not match integration type ${integrationCell.id}`, {
+        charm,
+      });
       return;
     }
 
@@ -227,8 +219,8 @@ export class BackgroundCharmService {
       state.consecutiveFailures >= this.config.maxConsecutiveFailures
     ) {
       log(
-        charm,
         `Disabling charm after ${state.consecutiveFailures} consecutive failures`,
+        { charm },
       );
       this.stateManager.disableCharm(space, charmId);
     }
@@ -260,7 +252,7 @@ export class BackgroundCharmService {
 
       // Refresh token if needed
       if (token && expiresAt && Date.now() > expiresAt) {
-        log(charm, "Token expired, refreshing");
+        log("Token expired, refreshing", { charm });
 
         try {
           await this.refreshAuthToken(auth, charm, space);
@@ -268,7 +260,7 @@ export class BackgroundCharmService {
           const errorMessage = error instanceof Error
             ? error.message
             : String(error);
-          log(charm, `Error refreshing token: ${errorMessage}`);
+          log(`Error refreshing token: ${errorMessage}`, { charm });
 
           return {
             success: false,
@@ -285,7 +277,7 @@ export class BackgroundCharmService {
       }
 
       // Execute the charm
-      log(charm, `Calling updater stream in charm`);
+      log(`Calling updater stream in charm`, { charm });
       updaterStream.send({});
 
       return {
@@ -299,7 +291,7 @@ export class BackgroundCharmService {
       const errorMessage = error instanceof Error
         ? error.message
         : String(error);
-      log(charm, `Error executing charm: ${errorMessage}`);
+      log(`Error executing charm: ${errorMessage}`, { charm });
 
       return {
         success: false,
@@ -343,7 +335,7 @@ export class BackgroundCharmService {
   ): Promise<void> {
     const authCellId = JSON.parse(JSON.stringify(auth.getAsCellLink()));
     authCellId.space = space as string;
-    log(charm, `Token expired, refreshing: ${authCellId}`);
+    log(`Token expired, refreshing: ${authCellId}`, { charm });
 
     // Determine the integration type for token refresh
     const integrationTypes = ["google", "github", "notion", "calendar"];
@@ -381,7 +373,7 @@ export class BackgroundCharmService {
     }
 
     await storage.synced();
-    log(charm, "Token refreshed successfully");
+    log("Token refreshed successfully", { charm });
   }
 
   /**
