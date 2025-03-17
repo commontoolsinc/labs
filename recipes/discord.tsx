@@ -67,6 +67,7 @@ const ResultSchema = {
       type: "array",
       items: MessageSchema,
     },
+    discordUpdater: { asStream: true, type: "object", properties: {} },
   },
 } as const satisfies JSONSchema;
 
@@ -79,15 +80,15 @@ const discordUpdater = handler(
     },
     required: ["messages"],
   },
-  (_event, state) => {
+  async (_event, state) => {
     console.log("discordUpdater!");
 
-    const requestor_id = state.settings.requestor_id;
-    const messages_data = await fetchMessages(requestor_id);
-    console.log("messages data ", messages_data, " length=", messages_data.length);
-    console.log("before: state messages length=", state.messages.length);
-    state.messages.push(...messages_data);
-    console.log("after: state messages length=", state.messages.length);
+      const requestor_id = state.requestor_id;
+      const messages_data = await fetchMessages(requestor_id);
+      console.log("messages data ", messages_data, " length=", messages_data.length);
+      // console.log("before: state messages length=", state.messages.length);
+      state.messages.push(...messages_data);
+      // console.log("after: state messages length=", state.messages.length);
   },
 );
 
@@ -97,7 +98,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 export async function fetchMessages(requestor_id: string) {
-  const api_url = "http://100.66.39.90:8080/api/messages?requestor_id=" + requestor_id;
+  const api_url = "https://macbookair.saga-castor.ts.net/api/messages?requestor_id=" + requestor_id;
   const messages_fetch = await fetch(api_url);
   return await messages_fetch.json();
 }
@@ -108,7 +109,8 @@ export default recipe(
   ({ requestor_id, messages }) => {
 //    const messages = cell<MessageSchema[]>([]);
     derive(messages, (messages) => {
-      console.log("messages", messages.length);
+      console.log("trying to call a handler!!!");
+      discordUpdater();
     });
 
     return {
@@ -123,7 +125,10 @@ export default recipe(
           </pre>  
         </div>
       ),
-      messages,
+      discordUpdater: discordUpdater({}),
     };
   },
 );
+
+
+
