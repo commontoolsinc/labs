@@ -206,29 +206,20 @@ export function unwrapOneLevelAndBindtoDoc<T>(
     if (isStatic(binding) && !processStatic) {
       return markAsStatic(convert(binding, true));
     } else if (isAlias(binding)) {
-      if (typeof binding.$alias.cell === "number") {
-        if (binding.$alias.cell === 1) {
+      let alias = binding.$alias;
+      if (typeof alias.cell === "number") {
+        alias = { ...alias };
+        if (alias.cell === 1) {
           // Moved to the next-to-top level. Don't assign a doc, so that on
           // next unwrap, the right doc be assigned.
-          return { $alias: { path: binding.$alias.path } };
+          delete alias.cell;
         } else {
-          return {
-            // Otherwise decrease count by one
-            $alias: {
-              cell: binding.$alias.cell - 1,
-              path: binding.$alias.path,
-            },
-          };
+          alias.cell--;
         }
-      } else {
-        return {
-          // Bind to passed doc, if there isn't already one
-          $alias: {
-            cell: binding.$alias.cell ?? doc,
-            path: binding.$alias.path,
-          },
-        };
+      } else if (!alias.cell) {
+        alias = { ...alias, cell: doc };
       }
+      return { $alias: alias };
     } else if (isDoc(binding)) {
       return binding; // Don't enter docs
     } else if (Array.isArray(binding)) {
@@ -343,18 +334,21 @@ export function resolvePath(
 
     // Now access the key.
     const key = keys.shift()!;
+
+    const childSchema = ref.schema?.type === "object"
+      ? ref.schema.properties?.[key as string] ||
+        (typeof ref.schema.additionalProperties === "object"
+          ? ref.schema.additionalProperties
+          : undefined)
+      : ref.schema?.type === "array"
+      ? ref.schema.items
+      : undefined;
+
     ref = {
       cell: ref.cell,
       path: [...ref.path, key],
-      schema: ref.schema?.type === "object"
-        ? ref.schema.properties?.[key as string] ||
-          (typeof ref.schema.additionalProperties === "object"
-            ? ref.schema.additionalProperties
-            : undefined)
-        : ref.schema?.type === "array"
-        ? ref.schema.items
-        : undefined,
-      rootSchema: ref.rootSchema,
+      schema: childSchema,
+      rootSchema: childSchema ? ref.rootSchema : undefined,
     };
   }
 
@@ -365,16 +359,15 @@ export function resolvePath(
     const aliasResult = followAliases(targetValue, ref.cell, log);
 
     // If the alias has schema info, it takes precedence
-    if (aliasResult.schema) {
-      ref = aliasResult;
-    } else {
-      // Otherwise keep our tracked schema and just update cell and path
+    if (!aliasResult.schema && ref.schema) {
       ref = {
         cell: aliasResult.cell,
         path: aliasResult.path,
         schema: ref.schema,
-        rootSchema: ref.rootSchema,
       };
+      if (ref.rootSchema) aliasResult.rootSchema = ref.rootSchema;
+    } else {
+      ref = aliasResult;
     }
   }
 
@@ -396,7 +389,8 @@ export function followLinks(
 
     // Add schema back if we didn't get a new one
     if (!resolvedRef.schema && ref.schema) {
-      ref = { ...ref, schema: ref.schema, rootSchema: ref.rootSchema };
+      ref = { ...resolvedRef, schema: ref.schema };
+      if (ref.rootSchema) resolvedRef.rootSchema = ref.rootSchema;
     } else {
       ref = resolvedRef;
     }
@@ -411,10 +405,8 @@ export function followLinks(
     else if (isDoc(target)) {
       nextRef = { cell: target, path: [] } satisfies CellLink;
     } else if (isAlias(target)) {
-      nextRef = {
-        cell: target.$alias.cell ?? ref.cell,
-        path: target.$alias.path,
-      } satisfies CellLink;
+      nextRef = { ...target.$alias } as CellLink;
+      if (!nextRef.cell) nextRef.cell = ref.cell;
     }
 
     if (nextRef) {
@@ -423,8 +415,8 @@ export function followLinks(
         nextRef = {
           ...nextRef,
           schema: ref.schema,
-          rootSchema: ref.rootSchema,
         };
+        if (ref.rootSchema) nextRef.rootSchema = ref.rootSchema;
       }
 
       // Log all the refs that were followed, but not the final value they point to.
@@ -479,13 +471,8 @@ export function followAliases(
   let result: CellLink;
 
   while (isAlias(alias)) {
-    if (alias.$alias.cell) cell = alias.$alias.cell;
-    result = { cell, path: alias.$alias.path };
-
-    if (alias.$alias.schema) {
-      result.schema = alias.$alias.schema;
-      if (alias.$alias.rootSchema) result.rootSchema = alias.$alias.rootSchema;
-    }
+    result = { ...alias.$alias } as CellLink;
+    if (!result.cell) result.cell = cell;
 
     if (seen.has(alias)) throw new Error("Alias cycle detected");
     seen.add(alias);

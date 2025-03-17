@@ -263,7 +263,7 @@ export function validateAndTransform(
   rootSchema: JSONSchema | undefined = schema,
   seen: CellLink[] = [],
 ): any {
-  const resolvedSchema = resolveSchema(schema, rootSchema, true);
+  let resolvedSchema = resolveSchema(schema, rootSchema, true);
 
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based of this value, as that
@@ -273,8 +273,8 @@ export function validateAndTransform(
   path = resolvedRef.path;
 
   // Use schema from alias if provided and no explicit schema was set
-  if (!schema && resolvedRef.schema) {
-    schema = resolvedRef.schema;
+  if (!resolvedSchema && resolvedRef.schema) {
+    resolvedSchema = resolvedRef.schema;
     rootSchema = resolvedRef.rootSchema || resolvedRef.schema;
   }
 
