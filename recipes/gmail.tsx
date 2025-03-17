@@ -405,30 +405,61 @@ export async function fetchEmail(
     state.emails.get().map((email) => email.id),
   );
 
-  const listResponse = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${
-      encodeURIComponent(gmailFilterQuery)
-    }&maxResults=${maxResults}`,
-    {
+  let allMessages: { id: string }[] = [];
+  let nextPageToken: string | undefined;
+
+  do {
+    const url = new URL(
+      "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+    );
+    url.searchParams.append("q", gmailFilterQuery);
+    url.searchParams.append(
+      "maxResults",
+      Math.min(500, maxResults - allMessages.length).toString(),
+    );
+    if (nextPageToken) {
+      url.searchParams.append("pageToken", nextPageToken);
+    }
+
+    const listResponse = await fetch(url.toString(), {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
-    },
-  );
+    });
 
-  const listData = await listResponse.json();
+    const listData = await listResponse.json();
 
-  if (!listData.messages || !Array.isArray(listData.messages)) {
-    console.log("No messages found in response");
-    return { messages: [] };
-  }
+    if (!listData.messages || !Array.isArray(listData.messages)) {
+      console.log("No more messages found");
+      break;
+    }
 
-  // Filter out existing messages
-  const newMessages = listData.messages.filter(
-    (message: { id: string }) => !existingEmailIds.has(message.id),
-  );
+    // Filter out existing messages
+    const newMessages = listData.messages.filter(
+      (message: { id: string }) => !existingEmailIds.has(message.id),
+    );
 
-  if (newMessages.length === 0) {
+    if (newMessages.length === 0) {
+      console.log("No new messages to fetch");
+      break;
+    }
+
+    allMessages = allMessages.concat(newMessages);
+    nextPageToken = listData.nextPageToken;
+
+    // If we've reached our target number of messages, break
+    if (allMessages.length >= maxResults) {
+      allMessages = allMessages.slice(0, maxResults);
+      break;
+    }
+
+    // Add a small delay between pages to avoid rate limiting
+    if (nextPageToken) {
+      await sleep(100);
+    }
+  } while (nextPageToken && allMessages.length < maxResults);
+
+  if (allMessages.length === 0) {
     console.log("No new messages to fetch");
     return { messages: [] };
   }
@@ -437,11 +468,11 @@ export async function fetchEmail(
   const allDetailedMessages: Email[] = [];
 
   // Process messages in batches with delay
-  for (let i = 0; i < newMessages.length; i += batchSize) {
-    const batchMessages = newMessages.slice(i, i + batchSize);
+  for (let i = 0; i < allMessages.length; i += batchSize) {
+    const batchMessages = allMessages.slice(i, i + batchSize);
     console.log(
       `Processing batch ${i / batchSize + 1} of ${
-        Math.ceil(newMessages.length / batchSize)
+        Math.ceil(allMessages.length / batchSize)
       }`,
     );
 
@@ -464,13 +495,12 @@ export async function fetchEmail(
       }
 
       // Add 1 second delay between batches, but not after the last batch
-      if (i + batchSize < newMessages.length) {
+      if (i + batchSize < allMessages.length) {
         console.log("Waiting 1 second before next batch...");
         await sleep(1000);
       }
     } catch (error) {
       console.error("Error processing batch:", error);
-      // Optional: add longer delay and retry logic here if needed
     }
   }
 
