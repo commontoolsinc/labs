@@ -4,6 +4,8 @@ import {
   getIframeRecipe,
   IFrameRecipe,
 } from "@commontools/charm";
+import { isCell, isStream } from "@commontools/runner";
+import { isObj } from "@commontools/utils";
 import React, {
   createContext,
   useCallback,
@@ -874,6 +876,7 @@ const CodeTab = () => {
 const DataTab = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
+  const { charmManager } = useCharmManager();
   const [isArgumentExpanded, setIsArgumentExpanded] = useState(false);
   const [isResultExpanded, setIsResultExpanded] = useState(false);
   const [isArgumentSchemaExpanded, setIsArgumentSchemaExpanded] = useState(
@@ -885,7 +888,7 @@ const DataTab = () => {
 
   return (
     <div className="h-full overflow-auto p-4">
-      {charm.getSourceCell && (
+      {charm.getSourceCell() && (
         <div className="mb-4">
           <button
             type="button"
@@ -900,7 +903,9 @@ const DataTab = () => {
             <div className="border border-gray-300 rounded bg-gray-50 p-2">
               {/* @ts-expect-error JsonView is imported as any */}
               <JsonView
-                value={charm.getSourceCell()?.get()?.argument || {}}
+                value={translateCellsAndStreamsToPlainJSON(
+                  charmManager.getArgument(charm)?.get(),
+                ) ?? {}}
                 style={{
                   background: "transparent",
                   fontSize: "0.875rem",
@@ -925,7 +930,7 @@ const DataTab = () => {
           <div className="border border-gray-300 rounded bg-gray-50 p-2">
             {/* @ts-expect-error JsonView is imported as any */}
             <JsonView
-              value={charm.get() || {}}
+              value={translateCellsAndStreamsToPlainJSON(charm.get()) ?? {}}
               style={{
                 background: "transparent",
                 fontSize: "0.875rem",
@@ -1123,6 +1128,23 @@ function CharmDetailView() {
       </div>
     </CharmOperationContext.Provider>
   );
+}
+
+function translateCellsAndStreamsToPlainJSON(data: any): any {
+  if (isStream(data)) {
+    return { __stream: data.schema ?? "no schema" };
+  } else if (isCell(data)) {
+    return translateCellsAndStreamsToPlainJSON(data.get());
+  } else if (Array.isArray(data)) {
+    return data.map(translateCellsAndStreamsToPlainJSON);
+  } else if (isObj(data)) {
+    return Object.fromEntries(
+      Object.entries(data).map(([key, value]) => [
+        key,
+        translateCellsAndStreamsToPlainJSON(value),
+      ]),
+    );
+  } else return data;
 }
 
 export default CharmDetailView;
