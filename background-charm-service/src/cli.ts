@@ -64,9 +64,11 @@ function showHelp() {
   }
 
   console.log("  --initialize               Initialize integration cell");
-  console.log("  --mode=<legacy|kv>         Service mode (default: legacy)");
   console.log(
-    "  --max-concurrent=<number>  Max concurrent jobs for KV mode (default: 5)",
+    "  --max-concurrent=<number>  Max concurrent jobs (default: 5)",
+  );
+  console.log(
+    "  --max-retries=<number>     Max retry attempts for failed jobs (default: 3)",
   );
   console.log("  --help                     Show this help message");
   Deno.exit(0);
@@ -97,8 +99,8 @@ async function main() {
       "interval",
       "failures",
       "log-interval",
-      "mode",
       "max-concurrent",
+      "max-retries",
     ],
     boolean: ["help", "initialize"],
     default: {
@@ -106,8 +108,8 @@ async function main() {
       failures: 5,
       "log-interval": 300,
       integration: "gmail",
-      mode: "legacy",
       "max-concurrent": 5,
+      "max-retries": 3,
     },
   });
 
@@ -146,86 +148,50 @@ async function main() {
     }
   }
 
-  // Check service mode
-  const mode = args.mode as string;
-  if (mode !== "legacy" && mode !== "kv") {
-    log(`Invalid mode: ${mode}. Valid modes are "legacy" or "kv"`);
-    Deno.exit(1);
-  }
+  log("Starting Background Charm Service");
 
-  // Handle KV mode
-  if (mode === "kv") {
-    log("Starting in KV mode");
+  // Open KV database
+  const kv = await Deno.openKv();
 
-    // Open KV database
-    const kv = await Deno.openKv();
-
-    // Create service
-    const kvService = new KVBackgroundCharmService({
-      kv,
-      cycleIntervalMs: (args.interval as number) * 1000,
-      maxConcurrentJobs: parseInt(args["max-concurrent"] as string, 10),
-      logIntervalMs: (args["log-interval"] as number) * 1000,
-    });
-
-    // Initialize service
-    await kvService.initialize();
-
-    // Handle graceful shutdown
-    const shutdown = () => {
-      console.log("Shutting down KV service...");
-      kvService.stop().then(() => {
-        kv.close();
-        Deno.exit(0);
-      });
-    };
-
-    // Register signal handlers
-    Deno.addSignalListener("SIGINT", shutdown);
-    Deno.addSignalListener("SIGTERM", shutdown);
-
-    // Start the service
-    await kvService.start();
-
-    log("KV Background Charm Service started successfully");
-    log("Press Ctrl+C to stop");
-
-    return;
-  }
-
-  // Legacy mode handling
-  log("Starting in legacy mode");
-
-  // Create integration cell configurations
-  const integrationCells: IntegrationCellConfig[] = [];
-
+  // Create integration cell configurations for manual charms if specified
+  let integrationCellConfig = null;
   if (args.charms) {
     // Manual charm configuration
-    integrationCells.push(createManualIntegrationCell(args.charms as string));
-  } else if (integration) {
-    // Get configuration from the integration
-    integrationCells.push(integration.getIntegrationConfig());
-  } else {
-    log("No valid integration or charms specified");
-    Deno.exit(1);
+    integrationCellConfig = createManualIntegrationCell(args.charms as string);
   }
 
-  // Create service configuration
-  const config: CharmServiceConfig = {
-    intervalSeconds: args.interval as number,
-    logIntervalSeconds: args["log-interval"] as number,
-    maxConsecutiveFailures: args.failures as number,
-    integrationCells,
-  };
+  // Convert string arguments to numbers
+  const maxConcurrentJobs = parseInt(args["max-concurrent"] as string, 10);
+  const maxRetries = parseInt(args["max-retries"] as string, 10);
+  const cycleIntervalMs = (args.interval as number) * 1000;
+  const logIntervalMs = (args["log-interval"] as number) * 1000;
+  const maxConsecutiveFailures = args.failures as number;
 
-  // Create and start service
-  const service = new BackgroundCharmService(config);
+  // Create service with parsed config
+  const kvService = new KVBackgroundCharmService({
+    kv,
+    cycleIntervalMs,
+    maxConcurrentJobs,
+    maxRetries,
+    logIntervalMs,
+    maxConsecutiveFailures,
+  });
+
+  // Initialize service
+  await kvService.initialize();
+
+  // Register the manual integration if provided
+  if (integrationCellConfig) {
+    await kvService.registerManualIntegration(integrationCellConfig);
+  }
 
   // Handle graceful shutdown
   const shutdown = () => {
-    console.log("Shutting down legacy service...");
-    service.stop();
-    Deno.exit(0);
+    console.log("Shutting down service...");
+    kvService.stop().then(() => {
+      kv.close();
+      Deno.exit(0);
+    });
   };
 
   // Register signal handlers
@@ -233,9 +199,9 @@ async function main() {
   Deno.addSignalListener("SIGTERM", shutdown);
 
   // Start the service
-  await service.start();
+  await kvService.start();
 
-  log("Legacy Background Charm Service started successfully");
+  log("Background Charm Service started successfully");
   log("Press Ctrl+C to stop");
 }
 

@@ -1,4 +1,4 @@
-import { Integration } from "./types.ts";
+import { Integration, IntegrationCellConfig } from "./types.ts";
 import { JobQueue } from "./job-queue.ts";
 import { KVStateManager } from "./kv-state-manager.ts";
 import { JobType, KV_PREFIXES, KVServiceOptions } from "./kv-types.ts";
@@ -7,6 +7,9 @@ import {
   loadIntegrations,
 } from "./integrations/index.ts";
 import { log } from "./utils.ts";
+import { getConfig } from "./config.ts";
+import { formatError, formatUptime } from "./utils/common.ts";
+import { IntegrationError } from "./errors/index.ts";
 
 /**
  * Background Charm Service using Deno KV and job queues
@@ -20,21 +23,30 @@ export class KVBackgroundCharmService {
   private cycleTimer: number | null = null;
   private isRunning = false;
   private globalErrorHandlerInstalled = false;
+  private maxConsecutiveFailures: number;
+  private config: ReturnType<typeof getConfig>;
 
   constructor(options: KVServiceOptions) {
     this.kv = options.kv;
+    this.config = getConfig();
+    
+    // Apply options, using config values as fallbacks
     this.queue = new JobQueue(this.kv, {
-      maxConcurrentJobs: options.maxConcurrentJobs,
-      maxRetries: options.maxRetries,
+      maxConcurrentJobs: options.maxConcurrentJobs ?? this.config.maxConcurrentJobs,
+      maxRetries: options.maxRetries ?? this.config.maxRetries,
+      pollingIntervalMs: this.config.pollingIntervalMs,
     });
-    this.stateManager = new KVStateManager(this.kv, options.logIntervalMs);
+    
+    this.stateManager = new KVStateManager(this.kv, options.logIntervalMs ?? this.config.logIntervalMs);
     this.integrations = new Map();
-    this.cycleIntervalMs = options.cycleIntervalMs ?? 60_000; // Default 1 minute
+    this.cycleIntervalMs = options.cycleIntervalMs ?? this.config.cycleIntervalMs;
+    this.maxConsecutiveFailures = options.maxConsecutiveFailures ?? 5;
 
     // Install global error handlers
     this.installGlobalErrorHandlers();
 
-    log("KV Background Charm Service constructed");
+    log("Background Charm Service constructed");
+    log(`Configuration: cycleInterval=${this.cycleIntervalMs}ms, maxConcurrentJobs=${options.maxConcurrentJobs ?? this.config.maxConcurrentJobs}`);
   }
 
   /**
@@ -108,6 +120,38 @@ export class KVBackgroundCharmService {
     await integration.initialize();
 
     log(`Registered integration: ${integration.id}`);
+  }
+  
+  /**
+   * Register a manual integration (from CLI charms list)
+   */
+  async registerManualIntegration(config: IntegrationCellConfig): Promise<void> {
+    if (!config) {
+      throw new IntegrationError("Invalid manual integration config", "manual");
+    }
+    
+    // Store in KV
+    await this.stateManager.setIntegrationConfig("manual", config);
+    
+    // Create a simple integration object to add to the map
+    const manualIntegration: Integration = {
+      id: "manual",
+      name: "Manual Charms",
+      
+      async initialize(): Promise<void> {
+        // No initialization needed
+        log("Manual integration initialized");
+      },
+      
+      getIntegrationConfig(): IntegrationCellConfig {
+        return config;
+      }
+    };
+    
+    // Add to integrations map
+    this.integrations.set("manual", manualIntegration);
+    
+    log(`Registered manual integration with ${config.fetchCharms ? "fetchCharms function" : "no fetchCharms"}`);
   }
 
   /**

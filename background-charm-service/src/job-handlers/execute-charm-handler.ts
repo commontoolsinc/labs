@@ -4,10 +4,22 @@ import { ExecuteCharmJob, Job, JobType } from "../kv-types.ts";
 import { KVStateManager } from "../kv-state-manager.ts";
 import { log } from "../utils.ts";
 import * as Session from "../session.ts";
-import { Cell, isStream } from "@commontools/runner";
+import { Cell, isStream, storage } from "@commontools/runner";
 import { Charm, CharmManager } from "@commontools/charm";
 import type { DID } from "@commontools/identity";
 import { getIntegration } from "../integrations/index.ts";
+import { 
+  CharmNotFoundError, 
+  CharmTimeoutError, 
+  IntegrationError 
+} from "../errors/index.ts";
+import { getConfig } from "../config.ts";
+import { 
+  findUpdaterStream, 
+  refreshAuthToken, 
+  createTimeoutController 
+} from "../utils/common.ts";
+import { WorkerPool } from "../utils/worker-pool.ts";
 
 /**
  * Handler for execute charm jobs
@@ -16,10 +28,33 @@ export class ExecuteCharmHandler implements JobHandler {
   private kv: Deno.Kv;
   private stateManager: KVStateManager;
   private managerCache = new Map<string, CharmManager>();
+  private workerPool: WorkerPool<any, any>;
+  private config: ReturnType<typeof getConfig>;
 
   constructor(kv: Deno.Kv) {
     this.kv = kv;
     this.stateManager = new KVStateManager(kv);
+    this.config = getConfig();
+    
+    // Initialize worker pool
+    const workerUrl = new URL("../utils/charm-worker.ts", import.meta.url).href;
+    this.workerPool = new WorkerPool({
+      maxWorkers: this.config.maxConcurrentJobs,
+      workerUrl,
+      workerOptions: {
+        type: "module",
+        deno: {
+          permissions: {
+            read: true,
+            write: true,
+            net: true,
+            env: true,
+          },
+        },
+      },
+    });
+    
+    log(`Initialized worker pool with ${this.config.maxConcurrentJobs} max workers`);
   }
 
   /**
@@ -58,7 +93,7 @@ export class ExecuteCharmHandler implements JobHandler {
       log(`Loading charm: ${charmId}`);
       const charm = await manager.get(charmId, false);
       if (!charm) {
-        throw new Error(`Charm not found: ${charmId}`);
+        throw new CharmNotFoundError(`Charm not found: ${charmId}`, spaceId, charmId);
       }
 
       // Get running charm and argument
@@ -67,13 +102,13 @@ export class ExecuteCharmHandler implements JobHandler {
       const argument = manager.getArgument(charm);
 
       if (!runningCharm || !argument) {
-        throw new Error(`Charm not properly loaded: ${charmId}`);
+        throw new CharmNotFoundError(`Charm not properly loaded: ${charmId}`, spaceId, charmId);
       }
 
       // Get the integration to validate the charm
       const integration = getIntegration(integrationId);
       if (!integration) {
-        throw new Error(`Integration not found: ${integrationId}`);
+        throw new IntegrationError(`Integration not found: ${integrationId}`, integrationId);
       }
 
       // Get integration config with validation function
@@ -82,8 +117,9 @@ export class ExecuteCharmHandler implements JobHandler {
         integrationConfig.isValidIntegrationCharm &&
         !integrationConfig.isValidIntegrationCharm(runningCharm)
       ) {
-        throw new Error(
+        throw new IntegrationError(
           `Charm does not match integration type ${integrationId}`,
+          integrationId
         );
       }
 
@@ -151,7 +187,7 @@ export class ExecuteCharmHandler implements JobHandler {
   }
 
   /**
-   * Execute a charm using a dedicated worker process
+   * Execute a charm using the worker pool
    */
   private async executeCharmWithWorker(
     charm: Cell<Charm>,
@@ -160,196 +196,111 @@ export class ExecuteCharmHandler implements JobHandler {
     integrationId?: string,
     charmId?: string,
   ): Promise<void> {
-    // Special case for Gmail integration: handle token refresh
-    // We still need to do this in the main process before spawning the worker
-    if (integrationId === "gmail") {
-      // Check auth
-      const auth = argument.key("auth");
-      if (!auth) {
-        throw new Error("Missing auth in Gmail charm argument");
-      }
-
+    // Check for authentication and handle token refresh if needed
+    const auth = argument.key("auth");
+    if (auth) {
       const { token, expiresAt } = auth.get();
 
-      // Refresh token if needed for Gmail integration
+      // Refresh token if needed
       if (token && expiresAt && Date.now() > expiresAt) {
-        log(`Token expired, refreshing for Gmail charm: ${charmId}`);
+        log(`Token expired, refreshing for charm: ${charmId}`);
         try {
-          await this.refreshGmailAuthToken(auth, charm, space);
+          await refreshAuthToken(auth, charm, space as string);
         } catch (error) {
-          const errorMsg = error instanceof Error
-            ? error.message
-            : String(error);
-          throw new Error(`Failed to refresh Gmail token: ${errorMsg}`);
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          throw new Error(`Failed to refresh token: ${errorMsg}`);
         }
       } else if (!token) {
-        throw new Error("Missing Gmail authentication token");
+        throw new Error(`Missing authentication token for charm: ${charmId}`);
       }
     }
 
-    // Find updater stream to verify it exists before creating a worker
-    const updaterStream = this.findUpdaterStream(charm);
+    // Find updater stream to verify it exists before submitting to worker pool
+    const updaterStream = findUpdaterStream(charm);
     if (!updaterStream) {
-      throw new Error("No updater stream found in charm");
+      throw new Error(`No updater stream found in charm: ${charmId}`);
     }
-
-    // Get the worker script path
-    const workerUrl = new URL("../utils/charm-worker.ts", import.meta.url).href;
-
-    // Create a worker timeout promise
-    const timeout = new Promise<void>((_, reject) => {
-      setTimeout(
-        () => reject(new Error(`Charm execution timed out: ${charmId}`)),
-        30000,
-      );
-    });
-
-    // Get operator password for the worker
-    const operatorPass = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
 
     // Extract the updater key (stream name) from the charm
-    const updaterKey = this.findUpdaterStreamName(charm);
+    let updaterKey: string | null = null;
+    
+    // Find which stream we're using
+    const streamNames = [
+      "integrationUpdater",
+      "updater",
+      "googleUpdater",
+      "githubUpdater",
+      "notionUpdater",
+      "calendarUpdater",
+      "discordUpdater",
+    ];
+    
+    for (const name of streamNames) {
+      if (isStream(charm.key(name))) {
+        updaterKey = name;
+        break;
+      }
+    }
+    
     if (!updaterKey) {
-      throw new Error("Could not determine updater stream name");
+      throw new Error(`Could not determine updater stream name for charm: ${charmId}`);
     }
-
-    // Create a worker execution promise
-    const workerPromise = new Promise<void>((resolve, reject) => {
-      log(`Creating worker for charm: ${charmId} with updater: ${updaterKey}`);
-
-      try {
-        // Create and start worker with appropriate permissions
-        const worker = new Worker(workerUrl, {
-          type: "module",
-          deno: {
-            permissions: {
-              read: true,
-              write: true,
-              net: true,
-              env: true,
-            },
-          },
-        });
-
-        // Handle messages from the worker
-        worker.onmessage = (e) => {
-          if (e.data.success) {
-            log(`Worker successfully executed charm: ${charmId}`);
-            resolve();
-          } else {
-            reject(new Error(e.data.error || "Unknown worker error"));
-          }
-          worker.terminate();
-        };
-
-        // Handle worker errors
-        worker.onerror = (e) => {
-          log(`Worker error for charm ${charmId}: ${e.message}`);
-          reject(new Error(`Worker error: ${e.message}`));
-          worker.terminate();
-        };
-
-        // Get toolshed URL for the worker
-        const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
-          "https://toolshed.saga-castor.ts.net/";
-
-        // Send data to worker, including the necessary URLs and configuration
-        worker.postMessage({
-          spaceId: space,
-          charmId: charmId,
-          updaterKey: updaterKey,
-          operatorPass: operatorPass,
-          toolshedUrl: toolshedUrl,
-        });
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        log(`Error creating worker: ${errorMsg}`);
-        reject(new Error(`Failed to create worker: ${errorMsg}`));
-      }
-    });
-
-    // Race the worker execution against the timeout
-    return Promise.race([workerPromise, timeout]);
-  }
-
-  /**
-   * Find the updater stream in a charm
-   */
-  private findUpdaterStream(charm: Cell<Charm>): Cell<any> | null {
-    // Check for known updater streams
-    const streamNames = [
-      // FIXME(jake): We need to document this `integrationUpdater`
-      "integrationUpdater", // Well-known handler name for integration charms
-      "updater",
-      "googleUpdater",
-      "discordUpdater",
-    ];
-
-    for (const name of streamNames) {
-      const stream = charm.key(name);
-      if (isStream(stream)) {
-        return stream;
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Find the updater stream name in a charm
-   * Returns the name of the first valid updater stream found
-   */
-  private findUpdaterStreamName(charm: Cell<Charm>): string | null {
-    // Check for known updater streams
-    const streamNames = [
-      "integrationUpdater", // Well-known handler name for integration charms
-      "updater",
-      "googleUpdater",
-      "discordUpdater",
-    ];
-
-    for (const name of streamNames) {
-      const stream = charm.key(name);
-      if (isStream(stream)) {
-        return name;
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Refresh a Gmail authentication token
-   * This is a special case specifically for Gmail integration
-   */
-  private async refreshGmailAuthToken(
-    auth: Cell<any>,
-    charm: Cell<Charm>,
-    space: DID,
-  ): Promise<void> {
-    const authCellId = JSON.parse(JSON.stringify(auth.getAsCellLink()));
-    authCellId.space = space as string;
-
-    // Get toolshed URL
-    const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
-      "https://toolshed.saga-castor.ts.net/";
-
-    const refreshUrl = new URL(
-      "/api/integrations/google-oauth/refresh",
-      toolshedUrl,
+    
+    // Create a timeout controller for the worker execution
+    const { controller, clear: clearTimeout } = createTimeoutController(
+      this.config.charmExecutionTimeoutMs
     );
-
-    const refreshResponse = await fetch(refreshUrl, {
-      method: "POST",
-      body: JSON.stringify({ authCellId }),
-    });
-
-    const refreshData = await refreshResponse.json();
-    if (!refreshData.success) {
-      throw new Error(
-        `Error refreshing Gmail token: ${JSON.stringify(refreshData)}`,
-      );
+    
+    try {
+      // Get operator password and toolshed URL for the worker
+      const operatorPass = this.config.operatorPass;
+      const toolshedUrl = this.config.toolshedUrl;
+      
+      // Submit task to worker pool
+      log(`Submitting charm ${charmId} to worker pool with updater: ${updaterKey}`);
+      
+      // The AbortController will automatically abort if the timeout is reached
+      const result = await Promise.race([
+        this.workerPool.execute({
+          spaceId: space,
+          charmId,
+          updaterKey,
+          operatorPass,
+          toolshedUrl,
+        }),
+        
+        // Convert AbortSignal to a promise that rejects when aborted
+        new Promise<never>((_, reject) => {
+          controller.signal.addEventListener("abort", () => {
+            reject(new CharmTimeoutError(
+              `Charm execution timed out after ${this.config.charmExecutionTimeoutMs}ms`,
+              space as string,
+              charmId || "",
+              this.config.charmExecutionTimeoutMs
+            ));
+          });
+        })
+      ]);
+      
+      // Check if the result indicates an error
+      if (result && typeof result === "object" && "error" in result) {
+        throw new Error(result.error as string);
+      }
+      
+      log(`Worker pool successfully executed charm: ${charmId}`);
+    } finally {
+      // Always clear the timeout to prevent memory leaks
+      clearTimeout();
     }
+  }
+
+  /**
+   * Shutdown the handler and its resources
+   */
+  async shutdown(): Promise<void> {
+    // Shutdown the worker pool
+    await this.workerPool.shutdown();
+    log("ExecuteCharmHandler shutdown complete");
   }
 
   /**

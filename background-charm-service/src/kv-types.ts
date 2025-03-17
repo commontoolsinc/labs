@@ -116,4 +116,5 @@ export interface KVServiceOptions {
   maxRetries?: number;
   charmTimeoutMs?: number;
   logIntervalMs?: number;
+  maxConsecutiveFailures?: number;
 }

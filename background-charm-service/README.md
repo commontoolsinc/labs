@@ -2,12 +2,15 @@
 
 A robust service for running background charms with integration capabilities and health monitoring.
 
-## Service Modes
+## Overview
 
-The service can run in two different modes:
+The Background Charm Service runs charms in the background with:
 
-- **Legacy Mode**: The default mode for basic operation
-- **KV Mode**: Advanced mode using Deno KV for persistent job queues and state management
+- Persistent job queue using Deno KV
+- Worker pooling for efficient charm execution
+- Automatic error handling and retry logic 
+- Integration with external services (Gmail, GCal, etc.)
+- Comprehensive logging and monitoring
 
 ## Available Integrations
 
@@ -78,26 +81,24 @@ export default new MyIntegration();
 Background Charm Service
 A robust service for running charms in the background with health monitoring
 
-Usage: deno run -A cli.ts [options]
+Usage: deno run --unstable-kv -A --unstable-worker-options src/cli.ts [options]
 
 Options:
   --charms=<space/charm>,*   Comma-separated list of space/charm IDs
   --interval=<seconds>       Update interval in seconds (default: 60)
   --failures=<number>        Disable after N consecutive failures (default: 5)
   --log-interval=<seconds>   Log status interval in seconds (default: 300)
-  --integration=<name>       Integration to run (default: gmail)
-                            Available: gmail, gcal
+  --integration=<name>          Integration to run (default: gmail)
+                             Available: gmail, gcal
   --initialize               Initialize integration cell
-  --mode=<legacy|kv>         Service mode (default: legacy)
-  --max-concurrent=<number>  Max concurrent jobs for KV mode (default: 5)
+  --max-concurrent=<number>  Max concurrent jobs (default: 5)
+  --max-retries=<number>     Max retry attempts for failed jobs (default: 3)
   --help                     Show this help message
 ```
 
 ### Running the Service
 
-#### Legacy Mode
-
-Without integration:
+Run the service with the default integration (Gmail):
 ```
 deno task start
 ```
@@ -107,21 +108,14 @@ With Gmail integration:
 deno task gmail
 ```
 
-With GCal integration (commented out in deno.json, needs uncommented):
+With Google Calendar integration:
 ```
 deno task gcal
 ```
 
-#### KV Mode
-
-With Gmail integration using KV:
+With manual charm list:
 ```
-deno task gmail:kv
-```
-
-With GCal integration using KV (commented out in deno.json, needs uncommented):
-```
-deno task gcal:kv
+deno run --unstable-kv -A --unstable-worker-options src/cli.ts --charms=space1/charm1,space2/charm2
 ```
 
 ### Initializing Integration Cells
