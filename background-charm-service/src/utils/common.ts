@@ -1,11 +1,11 @@
 /**
  * Common utility functions shared across the service
  */
-import { Cell, isStream } from "@commontools/runner";
+import { Cell, isStream, storage } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
 import { log } from "../utils.ts";
 import { TokenRefreshError } from "../errors/index.ts";
-import { getConfig } from "../config.ts";
+import { env } from "../config.ts";
 
 /**
  * Find an updater stream in a charm by checking common stream names
@@ -77,7 +77,6 @@ export async function refreshAuthToken(
   charm: Cell<Charm>,
   spaceId: string,
 ): Promise<void> {
-  const config = getConfig();
   const authCellId = JSON.parse(JSON.stringify(auth.getAsCellLink()));
   authCellId.space = spaceId;
   log(`Token expired, refreshing: ${authCellId}`, { charm });
@@ -87,7 +86,7 @@ export async function refreshAuthToken(
 
   const refresh_url = new URL(
     `/api/integrations/${integrationType}-oauth/refresh`,
-    config.toolshedUrl,
+    env.TOOLSHED_API_URL,
   );
 
   try {
@@ -95,7 +94,7 @@ export async function refreshAuthToken(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort();
-    }, config.tokenRefreshTimeoutMs);
+    }, env.TOKEN_REFRESH_TIMEOUT_MS);
 
     const refresh_response = await fetch(refresh_url, {
       method: "POST",

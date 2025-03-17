@@ -13,14 +13,12 @@ import {
   getIntegration,
 } from "./integrations/index.ts";
 
-// Constants
-const TOOLSHED_URL = Deno.env.get("TOOLSHED_API_URL") ??
-  "https://toolshed.saga-castor.ts.net/";
-const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
+// Import environment configuration
+import { env } from "./config.ts";
 
 // Initialize storage and Bobby server
-storage.setRemoteStorage(new URL(TOOLSHED_URL));
-setBobbyServerUrl(TOOLSHED_URL);
+storage.setRemoteStorage(new URL(env.TOOLSHED_API_URL));
+setBobbyServerUrl(env.TOOLSHED_API_URL);
 
 /**
  * Display usage information

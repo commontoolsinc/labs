@@ -7,7 +7,7 @@ import {
   loadIntegrations,
 } from "./integrations/index.ts";
 import { log } from "./utils.ts";
-import { getConfig } from "./config.ts";
+import { env, getConfig } from "./config.ts";
 import { formatError, formatUptime } from "./utils/common.ts";
 import { IntegrationError } from "./errors/index.ts";
 
@@ -30,22 +30,21 @@ export class KVBackgroundCharmService {
     this.kv = options.kv;
     this.config = getConfig();
 
-    // Apply options, using config values as fallbacks
+    // Apply options, using env values as fallbacks
     this.queue = new JobQueue(this.kv, {
-      maxConcurrentJobs: options.maxConcurrentJobs ??
-        this.config.maxConcurrentJobs,
-      maxRetries: options.maxRetries ?? this.config.maxRetries,
-      pollingIntervalMs: this.config.pollingIntervalMs,
+      maxConcurrentJobs: options.maxConcurrentJobs ?? env.MAX_CONCURRENT_JOBS,
+      maxRetries: options.maxRetries ?? env.MAX_RETRIES,
+      pollingIntervalMs: env.POLLING_INTERVAL_MS,
     });
 
     this.stateManager = new KVStateManager(
       this.kv,
-      options.logIntervalMs ?? this.config.logIntervalMs,
+      options.logIntervalMs ?? env.LOG_INTERVAL_MS,
     );
     this.integrations = new Map();
-    this.cycleIntervalMs = options.cycleIntervalMs ??
-      this.config.cycleIntervalMs;
-    this.maxConsecutiveFailures = options.maxConsecutiveFailures ?? 5;
+    this.cycleIntervalMs = options.cycleIntervalMs ?? env.CYCLE_INTERVAL_MS;
+    this.maxConsecutiveFailures = options.maxConsecutiveFailures ??
+      env.MAX_CONSECUTIVE_FAILURES;
 
     // Install global error handlers
     this.installGlobalErrorHandlers();
@@ -53,7 +52,7 @@ export class KVBackgroundCharmService {
     log("Background Charm Service constructed");
     log(
       `Configuration: cycleInterval=${this.cycleIntervalMs}ms, maxConcurrentJobs=${
-        options.maxConcurrentJobs ?? this.config.maxConcurrentJobs
+        options.maxConcurrentJobs ?? env.MAX_CONCURRENT_JOBS
       }`,
     );
   }
