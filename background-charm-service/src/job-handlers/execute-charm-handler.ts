@@ -91,11 +91,12 @@ export class ExecuteCharmHandler implements JobHandler {
 
       try {
         // Execute the charm - passing integration ID for Gmail-specific handling
-        await this.executeCharmWithTimeout(
+        await this.executeCharmWithWorker(
           runningCharm,
           argument,
           spaceId as DID,
           integrationId,
+          charmId
         );
 
         // If we get here, the charm succeeded (timeout function will throw on failure)
@@ -149,23 +150,17 @@ export class ExecuteCharmHandler implements JobHandler {
   }
 
   /**
-   * Execute a charm with timeout
+   * Execute a charm using a dedicated worker process
    */
-  private async executeCharmWithTimeout(
+  private async executeCharmWithWorker(
     charm: Cell<Charm>,
     argument: Cell<any>,
     space: DID,
-    integrationId?: string, // Added to identify integration type
+    integrationId?: string,
+    charmId?: string
   ): Promise<void> {
-    const charmId = charm.entityId ? charm.entityId["/"] : "unknown";
-
-    // Find updater stream - this is the core functionality we care about
-    const updaterStream = this.findUpdaterStream(charm);
-    if (!updaterStream) {
-      throw new Error("No updater stream found in charm");
-    }
-
     // Special case for Gmail integration: handle token refresh
+    // We still need to do this in the main process before spawning the worker
     if (integrationId === "gmail") {
       // Check auth
       const auth = argument.key("auth");
@@ -175,16 +170,13 @@ export class ExecuteCharmHandler implements JobHandler {
 
       const { token, expiresAt } = auth.get();
 
-      // FIXME(jake): We need to remove this from the execute-charm-handler, this should be a userland recipe handler...
       // Refresh token if needed for Gmail integration
       if (token && expiresAt && Date.now() > expiresAt) {
         log(`Token expired, refreshing for Gmail charm: ${charmId}`);
         try {
           await this.refreshGmailAuthToken(auth, charm, space);
         } catch (error) {
-          const errorMsg = error instanceof Error
-            ? error.message
-            : String(error);
+          const errorMsg = error instanceof Error ? error.message : String(error);
           throw new Error(`Failed to refresh Gmail token: ${errorMsg}`);
         }
       } else if (!token) {
@@ -192,69 +184,81 @@ export class ExecuteCharmHandler implements JobHandler {
       }
     }
 
-    // Create abort controller for timeout
-    const abortController = new AbortController();
-    const signal = abortController.signal;
+    // Find updater stream to verify it exists before creating a worker
+    const updaterStream = this.findUpdaterStream(charm);
+    if (!updaterStream) {
+      throw new Error("No updater stream found in charm");
+    }
 
-    // Set timeout (longer timeout to allow API requests to complete)
-    const timeoutId = setTimeout(() => {
-      abortController.abort();
-      log(`Charm execution timed out after 15s: ${charmId}`);
-    }, 15000);
-
-    // Detect completion using Promise.race with a timeout
-    return new Promise<void>((resolve, reject) => {
-      let errorDetected = false;
-
-      // Error listener specifically for this execution
-      const errorHandler = (event: PromiseRejectionEvent) => {
-        // Only handle errors coming from this charm execution
-        const errorText = String(event.reason);
-        if (errorText.includes(charmId)) {
-          errorDetected = true;
-          const errorMessage = event.reason instanceof Error
-            ? event.reason.message
-            : String(event.reason);
-          reject(new Error(`Charm execution error: ${errorMessage}`));
-        }
-      };
-
-      // Add temporary error listener
-      self.addEventListener("unhandledrejection", errorHandler);
-
-      try {
-        // Send the message to the stream - this is the core operation we want
-        updaterStream.send({});
-
-        // Set up a completion check - wait for a reasonable time for the charm to execute
-        const intervalId = setInterval(() => {
-          if (signal.aborted) {
-            clearInterval(intervalId);
-            self.removeEventListener("unhandledrejection", errorHandler);
-            reject(new Error(`Charm execution timed out: ${charmId}`));
-          }
-        }, 100);
-
-        // Allow a reasonable amount of time for execution to complete
-        setTimeout(() => {
-          clearInterval(intervalId);
-          self.removeEventListener("unhandledrejection", errorHandler);
-
-          if (errorDetected) {
-            reject(new Error(`Charm ${charmId} generated unhandled rejection`));
-          } else {
-            log(`Charm ${charmId} executed successfully`);
-            resolve();
-          }
-        }, 10000); // 10 second window to detect successful execution
-      } catch (error) {
-        self.removeEventListener("unhandledrejection", errorHandler);
-        reject(error);
-      }
-    }).finally(() => {
-      // Clean up
-      clearTimeout(timeoutId);
+    // Get the worker script path
+    const workerUrl = new URL("../utils/charm-worker.ts", import.meta.url).href;
+    
+    // Create a worker timeout promise
+    const timeout = new Promise<void>((_, reject) => {
+      setTimeout(() => reject(new Error(`Charm execution timed out: ${charmId}`)), 30000);
     });
+    
+    // Get operator password for the worker
+    const operatorPass = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
+
+    // Extract the updater key (stream name) from the charm
+    const updaterKey = this.findUpdaterStreamName(charm);
+    if (!updaterKey) {
+      throw new Error("Could not determine updater stream name");
+    }
+
+    // Create a worker execution promise
+    const workerPromise = new Promise<void>((resolve, reject) => {
+      log(`Creating worker for charm: ${charmId} with updater: ${updaterKey}`);
+      
+      try {
+        // Create and start worker with appropriate permissions
+        const worker = new Worker(workerUrl, {
+          type: "module",
+          deno: {
+            permissions: {
+              read: true,
+              write: true,
+              net: true,
+              env: true,
+            },
+          },
+        });
+        
+        // Handle messages from the worker
+        worker.onmessage = (e) => {
+          if (e.data.success) {
+            log(`Worker successfully executed charm: ${charmId}`);
+            resolve();
+          } else {
+            reject(new Error(e.data.error || "Unknown worker error"));
+          }
+          worker.terminate();
+        };
+        
+        // Handle worker errors
+        worker.onerror = (e) => {
+          log(`Worker error for charm ${charmId}: ${e.message}`);
+          reject(new Error(`Worker error: ${e.message}`));
+          worker.terminate();
+        };
+        
+        // Send data to worker
+        worker.postMessage({
+          spaceId: space,
+          charmId: charmId,
+          updaterKey: updaterKey,
+          operatorPass: operatorPass
+        });
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        log(`Error creating worker: ${errorMsg}`);
+        reject(new Error(`Failed to create worker: ${errorMsg}`));
+      }
+    });
+    
+    // Race the worker execution against the timeout
+    return Promise.race([workerPromise, timeout]);
   }
 
   /**
@@ -274,6 +278,29 @@ export class ExecuteCharmHandler implements JobHandler {
       const stream = charm.key(name);
       if (isStream(stream)) {
         return stream;
+      }
+    }
+
+    return null;
+  }
+  
+  /**
+   * Find the updater stream name in a charm
+   * Returns the name of the first valid updater stream found
+   */
+  private findUpdaterStreamName(charm: Cell<Charm>): string | null {
+    // Check for known updater streams
+    const streamNames = [
+      "integrationUpdater", // Well-known handler name for integration charms
+      "updater",
+      "googleUpdater", 
+      "discordUpdater",
+    ];
+
+    for (const name of streamNames) {
+      const stream = charm.key(name);
+      if (isStream(stream)) {
+        return name;
       }
     }
 
@@ -308,9 +335,7 @@ export class ExecuteCharmHandler implements JobHandler {
 
     const refreshData = await refreshResponse.json();
     if (!refreshData.success) {
-      throw new Error(
-        `Error refreshing Gmail token: ${JSON.stringify(refreshData)}`,
-      );
+      throw new Error(`Error refreshing Gmail token: ${JSON.stringify(refreshData)}`);
     }
   }
 
