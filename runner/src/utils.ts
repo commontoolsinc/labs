@@ -206,18 +206,17 @@ export function unwrapOneLevelAndBindtoDoc<T>(
     if (isStatic(binding) && !processStatic) {
       return markAsStatic(convert(binding, true));
     } else if (isAlias(binding)) {
-      let alias = binding.$alias;
+      const alias = { ...binding.$alias };
       if (typeof alias.cell === "number") {
-        alias = { ...alias };
         if (alias.cell === 1) {
           // Moved to the next-to-top level. Don't assign a doc, so that on
           // next unwrap, the right doc be assigned.
           delete alias.cell;
         } else {
-          alias.cell--;
+          alias.cell = alias.cell - 1;
         }
       } else if (!alias.cell) {
-        alias = { ...alias, cell: doc };
+        alias.cell = doc;
       }
       return { $alias: alias };
     } else if (isDoc(binding)) {
@@ -447,15 +446,15 @@ export function maybeGetCellLink(
 // Only logs interim aliases, not the first one, and not the non-alias value.
 export function followAliases(
   alias: any,
-  cell: DocImpl<any>,
+  doc: DocImpl<any>,
   log?: ReactivityLog,
 ): CellLink {
   const seen = new Set<any>();
   let result: CellLink;
 
   while (isAlias(alias)) {
-    result = { ...alias.$alias } as CellLink;
-    if (!result.cell) result.cell = cell;
+    if (alias.$alias.cell) doc = alias.$alias.cell;
+    result = { ...alias.$alias, cell: doc } as CellLink;
 
     if (seen.has(alias)) {
       throw new Error(
@@ -465,8 +464,8 @@ export function followAliases(
       );
     }
     seen.add(alias);
-    alias = cell.getAtPath(alias.$alias.path);
-    if (isAlias(alias)) log?.reads.push({ cell, path: alias.$alias.path });
+    alias = doc.getAtPath(alias.$alias.path);
+    if (isAlias(alias)) log?.reads.push({ cell: doc, path: alias.$alias.path });
   }
 
   return result!;
