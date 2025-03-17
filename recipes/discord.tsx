@@ -67,37 +67,36 @@ const ResultSchema = {
       type: "array",
       items: MessageSchema,
     },
+    requestor_id: {
+      type: "string",
+    },
     discordUpdater: { asStream: true, type: "object", properties: {} },
   },
 } as const satisfies JSONSchema;
 
 const discordUpdater = handler(
   {},
+
+  // this is the state object
   {
     type: "object",
     properties: {
       messages: { type: "array", items: MessageSchema, default: [], asCell: true },
     },
-    required: ["messages"],
+    required: ["messages", "requestor_id"],
   },
   async (_event, state) => {
-    console.log("discordUpdater!");
+    const requestor_id = state.requestor_id;
+    const messages_data = await fetchMessages(requestor_id);
+    console.log("messages data ", messages_data, " length=", messages_data.length);
 
-      const requestor_id = state.requestor_id;
-      const messages_data = await fetchMessages(requestor_id);
-      console.log("messages data ", messages_data, " length=", messages_data.length);
-      // console.log("before: state messages length=", state.messages.length);
-      state.messages.push(...messages_data);
-      // console.log("after: state messages length=", state.messages.length);
+    // this was set in the recipe export, see end of return object of recipe
+    state.messages.push(...messages_data);
   },
 );
 
-// Helper function for sleeping
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export async function fetchMessages(requestor_id: string) {
+export async function fetchMessages(requestor_id) {
+  requestor_id = requestor_id || "421";
   const api_url = "https://macbookair.saga-castor.ts.net/api/messages?requestor_id=" + requestor_id;
   const messages_fetch = await fetch(api_url);
   return await messages_fetch.json();
@@ -106,11 +105,10 @@ export async function fetchMessages(requestor_id: string) {
 export default recipe(
   InputSchema,
   ResultSchema,
-  ({ requestor_id, messages }) => {
-//    const messages = cell<MessageSchema[]>([]);
+  ({ requestor_id }) => {
+    const messages = cell<MessageSchema[]>([]);
     derive(messages, (messages) => {
-      console.log("trying to call a handler!!!");
-      discordUpdater();
+      console.log("REQUESTOR-ID is ", requestor_id);
     });
 
     return {
@@ -125,7 +123,9 @@ export default recipe(
           </pre>  
         </div>
       ),
-      discordUpdater: discordUpdater({}),
+      messages, // this sets state.messages, we inspect in handler()
+      requestor_id, 
+      discordUpdater: discordUpdater({ messages, requestor_id }),
     };
   },
 );
