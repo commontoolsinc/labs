@@ -4,9 +4,10 @@
 
 - Run service: `deno task start`
 - Run with Gmail integration: `deno task gmail:kv`
-- Run with Gmail integration (legacy): `deno task gmail` 
+- Run with Gmail integration (legacy): `deno task gmail`
 - Initialize integration cells: `deno task initialize`
-- Initialize specific integration: `deno task initialize:gmail` or `deno task initialize:gcal`
+- Initialize specific integration: `deno task initialize:gmail` or
+  `deno task initialize:gcal`
 - Run tests: `deno task test`
 - Run specific test: `deno test src/path/to/test.ts`
 - Check typings: `deno task check`
@@ -17,7 +18,8 @@
 
 ### Adding a New Integration
 
-1. Create a new file in `src/integrations/` named after your integration (e.g., `myservice.ts`)
+1. Create a new file in `src/integrations/` named after your integration (e.g.,
+   `myservice.ts`)
 2. Implement the `Integration` interface:
 
 ```typescript
@@ -28,13 +30,13 @@ import { Integration, IntegrationCellConfig } from "../types.ts";
 import { log } from "../utils.ts";
 
 export class MyServiceIntegration implements Integration {
-  id = "myservice";  // This will be used for --integration flag
+  id = "myservice"; // This will be used for --integration flag
   name = "My Service Integration";
-  
+
   async initialize(): Promise<void> {
     // Initialization logic
   }
-  
+
   getIntegrationConfig(): IntegrationCellConfig {
     return {
       id: this.id,
@@ -45,13 +47,15 @@ export class MyServiceIntegration implements Integration {
       isValidIntegrationCharm: (charm) => this.isValidCharm(charm),
     };
   }
-  
+
   // Helper methods
-  private async fetchMyServiceCharms(): Promise<{ space: DID; charmId: string }[]> {
+  private async fetchMyServiceCharms(): Promise<
+    { space: DID; charmId: string }[]
+  > {
     // Implementation
     return [];
   }
-  
+
   private isValidCharm(charm: Cell<Charm>): boolean {
     // Validation logic
     return true;
@@ -63,11 +67,13 @@ export default new MyServiceIntegration();
 ```
 
 3. The integration will be automatically discovered and registered
-4. Update deno.json to add shortcut task: `"myservice": "deno run -A src/cli.ts --integration=myservice"`
+4. Update deno.json to add shortcut task:
+   `"myservice": "deno run -A src/cli.ts --integration=myservice"`
 
 ## Code Style Guidelines
 
 ### Formatting
+
 - Indentation: 2 spaces
 - Semicolons: required
 - Double quotes for strings
@@ -75,6 +81,7 @@ export default new MyServiceIntegration();
 - Use `deno fmt` for auto-formatting
 
 ### TypeScript
+
 - Strong typing with explicit interfaces
 - Prefer interfaces over type aliases for object types
 - Export types explicitly with `export type { ... }`
@@ -82,6 +89,7 @@ export default new MyServiceIntegration();
 - Avoid `any` type, use `unknown` when type is uncertain
 
 ### Naming & Imports
+
 - Classes: PascalCase (BackgroundCharmService)
 - Functions/variables: camelCase (processCharm)
 - Constants: UPPER_SNAKE_CASE (TOOLSHED_URL)
@@ -89,12 +97,14 @@ export default new MyServiceIntegration();
 - Prefer named exports over default exports
 
 ### Error Handling
+
 - Use try/catch with descriptive error messages
 - Include context (like charm IDs) in error logs
 - Properly propagate errors in async functions
 - Use typed error classes for specific error scenarios
 
 ### Testing
+
 - Write unit tests for critical functions
 - Use descriptive test names that explain the expected behavior
 - Mock external dependencies when testing handlers and services

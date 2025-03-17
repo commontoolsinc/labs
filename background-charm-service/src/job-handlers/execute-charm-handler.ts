@@ -8,16 +8,16 @@ import { Cell, isStream, storage } from "@commontools/runner";
 import { Charm, CharmManager } from "@commontools/charm";
 import type { DID } from "@commontools/identity";
 import { getIntegration } from "../integrations/index.ts";
-import { 
-  CharmNotFoundError, 
-  CharmTimeoutError, 
-  IntegrationError 
+import {
+  CharmNotFoundError,
+  CharmTimeoutError,
+  IntegrationError,
 } from "../errors/index.ts";
 import { getConfig } from "../config.ts";
-import { 
-  findUpdaterStream, 
-  refreshAuthToken, 
-  createTimeoutController 
+import {
+  createTimeoutController,
+  findUpdaterStream,
+  refreshAuthToken,
 } from "../utils/common.ts";
 import { WorkerPool } from "../utils/worker-pool.ts";
 
@@ -35,7 +35,7 @@ export class ExecuteCharmHandler implements JobHandler {
     this.kv = kv;
     this.stateManager = new KVStateManager(kv);
     this.config = getConfig();
-    
+
     // Initialize worker pool
     const workerUrl = new URL("../utils/charm-worker.ts", import.meta.url).href;
     this.workerPool = new WorkerPool({
@@ -53,8 +53,10 @@ export class ExecuteCharmHandler implements JobHandler {
         },
       },
     });
-    
-    log(`Initialized worker pool with ${this.config.maxConcurrentJobs} max workers`);
+
+    log(
+      `Initialized worker pool with ${this.config.maxConcurrentJobs} max workers`,
+    );
   }
 
   /**
@@ -93,7 +95,11 @@ export class ExecuteCharmHandler implements JobHandler {
       log(`Loading charm: ${charmId}`);
       const charm = await manager.get(charmId, false);
       if (!charm) {
-        throw new CharmNotFoundError(`Charm not found: ${charmId}`, spaceId, charmId);
+        throw new CharmNotFoundError(
+          `Charm not found: ${charmId}`,
+          spaceId,
+          charmId,
+        );
       }
 
       // Get running charm and argument
@@ -102,13 +108,20 @@ export class ExecuteCharmHandler implements JobHandler {
       const argument = manager.getArgument(charm);
 
       if (!runningCharm || !argument) {
-        throw new CharmNotFoundError(`Charm not properly loaded: ${charmId}`, spaceId, charmId);
+        throw new CharmNotFoundError(
+          `Charm not properly loaded: ${charmId}`,
+          spaceId,
+          charmId,
+        );
       }
 
       // Get the integration to validate the charm
       const integration = getIntegration(integrationId);
       if (!integration) {
-        throw new IntegrationError(`Integration not found: ${integrationId}`, integrationId);
+        throw new IntegrationError(
+          `Integration not found: ${integrationId}`,
+          integrationId,
+        );
       }
 
       // Get integration config with validation function
@@ -119,7 +132,7 @@ export class ExecuteCharmHandler implements JobHandler {
       ) {
         throw new IntegrationError(
           `Charm does not match integration type ${integrationId}`,
-          integrationId
+          integrationId,
         );
       }
 
@@ -207,7 +220,9 @@ export class ExecuteCharmHandler implements JobHandler {
         try {
           await refreshAuthToken(auth, charm, space as string);
         } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
+          const errorMsg = error instanceof Error
+            ? error.message
+            : String(error);
           throw new Error(`Failed to refresh token: ${errorMsg}`);
         }
       } else if (!token) {
@@ -223,7 +238,7 @@ export class ExecuteCharmHandler implements JobHandler {
 
     // Extract the updater key (stream name) from the charm
     let updaterKey: string | null = null;
-    
+
     // Find which stream we're using
     const streamNames = [
       "integrationUpdater",
@@ -234,31 +249,35 @@ export class ExecuteCharmHandler implements JobHandler {
       "calendarUpdater",
       "discordUpdater",
     ];
-    
+
     for (const name of streamNames) {
       if (isStream(charm.key(name))) {
         updaterKey = name;
         break;
       }
     }
-    
+
     if (!updaterKey) {
-      throw new Error(`Could not determine updater stream name for charm: ${charmId}`);
+      throw new Error(
+        `Could not determine updater stream name for charm: ${charmId}`,
+      );
     }
-    
+
     // Create a timeout controller for the worker execution
     const { controller, clear: clearTimeout } = createTimeoutController(
-      this.config.charmExecutionTimeoutMs
+      this.config.charmExecutionTimeoutMs,
     );
-    
+
     try {
       // Get operator password and toolshed URL for the worker
       const operatorPass = this.config.operatorPass;
       const toolshedUrl = this.config.toolshedUrl;
-      
+
       // Submit task to worker pool
-      log(`Submitting charm ${charmId} to worker pool with updater: ${updaterKey}`);
-      
+      log(
+        `Submitting charm ${charmId} to worker pool with updater: ${updaterKey}`,
+      );
+
       // The AbortController will automatically abort if the timeout is reached
       const result = await Promise.race([
         this.workerPool.execute({
@@ -268,25 +287,27 @@ export class ExecuteCharmHandler implements JobHandler {
           operatorPass,
           toolshedUrl,
         }),
-        
+
         // Convert AbortSignal to a promise that rejects when aborted
         new Promise<never>((_, reject) => {
           controller.signal.addEventListener("abort", () => {
-            reject(new CharmTimeoutError(
-              `Charm execution timed out after ${this.config.charmExecutionTimeoutMs}ms`,
-              space as string,
-              charmId || "",
-              this.config.charmExecutionTimeoutMs
-            ));
+            reject(
+              new CharmTimeoutError(
+                `Charm execution timed out after ${this.config.charmExecutionTimeoutMs}ms`,
+                space as string,
+                charmId || "",
+                this.config.charmExecutionTimeoutMs,
+              ),
+            );
           });
-        })
+        }),
       ]);
-      
+
       // Check if the result indicates an error
       if (result && typeof result === "object" && "error" in result) {
         throw new Error(result.error as string);
       }
-      
+
       log(`Worker pool successfully executed charm: ${charmId}`);
     } finally {
       // Always clear the timeout to prevent memory leaks

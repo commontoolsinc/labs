@@ -28,7 +28,7 @@ export function findUpdaterStream(charm: Cell<Charm>): Cell<any> | null {
       log(
         `Found stream '${name}' in charm ${
           charm.entityId ? charm.entityId["/"] : "unknown"
-        }`
+        }`,
       );
       return stream;
     }
@@ -41,11 +41,11 @@ export function findUpdaterStream(charm: Cell<Charm>): Cell<any> | null {
     log(
       `No updater stream found in charm ${charmId}. Available keys: ${
         keys.join(", ")
-      }`
+      }`,
     );
   } catch (error) {
     log(
-      `No updater stream found in charm ${charmId} and could not enumerate keys`
+      `No updater stream found in charm ${charmId} and could not enumerate keys`,
     );
   }
 
@@ -57,14 +57,14 @@ export function findUpdaterStream(charm: Cell<Charm>): Cell<any> | null {
  */
 export function determineIntegrationType(charm: Cell<Charm>): string {
   const integrationTypes = ["google", "github", "notion", "calendar"];
-  
+
   // Try to determine integration type from charm keys
   for (const type of integrationTypes) {
     if (charm.key(`${type}Updater`) && isStream(charm.key(`${type}Updater`))) {
       return type;
     }
   }
-  
+
   // Default to google if we can't determine
   return "google";
 }
@@ -87,7 +87,7 @@ export async function refreshAuthToken(
 
   const refresh_url = new URL(
     `/api/integrations/${integrationType}-oauth/refresh`,
-    config.toolshedUrl
+    config.toolshedUrl,
   );
 
   try {
@@ -111,7 +111,9 @@ export async function refreshAuthToken(
 
     const refresh_data = await refresh_response.json();
     if (!refresh_data.success) {
-      throw new Error(`Error refreshing token: ${JSON.stringify(refresh_data)}`);
+      throw new Error(
+        `Error refreshing token: ${JSON.stringify(refresh_data)}`,
+      );
     }
 
     await storage.synced();
@@ -147,7 +149,7 @@ export function createTimeoutController(timeoutMs: number): {
   const timeoutId = setTimeout(() => {
     controller.abort();
   }, timeoutMs) as unknown as number;
-  
+
   return {
     controller,
     timeoutId,

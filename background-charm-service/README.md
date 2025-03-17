@@ -1,6 +1,7 @@
 # Background Charm Service
 
-A robust service for running background charms with integration capabilities and health monitoring.
+A robust service for running background charms with integration capabilities and
+health monitoring.
 
 ## Overview
 
@@ -8,7 +9,7 @@ The Background Charm Service runs charms in the background with:
 
 - Persistent job queue using Deno KV
 - Worker pooling for efficient charm execution
-- Automatic error handling and retry logic 
+- Automatic error handling and retry logic
 - Integration with external services (Gmail, GCal, etc.)
 - Comprehensive logging and monitoring
 
@@ -24,7 +25,8 @@ The service can be run with various integrations:
 
 To add a new integration:
 
-1. Create a new TypeScript file in the `src/integrations/` directory named after your integration (e.g., `src/integrations/gcal.ts`)
+1. Create a new TypeScript file in the `src/integrations/` directory named after
+   your integration (e.g., `src/integrations/gcal.ts`)
 2. Implement the `Integration` interface:
 
 ```typescript
@@ -41,7 +43,9 @@ export class MyIntegration implements Integration {
     // Initialization logic
   }
 
-  private async fetchMyIntegrationCharms(): Promise<{ space: DID; charmId: string }[]> {
+  private async fetchMyIntegrationCharms(): Promise<
+    { space: DID; charmId: string }[]
+  > {
     // Return array of charms to execute
     return [];
   }
@@ -99,21 +103,25 @@ Options:
 ### Running the Service
 
 Run the service with the default integration (Gmail):
+
 ```
 deno task start
 ```
 
 With Gmail integration:
+
 ```
 deno task gmail
 ```
 
 With Google Calendar integration:
+
 ```
 deno task gcal
 ```
 
 With manual charm list:
+
 ```
 deno run --unstable-kv -A --unstable-worker-options src/cli.ts --charms=space1/charm1,space2/charm2
 ```
@@ -121,11 +129,13 @@ deno run --unstable-kv -A --unstable-worker-options src/cli.ts --charms=space1/c
 ### Initializing Integration Cells
 
 Initialize the current integration:
+
 ```
 deno task initialize
 ```
 
 Initialize a specific integration:
+
 ```
 deno task initialize:gmail
 deno task initialize:gcal
@@ -134,11 +144,13 @@ deno task initialize:gcal
 ### Testing
 
 Run tests:
+
 ```
 deno task test
 ```
 
 Check TypeScript:
+
 ```
 deno task check
 ```

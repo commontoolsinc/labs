@@ -29,24 +29,33 @@ export class KVBackgroundCharmService {
   constructor(options: KVServiceOptions) {
     this.kv = options.kv;
     this.config = getConfig();
-    
+
     // Apply options, using config values as fallbacks
     this.queue = new JobQueue(this.kv, {
-      maxConcurrentJobs: options.maxConcurrentJobs ?? this.config.maxConcurrentJobs,
+      maxConcurrentJobs: options.maxConcurrentJobs ??
+        this.config.maxConcurrentJobs,
       maxRetries: options.maxRetries ?? this.config.maxRetries,
       pollingIntervalMs: this.config.pollingIntervalMs,
     });
-    
-    this.stateManager = new KVStateManager(this.kv, options.logIntervalMs ?? this.config.logIntervalMs);
+
+    this.stateManager = new KVStateManager(
+      this.kv,
+      options.logIntervalMs ?? this.config.logIntervalMs,
+    );
     this.integrations = new Map();
-    this.cycleIntervalMs = options.cycleIntervalMs ?? this.config.cycleIntervalMs;
+    this.cycleIntervalMs = options.cycleIntervalMs ??
+      this.config.cycleIntervalMs;
     this.maxConsecutiveFailures = options.maxConsecutiveFailures ?? 5;
 
     // Install global error handlers
     this.installGlobalErrorHandlers();
 
     log("Background Charm Service constructed");
-    log(`Configuration: cycleInterval=${this.cycleIntervalMs}ms, maxConcurrentJobs=${options.maxConcurrentJobs ?? this.config.maxConcurrentJobs}`);
+    log(
+      `Configuration: cycleInterval=${this.cycleIntervalMs}ms, maxConcurrentJobs=${
+        options.maxConcurrentJobs ?? this.config.maxConcurrentJobs
+      }`,
+    );
   }
 
   /**
@@ -121,37 +130,43 @@ export class KVBackgroundCharmService {
 
     log(`Registered integration: ${integration.id}`);
   }
-  
+
   /**
    * Register a manual integration (from CLI charms list)
    */
-  async registerManualIntegration(config: IntegrationCellConfig): Promise<void> {
+  async registerManualIntegration(
+    config: IntegrationCellConfig,
+  ): Promise<void> {
     if (!config) {
       throw new IntegrationError("Invalid manual integration config", "manual");
     }
-    
+
     // Store in KV
     await this.stateManager.setIntegrationConfig("manual", config);
-    
+
     // Create a simple integration object to add to the map
     const manualIntegration: Integration = {
       id: "manual",
       name: "Manual Charms",
-      
+
       async initialize(): Promise<void> {
         // No initialization needed
         log("Manual integration initialized");
       },
-      
+
       getIntegrationConfig(): IntegrationCellConfig {
         return config;
-      }
+      },
     };
-    
+
     // Add to integrations map
     this.integrations.set("manual", manualIntegration);
-    
-    log(`Registered manual integration with ${config.fetchCharms ? "fetchCharms function" : "no fetchCharms"}`);
+
+    log(
+      `Registered manual integration with ${
+        config.fetchCharms ? "fetchCharms function" : "no fetchCharms"
+      }`,
+    );
   }
 
   /**

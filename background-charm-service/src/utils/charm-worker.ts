@@ -15,26 +15,26 @@ let isInitialized = false;
  */
 function initializeWorker(operatorPass?: string, toolshedUrl?: string): void {
   if (isInitialized) return;
-  
+
   // Set operator password from main thread if provided
   if (operatorPass) {
     Deno.env.set("OPERATOR_PASS", operatorPass);
   }
-  
+
   // Configure storage and Bobby server
   if (toolshedUrl) {
     log(`Worker configuring storage with URL: ${toolshedUrl}`);
-    
+
     // Initialize storage and Bobby server in the worker process
     storage.setRemoteStorage(new URL(toolshedUrl));
     setBobbyServerUrl(toolshedUrl);
-    
+
     // Set environment variable as well for any internal code that might use it
     Deno.env.set("TOOLSHED_API_URL", toolshedUrl);
   } else {
     log("Warning: No toolshed URL provided to worker");
   }
-  
+
   isInitialized = true;
 }
 
@@ -43,20 +43,20 @@ function initializeWorker(operatorPass?: string, toolshedUrl?: string): void {
  */
 async function processTask(taskId: string, data: any): Promise<void> {
   const { spaceId, charmId, updaterKey, operatorPass, toolshedUrl } = data;
-  
+
   try {
     log(`Worker executing task ${taskId}: charm ${spaceId}/${charmId}`);
-    
+
     // Make sure worker is initialized
     initializeWorker(operatorPass, toolshedUrl);
-    
+
     // Execute the charm in the isolated worker environment
     const result = await runCharm({
       spaceId,
       charmId,
       updaterKey,
     });
-    
+
     // Report success back to the main thread
     self.postMessage({
       taskId,
@@ -65,7 +65,7 @@ async function processTask(taskId: string, data: any): Promise<void> {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     log(`Worker error for task ${taskId}: ${errorMessage}`);
-    
+
     // Report error back to the main thread
     self.postMessage({
       taskId,
@@ -77,7 +77,7 @@ async function processTask(taskId: string, data: any): Promise<void> {
 // Handle messages from the main thread
 self.onmessage = async (e) => {
   const { taskId, data } = e.data;
-  
+
   if (!taskId) {
     log("Worker received message without taskId");
     self.postMessage({
@@ -85,7 +85,7 @@ self.onmessage = async (e) => {
     });
     return;
   }
-  
+
   // Process the task
   await processTask(taskId, data);
 };
