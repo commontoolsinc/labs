@@ -146,10 +146,14 @@ export function toJSONWithAliases(
     if (pathToCell) {
       if (ignoreSelfAliases && deepEqual(path, pathToCell)) return undefined;
 
+      // Get schema from exported value if available
+      const exported = isOpaqueRef(value) ? value.export() : undefined;
       return {
         $alias: {
           ...(isShadowRef(value) ? { cell: value } : {}),
           path: pathToCell as (string | number)[],
+          ...(exported?.schema ? { schema: exported.schema } : {}),
+          ...(exported?.rootSchema ? { rootSchema: exported.rootSchema } : {}),
         },
       } satisfies Alias;
     } else throw new Error(`Cell not found in paths`);

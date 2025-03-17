@@ -176,6 +176,8 @@ export type CellLink = {
   space?: string;
   cell: DocImpl<any>;
   path: PropertyKey[];
+  schema?: JSONSchema;
+  rootSchema?: JSONSchema;
 };
 
 export function getCell<T>(
@@ -283,6 +285,13 @@ export function createCell<T>(
   // The corner case where during it's lifetime this changes from non-stream to stream
   // or vice versa will not be detected.
   const ref = resolveLinkToValue(doc, path);
+
+  // Use schema from alias if provided and no explicit schema was set
+  if (!schema && ref.schema) {
+    schema = ref.schema;
+    rootSchema = ref.rootSchema || ref.schema;
+  }
+
   if (isStreamAlias(ref.cell.getAtPath(ref.path))) {
     return createStreamCell(
       ref.cell,
