@@ -1,8 +1,9 @@
 import { Browser, ConsoleEvent, launch, Page } from "@astral/astral";
 import { Manifest } from "./manifest.ts";
-import { tsToJs, wait } from "./utils.ts";
+import { tsToJs } from "./utils.ts";
 import { TestResult } from "./interface.ts";
 import { extractAstralConfig } from "./config.ts";
+import { sleep } from "@commontools/utils/sleep";
 
 export class BrowserController extends EventTarget {
   private manifest: Manifest;
@@ -78,7 +79,7 @@ export class BrowserController extends EventTarget {
       if (response.error) {
         throw new Error(response.error?.message ?? response.error);
       }
-      await wait(200);
+      await sleep(200);
     }
     throw new Error("Test harness not ready in 2s.");
   }

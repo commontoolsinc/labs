@@ -12,6 +12,7 @@ import {
   UI,
 } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
+import { sleep } from "@commontools/utils/sleep";
 
 const EmailSchema = {
   type: "object",
@@ -339,11 +340,6 @@ Accept: application/json
       return null;
     }
   }).filter((message): message is Email => message !== null);
-}
-
-// Add this helper function for sleeping
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function fetchLabels(

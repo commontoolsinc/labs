@@ -14,6 +14,7 @@ import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to so
 import { VolatileStorageProvider } from "./storage/volatile.ts";
 import { Signer } from "@commontools/identity";
 import { isBrowser } from "@commontools/utils/env";
+import { sleep } from "@commontools/utils/sleep";
 
 export function log(fn: () => any[]) {
   debug(() => {
@@ -507,7 +508,7 @@ class StorageImpl implements Storage {
       if (loading.size === 0) {
         // If there was nothing queued, let the event loop settle before
         // continuing. We might have gotten new data from storage.
-        await new Promise((r) => setTimeout(r, 0));
+        await sleep(0);
       }
       loading.clear();
 

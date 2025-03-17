@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useState } from "react";
 import { type Charm } from "@commontools/charm";
+import { sleep } from "@commontools/utils/sleep";
 
 export type CharmsContextType = {
   charms: Charm[];
@@ -36,7 +37,7 @@ export const CharmsProvider: React.FC<{ children: React.ReactNode }> = (
       // Stub: runs charm asynchronously and then adds it
 
       // TODO(@jumble): Is this still needed?
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await sleep(300);
       addCharm(charm);
     },
     [addCharm],

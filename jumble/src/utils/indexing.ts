@@ -4,6 +4,8 @@ import { charmId } from "./charms.ts";
 import { client as llm } from "@commontools/llm";
 import { Cell } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
+import { sleep } from "@commontools/utils/sleep";
+
 interface IndexingContext {
   startJob: (name: string) => string;
   stopJob: (jobId: string) => void;
@@ -68,7 +70,7 @@ async function indexCharm(
       "text/plain;variant=description",
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 200)); // Simulate work
+    await sleep(200); // Simulate work
     context.addJobMessage(jobId, `✓ Indexed charm ${charmId(charm)}`);
   } catch (error) {
     context.addJobMessage(
