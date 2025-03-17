@@ -42,7 +42,6 @@ ${JSON.stringify(libraries)}
   window.React = React;
   window.ReactDOM = ReactDOM;
 
-  // Now define all utility functions with React available
   window.useDoc = function(key, defaultValue = null) {
     // Track if we've received a response from the parent
     const [received, setReceived] = React.useState(false);
@@ -164,31 +163,31 @@ ${JSON.stringify(libraries)}
     });
   })();
 
-  window.grabJSON = (gstr) => {
-    // Function to extract and parse JSON from a string
-    // This handles both raw JSON strings and code blocks with JSON
-    const jsonRegex = new RegExp("${jsonRegex}");
-    const match = gstr.match(jsonRegex);
+  window.grabJson = (gstr) => {
+      // Function to extract and parse JSON from a string
+      // This handles both raw JSON strings and code blocks with JSON
+      const jsonRegex = /\`\`\`(?:json)?[\\s\\n]*([\\s\\S]*?)[\\s\\n]*\`\`\`|(\\{[\\s\\S]*?\\})/;
+      const match = gstr.match(jsonRegex);
 
-    if (match) {
-      // Use the first matching group that contains content
-      const jsonStr = match[1] || match[2];
-      try {
-        return JSON.parse(jsonStr);
-      } catch (e) {
-        console.error("Failed to parse JSON:", e);
-        return null;
-      }
-    } else {
-      // If no JSON block found, attempt to parse the entire string
-      try {
-        return JSON.parse(gstr);
-      } catch (e) {
-        console.error("No valid JSON found in string");
-        return null;
+      if (match) {
+        // Use the first matching group that contains content
+        const jsonStr = match[1] || match[2];
+        try {
+          return JSON.parse(jsonStr);
+        } catch (e) {
+          console.error("Failed to parse JSON:", e);
+          return null;
+        }
+      } else {
+        // If no JSON block found, attempt to parse the entire string
+        try {
+          return JSON.parse(gstr);
+        } catch (e) {
+          console.error("No valid JSON found in string");
+          return null;
+        }
       }
     }
-  }
 
   // Define readWebpage utility with React available
   window.readWebpage = (function() {
@@ -565,16 +564,18 @@ Create an interactive React component that fulfills the user's request. Focus on
 4. For form handling, use \`onClick\` handlers instead of \`onSubmit\`
 
 ## Available APIs
-- **useDoc(key, defaultValue)** - Persistent data storage with real-time updates (follows React hook rules)
+- **useDoc(key, defaultValue)** - Persistent data storage with reactive updates
 - **llm(promptPayload)** - Send requests to the language model
 - **readWebpage(url)** - Fetch and parse external web content
 - **generateImage(prompt)** - Create AI-generated images
 
 ## Important Note About useDoc
 - **useDoc is a React Hook** and must follow all React hook rules
+- It should only be used for persistent state and must draw from the provided schema
+  - For any ephemeral state, use \`React.useState\`
 - Only call useDoc at the top level of your function components or custom hooks
 - Do not call useDoc inside loops, conditions, or nested functions
-- useDoc cannot be used outside of React components - it must be called during rendering
+- useDoc cannot be used outside of \`onReady\` components - it must be called during rendering
 
 ## Library Usage
 - Request additional libraries in \`onLoad\` by returning an array of module names
@@ -593,14 +594,9 @@ SCHEMA
 
 ## 1. \`useDoc\` Hook
 
-The \`useDoc\` hook subscribes to real-time updates for a given key and returns a tuple \`[doc, setDoc]\`:
+The \`useDoc\` hook binds to a reactive cell given key and returns a tuple \`[doc, setDoc]\`:
 
 Any keys from the view-model-schema are valid for useDoc, any other keys will fail. Provide a default as the second argument, **do not set an initial value explicitly**.
-
-**Important**: useDoc is a React Hook and must follow React Hook Rules:
-- Only call useDoc at the top level of your function components or custom hooks
-- Do not call useDoc inside loops, conditions, or nested functions
-- It cannot be used outside React components
 
 For this schema:
 
@@ -630,6 +626,7 @@ function CounterComponent() {
   // }
 
   const onIncrement = useCallback(() => {
+    // writing to the cell automatically triggers a re-render
     setCounter(counter + 1);
   }, [counter]);
 
@@ -650,7 +647,8 @@ async function fetchLLMResponse() {
     system: 'Translate all the messages to emojis, reply in JSON.',
     messages: ['Hi', 'How can I help you today?', 'tell me a joke']
   };
-  const result = await grabJson(llm(promptPayload));
+  // grabJson is available on the window, string -> JSON
+  const result = grabJson(await llm(promptPayload));
   console.log('LLM responded:', result);
 }
 \`\`\`
@@ -802,7 +800,6 @@ function onReady(mount, sourceData, libs) {
     return (
       <div className="p-4">
         <animated.div style={props}>
-          <h1 className="text-2xl font-bold">Hello ESM World!</h1>
           <button
             className="mt-2 px-4 py-2 bg-blue-500 text-white rounded"
             onClick={() => setCount(count + 1)}
