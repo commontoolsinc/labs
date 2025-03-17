@@ -104,7 +104,11 @@ function setPreviousValue(context: any, key: string, value: any) {
 export const setupIframe = () =>
   setIframeContextHandler({
     read(context: any, key: string): any {
-      const data = isCell(context) ? context.key(key).get?.() : context?.[key];
+      const data = key === "*"
+        ? isCell(context) ? context.get() : context
+        : isCell(context)
+        ? context.key(key).get?.()
+        : context?.[key];
       const serialized = removeNonJsonData(data);
       console.log("read", key, serialized, JSON.stringify(serialized));
       setPreviousValue(context, key, JSON.stringify(serialized));
