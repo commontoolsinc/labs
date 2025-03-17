@@ -160,6 +160,24 @@ export function scrub(data: any): any {
 }
 
 /**
+ * Turn cells references into aliases, this forces writes to go back
+ * to the original cell.
+ */
+function turnCellsIntoAliases(data: any): any {
+  if (isCell(data)) {
+    return { $alias: data.getAsCellLink() };
+  } else if (Array.isArray(data)) {
+    return data.map((value) => turnCellsIntoAliases(value));
+  } else if (isObj(data)) {
+    return Object.fromEntries(
+      Object.entries(data).map((
+        [key, value],
+      ) => [key, turnCellsIntoAliases(value)]),
+    );
+  } else return data;
+}
+
+/**
  * Cast a new recipe from a goal and data
  *
  * @param charmManager Charm manager representing the space this will be generated in
@@ -238,9 +256,9 @@ export async function castNewRecipe(
     name,
   });
 
-  // FIXME(ja): we should send the scrubbed data here - otherwise you
-  // will get $UI $NAME and any streams in the inputs...
-  return compileAndRunRecipe(charmManager, newRecipeSrc, goal, scrubbed);
+  const input = turnCellsIntoAliases(scrubbed);
+
+  return compileAndRunRecipe(charmManager, newRecipeSrc, goal, input);
 }
 
 export async function compileRecipe(
