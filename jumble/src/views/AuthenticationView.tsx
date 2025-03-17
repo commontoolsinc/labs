@@ -249,6 +249,10 @@ export function AuthenticationView() {
     throw new Error("Already authenticated");
   }
 
+  if (!auth.keyStore) {
+    return <div>Awaiting Key Store...</div>;
+  }
+
   return (
     <div>
       <div className="flex justify-center mb-4">

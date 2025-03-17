@@ -10,7 +10,7 @@ import discord from "@/routes/integrations/discord/discord.index.ts";
 import googleOAuth from "@/routes/integrations/google-oauth/google-oauth.index.ts";
 import blobby from "@/routes/storage/blobby/blobby.index.ts";
 import memory from "@/routes/storage/memory/memory.index.ts";
-import frontendProxy from "@/routes/frontend-proxy/frontend-proxy.index.ts";
+import frontendProxy from "@/routes/frontend/frontend.index.ts";
 import spellbook from "@/routes/spellbook/spellbook.index.ts";
 import whoami from "@/routes/whoami/whoami.index.ts";
 

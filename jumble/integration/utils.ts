@@ -2,6 +2,7 @@ import { ElementHandle, Page } from "@astral/astral";
 import * as path from "@std/path";
 import { ensureDirSync } from "@std/fs";
 import { join } from "@std/path";
+import { sleep } from "@commontools/utils/sleep";
 
 const COMMON_CLI_PATH = path.join(import.meta.dirname!, "../../cli");
 
@@ -34,9 +35,6 @@ export async function snapshot(page: Page | undefined, snapshotName: string) {
     console.log(`→ Snapshot saved: ${filePrefix}`);
   }
 }
-
-export const sleep = (ms: number) =>
-  new Promise((resolve) => setTimeout(resolve, ms));
 
 // Waits for `selector` element to exist,
 // and then click.
@@ -101,6 +99,8 @@ export const login = async (page: Page) => {
 
   // Click the only button, "login"
   await waitForSelectorClick(page, "button[aria-label='login']");
+
+  await page.waitForSelector("#user-avatar");
 };
 
 export const waitForSelectorWithText = async (
