@@ -397,17 +397,7 @@ export function followLinks(
 
     const target = ref.cell.getAtPath(ref.path);
 
-    nextRef = undefined;
-    if (isQueryResultForDereferencing(target)) {
-      nextRef = getCellLinkOrThrow(target);
-    } else if (isCell(target)) nextRef = target.getAsCellLink();
-    else if (isCellLink(target)) nextRef = target;
-    else if (isDoc(target)) {
-      nextRef = { cell: target, path: [] } satisfies CellLink;
-    } else if (isAlias(target)) {
-      nextRef = { ...target.$alias } as CellLink;
-      if (!nextRef.cell) nextRef.cell = ref.cell;
-    }
+    nextRef = maybeGetCellLink(target, ref.cell);
 
     if (nextRef) {
       // Add schema back if we didn't get a new one
@@ -441,23 +431,16 @@ export function followLinks(
   return ref;
 }
 
-// Follows cell references and returns the last one
-export function followCellReferences(
-  reference: CellLink,
-  log?: ReactivityLog,
-): any {
-  const seen = new Set<CellLink>();
-  let result = reference;
-
-  while (isCellLink(reference)) {
-    log?.reads.push({ cell: reference.cell, path: reference.path });
-    result = reference;
-    if (seen.has(reference)) throw new Error("Reference cycle detected");
-    seen.add(reference);
-    reference = reference.cell.getAtPath(reference.path);
-  }
-
-  return result;
+export function maybeGetCellLink(
+  value: any,
+  parent?: DocImpl<any>,
+): CellLink | undefined {
+  if (isQueryResultForDereferencing(value)) return getCellLinkOrThrow(value);
+  else if (isCellLink(value)) return value;
+  else if (isAlias(value)) return { cell: parent, ...value.$alias } as CellLink;
+  else if (isDoc(value)) return { cell: value, path: [] } satisfies CellLink;
+  else if (isCell(value)) return value.getAsCellLink();
+  else return undefined;
 }
 
 // Follows aliases and returns cell reference describing the last alias.

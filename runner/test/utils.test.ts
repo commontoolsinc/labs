@@ -7,7 +7,6 @@ import {
   diffAndUpdate,
   extractDefaultValues,
   followAliases,
-  followCellReferences,
   isEqualCellLink,
   mergeObjects,
   normalizeAndDiff,
@@ -293,56 +292,6 @@ describe("mapBindingToCell", () => {
       y: { $alias: { cell: testCell, path: ["b", "c"] } },
       z: 3,
     });
-  });
-});
-
-describe("followCellReferences", () => {
-  it("should follow a simple cell reference", () => {
-    const testCell = getDoc(
-      { value: 42 },
-      "should follow a simple cell reference 1",
-      "test",
-    );
-    const reference: CellLink = { cell: testCell, path: ["value"] };
-    const result = followCellReferences(reference);
-    expect(result.cell.getAtPath(result.path)).toBe(42);
-  });
-
-  it("should follow nested cell references", () => {
-    const innerCell = getDoc(
-      { inner: 10 },
-      "should follow nested cell references 1",
-      "test",
-    );
-    const outerCell = getDoc(
-      {
-        outer: { cell: innerCell, path: ["inner"] },
-      },
-      "should follow nested cell references 2",
-      "test",
-    );
-    const reference: CellLink = { cell: outerCell, path: ["outer"] };
-    const result = followCellReferences(reference);
-    expect(result.cell.getAtPath(result.path)).toBe(10);
-  });
-
-  it("should throw an error on circular references", () => {
-    const cellA = getDoc(
-      {},
-      "should throw an error on circular references 1",
-      "test",
-    );
-    const cellB = getDoc(
-      {},
-      "should throw an error on circular references 2",
-      "test",
-    );
-    cellA.send({ ref: { cell: cellB, path: ["ref"] } });
-    cellB.send({ ref: { cell: cellA, path: ["ref"] } });
-    const reference: CellLink = { cell: cellA, path: ["ref"] };
-    expect(() => followCellReferences(reference)).toThrow(
-      "Reference cycle detected",
-    );
   });
 });
 

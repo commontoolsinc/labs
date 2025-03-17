@@ -17,6 +17,7 @@ import {
   getRecipe,
   idle,
   isCell,
+  maybeGetCellLink,
   run,
   syncRecipeBlobby,
 } from "@commontools/runner";
@@ -313,21 +314,25 @@ export class CharmManager {
   ): Promise<Cell<Charm>> {
     await idle();
 
-    const syncAllMentionedCells = (
-      value: any,
-      promises: any[] = [],
-    ) => {
-      if (isCell(value)) {
-        promises.push(storage.syncCell(value.getAsCellLink().cell));
+    const seen = new Set<Cell<any>>();
+    const promises = new Set<Promise<any>>();
+
+    const syncAllMentionedCells = (value: any) => {
+      if (seen.has(value)) return;
+      seen.add(value);
+
+      const link = maybeGetCellLink(value);
+
+      if (link && link.cell) {
+        const maybePromise = storage.syncCell(link.cell);
+        if (maybePromise instanceof Promise) promises.add(maybePromise);
       } else if (typeof value === "object" && value !== null) {
-        for (const key in value) {
-          syncAllMentionedCells(value[key], promises);
-        }
+        for (const key in value) syncAllMentionedCells(value[key]);
       }
-      return promises;
     };
 
-    await Promise.all(syncAllMentionedCells(inputs));
+    syncAllMentionedCells(inputs);
+    await Promise.all(promises);
 
     const doc = await storage.syncCellById(
       this.space,
