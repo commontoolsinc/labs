@@ -131,6 +131,34 @@ ${JSON.stringify(libraries)}
     return llm;
   })();
 
+  window.perform = (() => {
+    const pending = new Map();
+    return function perform(command) {
+      return new Promise((succeed, fail) => {
+        let id = crypto.randomUUID();
+        pending.set(id, {succeed, fail});
+        window.parent.postMessage({
+          type: "perform",
+          data: {
+            ...command,
+            id
+          }
+        }, "*");
+      });
+    };
+
+    window.addEventListener("message", event => {
+      if (e.data.type === "command-effect") {
+        const task = pending.get(event.data.id);
+        if (event.data.output.ok) {
+          task.succeed(event.data.output.ok);
+        } else {
+          task.fail(event.data.output.error);
+        }
+      }
+    });
+  })();
+
   // Define readWebpage utility with React available
   window.readWebpage = (function() {
     const inflight = [];

@@ -1,4 +1,7 @@
-import { setIframeContextHandler } from "@commontools/iframe-sandbox";
+import {
+  setIframeContextHandler,
+  TaskPerform,
+} from "@commontools/iframe-sandbox";
 import {
   Action,
   addAction,
@@ -172,5 +175,12 @@ export const setupIframe = () =>
       );
       console.log("onReadWebpageRequest res", res);
       return await res.json();
+    },
+    async onPerform(
+      context: unknown,
+      command: TaskPerform,
+    ): Promise<{ ok: object; error?: void } | { ok?: void; error: Error }> {
+      console.log("perform", command);
+      throw new Error(`Command is not implemented`);
     },
   });
