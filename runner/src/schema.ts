@@ -263,12 +263,20 @@ export function validateAndTransform(
   rootSchema: JSONSchema | undefined = schema,
   seen: CellLink[] = [],
 ): any {
+  const resolvedSchema = resolveSchema(schema, rootSchema, true);
+
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based of this value, as that
   // is what a setter would change when they update a value or reference.
-  ({ cell: doc, path } = resolvePath(doc, path, log));
+  const resolvedRef = resolvePath(doc, path, log);
+  doc = resolvedRef.cell;
+  path = resolvedRef.path;
 
-  const resolvedSchema = resolveSchema(schema, rootSchema, true);
+  // Use schema from alias if provided and no explicit schema was set
+  if (!schema && resolvedRef.schema) {
+    schema = resolvedRef.schema;
+    rootSchema = resolvedRef.rootSchema || resolvedRef.schema;
+  }
 
   // If this should be a reference, return as a Cell of resolvedSchema
   // NOTE: Need to check on the passed schema whether it's a reference, not the

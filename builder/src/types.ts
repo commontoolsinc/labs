@@ -41,9 +41,14 @@ export type OpaqueRefMethods<T> = {
     nodes: Set<NodeRef>;
     external?: any;
     name?: string;
+    schema?: JSONSchema;
+    rootSchema?: JSONSchema;
     frame: Frame;
   };
-  unsafe_bindToRecipeAndPath(recipe: Recipe, path: PropertyKey[]): void;
+  unsafe_bindToRecipeAndPath(
+    recipe: Recipe,
+    path: PropertyKey[],
+  ): void;
   unsafe_getExternal(): OpaqueRef<T>;
   map<S>(
     fn: (
@@ -136,7 +141,12 @@ export type Writable<T> = {
 export type JSONSchemaWritable = Writable<JSONSchema>;
 
 export type Alias = {
-  $alias: { cell?: any; path: PropertyKey[] };
+  $alias: {
+    cell?: any;
+    path: PropertyKey[];
+    schema?: JSONSchema;
+    rootSchema?: JSONSchema;
+  };
 };
 
 export function isAlias(value: any): value is Alias {

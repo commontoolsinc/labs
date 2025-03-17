@@ -4,6 +4,7 @@ import {
   isAlias,
   isOpaqueRef,
   isStatic,
+  type JSONSchema,
   markAsStatic,
   type Recipe,
   unsafe_materializeFactory,
@@ -342,13 +343,39 @@ export function resolvePath(
 
     // Now access the key.
     const key = keys.shift()!;
-    ref = { cell: ref.cell, path: [...ref.path, key] };
+    ref = {
+      cell: ref.cell,
+      path: [...ref.path, key],
+      schema: ref.schema?.type === "object"
+        ? ref.schema.properties?.[key as string] ||
+          (typeof ref.schema.additionalProperties === "object"
+            ? ref.schema.additionalProperties
+            : undefined)
+        : ref.schema?.type === "array"
+        ? ref.schema.items
+        : undefined,
+      rootSchema: ref.rootSchema,
+    };
   }
 
   // Follow aliases on the last key, but no other kinds of links.
-  if (isAlias(ref.cell.getAtPath(ref.path))) {
+  const targetValue = ref.cell.getAtPath(ref.path);
+  if (isAlias(targetValue)) {
     log?.reads.push({ cell: ref.cell, path: ref.path });
-    ref = followAliases(ref.cell.getAtPath(ref.path), ref.cell, log);
+    const aliasResult = followAliases(targetValue, ref.cell, log);
+
+    // If the alias has schema info, it takes precedence
+    if (aliasResult.schema) {
+      ref = aliasResult;
+    } else {
+      // Otherwise keep our tracked schema and just update cell and path
+      ref = {
+        cell: aliasResult.cell,
+        path: aliasResult.path,
+        schema: ref.schema,
+        rootSchema: ref.rootSchema,
+      };
+    }
   }
 
   return ref;
@@ -365,7 +392,15 @@ export function followLinks(
   let nextRef: CellLink | undefined;
 
   do {
-    ref = resolvePath(ref.cell, ref.path, log, seen);
+    const resolvedRef = resolvePath(ref.cell, ref.path, log, seen);
+
+    // Add schema back if we didn't get a new one
+    if (!resolvedRef.schema && ref.schema) {
+      ref = { ...ref, schema: ref.schema, rootSchema: ref.rootSchema };
+    } else {
+      ref = resolvedRef;
+    }
+
     const target = ref.cell.getAtPath(ref.path);
 
     nextRef = undefined;
@@ -383,6 +418,15 @@ export function followLinks(
     }
 
     if (nextRef) {
+      // Add schema back if we didn't get a new one
+      if (!nextRef.schema && ref.schema) {
+        nextRef = {
+          ...nextRef,
+          schema: ref.schema,
+          rootSchema: ref.rootSchema,
+        };
+      }
+
       // Log all the refs that were followed, but not the final value they point to.
       log?.reads.push({ cell: ref.cell, path: ref.path });
 
@@ -437,6 +481,11 @@ export function followAliases(
   while (isAlias(alias)) {
     if (alias.$alias.cell) cell = alias.$alias.cell;
     result = { cell, path: alias.$alias.path };
+
+    if (alias.$alias.schema) {
+      result.schema = alias.$alias.schema;
+      if (alias.$alias.rootSchema) result.rootSchema = alias.$alias.rootSchema;
+    }
 
     if (seen.has(alias)) throw new Error("Alias cycle detected");
     seen.add(alias);
