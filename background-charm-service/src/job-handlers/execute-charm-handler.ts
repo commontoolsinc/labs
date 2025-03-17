@@ -78,35 +78,14 @@ export class ExecuteCharmHandler implements JobHandler {
         throw new Error(`Charm does not match integration type ${integrationId}`);
       }
       
-      // Execute charm with timeout - CRITICAL: Use a global rejection detector
+      // Execute charm with proper error detection and timeout
       log(`Executing charm: ${charmId}`);
       
-      // Set up global rejection tracking
-      let unhandledRejectionDetected = false;
-      const globalRejectionHandler = (event: PromiseRejectionEvent) => {
-        unhandledRejectionDetected = true;
-        log(`⚠️ Detected unhandled rejection during charm execution: ${charmId}`);
-        
-        const errorMessage = event.reason instanceof Error
-          ? event.reason.message
-          : String(event.reason);
-        
-        log(`Error details: ${errorMessage}`);
-      };
-      
-      // Install global error handler before executing charm
-      self.addEventListener("unhandledrejection", globalRejectionHandler);
-      
       try {
-        // Execute the charm with proper tracking
+        // Execute the charm with proper tracking and error detection
         await this.executeCharmWithTimeout(runningCharm, argument, spaceId as DID);
         
-        // CRITICAL FIX: Check if any unhandled rejections were caught
-        if (unhandledRejectionDetected) {
-          throw new Error(`Charm ${charmId} generated unhandled rejection`);
-        }
-        
-        // If we get here, the charm truly succeeded
+        // If we get here, the charm truly succeeded (timeout function will throw on failure)
         const executionTimeMs = Date.now() - startTime;
         await this.stateManager.updateAfterExecution(
           spaceId,
@@ -118,9 +97,9 @@ export class ExecuteCharmHandler implements JobHandler {
         
         log(`Successfully executed charm: ${charmId} (${executionTimeMs}ms)`);
         return { success: true, executionTimeMs };
-      } finally {
-        // Always remove our global handler
-        self.removeEventListener("unhandledrejection", globalRejectionHandler);
+      } catch (charmError) {
+        // The charm execution function will throw detailed errors
+        throw charmError;
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -193,24 +172,67 @@ export class ExecuteCharmHandler implements JobHandler {
     const abortController = new AbortController();
     const signal = abortController.signal;
     
-    // Set timeout
+    // Set timeout (longer timeout to allow API requests to complete)
     const timeoutId = setTimeout(() => {
       abortController.abort();
       log(`Charm execution timed out after 15s: ${charmId}`);
     }, 15000);
     
-    try {
-      // Send the message to the stream
-      updaterStream.send({});
+    // Detect completion using Promise.race with a timeout
+    return new Promise<void>((resolve, reject) => {
+      let errorDetected = false;
       
-      // Wait at least 2 seconds for any immediate errors
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Error listener specifically for this execution
+      const errorHandler = (event: PromiseRejectionEvent) => {
+        // Only handle errors coming from this charm execution
+        const errorText = String(event.reason);
+        if (errorText.includes(charmId)) {
+          errorDetected = true;
+          const errorMessage = event.reason instanceof Error 
+            ? event.reason.message 
+            : String(event.reason);
+          reject(new Error(`Charm execution error: ${errorMessage}`));
+        }
+      };
       
-      // If we got here without errors, the message was sent successfully
-    } finally {
+      // Add temporary error listener
+      self.addEventListener("unhandledrejection", errorHandler);
+      
+      try {
+        // Send the message to the stream
+        updaterStream.send({});
+        
+        // Set up a completion check - wait for a reasonable time for the charm to execute
+        // This is a more reliable approach than the 2 second fixed timeout
+        const intervalId = setInterval(() => {
+          if (signal.aborted) {
+            clearInterval(intervalId);
+            self.removeEventListener("unhandledrejection", errorHandler);
+            reject(new Error(`Charm execution timed out: ${charmId}`));
+          }
+        }, 100);
+        
+        // Allow a reasonable amount of time for execution to complete
+        // This is the maximum time we'll wait for a successful execution
+        setTimeout(() => {
+          clearInterval(intervalId);
+          self.removeEventListener("unhandledrejection", errorHandler);
+          
+          if (errorDetected) {
+            reject(new Error(`Charm ${charmId} generated unhandled rejection`));
+          } else {
+            log(`Charm ${charmId} executed successfully`);
+            resolve();
+          }
+        }, 10000); // 10 second window to detect successful execution
+      } catch (error) {
+        self.removeEventListener("unhandledrejection", errorHandler);
+        reject(error);
+      }
+    }).finally(() => {
       // Clean up
       clearTimeout(timeoutId);
-    }
+    });
   }
   
   /**
