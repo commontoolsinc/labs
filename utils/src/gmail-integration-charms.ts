@@ -5,7 +5,8 @@ import { Identity } from "@commontools/identity";
 // This is the derived space id for toolshed-system
 export const SYSTEM_SPACE_ID =
   "did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88";
-export const CELL_CAUSE = "gmail-integration-2025-03-17";
+export const CELL_CAUSE = "gmailIntegrationCharms";
+// export const CELL_CAUSE = "gmail-integration-2025-03-17";
 
 // Define schema for the cell with correct type literals
 export const gmailIntegrationCharmsSchema = {
