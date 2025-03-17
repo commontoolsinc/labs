@@ -1,3 +1,5 @@
+import { CSP } from "@commontools/iframe-sandbox";
+
 const libraries = {
   "imports": {
     "react": "https://esm.sh/react@18.3.0",
@@ -520,6 +522,17 @@ export function extractUserCode(html: string): string | null {
 
   return html.substring(startIndex + startMarker.length, endIndex);
 }
+
+const security = () =>
+  `## Security Restrictions
+- Do not use browser dialog functions (\`prompt()\`, \`alert()\`, \`confirm()\`)
+- Avoid any methods that could compromise security or user experience
+
+<csp-headers>
+${CSP}
+</csp-headers>
+`;
+
 // Update the system message to reflect the new interface
 export const systemMd = `# React Component Builder
 
@@ -567,9 +580,7 @@ Create an interactive React component that fulfills the user's request. Focus on
   ${Object.entries(libraries).map(([k, v]) => `- ${k} : ${v}`).join("\n")}
 - Only use the explicitly provided libraries
 
-## Security Restrictions
-- Do not use browser dialog functions (\`prompt()\`, \`alert()\`, \`confirm()\`)
-- Avoid any methods that could compromise security or user experience
+${security}
 
 <view-model-schema>
 SCHEMA
