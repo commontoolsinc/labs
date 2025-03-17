@@ -48,7 +48,7 @@ export class GcalIntegration implements Integration {
       id: this.id,
       name: this.name,
       spaceId: "system",
-      cellId: "gcal-integration-charms",
+      cellCauseName: "gcal-integration-charms",
       fetchCharms: () => this.fetchGcalIntegrationCharms(),
       isValidIntegrationCharm: (charm) => this.isValidGcalCharm(charm),
     };

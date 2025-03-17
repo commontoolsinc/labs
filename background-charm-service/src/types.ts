@@ -30,8 +30,8 @@ export interface IntegrationCellConfig {
   // Space ID where the integration cell is located
   spaceId: string;
 
-  // Cell ID for the integration cell
-  cellId: string;
+  // Cause name for the integration cell
+  cellCauseName: string;
 
   // Custom fetcher function for retrieving charms
   fetchCharms: () => Promise<Array<{ space: DID; charmId: string }>>;

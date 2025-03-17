@@ -53,7 +53,7 @@ export class MyIntegration implements Integration {
       id: this.id,
       name: this.name,
       spaceId: "system", // Update as needed
-      cellId: "my-integration-cell",
+      cellCauseName: "my-integration-cell",
       fetchCharms: () => this.fetchMyIntegrationCharms(),
       isValidIntegrationCharm: (charm) => this.isValidCharm(charm),
     };
