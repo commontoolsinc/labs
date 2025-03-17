@@ -9,6 +9,7 @@ import {
   str,
   UI,
 } from "@commontools/builder";
+import { sleep } from "@commontools/utils/sleep";
 
 interface GitHubCommit {
   sha: string;
@@ -51,8 +52,6 @@ async function getCommitDetails(
 
   return await response.json();
 }
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function getRecentCommits(
   owner: string,
