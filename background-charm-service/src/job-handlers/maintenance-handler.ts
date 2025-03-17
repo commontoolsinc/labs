@@ -10,12 +10,12 @@ import { log } from "../utils.ts";
 export class MaintenanceHandler implements JobHandler {
   private kv: Deno.Kv;
   private stateManager: KVStateManager;
-  
+
   constructor(kv: Deno.Kv) {
     this.kv = kv;
     this.stateManager = new KVStateManager(kv);
   }
-  
+
   /**
    * Handle a maintenance job
    */
@@ -23,12 +23,12 @@ export class MaintenanceHandler implements JobHandler {
     if (job.type !== JobType.MAINTENANCE) {
       throw new Error(`Invalid job type: ${job.type}`);
     }
-    
+
     const maintenanceJob = job as MaintenanceJob;
     const { task } = maintenanceJob;
-    
+
     log(`Running maintenance task: ${task}`);
-    
+
     switch (task) {
       case "cleanup":
         return this.runCleanup();
@@ -40,7 +40,7 @@ export class MaintenanceHandler implements JobHandler {
         throw new Error(`Unknown maintenance task: ${task}`);
     }
   }
-  
+
   /**
    * Run cleanup task
    */
@@ -48,27 +48,36 @@ export class MaintenanceHandler implements JobHandler {
     // Clean up old jobs
     const jobQueue = new JobQueue(this.kv);
     const cleaned = await jobQueue.cleanup();
-    
-    return { 
+
+    return {
       cleanedJobs: cleaned,
-      taskType: "cleanup"
+      taskType: "cleanup",
     };
   }
-  
+
   /**
    * Update service statistics
    */
   private async updateStats(): Promise<unknown> {
     // Get all charm states
     const allCharmStates = await this.stateManager.getAllCharmStates();
-    
+
     // Count metrics
     const totalCharms = allCharmStates.length;
-    const disabledCharms = allCharmStates.filter(s => s.disabled).length;
-    const totalExecutions = allCharmStates.reduce((sum, s) => sum + s.totalExecutions, 0);
-    const totalSuccesses = allCharmStates.reduce((sum, s) => sum + s.totalSuccesses, 0);
-    const totalFailures = allCharmStates.reduce((sum, s) => sum + s.totalFailures, 0);
-    
+    const disabledCharms = allCharmStates.filter((s) => s.disabled).length;
+    const totalExecutions = allCharmStates.reduce(
+      (sum, s) => sum + s.totalExecutions,
+      0,
+    );
+    const totalSuccesses = allCharmStates.reduce(
+      (sum, s) => sum + s.totalSuccesses,
+      0,
+    );
+    const totalFailures = allCharmStates.reduce(
+      (sum, s) => sum + s.totalFailures,
+      0,
+    );
+
     // Organize by integration
     const integrationStats = new Map<string, {
       charms: number;
@@ -77,7 +86,7 @@ export class MaintenanceHandler implements JobHandler {
       successes: number;
       failures: number;
     }>();
-    
+
     for (const state of allCharmStates) {
       if (!integrationStats.has(state.integrationId)) {
         integrationStats.set(state.integrationId, {
@@ -88,7 +97,7 @@ export class MaintenanceHandler implements JobHandler {
           failures: 0,
         });
       }
-      
+
       const stats = integrationStats.get(state.integrationId)!;
       stats.charms++;
       if (state.disabled) stats.disabled++;
@@ -96,20 +105,24 @@ export class MaintenanceHandler implements JobHandler {
       stats.successes += state.totalSuccesses;
       stats.failures += state.totalFailures;
     }
-    
+
     // Log stats
     log("=== Service Statistics ===");
     log(`Total charms: ${totalCharms} (${disabledCharms} disabled)`);
-    log(`Total executions: ${totalExecutions} (${totalSuccesses} successes, ${totalFailures} failures)`);
-    
+    log(
+      `Total executions: ${totalExecutions} (${totalSuccesses} successes, ${totalFailures} failures)`,
+    );
+
     for (const [id, stats] of integrationStats.entries()) {
       const successRate = stats.executions > 0
         ? (stats.successes / stats.executions * 100).toFixed(2)
         : "100.00";
-        
-      log(`Integration ${id}: ${stats.charms} charms, ${successRate}% success rate`);
+
+      log(
+        `Integration ${id}: ${stats.charms} charms, ${successRate}% success rate`,
+      );
     }
-    
+
     // Return stats for result
     return {
       taskType: "stats",
@@ -118,27 +131,27 @@ export class MaintenanceHandler implements JobHandler {
       totalExecutions,
       totalSuccesses,
       totalFailures,
-      successRate: totalExecutions > 0 
-        ? (totalSuccesses / totalExecutions * 100).toFixed(2) 
+      successRate: totalExecutions > 0
+        ? (totalSuccesses / totalExecutions * 100).toFixed(2)
         : "100.00",
       integrationStats: Object.fromEntries(integrationStats),
     };
   }
-  
+
   /**
    * Reset disabled charms
    */
   private async resetDisabledCharms(): Promise<unknown> {
     // Get all disabled charms
     const allCharmStates = await this.stateManager.getAllCharmStates();
-    const disabledCharms = allCharmStates.filter(s => s.disabled);
-    
+    const disabledCharms = allCharmStates.filter((s) => s.disabled);
+
     // Find charms that haven't been run in over 24 hours
     const oneDayAgo = Date.now() - 86400000;
-    const charmsToReset = disabledCharms.filter(c => 
+    const charmsToReset = disabledCharms.filter((c) =>
       c.lastExecuted === null || c.lastExecuted < oneDayAgo
     );
-    
+
     // Reset these charms
     for (const charm of charmsToReset) {
       await this.stateManager.updateCharmState(
@@ -149,12 +162,12 @@ export class MaintenanceHandler implements JobHandler {
           disabled: false,
           consecutiveFailures: 0,
           lastError: null,
-        }
+        },
       );
-      
+
       log(`Reset disabled charm: ${charm.spaceId}/${charm.charmId}`);
     }
-    
+
     return {
       taskType: "reset",
       disabledCharms: disabledCharms.length,

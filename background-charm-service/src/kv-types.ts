@@ -27,7 +27,7 @@ export interface Job {
   id: string;
   type: JobType;
   createdAt: number;
-  priority: number; 
+  priority: number;
   retryCount: number;
   maxRetries: number;
   status: JobStatus;
@@ -71,16 +71,16 @@ export interface CharmStateEntry {
   charmId: string;
   integrationId: string;
   spaceId: string;
-  
+
   // Status
   disabled: boolean;
   lastExecuted: number | null;
-  
+
   // Error tracking
   consecutiveFailures: number;
   lastError: string | null;
   lastErrorTimestamp: number | null;
-  
+
   // Performance stats
   totalExecutions: number;
   totalSuccesses: number;
@@ -97,13 +97,13 @@ export interface ServiceStateEntry {
   startTime: number;
   lastCycleStart: number | null;
   lastCycleEnd: number | null;
-  
+
   // Stats
   cyclesCompleted: number;
   totalCharmsProcessed: number;
   totalSuccesses: number;
   totalFailures: number;
-  
+
   // Version
   version: string;
 }

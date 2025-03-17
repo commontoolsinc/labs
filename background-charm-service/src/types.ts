@@ -9,10 +9,10 @@ export interface CharmServiceConfig {
   // Basic settings
   intervalSeconds: number;
   logIntervalSeconds: number;
-  
+
   // Failure policy configuration
   maxConsecutiveFailures: number;
-  
+
   // Integration cell configuration
   integrationCells: IntegrationCellConfig[];
 }
@@ -21,21 +21,21 @@ export interface CharmServiceConfig {
  * Configuration for an integration cell
  */
 export interface IntegrationCellConfig {
-  // Unique identifier for this integration 
+  // Unique identifier for this integration
   id: string;
-  
+
   // User-friendly name for logs
   name: string;
-  
+
   // Space ID where the integration cell is located
   spaceId: string;
-  
+
   // Cell ID for the integration cell
   cellId: string;
-  
+
   // Custom fetcher function for retrieving charms
-  fetchCharms: () => Promise<Array<{space: DID; charmId: string}>>;
-  
+  fetchCharms: () => Promise<Array<{ space: DID; charmId: string }>>;
+
   // Validator function that determines if a charm belongs to this integration
   isValidIntegrationCharm?: (charm: Cell<Charm>) => boolean;
 }
@@ -46,24 +46,24 @@ export interface IntegrationCellConfig {
 export interface CharmState {
   // Unique identifier for this charm (space/charmId)
   id: string;
-  
+
   // Integration this charm belongs to
   integrationId: string;
-  
+
   // Whether this charm is currently enabled
   enabled: boolean;
-  
+
   // Execution statistics
   lastRunTimestamp: number | null;
   totalRuns: number;
   successfulRuns: number;
   failedRuns: number;
   consecutiveFailures: number;
-  
+
   // Last error information
   lastError?: string;
   lastErrorTimestamp?: number;
-  
+
   // Performance metrics
   executionStats: {
     totalTimeMs: number;
@@ -101,13 +101,13 @@ export interface CharmServiceStats {
 export interface Integration {
   // Unique identifier for the integration
   id: string;
-  
+
   // User-friendly name for the integration
   name: string;
-  
+
   // Initialize the integration
   initialize: () => Promise<void>;
-  
+
   // Get integration cell configuration
   getIntegrationConfig: () => IntegrationCellConfig;
 }

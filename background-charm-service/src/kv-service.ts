@@ -1,12 +1,11 @@
 import { Integration } from "./types.ts";
 import { JobQueue } from "./job-queue.ts";
 import { KVStateManager } from "./kv-state-manager.ts";
-import { 
-  JobType, 
-  KV_PREFIXES, 
-  KVServiceOptions 
-} from "./kv-types.ts";
-import { loadIntegrations, getAvailableIntegrations } from "./integrations/index.ts";
+import { JobType, KV_PREFIXES, KVServiceOptions } from "./kv-types.ts";
+import {
+  getAvailableIntegrations,
+  loadIntegrations,
+} from "./integrations/index.ts";
 import { log } from "./utils.ts";
 
 /**
@@ -21,92 +20,96 @@ export class KVBackgroundCharmService {
   private cycleTimer: number | null = null;
   private isRunning = false;
   private globalErrorHandlerInstalled = false;
-  
+
   constructor(options: KVServiceOptions) {
     this.kv = options.kv;
     this.queue = new JobQueue(this.kv, {
       maxConcurrentJobs: options.maxConcurrentJobs,
-      maxRetries: options.maxRetries
+      maxRetries: options.maxRetries,
     });
     this.stateManager = new KVStateManager(this.kv, options.logIntervalMs);
     this.integrations = new Map();
     this.cycleIntervalMs = options.cycleIntervalMs ?? 60_000; // Default 1 minute
-    
+
     // Install global error handlers
     this.installGlobalErrorHandlers();
-    
+
     log("KV Background Charm Service constructed");
   }
-  
+
   /**
    * Install global error handlers
    */
   private installGlobalErrorHandlers(): void {
     if (this.globalErrorHandlerInstalled) return;
-    
+
     // Handle unhandled promise rejections
     self.addEventListener("unhandledrejection", (event) => {
       const errorMessage = event.reason instanceof Error
         ? event.reason.message
         : String(event.reason);
-      
+
       log(`⚠️ Caught unhandled promise rejection: ${errorMessage}`);
-      
+
       if (event.reason instanceof Error && event.reason.stack) {
-        log(`Stack trace: ${event.reason.stack.split("\n").slice(0, 5).join("\n")}`);
+        log(
+          `Stack trace: ${
+            event.reason.stack.split("\n").slice(0, 5).join("\n")
+          }`,
+        );
       } else {
         log(`Full rejection data: ${JSON.stringify(event.reason, null, 2)}`);
       }
-      
+
       event.preventDefault();
     });
-    
+
     // Handle uncaught exceptions
     self.addEventListener("error", (event) => {
       log(`⚠️ Caught uncaught exception: ${event.message}`);
       log(`Location: ${event.filename}:${event.lineno}:${event.colno}`);
-      
+
       event.preventDefault();
     });
-    
+
     this.globalErrorHandlerInstalled = true;
     log("Global error handlers installed");
   }
-  
+
   /**
    * Initialize the service
    */
   async initialize(): Promise<void> {
     // Initialize KV schema
     await this.stateManager.initialize();
-    
+
     // Load integrations
     await loadIntegrations();
-    
+
     // Register all available integrations
     for (const integration of getAvailableIntegrations()) {
       await this.registerIntegration(integration);
     }
-    
+
     log("KV Background Charm Service initialized");
   }
-  
+
   /**
    * Register an integration
    */
   private async registerIntegration(integration: Integration): Promise<void> {
     this.integrations.set(integration.id, integration);
-    
+
     // Store integration config in KV
     const config = integration.getIntegrationConfig();
     await this.stateManager.setIntegrationConfig(integration.id, config);
-    
+
     // Initialize integration
     await integration.initialize();
-    
+
     log(`Registered integration: ${integration.id}`);
   }
-  
+
   /**
    * Start the service
    */
@@ -115,25 +118,29 @@ export class KVBackgroundCharmService {
       log("Service is already running");
       return;
     }
-    
+
     this.isRunning = true;
-    
+
     // Start job consumer
     this.queue.startConsumer();
-    
+
     // Run initial cycle
     await this.runCycle();
-    
+
     // Schedule regular cycles
     this.cycleTimer = setInterval(() => {
-      this.runCycle().catch(error => {
-        log(`Error in cycle: ${error instanceof Error ? error.message : String(error)}`);
+      this.runCycle().catch((error) => {
+        log(
+          `Error in cycle: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
       });
     }, this.cycleIntervalMs) as unknown as number;
-    
+
     log(`Service started, cycle interval: ${this.cycleIntervalMs}ms`);
   }
-  
+
   /**
    * Stop the service
    */
@@ -142,27 +149,27 @@ export class KVBackgroundCharmService {
       log("Service is not running");
       return;
     }
-    
+
     // Clear interval
     if (this.cycleTimer !== null) {
       clearInterval(this.cycleTimer);
       this.cycleTimer = null;
     }
-    
+
     // Stop consumer
     await this.queue.stopConsumer();
-    
+
     // Stop state manager
     this.stateManager.stop();
-    
+
     this.isRunning = false;
-    
+
     // Log final state
     await this.stateManager.logState();
-    
+
     log("Service stopped");
   }
-  
+
   /**
    * Run a cycle
    */
@@ -170,34 +177,38 @@ export class KVBackgroundCharmService {
     // Update cycle start time
     await this.stateManager.updateCycleStats(true);
     log("Starting cycle");
-    
+
     try {
       // Queue a maintenance job for statistics (lowest priority)
       await this.queue.addMaintenanceJob("stats", 1);
-      
+
       // Queue a maintenance job for cleanup (low priority)
       await this.queue.addMaintenanceJob("cleanup", 2);
-      
+
       // Queue a maintenance job for resetting disabled charms (medium-low priority)
       await this.queue.addMaintenanceJob("reset", 3);
-      
+
       // Queue scan jobs for each integration (medium-high priority)
       for (const [id, integration] of this.integrations.entries()) {
         // Scan integrations have medium-high priority (5)
         await this.queue.addScanIntegrationJob(id, 5);
       }
-      
+
       // Update cycle end time
       await this.stateManager.updateCycleStats(false);
-      
+
       log("Cycle completed successfully");
     } catch (error) {
-      log(`Error in cycle: ${error instanceof Error ? error.message : String(error)}`);
+      log(
+        `Error in cycle: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
       // Still update the cycle end even on error
       await this.stateManager.updateCycleStats(false);
     }
   }
-  
+
   /**
    * Get service status
    */
@@ -212,7 +223,7 @@ export class KVBackgroundCharmService {
     serviceState: unknown;
   }> {
     const serviceState = await this.stateManager.getServiceState();
-    
+
     return {
       running: this.isRunning,
       integrations: Array.from(this.integrations.keys()),
@@ -220,7 +231,7 @@ export class KVBackgroundCharmService {
       serviceState,
     };
   }
-  
+
   /**
    * Initialize an integration
    */
@@ -229,7 +240,7 @@ export class KVBackgroundCharmService {
     if (!integration) {
       throw new Error(`Integration not found: ${integrationId}`);
     }
-    
+
     await integration.initialize();
     log(`Initialized integration: ${integrationId}`);
   }
