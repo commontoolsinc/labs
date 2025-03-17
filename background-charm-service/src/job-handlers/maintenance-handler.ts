@@ -1,6 +1,6 @@
 import { JobHandler } from "./base-handler.ts";
-import { Job, JobType, MaintenanceJob } from "../kv-types.ts";
-import { KVStateManager } from "../kv-state-manager.ts";
+import { Job, JobType, MaintenanceJob } from "../types.ts";
+import { StateManager } from "../state-manager.ts";
 import { JobQueue } from "../job-queue.ts";
 import { log } from "../utils.ts";
 
@@ -9,11 +9,11 @@ import { log } from "../utils.ts";
  */
 export class MaintenanceHandler implements JobHandler {
   private kv: Deno.Kv;
-  private stateManager: KVStateManager;
+  private stateManager: StateManager;
 
   constructor(kv: Deno.Kv) {
     this.kv = kv;
-    this.stateManager = new KVStateManager(kv);
+    this.stateManager = new StateManager(kv);
   }
 
   /**

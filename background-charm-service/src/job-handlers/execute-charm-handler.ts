@@ -1,7 +1,7 @@
 /// <reference lib="deno.unstable" />
 import { JobHandler } from "./base-handler.ts";
-import { ExecuteCharmJob, Job, JobType } from "../kv-types.ts";
-import { KVStateManager } from "../kv-state-manager.ts";
+import { ExecuteCharmJob, Job, JobType } from "../types.ts";
+import { StateManager } from "../state-manager.ts";
 import { log } from "../utils.ts";
 import * as Session from "../session.ts";
 import { Cell, isStream, storage } from "@commontools/runner";
@@ -26,14 +26,14 @@ import { WorkerPool } from "../utils/worker-pool.ts";
  */
 export class ExecuteCharmHandler implements JobHandler {
   private kv: Deno.Kv;
-  private stateManager: KVStateManager;
+  private stateManager: StateManager;
   private managerCache = new Map<string, CharmManager>();
   private workerPool: WorkerPool<any, any>;
   private config: ReturnType<typeof getConfig>;
 
   constructor(kv: Deno.Kv) {
     this.kv = kv;
-    this.stateManager = new KVStateManager(kv);
+    this.stateManager = new StateManager(kv);
     this.config = getConfig();
 
     // Initialize worker pool

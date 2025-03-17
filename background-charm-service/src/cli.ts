@@ -2,9 +2,8 @@
 /// <reference lib="deno.unstable" />
 // CLI entry point for the Background Charm Service
 import { parseArgs } from "@std/cli/parse-args";
-import { BackgroundCharmService } from "./background-charm-service.ts";
-import { KVBackgroundCharmService } from "./kv-service.ts";
-import { CharmServiceConfig, IntegrationCellConfig } from "./types.ts";
+import { BackgroundCharmService } from "./service.ts";
+import { IntegrationCellConfig } from "./types.ts";
 import { isValidCharmId, isValidDID, log, parseCharmsInput } from "./utils.ts";
 import { setBobbyServerUrl, storage } from "@commontools/runner";
 import type { DID } from "@commontools/identity";
@@ -165,7 +164,7 @@ async function main() {
   const config = mergeConfigWithArgs(baseConfig, args);
 
   // Create service with merged config
-  const kvService = new KVBackgroundCharmService({
+  const service = new BackgroundCharmService({
     kv,
     cycleIntervalMs: config.cycleIntervalMs,
     maxConcurrentJobs: config.maxConcurrentJobs,
@@ -175,17 +174,17 @@ async function main() {
   });
 
   // Initialize service
-  await kvService.initialize();
+  await service.initialize();
 
   // Register the manual integration if provided
   if (integrationCellConfig) {
-    await kvService.registerManualIntegration(integrationCellConfig);
+    await service.registerManualIntegration(integrationCellConfig);
   }
 
   // Handle graceful shutdown
   const shutdown = () => {
     console.log("Shutting down service...");
-    kvService.stop().then(() => {
+    service.stop().then(() => {
       kv.close();
       Deno.exit(0);
     });
@@ -196,7 +195,7 @@ async function main() {
   Deno.addSignalListener("SIGTERM", shutdown);
 
   // Start the service
-  await kvService.start();
+  await service.start();
 
   log("Background Charm Service started successfully");
   log("Press Ctrl+C to stop");

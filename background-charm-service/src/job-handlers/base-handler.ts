@@ -1,4 +1,4 @@
-import { Job } from "../kv-types.ts";
+import { Job } from "../types.ts";
 
 /**
  * Base interface for job handlers

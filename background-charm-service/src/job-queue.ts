@@ -7,7 +7,7 @@ import {
   KV_PREFIXES,
   MaintenanceJob,
   ScanIntegrationJob,
-} from "./kv-types.ts";
+} from "./types.ts";
 import { log } from "./utils.ts";
 
 // Import handlers

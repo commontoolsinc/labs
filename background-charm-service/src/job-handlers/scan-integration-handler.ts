@@ -1,6 +1,6 @@
 import { JobHandler } from "./base-handler.ts";
-import { Job, JobType, ScanIntegrationJob } from "../kv-types.ts";
-import { KVStateManager } from "../kv-state-manager.ts";
+import { Job, JobType, ScanIntegrationJob } from "../types.ts";
+import { StateManager } from "../state-manager.ts";
 import { JobQueue } from "../job-queue.ts";
 import { log } from "../utils.ts";
 import { getIntegration } from "../integrations/index.ts";
@@ -11,7 +11,7 @@ import type { DID } from "@commontools/identity";
  */
 export class ScanIntegrationHandler implements JobHandler {
   private kv: Deno.Kv;
-  private stateManager: KVStateManager;
+  private stateManager: StateManager;
   private charmCache: Map<string, Array<{ space: DID; charmId: string }>> =
     new Map();
   private cacheTimestamp: Map<string, number> = new Map();
@@ -19,7 +19,7 @@ export class ScanIntegrationHandler implements JobHandler {
 
   constructor(kv: Deno.Kv) {
     this.kv = kv;
-    this.stateManager = new KVStateManager(kv);
+    this.stateManager = new StateManager(kv);
   }
 
   /**

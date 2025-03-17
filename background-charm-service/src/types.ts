@@ -1,21 +1,6 @@
 import { Cell } from "@commontools/runner";
-import { Charm, CharmManager } from "@commontools/charm";
+import { Charm } from "@commontools/charm";
 import type { DID } from "@commontools/identity";
-
-/**
- * Configuration for the Background Charm Service
- */
-export interface CharmServiceConfig {
-  // Basic settings
-  intervalSeconds: number;
-  logIntervalSeconds: number;
-
-  // Failure policy configuration
-  maxConsecutiveFailures: number;
-
-  // Integration cell configuration
-  integrationCells: IntegrationCellConfig[];
-}
 
 /**
  * Configuration for an integration cell
@@ -30,69 +15,14 @@ export interface IntegrationCellConfig {
   // Space ID where the integration cell is located
   spaceId: string;
 
-  // Cause name for the integration cell
-  cellCauseName: string;
+  // Cell ID for the integration cell (replaces cellCauseName)
+  cellId: string;
 
   // Custom fetcher function for retrieving charms
   fetchCharms: () => Promise<Array<{ space: DID; charmId: string }>>;
 
   // Validator function that determines if a charm belongs to this integration
   isValidIntegrationCharm?: (charm: Cell<Charm>) => boolean;
-}
-
-/**
- * State tracking for a charm
- */
-export interface CharmState {
-  // Unique identifier for this charm (space/charmId)
-  id: string;
-
-  // Integration this charm belongs to
-  integrationId: string;
-
-  // Whether this charm is currently enabled
-  enabled: boolean;
-
-  // Execution statistics
-  lastRunTimestamp: number | null;
-  totalRuns: number;
-  successfulRuns: number;
-  failedRuns: number;
-  consecutiveFailures: number;
-
-  // Last error information
-  lastError?: string;
-  lastErrorTimestamp?: number;
-
-  // Performance metrics
-  executionStats: {
-    totalTimeMs: number;
-    avgTimeMs: number;
-    minTimeMs: number | null;
-    maxTimeMs: number | null;
-    lastRunTimeMs: number | null;
-  };
-}
-
-/**
- * Result of a charm execution
- */
-export interface CharmExecutionResult {
-  success: boolean;
-  executionTimeMs: number;
-  error?: Error;
-  metadata?: Record<string, unknown>;
-}
-
-/**
- * Overall statistics for the charm service
- */
-export interface CharmServiceStats {
-  totalRuns: number;
-  totalSuccesses: number;
-  totalFailures: number;
-  startTime: number;
-  charmsProcessed: Set<string>;
 }
 
 /**
@@ -110,4 +40,130 @@ export interface Integration {
 
   // Get integration cell configuration
   getIntegrationConfig: () => IntegrationCellConfig;
+}
+
+/**
+ * Result of a charm execution
+ */
+export interface CharmExecutionResult {
+  success: boolean;
+  executionTimeMs: number;
+  error?: Error;
+  metadata?: Record<string, unknown>;
+}
+
+// KV store prefixes
+export const KV_PREFIXES = {
+  CHARM_STATE: ["charm_state"],
+  SERVICE_STATE: ["service_state"],
+  INTEGRATION_CONFIG: ["integration_config"],
+  JOB_QUEUE: ["job_queue"],
+  JOB_RESULTS: ["job_results"],
+};
+
+// Job types
+export enum JobType {
+  SCAN_INTEGRATION = "scan_integration",
+  EXECUTE_CHARM = "execute_charm",
+  MAINTENANCE = "maintenance",
+}
+
+// Job status
+export type JobStatus = "pending" | "processing" | "completed" | "failed";
+
+// Base job interface
+export interface Job {
+  id: string;
+  type: JobType;
+  createdAt: number;
+  priority: number;
+  retryCount: number;
+  maxRetries: number;
+  status: JobStatus;
+  // Internal property for tracking KV entry version
+  _versionstamp?: string;
+}
+
+// Scan integration job
+export interface ScanIntegrationJob extends Job {
+  type: JobType.SCAN_INTEGRATION;
+  integrationId: string;
+}
+
+// Execute charm job
+export interface ExecuteCharmJob extends Job {
+  type: JobType.EXECUTE_CHARM;
+  integrationId: string;
+  spaceId: string;
+  charmId: string;
+}
+
+// Maintenance job
+export interface MaintenanceJob extends Job {
+  type: JobType.MAINTENANCE;
+  task: "cleanup" | "stats" | "reset";
+}
+
+// Job result
+export interface JobResult {
+  jobId: string;
+  success: boolean;
+  error?: string;
+  data?: unknown;
+  completedAt: number;
+  executionTimeMs: number;
+}
+
+// Charm state in KV store
+export interface CharmStateEntry {
+  // Identifiers
+  charmId: string;
+  integrationId: string;
+  spaceId: string;
+
+  // Status
+  disabled: boolean;
+  lastExecuted: number | null;
+
+  // Error tracking
+  consecutiveFailures: number;
+  lastError: string | null;
+  lastErrorTimestamp: number | null;
+
+  // Performance stats
+  totalExecutions: number;
+  totalSuccesses: number;
+  totalFailures: number;
+  avgExecutionTimeMs: number;
+  minExecutionTimeMs: number | null;
+  maxExecutionTimeMs: number | null;
+  lastExecutionTimeMs: number | null;
+}
+
+// Service state in KV store
+export interface ServiceStateEntry {
+  // Timing
+  startTime: number;
+  lastCycleStart: number | null;
+  lastCycleEnd: number | null;
+
+  // Stats
+  cyclesCompleted: number;
+  totalCharmsProcessed: number;
+  totalSuccesses: number;
+  totalFailures: number;
+
+  // Version
+  version: string;
+}
+
+// Service options
+export interface KVServiceOptions {
+  kv: Deno.Kv;
+  cycleIntervalMs?: number;
+  maxConcurrentJobs?: number;
+  maxRetries?: number;
+  charmTimeoutMs?: number;
+  logIntervalMs?: number;
+  maxConsecutiveFailures?: number;
 }

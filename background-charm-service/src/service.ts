@@ -1,7 +1,12 @@
-import { Integration, IntegrationCellConfig } from "./types.ts";
+import {
+  Integration,
+  IntegrationCellConfig,
+  JobType,
+  KV_PREFIXES,
+  KVServiceOptions,
+} from "./types.ts";
 import { JobQueue } from "./job-queue.ts";
-import { KVStateManager } from "./kv-state-manager.ts";
-import { JobType, KV_PREFIXES, KVServiceOptions } from "./kv-types.ts";
+import { StateManager } from "./state-manager.ts";
 import {
   getAvailableIntegrations,
   loadIntegrations,
@@ -14,10 +19,10 @@ import { IntegrationError } from "./errors/index.ts";
 /**
  * Background Charm Service using Deno KV and job queues
  */
-export class KVBackgroundCharmService {
+export class BackgroundCharmService {
   private kv: Deno.Kv;
   private queue: JobQueue;
-  private stateManager: KVStateManager;
+  private stateManager: StateManager;
   private integrations: Map<string, Integration>;
   private cycleIntervalMs: number;
   private cycleTimer: number | null = null;
@@ -37,7 +42,7 @@ export class KVBackgroundCharmService {
       pollingIntervalMs: env.POLLING_INTERVAL_MS,
     });
 
-    this.stateManager = new KVStateManager(
+    this.stateManager = new StateManager(
       this.kv,
       options.logIntervalMs ?? env.LOG_INTERVAL_MS,
     );
@@ -111,7 +116,7 @@ export class KVBackgroundCharmService {
       await this.registerIntegration(integration);
     }
 
-    log("KV Background Charm Service initialized");
+    log("Background Charm Service initialized");
   }
 
   /**
