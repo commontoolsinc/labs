@@ -1,11 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { getDoc } from "../src/doc.ts";
-import { type Cell, isCell } from "../src/cell.ts";
+import { type Cell } from "../src/cell.ts";
 import { type JSONSchema } from "@commontools/builder";
-import { recipe, opaqueRef } from "@commontools/builder";
-import { run, stop } from "../src/runner.ts";
-import { idle } from "../src/scheduler.ts";
 
 describe("Schema Lineage", () => {
   describe("Schema Propagation through Aliases", () => {
@@ -14,7 +11,7 @@ describe("Schema Lineage", () => {
       const targetDoc = getDoc(
         { count: 42, label: "test" },
         "schema-lineage-target",
-        "test"
+        "test",
       );
 
       // Create a schema for our alias
@@ -22,31 +19,32 @@ describe("Schema Lineage", () => {
         type: "object",
         properties: {
           count: { type: "number" },
-          label: { type: "string" }
-        }
+          label: { type: "string" },
+        },
       } as const satisfies JSONSchema;
 
       // Create a doc with an alias that includes schema information
       const sourceDoc = getDoc(
-        { 
-          $alias: { 
-            cell: targetDoc, 
+        {
+          $alias: {
+            cell: targetDoc,
             path: [],
             schema,
-            rootSchema: schema
-          } 
+            rootSchema: schema,
+          },
         },
         "schema-lineage-source",
-        "test"
+        "test",
       );
 
       // Access the doc without providing a schema
-      const cell = sourceDoc.asCell();
-      
+      // (Type script type is just to avoid compiler errors)
+      const cell: Cell<{ count: number; label: string }> = sourceDoc.asCell();
+
       // The cell should have picked up the schema from the alias
       expect(cell.schema).toBeDefined();
       expect(cell.schema).toEqual(schema);
-      
+
       // When we access a nested property, it should have the correct schema
       const countCell = cell.key("count");
       expect(countCell.schema).toBeDefined();
@@ -58,7 +56,7 @@ describe("Schema Lineage", () => {
       const targetDoc = getDoc(
         { count: 42, label: "test" },
         "schema-lineage-target-explicit",
-        "test"
+        "test",
       );
 
       // Create schemas with different types
@@ -66,39 +64,39 @@ describe("Schema Lineage", () => {
         type: "object",
         properties: {
           count: { type: "number" },
-          label: { type: "string" }
-        }
+          label: { type: "string" },
+        },
       } as const satisfies JSONSchema;
 
       const explicitSchema = {
         type: "object",
         properties: {
           count: { type: "string" }, // Different type than in aliasSchema
-          label: { type: "string" }
-        }
+          label: { type: "string" },
+        },
       } as const satisfies JSONSchema;
 
       // Create a doc with an alias that includes schema information
       const sourceDoc = getDoc(
-        { 
-          $alias: { 
-            cell: targetDoc, 
+        {
+          $alias: {
+            cell: targetDoc,
             path: [],
             schema: aliasSchema,
-            rootSchema: aliasSchema
-          } 
+            rootSchema: aliasSchema,
+          },
         },
         "schema-lineage-source-explicit",
-        "test"
+        "test",
       );
 
       // Access the doc with explicit schema
       const cell = sourceDoc.asCell([], undefined, explicitSchema);
-      
+
       // The cell should have the explicit schema, not the alias schema
       expect(cell.schema).toBeDefined();
       expect(cell.schema).toEqual(explicitSchema);
-      
+
       // The nested property should have the schema from explicitSchema
       const countCell = cell.key("count");
       expect(countCell.schema).toBeDefined();
@@ -112,41 +110,41 @@ describe("Schema Lineage", () => {
       const valueDoc = getDoc(
         { count: 5, name: "test" },
         "deep-alias-value",
-        "test"
+        "test",
       );
-      
+
       // Create a schema for our first level alias
       const numberSchema = { type: "number" };
-      
+
       // Create a doc with an alias specifically for the count field
       const countDoc = getDoc(
-        { 
-          $alias: { 
-            cell: valueDoc, 
+        {
+          $alias: {
+            cell: valueDoc,
             path: ["count"],
             schema: numberSchema,
-            rootSchema: numberSchema
-          } 
+            rootSchema: numberSchema,
+          },
         },
         "count-alias",
-        "test"
+        "test",
       );
-      
+
       // Create a third level of aliasing
       const finalDoc = getDoc(
-        { 
-          $alias: { 
-            cell: countDoc, 
+        {
+          $alias: {
+            cell: countDoc,
             path: [],
-          } 
+          },
         },
         "final-alias",
-        "test"
+        "test",
       );
-      
+
       // Access the doc without providing a schema
       const cell = finalDoc.asCell();
-      
+
       // The cell should have picked up the schema from the alias chain
       expect(cell.schema).toBeDefined();
       expect(cell.schema).toEqual(numberSchema);
