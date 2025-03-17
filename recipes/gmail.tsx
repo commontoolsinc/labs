@@ -125,6 +125,24 @@ const updateLimit = handler({
   state.limit.set(parseInt(detail?.value ?? "100") || 0);
 });
 
+const refreshAuthToken = async (auth: Auth) => {
+  const body = {
+    refreshToken: auth.refreshToken,
+  };
+
+  console.log("refreshAuthToken", body);
+
+  const refresh_response = await fetch(
+    "/api/integrations/google-oauth/refresh",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  ).then((res) => res.json());
+
+  console.log("refresh_data", refresh_response);
+};
+
 const googleUpdater = handler(
   {},
   {
@@ -144,23 +162,25 @@ const googleUpdater = handler(
       console.warn("no token");
       return;
     }
-    if (state.auth.expiresAt && state.auth.expiresAt < Date.now()) {
+
+    refreshAuthToken(state.auth);
+    if (state.auth.expiresAt && Date.now() > state.auth.expiresAt) {
       console.warn("token expired at ", state.auth.expiresAt);
       return;
     }
+
+    return;
 
     const gmailFilterQuery = state.settings.gmailFilterQuery;
 
     console.log("gmailFilterQuery", gmailFilterQuery);
 
     fetchEmail(
-      state.auth.token,
+      auth.token,
       state.settings.limit,
       gmailFilterQuery,
       state,
     );
-
-    fetchLabels(state.auth.token, state);
   },
 );
 

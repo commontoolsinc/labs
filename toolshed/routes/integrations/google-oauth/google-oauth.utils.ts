@@ -247,14 +247,6 @@ export async function getTokensFromAuthCell(
   }
 }
 
-// Format token info for response
-export function formatTokenInfo(tokenData: AuthData) {
-  return {
-    expiresAt: tokenData.expiresAt,
-    hasRefreshToken: !!tokenData.refreshToken,
-  };
-}
-
 // Standard error response
 export function createErrorResponse(c: Context, message: string, status = 400) {
   return c.json({
@@ -289,7 +281,7 @@ export function createLoginErrorResponse(c: any, errorMessage: string) {
 export function createRefreshSuccessResponse(
   c: any,
   message: string,
-  tokenInfo: { expiresAt?: number; hasRefreshToken: boolean },
+  tokenInfo: AuthData,
 ) {
   return c.json(
     {

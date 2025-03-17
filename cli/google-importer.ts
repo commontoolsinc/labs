@@ -96,21 +96,30 @@ async function loadGmailIntegrationCharms() {
       const validCharms = charms.filter(({ space, charmId }) => {
         // Validate space is a proper DID
         if (!isValidDID(space as string)) {
-          log(undefined, `Skipping invalid space ID: ${space}. Must be a valid DID.`);
+          log(
+            undefined,
+            `Skipping invalid space ID: ${space}. Must be a valid DID.`,
+          );
           return false;
         }
-        
+
         // Validate charmId is a proper merkle ID
         if (!isValidCharmId(charmId)) {
-          log(undefined, `Skipping invalid charm ID: ${charmId}. Must be a valid merkle ID.`);
+          log(
+            undefined,
+            `Skipping invalid charm ID: ${charmId}. Must be a valid merkle ID.`,
+          );
           return false;
         }
-        
+
         return true;
       });
-      
-      log(undefined, `Found ${validCharms.length} valid charms out of ${charms.length} total`);
-      
+
+      log(
+        undefined,
+        `Found ${validCharms.length} valid charms out of ${charms.length} total`,
+      );
+
       for (const { space, charmId } of validCharms) {
         try {
           log(
@@ -134,8 +143,13 @@ async function loadGmailIntegrationCharms() {
             log(charmId, "charm not found");
           }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          log(undefined, `Error processing charm ${space}/${charmId}: ${errorMessage}`);
+          const errorMessage = error instanceof Error
+            ? error.message
+            : String(error);
+          log(
+            undefined,
+            `Error processing charm ${space}/${charmId}: ${errorMessage}`,
+          );
           // Continue with next charm even if this one fails
         }
       }
@@ -199,7 +213,6 @@ async function refreshAuthToken(
   space: DID,
 ) {
   const authCellId = JSON.parse(JSON.stringify(auth.getAsCellLink()));
-  authCellId.space = space as string;
   log(charm, `token expired, refreshing: ${authCellId}`);
 
   const refresh_url = new URL(
@@ -282,29 +295,35 @@ function parseCharmsInput(
   charms: string,
 ): ({ space: DID; charmId: string })[] {
   const result: ({ space: DID; charmId: string })[] = [];
-  
+
   charms.split(",").forEach((entry) => {
     const parts = entry.split("/");
     if (parts.length !== 2) {
-      log(undefined, `Invalid charm format: ${entry}. Expected format: space/charmId`);
+      log(
+        undefined,
+        `Invalid charm format: ${entry}. Expected format: space/charmId`,
+      );
       return; // Skip this entry
     }
-    
+
     const [space, charmId] = parts;
-    
+
     if (!isValidDID(space)) {
       log(undefined, `Invalid space ID: ${space}. Must be a valid DID.`);
       return; // Skip this entry
     }
-    
+
     if (!isValidCharmId(charmId)) {
-      log(undefined, `Invalid charm ID: ${charmId}. Must be a valid merkle ID.`);
+      log(
+        undefined,
+        `Invalid charm ID: ${charmId}. Must be a valid merkle ID.`,
+      );
       return; // Skip this entry
     }
-    
+
     result.push({ space: space as DID, charmId });
   });
-  
+
   return result;
 }
 
@@ -313,10 +332,10 @@ function parseCharmsInput(
  */
 async function processCmdLineCharms() {
   if (!charms) return false;
-  
+
   log(undefined, "Processing command-line specified charms");
   const addresses = parseCharmsInput(charms);
-  
+
   async function processCharms() {
     for (const { space, charmId } of addresses) {
       try {
@@ -335,29 +354,39 @@ async function processCmdLineCharms() {
           log(charmId, "charm not found");
         }
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        log(undefined, `Error processing charm ${space}/${charmId}: ${errorMessage}`);
+        const errorMessage = error instanceof Error
+          ? error.message
+          : String(error);
+        log(
+          undefined,
+          `Error processing charm ${space}/${charmId}: ${errorMessage}`,
+        );
         // Continue with next charm even if this one fails
       }
     }
   }
-  
+
   // Process charms initially
   await processCharms();
-  
+
   // Set up interval to periodically process the same charms
   log(undefined, `Setting up check interval for ${CHECK_INTERVAL} seconds`);
   setInterval(async () => {
     try {
-      log(undefined, "Running scheduled check for command-line specified charms");
+      log(
+        undefined,
+        "Running scheduled check for command-line specified charms",
+      );
       await processCharms();
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error
+        ? error.message
+        : String(error);
       log(undefined, `Error in command-line charms interval: ${errorMessage}`);
       // Keep the interval going even if there's an error
     }
   }, CHECK_INTERVAL);
-  
+
   return true;
 }
 
@@ -371,7 +400,7 @@ async function main() {
 
   // Initial load of Gmail integration charms
   await loadGmailIntegrationCharms();
-  
+
   // Set up interval to periodically reload charms
   log(undefined, `Setting up check interval for ${CHECK_INTERVAL} seconds`);
   setInterval(async () => {
@@ -379,7 +408,9 @@ async function main() {
       log(undefined, "Running scheduled check for Gmail integration charms");
       await loadGmailIntegrationCharms();
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error
+        ? error.message
+        : String(error);
       log(undefined, `Error in Gmail integration interval: ${errorMessage}`);
       // Keep the interval going even if there's an error
     }

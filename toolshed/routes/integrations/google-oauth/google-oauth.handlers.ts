@@ -6,11 +6,11 @@ import type {
   RefreshRoute,
 } from "./google-oauth.routes.ts";
 import {
+  type AuthData,
   type CallbackResult,
   clearAuthData,
   codeVerifiers,
   createCallbackResponse,
-  createErrorResponse,
   createLoginErrorResponse,
   createLoginSuccessResponse,
   createLogoutErrorResponse,
@@ -19,9 +19,7 @@ import {
   createRefreshErrorResponse,
   createRefreshSuccessResponse,
   fetchUserInfo,
-  formatTokenInfo,
   getBaseUrl,
-  getTokensFromAuthCell,
   persistTokens,
 } from "./google-oauth.utils.ts";
 import { addCharmToGmailIntegrations } from "@commontools/utils";
@@ -220,7 +218,7 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
       details: {
         state: decodedState,
         scope,
-        tokenInfo: formatTokenInfo(tokenData),
+        tokenInfo: tokenData,
         userInfo,
         timestamp: new Date().toISOString(),
       },
@@ -243,76 +241,58 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
 export const refresh: AppRouteHandler<RefreshRoute> = async (c) => {
   const logger = c.get("logger");
 
+  let refreshToken: string;
+
   try {
     const payload = await c.req.json();
     logger.info({ payload }, "Received Google OAuth refresh request");
 
-    if (!payload.authCellId) {
-      logger.error("No authCellId provided in refresh request");
-      return createRefreshErrorResponse(c, "No authCellId provided");
+    if (!payload.refreshToken) {
+      logger.error("No refreshToken provided");
+      return createRefreshErrorResponse(c, "No refreshToken provided");
     }
 
+    refreshToken = payload.refreshToken;
+
+    // Get redirect URI for client creation
+    const baseUrl = getBaseUrl(c.req.url);
+    const redirectUri = `${baseUrl}/api/integrations/google-oauth/callback`;
+
+    // Create OAuth client
+    const client = createOAuthClient(redirectUri);
+
+    let newToken;
     try {
-      // Get current token data from auth cell
-      const currentToken = await getTokensFromAuthCell(payload.authCellId);
-
-      if (!currentToken.refreshToken) {
-        logger.error("No refresh token found in auth cell");
-        return createRefreshErrorResponse(c, "No refresh token found");
-      }
-
-      // Get redirect URI for client creation
-      const baseUrl = getBaseUrl(c.req.url);
-      const redirectUri = `${baseUrl}/api/integrations/google-oauth/callback`;
-
-      // Create OAuth client
-      const client = createOAuthClient(redirectUri);
-
-      // Refresh the token
-      const newToken = await client.refreshToken.refresh(
-        currentToken.refreshToken,
-      );
-
-      logger.info(
-        {
-          accessTokenPrefix: newToken.accessToken.substring(0, 21) + "...",
-          expiresAt: newToken.expiresIn
-            ? Date.now() + newToken.expiresIn * 1000
-            : undefined,
-          hasRefreshToken: !!newToken.refreshToken,
-        },
-        "Refreshed OAuth tokens",
-      );
-
-      // Keep existing refresh token if a new one wasn't provided
-      if (!newToken.refreshToken) {
-        newToken.refreshToken = currentToken.refreshToken;
-      }
-
-      // Fetch user info to verify the token
-      const userInfo = await fetchUserInfo(newToken.accessToken);
-
-      // Update tokens in auth cell
-      const updatedTokenData = await persistTokens(
-        newToken,
-        userInfo,
-        payload.authCellId,
-      );
-
-      // Return success response
-      return createRefreshSuccessResponse(
-        c,
-        "Token refreshed successfully",
-        formatTokenInfo(updatedTokenData),
-      );
+      newToken = await client.refreshToken.refresh(refreshToken);
     } catch (error) {
       logger.error({ error }, "Failed to refresh token");
-      return createRefreshErrorResponse(
-        c,
-        `Failed to refresh token. The refresh token may be invalid or expired: ${error}`,
-        401,
-      );
+      return createRefreshErrorResponse(c, "Failed to refresh token");
     }
+
+    logger.info(
+      {
+        accessTokenPrefix: newToken.accessToken.substring(0, 21) + "...",
+        expiresAt: newToken.expiresIn
+          ? Date.now() + newToken.expiresIn * 1000
+          : undefined,
+        hasRefreshToken: !!newToken.refreshToken,
+      },
+      "Refreshed OAuth tokens",
+    );
+
+    // Keep existing refresh token if a new one wasn't provided
+    if (!newToken.refreshToken) {
+      newToken.refreshToken = refreshToken;
+    }
+
+    const resp: AuthData = {
+      ...newToken,
+      expiresAt: newToken.expiresIn
+        ? Date.now() + newToken.expiresIn * 1000
+        : undefined,
+    };
+
+    return createRefreshSuccessResponse(c, "success", resp);
   } catch (error) {
     logger.error({ error }, "Failed to process refresh request");
     return createRefreshErrorResponse(c, "Failed to process refresh request");
