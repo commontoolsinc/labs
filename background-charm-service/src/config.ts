@@ -2,7 +2,7 @@
  * Centralized configuration for the Background Charm Service
  * Using Zod for schema validation
  */
-import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { z } from "zod";
 
 /**
  * Environment variables schema using Zod

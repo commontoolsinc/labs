@@ -14,7 +14,7 @@ import {
 } from "./integrations/index.ts";
 
 // Import environment configuration
-import { env } from "./config.ts";
+import { env, getConfig, mergeConfigWithArgs } from "./config.ts";
 
 // Initialize storage and Bobby server
 storage.setRemoteStorage(new URL(env.TOOLSHED_API_URL));
@@ -158,21 +158,20 @@ async function main() {
     integrationCellConfig = createManualIntegrationCell(args.charms as string);
   }
 
-  // Convert string arguments to numbers
-  const maxConcurrentJobs = parseInt(args["max-concurrent"] as string, 10);
-  const maxRetries = parseInt(args["max-retries"] as string, 10);
-  const cycleIntervalMs = (args.interval as number) * 1000;
-  const logIntervalMs = (args["log-interval"] as number) * 1000;
-  const maxConsecutiveFailures = args.failures as number;
+  // Get base configuration from environment variables
+  const baseConfig = getConfig();
 
-  // Create service with parsed config
+  // Merge with command line arguments (CLI args override env vars)
+  const config = mergeConfigWithArgs(baseConfig, args);
+
+  // Create service with merged config
   const kvService = new KVBackgroundCharmService({
     kv,
-    cycleIntervalMs,
-    maxConcurrentJobs,
-    maxRetries,
-    logIntervalMs,
-    maxConsecutiveFailures,
+    cycleIntervalMs: config.cycleIntervalMs,
+    maxConcurrentJobs: config.maxConcurrentJobs,
+    maxRetries: config.maxRetries,
+    logIntervalMs: config.logIntervalMs,
+    maxConsecutiveFailures: config.maxConsecutiveFailures,
   });
 
   // Initialize service
