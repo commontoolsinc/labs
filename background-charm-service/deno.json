@@ -1,9 +1,9 @@
 {
   "tasks": {
     "start": "deno run --allow-read --allow-env --allow-net src/cli.ts",
-    "start:kv": "deno run --unstable-kv --allow-read --allow-env --allow-net --allow-kv src/cli.ts --mode=kv",
+    "start:kv": "deno run --unstable-kv --allow-read --allow-env --allow-net --allow-kv --unstable-worker-options src/cli.ts --mode=kv",
     "gmail": "deno run --allow-read --allow-env --allow-net src/cli.ts --integration=gmail --interval=60",
-    "gmail:kv": "deno run --unstable-kv -A src/cli.ts --integration=gmail --interval=20 --mode=kv",
+    "gmail:kv": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts --integration=gmail --interval=20 --mode=kv",
     // "gcal": "deno run --allow-read --allow-env --allow-net src/cli.ts --integration=gcal --interval=60",
     // "gcal:kv": "deno run --unstable-kv --allow-read --allow-env --allow-net --allow-kv src/cli.ts --integration=gcal --interval=60 --mode=kv",
     "initialize": "deno run --allow-read --allow-env --allow-net src/cli.ts --initialize",
