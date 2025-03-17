@@ -90,11 +90,12 @@ export class ExecuteCharmHandler implements JobHandler {
       log(`Executing charm: ${charmId}`);
 
       try {
-        // Execute the charm - simplified to just call the updater stream
+        // Execute the charm - passing integration ID for Gmail-specific handling
         await this.executeCharmWithTimeout(
           runningCharm,
           argument,
           spaceId as DID,
+          integrationId,
         );
 
         // If we get here, the charm succeeded (timeout function will throw on failure)
@@ -154,6 +155,7 @@ export class ExecuteCharmHandler implements JobHandler {
     charm: Cell<Charm>,
     argument: Cell<any>,
     space: DID,
+    integrationId?: string, // Added to identify integration type
   ): Promise<void> {
     const charmId = charm.entityId ? charm.entityId["/"] : "unknown";
 
@@ -161,6 +163,33 @@ export class ExecuteCharmHandler implements JobHandler {
     const updaterStream = this.findUpdaterStream(charm);
     if (!updaterStream) {
       throw new Error("No updater stream found in charm");
+    }
+
+    // Special case for Gmail integration: handle token refresh
+    if (integrationId === "gmail") {
+      // Check auth
+      const auth = argument.key("auth");
+      if (!auth) {
+        throw new Error("Missing auth in Gmail charm argument");
+      }
+
+      const { token, expiresAt } = auth.get();
+
+      // FIXME(jake): We need to remove this from the execute-charm-handler, this should be a userland recipe handler...
+      // Refresh token if needed for Gmail integration
+      if (token && expiresAt && Date.now() > expiresAt) {
+        log(`Token expired, refreshing for Gmail charm: ${charmId}`);
+        try {
+          await this.refreshGmailAuthToken(auth, charm, space);
+        } catch (error) {
+          const errorMsg = error instanceof Error
+            ? error.message
+            : String(error);
+          throw new Error(`Failed to refresh Gmail token: ${errorMsg}`);
+        }
+      } else if (!token) {
+        throw new Error("Missing Gmail authentication token");
+      }
     }
 
     // Create abort controller for timeout
@@ -251,7 +280,39 @@ export class ExecuteCharmHandler implements JobHandler {
     return null;
   }
 
-  // Token refresh functionality has been moved to the integration-specific implementations
+  /**
+   * Refresh a Gmail authentication token
+   * This is a special case specifically for Gmail integration
+   */
+  private async refreshGmailAuthToken(
+    auth: Cell<any>,
+    charm: Cell<Charm>,
+    space: DID,
+  ): Promise<void> {
+    const authCellId = JSON.parse(JSON.stringify(auth.getAsCellLink()));
+    authCellId.space = space as string;
+
+    // Get toolshed URL
+    const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
+      "https://toolshed.saga-castor.ts.net/";
+
+    const refreshUrl = new URL(
+      "/api/integrations/google-oauth/refresh",
+      toolshedUrl,
+    );
+
+    const refreshResponse = await fetch(refreshUrl, {
+      method: "POST",
+      body: JSON.stringify({ authCellId }),
+    });
+
+    const refreshData = await refreshResponse.json();
+    if (!refreshData.success) {
+      throw new Error(
+        `Error refreshing Gmail token: ${JSON.stringify(refreshData)}`,
+      );
+    }
+  }
 
   /**
    * Get or create a charm manager for a space
