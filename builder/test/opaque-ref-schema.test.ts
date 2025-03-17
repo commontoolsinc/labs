@@ -175,6 +175,78 @@ describe("OpaqueRef Schema Support", () => {
       expect(exported.schema).toEqual({ type: "string" });
       expect(exported.rootSchema).toEqual(schema);
     });
+
+    it("should handle full object schemas correctly", () => {
+      // Set a schema with nested objects
+      const schema = {
+        type: "object",
+        properties: {
+          details: { 
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              age: { type: "number" },
+            }
+          }
+        },
+      } as const satisfies JSONSchema;
+
+      // Create an opaque ref with nested objects
+      const ref = opaqueRef<{
+        details: {
+          name: string;
+          age: number;
+        }
+      }>(undefined, schema);
+
+      // Access deeply nested property
+      const detailsRef = ref.key("details");
+
+      // Check schema was correctly propagated
+      const exported = detailsRef.export();
+      expect(exported.schema).toBeDefined();
+      expect(exported.schema).toEqual({ 
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          age: { type: "number" },
+        }
+      });
+      expect(exported.rootSchema).toEqual(schema);
+    });
+
+    it("should return undefined schema for properties that aren't included in the schema", () => {
+      // Set a schema with nested objects
+      const schema = {
+        type: "object",
+        properties: {
+          details: { 
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              age: { type: "number" },
+            }
+          }
+        },
+      } as const satisfies JSONSchema;
+
+      // Create an opaque ref with nested objects, and a property that isn't in the schema
+      const ref = opaqueRef<{
+        details: {
+            name: string;
+            age: number;
+        },
+        nickname: string;
+      }>(undefined, schema);
+
+      // Access nested property that's not part of the schema
+      const nicknameRef = ref.key("nickname");
+
+      // Check schema is undefined for this field that isn't in the schema
+      const exported = nicknameRef.export();
+      expect(exported.schema).toBeUndefined();
+      expect(exported.rootSchema).toBeUndefined();
+    });
   });
 
   describe("Schema in Recipe Context", () => {
