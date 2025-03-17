@@ -42,6 +42,10 @@ export class WorkerPool<T, R> {
   private nextWorkerId = 0;
   private isShuttingDown = false;
   private healthCheckInterval: number | null = null;
+  private activeMessageHandlers = new Map<
+    string,
+    (event: MessageEvent) => void
+  >();
   private stats = {
     tasksCompleted: 0,
     tasksFailed: 0,
@@ -64,6 +68,9 @@ export class WorkerPool<T, R> {
     if (options.healthCheckIntervalMs) {
       this.startHealthChecks(options.healthCheckIntervalMs);
     }
+
+    // Start stats reporting (every minute by default)
+    this.startStatsReporting();
   }
 
   private startHealthChecks(intervalMs: number): void {
@@ -115,6 +122,9 @@ export class WorkerPool<T, R> {
 
     this.workers.splice(workerIndex, 1);
 
+    // Update stats
+    this.stats.workersRecycled++;
+
     // Force queue processing to create new workers
     this.processQueue();
   }
@@ -162,6 +172,9 @@ export class WorkerPool<T, R> {
             new WorkerError(event.message, workerId),
           );
         };
+
+        // Update stats
+        this.stats.workersCreated++;
 
         return { worker, id: workerId };
       } catch (error) {
@@ -262,6 +275,11 @@ export class WorkerPool<T, R> {
       // Add to queue
       this.taskQueue.push(task);
 
+      // Update max queue length stat
+      if (this.taskQueue.length > this.stats.maxQueueLength) {
+        this.stats.maxQueueLength = this.taskQueue.length;
+      }
+
       // Try to process immediately
       this.processQueue();
     });
@@ -295,12 +313,21 @@ export class WorkerPool<T, R> {
   ): void {
     log(`Executing task ${task.id} on worker ${workerId}`);
 
+    // Track execution start time
+    const startTime = Date.now();
+
     // Create timeout to catch stuck workers
     const taskTimeout = setTimeout(() => {
       log(
         `Task ${task.id} timed out on worker ${workerId}, terminating worker`,
       );
       worker.removeEventListener("message", messageHandler);
+      this.activeMessageHandlers.delete(task.id);
+
+      // Update stats
+      this.stats.taskTimeouts++;
+      this.stats.tasksFailed++;
+
       this.handleWorkerError(
         workerId,
         new WorkerError(
@@ -331,20 +358,34 @@ export class WorkerPool<T, R> {
 
       // Clean up
       worker.removeEventListener("message", messageHandler);
+      this.activeMessageHandlers.delete(task.id);
 
       // Mark worker as available
       const workerInfo = this.workers.find((w) => w.id === workerId);
       if (workerInfo) {
         workerInfo.busy = false;
-        workerInfo.busySince = Date.now();
+        workerInfo.busySince = undefined;
+        workerInfo.tasksProcessed++;
+      }
+
+      // Calculate task execution time
+      const executionTime = Date.now() - startTime;
+
+      // Update stats
+      if (event.data.error) {
+        this.stats.tasksFailed++;
+      } else {
+        this.stats.tasksCompleted++;
+        this.stats.totalTaskTime += executionTime;
       }
 
       // Process next task if any
       this.processQueue();
     };
 
-    // Add message handler
+    // Add message handler and store it for potential cleanup
     worker.addEventListener("message", messageHandler);
+    this.activeMessageHandlers.set(task.id, messageHandler);
 
     // Send task to worker
     worker.postMessage({ taskId: task.id, data: task.data });
@@ -356,6 +397,12 @@ export class WorkerPool<T, R> {
   async shutdown(): Promise<void> {
     log("Shutting down worker pool");
     this.isShuttingDown = true;
+
+    // Clear any intervals
+    if (this.healthCheckInterval !== null) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
 
     // Wait for all workers to finish current tasks with a timeout
     const waitForIdle = new Promise<void>((resolve) => {
@@ -439,7 +486,7 @@ export class WorkerPool<T, R> {
   private reportStats(): void {
     log(`Worker Pool Stats:
       - Tasks: ${this.stats.tasksCompleted} completed, ${this.stats.tasksFailed} failed
-      - Workers: ${this.workers.length} active, ${this.stats.workersCreated} created, ${this.stats.workersRecycled} recycled
+      - Workers: ${this.getActiveWorkerCount()} busy / ${this.workers.length} total, ${this.stats.workersCreated} created, ${this.stats.workersRecycled} recycled
       - Queue: ${this.taskQueue.length} current, ${this.stats.maxQueueLength} max
       - Avg task time: ${
       this.stats.tasksCompleted

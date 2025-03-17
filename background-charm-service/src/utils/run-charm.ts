@@ -40,7 +40,7 @@ export default async function runCharm(
   setBobbyServerUrl(toolshedUrl);
 
   try {
-    // Get operator password
+    // Get operator password from environment (set by the worker initialization)
     const operatorPass = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
 
     // Create a new session (this is important - we're not reusing an existing session)

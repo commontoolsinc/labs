@@ -1,6 +1,8 @@
 import { DID, Identity } from "@commontools/identity";
+import { env } from "./config.ts";
+
 export const ANYONE = "common user";
-export const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
+export const OPERATOR_PASS = env.OPERATOR_PASS;
 
 export const open = async (
   { passphrase, space, name }: {

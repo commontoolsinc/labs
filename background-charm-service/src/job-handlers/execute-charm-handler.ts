@@ -334,8 +334,8 @@ export class ExecuteCharmHandler implements JobHandler {
       return this.managerCache.get(spaceKey)!;
     }
 
-    // Get operator password
-    const operatorPass = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
+    // Get operator password from config
+    const operatorPass = this.config.operatorPass;
 
     // Create new session and manager
     const session = await Session.open({
