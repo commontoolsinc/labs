@@ -1,7 +1,10 @@
 import { Charm } from "@commontools/charm";
 import { Cell } from "@commontools/runner";
 import type { DID } from "@commontools/identity";
-import { getGmailIntegrationCharms, initializeGmailIntegrationCharmsCell } from "@commontools/utils";
+import {
+  getGmailIntegrationCharms,
+  initializeGmailIntegrationCharmsCell,
+} from "@commontools/utils";
 import { Integration, IntegrationCellConfig } from "../types.ts";
 import { log } from "../utils.ts";
 
@@ -23,7 +26,9 @@ export class GmailIntegration implements Integration {
   /**
    * Fetch Gmail integration charms
    */
-  private async fetchGmailIntegrationCharms(): Promise<{ space: DID; charmId: string }[]> {
+  private async fetchGmailIntegrationCharms(): Promise<
+    { space: DID; charmId: string }[]
+  > {
     const charms = await getGmailIntegrationCharms();
     return charms.map((entry) => ({
       space: entry.space as DID,

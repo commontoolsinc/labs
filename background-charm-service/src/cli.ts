@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run -A
+/// <reference lib="deno.unstable" />
 // CLI entry point for the Background Charm Service
 import { parseArgs } from "@std/cli/parse-args";
 import { BackgroundCharmService } from "./background-charm-service.ts";

@@ -164,7 +164,10 @@ export class ScanIntegrationHandler implements JobHandler {
         throw timeoutError;
       }
     } catch (error) {
-      log(`Error fetching charms for ${integrationId}: ${error.message}`);
+      const errorMessage = error instanceof Error
+        ? error.message
+        : String(error);
+      log(`Error fetching charms for ${integrationId}: ${errorMessage}`);
       throw error;
     }
   }

@@ -1,3 +1,4 @@
+/// <reference lib="deno.unstable" />
 import { JobHandler } from "./base-handler.ts";
 import { ExecuteCharmJob, Job, JobType } from "../kv-types.ts";
 import { KVStateManager } from "../kv-state-manager.ts";
@@ -96,7 +97,7 @@ export class ExecuteCharmHandler implements JobHandler {
           argument,
           spaceId as DID,
           integrationId,
-          charmId
+          charmId,
         );
 
         // If we get here, the charm succeeded (timeout function will throw on failure)
@@ -157,7 +158,7 @@ export class ExecuteCharmHandler implements JobHandler {
     argument: Cell<any>,
     space: DID,
     integrationId?: string,
-    charmId?: string
+    charmId?: string,
   ): Promise<void> {
     // Special case for Gmail integration: handle token refresh
     // We still need to do this in the main process before spawning the worker
@@ -176,7 +177,9 @@ export class ExecuteCharmHandler implements JobHandler {
         try {
           await this.refreshGmailAuthToken(auth, charm, space);
         } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
+          const errorMsg = error instanceof Error
+            ? error.message
+            : String(error);
           throw new Error(`Failed to refresh Gmail token: ${errorMsg}`);
         }
       } else if (!token) {
@@ -192,12 +195,15 @@ export class ExecuteCharmHandler implements JobHandler {
 
     // Get the worker script path
     const workerUrl = new URL("../utils/charm-worker.ts", import.meta.url).href;
-    
+
     // Create a worker timeout promise
     const timeout = new Promise<void>((_, reject) => {
-      setTimeout(() => reject(new Error(`Charm execution timed out: ${charmId}`)), 30000);
+      setTimeout(
+        () => reject(new Error(`Charm execution timed out: ${charmId}`)),
+        30000,
+      );
     });
-    
+
     // Get operator password for the worker
     const operatorPass = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
 
@@ -210,7 +216,7 @@ export class ExecuteCharmHandler implements JobHandler {
     // Create a worker execution promise
     const workerPromise = new Promise<void>((resolve, reject) => {
       log(`Creating worker for charm: ${charmId} with updater: ${updaterKey}`);
-      
+
       try {
         // Create and start worker with appropriate permissions
         const worker = new Worker(workerUrl, {
@@ -224,7 +230,7 @@ export class ExecuteCharmHandler implements JobHandler {
             },
           },
         });
-        
+
         // Handle messages from the worker
         worker.onmessage = (e) => {
           if (e.data.success) {
@@ -235,25 +241,25 @@ export class ExecuteCharmHandler implements JobHandler {
           }
           worker.terminate();
         };
-        
+
         // Handle worker errors
         worker.onerror = (e) => {
           log(`Worker error for charm ${charmId}: ${e.message}`);
           reject(new Error(`Worker error: ${e.message}`));
           worker.terminate();
         };
-        
+
         // Get toolshed URL for the worker
-        const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ?? 
+        const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
           "https://toolshed.saga-castor.ts.net/";
-        
+
         // Send data to worker, including the necessary URLs and configuration
         worker.postMessage({
           spaceId: space,
           charmId: charmId,
           updaterKey: updaterKey,
           operatorPass: operatorPass,
-          toolshedUrl: toolshedUrl
+          toolshedUrl: toolshedUrl,
         });
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -261,7 +267,7 @@ export class ExecuteCharmHandler implements JobHandler {
         reject(new Error(`Failed to create worker: ${errorMsg}`));
       }
     });
-    
+
     // Race the worker execution against the timeout
     return Promise.race([workerPromise, timeout]);
   }
@@ -288,7 +294,7 @@ export class ExecuteCharmHandler implements JobHandler {
 
     return null;
   }
-  
+
   /**
    * Find the updater stream name in a charm
    * Returns the name of the first valid updater stream found
@@ -298,7 +304,7 @@ export class ExecuteCharmHandler implements JobHandler {
     const streamNames = [
       "integrationUpdater", // Well-known handler name for integration charms
       "updater",
-      "googleUpdater", 
+      "googleUpdater",
       "discordUpdater",
     ];
 
@@ -340,7 +346,9 @@ export class ExecuteCharmHandler implements JobHandler {
 
     const refreshData = await refreshResponse.json();
     if (!refreshData.success) {
-      throw new Error(`Error refreshing Gmail token: ${JSON.stringify(refreshData)}`);
+      throw new Error(
+        `Error refreshing Gmail token: ${JSON.stringify(refreshData)}`,
+      );
     }
   }
 

@@ -23,7 +23,9 @@ export class GcalIntegration implements Integration {
    * Fetch GCal integration charms
    * This is a placeholder and should be updated with actual implementation
    */
-  private async fetchGcalIntegrationCharms(): Promise<{ space: DID; charmId: string }[]> {
+  private async fetchGcalIntegrationCharms(): Promise<
+    { space: DID; charmId: string }[]
+  > {
     // TODO: Replace with actual implementation
     return [];
   }

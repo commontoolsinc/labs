@@ -48,7 +48,9 @@ export async function loadIntegrations(): Promise<void> {
           );
         }
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage = error instanceof Error
+          ? error.message
+          : String(error);
         log(`Error loading integration ${entry.name}: ${errorMessage}`);
       }
     }
