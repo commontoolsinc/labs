@@ -12,34 +12,26 @@ import {
   UI,
 } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
-import { sleep } from "@commontools/utils/sleep";
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const EmailProperties = {
+  id: { type: "string" },
+  threadId: { type: "string" },
+  labelIds: { type: "array", items: { type: "string" } },
+  snippet: { type: "string" },
+  subject: { type: "string" },
+  from: { type: "string" },
+  date: { type: "string" },
+  to: { type: "string" },
+  plainText: { type: "string" },
+  htmlContent: { type: "string" },
+} as const;
 
 const EmailSchema = {
   type: "object",
-  properties: {
-    id: { type: "string" },
-    threadId: { type: "string" },
-    labelIds: { type: "array", items: { type: "string" } },
-    snippet: { type: "string" },
-    subject: { type: "string" },
-    from: { type: "string" },
-    date: { type: "string" },
-    to: { type: "string" },
-    plainText: { type: "string" },
-    htmlContent: { type: "string" },
-  },
-  required: [
-    "id",
-    "threadId",
-    "labelIds",
-    "snippet",
-    "subject",
-    "from",
-    "date",
-    "to",
-    "plainText",
-    "htmlContent",
-  ],
+  properties: EmailProperties,
+  required: Object.keys(EmailProperties),
 } as const as JSONSchema;
 type Email = Schema<typeof EmailSchema>;
 
@@ -87,10 +79,10 @@ const GmailImporterInputs = {
         limit: {
           type: "number",
           description: "number of emails to import",
-          default: 10,
+          default: 100,
         },
       },
-      required: ["labels", "limit"],
+      required: ["gmailFilterQuery", "limit"],
     },
     auth: AuthSchema,
   },
@@ -109,44 +101,29 @@ const ResultSchema = {
       type: "array",
       items: {
         type: "object",
-        properties: {
-          id: { type: "string" },
-          threadId: { type: "string" },
-          labelIds: { type: "array", items: { type: "string" } },
-          snippet: { type: "string" },
-          subject: { type: "string" },
-          from: { type: "string" },
-          date: { type: "string" },
-          to: { type: "string" },
-          plainText: { type: "string" },
-          htmlContent: { type: "string" },
-        },
+        properties: EmailProperties,
       },
     },
     googleUpdater: { asStream: true, type: "object", properties: {} },
   },
 } as const satisfies JSONSchema;
 
-const updateLimit = handler(
-  {
-    type: "object",
-    properties: {
-      detail: {
-        type: "object",
-        properties: { value: { type: "string" } },
-        required: ["value"],
-      },
+const updateLimit = handler({
+  type: "object",
+  properties: {
+    detail: {
+      type: "object",
+      properties: { value: { type: "string" } },
+      required: ["value"],
     },
   },
-  {
-    type: "object",
-    properties: { limit: { type: "number", asCell: true } },
-    required: ["limit"],
-  },
-  ({ detail }, state) => {
-    state.limit.set(parseInt(detail?.value ?? "10") || 0);
-  },
-);
+}, {
+  type: "object",
+  properties: { limit: { type: "number", asCell: true } },
+  required: ["limit"],
+}, ({ detail }, state) => {
+  state.limit.set(parseInt(detail?.value ?? "100") || 0);
+});
 
 const googleUpdater = handler(
   {},
