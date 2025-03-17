@@ -6,7 +6,12 @@ import {
   type QueryResult,
 } from "./query-result-proxy.ts";
 import { diffAndUpdate, resolveLinkToValue, resolvePath } from "./utils.ts";
-import { queueEvent, type ReactivityLog, subscribe } from "./scheduler.ts";
+import {
+  type Action,
+  queueEvent,
+  type ReactivityLog,
+  subscribe,
+} from "./scheduler.ts";
 import { type EntityId, getDocByEntityId, getEntityId } from "./doc-map.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import { validateAndTransform } from "./schema.ts";
@@ -476,20 +481,12 @@ function subscribeToReferencedDocs<T>(
     reads: [],
     writes: [],
   } satisfies ReactivityLog;
-  // Get the value once to determine all the docs that need to be subscribed to.
-  const value = validateAndTransform(
-    doc,
-    path,
-    schema,
-    initialLog,
-    rootSchema,
-  ) as T;
 
-  // Call the callback once with initial value if requested.
-  let cleanup: Cancel | undefined = callback(value);
+  // Call the callback once with initial value.
+  let cleanup: Cancel | undefined;
 
   // Subscribe to the docs that are read (via logs), call callback on next change.
-  const cancel = subscribe((log) => {
+  const action: Action = (log) => {
     if (isCancel(cleanup)) cleanup();
     const newValue = validateAndTransform(
       doc,
@@ -499,7 +496,10 @@ function subscribeToReferencedDocs<T>(
       rootSchema,
     ) as T;
     cleanup = callback(newValue);
-  }, initialLog);
+  };
+
+  action(initialLog);
+  const cancel = subscribe(action, initialLog);
 
   return () => {
     cancel();

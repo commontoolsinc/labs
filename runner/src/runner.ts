@@ -358,7 +358,7 @@ function instantiateJavaScriptNode(
 
   let fn = (
     typeof module.implementation === "string"
-      ? eval(module.implementation)
+      ? eval(module.implementation) // TODO(all): Add sandboxing :)
       : module.implementation
   ) as (inputs: any) => any;
 
