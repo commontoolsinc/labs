@@ -364,8 +364,8 @@ export function resolvePath(
         cell: aliasResult.cell,
         path: aliasResult.path,
         schema: ref.schema,
+        ...(ref.rootSchema ? { rootSchema: ref.rootSchema } : {}),
       };
-      if (ref.rootSchema) aliasResult.rootSchema = ref.rootSchema;
     } else {
       ref = aliasResult;
     }
@@ -457,7 +457,13 @@ export function followAliases(
     result = { ...alias.$alias } as CellLink;
     if (!result.cell) result.cell = cell;
 
-    if (seen.has(alias)) throw new Error("Alias cycle detected");
+    if (seen.has(alias)) {
+      throw new Error(
+        `Alias cycle detected: ${JSON.stringify(alias)} in ${
+          JSON.stringify([...seen])
+        }`,
+      );
+    }
     seen.add(alias);
     alias = cell.getAtPath(alias.$alias.path);
     if (isAlias(alias)) log?.reads.push({ cell, path: alias.$alias.path });

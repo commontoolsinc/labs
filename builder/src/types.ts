@@ -1,3 +1,5 @@
+import { isObj } from "@commontools/utils";
+
 export const ID: symbol = Symbol("ID, unique to the context");
 export const ID_FIELD: symbol = Symbol(
   "ID_FIELD, name of sibling that contains id",
@@ -150,7 +152,8 @@ export type Alias = {
 };
 
 export function isAlias(value: any): value is Alias {
-  return !!(value && value.$alias && Array.isArray(value.$alias.path));
+  return isObj(value) && isObj(value.$alias) &&
+    Array.isArray(value.$alias.path);
 }
 
 export type StreamAlias = {
