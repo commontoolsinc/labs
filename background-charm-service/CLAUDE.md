@@ -3,13 +3,15 @@
 ## Build & Test Commands
 
 - Run service: `deno task start`
-- Run with Gmail integration: `deno task gmail`
-- Run with GCal integration: `deno task gcal`
+- Run with Gmail integration: `deno task gmail:kv`
+- Run with Gmail integration (legacy): `deno task gmail` 
 - Initialize integration cells: `deno task initialize`
 - Initialize specific integration: `deno task initialize:gmail` or `deno task initialize:gcal`
 - Run tests: `deno task test`
-- Check typings: `deno check src/**/*.ts`
+- Run specific test: `deno test src/path/to/test.ts`
+- Check typings: `deno task check`
 - Format code: `deno fmt`
+- Lint code: `deno lint`
 
 ## Working with Integrations
 
@@ -74,8 +76,10 @@ export default new MyServiceIntegration();
 
 ### TypeScript
 - Strong typing with explicit interfaces
+- Prefer interfaces over type aliases for object types
 - Export types explicitly with `export type { ... }`
-- Use JSDoc comments for functions and interfaces
+- Use JSDoc comments with `@param` and `@returns` tags
+- Avoid `any` type, use `unknown` when type is uncertain
 
 ### Naming & Imports
 - Classes: PascalCase (BackgroundCharmService)
@@ -88,3 +92,9 @@ export default new MyServiceIntegration();
 - Use try/catch with descriptive error messages
 - Include context (like charm IDs) in error logs
 - Properly propagate errors in async functions
+- Use typed error classes for specific error scenarios
+
+### Testing
+- Write unit tests for critical functions
+- Use descriptive test names that explain the expected behavior
+- Mock external dependencies when testing handlers and services
