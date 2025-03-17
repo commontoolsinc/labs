@@ -5,7 +5,7 @@ import { Identity } from "@commontools/identity";
 // This is the derived space id for toolshed-system
 export const SYSTEM_SPACE_ID =
   "did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88";
-export const CELL_CAUSE = "gmailIntegrationCharms";
+export const CELL_CAUSE = "gmail-integration-2025-03-17";
 
 // Define schema for the cell with correct type literals
 export const gmailIntegrationCharmsSchema = {
@@ -59,7 +59,15 @@ export async function initializeGmailIntegrationCharmsCell(): Promise<boolean> {
   }
 
   console.log("Initializing cell");
-  charmsCell.set({ charms: [] });
+  charmsCell.set({
+    charms: [{
+      "space": "did:key:z6MkkvaRC4RMz34m3XeXwhHDgp1SPE8M46Gw3pG1dedQuDL9",
+      "charmId": "baedreieljj76e2eybjdidspsqfivm5kbzp5x4rpkp5fil3gddrs2abjgey",
+    }, {
+      "space": "did:key:z6MkhxuM4nmzMpGt5wq9nUuycvV99vaNtMspgXzfNcBVB4n9",
+      "charmId": "baedreih4xd26gi6e2ddhf5ekxbzhklf7ydlboczx3jeywneqwerulwqvve",
+    }],
+  });
   await storage.synced();
   return true; // Initialized
 }

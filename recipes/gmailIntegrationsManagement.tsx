@@ -47,7 +47,7 @@ export default recipe(
       console.log("charms", charms);
     });
     return {
-      [NAME]: "Google Integration Management",
+      [NAME]: "Google Integration Management 2",
       [UI]: (
         <div>
           <h1>Google Integration Management</h1>
