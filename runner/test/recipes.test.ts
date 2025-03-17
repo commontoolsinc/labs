@@ -671,4 +671,57 @@ describe("Recipe Runner", () => {
     await idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: 3 });
   });
+
+  // FIXME(ja): should they really be ignored?
+  it("failed handlers should be ignored", async () => {
+    const divHandler = handler<
+      { divisor: number; dividend: number },
+      { result: number }
+    >(
+      ({ divisor, dividend }, state) => {
+        if (dividend === 0) {
+          throw new Error("division by zero");
+        }
+        state.result = divisor / dividend;
+      },
+    );
+
+    const divRecipe = recipe<{ result: number }>(
+      "Divide numbers",
+      ({ result }) => {
+        return { updater: divHandler({ result }), result };
+      },
+    );
+
+    const charm = run(
+      divRecipe,
+      { result: 1 },
+      getDoc(undefined, "failed handlers should be ignored", "test"),
+    );
+
+    await idle();
+
+    charm.asCell(["updater"]).send({ divisor: 5, dividend: 1 });
+    await idle();
+    expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
+
+    // NOTE(ja): not really sure how to test we are doing the right thing here
+    // nor am I sure what the right thing is...
+    try {
+      charm.asCell(["updater"]).send({ divisor: 5, dividend: 0 });
+    } catch (e) {
+      console.log("expected error", e);
+    }
+    await idle();
+    expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
+
+    // NOTE(ja): this test is really important after a handler
+    // fails the entire system crashes!!!!
+    charm.asCell(["updater"]).send({ divisor: 10, dividend: 5 });
+    await idle();
+    expect(charm.getAsQueryResult()).toMatchObject({ result: 2 });
+  });
+
+  // FIXME(ja): lifted functions crashing also crashes the system...
+  // we should test this as well...
 });
