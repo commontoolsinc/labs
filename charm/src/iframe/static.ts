@@ -159,6 +159,32 @@ ${JSON.stringify(libraries)}
     });
   })();
 
+  window.grabJSON = (gstr) => {
+    // Function to extract and parse JSON from a string
+    // This handles both raw JSON strings and code blocks with JSON
+    const jsonRegex = new RegExp("${jsonRegex}");
+    const match = gstr.match(jsonRegex);
+
+    if (match) {
+      // Use the first matching group that contains content
+      const jsonStr = match[1] || match[2];
+      try {
+        return JSON.parse(jsonStr);
+      } catch (e) {
+        console.error("Failed to parse JSON:", e);
+        return null;
+      }
+    } else {
+      // If no JSON block found, attempt to parse the entire string
+      try {
+        return JSON.parse(gstr);
+      } catch (e) {
+        console.error("No valid JSON found in string");
+        return null;
+      }
+    }
+  }
+
   // Define readWebpage utility with React available
   window.readWebpage = (function() {
     const inflight = [];
@@ -609,13 +635,13 @@ function CounterComponent() {
 
 \`\`\`jsx
 async function fetchLLMResponse() {
-  const promptPayload = { messages: ['Hi', 'How can I help you today?', 'tell me a joke']};
-  try {
-    const result = await llm(promptPayload);
-    console.log('LLM responded:', result);
-  } catch (error) {
-    console.error('LLM error:', error);
-  }
+  // place user-level requirements in system prompt
+  const promptPayload = {
+    system: 'Translate all the messages to emojis, reply in JSON.',
+    messages: ['Hi', 'How can I help you today?', 'tell me a joke']
+  };
+  const result = await grabJson(llm(promptPayload));
+  console.log('LLM responded:', result);
 }
 \`\`\`
 
