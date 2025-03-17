@@ -1130,18 +1130,26 @@ function CharmDetailView() {
   );
 }
 
-function translateCellsAndStreamsToPlainJSON(data: any): any {
+function translateCellsAndStreamsToPlainJSON(
+  data: any,
+  seen: Set<any> = new Set(),
+): any {
+  if (seen.has(data)) return "// circular reference";
+  seen.add(data);
+
   if (isStream(data)) {
-    return { __stream: data.schema ?? "no schema" };
+    return { "// stream": data.schema ?? "no schema" };
   } else if (isCell(data)) {
-    return translateCellsAndStreamsToPlainJSON(data.get());
+    return { "// cell": translateCellsAndStreamsToPlainJSON(data.get(), seen) };
   } else if (Array.isArray(data)) {
-    return data.map(translateCellsAndStreamsToPlainJSON);
+    return data.map((value) =>
+      translateCellsAndStreamsToPlainJSON(value, seen)
+    );
   } else if (isObj(data)) {
     return Object.fromEntries(
       Object.entries(data).map(([key, value]) => [
         key,
-        translateCellsAndStreamsToPlainJSON(value),
+        translateCellsAndStreamsToPlainJSON(value, seen),
       ]),
     );
   } else return data;
