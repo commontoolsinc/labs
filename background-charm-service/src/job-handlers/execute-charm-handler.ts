@@ -243,12 +243,17 @@ export class ExecuteCharmHandler implements JobHandler {
           worker.terminate();
         };
         
-        // Send data to worker
+        // Get toolshed URL for the worker
+        const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ?? 
+          "https://toolshed.saga-castor.ts.net/";
+        
+        // Send data to worker, including the necessary URLs and configuration
         worker.postMessage({
           spaceId: space,
           charmId: charmId,
           updaterKey: updaterKey,
-          operatorPass: operatorPass
+          operatorPass: operatorPass,
+          toolshedUrl: toolshedUrl
         });
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);

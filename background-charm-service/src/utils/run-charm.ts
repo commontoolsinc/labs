@@ -1,7 +1,8 @@
 import { Charm, CharmManager } from "@commontools/charm";
-import { Cell, isStream } from "@commontools/runner";
+import { Cell, isStream, storage, setBobbyServerUrl } from "@commontools/runner";
 import type { DID } from "@commontools/identity";
 import * as Session from "../session.ts";
+import { log } from "../utils.ts";
 
 /**
  * Options for running a charm in an isolated environment
@@ -18,7 +19,23 @@ export interface RunCharmOptions {
  */
 export default async function runCharm(options: RunCharmOptions): Promise<{ success: boolean; message?: string }> {
   const { spaceId, charmId, updaterKey } = options;
-  console.log(`Running charm ${spaceId}/${charmId} in isolated environment`);
+  log(`Running charm ${spaceId}/${charmId} in isolated environment`);
+  
+  // Verify storage configuration
+  const storageUrl = storage.getRemoteStorage();
+  if (!storageUrl) {
+    // Try to get from environment
+    const toolshedUrl = Deno.env.get("TOOLSHED_API_URL");
+    if (toolshedUrl) {
+      log(`Setting remote storage URL from env: ${toolshedUrl}`);
+      storage.setRemoteStorage(new URL(toolshedUrl));
+      setBobbyServerUrl(toolshedUrl);
+    } else {
+      throw new Error("No remote storage URL set. Cannot run charm.");
+    }
+  } else {
+    log(`Using existing remote storage URL: ${storageUrl.href}`);
+  }
   
   try {
     // Get operator password
