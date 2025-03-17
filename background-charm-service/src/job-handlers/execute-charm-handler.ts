@@ -90,14 +90,14 @@ export class ExecuteCharmHandler implements JobHandler {
       log(`Executing charm: ${charmId}`);
 
       try {
-        // Execute the charm with proper tracking and error detection
+        // Execute the charm - simplified to just call the updater stream
         await this.executeCharmWithTimeout(
           runningCharm,
           argument,
           spaceId as DID,
         );
 
-        // If we get here, the charm truly succeeded (timeout function will throw on failure)
+        // If we get here, the charm succeeded (timeout function will throw on failure)
         const executionTimeMs = Date.now() - startTime;
         await this.stateManager.updateAfterExecution(
           spaceId,
@@ -157,31 +157,10 @@ export class ExecuteCharmHandler implements JobHandler {
   ): Promise<void> {
     const charmId = charm.entityId ? charm.entityId["/"] : "unknown";
 
-    // Find updater stream
+    // Find updater stream - this is the core functionality we care about
     const updaterStream = this.findUpdaterStream(charm);
     if (!updaterStream) {
       throw new Error("No updater stream found in charm");
-    }
-
-    // Check auth
-    const auth = argument.key("auth");
-    if (!auth) {
-      throw new Error("Missing auth in charm argument");
-    }
-
-    const { token, expiresAt } = auth.get();
-
-    // Refresh token if needed
-    if (token && expiresAt && Date.now() > expiresAt) {
-      log(`Token expired, refreshing for charm: ${charmId}`);
-      try {
-        await this.refreshAuthToken(auth, charm, space);
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        throw new Error(`Failed to refresh token: ${errorMsg}`);
-      }
-    } else if (!token) {
-      throw new Error("Missing authentication token");
     }
 
     // Create abort controller for timeout
@@ -215,11 +194,10 @@ export class ExecuteCharmHandler implements JobHandler {
       self.addEventListener("unhandledrejection", errorHandler);
 
       try {
-        // Send the message to the stream
+        // Send the message to the stream - this is the core operation we want
         updaterStream.send({});
 
         // Set up a completion check - wait for a reasonable time for the charm to execute
-        // This is a more reliable approach than the 2 second fixed timeout
         const intervalId = setInterval(() => {
           if (signal.aborted) {
             clearInterval(intervalId);
@@ -229,7 +207,6 @@ export class ExecuteCharmHandler implements JobHandler {
         }, 100);
 
         // Allow a reasonable amount of time for execution to complete
-        // This is the maximum time we'll wait for a successful execution
         setTimeout(() => {
           clearInterval(intervalId);
           self.removeEventListener("unhandledrejection", errorHandler);
@@ -274,49 +251,7 @@ export class ExecuteCharmHandler implements JobHandler {
     return null;
   }
 
-  /**
-   * Refresh an authentication token
-   */
-  private async refreshAuthToken(
-    auth: Cell<any>,
-    charm: Cell<Charm>,
-    space: DID,
-  ): Promise<void> {
-    const authCellId = JSON.parse(JSON.stringify(auth.getAsCellLink()));
-    authCellId.space = space as string;
-
-    // Determine integration type
-    const integrationTypes = ["google", "discord"];
-    let integrationType = "google"; // Default
-
-    for (const type of integrationTypes) {
-      if (
-        charm.key(`${type}Updater`) && isStream(charm.key(`${type}Updater`))
-      ) {
-        integrationType = type;
-        break;
-      }
-    }
-
-    // Get toolshed URL
-    const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
-      "https://toolshed.saga-castor.ts.net/";
-
-    const refreshUrl = new URL(
-      `/api/integrations/${integrationType}-oauth/refresh`,
-      toolshedUrl,
-    );
-
-    const refreshResponse = await fetch(refreshUrl, {
-      method: "POST",
-      body: JSON.stringify({ authCellId }),
-    });
-
-    const refreshData = await refreshResponse.json();
-    if (!refreshData.success) {
-      throw new Error(`Error refreshing token: ${JSON.stringify(refreshData)}`);
-    }
-  }
+  // Token refresh functionality has been moved to the integration-specific implementations
 
   /**
    * Get or create a charm manager for a space
