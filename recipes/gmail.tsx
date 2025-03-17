@@ -140,7 +140,7 @@ const refreshAuthToken = async (auth: Auth) => {
     },
   ).then((res) => res.json());
 
-  console.log("refresh_data", refresh_response);
+  return refresh_response as Auth;
 };
 
 const googleUpdater = handler(
@@ -149,7 +149,7 @@ const googleUpdater = handler(
     type: "object",
     properties: {
       emails: { type: "array", items: EmailSchema, default: [], asCell: true },
-      auth: AuthSchema,
+      auth: { type: AuthSchema, asCell: true },
       settings: GmailImporterInputs.properties.settings,
       labels: { type: "array", items: LabelSchema, default: [], asCell: true },
     },
@@ -158,25 +158,17 @@ const googleUpdater = handler(
   (_event, state) => {
     console.log("googleUpdater!");
 
-    if (!state.auth.token) {
+    if (!state.auth.get().token) {
       console.warn("no token");
       return;
     }
-
-    refreshAuthToken(state.auth);
-    if (state.auth.expiresAt && Date.now() > state.auth.expiresAt) {
-      console.warn("token expired at ", state.auth.expiresAt);
-      return;
-    }
-
-    return;
 
     const gmailFilterQuery = state.settings.gmailFilterQuery;
 
     console.log("gmailFilterQuery", gmailFilterQuery);
 
     fetchEmail(
-      auth.token,
+      state.auth,
       state.settings.limit,
       gmailFilterQuery,
       state,
@@ -387,13 +379,28 @@ async function fetchLabels(
 }
 
 export async function fetchEmail(
-  accessToken: string,
-  maxResults: number = 10,
+  auth: Cell<Auth>,
+  maxResults: number = 100,
   gmailFilterQuery: string = "in:INBOX",
   state: {
     emails: Cell<Email[]>;
   },
 ) {
+  let cur = auth.get();
+
+  if (cur.expiresAt && Date.now() > cur.expiresAt) {
+    const resp = await refreshAuthToken(auth);
+    auth.set(resp);
+    console.log("refresh_data", resp);
+  }
+
+  cur = auth.get();
+
+  if (!cur.token) {
+    console.warn("no token");
+    return;
+  }
+
   const existingEmailIds = new Set(
     state.emails.get().map((email) => email.id),
   );
@@ -404,7 +411,7 @@ export async function fetchEmail(
     }&maxResults=${maxResults}`,
     {
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${cur.token}`,
       },
     },
   );
@@ -439,7 +446,7 @@ export async function fetchEmail(
     );
 
     try {
-      const emails = await processBatch(batchMessages, accessToken);
+      const emails = await processBatch(batchMessages, cur.token);
 
       // Filter out any duplicates by ID
       const newEmails = emails.filter((email) =>
