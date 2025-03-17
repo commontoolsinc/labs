@@ -14,6 +14,7 @@ import {
 import { hasValueAtPath, setValueAtPath } from "./utils.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { createNodeFactory } from "./module.ts";
+import { SchemaWithoutCell } from "./schema-to-ts.ts";
 
 let mapFactory: NodeFactory<any, any>;
 
@@ -30,6 +31,15 @@ let mapFactory: NodeFactory<any, any>;
 //
 // The proxy yields another proxy for each nested value, but still allows the
 // methods to be called. Setters just call .set() on the nested cell.
+export function opaqueRef<S extends JSONSchema>(
+  value: Opaque<SchemaWithoutCell<S>> | SchemaWithoutCell<S>,
+  schema: S,
+): OpaqueRef<SchemaWithoutCell<S>>;
+export function opaqueRef<T>(
+  value?: Opaque<T> | T,
+  schema?: JSONSchema,
+): OpaqueRef<T>;
+
 export function opaqueRef<T>(
   value?: Opaque<T> | T,
   schema?: JSONSchema,
