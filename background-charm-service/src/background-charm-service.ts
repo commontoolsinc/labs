@@ -1040,6 +1040,7 @@ export class BackgroundCharmService {
   private findUpdaterStream(charm: Cell<Charm>): Cell<any> | null {
     // Check for known updater streams
     const streamNames = [
+      "integrationUpdater",
       "updater",
       "googleUpdater",
       "githubUpdater",
