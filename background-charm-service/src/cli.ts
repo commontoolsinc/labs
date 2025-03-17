@@ -82,7 +82,7 @@ function createManualIntegrationCell(
     id: "manual",
     name: "Manual Charms",
     spaceId: "manual",
-    cellId: "manual-charms",
+    cellCauseName: "manual-charms",
     fetchCharms: async () => parseCharmsInput(charmsInput),
     // No validator needed for manual charms
   };

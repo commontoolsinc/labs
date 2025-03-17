@@ -367,7 +367,7 @@ export class KVStateManager {
       id: config.id,
       name: config.name,
       spaceId: config.spaceId,
-      cellId: config.cellId,
+      cellCauseName: config.cellCauseName,
       // Don't store functions - they'll be provided by the integration when needed
     };
 
@@ -490,7 +490,11 @@ export class KVStateManager {
 
       log("============================================");
     } catch (error) {
-      log(`Error logging state: ${error.message}`);
+      log(
+        `Error logging state: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
 
