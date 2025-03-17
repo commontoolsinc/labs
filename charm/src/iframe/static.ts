@@ -16,6 +16,9 @@ const libraries = {
     "tone": "https://esm.sh/tone@15.0.4",
   },
 };
+const jsonRegex = new RegExp(
+  "```(?:json)?\s*(\{[\s\S]*?\})\s*```|(\{[\s\S]*\})",
+);
 
 // The HTML template that wraps the developer's code
 export const prefillHtml = `<html>
@@ -559,8 +562,7 @@ Create an interactive React component that fulfills the user's request. Focus on
 1. React and ReactDOM are pre-imported - don't import them again
 2. All React hooks must be namespaced (e.g., \`React.useState\`, \`React.useEffect\`)
 3. Follow React hooks rules - never nest or conditionally call hooks
-4. Define components within the \`onReady\` function
-5. For form handling, use \`onClick\` handlers instead of \`onSubmit\`
+4. For form handling, use \`onClick\` handlers instead of \`onSubmit\`
 
 ## Available APIs
 - **useDoc(key, defaultValue)** - Persistent data storage with real-time updates (follows React hook rules)
@@ -621,23 +623,20 @@ For this schema:
 function CounterComponent() {
   // Correct: useDoc called at top level of component
   const [counter, setCounter] = useDoc("counter", -1); // default
-  const [title, setTitle] = useDoc("title", "My Counter App"); // default
 
   // Incorrect: would cause errors
   // if(something) {
   //   const [data, setData] = useDoc("data", {}); // Never do this!
   // }
 
+  const onIncrement = useCallback(() => {
+    setCounter(counter + 1);
+  }, [counter]);
+
   return (
-    <div>
-      <h2>{title}</h2>
-      <button onClick={() => setTitle(Math.random().toString(36).substring(2, 15))}>
-        Randomize Title
-      </button>
-      <button onClick={() => setCounter(counter + 1)}>
-        Increment
-      </button>
-    </div>
+    <button onClick={onIncrement}>
+      Increment
+    </button>
   );
 }
 \`\`\`
@@ -661,12 +660,8 @@ async function fetchLLMResponse() {
 \`\`\`jsx
 async function fetchFromUrl() {
   const url = 'https://twopm.studio';
-  try {
-    const result = await readWebpage(url);
-    console.log('Markdown:', result.content);
-  } catch (error) {
-    console.error('readWebpage error:', error);
-  }
+  const result = await readWebpage(url);
+  console.log('Markdown:', result.content);
 }
 \`\`\`
 
@@ -676,6 +671,7 @@ async function fetchFromUrl() {
 function ImageComponent() {
   return <img src={generateImage("A beautiful sunset over mountains")} alt="Generated landscape" />;
 }
+
 \`\`\`
 ## 5. Using the Interface Functions
 
@@ -687,6 +683,105 @@ function onLoad() {
 }
 
 const title = 'My ESM App';
+function ImageComponent({ url }) {
+  return <img src={url} alt="Generated landscape" />;
+}
+
+function MyComponent({ label, description }) {
+  return (
+    <div>
+      <h2>{label}</h2>
+      <p>{description}</p>
+      <ImageComponent url={generateImage("A beautiful sunset over mountains")} />
+    </div>
+  );
+}
+
+function TodoItem({ todo, onToggle, onDelete }) {
+  return (
+    <div className="flex items-center p-2 border-b">
+      <input
+        type="checkbox"
+        checked={todo.completed}
+        onChange={onToggle}
+        className="mr-2"
+      />
+      <span className={\`flex-grow \${todo.completed ? 'line-through text-gray-500' : ''}\`}>
+        {todo.text}
+      </span>
+      <button
+        onClick={onDelete}
+        className="px-2 py-1 bg-red-500 text-white rounded"
+      >
+        Delete
+      </button>
+    </div>
+  );
+}
+
+function TodoList({ todo, setTodos}) {
+  const [newTodo, setNewTodo] = React.useState('');
+
+  const addTodo = () => {
+    if (newTodo.trim() === '') return;
+
+    const newTodoItem = {
+      id: Date.now(),
+      text: newTodo,
+      completed: false
+    };
+
+    setTodos([...todos, newTodoItem]);
+    setNewTodo('');
+  };
+
+  const toggleTodo = (id) => {
+    setTodos(todos.map(todo =>
+      todo.id === id ? { ...todo, completed: !todo.completed } : todo
+    ));
+  };
+
+  const deleteTodo = (id) => {
+    setTodos(todos.filter(todo => todo.id !== id));
+  };
+
+  return (
+    <div className="max-w-md mx-auto mt-4 p-4 bg-white rounded shadow">
+      <h2 className="text-xl font-bold mb-4">Todo List</h2>
+
+      <div className="flex mb-4">
+        <input
+          type="text"
+          value={newTodo}
+          onChange={(e) => setNewTodo(e.target.value)}
+          placeholder="Add a new todo"
+          className="flex-grow p-2 border rounded-l"
+        />
+        <button
+          onClick={addTodo}
+          className="px-4 py-2 bg-blue-500 text-white rounded-r"
+        >
+          Add
+        </button>
+      </div>
+
+      <div className="border rounded">
+        {todos.length > 0 ? (
+          todos.map(todo => (
+            <TodoItem
+              key={todo.id}
+              todo={todo}
+              onToggle={() => toggleTodo(todo.id)}
+              onDelete={() => deleteTodo(todo.id)}
+            />
+          ))
+        ) : (
+          <p className="p-2 text-center text-gray-500">No todos yet!</p>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // Main application code with modules passed as third parameter
 function onReady(mount, sourceData, libs) {
@@ -695,6 +790,10 @@ function onReady(mount, sourceData, libs) {
 
   function MyApp() {
     const [count, setCount] = useDoc('count', 0);
+    const [todos, setTodos] = useDoc('todos', [
+      { id: 1, text: 'Learn React', completed: false },
+      { id: 2, text: 'Build a Todo App', completed: false }
+    ]);
     const props = useSpring({
       from: { opacity: 0 },
       to: { opacity: 1 }
@@ -711,6 +810,7 @@ function onReady(mount, sourceData, libs) {
             Clicks: {count}
           </button>
         </animated.div>
+        <TodoList todos={todos} setTodos={setTodos} />
       </div>
     );
   }
