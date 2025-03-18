@@ -85,6 +85,7 @@ export class CommonInputElement extends LitElement {
   declare placeholder: string;
   declare appearance: string;
   declare customStyle: string;
+  declare password: boolean;
 
   constructor() {
     super();
@@ -128,7 +129,7 @@ export class CommonInputElement extends LitElement {
           .value="${this.value}"
           .placeholder="${this.placeholder}"
           style="${this.customStyle}"
-          type="text"
+          type="${this.password ? "password" : "text"}"
         />
       </div>
     `;
