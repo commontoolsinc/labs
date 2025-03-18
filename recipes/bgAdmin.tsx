@@ -69,11 +69,36 @@ export default recipe(
       [UI]: (
         <div>
           <h1>BG Updater Management</h1>
-          <pre>
-            {derive(charms, (charms) => {
-              return JSON.stringify(charms, null, 2);
-            })}
-          </pre>
+          <table>
+            <thead>
+              <tr>
+                <th style="padding: 10px;">Space</th>
+                <th style="padding: 10px;">Charm ID</th>
+                <th style="padding: 10px;">Integration</th>
+                <th style="padding: 10px;">Created At</th>
+                <th style="padding: 10px;">Updated At</th>
+                <th style="padding: 10px;">Enabled</th>
+                <th style="padding: 10px;">Runs</th>
+              </tr>
+            </thead>
+            <tbody>
+              {charms.map((charm) => (
+                <tr>
+                  <td style="padding: 10px;">
+                    #{derive(charm, (charm) => charm.space.slice(-4))}
+                  </td>
+                  <td style="padding: 10px;">
+                    #{derive(charm, (charm) => charm.charmId.slice(-4))}
+                  </td>
+                  <td style="padding: 10px;">{charm.integration}</td>
+                  <td style="padding: 10px;">{charm.createdAt}</td>
+                  <td style="padding: 10px;">{charm.updatedAt}</td>
+                  <td style="padding: 10px;">{charm.enabled}</td>
+                  <td style="padding: 10px;">{charm.runs}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       ),
       charms,

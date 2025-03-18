@@ -5,6 +5,8 @@ import { log } from "./utils.ts";
 import { env, getConfig } from "./config.ts";
 import { getSharedWorkerPool } from "./utils/common.ts";
 import { WorkerPool } from "./utils/worker-pool.ts";
+import { getBGUpdaterCharmsCell } from "@commontools/utils";
+import { storage } from "@commontools/runner";
 
 /**
  * Background Charm Service using Deno KV and job queues
@@ -21,6 +23,7 @@ export class BackgroundCharmService {
   private maxConsecutiveFailures: number;
   private config: ReturnType<typeof getConfig>;
   private workerPool: WorkerPool<any, any> | null = null;
+  private charmsCell: any | null = null;
 
   constructor(options: KVServiceOptions) {
     this.kv = options.kv;
@@ -127,6 +130,11 @@ export class BackgroundCharmService {
     // Initialize KV schema
     await this.stateManager.initialize();
 
+    // Initialize charms cell
+    this.charmsCell = await getBGUpdaterCharmsCell();
+    await storage.syncCell(this.charmsCell, true);
+    await storage.synced();
+
     log("Background Charm Service initialized");
   }
 
@@ -206,6 +214,22 @@ export class BackgroundCharmService {
     log("Starting cycle");
 
     try {
+      // Check for new charms to watch
+      if (this.charmsCell) {
+        const charms = this.charmsCell.get() || [];
+        log(`Found ${charms.length} charms to watch`);
+
+        // add each charm to the service
+        for (const charm of charms) {
+          this.queue.addExecuteCharmJob(
+            charm.integration,
+            charm.space,
+            charm.charmId,
+            1,
+          );
+        }
+      }
+
       // Queue a maintenance job for statistics (lowest priority)
       await this.queue.addMaintenanceJob("stats", 1);
 

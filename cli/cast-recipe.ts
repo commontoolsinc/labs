@@ -108,31 +108,9 @@ async function castRecipe() {
     console.log("Recipe cast successfully!");
     console.log("Result charm ID:", getEntityId(charm));
 
-    // Similar to main.ts, get the charm with schema and set up a sink
-    const charmWithSchema = (await charmManager.get(charm))!;
-    charmWithSchema.sink((value) => {
-      console.log("running charm:", getEntityId(charm), value);
-    });
-
-    // Check for updater stream
-    const updater = charmWithSchema.get()?.updater;
-    if (isStream(updater)) {
-      console.log("running updater");
-      updater.send({ newValues: ["test"] });
-    }
-
-    // Wait for storage to sync and exit if quit is specified
-    if (quit) {
-      await storage.synced();
-      console.log("Storage synced, exiting");
-      Deno.exit(0);
-    } else {
-      console.log(
-        "Recipe cast complete. Staying alive for updates. Press Ctrl+C to exit.",
-      );
-      // Keep the process alive to continue receiving updates
-      return new Promise(() => {});
-    }
+    await storage.synced();
+    console.log("Storage synced, exiting");
+    Deno.exit(0);
   } catch (error) {
     console.error("Error casting recipe:", error);
     if (quit) {

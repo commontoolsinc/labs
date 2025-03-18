@@ -1,14 +1,5 @@
-import { Cell, getEntityId } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
 import type { DID } from "@commontools/identity";
-
-export function ensureBGCell(spaceId: DID): Cell<any> {
-  const cell = getCell<any>(spaceId, "integration-cell");
-  if (!cell) {
-    throw new Error(`Integration cell not found for space: ${spaceId}`);
-  }
-  return cell;
-}
 
 /**
  * Custom logger that includes timestamp and optionally charm ID

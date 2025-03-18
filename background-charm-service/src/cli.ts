@@ -1,9 +1,8 @@
 #!/usr/bin/env -S deno run -A
 import { parseArgs } from "@std/cli/parse-args";
 import { BackgroundCharmService } from "./service.ts";
-import { ensureBGCell, log } from "./utils.ts";
+import { log } from "./utils.ts";
 import { setBobbyServerUrl, storage } from "@commontools/runner";
-
 // Import environment configuration
 import { env, getConfig, mergeConfigWithArgs } from "./config.ts";
 
@@ -76,13 +75,6 @@ async function main() {
   // Show help if requested
   if (args.help) {
     showHelp();
-    Deno.exit(0);
-  }
-
-  if (args.initialize) {
-    log("Initializing integration cell");
-    const integrationCell = ensureBGCell(SYSTEM_SPACE_ID);
-
     Deno.exit(0);
   }
 
