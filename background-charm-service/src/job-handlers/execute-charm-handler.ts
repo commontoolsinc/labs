@@ -241,6 +241,7 @@ export class ExecuteCharmHandler implements JobHandler {
 
     // Find which stream we're using
     const streamNames = [
+      "bgUpdater",
       "integrationUpdater",
       "updater",
       "googleUpdater",
