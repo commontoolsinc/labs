@@ -5,7 +5,6 @@ import {
   ServiceStateEntry,
 } from "./types.ts";
 import { log } from "./utils.ts";
-import type { DID } from "@commontools/identity";
 
 /**
  * Manages state storage and retrieval in Deno KV
@@ -238,6 +237,7 @@ export class StateManager {
     charmId: string,
     integrationId: string,
   ): Promise<boolean> {
+    // FIXME(ja): we should check if the charm is no longer in the charm list too!
     const state = await this.getCharmState(spaceId, charmId, integrationId);
     return state?.disabled || false;
   }

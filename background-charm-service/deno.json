@@ -1,10 +1,9 @@
 {
   "tasks": {
     "start": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts",
-    "gmail": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts --integration=gmail --interval=60",
-    "discord": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts --integration=discord --interval=60",
-    "initialize:gmail": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts --integration=gmail --initialize",
-    "initialize:discord": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts --integration=discord --initialize",
+    "gmail": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts --only=gmail --interval=60",
+    "discord": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts --only=discord --interval=60",
+    "initialize": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts --initialize",
     "test": "deno test",
     "check": "deno check src/**/*.ts",
     "lint": "deno lint",

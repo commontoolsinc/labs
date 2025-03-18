@@ -247,7 +247,63 @@ export const logout = createRoute({
   },
 });
 
+export const backgroundIntegration = createRoute({
+  path: "/api/integrations/bg",
+  method: "post",
+  tags,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z
+            .object({
+              charmId: z.string().describe("The charm ID"),
+              space: z.string().describe("The space DID"),
+              integration: z.string().describe("The integration name"),
+            })
+            .openapi({
+              example: {
+                charmId: "bafy...",
+                space: "did:",
+                integration: "rss",
+              },
+            }),
+        },
+      },
+    },
+  },
+  responses: {
+    [HttpStatusCodes.OK]: {
+      content: {
+        "application/json": {
+          schema: z.union([
+            z.object({
+              success: z.boolean(),
+              message: z.string(),
+            }),
+            z.object({
+              error: z.string(),
+            }),
+          ]),
+        },
+      },
+      description: "Background integration response",
+    },
+    [HttpStatusCodes.BAD_REQUEST]: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            error: z.string(),
+          }),
+        },
+      },
+      description: "Invalid request parameters",
+    },
+  },
+});
+
 export type LoginRoute = typeof login;
 export type CallbackRoute = typeof callback;
 export type RefreshRoute = typeof refresh;
 export type LogoutRoute = typeof logout;
+export type BackgroundIntegrationRoute = typeof backgroundIntegration;

@@ -1,5 +1,6 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
+  BackgroundIntegrationRoute,
   CallbackRoute,
   LoginRoute,
   LogoutRoute,
@@ -10,6 +11,8 @@ import {
   type CallbackResult,
   clearAuthData,
   codeVerifiers,
+  createBackgroundIntegrationErrorResponse,
+  createBackgroundIntegrationSuccessResponse,
   createCallbackResponse,
   createLoginErrorResponse,
   createLoginSuccessResponse,
@@ -22,7 +25,7 @@ import {
   getBaseUrl,
   persistTokens,
 } from "./google-oauth.utils.ts";
-import { addCharmToGmailIntegrations } from "@commontools/utils";
+import { addCharmToBG } from "@commontools/utils";
 
 import { type CellLink } from "@commontools/runner";
 
@@ -187,10 +190,11 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
           "Adding Google integration charm to Gmail integrations",
         );
 
-        const added = await addCharmToGmailIntegrations(
+        const added = await addCharmToBG({
           space,
-          integrationCharmId,
-        );
+          charmId: integrationCharmId,
+          integration: "gmail",
+        });
 
         if (added) {
           logger.info("Added charm to Gmail integrations");
@@ -343,5 +347,23 @@ export const logout: AppRouteHandler<LogoutRoute> = async (c) => {
   } catch (error: unknown) {
     logger.error({ error }, "Failed to process logout request");
     return createLogoutErrorResponse(c, "Failed to process logout request");
+  }
+};
+
+export const backgroundIntegration: AppRouteHandler<
+  BackgroundIntegrationRoute
+> = async (c) => {
+  const logger = c.get("logger");
+
+  try {
+    const payload = await c.req.json();
+
+    return createBackgroundIntegrationSuccessResponse(c, "success");
+  } catch (error) {
+    logger.error({ error }, "Failed to process background integration request");
+    return createBackgroundIntegrationErrorResponse(
+      c,
+      "Failed to process background integration request",
+    );
   }
 };

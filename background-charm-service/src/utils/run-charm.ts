@@ -17,7 +17,6 @@ import { log } from "../utils.ts";
 export interface RunCharmOptions {
   spaceId: DID;
   charmId: string;
-  updaterKey?: string; // Optional specific updater key to use
 }
 
 /**
@@ -30,18 +29,16 @@ export default async function runCharm(
   const { spaceId, charmId } = options;
   log(`Running charm ${spaceId}/${charmId} in isolated environment`);
 
-  // Try to get from environment
-  const toolshedUrl = Deno.env.get("TOOLSHED_API_URL");
-
-  if (!toolshedUrl) {
-    throw new Error("TOOLSHED_API_URL is not set");
-  }
-
-  log(`Setting remote storage URL from env: ${toolshedUrl}`);
-  storage.setRemoteStorage(new URL(toolshedUrl));
-  setBobbyServerUrl(toolshedUrl);
-
   try {
+    const toolshedUrl = Deno.env.get("TOOLSHED_API_URL");
+    if (!toolshedUrl) {
+      throw new Error("TOOLSHED_API_URL is not set");
+    }
+
+    log(`Setting remote storage URL from env: ${toolshedUrl}`);
+    storage.setRemoteStorage(new URL(toolshedUrl));
+    setBobbyServerUrl(toolshedUrl);
+
     // Get operator password from environment (set by the worker initialization)
     const operatorPass = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
 
@@ -54,28 +51,21 @@ export default async function runCharm(
 
     // Create a new manager (not reusing from a cache)
     const manager = new CharmManager(session);
-
-    // Get running charm and argument
     const runningCharm = await manager.get(charmId, true);
     if (!runningCharm) {
-      return {
-        success: false,
-        message: `Charm not found: ${charmId}`,
-      };
+      throw new Error(`Charm not found: ${charmId}`);
     }
 
     // Find the updater stream
     const updaterStream = findUpdaterStream(runningCharm);
     if (!updaterStream) {
-      return {
-        success: false,
-        message: `No updater stream found for charm: ${charmId}`,
-      };
+      throw new Error(`No updater stream found for charm: ${charmId}`);
     }
 
     // Execute the charm by sending a message to the updater stream
     updaterStream.send({});
 
+    // waits for all pending actions to complete
     await idle();
 
     return { success: true };
@@ -88,6 +78,8 @@ export default async function runCharm(
 
 /**
  * Find an updater stream in a charm
+ * This is a duplication of the function in common.ts,
+ * but we need it here for the worker context
  */
 function findUpdaterStream(
   charm: Cell<Charm>,

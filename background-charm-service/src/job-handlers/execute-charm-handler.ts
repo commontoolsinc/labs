@@ -4,19 +4,12 @@ import { ExecuteCharmJob, Job, JobType } from "../types.ts";
 import { StateManager } from "../state-manager.ts";
 import { log } from "../utils.ts";
 import * as Session from "../session.ts";
-import { Cell, isStream } from "@commontools/runner";
-import { Charm, CharmManager } from "@commontools/charm";
+import { CharmManager } from "@commontools/charm";
 import type { DID } from "@commontools/identity";
-import { getIntegration } from "../integrations/index.ts";
-import {
-  CharmNotFoundError,
-  CharmTimeoutError,
-  IntegrationError,
-} from "../errors/index.ts";
+import { CharmTimeoutError } from "../errors/index.ts";
 import { getConfig } from "../config.ts";
 import {
   createTimeoutController,
-  findUpdaterStream,
   getSharedWorkerPool,
 } from "../utils/common.ts";
 import { WorkerPool } from "../utils/worker-pool.ts";
@@ -88,41 +81,6 @@ export class ExecuteCharmHandler implements JobHandler {
     try {
       // Get or create manager for this space
       const manager = await this.getManagerForSpace(spaceId as DID);
-
-      // Load the charm
-      log(`Loading charm: ${charmId}`);
-      const charm = await manager.get(charmId, false);
-      if (!charm) {
-        throw new CharmNotFoundError(
-          `Charm not found: ${charmId}`,
-          spaceId,
-          charmId,
-        );
-      }
-
-      // Get running charm and argument
-      log(`Loading running charm and argument: ${charmId}`);
-      const runningCharm = await manager.get(charm, true);
-      const argument = manager.getArgument(charm);
-
-      if (!runningCharm || !argument) {
-        throw new CharmNotFoundError(
-          `Charm not properly loaded: ${charmId}`,
-          spaceId,
-          charmId,
-        );
-      }
-
-      // Get the integration to validate the charm
-      const integration = getIntegration(integrationId);
-      if (!integration) {
-        throw new IntegrationError(
-          `Integration not found: ${integrationId}`,
-          integrationId,
-        );
-      }
-      // Execute charm with proper error detection and timeout
-      log(`Executing charm: ${charmId}`);
 
       try {
         // Execute the charm - passing integration ID for Gmail-specific handling
@@ -206,29 +164,29 @@ export class ExecuteCharmHandler implements JobHandler {
         `Submitting charm ${charmId} to worker pool`,
       );
 
-      // The AbortController will automatically abort if the timeout is reached
-      const result = await Promise.race([
-        this.workerPool.execute({
-          spaceId: space,
-          charmId,
-          operatorPass,
-          toolshedUrl,
-        }),
+      // this spawns the actual worker process
+      const task = this.workerPool.execute({
+        spaceId: space,
+        charmId,
+        operatorPass,
+        toolshedUrl,
+      });
 
-        // Convert AbortSignal to a promise that rejects when aborted
-        new Promise<never>((_, reject) => {
-          controller.signal.addEventListener("abort", () => {
-            reject(
-              new CharmTimeoutError(
-                `Charm execution timed out after ${this.config.charmExecutionTimeoutMs}ms`,
-                space as string,
-                charmId || "",
-                this.config.charmExecutionTimeoutMs,
-              ),
-            );
-          });
-        }),
-      ]);
+      // Convert AbortSignal to a promise that rejects when aborted
+      const abort = new Promise<never>((_, reject) => {
+        controller.signal.addEventListener("abort", () => {
+          reject(
+            new CharmTimeoutError(
+              `Charm execution timed out after ${this.config.charmExecutionTimeoutMs}ms`,
+              space as string,
+              charmId || "",
+              this.config.charmExecutionTimeoutMs,
+            ),
+          );
+        });
+      });
+
+      const result = await Promise.race([task, abort]);
 
       // Check if the result indicates an error
       if (result && typeof result === "object" && "error" in result) {

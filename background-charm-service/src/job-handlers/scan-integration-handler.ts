@@ -3,7 +3,6 @@ import { Job, JobType, ScanIntegrationJob } from "../types.ts";
 import { StateManager } from "../state-manager.ts";
 import { JobQueue } from "../job-queue.ts";
 import { log } from "../utils.ts";
-import { getIntegration } from "../integrations/index.ts";
 import type { DID } from "@commontools/identity";
 
 /**
@@ -117,15 +116,6 @@ export class ScanIntegrationHandler implements JobHandler {
     const { integrationId } = scanJob;
 
     log(`Scanning integration: ${integrationId}`);
-
-    // Get the integration
-    const integration = getIntegration(integrationId);
-    if (!integration) {
-      throw new Error(`Integration not found: ${integrationId}`);
-    }
-
-    // Get the integration config (with functions)
-    const config = integration.getIntegrationConfig();
 
     // Fetch charms with a strict timeout
     log(`Fetching charms for integration: ${integrationId}`);
