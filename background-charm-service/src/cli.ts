@@ -22,10 +22,6 @@ function showHelp() {
   console.log("Usage: deno run -A cli.ts [options]");
   console.log("");
   console.log("Options:");
-  // FIXME(ja): readd adding of manual charms to list!
-  // console.log(
-  //   "  --charms=<space/charm/integration>,*   Comma-separated list of space/charm IDs/integrations",
-  // );
   console.log(
     "  --interval=<seconds>       Update interval in seconds (default: 60)",
   );
