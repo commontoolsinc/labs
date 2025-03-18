@@ -531,7 +531,14 @@ const security = () =>
 - Avoid any methods that could compromise security or user experience
 
 <csp-headers>
-${CSP}
+  <header>default-src 'none';</header>
+  <header>script-src http://localhost:3000 'unsafe-inline' https://unpkg.com https://cdn.tailwindcss.com https://esm.sh;</header>
+  <header>style-src http://localhost:3000 'unsafe-inline';</header>
+  <header>img-src http://localhost:3000 'unsafe-inline';</header>
+  <header>form-action 'none';</header>
+  <header>base-uri 'none';</header>
+  <header>child-src 'none';</header>
+  <header>connect-src 'self';</header>
 </csp-headers>
 `;
 

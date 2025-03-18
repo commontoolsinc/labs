@@ -8,8 +8,10 @@
 - we store cached llm responses in these integration tests
 - this allows running them with an expected response - assuming the request
   hasn't changed
-- if the requests need to be changed:
-  - delete all the existing toolshed/cache/llm-api-cache
+
+- to regenerate the LLM cache, run `chmod u+x rebuild-llm-cache.sh` and then `./rebuild-llm-cache.sh`, this will:
+  - delete the existing `toolshed/cache/llm-api-cache`
+  - run `toolshed` and `jumble` pointing to local dev environment
+    - relies on local LLM config
   - run the integration tests
-  - copy the (minimal) json blobs to integration/cache/llm-api-cache
-  - update any assertions in the run steps
+  - copy the (minimal) json blobs to `integration/cache/llm-api-cache`
