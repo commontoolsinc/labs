@@ -6,15 +6,14 @@ import {
   JobType,
   KV_PREFIXES,
   MaintenanceJob,
-  ScanIntegrationJob,
 } from "./types.ts";
 import { log } from "./utils.ts";
 
 // Import handlers
 import { JobHandler } from "./job-handlers/base-handler.ts";
-import { ScanIntegrationHandler } from "./job-handlers/scan-integration-handler.ts";
 import { ExecuteCharmHandler } from "./job-handlers/execute-charm-handler.ts";
 import { MaintenanceHandler } from "./job-handlers/maintenance-handler.ts";
+import { BGCharmEntry } from "@commontools/utils";
 
 /**
  * Options for the job queue
@@ -45,7 +44,6 @@ export class JobQueue {
 
     // Register handlers
     this.handlers = {
-      [JobType.SCAN_INTEGRATION]: new ScanIntegrationHandler(kv),
       [JobType.EXECUTE_CHARM]: new ExecuteCharmHandler(kv),
       [JobType.MAINTENANCE]: new MaintenanceHandler(kv),
     };
@@ -82,33 +80,17 @@ export class JobQueue {
   }
 
   /**
-   * Add a scan integration job
-   */
-  async addScanIntegrationJob(
-    integrationId: string,
-    priority: number = 5,
-  ): Promise<string> {
-    return await this.addJob<ScanIntegrationJob>({
-      type: JobType.SCAN_INTEGRATION,
-      integrationId,
-      priority,
-    });
-  }
-
-  /**
    * Add an execute charm job
    */
   async addExecuteCharmJob(
-    integrationId: string,
-    spaceId: string,
-    charmId: string,
+    charm: BGCharmEntry,
     priority: number = 3,
   ): Promise<string> {
     return await this.addJob<ExecuteCharmJob>({
       type: JobType.EXECUTE_CHARM,
-      integrationId,
-      spaceId,
-      charmId,
+      integrationId: charm.integration,
+      spaceId: charm.space,
+      charmId: charm.charmId,
       priority,
     });
   }
@@ -490,8 +472,6 @@ export class JobQueue {
     switch (type) {
       case JobType.EXECUTE_CHARM:
         return 30000; // 30 seconds for charm execution
-      case JobType.SCAN_INTEGRATION:
-        return 20000; // 20 seconds for integration scanning
       case JobType.MAINTENANCE:
         return 60000; // 60 seconds for maintenance tasks
       default:

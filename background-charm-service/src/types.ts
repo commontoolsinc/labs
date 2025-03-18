@@ -46,7 +46,6 @@ export const KV_PREFIXES = {
 
 // Job types
 export enum JobType {
-  SCAN_INTEGRATION = "scan_integration",
   EXECUTE_CHARM = "execute_charm",
   MAINTENANCE = "maintenance",
 }
@@ -65,12 +64,6 @@ export interface Job {
   status: JobStatus;
   // Internal property for tracking KV entry version
   _versionstamp?: string;
-}
-
-// Scan integration job
-export interface ScanIntegrationJob extends Job {
-  type: JobType.SCAN_INTEGRATION;
-  integrationId: string;
 }
 
 // Execute charm job

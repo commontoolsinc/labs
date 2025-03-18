@@ -5,7 +5,7 @@ import { log } from "./utils.ts";
 import { env, getConfig } from "./config.ts";
 import { getSharedWorkerPool } from "./utils/common.ts";
 import { WorkerPool } from "./utils/worker-pool.ts";
-import { getBGUpdaterCharmsCell } from "@commontools/utils";
+import { BGCharmEntry, getBGUpdaterCharmsCell } from "@commontools/utils";
 import { storage } from "@commontools/runner";
 
 /**
@@ -216,17 +216,12 @@ export class BackgroundCharmService {
     try {
       // Check for new charms to watch
       if (this.charmsCell) {
-        const charms = this.charmsCell.get() || [];
+        const charms = (this.charmsCell.get() || []) as BGCharmEntry[];
         log(`Found ${charms.length} charms to watch`);
 
         // add each charm to the service
         for (const charm of charms) {
-          this.queue.addExecuteCharmJob(
-            charm.integration,
-            charm.space,
-            charm.charmId,
-            1,
-          );
+          this.queue.addExecuteCharmJob(charm);
         }
       }
 
@@ -238,12 +233,6 @@ export class BackgroundCharmService {
 
       // Queue a maintenance job for resetting disabled charms (medium-low priority)
       await this.queue.addMaintenanceJob("reset", 3);
-
-      // Queue scan jobs for each integration (medium-high priority)
-      for (const [id, integration] of this.integrations.entries()) {
-        // Scan integrations have medium-high priority (5)
-        await this.queue.addScanIntegrationJob(id, 5);
-      }
 
       // Update cycle end time
       await this.stateManager.updateCycleStats(false);

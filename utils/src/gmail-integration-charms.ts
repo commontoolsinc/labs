@@ -27,7 +27,7 @@ export const CharmEntrySchema = {
     "runs",
   ],
 } as const satisfies JSONSchema;
-type CharmEntry = Schema<typeof CharmEntrySchema>;
+export type BGCharmEntry = Schema<typeof CharmEntrySchema>;
 
 // Define schema for the cell with correct type literals
 export const bgUpdaterCharmsSchema = {
@@ -40,8 +40,8 @@ export const bgUpdaterCharmsSchema = {
     },
   },
   required: ["charms"],
-} as const as JSONSchema;
-type BGUpdaterCharmsSchema = Schema<typeof bgUpdaterCharmsSchema>;
+} as const satisfies JSONSchema;
+export type BGUpdaterCharmsSchema = Schema<typeof bgUpdaterCharmsSchema>;
 
 /**
  * Add a charm to the Gmail integration charms cell
@@ -68,7 +68,7 @@ export async function addCharmToBG({
 
   // Check if this charm is already in the list to avoid duplicates
   const exists = charms.some(
-    (charm: CharmEntry) => charm.space === space && charm.charmId === charmId,
+    (charm: BGCharmEntry) => charm.space === space && charm.charmId === charmId,
   );
 
   if (!exists) {
@@ -96,7 +96,7 @@ export async function addCharmToBG({
  * Get the BGUpdater charms cell
  */
 export async function getBGUpdaterCharmsCell(): Promise<
-  Cell<BGUpdaterCharmsSchema>
+  Cell<BGCharmEntry[]>
 > {
   await ensureSigner();
 

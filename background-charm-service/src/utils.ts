@@ -1,5 +1,6 @@
 import { Charm } from "@commontools/charm";
 import type { DID } from "@commontools/identity";
+import { Cell, getEntityId } from "@commontools/runner";
 
 /**
  * Custom logger that includes timestamp and optionally charm ID

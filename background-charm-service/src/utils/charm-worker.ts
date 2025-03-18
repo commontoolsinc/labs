@@ -42,7 +42,7 @@ function initializeWorker(operatorPass?: string, toolshedUrl?: string): void {
  * Process a task to execute a charm
  */
 async function processTask(taskId: string, data: any): Promise<void> {
-  const { spaceId, charmId, updaterKey, operatorPass, toolshedUrl } = data;
+  const { spaceId, charmId, operatorPass, toolshedUrl } = data;
 
   try {
     log(`Worker executing task ${taskId}: charm ${spaceId}/${charmId}`);
@@ -54,7 +54,6 @@ async function processTask(taskId: string, data: any): Promise<void> {
     const result = await runCharm({
       spaceId,
       charmId,
-      updaterKey,
     });
 
     // Report success back to the main thread

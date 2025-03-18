@@ -61,9 +61,7 @@ export class ExecuteCharmHandler implements JobHandler {
     const executeJob = job as ExecuteCharmJob;
     const { integrationId, spaceId, charmId } = executeJob;
 
-    log(
-      `Executing charm: ${spaceId}/${charmId} (integration: ${integrationId})`,
-    );
+    log(`Executing charm: ${spaceId}/${charmId} (${integrationId})`);
 
     // Check if charm is disabled
     const isDisabled = await this.stateManager.isCharmDisabled(
@@ -72,39 +70,31 @@ export class ExecuteCharmHandler implements JobHandler {
       integrationId,
     );
     if (isDisabled) {
-      log(`Charm is disabled: ${spaceId}/${charmId}`);
+      log(`Charm is disabled: ${spaceId}/${charmId} but running anyway`);
       return { skipped: true, reason: "disabled" };
     }
 
     const startTime = Date.now();
 
     try {
-      // Get or create manager for this space
-      const manager = await this.getManagerForSpace(spaceId as DID);
+      // Execute the charm - passing integration ID for Gmail-specific handling
+      await this.executeCharmWithWorker({
+        space: spaceId as DID,
+        charmId,
+      });
 
-      try {
-        // Execute the charm - passing integration ID for Gmail-specific handling
-        await this.executeCharmWithWorker({
-          space: spaceId as DID,
-          charmId,
-        });
+      // If we get here, the charm succeeded (timeout function will throw on failure)
+      const executionTimeMs = Date.now() - startTime;
+      await this.stateManager.updateAfterExecution(
+        spaceId,
+        charmId,
+        integrationId,
+        true, // success
+        executionTimeMs,
+      );
 
-        // If we get here, the charm succeeded (timeout function will throw on failure)
-        const executionTimeMs = Date.now() - startTime;
-        await this.stateManager.updateAfterExecution(
-          spaceId,
-          charmId,
-          integrationId,
-          true, // success
-          executionTimeMs,
-        );
-
-        log(`Successfully executed charm: ${charmId} (${executionTimeMs}ms)`);
-        return { success: true, executionTimeMs };
-      } catch (charmError) {
-        // The charm execution function will throw detailed errors
-        throw charmError;
-      }
+      log(`Successfully executed charm: ${charmId} (${executionTimeMs}ms)`);
+      return { success: true, executionTimeMs };
     } catch (error) {
       const errorMessage = error instanceof Error
         ? error.message
