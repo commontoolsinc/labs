@@ -105,6 +105,7 @@ function findUpdaterStream(
 
   // Otherwise check known updater keys
   const streamNames = [
+    "bgUpdater",
     "integrationUpdater", // Well-known handler name for integration charms
     "updater",
     "googleUpdater",
