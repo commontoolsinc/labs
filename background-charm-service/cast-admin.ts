@@ -28,7 +28,7 @@ const { recipePath, name, quit } = parseArgs(
 
 if (!recipePath) {
   console.error(
-    "Usage: deno task castRecipe --recipePath <path to recipe> [--name <name>] [--quit]",
+    "Usage: deno task castRecipe --recipePath <path to recipe>",
   );
   Deno.exit(1);
 }

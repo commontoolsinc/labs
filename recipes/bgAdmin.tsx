@@ -29,7 +29,7 @@ const BGCharmEntrySchema = {
     "enabled",
     "runs",
   ],
-} as const satisfies JSONSchema;
+} as const as JSONSchema;
 type BGCharmEntry = Schema<typeof BGCharmEntrySchema>;
 
 const InputSchema = {
@@ -41,7 +41,7 @@ const InputSchema = {
       default: [],
     },
   },
-} as const satisfies JSONSchema;
+} as const as JSONSchema;
 
 const ResultSchema = {
   type: "object",
@@ -66,8 +66,8 @@ const deleteCharm = handler<
 );
 
 const toggleCharm = handler<never, { charm: BGCharmEntry }>((_, { charm }) => {
-    charm.enabled = !charm.enabled;
-  });
+  charm.enabled = !charm.enabled;
+});
 
 export default recipe(
   InputSchema,
@@ -79,8 +79,7 @@ export default recipe(
     return {
       [NAME]: "BG Updater Management",
       [UI]: (
-        <div>
-          <h1>BG Updater Management</h1>
+        <os-container>
           <table>
             <thead>
               <tr>
@@ -117,16 +116,19 @@ export default recipe(
                   </td>
                   <td style="padding: 10px;">
                     <button
-                      onClick={() => toggleCharm({ charm })}
+                      onClick={toggleCharm({ charm })}
                       type="button"
                     >
-                      {charm.enabled ? "Disable" : "Enable"}
+                      {derive(
+                        charm,
+                        (charm) => charm.enabled ? "Disable" : "Enable",
+                      )}
                     </button>
                   </td>
                   <td style="padding: 10px;">{charm.runs}</td>
                   <td style="padding: 10px;">
                     <button
-                      onClick={() => deleteCharm({ charm, charms })}
+                      onClick={deleteCharm({ charm, charms })}
                       type="button"
                     >
                       Delete
@@ -136,7 +138,7 @@ export default recipe(
               ))}
             </tbody>
           </table>
-        </div>
+        </os-container>
       ),
       charms,
     };
