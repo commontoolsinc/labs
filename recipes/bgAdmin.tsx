@@ -17,9 +17,9 @@ const BGCharmEntrySchema = {
     integration: { type: "string" },
     createdAt: { type: "number" },
     updatedAt: { type: "number" },
+    disabledAt: { type: "number" },
+    lastRun: { type: "number" },
     status: { type: "string" },
-    enabled: { type: "boolean" },
-    runs: { type: "number", default: 0 },
   },
   required: [
     "space",
@@ -27,9 +27,8 @@ const BGCharmEntrySchema = {
     "integration",
     "createdAt",
     "updatedAt",
+    "lastRun",
     "status",
-    "enabled",
-    "runs",
   ],
 } as const as JSONSchema;
 type BGCharmEntry = Schema<typeof BGCharmEntrySchema>;
@@ -68,7 +67,7 @@ const deleteCharm = handler<
 );
 
 const toggleCharm = handler<never, { charm: BGCharmEntry }>((_, { charm }) => {
-  charm.enabled = !charm.enabled;
+  charm.disabledAt = charm.disabledAt ? undefined : Date.now();
 });
 
 export default recipe(
@@ -90,9 +89,10 @@ export default recipe(
                 <th style="padding: 10px;">Integration</th>
                 <th style="padding: 10px;">Created At</th>
                 <th style="padding: 10px;">Updated At</th>
-                <th style="padding: 10px;">Enabled</th>
+                <th style="padding: 10px;">Last Run</th>
                 <th style="padding: 10px;">Status</th>
-                <th style="padding: 10px;">Runs</th>
+                <th style="padding: 10px;">Disabled</th>
+                <th style="padding: 10px;">Delete</th>
               </tr>
             </thead>
             <tbody>
@@ -117,18 +117,35 @@ export default recipe(
                       (charm) => new Date(charm.updatedAt).toLocaleString(),
                     )}
                   </td>
+
                   <td style="padding: 10px;">
+                    {derive(
+                      charm,
+                      (charm) =>
+                        charm.lastRun
+                          ? new Date(charm.lastRun).toLocaleString()
+                          : "never",
+                    )}
+                  </td>
+                  <td style="padding: 10px;">{charm.status}</td>
+                  <td style="padding: 10px;">
+                    {derive(
+                      charm,
+                      (charm) =>
+                        charm.disabledAt
+                          ? new Date(charm.disabledAt).toLocaleString()
+                          : "enabled",
+                    )}&nbsp;
                     <button
                       onClick={toggleCharm({ charm })}
                       type="button"
                     >
                       {derive(
                         charm,
-                        (charm) => charm.enabled ? "Disable" : "Enable",
+                        (charm) => charm.disabledAt ? "enable" : "disable",
                       )}
                     </button>
                   </td>
-                  <td style="padding: 10px;">{charm.runs}</td>
                   <td style="padding: 10px;">
                     <button
                       onClick={deleteCharm({ charm, charms })}
@@ -137,7 +154,6 @@ export default recipe(
                       Delete
                     </button>
                   </td>
-                  <td style="padding: 10px;">{charm.status}</td>
                 </tr>
               ))}
             </tbody>
