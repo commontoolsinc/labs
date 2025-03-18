@@ -758,7 +758,7 @@ async function handleUseSpellOnOtherData(deps: CommandContext) {
   }
 }
 
-async function handleAddGmailImporter(deps: CommandContext, filename: string) {
+async function handleAddRemoteRecipe(deps: CommandContext, filename: string) {
   deps.setLoading(true);
   try {
     const response = await fetch(
@@ -1124,13 +1124,19 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           id: "add-gmail-importer",
           type: "action",
           title: "Add Gmail Importer",
-          handler: () => handleAddGmailImporter(deps, "gmail.tsx"),
+          handler: () => handleAddRemoteRecipe(deps, "gmail.tsx"),
         },
         {
           id: "add-gcal-importer",
           type: "action",
           title: "Add GCal Importer",
-          handler: () => handleAddGmailImporter(deps, "gcal.tsx"),
+          handler: () => handleAddRemoteRecipe(deps, "gcal.tsx"),
+        },
+        {
+          id: "add-rss-importer",
+          type: "action",
+          title: "Add RSS Importer",
+          handler: () => handleAddRemoteRecipe(deps, "rss.tsx"),
         },
       ],
     },
