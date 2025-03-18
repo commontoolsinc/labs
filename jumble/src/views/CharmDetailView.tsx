@@ -304,7 +304,7 @@ function useCharmOperation() {
     "anthropic:claude-3-7-sonnet-latest",
   );
   const [operationType, setOperationType] = useState<OperationType>("iterate");
-  const [showVariants, setShowVariants] = useState(true);
+  const [showVariants, setShowVariants] = useState(false);
   const [loading, setLoading] = useState(false);
   const [variants, setVariants] = useState<Cell<Charm>[]>([]);
   const [variantModelsMap, setVariantModelsMap] = useState<
