@@ -152,6 +152,12 @@ export const setupIframe = () =>
           setPreviousValue(context, key, serializedString);
           callback(key, serialized);
         }
+
+        // HACK(seefeld): We want to remove * support, but some existing iframes
+        // use it to know that data is available. So as a hack, we're
+        // unsubscribing from * here after the first time it's called.
+        // TODO(seefeld): Remove this 2025-04-15 or sooner
+        if (key === "*") removeAction(action);
       };
 
       addAction(action);
