@@ -307,6 +307,7 @@ export class ExecuteCharmHandler implements JobHandler {
   /**
    * Shutdown the handler and its resources
    */
+  // deno-lint-ignore require-await
   async shutdown(): Promise<void> {
     // We're not shutting down the worker pool here since it's shared
     // The service will handle shutting down the shared pool
