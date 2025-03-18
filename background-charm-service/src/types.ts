@@ -36,7 +36,7 @@ export interface Integration {
   name: string;
 
   // Initialize the integration
-  initialize: () => Promise<void>;
+  initialize: () => Promise<void> | void;
 
   // Get integration cell configuration
   getIntegrationConfig: () => IntegrationCellConfig;

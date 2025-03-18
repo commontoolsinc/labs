@@ -153,7 +153,7 @@ export class BackgroundCharmService {
       id: "manual",
       name: "Manual Charms",
 
-      async initialize(): Promise<void> {
+      initialize(): void {
         // No initialization needed
         log("Manual integration initialized");
       },
