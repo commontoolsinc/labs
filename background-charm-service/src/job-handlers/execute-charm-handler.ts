@@ -124,19 +124,6 @@ export class ExecuteCharmHandler implements JobHandler {
           integrationId,
         );
       }
-
-      // Get integration config with validation function
-      const integrationConfig = integration.getIntegrationConfig();
-      if (
-        integrationConfig.isValidIntegrationCharm &&
-        !integrationConfig.isValidIntegrationCharm(runningCharm)
-      ) {
-        throw new IntegrationError(
-          `Charm does not match integration type ${integrationId}`,
-          integrationId,
-        );
-      }
-
       // Execute charm with proper error detection and timeout
       log(`Executing charm: ${charmId}`);
 
