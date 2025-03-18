@@ -88,7 +88,7 @@ export class JobQueue {
     integrationId: string,
     priority: number = 5,
   ): Promise<string> {
-    return this.addJob<ScanIntegrationJob>({
+    return await this.addJob<ScanIntegrationJob>({
       type: JobType.SCAN_INTEGRATION,
       integrationId,
       priority,
