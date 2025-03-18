@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 deno check \
+  background-charm-service \
   builder \
   charm \
   cli \

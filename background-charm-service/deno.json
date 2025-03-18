@@ -1,0 +1,15 @@
+{
+  "tasks": {
+    "start": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts",
+    "gmail": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts --integration=gmail --interval=20",
+    "gcal": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts --integration=gcal --interval=20",
+    "initialize": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts --initialize",
+    "initialize:gmail": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts --integration=gmail --initialize",
+    "initialize:gcal": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts --integration=gcal --initialize",
+    "test": "deno test",
+    "check": "deno check src/**/*.ts",
+    "lint": "deno lint",
+    "fmt": "deno fmt"
+  },
+  "imports": {}
+}
