@@ -529,10 +529,6 @@ const security = () =>
   `## Security Restrictions
 - Do not use browser dialog functions (\`prompt()\`, \`alert()\`, \`confirm()\`)
 - Avoid any methods that could compromise security or user experience
-
-<csp-headers>
-  ${CSP}
-</csp-headers>
 `;
 
 // Update the system message to reflect the new interface
