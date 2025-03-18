@@ -9,14 +9,12 @@ import {
   setBobbyServerUrl,
   storage,
 } from "@commontools/runner";
-import { type DID, Identity } from "@commontools/identity";
-import * as Session from "./session.ts";
-import { gmailIntegrationCharmsSchema } from "@commontools/utils";
+import { type DID, Identity, Session } from "@commontools/identity";
 
 const { spaceId, targetCellCause, recipePath, cause, name, quit } = parseArgs(
   Deno.args,
   {
-    string: ["spaceId", "targetCellCause", "recipePath", "cause", "name"],
+    string: ["spaceId", "recipePath", "cause", "name"],
     boolean: ["quit"],
     default: {
       name: "recipe-caster",
@@ -27,7 +25,7 @@ const { spaceId, targetCellCause, recipePath, cause, name, quit } = parseArgs(
 
 if (!spaceId || !recipePath) {
   console.error(
-    "Usage: deno task castRecipe --spaceId <spaceId> --recipePath <path to recipe> [--targetCellCause <targetCellCause>] [--cause <cause>] [--name <name>] [--quit]",
+    "Usage: deno task castRecipe --spaceId <spaceId> --recipePath <path to recipe> [--cause <cause>] [--name <name>] [--quit]",
   );
   Deno.exit(1);
 }
@@ -66,25 +64,7 @@ async function castRecipe() {
       throw new Error(`Failed to compile recipe from ${recipePath}`);
     }
 
-    if (!targetCellCause) {
-      throw new Error("Cell ID is required");
-    }
-
     console.log("Recipe compiled successfully");
-
-    const targetCell = getCell(
-      spaceId as DID,
-      targetCellCause,
-      gmailIntegrationCharmsSchema,
-    );
-    // Ensure the cell is synced
-    storage.syncCell(targetCell, true);
-    await storage.synced();
-
-    console.log("Getting cell...");
-
-    // Cast the recipe on the cell or with undefined if no cell
-    console.log("Casting recipe...");
 
     // Create session and charm manager (matching main.ts pattern)
     const session = await Session.open({
@@ -98,7 +78,7 @@ async function castRecipe() {
 
     const charm = await charmManager.runPersistent(
       recipe,
-      targetCell,
+      undefined,
       cause,
     );
 
