@@ -16,6 +16,7 @@
     "./ui",
     "./utils"
   ],
+  "nodeModulesDir": "auto",
   "tasks": {
     "check": "./scripts/check-all.sh",
     "test-all": "./scripts/test-all.ts",
@@ -65,9 +66,9 @@
     "proseWrap": "always"
   },
   "imports": {
+    "@atproto/api": "npm:@atproto/api@^0.14.9",
     "ai": "npm:ai@^4.1.5",
     "@astral/astral": "jsr:@astral/astral",
-    "@atproto/api": "npm:@atproto/api^0.14.9",
     "@cfworker/json-schema": "npm:@cfworker/json-schema@^4.1.0",
     "@cmd-johnson/oauth2-client": "jsr:@cmd-johnson/oauth2-client@^2.0.0",
     "@codemirror/lang-javascript": "npm:@codemirror/lang-javascript@^6.2.2",

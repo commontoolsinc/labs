@@ -6921,6 +6921,7 @@
       "jsr:@std/http@1",
       "jsr:@std/path@1",
       "jsr:@std/testing@1",
+      "npm:@atproto/api@~0.14.9",
       "npm:@cfworker/json-schema@^4.1.0",
       "npm:@codemirror/lang-javascript@^6.2.2",
       "npm:@codemirror/lang-markdown@^6.3.2",
@@ -6966,7 +6967,6 @@
       },
       "jumble": {
         "dependencies": [
-          "npm:@atproto/api@~0.14.9",
           "npm:@codemirror/view@^6.36.2",
           "npm:@lit/react@^1.0.7",
           "npm:@radix-ui/react-dialog@^1.1.6",
