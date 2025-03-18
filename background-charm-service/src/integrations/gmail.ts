@@ -2,8 +2,10 @@ import { Charm } from "@commontools/charm";
 import { Cell } from "@commontools/runner";
 import type { DID } from "@commontools/identity";
 import {
+  CELL_CAUSE,
   getGmailIntegrationCharms,
   initializeGmailIntegrationCharmsCell,
+  SYSTEM_SPACE_ID,
 } from "@commontools/utils";
 import { Integration, IntegrationCellConfig } from "../types.ts";
 import { log } from "../utils.ts";
@@ -37,26 +39,15 @@ export class GmailIntegration implements Integration {
   }
 
   /**
-   * Validate a Gmail integration charm
-   */
-  private isValidGmailCharm(charm: Cell<Charm>): boolean {
-    const googleUpdater = charm.key("googleUpdater");
-    const auth = charm.key("auth");
-    return !!(googleUpdater && auth);
-  }
-
-  /**
    * Get the integration cell configuration
    */
   getIntegrationConfig(): IntegrationCellConfig {
     return {
       id: this.id,
       name: this.name,
-      spaceId: "system",
-      cellId: "gmail-integration-cell",
-      cellCauseName: "gmail-integration-charms",
+      spaceId: SYSTEM_SPACE_ID,
+      cellCauseName: CELL_CAUSE,
       fetchCharms: () => this.fetchGmailIntegrationCharms(),
-      isValidIntegrationCharm: (charm) => this.isValidGmailCharm(charm),
     };
   }
 }
