@@ -1,3 +1,5 @@
+import { TaskPerform } from "./ipc.ts";
+
 // An `IframeContextHandler` is used by consumers to
 // register how read/writing values from frames are handled.
 export interface IframeContextHandler {
@@ -12,6 +14,14 @@ export interface IframeContextHandler {
   unsubscribe(context: any, receipt: any): void;
   onLLMRequest(context: any, payload: string): Promise<object>;
   onReadWebpageRequest(context: any, payload: string): Promise<object>;
+
+  /**
+   * Guest may send a command it wishes system to perform.
+   */
+  onPerform(
+    context: unknown,
+    command: TaskPerform,
+  ): Promise<{ ok: object; error?: void } | { ok?: void; error: Error }>;
 }
 
 let IframeHandler: IframeContextHandler | null = null;

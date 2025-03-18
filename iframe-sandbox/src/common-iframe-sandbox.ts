@@ -272,6 +272,27 @@ export class CommonIframeSandboxElement extends LitElement {
         });
         return;
       }
+
+      case IPC.GuestMessageType.Perform: {
+        const instanceId = this.instanceId;
+        IframeHandler.onPerform(this.context, message.data).then((result) => {
+          if (this.instanceId !== instanceId) {
+            // Inner frame was reloaded. This response was
+            // from a previous page. Abort.
+            return;
+          }
+
+          this.toGuest({
+            id: this.frameId,
+            type: IPC.IPCHostMessageType.Passthrough,
+            data: {
+              type: IPC.HostMessageType.Effect,
+              id: message.data.id,
+              result,
+            },
+          });
+        });
+      }
     }
   }
 
