@@ -183,7 +183,7 @@ export class ExecuteCharmHandler implements JobHandler {
       );
 
       // Check if we should disable this charm
-      if (state.consecutiveFailures >= 5) { // TODO: Make configurable
+      if (state.consecutiveFailures >= 5) { // TODO(@jakedahn): Make configurable
         log(
           `Disabling charm ${spaceId}/${charmId} after ${state.consecutiveFailures} consecutive failures`,
         );

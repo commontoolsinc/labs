@@ -104,7 +104,7 @@ export class JobQueue {
     charmId: string,
     priority: number = 3,
   ): Promise<string> {
-    return this.addJob<ExecuteCharmJob>({
+    return await this.addJob<ExecuteCharmJob>({
       type: JobType.EXECUTE_CHARM,
       integrationId,
       spaceId,
@@ -120,7 +120,7 @@ export class JobQueue {
     task: "cleanup" | "stats" | "reset",
     priority: number = 10,
   ): Promise<string> {
-    return this.addJob<MaintenanceJob>({
+    return await this.addJob<MaintenanceJob>({
       type: JobType.MAINTENANCE,
       task,
       priority,

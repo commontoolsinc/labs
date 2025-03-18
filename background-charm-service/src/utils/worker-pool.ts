@@ -261,7 +261,7 @@ export class WorkerPool<T, R> {
       throw new Error("Worker pool is shutting down");
     }
 
-    return new Promise<R>((resolve, reject) => {
+    return await new Promise<R>((resolve, reject) => {
       const taskId = crypto.randomUUID();
 
       // Create a task

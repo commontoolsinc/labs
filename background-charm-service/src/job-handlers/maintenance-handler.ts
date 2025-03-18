@@ -31,11 +31,11 @@ export class MaintenanceHandler implements JobHandler {
 
     switch (task) {
       case "cleanup":
-        return this.runCleanup();
+        return await this.runCleanup();
       case "stats":
-        return this.updateStats();
+        return await this.updateStats();
       case "reset":
-        return this.resetDisabledCharms();
+        return await this.resetDisabledCharms();
       default:
         throw new Error(`Unknown maintenance task: ${task}`);
     }
