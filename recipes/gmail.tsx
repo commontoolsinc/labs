@@ -56,15 +56,6 @@ const AuthSchema = {
 } as const satisfies JSONSchema;
 type Auth = Schema<typeof AuthSchema>;
 
-const LabelSchema = {
-  type: "object",
-  properties: {
-    id: { type: "string" },
-    name: { type: "string" },
-  },
-} as const satisfies JSONSchema;
-type Label = Schema<typeof LabelSchema>;
-
 const GmailImporterInputs = {
   type: "object",
   properties: {
@@ -93,10 +84,6 @@ const GmailImporterInputs = {
 const ResultSchema = {
   type: "object",
   properties: {
-    labels: {
-      type: "array",
-      items: LabelSchema,
-    },
     emails: {
       type: "array",
       items: {
@@ -149,12 +136,11 @@ const googleUpdater = handler(
     type: "object",
     properties: {
       emails: { type: "array", items: EmailSchema, default: [], asCell: true },
-      auth: { type: AuthSchema, asCell: true },
+      auth: { ...AuthSchema, asCell: true },
       settings: GmailImporterInputs.properties.settings,
-      labels: { type: "array", items: LabelSchema, default: [], asCell: true },
     },
-    required: ["emails", "auth", "settings", "labels"],
-  },
+    required: ["emails", "auth", "settings"],
+  } as const satisfies JSONSchema,
   (_event, state) => {
     console.log("googleUpdater!");
 
@@ -331,53 +317,6 @@ Accept: application/json
   }).filter((message): message is Email => message !== null);
 }
 
-async function fetchLabels(
-  accessToken: string,
-  state: {
-    labels: Cell<Label[]>;
-  },
-) {
-  const existingLabels = new Set(
-    state.labels.get().map((label) => label.id),
-  );
-
-  try {
-    console.log("Fetching Gmail labels...");
-    const response = await fetch(
-      "https://gmail.googleapis.com/gmail/v1/users/me/labels",
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      },
-    );
-
-    const data = await response.json();
-
-    const labelData = data.labels.map((
-      label: { id: string; name: string },
-    ) => ({
-      id: label.id,
-      name: label.name,
-    }));
-
-    const newLabels = labelData.filter(
-      (label: { id: string }) => !existingLabels.has(label.id),
-    );
-
-    if (newLabels.length === 0) {
-      console.log("No new labels to fetch");
-      return { labels: [] };
-    }
-    state.labels.push(...newLabels);
-
-    return state.labels || [];
-  } catch (error) {
-    console.error("Error fetching Gmail labels:", error);
-    return [];
-  }
-}
-
 export async function fetchEmail(
   auth: Cell<Auth>,
   maxResults: number = 100,
@@ -496,14 +435,9 @@ export default recipe(
   ResultSchema,
   ({ settings, auth }) => {
     const emails = cell<Email[]>([]);
-    const labels = cell<Label[]>([]);
 
     derive(emails, (emails) => {
       console.log("emails", emails.length);
-    });
-
-    derive(labels, (labels) => {
-      console.log("labels results", labels.length);
     });
 
     return {
@@ -548,7 +482,6 @@ export default recipe(
                   emails,
                   auth,
                   settings,
-                  labels,
                 })}
               >
                 Fetch Emails
@@ -588,8 +521,7 @@ export default recipe(
         </div>
       ),
       emails,
-      labels,
-      googleUpdater: googleUpdater({ emails, auth, settings, labels }),
+      bgUpdater: googleUpdater({ emails, auth, settings }),
     };
   },
 );
