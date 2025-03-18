@@ -211,6 +211,21 @@ if (env.CTTS_AI_LLM_GROQ_API_KEY) {
 
   addModel({
     provider: groqProvider,
+    name: "groq:qwen-qwq-32b",
+    aliases: ["groq:qwen-qwq-32b", "qwen-qwq-32b"],
+    capabilities: {
+      contextWindow: 128_000,
+      maxOutputTokens: 128_000,
+      images: false,
+      prefill: false,
+      systemPrompt: false,
+      stopSequences: false,
+      streaming: true,
+    },
+  });
+
+  addModel({
+    provider: groqProvider,
     name: "groq:llama-3.3-70b-versatile",
     aliases: ["groq:llama-3.3-70b"],
     capabilities: {
