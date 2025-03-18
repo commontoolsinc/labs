@@ -1,4 +1,5 @@
-import { DID, Identity } from "@commontools/identity";
+import { Identity } from "./identity.ts";
+import { type DID } from "./interface.ts";
 export const ANYONE = "common user";
 
 export const open = async (

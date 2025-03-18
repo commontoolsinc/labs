@@ -1,19 +1,15 @@
 import { h } from "@commontools/html";
 import {
-  cell,
   derive,
   handler,
-  ID,
   JSONSchema,
   NAME,
   recipe,
   Schema,
-  str,
   UI,
 } from "@commontools/builder";
-import { Cell } from "@commontools/runner";
 
-export const CharmEntrySchema = {
+const BGCharmEntrySchema = {
   type: "object",
   properties: {
     space: { type: "string" },
@@ -34,14 +30,14 @@ export const CharmEntrySchema = {
     "runs",
   ],
 } as const satisfies JSONSchema;
-type CharmEntry = Schema<typeof CharmEntrySchema>;
+type BGCharmEntry = Schema<typeof BGCharmEntrySchema>;
 
 const InputSchema = {
   type: "object",
   properties: {
     charms: {
       type: "array",
-      items: CharmEntrySchema,
+      items: BGCharmEntrySchema,
       default: [],
     },
   },
@@ -52,10 +48,26 @@ const ResultSchema = {
   properties: {
     charms: {
       type: "array",
-      items: CharmEntrySchema,
+      items: BGCharmEntrySchema,
     },
   },
 } as const satisfies JSONSchema;
+
+const deleteCharm = handler<
+  never,
+  { charms: BGCharmEntry[]; charm: BGCharmEntry }
+>(
+  (_, { charm, charms }) => {
+    const idx = charms.findIndex((i) =>
+      i.space === charm.space && i.charmId === charm.charmId
+    );
+    if (idx !== -1) charms.splice(idx, 1);
+  },
+);
+
+const toggleCharm = handler<never, { charm: BGCharmEntry }>((_, { charm }) => {
+    charm.enabled = !charm.enabled;
+  });
 
 export default recipe(
   InputSchema,
@@ -103,8 +115,23 @@ export default recipe(
                       (charm) => new Date(charm.updatedAt).toLocaleString(),
                     )}
                   </td>
-                  <td style="padding: 10px;">{charm.enabled}</td>
+                  <td style="padding: 10px;">
+                    <button
+                      onClick={() => toggleCharm({ charm })}
+                      type="button"
+                    >
+                      {charm.enabled ? "Disable" : "Enable"}
+                    </button>
+                  </td>
                   <td style="padding: 10px;">{charm.runs}</td>
+                  <td style="padding: 10px;">
+                    <button
+                      onClick={() => deleteCharm({ charm, charms })}
+                      type="button"
+                    >
+                      Delete
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
