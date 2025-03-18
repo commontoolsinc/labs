@@ -17,6 +17,7 @@ const BGCharmEntrySchema = {
     integration: { type: "string" },
     createdAt: { type: "number" },
     updatedAt: { type: "number" },
+    status: { type: "string" },
     enabled: { type: "boolean" },
     runs: { type: "number", default: 0 },
   },
@@ -26,6 +27,7 @@ const BGCharmEntrySchema = {
     "integration",
     "createdAt",
     "updatedAt",
+    "status",
     "enabled",
     "runs",
   ],
@@ -89,6 +91,7 @@ export default recipe(
                 <th style="padding: 10px;">Created At</th>
                 <th style="padding: 10px;">Updated At</th>
                 <th style="padding: 10px;">Enabled</th>
+                <th style="padding: 10px;">Status</th>
                 <th style="padding: 10px;">Runs</th>
               </tr>
             </thead>
@@ -134,6 +137,7 @@ export default recipe(
                       Delete
                     </button>
                   </td>
+                  <td style="padding: 10px;">{charm.status}</td>
                 </tr>
               ))}
             </tbody>
