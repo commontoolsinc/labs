@@ -3,6 +3,7 @@ import {
   Action,
   addAction,
   addCommonIDfromObjectID,
+  idle,
   isCell,
   ReactivityLog,
   removeAction,
@@ -155,9 +156,13 @@ export const setupIframe = () =>
 
         // HACK(seefeld): We want to remove * support, but some existing iframes
         // use it to know that data is available. So as a hack, we're
-        // unsubscribing from * here after the first time it's called.
-        // TODO(seefeld): Remove this 2025-04-15 or sooner
-        if (key === "*") removeAction(action);
+        // unsubscribing from * here after the first time it's called. Has to be
+        // wait for idle to confuse the scheduler as it updates dependencies
+        // after running this function.
+        // TODO(seefeld): Remove this 2025-04-15 or
+        if (key === "*") {
+          idle().then(() => removeAction(action));
+        }
       };
 
       addAction(action);
