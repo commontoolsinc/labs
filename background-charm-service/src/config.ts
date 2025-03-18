@@ -8,6 +8,7 @@ import { z } from "zod";
  * Environment variables schema using Zod
  */
 const envSchema = z.object({
+  KV_STORE_DIR: z.string().default(".cache"),
   // Job queue settings
   MAX_CONCURRENT_JOBS: z.coerce.number().positive().default(5),
   MAX_RETRIES: z.coerce.number().nonnegative().default(3),
