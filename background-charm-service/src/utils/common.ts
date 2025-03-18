@@ -6,6 +6,41 @@ import { Charm } from "@commontools/charm";
 import { log } from "../utils.ts";
 import { TokenRefreshError } from "../errors/index.ts";
 import { env } from "../config.ts";
+import { WorkerPool } from "./worker-pool.ts";
+
+// Create a singleton worker pool that can be shared across the application
+let sharedWorkerPool: WorkerPool<any, any> | null = null;
+
+/**
+ * Get or create the shared worker pool
+ */
+export function getSharedWorkerPool(options: {
+  maxWorkers: number;
+  workerUrl: string;
+  workerOptions?: {
+    type?: "classic" | "module";
+    name?: string;
+    deno?: {
+      permissions?: {
+        read?: boolean;
+        write?: boolean;
+        net?: boolean;
+        env?: boolean;
+        run?: boolean;
+        ffi?: boolean;
+        hrtime?: boolean;
+      };
+    };
+  };
+  taskTimeout?: number;
+  healthCheckIntervalMs?: number;
+}): WorkerPool<any, any> {
+  if (!sharedWorkerPool) {
+    sharedWorkerPool = new WorkerPool(options);
+    log(`Created shared worker pool with ${options.maxWorkers} max workers`);
+  }
+  return sharedWorkerPool;
+}
 
 /**
  * Find an updater stream in a charm by checking common stream names
@@ -14,6 +49,7 @@ import { env } from "../config.ts";
 export function findUpdaterStream(charm: Cell<Charm>): Cell<any> | null {
   // Check for known updater streams
   const streamNames = [
+    "bgUpdater",
     "updater",
     "googleUpdater",
     "githubUpdater",

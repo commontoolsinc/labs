@@ -17,6 +17,7 @@ import { getConfig } from "../config.ts";
 import {
   createTimeoutController,
   findUpdaterStream,
+  getSharedWorkerPool,
   refreshAuthToken,
 } from "../utils/common.ts";
 import { WorkerPool } from "../utils/worker-pool.ts";
@@ -36,9 +37,9 @@ export class ExecuteCharmHandler implements JobHandler {
     this.stateManager = new StateManager(kv);
     this.config = getConfig();
 
-    // Initialize worker pool
+    // Get the shared worker pool instance
     const workerUrl = new URL("../utils/charm-worker.ts", import.meta.url).href;
-    this.workerPool = new WorkerPool({
+    this.workerPool = getSharedWorkerPool({
       maxWorkers: this.config.maxConcurrentJobs,
       workerUrl,
       workerOptions: {
@@ -320,8 +321,8 @@ export class ExecuteCharmHandler implements JobHandler {
    * Shutdown the handler and its resources
    */
   async shutdown(): Promise<void> {
-    // Shutdown the worker pool
-    await this.workerPool.shutdown();
+    // We're not shutting down the worker pool here since it's shared
+    // The service will handle shutting down the shared pool
     log("ExecuteCharmHandler shutdown complete");
   }
 
