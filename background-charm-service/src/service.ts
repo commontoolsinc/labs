@@ -13,8 +13,13 @@ import {
 } from "./integrations/index.ts";
 import { log } from "./utils.ts";
 import { env, getConfig } from "./config.ts";
-import { formatError, formatUptime } from "./utils/common.ts";
+import {
+  formatError,
+  formatUptime,
+  getSharedWorkerPool,
+} from "./utils/common.ts";
 import { IntegrationError } from "./errors/index.ts";
+import { WorkerPool } from "./utils/worker-pool.ts";
 
 /**
  * Background Charm Service using Deno KV and job queues
@@ -30,6 +35,7 @@ export class BackgroundCharmService {
   private globalErrorHandlerInstalled = false;
   private maxConsecutiveFailures: number;
   private config: ReturnType<typeof getConfig>;
+  private workerPool: WorkerPool<any, any> | null = null;
 
   constructor(options: KVServiceOptions) {
     this.kv = options.kv;
@@ -51,6 +57,9 @@ export class BackgroundCharmService {
     this.maxConsecutiveFailures = options.maxConsecutiveFailures ??
       env.MAX_CONSECUTIVE_FAILURES;
 
+    // Initialize the shared worker pool
+    this.initializeWorkerPool();
+
     // Install global error handlers
     this.installGlobalErrorHandlers();
 
@@ -60,6 +69,31 @@ export class BackgroundCharmService {
         options.maxConcurrentJobs ?? env.MAX_CONCURRENT_JOBS
       }`,
     );
+  }
+
+  /**
+   * Initialize the shared worker pool
+   */
+  private initializeWorkerPool(): void {
+    // Create the charm worker URL
+    const workerUrl = new URL("./utils/charm-worker.ts", import.meta.url).href;
+
+    // Initialize the shared worker pool
+    this.workerPool = getSharedWorkerPool({
+      maxWorkers: this.config.maxConcurrentJobs,
+      workerUrl,
+      workerOptions: {
+        type: "module",
+        deno: {
+          permissions: {
+            read: true,
+            write: true,
+            net: true,
+            env: true,
+          },
+        },
+      },
+    });
   }
 
   /**
@@ -220,6 +254,13 @@ export class BackgroundCharmService {
 
     // Stop state manager
     this.stateManager.stop();
+
+    // Get final worker pool stats
+    if (this.workerPool) {
+      this.workerPool.reportWorkerStats();
+      await this.workerPool.shutdown();
+      log("Worker pool shutdown complete");
+    }
 
     this.isRunning = false;
 

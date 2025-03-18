@@ -62,7 +62,6 @@ export class MyIntegration implements Integration {
       spaceId: "system", // Update as needed
       cellCauseName: "my-integration-cell",
       fetchCharms: () => this.fetchMyIntegrationCharms(),
-      isValidIntegrationCharm: (charm) => this.isValidCharm(charm),
     };
   }
 }
@@ -77,7 +76,7 @@ export default new MyIntegration();
 
 ### Prerequisites
 
-- Deno 1.40.0 or later
+- Deno 2.2 or later
 
 ### Command Line Options
 
@@ -114,10 +113,10 @@ With Gmail integration:
 deno task gmail
 ```
 
-With Google Calendar integration:
+With Discord integration:
 
 ```
-deno task gcal
+deno task discord
 ```
 
 With manual charm list:
@@ -138,7 +137,7 @@ Initialize a specific integration:
 
 ```
 deno task initialize:gmail
-deno task initialize:gcal
+deno task initialize:discord
 ```
 
 ### Testing

@@ -17,7 +17,7 @@ import { Cell } from "@commontools/runner";
 // sudo tailscale serve --https=443 localhost:8080
 // you need OPERATOR_PASS set so that it doesn't default to "implicit trust"
 // OPERATOR_PASS="common user" TOOLSHED_API_URL=https://toolshed.saga-castor.ts.net deno task start --name discordstuff --cause 420 --recipeFile ../recipes/discord.tsx
-// then you go to 
+// then you go to
 // TOOLSHED_URL/discordstuff
 
 const MessageSchema = {
@@ -46,7 +46,7 @@ const MessageSchema = {
     "guild_id",
     "mentions",
     "referenced_message_id",
-    "thread_id"
+    "thread_id",
   ],
 } as const as JSONSchema;
 type MessageSchema = Schema<typeof MessageSchema>;
@@ -54,16 +54,14 @@ type MessageSchema = Schema<typeof MessageSchema>;
 const InputSchema = {
   type: "object",
   properties: {
-    type: "object",
-    properties: {
-      requestor_id: {
-        type: "string",
-        description: "requestor id, discord api server keeps track of what messages were sent with this id",
-        default: "420",
-      },
+    requestor_id: {
+      type: "string",
+      description:
+        "requestor id, discord api server keeps track of what messages were sent with this id",
+      default: "420",
     },
-    required: ["requestor_id"],
   },
+  required: ["requestor_id"],
   description: "Schema for Discord Messages input, just requestor_id",
 } as const satisfies JSONSchema;
 
@@ -83,28 +81,43 @@ const ResultSchema = {
 
 const discordUpdater = handler(
   {},
-
   // this is the state object
   {
     type: "object",
     properties: {
-      messages: { type: "array", items: MessageSchema, default: [], asCell: true },
+      messages: {
+        type: "array",
+        items: MessageSchema,
+        default: [],
+        asCell: true,
+      },
+      requestor_id: {
+        type: "string",
+        default: "420",
+      },
     },
     required: ["messages", "requestor_id"],
   },
   async (_event, state) => {
     const requestor_id = state.requestor_id;
     const messages_data = await fetchMessages(requestor_id);
-    console.log("messages data ", messages_data, " length=", messages_data.length);
+    console.log(
+      "messages data ",
+      messages_data,
+      " length=",
+      messages_data.length,
+    );
 
     // this was set in the recipe export, see end of return object of recipe
     state.messages.push(...messages_data);
   },
 );
 
-export async function fetchMessages(requestor_id) {
+export async function fetchMessages(requestor_id: string) {
   requestor_id = requestor_id || "421";
-  const api_url = "https://macbookair.saga-castor.ts.net/api/messages?requestor_id=" + requestor_id;
+  const api_url =
+    "https://macbookair.saga-castor.ts.net/api/messages?requestor_id=" +
+    requestor_id;
   const messages_fetch = await fetch(api_url);
   return await messages_fetch.json();
 }
@@ -119,7 +132,7 @@ export default recipe(
     });
 
     return {
-      [NAME]: "Discord Messages",
+      [NAME]: "Discord Messages jake",
       [UI]: (
         <div>
           <h1>Discord Messages</h1>
@@ -127,15 +140,12 @@ export default recipe(
             {derive(messages, (messages) => {
               return JSON.stringify(messages, null, 2);
             })}
-          </pre>  
+          </pre>
         </div>
       ),
       messages, // this sets state.messages, we inspect in handler()
-      requestor_id, 
-      discordUpdater: discordUpdater({ messages, requestor_id }),
+      requestor_id,
+      bgUpdater: discordUpdater({ messages, requestor_id }),
     };
   },
 );
-
-
-

@@ -149,7 +149,7 @@ async function main() {
   log("Starting Background Charm Service");
 
   // Open KV database
-  const kv = await Deno.openKv();
+  const kv = await Deno.openKv(`${env.KV_STORE_DIR}/${integrationId}.sqlite`);
 
   // Create integration cell configurations for manual charms if specified
   let integrationCellConfig = null;

@@ -490,6 +490,17 @@ export class WorkerPool<T, R> {
     }, intervalMs);
   }
 
+  /**
+   * Public method to report worker pool stats
+   * Can be called by external services to log current stats
+   */
+  public reportWorkerStats(): void {
+    this.reportStats();
+  }
+
+  /**
+   * Report internal statistics about the worker pool
+   */
   private reportStats(): void {
     log(`Worker Pool Stats:
       - Tasks: ${this.stats.tasksCompleted} completed, ${this.stats.tasksFailed} failed

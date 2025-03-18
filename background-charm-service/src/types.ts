@@ -15,17 +15,14 @@ export interface IntegrationCellConfig {
   // Space ID where the integration cell is located
   spaceId: string;
 
-  // Cell ID for the integration cell (replaces cellCauseName)
-  cellId: string;
+  // Cell ID for the integration cell
+  cellId?: string;
 
-  // Legacy cell cause name (for backward compatibility)
-  cellCauseName?: string;
+  // Name of the cell cause, which when derived becomes a merkle id
+  cellCauseName: string;
 
   // Custom fetcher function for retrieving charms
   fetchCharms: () => Promise<Array<{ space: DID; charmId: string }>>;
-
-  // Validator function that determines if a charm belongs to this integration
-  isValidIntegrationCharm?: (charm: Cell<Charm>) => boolean;
 }
 
 /**

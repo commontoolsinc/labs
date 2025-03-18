@@ -3,6 +3,8 @@ import { Job, JobType, MaintenanceJob } from "../types.ts";
 import { StateManager } from "../state-manager.ts";
 import { JobQueue } from "../job-queue.ts";
 import { log } from "../utils.ts";
+import { getSharedWorkerPool } from "../utils/common.ts";
+import { WorkerPool } from "../utils/worker-pool.ts";
 
 /**
  * Handler for maintenance jobs
@@ -120,6 +122,27 @@ export class MaintenanceHandler implements JobHandler {
 
       log(
         `Integration ${id}: ${stats.charms} charms, ${successRate}% success rate`,
+      );
+    }
+
+    // Get worker pool stats - only attempt to retrieve if the shared pool exists
+    try {
+      // We don't need to pass all options since we're just checking if the pool exists
+      // URL is required so pass a dummy value - it won't create a new pool if one exists
+      const workerPool = getSharedWorkerPool({
+        maxWorkers: 1,
+        workerUrl: "dummy-url",
+      });
+
+      // Use the public method to report stats
+      if (workerPool) {
+        (workerPool as WorkerPool<any, any>).reportWorkerStats();
+      }
+    } catch (error) {
+      log(
+        `Error retrieving worker pool stats: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
 
