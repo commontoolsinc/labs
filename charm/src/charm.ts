@@ -162,9 +162,10 @@ export class CharmManager {
     }
   }
 
-  async unpin(charm: Cell<Charm>) {
+  async unpinById(charmId: string) {
     await storage.syncCell(this.pinned);
-    const newPinnedCharms = filterOutEntity(this.pinnedCharms, charm);
+    const targetId = { "/": charmId };
+    const newPinnedCharms = filterOutEntity(this.pinnedCharms, targetId);
 
     if (newPinnedCharms.length !== this.pinnedCharms.get().length) {
       this.pinnedCharms.set(newPinnedCharms);
@@ -173,6 +174,13 @@ export class CharmManager {
     }
 
     return false;
+  }
+
+  async unpin(charm: Cell<Charm> | string | EntityId) {
+    const id = getEntityId(charm);
+    if (!id) return false;
+
+    return await this.unpinById(id["/"]);
   }
 
   getPinned(): Cell<Cell<Charm>[]> {
@@ -288,12 +296,15 @@ export class CharmManager {
       | Cell<T>
       | undefined;
   }
-
   // note: removing a charm doesn't clean up the charm's cells
   async remove(idOrCharm: string | EntityId | Cell<Charm>) {
     await storage.syncCell(this.charmsDoc);
+    await storage.syncCell(this.pinned);
+
     const id = getEntityId(idOrCharm);
     if (!id) return false;
+
+    await this.unpin(idOrCharm);
 
     const newCharms = filterOutEntity(this.charms, id);
 
