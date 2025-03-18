@@ -91,8 +91,18 @@ export default recipe(
                     #{derive(charm, (charm) => charm.charmId.slice(-4))}
                   </td>
                   <td style="padding: 10px;">{charm.integration}</td>
-                  <td style="padding: 10px;">{charm.createdAt}</td>
-                  <td style="padding: 10px;">{charm.updatedAt}</td>
+                  <td style="padding: 10px;">
+                    {derive(
+                      charm,
+                      (charm) => new Date(charm.createdAt).toLocaleString(),
+                    )}
+                  </td>
+                  <td style="padding: 10px;">
+                    {derive(
+                      charm,
+                      (charm) => new Date(charm.updatedAt).toLocaleString(),
+                    )}
+                  </td>
                   <td style="padding: 10px;">{charm.enabled}</td>
                   <td style="padding: 10px;">{charm.runs}</td>
                 </tr>
