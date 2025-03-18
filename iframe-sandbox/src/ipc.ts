@@ -1,4 +1,5 @@
 import { type JSONSchema } from "@commontools/builder";
+import { effect } from "../../runner/src/reactivity.ts";
 
 // Types used by the `common-iframe-sandbox` IPC.
 

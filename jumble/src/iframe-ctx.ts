@@ -1,7 +1,4 @@
-import {
-  setIframeContextHandler,
-  TaskPerform,
-} from "@commontools/iframe-sandbox";
+import { IPC, setIframeContextHandler } from "@commontools/iframe-sandbox";
 import {
   Action,
   addAction,
@@ -178,7 +175,7 @@ export const setupIframe = () =>
     },
     async onPerform(
       context: unknown,
-      command: TaskPerform,
+      command: IPC.TaskPerform,
     ): Promise<{ ok: object; error?: void } | { ok?: void; error: Error }> {
       console.log("perform", command);
       throw new Error(`Command is not implemented`);
