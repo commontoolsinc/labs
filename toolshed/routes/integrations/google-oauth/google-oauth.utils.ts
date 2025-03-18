@@ -357,3 +357,18 @@ export function createLogoutErrorResponse(
     status,
   );
 }
+
+export function createBackgroundIntegrationSuccessResponse(
+  c: any,
+  message: string,
+) {
+  return c.json({ success: true, message }, 200) as any;
+}
+
+export function createBackgroundIntegrationErrorResponse(
+  c: any,
+  errorMessage: string,
+  status = 400,
+) {
+  return c.json({ success: false, error: errorMessage }, status) as any;
+}

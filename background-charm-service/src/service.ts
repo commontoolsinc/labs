@@ -1,25 +1,12 @@
-import {
-  Integration,
-  IntegrationCellConfig,
-  JobType,
-  KV_PREFIXES,
-  KVServiceOptions,
-} from "./types.ts";
+import { KVServiceOptions } from "./types.ts";
 import { JobQueue } from "./job-queue.ts";
 import { StateManager } from "./state-manager.ts";
-import {
-  getAvailableIntegrations,
-  loadIntegrations,
-} from "./integrations/index.ts";
 import { log } from "./utils.ts";
 import { env, getConfig } from "./config.ts";
-import {
-  formatError,
-  formatUptime,
-  getSharedWorkerPool,
-} from "./utils/common.ts";
-import { IntegrationError } from "./errors/index.ts";
+import { getSharedWorkerPool } from "./utils/common.ts";
 import { WorkerPool } from "./utils/worker-pool.ts";
+import { BGCharmEntry, getBGUpdaterCharmsCell } from "@commontools/utils";
+import { storage } from "@commontools/runner";
 
 /**
  * Background Charm Service using Deno KV and job queues
@@ -28,7 +15,7 @@ export class BackgroundCharmService {
   private kv: Deno.Kv;
   private queue: JobQueue;
   private stateManager: StateManager;
-  private integrations: Map<string, Integration>;
+  private integrations: Set<string>;
   private cycleIntervalMs: number;
   private cycleTimer: number | null = null;
   private isRunning = false;
@@ -36,6 +23,7 @@ export class BackgroundCharmService {
   private maxConsecutiveFailures: number;
   private config: ReturnType<typeof getConfig>;
   private workerPool: WorkerPool<any, any> | null = null;
+  private charmsCell: any | null = null;
 
   constructor(options: KVServiceOptions) {
     this.kv = options.kv;
@@ -52,7 +40,7 @@ export class BackgroundCharmService {
       this.kv,
       options.logIntervalMs ?? env.LOG_INTERVAL_MS,
     );
-    this.integrations = new Map();
+    this.integrations = new Set<string>();
     this.cycleIntervalMs = options.cycleIntervalMs ?? env.CYCLE_INTERVAL_MS;
     this.maxConsecutiveFailures = options.maxConsecutiveFailures ??
       env.MAX_CONSECUTIVE_FAILURES;
@@ -142,65 +130,12 @@ export class BackgroundCharmService {
     // Initialize KV schema
     await this.stateManager.initialize();
 
-    // Load integrations
-    await loadIntegrations();
-
-    // Register all available integrations
-    for (const integration of getAvailableIntegrations()) {
-      await this.registerIntegration(integration);
-    }
+    // Initialize charms cell
+    this.charmsCell = await getBGUpdaterCharmsCell();
+    await storage.syncCell(this.charmsCell, true);
+    await storage.synced();
 
     log("Background Charm Service initialized");
-  }
-
-  /**
-   * Register an integration
-   */
-  private async registerIntegration(integration: Integration): Promise<void> {
-    this.integrations.set(integration.id, integration);
-
-    // Store integration config in KV
-    const config = integration.getIntegrationConfig();
-    await this.stateManager.setIntegrationConfig(integration.id, config);
-
-    // Initialize integration
-    await integration.initialize();
-
-    log(`Registered integration: ${integration.id}`);
-  }
-
-  /**
-   * Register a manual integration (from CLI charms list)
-   */
-  async registerManualIntegration(
-    config: IntegrationCellConfig,
-  ): Promise<void> {
-    if (!config) {
-      throw new IntegrationError("Invalid manual integration config", "manual");
-    }
-
-    // Store in KV
-    await this.stateManager.setIntegrationConfig("manual", config);
-
-    // Create a simple integration object to add to the map
-    const manualIntegration: Integration = {
-      id: "manual",
-      name: "Manual Charms",
-
-      initialize(): void {
-        // No initialization needed
-        log("Manual integration initialized");
-      },
-
-      getIntegrationConfig(): IntegrationCellConfig {
-        return config;
-      },
-    };
-
-    // Add to integrations map
-    this.integrations.set("manual", manualIntegration);
-
-    log(`Registered manual integration with fetchCharms function`);
   }
 
   /**
@@ -279,6 +214,17 @@ export class BackgroundCharmService {
     log("Starting cycle");
 
     try {
+      // Check for new charms to watch
+      if (this.charmsCell) {
+        const charms = (this.charmsCell.get() || []) as BGCharmEntry[];
+        log(`Found ${charms.length} charms to watch`);
+
+        // add each charm to the service
+        for (const charm of charms) {
+          this.queue.addExecuteCharmJob(charm);
+        }
+      }
+
       // Queue a maintenance job for statistics (lowest priority)
       await this.queue.addMaintenanceJob("stats", 1);
 
@@ -287,12 +233,6 @@ export class BackgroundCharmService {
 
       // Queue a maintenance job for resetting disabled charms (medium-low priority)
       await this.queue.addMaintenanceJob("reset", 3);
-
-      // Queue scan jobs for each integration (medium-high priority)
-      for (const [id, integration] of this.integrations.entries()) {
-        // Scan integrations have medium-high priority (5)
-        await this.queue.addScanIntegrationJob(id, 5);
-      }
 
       // Update cycle end time
       await this.stateManager.updateCycleStats(false);
@@ -326,22 +266,9 @@ export class BackgroundCharmService {
 
     return {
       running: this.isRunning,
-      integrations: Array.from(this.integrations.keys()),
+      integrations: Array.from(this.integrations),
       queueStatus: this.queue.getStatus(),
       serviceState,
     };
-  }
-
-  /**
-   * Initialize an integration
-   */
-  async initializeIntegration(integrationId: string): Promise<void> {
-    const integration = this.integrations.get(integrationId);
-    if (!integration) {
-      throw new Error(`Integration not found: ${integrationId}`);
-    }
-
-    await integration.initialize();
-    log(`Initialized integration: ${integrationId}`);
   }
 }

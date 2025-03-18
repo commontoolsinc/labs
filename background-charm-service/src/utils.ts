@@ -1,6 +1,6 @@
-import { Cell, getEntityId } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
 import type { DID } from "@commontools/identity";
+import { Cell, getEntityId } from "@commontools/runner";
 
 /**
  * Custom logger that includes timestamp and optionally charm ID
@@ -52,17 +52,19 @@ export function isValidCharmId(id: string): boolean {
  */
 export function parseCharmsInput(
   charms: string,
-): ({ space: DID; charmId: string })[] {
-  const result: ({ space: DID; charmId: string })[] = [];
+): ({ space: DID; charmId: string; integration: string })[] {
+  const result: ({ space: DID; charmId: string; integration: string })[] = [];
 
   charms.split(",").forEach((entry) => {
     const parts = entry.split("/");
-    if (parts.length !== 2) {
-      log(`Invalid charm format: ${entry}. Expected format: space/charmId`);
+    if (parts.length !== 3) {
+      log(
+        `Invalid charm format: ${entry}. Expected format: space/charmId/integration`,
+      );
       return; // Skip this entry
     }
 
-    const [space, charmId] = parts;
+    const [space, charmId, integration] = parts;
 
     if (!isValidDID(space)) {
       log(`Invalid space ID: ${space}. Must be a valid DID.`);
@@ -74,7 +76,12 @@ export function parseCharmsInput(
       return; // Skip this entry
     }
 
-    result.push({ space: space as DID, charmId });
+    if (!integration) {
+      log(`Invalid integration: ${integration}. Must be a valid integration.`);
+      return; // Skip this entry
+    }
+
+    result.push({ space: space as DID, charmId, integration });
   });
 
   return result;

@@ -1,5 +1,3 @@
-import { Cell } from "@commontools/runner";
-import { Charm } from "@commontools/charm";
 import type { DID } from "@commontools/identity";
 
 /**
@@ -22,24 +20,9 @@ export interface IntegrationCellConfig {
   cellCauseName: string;
 
   // Custom fetcher function for retrieving charms
-  fetchCharms: () => Promise<Array<{ space: DID; charmId: string }>>;
-}
-
-/**
- * Integration interface for external services
- */
-export interface Integration {
-  // Unique identifier for the integration
-  id: string;
-
-  // User-friendly name for the integration
-  name: string;
-
-  // Initialize the integration
-  initialize: () => Promise<void> | void;
-
-  // Get integration cell configuration
-  getIntegrationConfig: () => IntegrationCellConfig;
+  fetchCharms: () => Promise<
+    Array<{ space: DID; charmId: string; integration: string }>
+  >;
 }
 
 /**
@@ -63,7 +46,6 @@ export const KV_PREFIXES = {
 
 // Job types
 export enum JobType {
-  SCAN_INTEGRATION = "scan_integration",
   EXECUTE_CHARM = "execute_charm",
   MAINTENANCE = "maintenance",
 }
@@ -82,12 +64,6 @@ export interface Job {
   status: JobStatus;
   // Internal property for tracking KV entry version
   _versionstamp?: string;
-}
-
-// Scan integration job
-export interface ScanIntegrationJob extends Job {
-  type: JobType.SCAN_INTEGRATION;
-  integrationId: string;
 }
 
 // Execute charm job
