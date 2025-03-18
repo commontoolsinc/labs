@@ -18,6 +18,9 @@ export interface IntegrationCellConfig {
   // Cell ID for the integration cell (replaces cellCauseName)
   cellId: string;
 
+  // Legacy cell cause name (for backward compatibility)
+  cellCauseName?: string;
+
   // Custom fetcher function for retrieving charms
   fetchCharms: () => Promise<Array<{ space: DID; charmId: string }>>;
 

@@ -278,7 +278,10 @@ export class JobQueue {
       const { _versionstamp, ...cleanJob } = job;
       return { ...cleanJob, status: "processing" };
     } catch (error) {
-      log(`Error marking job ${job.id} as processing: ${error.message}`);
+      const errorMessage = error instanceof Error
+        ? error.message
+        : String(error);
+      log(`Error marking job ${job.id} as processing: ${errorMessage}`);
       return null;
     }
   }
@@ -438,7 +441,10 @@ export class JobQueue {
           );
         }
       } catch (updateError) {
-        log(`Error updating job status: ${updateError.message}`);
+        const errorMessage = updateError instanceof Error
+          ? updateError.message
+          : String(updateError);
+        log(`Error updating job status: ${errorMessage}`);
       }
 
       return;
@@ -470,7 +476,10 @@ export class JobQueue {
 
       await this.kv.set([...KV_PREFIXES.JOB_RESULTS, job.id], jobResult);
     } catch (updateError) {
-      log(`Error updating job status: ${updateError.message}`);
+      const errorMessage = updateError instanceof Error
+        ? updateError.message
+        : String(updateError);
+      log(`Error updating job status: ${errorMessage}`);
     }
   }
 

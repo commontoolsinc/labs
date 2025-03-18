@@ -4,10 +4,17 @@
 import { log } from "../utils.ts";
 import { WorkerError } from "../errors/index.ts";
 
+// Generic worker options interface
+interface GenericWorkerOptions {
+  type?: "classic" | "module";
+  name?: string;
+  [key: string]: unknown;
+}
+
 export interface WorkerPoolOptions {
   maxWorkers: number;
   workerUrl: URL | string;
-  workerOptions?: Deno.WorkerOptions;
+  workerOptions?: GenericWorkerOptions;
   initTimeout?: number;
   taskTimeout?: number;
   healthCheckIntervalMs?: number;
@@ -80,24 +87,17 @@ export class WorkerPool<T, R> {
   }
 
   private performHealthCheck(): void {
-    log(
-      `Performing worker pool health check. Active workers: ${this.workers.length}, Busy: ${
-        this.workers.filter((w) => w.busy).length
-      }, Queue: ${this.taskQueue.length}`,
-    );
-
-    // Check for workers that have been busy for too long
     const now = Date.now();
+
     for (const workerInfo of this.workers) {
+      // Check if worker has been busy for too long
       if (
-        workerInfo.busy && workerInfo.busySince &&
+        workerInfo.busy &&
+        workerInfo.busySince &&
+        this.options.workerMaxBusyTimeMs &&
         (now - workerInfo.busySince > this.options.workerMaxBusyTimeMs)
       ) {
-        log(
-          `Worker ${workerInfo.id} has been busy for too long (${
-            now - workerInfo.busySince
-          }ms), recycling`,
-        );
+        log(`Worker ${workerInfo.id} busy for too long, recycling`);
         this.recycleWorker(workerInfo.id);
       }
     }
@@ -109,18 +109,17 @@ export class WorkerPool<T, R> {
   }
 
   private recycleWorker(workerId: string): void {
-    // Find the worker
-    const workerIndex = this.workers.findIndex((w) => w.id === workerId);
-    if (workerIndex === -1) return;
+    const index = this.workers.findIndex((w) => w.id === workerId);
+    if (index === -1) return;
 
-    // Terminate and remove
     try {
-      this.workers[workerIndex].worker.terminate();
+      this.workers[index].worker.terminate();
     } catch (e) {
-      log(`Error terminating worker ${workerId}: ${e.message}`);
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      log(`Error terminating worker ${workerId}: ${errorMessage}`);
     }
 
-    this.workers.splice(workerIndex, 1);
+    this.workers.splice(index, 1);
 
     // Update stats
     this.stats.workersRecycled++;
@@ -178,8 +177,11 @@ export class WorkerPool<T, R> {
 
         return { worker, id: workerId };
       } catch (error) {
-        log(`Error creating worker ${workerId}: ${error.message}`);
-        return null;
+        const errorMessage = error instanceof Error
+          ? error.message
+          : String(error);
+        log(`Error creating worker ${workerId}: ${errorMessage}`);
+        throw new WorkerError(`Failed to create worker ${workerId}`, workerId);
       }
     }
 
@@ -240,7 +242,10 @@ export class WorkerPool<T, R> {
     try {
       this.workers[workerIndex].worker.terminate();
     } catch (terminateError) {
-      log(`Error terminating worker ${workerId}: ${terminateError.message}`);
+      const errorMessage = terminateError instanceof Error
+        ? terminateError.message
+        : String(terminateError);
+      log(`Error terminating worker ${workerId}: ${errorMessage}`);
     }
 
     // Remove the worker from the pool
@@ -425,9 +430,11 @@ export class WorkerPool<T, R> {
     for (const workerInfo of this.workers) {
       try {
         workerInfo.worker.terminate();
-        log(`Terminated worker ${workerInfo.id}`);
       } catch (error) {
-        log(`Error terminating worker ${workerInfo.id}: ${error.message}`);
+        const errorMessage = error instanceof Error
+          ? error.message
+          : String(error);
+        log(`Error terminating worker ${workerInfo.id}: ${errorMessage}`);
       }
     }
 

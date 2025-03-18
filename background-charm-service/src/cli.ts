@@ -81,6 +81,7 @@ function createManualIntegrationCell(
     id: "manual",
     name: "Manual Charms",
     spaceId: "manual",
+    cellId: "manual-integration-cell",
     cellCauseName: "manual-charms",
     fetchCharms: async () => await parseCharmsInput(charmsInput),
     // No validator needed for manual charms

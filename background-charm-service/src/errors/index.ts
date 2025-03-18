@@ -47,7 +47,7 @@ export class AuthenticationError extends ServiceError {
 export class TokenRefreshError extends AuthenticationError {
   constructor(
     message: string,
-    public readonly integrationId: string,
+    public override readonly integrationId: string,
   ) {
     super(message, integrationId);
     Object.setPrototypeOf(this, TokenRefreshError.prototype);

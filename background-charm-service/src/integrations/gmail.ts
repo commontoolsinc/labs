@@ -53,6 +53,7 @@ export class GmailIntegration implements Integration {
       id: this.id,
       name: this.name,
       spaceId: "system",
+      cellId: "gmail-integration-cell",
       cellCauseName: "gmail-integration-charms",
       fetchCharms: () => this.fetchGmailIntegrationCharms(),
       isValidIntegrationCharm: (charm) => this.isValidGmailCharm(charm),

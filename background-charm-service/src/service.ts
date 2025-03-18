@@ -166,11 +166,7 @@ export class BackgroundCharmService {
     // Add to integrations map
     this.integrations.set("manual", manualIntegration);
 
-    log(
-      `Registered manual integration with ${
-        config.fetchCharms ? "fetchCharms function" : "no fetchCharms"
-      }`,
-    );
+    log(`Registered manual integration with fetchCharms function`);
   }
 
   /**

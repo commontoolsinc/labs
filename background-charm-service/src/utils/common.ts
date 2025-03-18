@@ -125,6 +125,16 @@ export async function refreshAuthToken(
 }
 
 /**
+ * Format error for logging
+ */
+export function formatError(error: unknown): string {
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`;
+  }
+  return String(error);
+}
+
+/**
  * Format uptime in a human-readable format
  */
 export function formatUptime(ms: number): string {
