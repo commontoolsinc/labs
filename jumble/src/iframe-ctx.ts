@@ -178,6 +178,6 @@ export const setupIframe = () =>
       command: IPC.TaskPerform,
     ): Promise<{ ok: object; error?: void } | { ok?: void; error: Error }> {
       console.log("perform", command);
-      throw new Error(`Command is not implemented`);
+      return await { error: new Error(`Command is not implemented`) };
     },
   });
