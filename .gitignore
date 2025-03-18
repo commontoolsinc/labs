@@ -10,3 +10,5 @@ __pycache__
 cache
 artifact
 _deno.lock
+
+!/jumble/integration/cache/llm-api-cache
