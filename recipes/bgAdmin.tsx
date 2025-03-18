@@ -13,20 +13,32 @@ import {
 } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
 
-const IntegrationSpaceCharmSchema = {
+export const CharmEntrySchema = {
   type: "object",
   properties: {
     space: { type: "string" },
     charmId: { type: "string" },
+    integration: { type: "string" },
+    createdAt: { type: "number" },
+    updatedAt: { type: "number" },
+    enabled: { type: "boolean" },
+    runs: { type: "number", default: 0 },
   },
+  required: [
+    "space",
+    "charmId",
+    "integration",
+    "createdAt",
+    "updatedAt",
+    "enabled",
+    "runs",
+  ],
 } as const satisfies JSONSchema;
-type IntegrationSpaceCell = Schema<typeof IntegrationSpaceCharmSchema>;
+type CharmEntry = Schema<typeof CharmEntrySchema>;
 
 const InputSchema = {
   type: "object",
-  properties: {
-    charms: { type: "array", items: IntegrationSpaceCharmSchema },
-  },
+  properties: {},
 } as const satisfies JSONSchema;
 
 const ResultSchema = {
@@ -34,7 +46,7 @@ const ResultSchema = {
   properties: {
     charms: {
       type: "array",
-      items: IntegrationSpaceCharmSchema,
+      items: CharmEntrySchema,
     },
   },
 } as const satisfies JSONSchema;
@@ -42,15 +54,17 @@ const ResultSchema = {
 export default recipe(
   InputSchema,
   ResultSchema,
-  ({ charms }) => {
+  () => {
+    const charms = cell<CharmEntry[]>([]);
+
     derive(charms, (charms) => {
       console.log("charms", charms);
     });
     return {
-      [NAME]: "Google Integration Management 2",
+      [NAME]: "BG Updater Management",
       [UI]: (
         <div>
-          <h1>Google Integration Management</h1>
+          <h1>BG Updater Management</h1>
           <pre>
             {derive(charms, (charms) => {
               return JSON.stringify(charms, null, 2);

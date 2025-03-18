@@ -1,9 +1,7 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
 import {
-  type CellLink,
   getCell,
-  getCellFromLink,
   getEntityId,
   isStream,
   setBobbyServerUrl,
@@ -11,12 +9,12 @@ import {
 } from "@commontools/runner";
 import { type DID, Identity } from "@commontools/identity";
 import * as Session from "./session.ts";
-import { gmailIntegrationCharmsSchema } from "@commontools/utils";
+import { bgUpdaterCharmsSchema } from "@commontools/utils";
 
-const { spaceId, targetCellCause, recipePath, cause, name, quit } = parseArgs(
+const { spaceId, cause, recipePath, name, quit } = parseArgs(
   Deno.args,
   {
-    string: ["spaceId", "targetCellCause", "recipePath", "cause", "name"],
+    string: ["spaceId", "recipePath", "cause", "name"],
     boolean: ["quit"],
     default: {
       name: "recipe-caster",
@@ -49,7 +47,6 @@ async function castRecipe() {
 
   console.log("params:", {
     spaceId,
-    targetCellCause,
     recipePath,
     cause,
     toolshedUrl,
@@ -66,7 +63,7 @@ async function castRecipe() {
       throw new Error(`Failed to compile recipe from ${recipePath}`);
     }
 
-    if (!targetCellCause) {
+    if (!cause) {
       throw new Error("Cell ID is required");
     }
 
@@ -74,8 +71,8 @@ async function castRecipe() {
 
     const targetCell = getCell(
       spaceId as DID,
-      targetCellCause,
-      gmailIntegrationCharmsSchema,
+      cause,
+      bgUpdaterCharmsSchema,
     );
     // Ensure the cell is synced
     storage.syncCell(targetCell, true);
@@ -99,7 +96,7 @@ async function castRecipe() {
     const charm = await charmManager.runPersistent(
       recipe,
       targetCell,
-      cause,
+      {},
     );
 
     console.log("Recipe cast successfully!");
