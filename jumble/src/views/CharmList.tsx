@@ -60,11 +60,7 @@ function CharmPreview(
         type="button"
         onClick={(e) => {
           e.preventDefault();
-          if (
-            globalThis.confirm("Are you sure you want to remove this charm?")
-          ) {
-            charmManager.remove({ "/": charmId(charm)! });
-          }
+          charmManager.remove({ "/": charmId(charm)! });
         }}
         className="absolute hidden group-hover:block top-2 right-2 p-2 text-gray-400 hover:text-red-500 transition-colors"
       >
@@ -150,6 +146,7 @@ const CharmTable = (
 ) => {
   const [hoveredCharm, setHoveredCharm] = useState<string | null>(null);
   const [previewPosition, setPreviewPosition] = useState({ x: 0, y: 0 });
+  const [selectedCharms, setSelectedCharms] = useState<string[]>([]);
   // Use a ref to cache the last hovered charm to prevent thrashing
   const hoveredCharmRef = useRef<string | null>(null);
 
@@ -172,16 +169,77 @@ const CharmTable = (
     setHoveredCharm(null);
   };
 
+  const toggleCharmSelection = (id: string) => {
+    setSelectedCharms((prev) =>
+      prev.includes(id)
+        ? prev.filter((charmId) => charmId !== id)
+        : [...prev, id]
+    );
+  };
+
+  const handleMoveToTrash = async () => {
+    if (selectedCharms.length === 0) return;
+
+    if (
+      confirm(
+        `Are you sure you want to move ${selectedCharms.length} charm${
+          selectedCharms.length > 1 ? "s" : ""
+        } to trash?`,
+      )
+    ) {
+      // Process each selected charm
+      for (const id of selectedCharms) {
+        await charmManager.remove({ "/": id });
+      }
+      // Clear selection after moving to trash
+      setSelectedCharms([]);
+    }
+  };
+
+  const selectAllCharms = () => {
+    if (selectedCharms.length === charms.length) {
+      // If all are selected, deselect all
+      setSelectedCharms([]);
+    } else {
+      // Otherwise select all
+      setSelectedCharms(charms.map((charm) => charmId(charm)!));
+    }
+  };
+
   return (
     <div className="
       border border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.5)] rounded-[4px] transition-all
       transition-[border,box-shadow,transform] duration-100 ease-in-out
       group relative
     ">
+      {selectedCharms.length > 0 && (
+        <div className="bg-gray-100 p-4 border-b flex justify-between items-center">
+          <div className="text-sm">
+            {selectedCharms.length}{" "}
+            charm{selectedCharms.length !== 1 ? "s" : ""} selected
+          </div>
+          <button
+            type="button"
+            onClick={handleMoveToTrash}
+            className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+          >
+            Move {selectedCharms.length} to Trash
+          </button>
+        </div>
+      )}
       <div className="overflow-hidden w-full rounded-[4px]">
         <table className="w-full text-sm text-left text-gray-500 rounded-[4px]">
           <thead className="text-xs text-gray-700 uppercase bg-gray-50">
             <tr>
+              <th scope="col" className="px-6 py-3">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  onChange={selectAllCharms}
+                  checked={selectedCharms.length > 0 &&
+                    selectedCharms.length === charms.length}
+                />
+              </th>
               <th scope="col" className="px-6 py-3">Name</th>
               <th scope="col" className="px-6 py-3">ID</th>
               <th scope="col" className="px-6 py-3">Actions</th>
@@ -191,14 +249,25 @@ const CharmTable = (
             {charms.map((charm) => {
               const id = charmId(charm);
               const name = charm.get()[NAME] || "Unnamed Charm";
+              const isSelected = selectedCharms.includes(id!);
 
               return (
                 <tr
                   key={id}
-                  className="bg-white border-b hover:bg-gray-50 relative"
+                  className={`bg-white border-b hover:bg-gray-50 relative ${
+                    isSelected ? "bg-blue-50" : ""
+                  }`}
                   onMouseMove={(e) => handleMouseMove(e, id!)}
                   onMouseLeave={handleMouseLeave}
                 >
+                  <td className="px-6 py-4">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={isSelected}
+                      onChange={() => toggleCharmSelection(id!)}
+                    />
+                  </td>
                   <td className="px-6 py-4 font-medium text-gray-900">
                     <NavLink to={`/${replicaName}/${id}`}>
                       {name}
@@ -214,14 +283,7 @@ const CharmTable = (
                       type="button"
                       onClick={(e) => {
                         e.preventDefault();
-                        if (
-                          e.shiftKey ||
-                          globalThis.confirm(
-                            "Are you sure you want to remove this charm?",
-                          )
-                        ) {
-                          charmManager.remove({ "/": id! });
-                        }
+                        charmManager.remove({ "/": id! });
                       }}
                       className="text-gray-400 hover:text-red-500 transition-colors"
                     >
@@ -262,6 +324,7 @@ export default function CharmList() {
   const { charmManager } = useCharmManager();
   const [pinned] = useCell(charmManager.getPinned());
   const [charms] = useCell(charmManager.getCharms());
+  const [trash] = useCell(charmManager.getTrash());
 
   const { lastSyncTime } = useSyncedStatus();
 
@@ -320,6 +383,42 @@ export default function CharmList() {
           />
         )}
       </div>
+
+      <details className="mb-4">
+        <summary className="text-2xl font-bold cursor-pointer">
+          Trash
+        </summary>
+        <div className="p-8">
+          {replicaName && trash && trash.length > 0
+            ? (
+              <>
+                <div className="mb-4 flex justify-end">
+                  <button
+                    onClick={async () => {
+                      if (
+                        confirm(
+                          "Are you sure you want to empty the trash? This action cannot be undone.",
+                        )
+                      ) {
+                        await charmManager.emptyTrash();
+                      }
+                    }}
+                    className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+                    type="button"
+                  >
+                    Empty Trash
+                  </button>
+                </div>
+                <CharmTable
+                  charms={trash}
+                  replicaName={replicaName}
+                  charmManager={charmManager}
+                />
+              </>
+            )
+            : <div className="text-gray-500 italic">Trash is empty</div>}
+        </div>
+      </details>
     </div>
   );
 }
