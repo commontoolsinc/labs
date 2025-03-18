@@ -84,6 +84,17 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
   const { charmManager, currentReplica } = useCharmManager();
   const navigate = useNavigate();
 
+  // Store a reference to the current charm to detect changes
+  const prevCharmRef = useRef(charm);
+
+  // Clear error when charm changes
+  React.useEffect(() => {
+    if (prevCharmRef.current !== charm) {
+      setRuntimeError(null);
+      prevCharmRef.current = charm;
+    }
+  }, [charm]);
+
   const handleFixIt = React.useCallback(async () => {
     if (!runtimeError || isFixing) return;
     setIsFixing(true);
@@ -106,6 +117,9 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+
+    // Clear any previous errors when mounting a new charm
+    setRuntimeError(null);
 
     function handleIframeError(event: Event) {
       const customEvent = event as CustomEvent<Error>;
