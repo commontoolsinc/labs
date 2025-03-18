@@ -121,7 +121,7 @@ export const setupIframe = () =>
         console.log("write", key, value, JSON.stringify(value));
         if (isCell(context)) {
           addCommonIDfromObjectID(value);
-          if (isObj(value)) {
+          if (isObj(value) && !Array.isArray(value)) {
             context.key(key).update(value);
           } else {
             context.key(key).set(value);
