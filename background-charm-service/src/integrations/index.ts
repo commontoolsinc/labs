@@ -1,64 +1,24 @@
 import { Integration } from "../types.ts";
 import { log } from "../utils.ts";
+import gmailIntegration from "./gmail.ts";
+import discordIntegration from "./discord.ts";
 
 // Integration registry
 const integrations = new Map<string, Integration>();
 
 /**
- * Dynamically load all integration modules
+ * Load all integrations explicitly (typechecking!)
  */
-export async function loadIntegrations(): Promise<void> {
+export function loadIntegrations(): void {
   try {
-    // Get the directory containing the integrations
-    const dirUrl = new URL(".", import.meta.url);
-
-    // List all files in the directory
-    for await (const entry of Deno.readDir(dirUrl)) {
-      // Skip non-TypeScript files and this index file
-      if (
-        !entry.isFile || !entry.name.endsWith(".ts") ||
-        entry.name === "index.ts"
-      ) {
-        continue;
-      }
-
-      try {
-        // Get the integration ID from the filename (without .ts extension)
-        const integrationId = entry.name.replace(/\.ts$/, "");
-
-        // Skip already loaded integrations
-        if (integrations.has(integrationId)) {
-          continue;
-        }
-
-        // Try to import the integration module
-        const module = await import(`./${entry.name}`);
-
-        // Check if the default export is an Integration
-        if (
-          module.default && typeof module.default === "object" &&
-          "id" in module.default
-        ) {
-          const integration = module.default as Integration;
-
-          // Register the integration
-          registerIntegration(integration);
-          log(
-            `Registered integration: ${integration.name} (${integration.id})`,
-          );
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error
-          ? error.message
-          : String(error);
-        log(`Error loading integration ${entry.name}: ${errorMessage}`);
-      }
-    }
+    // Register integrations explicitly
+    registerIntegration(gmailIntegration);
+    registerIntegration(discordIntegration);
 
     log(`Loaded ${integrations.size} integrations`);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    log(`Error scanning integrations directory: ${errorMessage}`);
+    log(`Error loading integrations: ${errorMessage}`);
   }
 }
 
@@ -91,4 +51,4 @@ export function registerIntegration(integration: Integration): void {
 }
 
 // Load integrations on module import
-await loadIntegrations();
+loadIntegrations();

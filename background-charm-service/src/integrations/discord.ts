@@ -1,8 +1,6 @@
-import { Charm } from "@commontools/charm";
 import { Cell, getCell, storage } from "@commontools/runner";
 import type { DID } from "@commontools/identity";
 import { Integration, IntegrationCellConfig } from "../types.ts";
-import { log } from "../utils.ts";
 import { Identity } from "@commontools/identity";
 import { env } from "../config.ts";
 export const SYSTEM_SPACE_ID =

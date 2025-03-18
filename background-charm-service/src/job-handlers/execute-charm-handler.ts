@@ -4,7 +4,7 @@ import { ExecuteCharmJob, Job, JobType } from "../types.ts";
 import { StateManager } from "../state-manager.ts";
 import { log } from "../utils.ts";
 import * as Session from "../session.ts";
-import { Cell, isStream, storage } from "@commontools/runner";
+import { Cell, isStream } from "@commontools/runner";
 import { Charm, CharmManager } from "@commontools/charm";
 import type { DID } from "@commontools/identity";
 import { getIntegration } from "../integrations/index.ts";
@@ -18,7 +18,6 @@ import {
   createTimeoutController,
   findUpdaterStream,
   getSharedWorkerPool,
-  refreshAuthToken,
 } from "../utils/common.ts";
 import { WorkerPool } from "../utils/worker-pool.ts";
 
@@ -26,14 +25,12 @@ import { WorkerPool } from "../utils/worker-pool.ts";
  * Handler for execute charm jobs
  */
 export class ExecuteCharmHandler implements JobHandler {
-  private kv: Deno.Kv;
   private stateManager: StateManager;
   private managerCache = new Map<string, CharmManager>();
   private workerPool: WorkerPool<any, any>;
   private config: ReturnType<typeof getConfig>;
 
   constructor(kv: Deno.Kv) {
-    this.kv = kv;
     this.stateManager = new StateManager(kv);
     this.config = getConfig();
 
@@ -129,13 +126,10 @@ export class ExecuteCharmHandler implements JobHandler {
 
       try {
         // Execute the charm - passing integration ID for Gmail-specific handling
-        await this.executeCharmWithWorker(
-          runningCharm,
-          argument,
-          spaceId as DID,
-          integrationId,
+        await this.executeCharmWithWorker({
+          space: spaceId as DID,
           charmId,
-        );
+        });
 
         // If we get here, the charm succeeded (timeout function will throw on failure)
         const executionTimeMs = Date.now() - startTime;
@@ -190,68 +184,13 @@ export class ExecuteCharmHandler implements JobHandler {
   /**
    * Execute a charm using the worker pool
    */
-  private async executeCharmWithWorker(
-    charm: Cell<Charm>,
-    argument: Cell<any>,
-    space: DID,
-    integrationId?: string,
-    charmId?: string,
-  ): Promise<void> {
-    // Check for authentication and handle token refresh if needed
-    const auth = argument.key("auth");
-    if (auth) {
-      const { token, expiresAt } = auth.get();
-
-      // Refresh token if needed
-      if (token && expiresAt && Date.now() > expiresAt) {
-        log(`Token expired, refreshing for charm: ${charmId}`);
-        try {
-          await refreshAuthToken(auth, charm, space as string);
-        } catch (error) {
-          const errorMsg = error instanceof Error
-            ? error.message
-            : String(error);
-          throw new Error(`Failed to refresh token: ${errorMsg}`);
-        }
-      } else if (!token) {
-        throw new Error(`Missing authentication token for charm: ${charmId}`);
-      }
-    }
-
-    // Find updater stream to verify it exists before submitting to worker pool
-    const updaterStream = findUpdaterStream(charm);
-    if (!updaterStream) {
-      throw new Error(`No updater stream found in charm: ${charmId}`);
-    }
-
-    // Extract the updater key (stream name) from the charm
-    let updaterKey: string | null = null;
-
-    // Find which stream we're using
-    const streamNames = [
-      "bgUpdater",
-      "integrationUpdater",
-      "updater",
-      "googleUpdater",
-      "githubUpdater",
-      "notionUpdater",
-      "calendarUpdater",
-      "discordUpdater",
-    ];
-
-    for (const name of streamNames) {
-      if (isStream(charm.key(name))) {
-        updaterKey = name;
-        break;
-      }
-    }
-
-    if (!updaterKey) {
-      throw new Error(
-        `Could not determine updater stream name for charm: ${charmId}`,
-      );
-    }
-
+  private async executeCharmWithWorker({
+    space,
+    charmId,
+  }: {
+    space: DID;
+    charmId: string;
+  }): Promise<void> {
     // Create a timeout controller for the worker execution
     const { controller, clear: clearTimeout } = createTimeoutController(
       this.config.charmExecutionTimeoutMs,
@@ -264,7 +203,7 @@ export class ExecuteCharmHandler implements JobHandler {
 
       // Submit task to worker pool
       log(
-        `Submitting charm ${charmId} to worker pool with updater: ${updaterKey}`,
+        `Submitting charm ${charmId} to worker pool`,
       );
 
       // The AbortController will automatically abort if the timeout is reached
@@ -272,7 +211,6 @@ export class ExecuteCharmHandler implements JobHandler {
         this.workerPool.execute({
           spaceId: space,
           charmId,
-          updaterKey,
           operatorPass,
           toolshedUrl,
         }),

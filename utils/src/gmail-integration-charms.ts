@@ -111,29 +111,11 @@ export async function addCharmToGmailIntegrations(
 }
 
 /**
- * Get all charms from the Gmail integration charms cell
- */
-export async function getGmailIntegrationCharms(): Promise<CharmEntry[]> {
-  await ensureSigner();
-
-  const charmsCell = getCell(
-    SYSTEM_SPACE_ID,
-    CELL_CAUSE,
-    gmailIntegrationCharmsSchema,
-  );
-
-  // Ensure the cell is synced
-  storage.syncCell(charmsCell, true);
-  await storage.synced();
-
-  const charmsData = charmsCell.get();
-  return charmsData?.charms || [];
-}
-
-/**
  * Get the Gmail integration charms cell
  */
-export async function getGmailIntegrationCharmsCell(): Promise<Cell<any>> {
+export async function getGmailIntegrationCharmsCell(): Promise<
+  Cell<CharmEntry[]>
+> {
   await ensureSigner();
 
   const charmsCell = getCell(

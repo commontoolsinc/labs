@@ -3,7 +3,7 @@ import { Cell } from "@commontools/runner";
 import type { DID } from "@commontools/identity";
 import {
   CELL_CAUSE,
-  getGmailIntegrationCharms,
+  getGmailIntegrationCharmsCell,
   initializeGmailIntegrationCharmsCell,
   SYSTEM_SPACE_ID,
 } from "@commontools/utils";
@@ -31,8 +31,8 @@ export class GmailIntegration implements Integration {
   private async fetchGmailIntegrationCharms(): Promise<
     { space: DID; charmId: string }[]
   > {
-    const charms = await getGmailIntegrationCharms();
-    return charms.map((entry) => ({
+    const charms = await getGmailIntegrationCharmsCell();
+    return charms.get().map((entry) => ({
       space: entry.space as DID,
       charmId: entry.charmId,
     }));
