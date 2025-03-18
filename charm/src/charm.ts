@@ -162,10 +162,9 @@ export class CharmManager {
     }
   }
 
-  async unpinById(charmId: string) {
+  async unpinById(charmId: EntityId) {
     await storage.syncCell(this.pinned);
-    const targetId = { "/": charmId };
-    const newPinnedCharms = filterOutEntity(this.pinnedCharms, targetId);
+    const newPinnedCharms = filterOutEntity(this.pinnedCharms, charmId);
 
     if (newPinnedCharms.length !== this.pinnedCharms.get().length) {
       this.pinnedCharms.set(newPinnedCharms);
@@ -180,7 +179,7 @@ export class CharmManager {
     const id = getEntityId(charm);
     if (!id) return false;
 
-    return await this.unpinById(id["/"]);
+    return await this.unpinById(id);
   }
 
   getPinned(): Cell<Cell<Charm>[]> {
