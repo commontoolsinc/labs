@@ -583,7 +583,7 @@ Create an interactive React component that fulfills the user's request. Focus on
   ${Object.entries(libraries).map(([k, v]) => `- ${k} : ${v}`).join("\n")}
 - Only use the explicitly provided libraries
 
-${security}
+${security()}
 
 <view-model-schema>
 SCHEMA
