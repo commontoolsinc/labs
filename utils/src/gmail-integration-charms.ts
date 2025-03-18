@@ -60,15 +60,7 @@ export async function initializeGmailIntegrationCharmsCell(): Promise<boolean> {
   }
 
   console.log("Initializing cell");
-  charmsCell.set({
-    charms: [{
-      "space": "did:key:z6MkkvaRC4RMz34m3XeXwhHDgp1SPE8M46Gw3pG1dedQuDL9",
-      "charmId": "baedreieljj76e2eybjdidspsqfivm5kbzp5x4rpkp5fil3gddrs2abjgey",
-    }, {
-      "space": "did:key:z6MkhxuM4nmzMpGt5wq9nUuycvV99vaNtMspgXzfNcBVB4n9",
-      "charmId": "baedreih4xd26gi6e2ddhf5ekxbzhklf7ydlboczx3jeywneqwerulwqvve",
-    }],
-  });
+  charmsCell.set({ charms: [] });
   await storage.synced();
   return true; // Initialized
 }
