@@ -760,6 +760,7 @@ const OperationTab = () => {
             <option value="anthropic:claude-3-5-sonnet-latest">
               Claude 3.5 ✨
             </option>
+            <option value="groq:qwen-qwq-32b">Qwen QwQ 32B 🧠</option>
             <option value="groq:llama-3.3-70b-versatile">Llama 3.3 🔥</option>
             <option value="openai:o3-mini-low-latest">o3-mini-low</option>
             <option value="openai:o3-mini-medium-latest">o3-mini-medium</option>
