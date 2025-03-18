@@ -9,12 +9,16 @@ import {
 } from "@commontools/runner";
 import { type DID, Identity } from "@commontools/identity";
 import * as Session from "./session.ts";
-import { bgUpdaterCharmsSchema } from "@commontools/utils";
+import {
+  bgUpdaterCharmsSchema,
+  CELL_CAUSE,
+  SYSTEM_SPACE_ID,
+} from "@commontools/utils";
 
-const { spaceId, cause, recipePath, name, quit } = parseArgs(
+const { recipePath, name, quit } = parseArgs(
   Deno.args,
   {
-    string: ["spaceId", "recipePath", "cause", "name"],
+    string: ["recipePath"],
     boolean: ["quit"],
     default: {
       name: "recipe-caster",
@@ -23,9 +27,9 @@ const { spaceId, cause, recipePath, name, quit } = parseArgs(
   },
 );
 
-if (!spaceId || !recipePath) {
+if (!recipePath) {
   console.error(
-    "Usage: deno task castRecipe --spaceId <spaceId> --recipePath <path to recipe> [--targetCellCause <targetCellCause>] [--cause <cause>] [--name <name>] [--quit]",
+    "Usage: deno task castRecipe --recipePath <path to recipe> [--name <name>] [--quit]",
   );
   Deno.exit(1);
 }
@@ -39,6 +43,8 @@ storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
 
 async function castRecipe() {
+  const spaceId = SYSTEM_SPACE_ID;
+  const cause = CELL_CAUSE;
   console.log(`Casting recipe from ${recipePath} in space ${spaceId}`);
 
   console.log("OPERATOR_PASS", OPERATOR_PASS);
@@ -72,8 +78,9 @@ async function castRecipe() {
     const targetCell = getCell(
       spaceId as DID,
       cause,
-      bgUpdaterCharmsSchema,
+      bgUpdaterCharmsSchema.properties.charms,
     );
+
     // Ensure the cell is synced
     storage.syncCell(targetCell, true);
     await storage.synced();
@@ -86,7 +93,7 @@ async function castRecipe() {
     // Create session and charm manager (matching main.ts pattern)
     const session = await Session.open({
       passphrase: OPERATOR_PASS,
-      name: name!,
+      name: "recipe-caster",
       space: spaceId as DID,
     });
 
@@ -95,8 +102,7 @@ async function castRecipe() {
 
     const charm = await charmManager.runPersistent(
       recipe,
-      targetCell,
-      {},
+      { charms: targetCell },
     );
 
     console.log("Recipe cast successfully!");

@@ -38,7 +38,7 @@ export class CommonUpdaterElement extends LitElement {
   declare integration: string;
 
   private handleClick() {
-    const charmId = globalThis.location.pathname.split("/")[1];
+    const charmId = globalThis.location.pathname.split("/")[2];
     const cleanCharmId = charmId?.split(/[-?/]/)[0];
     const space = this.state.getAsCellLink().space;
     const payload = {

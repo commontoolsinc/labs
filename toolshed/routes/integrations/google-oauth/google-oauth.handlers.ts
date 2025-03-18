@@ -358,8 +358,15 @@ export const backgroundIntegration: AppRouteHandler<
   try {
     const payload = await c.req.json();
 
+    await addCharmToBG({
+      space: payload.space,
+      charmId: payload.charmId,
+      integration: payload.integration,
+    });
+
     return createBackgroundIntegrationSuccessResponse(c, "success");
   } catch (error) {
+    console.log("error", error);
     logger.error({ error }, "Failed to process background integration request");
     return createBackgroundIntegrationErrorResponse(
       c,

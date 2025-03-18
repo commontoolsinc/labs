@@ -44,41 +44,6 @@ export const bgUpdaterCharmsSchema = {
 type BGUpdaterCharmsSchema = Schema<typeof bgUpdaterCharmsSchema>;
 
 /**
- * Initialize the BGUpdater charms cell
- */
-export async function initializeBGUpdaterCharmsCell(): Promise<boolean> {
-  await ensureSigner();
-
-  // FIXME(ja): I'm really really worried this might change
-  // just because we do something inoculous like add a description
-  // to the schema....
-  const charmsCell = getCell<BGUpdaterCharmsSchema>(
-    SYSTEM_SPACE_ID,
-    CELL_CAUSE,
-    bgUpdaterCharmsSchema,
-  );
-
-  // Ensure the cell is synced
-  await storage.syncCell(charmsCell, true);
-  await storage.synced();
-
-  const cellData = charmsCell.get();
-  const cellExists = cellData?.charms.length > 0;
-  console.log("existingData", cellExists);
-  console.log("cell id", charmsCell.entityId);
-
-  if (cellExists) {
-    console.log("Cell already exists, skipping initialization");
-    return false; // Already initialized
-  }
-
-  console.log("Initializing cell");
-  charmsCell.set({ charms: [] });
-  await storage.synced();
-  return true; // Initialized
-}
-
-/**
  * Add a charm to the Gmail integration charms cell
  */
 export async function addCharmToBG({
@@ -92,8 +57,14 @@ export async function addCharmToBG({
 }): Promise<boolean> {
   const charmsCell = await getBGUpdaterCharmsCell();
 
+  console.log(
+    "charmsCell",
+    JSON.stringify(charmsCell.getAsCellLink(), null, 2),
+  );
+
+  // FIXME(ja): if we use IDs might might not need to do this?
   // Get current charms data
-  const charms = charmsCell.get().charms || [];
+  const charms = charmsCell.get() || [];
 
   // Check if this charm is already in the list to avoid duplicates
   const exists = charms.some(
@@ -101,6 +72,7 @@ export async function addCharmToBG({
   );
 
   if (!exists) {
+    console.log("Adding charm to BGUpdater charms cell");
     charmsCell.push({
       space,
       charmId,
@@ -116,6 +88,7 @@ export async function addCharmToBG({
     return true;
   }
 
+  console.log("Charm already exists in BGUpdater charms cell");
   return false;
 }
 
@@ -130,7 +103,7 @@ export async function getBGUpdaterCharmsCell(): Promise<
   const charmsCell = getCell(
     SYSTEM_SPACE_ID,
     CELL_CAUSE,
-    bgUpdaterCharmsSchema,
+    bgUpdaterCharmsSchema.properties.charms,
   );
 
   // Ensure the cell is synced
@@ -146,6 +119,8 @@ export async function getBGUpdaterCharmsCell(): Promise<
 async function ensureSigner() {
   try {
     // Just attempt to set a new signer
+    // FIXME(ja): remove this !!!!!!!!!
+    storage.setRemoteStorage(new URL("http://localhost:8000"));
     const signer = await Identity.fromPassphrase("implicit trust");
     storage.setSigner(signer);
   } catch (error) {

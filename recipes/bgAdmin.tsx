@@ -38,7 +38,13 @@ type CharmEntry = Schema<typeof CharmEntrySchema>;
 
 const InputSchema = {
   type: "object",
-  properties: {},
+  properties: {
+    charms: {
+      type: "array",
+      items: CharmEntrySchema,
+      default: [],
+    },
+  },
 } as const satisfies JSONSchema;
 
 const ResultSchema = {
@@ -54,11 +60,9 @@ const ResultSchema = {
 export default recipe(
   InputSchema,
   ResultSchema,
-  () => {
-    const charms = cell<CharmEntry[]>([]);
-
+  ({ charms }) => {
     derive(charms, (charms) => {
-      console.log("charms", charms);
+      console.log("bg charm list:", charms);
     });
     return {
       [NAME]: "BG Updater Management",
