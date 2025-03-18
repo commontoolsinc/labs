@@ -8,6 +8,7 @@ import { createTemporaryDirectory } from "../util.ts";
 import { refer } from "merkle-reference";
 
 import { alice, space } from "./principal.ts";
+import { GraphSelector } from "../space.ts";
 const the = "application/json";
 const doc = `of:${refer({ hello: "world" })}` as const;
 
@@ -1134,3 +1135,111 @@ test("ony list excludes retracted facts", DB, async (session) => {
     "selects retracted facts",
   );
 });
+
+test("list single fact with graph query", DB, async (session) => {
+  const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
+  const tr = Transaction.create({
+    issuer: alice.did(),
+    subject: space.did(),
+    changes: Changes.from([v1]),
+  });
+  const write = await session.transact(tr);
+  assert(write.ok);
+
+  // { path: ["v"], schema: { "type": "integer" } },
+  const sampleGraphSelector: GraphSelector = {
+    [doc]: {
+      [the]: {
+        _: {
+          ["v"]: [
+            {
+              select: { "type": "integer" },
+              context: {
+                "type": "object",
+                "properties": { "v": { "type": "integer" } },
+              },
+            },
+          ],
+        },
+      },
+    },
+  };
+
+  const result = session.queryGraph({
+    cmd: "/memory/graph/query@0.1",
+    iss: alice.did(),
+    sub: space.did(),
+    args: {
+      select: sampleGraphSelector,
+    },
+    prf: [],
+  });
+
+  assertEquals(result, {
+    ok: { [space.did()]: Changes.from([v1]) },
+  });
+});
+
+test(
+  "list single fact with graph query and schema filter",
+  DB,
+  async (session) => {
+    const v1 = Fact.assert({
+      the,
+      of: doc,
+      is: {
+        v: {
+          "address": {
+            "$alias": {
+              "cell": {
+                "/":
+                  "baedreicpmdsacbwn6d7rheirfutm3uulywizvjio72kppuls5lpq3f4mze",
+              },
+              "path": ["argument"],
+            },
+          },
+          "name": "Bob",
+        },
+      },
+    });
+    const tr = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v1]),
+    });
+    const write = await session.transact(tr);
+    assert(write.ok);
+
+    const sampleGraphSelector: GraphSelector = {
+      [doc]: {
+        [the]: {
+          _: {
+            ["v"]: [
+              {
+                select: { "type": "integer" },
+                context: {
+                  "type": "object",
+                  "properties": { "v": { "type": "integer" } },
+                },
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const result = session.queryGraph({
+      cmd: "/memory/graph/query@0.1",
+      iss: alice.did(),
+      sub: space.did(),
+      args: {
+        select: sampleGraphSelector,
+      },
+      prf: [],
+    });
+
+    assertEquals(result, {
+      ok: { [space.did()]: Changes.from([v1]) },
+    });
+  },
+);

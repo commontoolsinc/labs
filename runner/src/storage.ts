@@ -386,6 +386,8 @@ class StorageImpl implements Storage {
       source: doc.sourceCell?.entityId,
     };
 
+    // 🤔 I'm guessing we should be storting schema here
+
     if (JSON.stringify(value) !== JSON.stringify(this.writeValues.get(doc))) {
       this.writeDependentDocs.set(doc, dependencies);
       this.writeValues.set(doc, value);
