@@ -70,6 +70,9 @@ export function setIframeTestHandler() {
       // Not implemented
       return Promise.resolve({});
     },
+    async onPerform(context, command) {
+      return await { error: new Error(`Not implemented`) };
+    },
   });
 }
 
