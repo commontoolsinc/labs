@@ -8,6 +8,7 @@ import {
   removeAction,
 } from "@commontools/runner";
 import { client as llm } from "@commontools/llm";
+import { isObj } from "@commontools/utils";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 // This is to prepare Proxy objects to be serialized
@@ -120,7 +121,11 @@ export const setupIframe = () =>
         console.log("write", key, value, JSON.stringify(value));
         if (isCell(context)) {
           addCommonIDfromObjectID(value);
-          context.key(key).set(value);
+          if (isObj(value)) {
+            context.key(key).update(value);
+          } else {
+            context.key(key).set(value);
+          }
         } else {
           context[key] = value;
         }
