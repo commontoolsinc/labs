@@ -1,3 +1,5 @@
+import { CSP } from "@commontools/iframe-sandbox";
+
 const libraries = {
   "imports": {
     "react": "https://esm.sh/react@18.3.0",
@@ -14,6 +16,9 @@ const libraries = {
     "tone": "https://esm.sh/tone@15.0.4",
   },
 };
+const jsonRegex = new RegExp(
+  "```(?:json)?\s*(\{[\s\S]*?\})\s*```|(\{[\s\S]*\})",
+);
 
 // The HTML template that wraps the developer's code
 export const prefillHtml = `<html>
@@ -37,7 +42,6 @@ ${JSON.stringify(libraries)}
   window.React = React;
   window.ReactDOM = ReactDOM;
 
-  // Now define all utility functions with React available
   window.useDoc = function(key, defaultValue = null) {
     // Track if we've received a response from the parent
     const [received, setReceived] = React.useState(false);
@@ -158,6 +162,32 @@ ${JSON.stringify(libraries)}
       }
     });
   })();
+
+  window.grabJson = (gstr) => {
+      // Function to extract and parse JSON from a string
+      // This handles both raw JSON strings and code blocks with JSON
+      const jsonRegex = /\`\`\`(?:json)?[\\s\\n]*([\\s\\S]*?)[\\s\\n]*\`\`\`|(\\{[\\s\\S]*?\\})/;
+      const match = gstr.match(jsonRegex);
+
+      if (match) {
+        // Use the first matching group that contains content
+        const jsonStr = match[1] || match[2];
+        try {
+          return JSON.parse(jsonStr);
+        } catch (e) {
+          console.error("Failed to parse JSON:", e);
+          return null;
+        }
+      } else {
+        // If no JSON block found, attempt to parse the entire string
+        try {
+          return JSON.parse(gstr);
+        } catch (e) {
+          console.error("No valid JSON found in string");
+          return null;
+        }
+      }
+    }
 
   // Define readWebpage utility with React available
   window.readWebpage = (function() {
@@ -494,6 +524,13 @@ export function extractUserCode(html: string): string | null {
 
   return html.substring(startIndex + startMarker.length, endIndex);
 }
+
+const security = () =>
+  `## Security Restrictions
+- Do not use browser dialog functions (\`prompt()\`, \`alert()\`, \`confirm()\`)
+- Avoid any methods that could compromise security or user experience
+`;
+
 // Update the system message to reflect the new interface
 export const systemMd = `# React Component Builder
 
@@ -520,20 +557,21 @@ Create an interactive React component that fulfills the user's request. Focus on
 1. React and ReactDOM are pre-imported - don't import them again
 2. All React hooks must be namespaced (e.g., \`React.useState\`, \`React.useEffect\`)
 3. Follow React hooks rules - never nest or conditionally call hooks
-4. Define components within the \`onReady\` function
-5. For form handling, use \`onClick\` handlers instead of \`onSubmit\`
+4. For form handling, use \`onClick\` handlers instead of \`onSubmit\`
 
 ## Available APIs
-- **useDoc(key, defaultValue)** - Persistent data storage with real-time updates (follows React hook rules)
+- **useDoc(key, defaultValue)** - Persistent data storage with reactive updates
 - **llm(promptPayload)** - Send requests to the language model
 - **readWebpage(url)** - Fetch and parse external web content
 - **generateImage(prompt)** - Create AI-generated images
 
 ## Important Note About useDoc
 - **useDoc is a React Hook** and must follow all React hook rules
+- It should only be used for persistent state and must draw from the provided schema
+  - For any ephemeral state, use \`React.useState\`
 - Only call useDoc at the top level of your function components or custom hooks
 - Do not call useDoc inside loops, conditions, or nested functions
-- useDoc cannot be used outside of React components - it must be called during rendering
+- useDoc cannot be used outside of \`onReady\` components - it must be called during rendering
 
 ## Library Usage
 - Request additional libraries in \`onLoad\` by returning an array of module names
@@ -541,9 +579,7 @@ Create an interactive React component that fulfills the user's request. Focus on
   ${Object.entries(libraries).map(([k, v]) => `- ${k} : ${v}`).join("\n")}
 - Only use the explicitly provided libraries
 
-## Security Restrictions
-- Do not use browser dialog functions (\`prompt()\`, \`alert()\`, \`confirm()\`)
-- Avoid any methods that could compromise security or user experience
+${security()}
 
 <view-model-schema>
 SCHEMA
@@ -554,14 +590,9 @@ SCHEMA
 
 ## 1. \`useDoc\` Hook
 
-The \`useDoc\` hook subscribes to real-time updates for a given key and returns a tuple \`[doc, setDoc]\`:
+The \`useDoc\` hook binds to a reactive cell given key and returns a tuple \`[doc, setDoc]\`:
 
 Any keys from the view-model-schema are valid for useDoc, any other keys will fail. Provide a default as the second argument, **do not set an initial value explicitly**.
-
-**Important**: useDoc is a React Hook and must follow React Hook Rules:
-- Only call useDoc at the top level of your function components or custom hooks
-- Do not call useDoc inside loops, conditions, or nested functions
-- It cannot be used outside React components
 
 For this schema:
 
@@ -584,23 +615,21 @@ For this schema:
 function CounterComponent() {
   // Correct: useDoc called at top level of component
   const [counter, setCounter] = useDoc("counter", -1); // default
-  const [title, setTitle] = useDoc("title", "My Counter App"); // default
 
   // Incorrect: would cause errors
   // if(something) {
   //   const [data, setData] = useDoc("data", {}); // Never do this!
   // }
 
+  const onIncrement = useCallback(() => {
+    // writing to the cell automatically triggers a re-render
+    setCounter(counter + 1);
+  }, [counter]);
+
   return (
-    <div>
-      <h2>{title}</h2>
-      <button onClick={() => setTitle(Math.random().toString(36).substring(2, 15))}>
-        Randomize Title
-      </button>
-      <button onClick={() => setCounter(counter + 1)}>
-        Increment
-      </button>
-    </div>
+    <button onClick={onIncrement}>
+      Increment
+    </button>
   );
 }
 \`\`\`
@@ -609,13 +638,14 @@ function CounterComponent() {
 
 \`\`\`jsx
 async function fetchLLMResponse() {
-  const promptPayload = { messages: ['Hi', 'How can I help you today?', 'tell me a joke']};
-  try {
-    const result = await llm(promptPayload);
-    console.log('LLM responded:', result);
-  } catch (error) {
-    console.error('LLM error:', error);
-  }
+  // place user-level requirements in system prompt
+  const promptPayload = {
+    system: 'Translate all the messages to emojis, reply in JSON.',
+    messages: ['Hi', 'How can I help you today?', 'tell me a joke']
+  };
+  // grabJson is available on the window, string -> JSON
+  const result = grabJson(await llm(promptPayload));
+  console.log('LLM responded:', result);
 }
 \`\`\`
 
@@ -624,12 +654,8 @@ async function fetchLLMResponse() {
 \`\`\`jsx
 async function fetchFromUrl() {
   const url = 'https://twopm.studio';
-  try {
-    const result = await readWebpage(url);
-    console.log('Markdown:', result.content);
-  } catch (error) {
-    console.error('readWebpage error:', error);
-  }
+  const result = await readWebpage(url);
+  console.log('Markdown:', result.content);
 }
 \`\`\`
 
@@ -639,6 +665,7 @@ async function fetchFromUrl() {
 function ImageComponent() {
   return <img src={generateImage("A beautiful sunset over mountains")} alt="Generated landscape" />;
 }
+
 \`\`\`
 ## 5. Using the Interface Functions
 
@@ -650,6 +677,105 @@ function onLoad() {
 }
 
 const title = 'My ESM App';
+function ImageComponent({ url }) {
+  return <img src={url} alt="Generated landscape" />;
+}
+
+function MyComponent({ label, description }) {
+  return (
+    <div>
+      <h2>{label}</h2>
+      <p>{description}</p>
+      <ImageComponent url={generateImage("A beautiful sunset over mountains")} />
+    </div>
+  );
+}
+
+function TodoItem({ todo, onToggle, onDelete }) {
+  return (
+    <div className="flex items-center p-2 border-b">
+      <input
+        type="checkbox"
+        checked={todo.completed}
+        onChange={onToggle}
+        className="mr-2"
+      />
+      <span className={\`flex-grow \${todo.completed ? 'line-through text-gray-500' : ''}\`}>
+        {todo.text}
+      </span>
+      <button
+        onClick={onDelete}
+        className="px-2 py-1 bg-red-500 text-white rounded"
+      >
+        Delete
+      </button>
+    </div>
+  );
+}
+
+function TodoList({ todo, setTodos}) {
+  const [newTodo, setNewTodo] = React.useState('');
+
+  const addTodo = () => {
+    if (newTodo.trim() === '') return;
+
+    const newTodoItem = {
+      id: Date.now(),
+      text: newTodo,
+      completed: false
+    };
+
+    setTodos([...todos, newTodoItem]);
+    setNewTodo('');
+  };
+
+  const toggleTodo = (id) => {
+    setTodos(todos.map(todo =>
+      todo.id === id ? { ...todo, completed: !todo.completed } : todo
+    ));
+  };
+
+  const deleteTodo = (id) => {
+    setTodos(todos.filter(todo => todo.id !== id));
+  };
+
+  return (
+    <div className="max-w-md mx-auto mt-4 p-4 bg-white rounded shadow">
+      <h2 className="text-xl font-bold mb-4">Todo List</h2>
+
+      <div className="flex mb-4">
+        <input
+          type="text"
+          value={newTodo}
+          onChange={(e) => setNewTodo(e.target.value)}
+          placeholder="Add a new todo"
+          className="flex-grow p-2 border rounded-l"
+        />
+        <button
+          onClick={addTodo}
+          className="px-4 py-2 bg-blue-500 text-white rounded-r"
+        >
+          Add
+        </button>
+      </div>
+
+      <div className="border rounded">
+        {todos.length > 0 ? (
+          todos.map(todo => (
+            <TodoItem
+              key={todo.id}
+              todo={todo}
+              onToggle={() => toggleTodo(todo.id)}
+              onDelete={() => deleteTodo(todo.id)}
+            />
+          ))
+        ) : (
+          <p className="p-2 text-center text-gray-500">No todos yet!</p>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // Main application code with modules passed as third parameter
 function onReady(mount, sourceData, libs) {
@@ -658,6 +784,10 @@ function onReady(mount, sourceData, libs) {
 
   function MyApp() {
     const [count, setCount] = useDoc('count', 0);
+    const [todos, setTodos] = useDoc('todos', [
+      { id: 1, text: 'Learn React', completed: false },
+      { id: 2, text: 'Build a Todo App', completed: false }
+    ]);
     const props = useSpring({
       from: { opacity: 0 },
       to: { opacity: 1 }
@@ -666,7 +796,6 @@ function onReady(mount, sourceData, libs) {
     return (
       <div className="p-4">
         <animated.div style={props}>
-          <h1 className="text-2xl font-bold">Hello ESM World!</h1>
           <button
             className="mt-2 px-4 py-2 bg-blue-500 text-white rounded"
             onClick={() => setCount(count + 1)}
@@ -674,6 +803,7 @@ function onReady(mount, sourceData, libs) {
             Clicks: {count}
           </button>
         </animated.div>
+        <TodoList todos={todos} setTodos={setTodos} />
       </div>
     );
   }
