@@ -13,6 +13,9 @@ import ShapeLogo from "@/assets/ShapeLogo.tsx";
 import { MdOutlineStar } from "react-icons/md";
 import { useSyncedStatus } from "@/contexts/SyncStatusContext.tsx";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
+import { CharmLink } from "@/components/CharmLink.tsx";
+import { HoverPreview } from "@/components/HoverPreview.tsx";
+import { useCharmHover } from "@/hooks/use-charm-hover.ts";
 
 export interface CommonDataEvent extends CustomEvent {
   detail: {
@@ -93,48 +96,6 @@ function CharmPreview(
   );
 }
 
-interface HoverPreviewProps {
-  hoveredCharm: string | null;
-  charms: Cell<Charm>[];
-  position: { x: number; y: number };
-  replicaName: string;
-}
-const HoverPreview = (
-  { hoveredCharm, charms, position, replicaName }: HoverPreviewProps,
-) => {
-  // Find the charm that matches the hoveredCharm ID
-  const charm = hoveredCharm
-    ? charms.find((c) => charmId(c) === hoveredCharm)
-    : null;
-
-  if (!charm || !hoveredCharm) return null;
-
-  const id = charmId(charm);
-  const name = charm.get()[NAME] || "Unnamed Charm";
-
-  return (
-    <div
-      className="fixed z-50 w-128 pointer-events-none
-      border border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.5)] rounded-[4px]
-    "
-      style={{
-        left: `${position.x}px`,
-        top: `${position.y}px`,
-        transform: "translate(25%, 25%)",
-      }}
-    >
-      <CommonCard className="p-2 shadow-xl bg-white rounded-[4px]">
-        <h3 className="text-xl font-semibold text-gray-800 mb-4">
-          {name + ` (#${id!.slice(-4)})`}
-        </h3>
-        <div className="w-full bg-gray-50 rounded border border-gray-100 min-h-[256px] pointer-events-none select-none">
-          <CharmRenderer className="h-full rounded-[4px]" charm={charm} />
-        </div>
-      </CommonCard>
-    </div>
-  );
-};
-
 interface CharmTableProps {
   charms: Cell<Charm>[];
   replicaName: string;
@@ -144,30 +105,10 @@ interface CharmTableProps {
 const CharmTable = (
   { charms, replicaName, charmManager }: CharmTableProps,
 ) => {
-  const [hoveredCharm, setHoveredCharm] = useState<string | null>(null);
-  const [previewPosition, setPreviewPosition] = useState({ x: 0, y: 0 });
+  const { hoveredCharm, previewPosition, handleMouseMove, handleMouseLeave } =
+    useCharmHover();
   const [selectedCharms, setSelectedCharms] = useState<string[]>([]);
-  // Use a ref to cache the last hovered charm to prevent thrashing
-  const hoveredCharmRef = useRef<string | null>(null);
-
-  const handleMouseMove = (e: React.MouseEvent, id: string) => {
-    // Only update state if the hovered charm has changed
-    if (hoveredCharmRef.current !== id) {
-      hoveredCharmRef.current = id;
-      setHoveredCharm(id);
-    }
-
-    // Position the preview card relative to the cursor
-    setPreviewPosition({
-      x: e.clientX + 20, // offset to the right of cursor
-      y: e.clientY - 100, // offset above the cursor
-    });
-  };
-
-  const handleMouseLeave = () => {
-    hoveredCharmRef.current = null;
-    setHoveredCharm(null);
-  };
+  const hoveredCharmInstance = charms.find((c) => charmId(c) === hoveredCharm);
 
   const toggleCharmSelection = (id: string) => {
     setSelectedCharms((prev) =>
@@ -241,14 +182,12 @@ const CharmTable = (
                 />
               </th>
               <th scope="col" className="px-6 py-3">Name</th>
-              <th scope="col" className="px-6 py-3">ID</th>
               <th scope="col" className="px-6 py-3">Actions</th>
             </tr>
           </thead>
           <tbody>
             {charms.map((charm) => {
               const id = charmId(charm);
-              const name = charm.get()[NAME] || "Unnamed Charm";
               const isSelected = selectedCharms.includes(id!);
 
               return (
@@ -269,14 +208,7 @@ const CharmTable = (
                     />
                   </td>
                   <td className="px-6 py-4 font-medium text-gray-900">
-                    <NavLink to={`/${replicaName}/${id}`}>
-                      {name}
-                    </NavLink>
-                  </td>
-                  <td className="px-6 py-4">
-                    <NavLink to={`/${replicaName}/${id}`}>
-                      #{id}
-                    </NavLink>
+                    <CharmLink charm={charm} showHash className="font-medium" />
                   </td>
                   <td className="px-6 py-4">
                     <button
@@ -307,12 +239,10 @@ const CharmTable = (
         </table>
       </div>
 
-      {hoveredCharm && (
+      {hoveredCharm && hoveredCharmInstance && (
         <HoverPreview
-          hoveredCharm={hoveredCharm}
-          charms={charms}
+          charm={hoveredCharmInstance}
           position={previewPosition}
-          replicaName={replicaName}
         />
       )}
     </div>

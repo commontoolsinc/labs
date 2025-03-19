@@ -38,6 +38,7 @@ import JsonView from "@uiw/react-json-view";
 import { Composer } from "@/components/Composer.tsx";
 import { useCharmMentions } from "@/components/CommandCenter.tsx";
 import { formatPromptWithMentions } from "@/utils/format.ts";
+import { CharmLink } from "@/components/CharmLink.tsx";
 
 type Tab = "iterate" | "code" | "data";
 type OperationType = "iterate" | "extend";
@@ -920,8 +921,28 @@ const DataTab = () => {
     false,
   );
   const [isResultSchemaExpanded, setIsResultSchemaExpanded] = useState(false);
+  const [isLineageExpanded, setIsLineageExpanded] = useState(false);
 
   if (!charm) return null;
+
+  const lineage = charmManager.getLineage(charm);
+
+  const Lineage = (item: typeof lineage[number]) => (
+    <div
+      key={`lineage-${charmId(item.charm) || ""}`}
+    >
+      <CharmLink
+        charm={item.charm}
+        showHash
+      />&nbsp;
+      <span className="text-sm font-medium bg-gray-200 px-2 py-1 rounded">
+        {item.relation} at {new Date(item.timestamp).toLocaleString()}
+      </span>
+      <div className="ml-4">
+        {charmManager.getLineage(item.charm).map((item) => Lineage(item))}
+      </div>
+    </div>
+  );
 
   return (
     <div className="h-full overflow-auto p-4">
@@ -1028,6 +1049,25 @@ const DataTab = () => {
             )}
           </div>
         </>
+      )}
+
+      {lineage.length > 0 && (
+        <div className="mt-4">
+          <button
+            type="button"
+            onClick={() => setIsLineageExpanded(!isLineageExpanded)}
+            className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+          >
+            <span className="text-md font-semibold">Lineage</span>
+            <span>{isLineageExpanded ? "▼" : "▶"}</span>
+          </button>
+
+          {isLineageExpanded && (
+            <div className="border border-gray-300 rounded p-2 bg-gray-50">
+              {lineage.map((item) => Lineage(item))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
