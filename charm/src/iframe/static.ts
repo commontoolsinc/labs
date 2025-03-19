@@ -16,6 +16,7 @@ const libraries = {
     "tone": "https://esm.sh/tone@15.0.4",
   },
 };
+
 const jsonRegex = new RegExp(
   "```(?:json)?\s*(\{[\s\S]*?\})\s*```|(\{[\s\S]*\})",
 );
@@ -23,6 +24,7 @@ const jsonRegex = new RegExp(
 // The HTML template that wraps the developer's code
 export const prefillHtml = `<html>
 <head>
+<meta name="template-version" content="1.0.0">
 <script src="https://cdn.tailwindcss.com"></script>
 <script type="importmap">
 ${JSON.stringify(libraries)}
