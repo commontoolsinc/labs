@@ -191,6 +191,7 @@ async function execute() {
         new Error(
           `Too many iterations: ${loopCounter.get(fn)} ${fn.name ?? ""}`,
         ),
+        fn,
       );
     } else await run(fn);
   }
