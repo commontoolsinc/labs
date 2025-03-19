@@ -30,6 +30,7 @@ const envSchema = z.object({
 
   // Authentication
   OPERATOR_PASS: z.string().default("implicit trust"),
+  MEMORY_URL: z.string().default("http://localhost:8000"),
 });
 
 /**

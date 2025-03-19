@@ -163,7 +163,7 @@ export async function getAuthCellAndStorage(docLink: CellLink | string) {
       storage.setSigner(signer);
     }
 
-    storage.setRemoteStorage(new URL("http://localhost:8000"));
+    storage.setRemoteStorage(new URL(env.MEMORY_URL));
 
     // FIXME(ja): add the authcell schema!
     const authCell = getCellFromLink(

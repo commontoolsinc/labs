@@ -75,9 +75,13 @@ const EnvSchema = z.object({
   BLOBBY_REDIS_URL: z.string().default("redis://localhost:6379"),
   // ===========================================================================
   // Memory Store
-  MEMORY_URL: z.string().default(
+  //  - MEMORY_DIR is used by toolshed to access sqlite files for common-memory
+  //  - MEMORY_URL is used by toolshed to connect to memory endpoint
+  // ===========================================================================
+  MEMORY_DIR: z.string().default(
     new URL(`./cache/memory/`, Path.toFileUrl(`${Deno.cwd()}/`)).href,
   ),
+  MEMORY_URL: z.string().default("http://localhost:8000"),
   // ===========================================================================
   // Sentry DSN global middleware
   //   * /lib/create-app.ts

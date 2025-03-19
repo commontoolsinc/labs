@@ -98,7 +98,13 @@ export async function addCharmToBG({
 export async function getBGUpdaterCharmsCell(): Promise<
   Cell<BGCharmEntry[]>
 > {
-  await ensureSigner();
+  if (!storage.hasSigner()) {
+    throw new Error("Storage has no signer");
+  }
+
+  if (!storage.hasRemoteStorage()) {
+    throw new Error("Storage has no remote storage");
+  }
 
   const charmsCell = getCell(
     SYSTEM_SPACE_ID,
@@ -111,20 +117,4 @@ export async function getBGUpdaterCharmsCell(): Promise<
   await storage.synced();
 
   return charmsCell;
-}
-
-/**
- * Ensure we have a signer
- */
-async function ensureSigner() {
-  try {
-    // Just attempt to set a new signer
-    // FIXME(ja): remove this !!!!!!!!!
-    storage.setRemoteStorage(new URL("http://localhost:8000"));
-    const signer = await Identity.fromPassphrase("implicit trust");
-    storage.setSigner(signer);
-  } catch (error) {
-    // If there's already a signer this might fail, which is fine
-    console.log("Error setting signer, might already be set:", error);
-  }
 }

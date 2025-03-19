@@ -7,7 +7,7 @@ import { getSharedWorkerPool } from "./utils/common.ts";
 import { WorkerPool } from "./utils/worker-pool.ts";
 import { BGCharmEntry, getBGUpdaterCharmsCell } from "@commontools/utils";
 import { storage } from "@commontools/runner";
-
+import { Identity } from "@commontools/identity";
 /**
  * Background Charm Service using Deno KV and job queues
  */
@@ -131,6 +131,8 @@ export class BackgroundCharmService {
     await this.stateManager.initialize();
 
     // Initialize charms cell
+    storage.setRemoteStorage(new URL(env.MEMORY_URL));
+    storage.setSigner(await Identity.fromPassphrase(env.OPERATOR_PASS));
     this.charmsCell = await getBGUpdaterCharmsCell();
     await storage.syncCell(this.charmsCell, true);
     await storage.synced();
