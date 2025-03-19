@@ -1,6 +1,7 @@
 import {
   Charm,
   extractUserCode,
+  extractVersionTag,
   generateNewRecipeVersion,
   getIframeRecipe,
   IFrameRecipe,
@@ -825,14 +826,6 @@ const OperationTab = () => {
     </div>
   );
 };
-
-function extractVersionTag(template?: string) {
-  // Extract the template version from the HTML comment
-  const versionMatch = template?.match(
-    /<meta name="template-version" content="([^"]+)">/,
-  );
-  return versionMatch ? versionMatch[1] : null;
-}
 
 // Code Tab Component
 const CodeTab = () => {

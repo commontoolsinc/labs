@@ -527,6 +527,14 @@ export function extractUserCode(html: string): string | null {
   return html.substring(startIndex + startMarker.length, endIndex);
 }
 
+export function extractVersionTag(template?: string) {
+  // Extract the template version from the HTML comment
+  const versionMatch = template?.match(
+    /<meta name="template-version" content="([^"]+)">/,
+  );
+  return versionMatch ? versionMatch[1] : null;
+}
+
 const security = () =>
   `## Security Restrictions
 - Do not use browser dialog functions (\`prompt()\`, \`alert()\`, \`confirm()\`)
