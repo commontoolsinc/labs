@@ -35,7 +35,7 @@ import {
 import { Cell } from "@commontools/runner";
 import { createPath } from "@/routes.ts";
 import JsonView from "@uiw/react-json-view";
-import { Composer } from "@/components/Composer.tsx";
+import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { useCharmMentions } from "@/components/CommandCenter.tsx";
 import { formatPromptWithMentions } from "@/utils/format.ts";
 import { CharmLink } from "@/components/CharmLink.tsx";
@@ -734,88 +734,62 @@ const OperationTab = () => {
           </button>
         </div>
 
-        <div className="border border-gray-300">
-          <Composer
-            placeholder={operationType === "iterate"
-              ? "Tweak your charm"
-              : "Add new features to your charm"}
-            readOnly={false}
-            mentions={mentions}
-            value={input}
-            onValueChange={setInput}
-            onSubmit={() => {
-              handlePerformOperation();
-            }}
-            style={{ width: "100%", height: "96px" }}
-          />
-        </div>
-
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center">
-            <input
-              type="checkbox"
-              id="variants"
-              checked={showVariants}
-              onChange={(e) => setShowVariants(e.target.checked)}
-              className="border-2 border-black mr-2"
+        <div className="flex flex-col gap-2">
+          <div className="border border-gray-300">
+            <Composer
+              placeholder={operationType === "iterate"
+                ? "Tweak your charm"
+                : "Add new features to your charm"}
+              readOnly={false}
+              mentions={mentions}
+              value={input}
+              onValueChange={setInput}
+              onSubmit={handlePerformOperation}
+              disabled={loading}
+              style={{ width: "100%", height: "96px" }}
             />
-            <label htmlFor="variants" className="text-sm font-medium">
-              Variants
-            </label>
           </div>
 
-          <select
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
-            className="p-1 border-2 border-black bg-white text-xs"
+          <ComposerSubmitBar
+            loading={loading}
+            operation={operationType === "iterate" ? "Iterate" : "Extend"}
+            onSubmit={handlePerformOperation}
           >
-            <option value="anthropic:claude-3-7-sonnet-latest">
-              Claude 3.7 ✨
-            </option>
-            <option value="anthropic:claude-3-5-sonnet-latest">
-              Claude 3.5 ✨
-            </option>
-            <option value="groq:qwen-qwq-32b">Qwen QwQ 32B 🧠</option>
-            <option value="groq:llama-3.3-70b-versatile">Llama 3.3 🔥</option>
-            <option value="openai:o3-mini-low-latest">o3-mini-low</option>
-            <option value="openai:o3-mini-medium-latest">o3-mini-medium</option>
-            <option value="openai:o3-mini-high-latest">o3-mini-high</option>
-            <option value="google:gemini-2.0-pro">Gemini 2.0</option>
-            <option value="perplexity:sonar-pro">Sonar Pro 🌐</option>
-          </select>
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="variants"
+                checked={showVariants}
+                onChange={(e) => setShowVariants(e.target.checked)}
+                className="border-2 border-black mr-2"
+              />
+              <label htmlFor="variants" className="text-sm font-medium">
+                Variants
+              </label>
+            </div>
 
-          <button
-            type="button"
-            onClick={handlePerformOperation}
-            disabled={loading || !input}
-            className="px-4 py-2 border-2 text-sm border-white bg-black text-white flex items-center gap-2 disabled:opacity-50"
-          >
-            {loading
-              ? (
-                <>
-                  <DitheredCube
-                    animationSpeed={2}
-                    width={16}
-                    height={16}
-                    animate
-                    cameraZoom={12}
-                  />
-                  <span>
-                    {operationType === "iterate"
-                      ? "Iterating..."
-                      : "Extending..."}
-                  </span>
-                </>
-              )
-              : (
-                <span className="text-xs">
-                  {operationType === "iterate" ? "Iterate" : "Extend"}{" "}
-                  <span className="hidden md:inline text-gray-400 font-bold italic">
-                    (⌘ + enter)
-                  </span>
-                </span>
-              )}
-          </button>
+            <select
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              className="p-1 border-2 border-black bg-white text-xs"
+            >
+              <option value="anthropic:claude-3-7-sonnet-latest">
+                Claude 3.7 ✨
+              </option>
+              <option value="anthropic:claude-3-5-sonnet-latest">
+                Claude 3.5 ✨
+              </option>
+              <option value="groq:qwen-qwq-32b">Qwen QwQ 32B 🧠</option>
+              <option value="groq:llama-3.3-70b-versatile">Llama 3.3 🔥</option>
+              <option value="openai:o3-mini-low-latest">o3-mini-low</option>
+              <option value="openai:o3-mini-medium-latest">
+                o3-mini-medium
+              </option>
+              <option value="openai:o3-mini-high-latest">o3-mini-high</option>
+              <option value="google:gemini-2.0-pro">Gemini 2.0</option>
+              <option value="perplexity:sonar-pro">Sonar Pro 🌐</option>
+            </select>
+          </ComposerSubmitBar>
         </div>
       </div>
 

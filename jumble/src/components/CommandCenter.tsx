@@ -22,11 +22,11 @@ import {
 import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext.tsx";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
-import { Composer } from "@/components/Composer.tsx";
+import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { charmId } from "@/utils/charms.ts";
 import { formatPromptWithMentions } from "@/utils/format.ts";
 import { NAME } from "@commontools/builder";
-import { LuSend, LuX } from "react-icons/lu";
+import { LuSend } from "react-icons/lu";
 
 function CommandProcessor({
   mode,
@@ -42,7 +42,7 @@ function CommandProcessor({
   const [inputValue, setInputValue] = useState("");
   const charmMentions = useCharmMentions();
 
-  if (context.loading) {
+  if (context.loading && mode.type !== "input") {
     return (
       <Command.Group>
         <div className="flex items-center justify-center p-4">
@@ -54,6 +54,16 @@ function CommandProcessor({
 
   switch (mode.type) {
     case "input":
+      const onSubmit = async () => {
+        const { text, sources } = await formatPromptWithMentions(
+          inputValue,
+          charmManager,
+        );
+        if ((mode.command as InputCommandItem).handler) {
+          (mode.command as InputCommandItem).handler(text, sources);
+        }
+      };
+
       return (
         <div className="flex flex-col gap-2">
           <Composer
@@ -62,38 +72,15 @@ function CommandProcessor({
             value={inputValue}
             onValueChange={setInputValue}
             mentions={charmMentions}
+            onSubmit={onSubmit}
+            disabled={context.loading}
             autoFocus
-            onSubmit={async () => {
-              const { text, sources } = await formatPromptWithMentions(
-                inputValue,
-                charmManager,
-              );
-              if ((mode.command as InputCommandItem).handler) {
-                (mode.command as InputCommandItem).handler(text, sources);
-              }
-            }}
           />
-          <div className="flex justify-between items-top w-full">
-            <label className="text-[10px] text-gray-400">
-              Shift+Enter for new line<br />
-              Type <code>@</code> to mention a charm
-            </label>
-
-            <button
-              type="button"
-              className="px-4 py-2 text-sm bg-black text-white flex items-center gap-2 disabled:opacity-50"
-            >
-              <span className="text-xs flex items-center gap-2">
-                <span className="text-xs flex items-center gap-1">
-                  <LuSend />
-                  <span>Go</span>
-                </span>
-                <span className="hidden md:inline text-gray-400 font-bold italic">
-                  (Enter)
-                </span>
-              </span>
-            </button>
-          </div>
+          <ComposerSubmitBar
+            loading={context.loading}
+            operation={"Go"}
+            onSubmit={onSubmit}
+          />
         </div>
       );
 
@@ -450,13 +437,7 @@ export function CommandCenter() {
         {!loading && mode.type != "input" && mode.type != "transcribe" && (
           <Command.Empty>No results found.</Command.Empty>
         )}
-        {loading && (
-          <Command.Loading>
-            <div className="flex items-center justify-center p-4">
-              <span className="text-sm text-gray-500">Processing...</span>
-            </div>
-          </Command.Loading>
-        )}
+
 
         {mode.type === "main" || mode.type === "menu"
           ? (

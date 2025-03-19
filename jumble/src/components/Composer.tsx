@@ -35,6 +35,55 @@ import { createPortal } from "react-dom";
 import { CharmManager } from "../../../charm/src/index.ts";
 import { Module, Recipe, TYPE } from "@commontools/builder";
 import { Cell, getRecipe } from "@commontools/runner";
+import { LuSend } from "react-icons/lu";
+import { DitheredCube } from "@/components/DitherCube.tsx";
+
+export function ComposerSubmitBar(
+  { loading, onSubmit, operation = "Go", children }: { loading: boolean; onSubmit: () => void; operation?: string; children?: React.ReactNode },
+): JSX.Element {
+  return (
+    <div className="flex justify-between items-top w-full">
+      <label className="text-[10px] text-gray-400">
+        Shift+Enter for new line<br />
+        Type <code>@</code> to mention a charm
+      </label>
+
+      <div className="flex flex-row gap-2">
+      {children}
+
+      <button
+        type="button"
+        onClick={onSubmit}
+        disabled={loading}
+        className="px-4 py-2 text-sm bg-black text-white flex items-center gap-2 disabled:opacity-50"
+      >
+        {loading ? (
+          <span className="text-xs flex items-center gap-2">
+            <DitheredCube
+              animationSpeed={2}
+              width={16}
+              height={16}
+              animate
+              cameraZoom={12}
+            />
+            <span>Working...</span>
+          </span>
+        ) : (
+          <span className="text-xs flex items-center gap-2">
+            <span className="text-xs flex items-center gap-1">
+              <LuSend />
+              <span>{operation}</span>
+            </span>
+            <span className="hidden md:inline text-gray-400 font-bold italic">
+              (Enter)
+            </span>
+          </span>
+        )}
+      </button>
+      </div>
+    </div>
+  );
+}
 
 /** WISHLIST
 - inline code blocks for specifying keys / fields
@@ -396,6 +445,7 @@ export function Composer({
   mentions = [],
   autoFocus = false,
   onSubmit,
+  disabled = false,
 }: {
   placeholder?: string;
   readOnly?: boolean;
@@ -405,6 +455,7 @@ export function Composer({
   mentions?: Array<{ id: string; name: string }>;
   autoFocus?: boolean;
   onSubmit?: () => void;
+  disabled?: boolean;
 }) {
   // Convert string value to Slate value format if needed
   const initialValue: Descendant[] = useMemo(() => {
@@ -460,6 +511,9 @@ export function Composer({
 
   const handleDOMBeforeInput = useCallback(
     (_: InputEvent) => {
+      // Don't process input when disabled
+      if (disabled) return;
+
       queueMicrotask(() => {
         const pendingDiffs = ReactEditor.androidPendingDiffs(editor);
 
@@ -492,11 +546,17 @@ export function Composer({
         }
       });
     },
-    [editor],
+    [editor, disabled],
   );
 
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      // Don't process key events when disabled
+      if (disabled) {
+        event.preventDefault();
+        return;
+      }
+
       // Handle mention selection navigation
       if (target && filteredMentions.length > 0) {
         switch (event.key) {
@@ -548,7 +608,7 @@ export function Composer({
         }
       }
     },
-    [filteredMentions, editor, index, target, onSubmit],
+    [filteredMentions, editor, index, target, onSubmit, disabled],
   );
 
   useEffect(() => {
@@ -580,6 +640,9 @@ export function Composer({
 
   // Handle editor changes including mention detection
   const onChange = useCallback(() => {
+    // Don't process changes when disabled
+    if (disabled) return;
+
     const { selection } = editor;
 
     if (selection && Range.isCollapsed(selection)) {
@@ -606,10 +669,10 @@ export function Composer({
 
     // Update the current value
     setCurrentValue(editor.children);
-  }, [editor]);
+  }, [editor, disabled]);
 
   useEffect(() => {
-    if (autoFocus && editor) {
+    if (autoFocus && editor && !disabled) {
       // Small delay to ensure the editor is fully mounted
       setTimeout(() => {
         try {
@@ -619,15 +682,15 @@ export function Composer({
         }
       }, 100);
     }
-  }, [autoFocus, editor]);
+  }, [autoFocus, editor, disabled]);
 
   return (
     <>
       <Slate editor={editor} initialValue={currentValue} onChange={onChange}>
         <Editable
           id="composer"
-          className="p-2"
-          readOnly={readOnly}
+          className={`p-2 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          readOnly={readOnly || disabled}
           renderElement={renderElement}
           renderLeaf={renderLeaf}
           onKeyDown={handleKeyDown}
@@ -650,7 +713,7 @@ export function Composer({
             resize: "none",
           }}
         />
-        {target && filteredMentions.length > 0 && (
+        {!disabled && target && filteredMentions.length > 0 && (
           <Portal>
             <div
               ref={ref}
