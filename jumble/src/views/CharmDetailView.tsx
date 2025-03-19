@@ -1158,27 +1158,47 @@ function CharmDetailView() {
 
 function translateCellsAndStreamsToPlainJSON(
   data: any,
-  seen: Set<any> = new Set(),
-): any {
-  if (seen.has(data)) return "// circular reference";
-  seen.add(data);
+  partial: Set<any> = new Set(),
+  complete: Map<any, JSON | string> = new Map<any, JSON | string>(),
+): JSON | string {
+  // If we already have the serialized form of this object, just use that
+  const existing = complete.get(data);
+  if (existing !== undefined) {
+    return existing;
+  }
+  if (partial.has(data)) {
+    return "// circular reference";
+  }
+  partial.add(data);
 
+  let result: any;
   if (isStream(data)) {
-    return { "// stream": data.schema ?? "no schema" };
+    result = { "// stream": data.schema ?? "no schema" };
   } else if (isCell(data)) {
-    return { "// cell": translateCellsAndStreamsToPlainJSON(data.get(), seen) };
+    result = {
+      "// cell": translateCellsAndStreamsToPlainJSON(
+        data.get(),
+        partial,
+        complete,
+      ),
+    };
   } else if (Array.isArray(data)) {
-    return data.map((value) =>
-      translateCellsAndStreamsToPlainJSON(value, seen)
+    result = data.map((value) =>
+      translateCellsAndStreamsToPlainJSON(value, partial, complete)
     );
   } else if (isObj(data)) {
-    return Object.fromEntries(
+    result = Object.fromEntries(
       Object.entries(data).map(([key, value]) => [
         key,
-        translateCellsAndStreamsToPlainJSON(value, seen),
+        translateCellsAndStreamsToPlainJSON(value, partial, complete),
       ]),
     );
-  } else return data;
+  } else {
+    result = data;
+  }
+  partial.delete(data);
+  complete.set(data, result);
+  return result;
 }
 
 export default CharmDetailView;
