@@ -4,7 +4,7 @@ import { byRef, handler, JSONSchema, lift, recipe } from "@commontools/builder";
 import { run } from "../src/runner.ts";
 import { addModuleByRef } from "../src/module.ts";
 import { getDoc } from "../src/doc.ts";
-import { idle } from "../src/scheduler.ts";
+import { idle, onError } from "../src/scheduler.ts";
 import { type Cell } from "../src/cell.ts";
 
 describe("Recipe Runner", () => {
@@ -670,5 +670,111 @@ describe("Recipe Runner", () => {
     result.asCell(["stream"]).send({ amount: 2 });
     await idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: 3 });
+  });
+
+  it("failed handlers should be ignored", async () => {
+    let errors = 0;
+
+    onError(() => errors++);
+
+    const divHandler = handler<
+      { divisor: number; dividend: number },
+      { result: number }
+    >(
+      ({ divisor, dividend }, state) => {
+        if (dividend === 0) {
+          throw new Error("division by zero");
+        }
+        state.result = divisor / dividend;
+      },
+    );
+
+    const divRecipe = recipe<{ result: number }>(
+      "Divide numbers",
+      ({ result }) => {
+        return { updater: divHandler({ result }), result };
+      },
+    );
+
+    const charm = run(
+      divRecipe,
+      { result: 1 },
+      getDoc(undefined, "failed handlers should be ignored", "test"),
+    );
+
+    await idle();
+
+    charm.asCell(["updater"]).send({ divisor: 5, dividend: 1 });
+    await idle();
+    expect(errors).toBe(0);
+
+    expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
+
+    charm.asCell(["updater"]).send({ divisor: 10, dividend: 0 });
+    await idle();
+    expect(errors).toBe(1);
+    expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
+
+    // NOTE(ja): this test is really important after a handler
+    // fails the entire system crashes!!!!
+    charm.asCell(["updater"]).send({ divisor: 10, dividend: 5 });
+    await idle();
+    expect(charm.getAsQueryResult()).toMatchObject({ result: 2 });
+  });
+
+  it("failed lifted functions should be ignored", async () => {
+    let errors = 0;
+
+    onError(() => errors++);
+
+    const divider = lift<
+      { divisor: number; dividend: number },
+      number
+    >(
+      ({ divisor, dividend }) => {
+        console.log("divider", divisor, dividend);
+        if (dividend === 0) {
+          throw new Error("division by zero");
+        }
+        console.log("divider result", divisor / dividend);
+        return divisor / dividend;
+      },
+    );
+
+    const divRecipe = recipe<{ divisor: number; dividend: number }>(
+      "Divide numbers",
+      ({ divisor, dividend }) => {
+        return { result: divider({ divisor, dividend }) };
+      },
+    );
+
+    const dividend = getDoc(
+      1,
+      "failed lifted functions should be ignored 1",
+      "test",
+    );
+
+    const charm = run(
+      divRecipe,
+      { divisor: 10, dividend },
+      getDoc(undefined, "failed lifted handlers should be ignored", "test"),
+    );
+
+    await idle();
+
+    expect(errors).toBe(0);
+    expect(charm.getAsQueryResult()).toMatchObject({ result: 10 });
+
+    dividend.send(0);
+    await idle();
+    expect(errors).toBe(1);
+    expect(charm.getAsQueryResult()).toMatchObject({ result: 10 });
+
+    // Make sure it recovers:
+    dividend.send(2);
+    await idle();
+    console.log(charm.get());
+    expect((charm.get() as any).result.$alias.cell).toBe(charm.sourceCell);
+    expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
   });
 });
