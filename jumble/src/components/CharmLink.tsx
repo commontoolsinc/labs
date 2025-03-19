@@ -109,6 +109,7 @@ export const CharmLink: React.FC<CharmLinkProps> = ({
           charmId: id,
           replicaName: currentReplicaName,
         })}
+        aria-roledescription="charm-link"
         className={({ isActive }) => `
           charm-link font-medium transition-colors
           hover:text-black hover:underline
