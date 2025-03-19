@@ -212,6 +212,8 @@ export function run<T, R = any>(
     argument = mergeObjects(argument, defaults);
   }
 
+  const recipeChanged = recipeId !== processCell.get()?.[TYPE];
+
   processCell.send({
     ...processCell.get(),
     [TYPE]: recipeId,
@@ -227,10 +229,15 @@ export function run<T, R = any>(
     );
   }
 
-  // Send "query" to results to the result doc
-  resultCell.send(
-    unwrapOneLevelAndBindtoDoc<R>(recipe.result as R, processCell),
-  );
+  // Send "query" to results to the result doc only on initial run or if recipe
+  // changed. This preserves user modifications like renamed charms.
+  if (recipeChanged) {
+    // TODO(seefeld): Be smarter about merging in case result changed. But since
+    // we don't yet update recipes, this isn't urgent yet.
+    resultCell.send(
+      unwrapOneLevelAndBindtoDoc<R>(recipe.result as R, processCell),
+    );
+  }
 
   // [unsafe closures:] For recipes from closures, add a materialize factory
   if (recipe[unsafe_originalRecipe]) {

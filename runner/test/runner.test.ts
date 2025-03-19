@@ -332,4 +332,211 @@ describe("runRecipe", () => {
     await idle();
     expect(inputCell.get()).toMatchObject({ input: 40, output: 80 });
   });
+
+  it("should apply default values from argument schema", async () => {
+    const recipe: Recipe = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          input: { type: "number", default: 42 },
+          multiplier: { type: "number", default: 2 },
+        },
+        required: ["input"],
+      },
+      resultSchema: {},
+      result: { result: { $alias: { path: ["internal", "result"] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (args: { input: number; multiplier: number }) =>
+              args.input * args.multiplier,
+          },
+          inputs: { $alias: { path: ["argument"] } },
+          outputs: { $alias: { path: ["internal", "result"] } },
+        },
+      ],
+    };
+
+    // Test with partial arguments (should use default for multiplier)
+    const resultWithPartial = run(
+      recipe,
+      { input: 10 },
+      getDoc(undefined, "default values test - partial", "test"),
+    );
+    await idle();
+    expect(resultWithPartial.getAsQueryResult()).toEqual({ result: 20 });
+
+    // Test with no arguments (should use default for input)
+    const resultWithDefaults = run(
+      recipe,
+      {},
+      getDoc(undefined, "default values test - all defaults", "test"),
+    );
+    await idle();
+    expect(resultWithDefaults.getAsQueryResult()).toEqual({ result: 84 }); // 42 * 2
+  });
+
+  it("should handle complex nested schema types", async () => {
+    const recipe: Recipe = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          config: {
+            type: "object",
+            properties: {
+              values: {
+                type: "array",
+                items: { type: "number" },
+              },
+              operation: { type: "string", enum: ["sum", "avg", "max"] },
+            },
+            required: ["values", "operation"],
+          },
+        },
+        required: ["config"],
+      },
+      resultSchema: {},
+      result: { result: { $alias: { path: ["internal", "result"] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (
+              args: { config: { values: number[]; operation: string } },
+            ) => {
+              const values = args.config.values;
+              switch (args.config.operation) {
+                case "sum":
+                  return values.reduce((a, b) => a + b, 0);
+                case "avg":
+                  return values.length
+                    ? values.reduce((a, b) => a + b, 0) / values.length
+                    : 0;
+                case "max":
+                  return Math.max(...values);
+                default:
+                  return 0;
+              }
+            },
+          },
+          inputs: { $alias: { path: ["argument"] } },
+          outputs: { $alias: { path: ["internal", "result"] } },
+        },
+      ],
+    };
+
+    const result = run(
+      recipe,
+      { config: { values: [10, 20, 30, 40], operation: "avg" } },
+      getDoc(undefined, "complex schema test", "test"),
+    );
+    await idle();
+    expect(result.getAsQueryResult()).toEqual({ result: 25 });
+
+    // Test with a different operation
+    const result2 = run(
+      recipe,
+      { config: { values: [10, 20, 30, 40], operation: "max" } },
+      result,
+    );
+    await idle();
+    expect(result2.getAsQueryResult()).toEqual({ result: 40 });
+  });
+
+  it("should merge arguments with defaults from schema", async () => {
+    const recipe: Recipe = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          options: {
+            type: "object",
+            properties: {
+              enabled: { type: "boolean", default: true },
+              value: { type: "number", default: 100 },
+              name: { type: "string", default: "default" },
+            },
+          },
+          input: { type: "number", default: 1 },
+        },
+      },
+      resultSchema: {},
+      result: {
+        result: { $alias: { path: ["internal", "result"] } },
+        options: { $alias: { path: ["argument", "options"] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (args: { input: number; options: any }) => {
+              return args.options.enabled ? args.input * args.options.value : 0;
+            },
+          },
+          inputs: { $alias: { path: ["argument"] } },
+          outputs: { $alias: { path: ["internal", "result"] } },
+        },
+      ],
+    };
+
+    // Provide partial options - should merge with defaults
+    const result = run(
+      recipe,
+      { options: { value: 10 }, input: 5 },
+      getDoc(undefined, "merge defaults test", "test"),
+    );
+    await idle();
+
+    expect(result.getAsQueryResult().options).toEqual({
+      enabled: true,
+      value: 10,
+      name: "default",
+    });
+    expect(result.getAsQueryResult().result).toEqual(50); // 5 * 10
+  });
+
+  it("should preserve result state between runs when recipe doesn't change", async () => {
+    const recipe: Recipe = {
+      argumentSchema: {},
+      resultSchema: {},
+      initial: { internal: { counter: 0 } },
+      result: {
+        name: "counter",
+        counter: { $alias: { path: ["internal", "counter"] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (input: any) => {
+              return input.value;
+            },
+          },
+          inputs: { $alias: { path: ["argument"] } },
+          outputs: { $alias: { path: ["internal", "counter"] } },
+        },
+      ],
+    };
+
+    const resultCell = getDoc<any>(
+      undefined,
+      "state preservation test",
+      "test",
+    );
+
+    // First run
+    run(recipe, { value: 1 }, resultCell);
+    await idle();
+    expect(resultCell.get()?.name).toEqual("counter");
+    expect(resultCell.getAsQueryResult()?.counter).toEqual(1);
+
+    // Now change the name
+    resultCell.setAtPath(["name"], "my counter");
+
+    // Second run with same recipe but different argument
+    run(recipe, { value: 2 }, resultCell);
+    await idle();
+    expect(resultCell.get()?.name).toEqual("my counter");
+    expect(resultCell.getAsQueryResult()?.counter).toEqual(2);
+  });
 });
