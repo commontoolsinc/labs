@@ -243,7 +243,6 @@ const CharmTable = (
         <HoverPreview
           charm={hoveredCharmInstance}
           position={previewPosition}
-          replicaName={replicaName}
         />
       )}
     </div>

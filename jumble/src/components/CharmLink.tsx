@@ -126,7 +126,6 @@ export const CharmLink: React.FC<CharmLinkProps> = ({
         <HoverPreview
           charm={instance}
           position={previewPosition}
-          replicaName={currentReplicaName}
         />
       )}
     </div>
