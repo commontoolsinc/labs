@@ -45,12 +45,9 @@ export const login: AppRouteHandler<LoginRoute> = async (c) => {
       return createLoginErrorResponse(c, "Missing authCellId in request");
     }
 
-    // Encode the auth cell ID as state parameter
-    const statePayload = btoa(JSON.stringify(payload));
     const redirectUri = `${
       getBaseUrl(c.req.url)
     }/api/integrations/google-oauth/callback`;
-
     logger.debug({ redirectUri }, "Created redirect URI");
 
     // Create OAuth client
@@ -59,14 +56,18 @@ export const login: AppRouteHandler<LoginRoute> = async (c) => {
     // Generate authorization URL with PKCE
     const { uri, codeVerifier } = await client.code.getAuthorizationUri();
 
+    // Create state payload that includes the code verifier
+    const statePayload = btoa(JSON.stringify({
+      authCellId: payload.authCellId,
+      integrationCharmId: payload.integrationCharmId,
+      codeVerifier: codeVerifier,
+    }));
+
     // Add state parameter and other required params to the URL
     const authUrl = new URL(uri.toString());
     authUrl.searchParams.set("state", statePayload);
     authUrl.searchParams.set("access_type", "offline");
     authUrl.searchParams.set("prompt", "consent");
-
-    // Store the code verifier for later use in the callback
-    codeVerifiers.set(statePayload, codeVerifier);
 
     logger.info({ authUrl: authUrl.toString() }, "Generated OAuth URL");
 
@@ -114,14 +115,22 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
       return createCallbackResponse(callbackResult);
     }
 
-    // Decode and parse the state parameter (contains the auth cell ID)
+    // Decode and parse the state parameter
     let decodedState: {
       authCellId: string;
       integrationCharmId: string;
+      codeVerifier: string;
     };
+
     try {
       decodedState = JSON.parse(atob(state));
-      logger.info({ decodedState }, "Decoded state parameter");
+      logger.info({
+        decodedState: {
+          authCellId: decodedState.authCellId,
+          integrationCharmId: decodedState.integrationCharmId,
+          codeVerifier: decodedState.codeVerifier ? "present" : "missing",
+        },
+      }, "Decoded state parameter");
     } catch (error) {
       logger.error({ state, error }, "Failed to decode state parameter");
       const callbackResult: CallbackResult = {
@@ -131,13 +140,12 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
       return createCallbackResponse(callbackResult);
     }
 
-    // Get the code verifier for this state
-    const codeVerifier = codeVerifiers.get(state);
+    const codeVerifier = decodedState.codeVerifier;
     if (!codeVerifier) {
-      logger.error(state, "No code verifier found for state");
+      logger.error("No code verifier found in state parameter");
       const callbackResult: CallbackResult = {
         success: false,
-        error: "Invalid state parameter",
+        error: "Invalid state parameter: missing code verifier",
       };
       return createCallbackResponse(callbackResult);
     }
@@ -156,9 +164,6 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
         codeVerifier,
       },
     );
-
-    // Clean up the code verifier
-    codeVerifiers.delete(state);
 
     logger.info(
       {
