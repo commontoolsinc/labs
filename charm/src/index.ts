@@ -12,4 +12,5 @@ export {
   generateNewRecipeVersion,
   iterate,
 } from "./iterate.ts";
+export { extractUserCode, injectUserCode } from "./iframe/static.ts";
 export { getIframeRecipe, type IFrameRecipe } from "./iframe/recipe.ts";

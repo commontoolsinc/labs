@@ -1,8 +1,10 @@
 import {
   Charm,
+  extractUserCode,
   generateNewRecipeVersion,
   getIframeRecipe,
   IFrameRecipe,
+  injectUserCode,
 } from "@commontools/charm";
 import { isCell, isStream } from "@commontools/runner";
 import { isObj } from "@commontools/utils";
@@ -255,6 +257,7 @@ function useSuggestions(charm: Cell<Charm> | null) {
 function useCodeEditor(
   charm: Cell<Charm> | null,
   iframeRecipe: IFrameRecipe | null,
+  showFullCode: boolean = false,
 ) {
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
@@ -263,18 +266,25 @@ function useCodeEditor(
 
   useEffect(() => {
     if (charm && iframeRecipe) {
-      setWorkingSrc(iframeRecipe.src);
+      if (showFullCode) {
+        setWorkingSrc(iframeRecipe.src);
+      } else {
+        setWorkingSrc(extractUserCode(iframeRecipe.src ?? "") ?? "");
+      }
     }
-  }, [iframeRecipe, charm]);
+  }, [iframeRecipe, charm, showFullCode]);
 
-  const hasUnsavedChanges = workingSrc !== iframeRecipe?.src;
+  const hasUnsavedChanges = showFullCode
+    ? workingSrc !== iframeRecipe?.src
+    : injectUserCode(workingSrc ?? "") !== iframeRecipe?.src;
 
   const saveChanges = useCallback(() => {
-    if (workingSrc && iframeRecipe && charm) {
+    const src = showFullCode ? workingSrc : injectUserCode(workingSrc ?? "");
+    if (src && iframeRecipe && charm) {
       generateNewRecipeVersion(
         charmManager,
         charm,
-        workingSrc,
+        src,
         iframeRecipe.spec,
       ).then((newCharm) => {
         navigate(createPath("charmShow", {
@@ -819,10 +829,13 @@ const OperationTab = () => {
 const CodeTab = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
+  const [showFullCode, setShowFullCode] = useState(false);
+
   const { workingSrc, setWorkingSrc, hasUnsavedChanges, saveChanges } =
     useCodeEditor(
       charm,
       iframeRecipe,
+      showFullCode,
     );
 
   useEffect(() => {
@@ -842,6 +855,18 @@ const CodeTab = () => {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="p-4 flex-grow flex flex-col overflow-hidden">
+        <div className="mt-4 flex justify-start">
+          <input
+            type="checkbox"
+            id="fullCode"
+            checked={showFullCode}
+            onChange={(e) => setShowFullCode(e.target.checked)}
+            className="border-2 border-black mr-2"
+          />
+          <label htmlFor="fullCode" className="text-sm font-medium">
+            Full Code
+          </label>
+        </div>
         {hasUnsavedChanges && (
           <div className="mt-4 flex justify-end">
             <button
