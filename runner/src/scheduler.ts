@@ -75,15 +75,15 @@ export async function run(action: Action): Promise<any> {
   let result: any;
   running = new Promise((resolve) => {
     const finalizeAction = (error?: unknown) => {
+      // handlerError() might throw, so let's make sure to resolve the promise.
       try {
         if (error) {
-          console.error("caught error", error, action);
-          if (error instanceof Error) handleError(error); // Might throw again.
+          if (error instanceof Error) handleError(error, action);
         }
       } finally {
-        // Note: By adding the listeners after the call we avoid triggering a re-run
-        // of the action if it changed a r/w doc. Note that this also means that
-        // those actions can't loop on themselves.
+        // Note: By adding the listeners after the call we avoid triggering a
+        // re-run of the action if it changed a r/w doc. Note that this also
+        // means that those actions can't loop on themselves.
         subscribe(action, log);
         running = undefined;
         resolve(result);
@@ -153,8 +153,8 @@ function setDependencies(action: Action, log: ReactivityLog) {
   return reads;
 }
 
-function handleError(error: Error) {
-  if (errorHandlers.size === 0) throw error;
+function handleError(error: Error, context: any) {
+  console.error("caught error", error, context);
   for (const handler of errorHandlers) handler(error);
 }
 
@@ -163,12 +163,15 @@ async function execute() {
   if (running) await running;
 
   // Process next event from the event queue. Will mark more docs as dirty.
-  try {
-    await Promise.resolve(eventQueue.shift()?.()).catch((error) => {
-      handleError(error as Error);
-    });
-  } catch (error) {
-    handleError(error as Error);
+  const handler = eventQueue.shift();
+  if (handler) {
+    try {
+      await Promise.resolve(handler()).catch((error) => {
+        handleError(error as Error, handler);
+      });
+    } catch (error) {
+      handleError(error as Error, handler);
+    }
   }
 
   const order = topologicalSort(pending, dependencies, dirty);
