@@ -3,6 +3,7 @@ export { addModuleByRef, raw } from "./module.ts";
 export {
   type Action,
   idle,
+  onError,
   run as addAction,
   unschedule as removeAction,
 } from "./scheduler.ts";
