@@ -1,19 +1,56 @@
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
+import {
+  AuthorizationError,
+  ConflictError,
+  ConnectionError,
+  Query,
+  QueryError,
+  QueryResult,
+  Transaction,
+  TransactionError,
+  TransactionResult,
+} from "@commontools/memory";
+
 import { useEffect, useRef, useState } from "react";
 
 interface StorageEvent {
   transact?: {
     changes: Record<string, any>;
   };
+  commit?: {
+    result: { ok: object; error?: void } | { ok?: void; error: Error };
+    spaces: number;
+    subscriptions: number;
+    localChanges: number;
+  };
+  send?: {
+    command: {
+      cmd: string;
+    };
+  };
   receive?: {
     the: string;
     of: string;
     is: Record<string, any>;
   };
-  connectionStatus?: "connected" | "disconnected";
-  connectionCount?: number;
-  timestamp?: string;
-  reason?: string;
+  connected?: {
+    connectionStatus: "connected";
+    connectionCount: number;
+  };
+  disconnected?: {
+    connectionStatus: "disconnected";
+    reason: string;
+  };
+  subscription?: {
+    entity: string;
+    subscriberCount: number;
+    totalSubscriptions: number;
+  };
+  timeout?: {
+    connectionStatus: "timeout";
+    description: string;
+  };
+  timestamp: string;
 }
 
 export function useStorageBroadcast(callback: (data: any) => void) {
@@ -27,11 +64,81 @@ export function useStorageBroadcast(callback: (data: any) => void) {
   }, [callback]);
 }
 
+export type ConnectionStatus =
+  | "ready" // Connection is active
+  | "pending"; // Not yet connected but trying to
+
+export type ActivityStatus =
+  | "push" // Pushing changes upstream
+  | "pull" // Pulling changes from upstream
+  | "merge"; // Merging changes from upstream
+
+export type Result<Ok extends object = object, Failure extends Error = Error> =
+  | { ok: Ok; error?: void }
+  | { ok?: void; error: Failure };
+
+export type Status<Ready extends object, Pending extends object> =
+  | { pending: Pending; ready?: void; time: Time }
+  | { pending?: void; ready: Ready; time: Time };
+
+export type Time = number;
+
+export type PushError =
+  | ConnectionError
+  | ConflictError
+  | TransactionError
+  | AuthorizationError;
+
+export type PullError =
+  | ConnectionError
+  | QueryError
+  | AuthorizationError;
+
+export type PullStatus = {
+  pending: Record<string, Query>;
+  failed: Record<string, PushError>;
+};
+
+export type PushStatus = {
+  pending: Record<string, Transaction>;
+  failed: Record<string, PullError>;
+};
+
+export type SubscriptionStatus = {
+  pending: Record<string, Query>;
+  active: Record<string, object>;
+};
+
+export interface MemoryStatus {
+  /**
+   * Status of the connection to the upstream. If pending it will contain
+   * result holding potentially an error which occurred causing a reconnection
+   * if pending and result is ok it is an initial connection.
+   */
+  connection: Status<object, Result<object, Error>>;
+
+  /**
+   * If pending holds inflight transaction. If ready shows status of the last
+   * transaction.
+   */
+  push: Record<string, Result<Transaction, PushError & { time: Time }>>;
+
+  /**
+   * If pending shows set of active queries, if ready shows last query result.
+   */
+  pull: Record<string, Result<Query, PullError & { time: Time }>>;
+
+  /**
+   * Status of current subscriptions.
+   */
+  subscriptions: Record<string, { query: Query; merging?: Transaction }>;
+}
+
 export function User() {
   const { session, clearAuthentication } = useAuthentication();
   const [did, setDid] = useState<string | undefined>(undefined);
   const [connectionStatus, setConnectionStatus] = useState<
-    "connected" | "disconnected" | null
+    "connected" | "disconnected" | "offline" | null
   >(null);
 
   // Animation refs
@@ -63,27 +170,26 @@ export function User() {
   // Listen for real events
   useStorageBroadcast((data: StorageEvent) => {
     // Handle connection status events
-    if (data.connectionStatus) {
-      setConnectionStatus(data.connectionStatus);
-
-      // If connection state changes, add to activity buffer to show visual feedback
+    if (data.connected) {
+      setConnectionStatus("connected");
+    } else if (data.disconnected) {
+      setConnectionStatus("disconnected");
+    } else if (data.timeout) {
+      setConnectionStatus("offline");
+    } else if (data.receive) {
       activityBufferRef.current.push({
-        type: data.connectionStatus === "connected" ? "receive" : "send",
+        type: "receive",
         timestamp: Date.now(),
       });
-    }
-
-    // Handle existing events
-    if (data.transact) {
-      // Add send activity to buffer
+    } else if (data.send) {
       activityBufferRef.current.push({
         type: "send",
         timestamp: Date.now(),
       });
-    } else if (data.receive) {
-      // Add receive activity to buffer
+    } else if (data.transact) {
+      // Add send activity to buffer
       activityBufferRef.current.push({
-        type: "receive",
+        type: "send",
         timestamp: Date.now(),
       });
     }

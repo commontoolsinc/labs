@@ -52,6 +52,12 @@ export interface RemoteStorageProviderSettings {
    * space.
    */
   maxSubscriptionsPerSpace: number;
+
+  /**
+   * Amount of milliseconds we will spend waiting on WS connection before we
+   * abort.
+   */
+  connectionTimeout: number;
 }
 
 export interface RemoteStorageProviderOptions {
@@ -66,6 +72,7 @@ export interface RemoteStorageProviderOptions {
 
 const defaultSettings: RemoteStorageProviderSettings = {
   maxSubscriptionsPerSpace: 50_000,
+  connectionTimeout: 30_000,
 };
 
 export class RemoteStorageProvider implements StorageProvider {
@@ -91,6 +98,7 @@ export class RemoteStorageProvider implements StorageProvider {
   >;
 
   connectionCount = 0;
+  timeoutID = 0;
 
   constructor({
     address,
@@ -107,6 +115,7 @@ export class RemoteStorageProvider implements StorageProvider {
     this.the = the;
     this.settings = settings;
     this.inspector = inspector;
+    this.handleEvent = this.handleEvent.bind(this);
 
     const session = Memory.create({ as });
 
@@ -170,13 +179,12 @@ export class RemoteStorageProvider implements StorageProvider {
         local.remote.set(of, subscription);
 
         // Log subscription creation to inspector
-        this.inspector?.postMessage({
+        this.inspect({
           subscription: {
             entity: of,
             subscriberCount: subscription.subscribers.size,
             totalSubscriptions: local.remote.size,
           },
-          timestamp: new Date().toISOString(),
         });
       }
     }
@@ -265,17 +273,17 @@ export class RemoteStorageProvider implements StorageProvider {
 
     const transaction = { changes: Changes.from(facts) };
 
-    this.inspector?.postMessage({ transact: transaction });
+    this.inspect({ transact: transaction });
 
     const result = await memory.transact(transaction);
     // Report memory state metrics after transaction
-    this.inspector?.postMessage({
-      state: {
+    this.inspect({
+      commit: {
+        result: result,
         spaces: this.state.size,
         subscriptions: remote.size,
         localChanges: local.size,
       },
-      timestamp: new Date().toISOString(),
     });
 
     // Once we have a result of the transaction we clear out local facts we
@@ -321,11 +329,17 @@ export class RemoteStorageProvider implements StorageProvider {
   inspect<T>(
     message: T,
   ): T {
-    this.inspector?.postMessage(message);
+    this.inspector?.postMessage({
+      ...message,
+      timestamp: new Date().toISOString(),
+    });
     return message;
   }
 
   handleEvent(event: MessageEvent) {
+    // clear if we had timeout pending
+    clearTimeout(this.timeoutID);
+
     switch (event.type) {
       case "message":
         return this.onReceive(event.data);
@@ -335,12 +349,15 @@ export class RemoteStorageProvider implements StorageProvider {
         return this.onDisconnect(event);
       case "error":
         return this.onDisconnect(event);
+      case "timeout":
+        return this.onTimeout(event.target as WebSocket);
     }
   }
   connect() {
     const { connection } = this;
     // If we already have a connection we remove all the listeners from it.
     if (connection) {
+      clearTimeout(this.timeoutID);
       connection.removeEventListener("message", this);
       connection.removeEventListener("open", this);
       connection.removeEventListener("close", this);
@@ -351,6 +368,9 @@ export class RemoteStorageProvider implements StorageProvider {
     webSocketUrl.searchParams.set("space", this.workspace);
     const socket = new WebSocket(webSocketUrl.href);
     this.connection = socket;
+    // Start a timer so if connection is pending longer then `connectionTimeout`
+    // we should abort and retry.
+    this.setTimeout();
     socket.addEventListener("message", this);
     socket.addEventListener("open", this);
     socket.addEventListener("close", this);
@@ -359,14 +379,37 @@ export class RemoteStorageProvider implements StorageProvider {
     this.connectionCount += 1;
   }
 
+  setTimeout() {
+    this.timeoutID = setTimeout(
+      this.handleEvent,
+      this.settings.connectionTimeout,
+      { type: "timeout", target: this.connection },
+    );
+  }
+
+  onTimeout(socket: WebSocket) {
+    this.inspect({
+      timeout: {
+        connectionStatus: "timeout",
+        description:
+          `Aborting connection after failure to connect in ${this.settings.connectionTimeout}ms`,
+      },
+    });
+
+    if (this.connection === socket) {
+      socket.close();
+    }
+  }
+
   async onOpen(socket: WebSocket) {
     const { reader, queue } = this;
 
     // Report connection to inspector
-    this.inspector?.postMessage({
-      connectionStatus: "connected",
-      connectionCount: this.connectionCount,
-      timestamp: new Date().toISOString(),
+    this.inspect({
+      connected: {
+        connectionStatus: "connected",
+        connectionCount: this.connectionCount,
+      },
     });
 
     // If we did have connection
@@ -395,9 +438,10 @@ export class RemoteStorageProvider implements StorageProvider {
 
       const command = next.value!;
 
-      // Now we make that our socket is still a current connection as we may
-      // have lost connection while waiting to read a command.
+      // Now we make sure that our socket is still a current connection as we
+      // may have lost connection while waiting to read a command.
       if (this.connection === socket) {
+        this.inspect({ send: command });
         socket.send(Codec.UCAN.toString(command));
       } // If it is no longer our connection we simply add the command into a
       // queue so it will be send once connection is reopen.
@@ -414,10 +458,11 @@ export class RemoteStorageProvider implements StorageProvider {
     // disconnect.
     if (this.connection === socket) {
       // Report disconnection to inspector
-      this.inspector?.postMessage({
-        connectionStatus: "disconnected",
-        reason: event.type,
-        timestamp: new Date().toISOString(),
+      this.inspect({
+        disconnected: {
+          connectionStatus: "disconnected",
+          reason: event.type,
+        },
       });
 
       this.connect();
