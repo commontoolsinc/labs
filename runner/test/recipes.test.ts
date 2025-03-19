@@ -4,7 +4,7 @@ import { byRef, handler, JSONSchema, lift, recipe } from "@commontools/builder";
 import { run } from "../src/runner.ts";
 import { addModuleByRef } from "../src/module.ts";
 import { getDoc } from "../src/doc.ts";
-import { idle } from "../src/scheduler.ts";
+import { idle, onError } from "../src/scheduler.ts";
 import { type Cell } from "../src/cell.ts";
 
 describe("Recipe Runner", () => {
@@ -672,8 +672,11 @@ describe("Recipe Runner", () => {
     expect(result.getAsQueryResult()).toMatchObject({ counter: 3 });
   });
 
-  // FIXME(ja): should they really be ignored?
   it("failed handlers should be ignored", async () => {
+    let errors = 0;
+
+    onError(() => errors++);
+
     const divHandler = handler<
       { divisor: number; dividend: number },
       { result: number }
@@ -703,16 +706,13 @@ describe("Recipe Runner", () => {
 
     charm.asCell(["updater"]).send({ divisor: 5, dividend: 1 });
     await idle();
+    expect(errors).toBe(0);
+
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
 
-    // NOTE(ja): not really sure how to test we are doing the right thing here
-    // nor am I sure what the right thing is...
-    try {
-      charm.asCell(["updater"]).send({ divisor: 5, dividend: 0 });
-    } catch (e) {
-      console.log("expected error", e);
-    }
+    charm.asCell(["updater"]).send({ divisor: 10, dividend: 0 });
     await idle();
+    expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
 
     // NOTE(ja): this test is really important after a handler
@@ -722,6 +722,59 @@ describe("Recipe Runner", () => {
     expect(charm.getAsQueryResult()).toMatchObject({ result: 2 });
   });
 
-  // FIXME(ja): lifted functions crashing also crashes the system...
-  // we should test this as well...
+  it("failed lifted functions should be ignored", async () => {
+    let errors = 0;
+
+    onError(() => errors++);
+
+    const divider = lift<
+      { divisor: number; dividend: number },
+      number
+    >(
+      ({ divisor, dividend }) => {
+        console.log("divider", divisor, dividend);
+        if (dividend === 0) {
+          throw new Error("division by zero");
+        }
+        console.log("divider result", divisor / dividend);
+        return divisor / dividend;
+      },
+    );
+
+    const divRecipe = recipe<{ divisor: number; dividend: number }>(
+      "Divide numbers",
+      ({ divisor, dividend }) => {
+        return { result: divider({ divisor, dividend }) };
+      },
+    );
+
+    const dividend = getDoc(
+      1,
+      "failed lifted functions should be ignored 1",
+      "test",
+    );
+
+    const charm = run(
+      divRecipe,
+      { divisor: 10, dividend },
+      getDoc(undefined, "failed lifted handlers should be ignored", "test"),
+    );
+
+    await idle();
+
+    expect(errors).toBe(0);
+    expect(charm.getAsQueryResult()).toMatchObject({ result: 10 });
+
+    dividend.send(0);
+    await idle();
+    expect(errors).toBe(1);
+    expect(charm.getAsQueryResult()).toMatchObject({ result: 10 });
+
+    // Make sure it recovers:
+    dividend.send(2);
+    await idle();
+    console.log(charm.get());
+    expect((charm.get() as any).result.$alias.cell).toBe(charm.sourceCell);
+    expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
+  });
 });

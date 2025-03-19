@@ -75,17 +75,19 @@ export async function run(action: Action): Promise<any> {
   let result: any;
   running = new Promise((resolve) => {
     const finalizeAction = (error?: unknown) => {
-      if (error) {
-        console.error("caught error", error, action);
-        if (error instanceof Error) handleError(error);
+      try {
+        if (error) {
+          console.error("caught error", error, action);
+          if (error instanceof Error) handleError(error); // Might throw again.
+        }
+      } finally {
+        // Note: By adding the listeners after the call we avoid triggering a re-run
+        // of the action if it changed a r/w doc. Note that this also means that
+        // those actions can't loop on themselves.
+        subscribe(action, log);
+        running = undefined;
+        resolve(result);
       }
-
-      // Note: By adding the listeners after the call we avoid triggering a re-run
-      // of the action if it changed a r/w doc. Note that this also means that
-      // those actions can't loop on themselves.
-      subscribe(action, log);
-      running = undefined;
-      resolve(result);
     };
 
     try {
@@ -105,7 +107,7 @@ export async function run(action: Action): Promise<any> {
 
 export function idle() {
   return new Promise<void>((resolve) => {
-    if (running) running.then(() => resolve());
+    if (running) running.then(() => idle().then(resolve));
     else if (pending.size === 0 && eventQueue.length === 0) resolve();
     else idlePromises.push(resolve);
   });
@@ -161,7 +163,13 @@ async function execute() {
   if (running) await running;
 
   // Process next event from the event queue. Will mark more docs as dirty.
-  eventQueue.shift()?.();
+  try {
+    await Promise.resolve(eventQueue.shift()?.()).catch((error) => {
+      handleError(error as Error);
+    });
+  } catch (error) {
+    handleError(error as Error);
+  }
 
   const order = topologicalSort(pending, dependencies, dirty);
 
