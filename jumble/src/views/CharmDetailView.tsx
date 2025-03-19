@@ -1,6 +1,7 @@
 import {
   Charm,
   extractUserCode,
+  extractVersionTag,
   generateNewRecipeVersion,
   getIframeRecipe,
   IFrameRecipe,
@@ -296,6 +297,7 @@ function useCodeEditor(
   }, [workingSrc, iframeRecipe, charm, navigate, replicaName]);
 
   return {
+    fullSrc: iframeRecipe?.src ?? "",
     workingSrc,
     setWorkingSrc,
     hasUnsavedChanges,
@@ -831,12 +833,13 @@ const CodeTab = () => {
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
   const [showFullCode, setShowFullCode] = useState(false);
 
-  const { workingSrc, setWorkingSrc, hasUnsavedChanges, saveChanges } =
+  const { fullSrc, workingSrc, setWorkingSrc, hasUnsavedChanges, saveChanges } =
     useCodeEditor(
       charm,
       iframeRecipe,
       showFullCode,
     );
+  const templateVersion = extractVersionTag(fullSrc);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -854,8 +857,11 @@ const CodeTab = () => {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="p-4 flex-grow flex flex-col overflow-hidden">
-        <div className="mt-4 flex justify-start">
+      <div className="flex items-center gap-4 p-4">
+        <span className="px-2 py-1 inline rounded-full text-xs bg-gray-100 border border-gray-300">
+          <span>Template Version: {templateVersion ?? "Missing"}</span>
+        </span>
+        <div className="flex items-center px-3 py-1 rounded-full bg-gray-100 border border-gray-300">
           <input
             type="checkbox"
             id="fullCode"
@@ -863,10 +869,15 @@ const CodeTab = () => {
             onChange={(e) => setShowFullCode(e.target.checked)}
             className="border-2 border-black mr-2"
           />
-          <label htmlFor="fullCode" className="text-sm font-medium">
-            Full Code
+          <label
+            htmlFor="fullCode"
+            className="text-xs font-medium cursor-pointer"
+          >
+            Show Full Template
           </label>
         </div>
+      </div>
+      <div className="px-4 flex-grow flex flex-col overflow-hidden">
         {hasUnsavedChanges && (
           <div className="mt-4 flex justify-end">
             <button
