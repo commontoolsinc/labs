@@ -255,7 +255,7 @@ function useSuggestions(charm: Cell<Charm> | null) {
 function useCodeEditor(
   charm: Cell<Charm> | null,
   iframeRecipe: IFrameRecipe | null,
-  userCode: boolean = true,
+  showFullCode: boolean = false,
 ) {
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
@@ -264,20 +264,20 @@ function useCodeEditor(
 
   useEffect(() => {
     if (charm && iframeRecipe) {
-      if (userCode) {
-        setWorkingSrc(extractUserCode(iframeRecipe.src ?? "") ?? "");
-      } else {
+      if (showFullCode) {
         setWorkingSrc(iframeRecipe.src);
+      } else {
+        setWorkingSrc(extractUserCode(iframeRecipe.src ?? "") ?? "");
       }
     }
-  }, [iframeRecipe, charm]);
+  }, [iframeRecipe, charm, showFullCode]);
 
-  const hasUnsavedChanges = userCode
-    ? injectUserCode(workingSrc ?? "") !== iframeRecipe?.src
-    : workingSrc !== iframeRecipe?.src;
+  const hasUnsavedChanges = showFullCode
+    ? workingSrc !== iframeRecipe?.src
+    : injectUserCode(workingSrc ?? "") !== iframeRecipe?.src;
 
   const saveChanges = useCallback(() => {
-    const src = userCode ? injectUserCode(workingSrc ?? "") : workingSrc;
+    const src = showFullCode ? workingSrc : injectUserCode(workingSrc ?? "");
     if (src && iframeRecipe && charm) {
       generateNewRecipeVersion(
         charmManager,
@@ -827,11 +827,13 @@ const OperationTab = () => {
 const CodeTab = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
+  const [showFullCode, setShowFullCode] = useState(false);
+
   const { workingSrc, setWorkingSrc, hasUnsavedChanges, saveChanges } =
     useCodeEditor(
       charm,
       iframeRecipe,
-      true,
+      showFullCode,
     );
 
   useEffect(() => {
@@ -851,6 +853,18 @@ const CodeTab = () => {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="p-4 flex-grow flex flex-col overflow-hidden">
+        <div className="mt-4 flex justify-start">
+          <input
+            type="checkbox"
+            id="fullCode"
+            checked={showFullCode}
+            onChange={(e) => setShowFullCode(e.target.checked)}
+            className="border-2 border-black mr-2"
+          />
+          <label htmlFor="fullCode" className="text-sm font-medium">
+            Full Code
+          </label>
+        </div>
         {hasUnsavedChanges && (
           <div className="mt-4 flex justify-end">
             <button
