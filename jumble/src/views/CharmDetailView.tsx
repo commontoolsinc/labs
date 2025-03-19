@@ -1,8 +1,10 @@
 import {
   Charm,
+  extractUserCode,
   generateNewRecipeVersion,
   getIframeRecipe,
   IFrameRecipe,
+  injectUserCode,
 } from "@commontools/charm";
 import React, {
   createContext,
@@ -253,6 +255,7 @@ function useSuggestions(charm: Cell<Charm> | null) {
 function useCodeEditor(
   charm: Cell<Charm> | null,
   iframeRecipe: IFrameRecipe | null,
+  userCode: boolean = true,
 ) {
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
@@ -261,18 +264,25 @@ function useCodeEditor(
 
   useEffect(() => {
     if (charm && iframeRecipe) {
-      setWorkingSrc(iframeRecipe.src);
+      if (userCode) {
+        setWorkingSrc(extractUserCode(iframeRecipe.src ?? "") ?? "");
+      } else {
+        setWorkingSrc(iframeRecipe.src);
+      }
     }
   }, [iframeRecipe, charm]);
 
-  const hasUnsavedChanges = workingSrc !== iframeRecipe?.src;
+  const hasUnsavedChanges = userCode
+    ? injectUserCode(workingSrc ?? "") !== iframeRecipe?.src
+    : workingSrc !== iframeRecipe?.src;
 
   const saveChanges = useCallback(() => {
-    if (workingSrc && iframeRecipe && charm) {
+    const src = userCode ? injectUserCode(workingSrc ?? "") : workingSrc;
+    if (src && iframeRecipe && charm) {
       generateNewRecipeVersion(
         charmManager,
         charm,
-        workingSrc,
+        src,
         iframeRecipe.spec,
       ).then((newCharm) => {
         navigate(createPath("charmShow", {
@@ -821,6 +831,7 @@ const CodeTab = () => {
     useCodeEditor(
       charm,
       iframeRecipe,
+      true,
     );
 
   useEffect(() => {
