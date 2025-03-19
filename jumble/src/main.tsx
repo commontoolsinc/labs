@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { onError } from "@commontools/runner";
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
 import "./styles/index.css";
 import Shell from "@/views/Shell.tsx";
@@ -28,6 +29,13 @@ const ReplicaRedirect = () => {
 };
 
 setupIframe();
+
+// Show an alert on the first error in a handler or lifted function.
+let errorCount = 0;
+onError((error) =>
+  !errorCount++ &&
+  globalThis.alert("Uncaught error in recipe: " + error.message)
+);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
