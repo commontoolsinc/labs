@@ -33,7 +33,8 @@ setupIframe();
 // Show an alert on the first error in a handler or lifted function.
 let errorCount = 0;
 onError((error) =>
-  !errorCount++ && globalThis.alert("Error: " + error.message)
+  !errorCount++ &&
+  globalThis.alert("Uncaught error in recipe: " + error.message)
 );
 
 createRoot(document.getElementById("root")!).render(
