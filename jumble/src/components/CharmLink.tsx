@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { NavLink, useParams } from "react-router-dom";
 import { NAME } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
@@ -6,6 +6,9 @@ import { Charm } from "@commontools/charm";
 import { charmId } from "@/utils/charms.ts";
 import { createPath } from "@/routes.ts";
 import { type CharmRouteParams } from "@/routes.ts";
+import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { useCell } from "@/hooks/use-cell.ts";
+import { HoverPreview } from "@/components/HoverPreview.tsx";
 
 export interface CharmLinkProps {
   charm: Cell<Charm> | any;
@@ -38,6 +41,12 @@ export const CharmLink: React.FC<CharmLinkProps> = ({
   const currentReplicaName = replicaName || params.replicaName;
   const [charmName, setCharmName] = useState<string | null>(null);
   const id = charmId(charm);
+  const [hoveredCharm, setHoveredCharm] = useState<boolean>(false);
+  const [previewPosition, setPreviewPosition] = useState({ x: 0, y: 0 });
+
+  const { charmManager } = useCharmManager();
+  const [charms] = useCell(charmManager.getCharms());
+  const instance = charms?.find((c) => charmId(c) === id);
 
   // If charm is a Cell<Charm>, get its name
   useEffect(() => {
@@ -74,7 +83,7 @@ export const CharmLink: React.FC<CharmLinkProps> = ({
   const displayText = () => {
     if (children) return children;
 
-    let text = charmName || "Unnamed Charm";
+    const text = charmName || "Unnamed Charm";
 
     if (showId) {
       return text + ` (${id})`;
@@ -87,21 +96,45 @@ export const CharmLink: React.FC<CharmLinkProps> = ({
     return text;
   };
 
+  const handleMouseMove = (e: React.MouseEvent) => {
+    setHoveredCharm(true);
+    setPreviewPosition({
+      x: e.clientX + 20, // offset to the right of cursor
+      y: e.clientY - 100, // offset above the cursor
+    });
+  };
+
+  const handleMouseLeave = () => {
+    setHoveredCharm(false);
+  };
+
   return (
-    <NavLink
-      to={createPath("charmShow", {
-        charmId: id,
-        replicaName: currentReplicaName,
-      })}
-      className={({ isActive }) => `
-        charm-link font-medium transition-colors
-        hover:text-black hover:underline
-        ${isActive ? "text-black" : "text-gray-700"}
-        ${className}
-      `}
-    >
-      {displayText()}
-    </NavLink>
+    <div className="relative inline-block">
+      <NavLink
+        to={createPath("charmShow", {
+          charmId: id,
+          replicaName: currentReplicaName,
+        })}
+        className={({ isActive }) => `
+          charm-link font-medium transition-colors
+          hover:text-black hover:underline
+          ${isActive ? "text-black" : "text-gray-700"}
+          ${className}
+        `}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+      >
+        {displayText()}
+      </NavLink>
+
+      {hoveredCharm && instance && (
+        <HoverPreview
+          charm={instance}
+          position={previewPosition}
+          replicaName={currentReplicaName}
+        />
+      )}
+    </div>
   );
 };
 

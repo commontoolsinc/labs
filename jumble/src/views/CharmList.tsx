@@ -14,6 +14,7 @@ import { MdOutlineStar } from "react-icons/md";
 import { useSyncedStatus } from "@/contexts/SyncStatusContext.tsx";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
 import { CharmLink } from "@/components/CharmLink.tsx";
+import { HoverPreview } from "@/components/HoverPreview.tsx";
 
 export interface CommonDataEvent extends CustomEvent {
   detail: {
@@ -94,48 +95,6 @@ function CharmPreview(
   );
 }
 
-interface HoverPreviewProps {
-  hoveredCharm: string | null;
-  charms: Cell<Charm>[];
-  position: { x: number; y: number };
-  replicaName: string;
-}
-const HoverPreview = (
-  { hoveredCharm, charms, position, replicaName }: HoverPreviewProps,
-) => {
-  // Find the charm that matches the hoveredCharm ID
-  const charm = hoveredCharm
-    ? charms.find((c) => charmId(c) === hoveredCharm)
-    : null;
-
-  if (!charm || !hoveredCharm) return null;
-
-  const id = charmId(charm);
-  const name = charm.get()[NAME] || "Unnamed Charm";
-
-  return (
-    <div
-      className="fixed z-50 w-128 pointer-events-none
-      border border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.5)] rounded-[4px]
-    "
-      style={{
-        left: `${position.x}px`,
-        top: `${position.y}px`,
-        transform: "translate(25%, 25%)",
-      }}
-    >
-      <CommonCard className="p-2 shadow-xl bg-white rounded-[4px]">
-        <h3 className="text-xl font-semibold text-gray-800 mb-4">
-          {name + ` (#${id!.slice(-4)})`}
-        </h3>
-        <div className="w-full bg-gray-50 rounded border border-gray-100 min-h-[256px] pointer-events-none select-none">
-          <CharmRenderer className="h-full rounded-[4px]" charm={charm} />
-        </div>
-      </CommonCard>
-    </div>
-  );
-};
-
 interface CharmTableProps {
   charms: Cell<Charm>[];
   replicaName: string;
@@ -150,6 +109,7 @@ const CharmTable = (
   const [selectedCharms, setSelectedCharms] = useState<string[]>([]);
   // Use a ref to cache the last hovered charm to prevent thrashing
   const hoveredCharmRef = useRef<string | null>(null);
+  const hoveredCharmInstance = charms.find((c) => charmId(c) === hoveredCharm);
 
   const handleMouseMove = (e: React.MouseEvent, id: string) => {
     // Only update state if the hovered charm has changed
@@ -300,10 +260,9 @@ const CharmTable = (
         </table>
       </div>
 
-      {hoveredCharm && (
+      {hoveredCharm && hoveredCharmInstance && (
         <HoverPreview
-          hoveredCharm={hoveredCharm}
-          charms={charms}
+          charm={hoveredCharmInstance}
           position={previewPosition}
           replicaName={replicaName}
         />
