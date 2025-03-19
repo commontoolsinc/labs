@@ -3,7 +3,7 @@ import * as commonHtml from "@commontools/html";
 import * as commonBuilder from "@commontools/builder";
 import * as zod from "zod";
 import * as zodToJsonSchema from "zod-to-json-schema";
-
+import * as atProtoApi from "@atproto/api";
 import * as merkleReference from "merkle-reference";
 
 // NOTE(ja): this isn't currently doing typechecking, but it could...
@@ -108,6 +108,8 @@ export const tsToExports = async (
         return merkleReference;
       case "zod-to-json-schema":
         return zodToJsonSchema;
+      case "@atproto/api":
+        return atProtoApi;
       default:
         throw new Error(`Module not found: ${moduleName}`);
     }
