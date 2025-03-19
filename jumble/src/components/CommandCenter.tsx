@@ -52,18 +52,21 @@ function CommandProcessor({
     );
   }
 
+  const onSubmit = useCallback(async () => {
+    if (mode.type !== "input") {
+      return;
+    }
+    const { text, sources } = await formatPromptWithMentions(
+      inputValue,
+      charmManager,
+    );
+    if ((mode.command as InputCommandItem).handler) {
+      (mode.command as InputCommandItem).handler(text, sources);
+    }
+  }, [mode, inputValue, charmManager]);
+
   switch (mode.type) {
     case "input":
-      const onSubmit = async () => {
-        const { text, sources } = await formatPromptWithMentions(
-          inputValue,
-          charmManager,
-        );
-        if ((mode.command as InputCommandItem).handler) {
-          (mode.command as InputCommandItem).handler(text, sources);
-        }
-      };
-
       return (
         <div className="flex flex-col gap-2">
           <Composer
@@ -78,7 +81,7 @@ function CommandProcessor({
           />
           <ComposerSubmitBar
             loading={context.loading}
-            operation={"Go"}
+            operation="Send"
             onSubmit={onSubmit}
           />
         </div>
@@ -437,7 +440,6 @@ export function CommandCenter() {
         {!loading && mode.type != "input" && mode.type != "transcribe" && (
           <Command.Empty>No results found.</Command.Empty>
         )}
-
 
         {mode.type === "main" || mode.type === "menu"
           ? (
