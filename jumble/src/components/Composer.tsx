@@ -36,6 +36,10 @@ import { CharmManager } from "../../../charm/src/index.ts";
 import { Module, Recipe, TYPE } from "@commontools/builder";
 import { Cell, getRecipe } from "@commontools/runner";
 
+/** WISHLIST
+- inline code blocks for specifying keys / fields
+*/
+
 // First define a basic interface with the required ReactEditor methods plus our extensions
 interface EditorWithExtensions extends BaseEditor, ReactEditor {
   isInline: (element: SlateElement) => boolean;
@@ -291,40 +295,48 @@ const withShortcuts = (editor: CustomEditor) => {
       const block = Editor.above(editor, {
         match: (n) => SlateElement.isElement(n) && Editor.isBlock(editor, n),
       });
-      const path = block ? block[1] : [];
-      const start = Editor.start(editor, path);
-      const range = { anchor, focus: start };
-      const beforeText = Editor.string(editor, range) + text.slice(0, -1);
-      const type = SHORTCUTS[beforeText as keyof typeof SHORTCUTS];
 
-      if (type) {
-        Transforms.select(editor, range);
+      if (block) {
+        const [blockNode, path] = block;
+        const start = Editor.start(editor, path);
+        const range = { anchor, focus: start };
+        const beforeText = Editor.string(editor, range) + text.slice(0, -1);
 
-        if (!Range.isCollapsed(range)) {
-          Transforms.delete(editor);
-        }
+        // Check if the string before the cursor is a valid shortcut
+        const type = SHORTCUTS[beforeText as keyof typeof SHORTCUTS];
 
-        const newProperties: Partial<SlateElement> = {
-          type,
-        };
-        Transforms.setNodes<SlateElement>(editor, newProperties, {
-          match: (n) => SlateElement.isElement(n) && Editor.isBlock(editor, n),
-        });
+        if (type) {
+          Transforms.select(editor, range);
 
-        if (type === "list-item") {
-          const list: BulletedListElement = {
-            type: "bulleted-list",
-            children: [],
+          if (!Range.isCollapsed(range)) {
+            Transforms.delete(editor);
+          }
+
+          const newProperties: Partial<SlateElement> = {
+            type,
           };
-          Transforms.wrapNodes(editor, list, {
-            match: (n) =>
-              !Editor.isEditor(n) &&
-              SlateElement.isElement(n) &&
-              n.type === "list-item",
-          });
-        }
 
-        return;
+          Transforms.setNodes<SlateElement>(editor, newProperties, {
+            match: (n) =>
+              SlateElement.isElement(n) && Editor.isBlock(editor, n),
+          });
+
+          if (type === "list-item") {
+            const list: BulletedListElement = {
+              type: "bulleted-list",
+              children: [],
+            };
+
+            Transforms.wrapNodes(editor, list, {
+              match: (n) =>
+                !Editor.isEditor(n) &&
+                SlateElement.isElement(n) &&
+                n.type === "list-item",
+            });
+          }
+
+          return;
+        }
       }
     }
 
@@ -520,14 +532,20 @@ export function Composer({
             setTarget(null);
             break;
         }
-      } else if (event.key === "Enter" && !event.shiftKey && onSubmit) {
-        // Only trigger onSubmit when:
-        // 1. Enter is pressed
-        // 2. Shift isn't pressed (to allow line breaks)
-        // 3. The mention menu is closed
-        // 4. There's an onSubmit handler
-        event.preventDefault();
-        onSubmit();
+      } else if (event.key === "Enter") {
+        if (event.shiftKey) {
+          // Manually insert a soft break/line break
+          event.preventDefault();
+          editor.insertText("\n");
+          return;
+        } else if (onSubmit) {
+          // Only trigger onSubmit when:
+          // 1. Enter is pressed (without Shift)
+          // 2. The mention menu is closed
+          // 3. There's an onSubmit handler
+          event.preventDefault();
+          onSubmit();
+        }
       }
     },
     [filteredMentions, editor, index, target, onSubmit],
@@ -626,7 +644,7 @@ export function Composer({
           style={{
             ...style,
             overflowY: "auto",
-            minHeight: "36px",
+            minHeight: "100px", // Changed from 36px to 100px to accommodate ~4 lines
             maxHeight: "200px",
             height: "auto",
             resize: "none",
