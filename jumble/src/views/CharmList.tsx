@@ -15,6 +15,7 @@ import { useSyncedStatus } from "@/contexts/SyncStatusContext.tsx";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
 import { CharmLink } from "@/components/CharmLink.tsx";
 import { HoverPreview } from "@/components/HoverPreview.tsx";
+import { useCharmHover } from "@/hooks/use-charm-hover.ts";
 
 export interface CommonDataEvent extends CustomEvent {
   detail: {
@@ -104,31 +105,10 @@ interface CharmTableProps {
 const CharmTable = (
   { charms, replicaName, charmManager }: CharmTableProps,
 ) => {
-  const [hoveredCharm, setHoveredCharm] = useState<string | null>(null);
-  const [previewPosition, setPreviewPosition] = useState({ x: 0, y: 0 });
+  const { hoveredCharm, previewPosition, handleMouseMove, handleMouseLeave } =
+    useCharmHover();
   const [selectedCharms, setSelectedCharms] = useState<string[]>([]);
-  // Use a ref to cache the last hovered charm to prevent thrashing
-  const hoveredCharmRef = useRef<string | null>(null);
   const hoveredCharmInstance = charms.find((c) => charmId(c) === hoveredCharm);
-
-  const handleMouseMove = (e: React.MouseEvent, id: string) => {
-    // Only update state if the hovered charm has changed
-    if (hoveredCharmRef.current !== id) {
-      hoveredCharmRef.current = id;
-      setHoveredCharm(id);
-    }
-
-    // Position the preview card relative to the cursor
-    setPreviewPosition({
-      x: e.clientX + 20, // offset to the right of cursor
-      y: e.clientY - 100, // offset above the cursor
-    });
-  };
-
-  const handleMouseLeave = () => {
-    hoveredCharmRef.current = null;
-    setHoveredCharm(null);
-  };
 
   const toggleCharmSelection = (id: string) => {
     setSelectedCharms((prev) =>
@@ -208,7 +188,6 @@ const CharmTable = (
           <tbody>
             {charms.map((charm) => {
               const id = charmId(charm);
-              const name = charm.get()[NAME] || "Unnamed Charm";
               const isSelected = selectedCharms.includes(id!);
 
               return (

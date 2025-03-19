@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { NavLink, useParams } from "react-router-dom";
 import { NAME } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
@@ -9,12 +9,14 @@ import { type CharmRouteParams } from "@/routes.ts";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { useCell } from "@/hooks/use-cell.ts";
 import { HoverPreview } from "@/components/HoverPreview.tsx";
+import { useCharmHover } from "@/hooks/use-charm-hover.ts";
 
 export interface CharmLinkProps {
   charm: Cell<Charm> | any;
   replicaName?: string;
   showId?: boolean;
   showHash?: boolean;
+  showHoverPreview?: boolean;
   className?: string;
   children?: React.ReactNode;
 }
@@ -26,6 +28,7 @@ export interface CharmLinkProps {
  * @param replicaName - Optional: The replica name for routing (defaults to current URL replica)
  * @param showId - Whether to show the full ID (defaults to false)
  * @param showHash - Whether to show the shortened hash (defaults to true)
+ * @param showHoverPreview - Whether to show hover preview (defaults to true)
  * @param className - Additional className for the link
  * @param children - Optional children to render inside the link instead of the charm name
  */
@@ -34,6 +37,7 @@ export const CharmLink: React.FC<CharmLinkProps> = ({
   replicaName,
   showId = false,
   showHash = true,
+  showHoverPreview = true,
   className = "",
   children,
 }) => {
@@ -41,12 +45,14 @@ export const CharmLink: React.FC<CharmLinkProps> = ({
   const currentReplicaName = replicaName || params.replicaName;
   const [charmName, setCharmName] = useState<string | null>(null);
   const id = charmId(charm);
-  const [hoveredCharm, setHoveredCharm] = useState<boolean>(false);
-  const [previewPosition, setPreviewPosition] = useState({ x: 0, y: 0 });
+
+  const { hoveredCharm, previewPosition, handleMouseMove, handleMouseLeave } =
+    useCharmHover();
 
   const { charmManager } = useCharmManager();
   const [charms] = useCell(charmManager.getCharms());
   const instance = charms?.find((c) => charmId(c) === id);
+  const isHovered = hoveredCharm === id;
 
   // If charm is a Cell<Charm>, get its name
   useEffect(() => {
@@ -96,18 +102,6 @@ export const CharmLink: React.FC<CharmLinkProps> = ({
     return text;
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    setHoveredCharm(true);
-    setPreviewPosition({
-      x: e.clientX + 20, // offset to the right of cursor
-      y: e.clientY - 100, // offset above the cursor
-    });
-  };
-
-  const handleMouseLeave = () => {
-    setHoveredCharm(false);
-  };
-
   return (
     <div className="relative inline-block">
       <NavLink
@@ -121,13 +115,14 @@ export const CharmLink: React.FC<CharmLinkProps> = ({
           ${isActive ? "text-black" : "text-gray-700"}
           ${className}
         `}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
+        onMouseMove={(e) =>
+          showHoverPreview ? handleMouseMove(e, id) : undefined}
+        onMouseLeave={showHoverPreview ? handleMouseLeave : undefined}
       >
         {displayText()}
       </NavLink>
 
-      {hoveredCharm && instance && (
+      {showHoverPreview && isHovered && instance && (
         <HoverPreview
           charm={instance}
           position={previewPosition}
