@@ -22,10 +22,11 @@ import {
 import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext.tsx";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
-import { Composer } from "@/components/Composer.tsx";
+import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { charmId } from "@/utils/charms.ts";
 import { formatPromptWithMentions } from "@/utils/format.ts";
 import { NAME } from "@commontools/builder";
+import { LuSend } from "react-icons/lu";
 
 function CommandProcessor({
   mode,
@@ -41,7 +42,7 @@ function CommandProcessor({
   const [inputValue, setInputValue] = useState("");
   const charmMentions = useCharmMentions();
 
-  if (context.loading) {
+  if (context.loading && mode.type !== "input") {
     return (
       <Command.Group>
         <div className="flex items-center justify-center p-4">
@@ -51,26 +52,39 @@ function CommandProcessor({
     );
   }
 
+  const onSubmit = useCallback(async () => {
+    if (mode.type !== "input") {
+      return;
+    }
+    const { text, sources } = await formatPromptWithMentions(
+      inputValue,
+      charmManager,
+    );
+    if ((mode.command as InputCommandItem).handler) {
+      (mode.command as InputCommandItem).handler(text, sources);
+    }
+  }, [mode, inputValue, charmManager]);
+
   switch (mode.type) {
     case "input":
       return (
-        <Composer
-          style={{ width: "100%", height: "96px" }}
-          placeholder={mode.placeholder || "Enter input"}
-          value={inputValue}
-          onValueChange={setInputValue}
-          mentions={charmMentions}
-          autoFocus
-          onSubmit={async () => {
-            const { text, sources } = await formatPromptWithMentions(
-              inputValue,
-              charmManager,
-            );
-            if ((mode.command as InputCommandItem).handler) {
-              (mode.command as InputCommandItem).handler(text, sources);
-            }
-          }}
-        />
+        <div className="flex flex-col gap-2">
+          <Composer
+            style={{ width: "100%", height: "96px", border: "1px solid #ccc" }}
+            placeholder={mode.placeholder || "Enter input"}
+            value={inputValue}
+            onValueChange={setInputValue}
+            mentions={charmMentions}
+            onSubmit={onSubmit}
+            disabled={context.loading}
+            autoFocus
+          />
+          <ComposerSubmitBar
+            loading={context.loading}
+            operation="Send"
+            onSubmit={onSubmit}
+          />
+        </div>
       );
 
     case "confirm":
@@ -425,13 +439,6 @@ export function CommandCenter() {
       <Command.List>
         {!loading && mode.type != "input" && mode.type != "transcribe" && (
           <Command.Empty>No results found.</Command.Empty>
-        )}
-        {loading && (
-          <Command.Loading>
-            <div className="flex items-center justify-center p-4">
-              <span className="text-sm text-gray-500">Processing...</span>
-            </div>
-          </Command.Loading>
         )}
 
         {mode.type === "main" || mode.type === "menu"

@@ -35,6 +35,59 @@ import { createPortal } from "react-dom";
 import { CharmManager } from "../../../charm/src/index.ts";
 import { Module, Recipe, TYPE } from "@commontools/builder";
 import { Cell, getRecipe } from "@commontools/runner";
+import { LuSend } from "react-icons/lu";
+import { DitheredCube } from "@/components/DitherCube.tsx";
+
+export function ComposerSubmitBar(
+  { loading, onSubmit, operation = "Go", children }: { loading: boolean; onSubmit: () => void; operation?: string; children?: React.ReactNode },
+): JSX.Element {
+  return (
+    <div className="flex justify-between items-top w-full">
+      <label className="text-[10px] text-gray-400">
+        Shift+Enter for new line<br />
+        Type <code>@</code> to mention a charm
+      </label>
+
+      <div className="flex flex-row gap-2">
+      {children}
+
+      <button
+        type="button"
+        onClick={onSubmit}
+        disabled={loading}
+        className="px-4 py-2 text-sm bg-black text-white flex items-center gap-2 disabled:opacity-50"
+      >
+        {loading ? (
+          <span className="text-xs flex items-center gap-2">
+            <DitheredCube
+              animationSpeed={2}
+              width={16}
+              height={16}
+              animate
+              cameraZoom={12}
+            />
+            <span>Working...</span>
+          </span>
+        ) : (
+          <span className="text-xs flex items-center gap-2">
+            <span className="text-xs flex items-center gap-1">
+              <LuSend />
+              <span>{operation}</span>
+            </span>
+            <span className="hidden md:inline text-gray-400 font-bold italic">
+              (Enter)
+            </span>
+          </span>
+        )}
+      </button>
+      </div>
+    </div>
+  );
+}
+
+/** WISHLIST
+- inline code blocks for specifying keys / fields
+*/
 
 // First define a basic interface with the required ReactEditor methods plus our extensions
 interface EditorWithExtensions extends BaseEditor, ReactEditor {
@@ -291,40 +344,48 @@ const withShortcuts = (editor: CustomEditor) => {
       const block = Editor.above(editor, {
         match: (n) => SlateElement.isElement(n) && Editor.isBlock(editor, n),
       });
-      const path = block ? block[1] : [];
-      const start = Editor.start(editor, path);
-      const range = { anchor, focus: start };
-      const beforeText = Editor.string(editor, range) + text.slice(0, -1);
-      const type = SHORTCUTS[beforeText as keyof typeof SHORTCUTS];
 
-      if (type) {
-        Transforms.select(editor, range);
+      if (block) {
+        const [blockNode, path] = block;
+        const start = Editor.start(editor, path);
+        const range = { anchor, focus: start };
+        const beforeText = Editor.string(editor, range) + text.slice(0, -1);
 
-        if (!Range.isCollapsed(range)) {
-          Transforms.delete(editor);
-        }
+        // Check if the string before the cursor is a valid shortcut
+        const type = SHORTCUTS[beforeText as keyof typeof SHORTCUTS];
 
-        const newProperties: Partial<SlateElement> = {
-          type,
-        };
-        Transforms.setNodes<SlateElement>(editor, newProperties, {
-          match: (n) => SlateElement.isElement(n) && Editor.isBlock(editor, n),
-        });
+        if (type) {
+          Transforms.select(editor, range);
 
-        if (type === "list-item") {
-          const list: BulletedListElement = {
-            type: "bulleted-list",
-            children: [],
+          if (!Range.isCollapsed(range)) {
+            Transforms.delete(editor);
+          }
+
+          const newProperties: Partial<SlateElement> = {
+            type,
           };
-          Transforms.wrapNodes(editor, list, {
-            match: (n) =>
-              !Editor.isEditor(n) &&
-              SlateElement.isElement(n) &&
-              n.type === "list-item",
-          });
-        }
 
-        return;
+          Transforms.setNodes<SlateElement>(editor, newProperties, {
+            match: (n) =>
+              SlateElement.isElement(n) && Editor.isBlock(editor, n),
+          });
+
+          if (type === "list-item") {
+            const list: BulletedListElement = {
+              type: "bulleted-list",
+              children: [],
+            };
+
+            Transforms.wrapNodes(editor, list, {
+              match: (n) =>
+                !Editor.isEditor(n) &&
+                SlateElement.isElement(n) &&
+                n.type === "list-item",
+            });
+          }
+
+          return;
+        }
       }
     }
 
@@ -384,6 +445,7 @@ export function Composer({
   mentions = [],
   autoFocus = false,
   onSubmit,
+  disabled = false,
 }: {
   placeholder?: string;
   readOnly?: boolean;
@@ -393,6 +455,7 @@ export function Composer({
   mentions?: Array<{ id: string; name: string }>;
   autoFocus?: boolean;
   onSubmit?: () => void;
+  disabled?: boolean;
 }) {
   // Convert string value to Slate value format if needed
   const initialValue: Descendant[] = useMemo(() => {
@@ -448,6 +511,9 @@ export function Composer({
 
   const handleDOMBeforeInput = useCallback(
     (_: InputEvent) => {
+      // Don't process input when disabled
+      if (disabled) return;
+
       queueMicrotask(() => {
         const pendingDiffs = ReactEditor.androidPendingDiffs(editor);
 
@@ -480,11 +546,17 @@ export function Composer({
         }
       });
     },
-    [editor],
+    [editor, disabled],
   );
 
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      // Don't process key events when disabled
+      if (disabled) {
+        event.preventDefault();
+        return;
+      }
+
       // Handle mention selection navigation
       if (target && filteredMentions.length > 0) {
         switch (event.key) {
@@ -520,17 +592,23 @@ export function Composer({
             setTarget(null);
             break;
         }
-      } else if (event.key === "Enter" && !event.shiftKey && onSubmit) {
-        // Only trigger onSubmit when:
-        // 1. Enter is pressed
-        // 2. Shift isn't pressed (to allow line breaks)
-        // 3. The mention menu is closed
-        // 4. There's an onSubmit handler
-        event.preventDefault();
-        onSubmit();
+      } else if (event.key === "Enter") {
+        if (event.shiftKey) {
+          // Manually insert a soft break/line break
+          event.preventDefault();
+          editor.insertText("\n");
+          return;
+        } else if (onSubmit) {
+          // Only trigger onSubmit when:
+          // 1. Enter is pressed (without Shift)
+          // 2. The mention menu is closed
+          // 3. There's an onSubmit handler
+          event.preventDefault();
+          onSubmit();
+        }
       }
     },
-    [filteredMentions, editor, index, target, onSubmit],
+    [filteredMentions, editor, index, target, onSubmit, disabled],
   );
 
   useEffect(() => {
@@ -562,6 +640,9 @@ export function Composer({
 
   // Handle editor changes including mention detection
   const onChange = useCallback(() => {
+    // Don't process changes when disabled
+    if (disabled) return;
+
     const { selection } = editor;
 
     if (selection && Range.isCollapsed(selection)) {
@@ -588,10 +669,10 @@ export function Composer({
 
     // Update the current value
     setCurrentValue(editor.children);
-  }, [editor]);
+  }, [editor, disabled]);
 
   useEffect(() => {
-    if (autoFocus && editor) {
+    if (autoFocus && editor && !disabled) {
       // Small delay to ensure the editor is fully mounted
       setTimeout(() => {
         try {
@@ -601,15 +682,15 @@ export function Composer({
         }
       }, 100);
     }
-  }, [autoFocus, editor]);
+  }, [autoFocus, editor, disabled]);
 
   return (
     <>
       <Slate editor={editor} initialValue={currentValue} onChange={onChange}>
         <Editable
           id="composer"
-          className="p-2"
-          readOnly={readOnly}
+          className={`p-2 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          readOnly={readOnly || disabled}
           renderElement={renderElement}
           renderLeaf={renderLeaf}
           onKeyDown={handleKeyDown}
@@ -626,13 +707,13 @@ export function Composer({
           style={{
             ...style,
             overflowY: "auto",
-            minHeight: "36px",
+            minHeight: "100px", // Changed from 36px to 100px to accommodate ~4 lines
             maxHeight: "200px",
             height: "auto",
             resize: "none",
           }}
         />
-        {target && filteredMentions.length > 0 && (
+        {!disabled && target && filteredMentions.length > 0 && (
           <Portal>
             <div
               ref={ref}
