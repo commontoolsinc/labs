@@ -2,6 +2,7 @@ import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { NAME } from "@commontools/builder";
 import React, { useEffect } from "react";
 import { NavLink } from "react-router-dom";
+import { CharmLink } from "@/components/CharmLink.tsx";
 
 type NavPathProps = {
   replicaId: string | undefined;
@@ -51,13 +52,14 @@ export function NavPath({ replicaId, charmId }: NavPathProps) {
               <span className="text-gray-500">/</span>
             </li>
             <li>
-              <NavLink
-                to={`/${replicaId}/${charmId}`}
+              <CharmLink
+                charm={{ "/": charmId }}
+                replicaName={replicaId}
+                showHash={false}
                 className="text-gray-700 font-bold"
-                aria-roledescription="charm-link"
               >
                 {charmName}
-              </NavLink>
+              </CharmLink>
             </li>
           </>
         )}

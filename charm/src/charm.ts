@@ -3,6 +3,7 @@ import {
   Module,
   NAME,
   Recipe,
+  Schema,
   TYPE,
   UI,
 } from "@commontools/builder";
@@ -45,13 +46,24 @@ export const charmListSchema = {
   items: { ...charmSchema, asCell: true },
 } as const satisfies JSONSchema satisfies JSONSchema;
 
+export const charmLineageSchema = {
+  type: "object",
+  properties: {
+    charm: { type: "object", asCell: true },
+    relation: { type: "string" },
+    timestamp: { type: "number" },
+  },
+  required: ["charm", "relation", "timestamp"],
+} as const satisfies JSONSchema;
+export type CharmLineage = Schema<typeof charmLineageSchema>;
+
 export const charmSourceCellSchema = {
   type: "object",
   properties: {
     [TYPE]: { type: "string" },
-    parents: {
+    lineage: {
       type: "array",
-      items: { type: "object", asCell: true },
+      items: charmLineageSchema,
       default: [],
     },
   },
@@ -327,8 +339,8 @@ export class CharmManager {
     }
   }
 
-  getParents(charm: Cell<Charm>): Cell<Charm>[] {
-    return charm.getSourceCell(charmSourceCellSchema)?.key("parents").get() ??
+  getLineage(charm: Cell<Charm>) {
+    return charm.getSourceCell(charmSourceCellSchema)?.key("lineage").get() ??
       [];
   }
 

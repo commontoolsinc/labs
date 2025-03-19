@@ -106,7 +106,11 @@ export const generateNewRecipeVersion = async (
     recipeId ? [recipeId] : undefined,
   );
 
-  newCharm.getSourceCell(charmSourceCellSchema)?.key("parents").push(parent);
+  newCharm.getSourceCell(charmSourceCellSchema)?.key("lineage").push({
+    charm: parent,
+    relation: "iterate",
+    timestamp: Date.now(),
+  });
 
   return newCharm;
 };

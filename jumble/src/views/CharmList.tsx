@@ -13,6 +13,7 @@ import ShapeLogo from "@/assets/ShapeLogo.tsx";
 import { MdOutlineStar } from "react-icons/md";
 import { useSyncedStatus } from "@/contexts/SyncStatusContext.tsx";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
+import { CharmLink } from "@/components/CharmLink.tsx";
 
 export interface CommonDataEvent extends CustomEvent {
   detail: {
@@ -241,8 +242,6 @@ const CharmTable = (
                 />
               </th>
               <th scope="col" className="px-6 py-3">Name</th>
-              <th scope="col" className="px-6 py-3">ID</th>
-              <th scope="col" className="px-6 py-3">Parents</th>
               <th scope="col" className="px-6 py-3">Actions</th>
             </tr>
           </thead>
@@ -270,17 +269,7 @@ const CharmTable = (
                     />
                   </td>
                   <td className="px-6 py-4 font-medium text-gray-900">
-                    <NavLink to={`/${replicaName}/${id}`}>
-                      {name}
-                    </NavLink>
-                  </td>
-                  <td className="px-6 py-4">
-                    <NavLink to={`/${replicaName}/${id}`}>
-                      #{id}
-                    </NavLink>
-                  </td>
-                  <td className="px-6 py-4">
-                    {JSON.stringify(charmManager.getParents(charm))}
+                    <CharmLink charm={charm} showHash className="font-medium" />
                   </td>
                   <td className="px-6 py-4">
                     <button
