@@ -3,6 +3,7 @@ import {
   Action,
   addAction,
   addCommonIDfromObjectID,
+  idle,
   isCell,
   ReactivityLog,
   removeAction,
@@ -139,7 +140,8 @@ export const setupIframe = () =>
     ): any {
       const action: Action = (log: ReactivityLog) => {
         const data = key === "*"
-          ? (isCell(context) ? context.withLog(log).get() : context)
+          // No withLog because we don't want to schedule more runs, see below
+          ? (isCell(context) ? context.get() : context)
           : (isCell(context)
             // get?.() because streams don't have a get, set undefined for those
             ? context.withLog(log).key(key).get?.()
@@ -151,6 +153,16 @@ export const setupIframe = () =>
           console.log("subscribe", key, serialized, previousValue);
           setPreviousValue(context, key, serializedString);
           callback(key, serialized);
+        }
+
+        // HACK(seefeld): We want to remove * support, but some existing iframes
+        // use it to know that data is available. So as a hack, we're
+        // unsubscribing from * here after the first time it's called.
+        // TODO(seefeld): Remove this and * support2025-04-15 or earlier.
+        if (key === "*") {
+          // Wait for idle to confuse the scheduler as it updates dependencies
+          // after running this function.
+          idle().then(() => removeAction(action));
         }
       };
 
