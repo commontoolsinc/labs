@@ -218,7 +218,14 @@ describe("Schema propagation end-to-end example", () => {
     const testRecipe = recipe({
       type: "object",
       properties: {
-        name: { type: "string" },
+        details: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+            },
+          },
+        },
       },
       // TODO(seefeld): Fix type inference and replace any
     }, (input: any) => ({
@@ -226,7 +233,7 @@ describe("Schema propagation end-to-end example", () => {
         type: "element",
         name: "input",
         props: {
-          value: input.name,
+          value: input.details,
         },
       },
     }));
@@ -236,7 +243,7 @@ describe("Schema propagation end-to-end example", () => {
       "should propagate schema through a recipe",
       "test",
     );
-    run(testRecipe, { name: "hello" }, result);
+    run(testRecipe, { details: { name: "hello", age: 14 } }, result);
 
     const c = result.asCell(
       [UI],
@@ -255,6 +262,10 @@ describe("Schema propagation end-to-end example", () => {
     );
 
     expect(isCell(c.get().props.value)).toBe(true);
-    expect(c.get().props.value.schema).toEqual({ type: "string" });
+    expect(c.get().props.value.schema).toEqual({
+      type: "object",
+      properties: { name: { type: "string" } },
+    });
+    expect(c.get().props.value.get()).toEqual({ name: "hello" });
   });
 });
