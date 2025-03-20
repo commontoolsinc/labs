@@ -6,6 +6,7 @@ import {
   getIframeRecipe,
   IFrameRecipe,
   injectUserCode,
+  iterate,
 } from "@commontools/charm";
 import { isCell, isStream } from "@commontools/runner";
 import { isObj } from "@commontools/utils";
@@ -25,7 +26,7 @@ import { useCharm } from "@/hooks/use-charm.ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
-import { extendCharm, iterateCharm } from "@/utils/charm-operations.ts";
+import { extendCharm } from "@/utils/charm-operations.ts";
 import { charmId } from "@/utils/charms.ts";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import {
@@ -299,7 +300,16 @@ function useCodeEditor(
         }));
       });
     }
-  }, [workingSrc, workingSpec, iframeRecipe, charm, navigate, replicaName, showFullCode, charmManager]);
+  }, [
+    workingSrc,
+    workingSpec,
+    iframeRecipe,
+    charm,
+    navigate,
+    replicaName,
+    showFullCode,
+    charmManager,
+  ]);
 
   return {
     fullSrc: iframeRecipe?.src ?? "",
@@ -346,12 +356,16 @@ function useCharmOperation() {
     ) => {
       if (operationType === "iterate") {
         // TODO(bf): do we use @-ref data for iterate?
-        return iterateCharm(
-          charmManager,
-          charmId,
-          input,
-          model,
-        );
+        return charmManager.get(charmId, false).then((fetched) => {
+          const charm = fetched!;
+          return iterate(
+            charmManager,
+            charm,
+            input,
+            false,
+            model,
+          );
+        });
       } else {
         return extendCharm(
           charmManager,
@@ -813,16 +827,16 @@ const CodeTab = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
   const [showFullCode, setShowFullCode] = useState(false);
-  const [activeEditor, setActiveEditor] = useState<'code' | 'spec'>('code');
+  const [activeEditor, setActiveEditor] = useState<"code" | "spec">("code");
 
-  const { 
-    fullSrc, 
-    workingSrc, 
-    setWorkingSrc, 
-    workingSpec, 
-    setWorkingSpec, 
-    hasUnsavedChanges, 
-    saveChanges 
+  const {
+    fullSrc,
+    workingSrc,
+    setWorkingSrc,
+    workingSpec,
+    setWorkingSpec,
+    hasUnsavedChanges,
+    saveChanges,
   } = useCodeEditor(
     charm,
     iframeRecipe,
@@ -865,26 +879,30 @@ const CodeTab = () => {
             Show Full Template
           </label>
         </div>
-        
+
         {/* Editor type selector */}
         <div className="flex border border-gray-300 rounded-full overflow-hidden">
           <button
             type="button"
-            onClick={() => setActiveEditor('code')}
-            className={`px-3 py-1 text-xs ${activeEditor === 'code' ? 'bg-black text-white' : 'bg-gray-100'}`}
+            onClick={() => setActiveEditor("code")}
+            className={`px-3 py-1 text-xs ${
+              activeEditor === "code" ? "bg-black text-white" : "bg-gray-100"
+            }`}
           >
             Code
           </button>
           <button
             type="button"
-            onClick={() => setActiveEditor('spec')}
-            className={`px-3 py-1 text-xs ${activeEditor === 'spec' ? 'bg-black text-white' : 'bg-gray-100'}`}
+            onClick={() => setActiveEditor("spec")}
+            className={`px-3 py-1 text-xs ${
+              activeEditor === "spec" ? "bg-black text-white" : "bg-gray-100"
+            }`}
           >
             Specification
           </button>
         </div>
       </div>
-      
+
       <div className="px-4 flex-grow flex flex-col overflow-hidden">
         {hasUnsavedChanges && (
           <div className="mt-4 flex justify-end">
@@ -898,7 +916,7 @@ const CodeTab = () => {
           </div>
         )}
 
-        {activeEditor === 'code' && (
+        {activeEditor === "code" && (
           <div className="flex-grow overflow-hidden border border-black h-full">
             <CodeMirror
               value={workingSrc || ""}
@@ -915,7 +933,7 @@ const CodeTab = () => {
           </div>
         )}
 
-        {activeEditor === 'spec' && (
+        {activeEditor === "spec" && (
           <div className="flex-grow overflow-hidden border border-black h-full">
             <textarea
               value={workingSpec || ""}

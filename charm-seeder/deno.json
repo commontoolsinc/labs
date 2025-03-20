@@ -1,0 +1,10 @@
+{
+  "name": "@commontools/charm-seeder",
+  "tasks": {
+    "start": "deno run -A ./cli.ts",
+    "test": "echo 'No tests defined.'"
+  },
+  "exports": {
+    ".": "./cli.ts"
+  }
+}

@@ -3,6 +3,7 @@
     "./background-charm-service",
     "./builder",
     "./charm",
+    "./charm-seeder",
     "./cli",
     "./deno-vite-plugin",
     "./deno-web-test",
