@@ -6,7 +6,6 @@
 - Run all tests: `deno task test-all`
 - Run single test: `deno test path/to/test.ts`
 - Run specific package tests: `cd package-name && deno task test`
-- Bundle for deployment: `./scripts/bundle.ts path/to/entry.ts [dist/output.js]`
 
 ## Code Style Guidelines
 
@@ -16,7 +15,7 @@
 - Indentation: 2 spaces
 - Semicolons: required
 - Double quotes for strings
-- Auto-format with: `deno fmt`
+- ALWAYS Auto-format with: `deno fmt`
 
 ### TypeScript
 
