@@ -1243,3 +1243,67 @@ test(
     });
   },
 );
+
+test(
+  "list non-matching fact with graph query and schema filter",
+  DB,
+  async (session) => {
+    const v1 = Fact.assert({
+      the,
+      of: doc,
+      is: {
+        v: {
+          "address": {
+            "$alias": {
+              "cell": {
+                "/":
+                  "baedreicpmdsacbwn6d7rheirfutm3uulywizvjio72kppuls5lpq3f4mze",
+              },
+              "path": ["argument"],
+            },
+          },
+          "name": "Bob",
+        },
+      },
+    });
+    const tr = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v1]),
+    });
+    const write = session.transact(tr);
+    assert(write.ok);
+
+    const sampleGraphSelector: GraphSelector = {
+      [doc]: {
+        [the]: {
+          _: {
+            ["c"]: [
+              {
+                select: { "type": "integer" },
+                context: {
+                  "type": "object",
+                  "properties": { "c": { "type": "integer" } },
+                },
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const result = session.queryGraph({
+      cmd: "/memory/graph/query@0.1",
+      iss: alice.did(),
+      sub: space.did(),
+      args: {
+        select: sampleGraphSelector,
+      },
+      prf: [],
+    });
+
+    assertEquals(result, {
+      ok: { [space.did()]: {} },
+    });
+  },
+);

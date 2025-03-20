@@ -52,6 +52,7 @@ import type {
   Unit,
 } from "./interface.ts";
 import * as Error from "./error.ts";
+import { isNumber, isObject, isString } from "./util.ts";
 export * from "./interface.ts";
 
 export const PREPARE = `
@@ -474,28 +475,25 @@ export const selectGraph = <Space extends MemorySpace>(
   { select }: GraphSubscription["args"],
 ): Selection<Space>[Space] => {
   const selection = {};
-  const selector = Object.entries(select);
-  for (const [of, attributes] of selector) {
-    const selector = Object.entries(attributes);
-    for (const [the, revisions] of selector) {
-      const selector = Object.entries(revisions);
-      for (const [cause, branches] of selector) {
+  const selectorEntries = Object.entries(select);
+  for (const [of, attributes] of selectorEntries) {
+    const attributeEntries = Object.entries(attributes);
+    for (const [the, revisions] of attributeEntries) {
+      const revisionEntries = Object.entries(revisions);
+      for (const [cause, branches] of revisionEntries) {
         for (
           const fact of selectFacts(session, { the, of: of as Entity, cause })
         ) {
-          // Save the top level fact into the selection.
-          set(
-            selection,
-            [fact.of, fact.the],
-            fact.cause,
-            fact.is !== undefined ? { is: fact.is } : {},
-          );
-          // Root selector case
-          if (Array.isArray(branches)) {
-            for (const branch of branches) {
-            }
-          } // Traversal case
-          else {
+          // We're going to do this in two passes.
+          // The first goes through and decides whether this fact has anything matching our query
+          // The second goes through and filters the fact.is to be limited to match the schemas
+          if (checkFactMatch(fact.is, branches)) {
+            set(
+              selection,
+              [fact.of, fact.the],
+              fact.cause,
+              fact.is !== undefined ? { is: fact.is } : {},
+            );
           }
         }
       }
@@ -503,6 +501,58 @@ export const selectGraph = <Space extends MemorySpace>(
   }
   return selection;
 };
+
+// Check whether this fact has anything matching our query
+function checkFactMatch(
+  fact: JSONValue | undefined,
+  nodeSelector: NodeSelector,
+): boolean {
+  // console.log("Checking fact match for ", fact, nodeSelector);
+  if (Array.isArray(nodeSelector)) {
+    // nodeSelector is a LeafSelectorGroup
+    for (const branch of nodeSelector) {
+      // check if fact.is complies with branch.schema
+      return true;
+    }
+  } else {
+    // nodeSelector is a BranchSelector, so walk down
+    if (
+      fact === undefined || fact === null || isString(fact) || isNumber(fact)
+    ) {
+      // TODO: I'm not sure this is what I want. I want to see when an object was replaced
+      // with a primitive, because that nullifies the object.
+      return true;
+    } else if (Array.isArray(fact)) {
+      const branchEntries = Object.entries(nodeSelector);
+      for (const [at, val] of branchEntries) {
+        const numericKeyValue = new Number(at).valueOf();
+        if (!Number.isInteger(numericKeyValue)) {
+          // our branch wants a string property, but it's pointing at an array -- no match
+          continue;
+        } else {
+          if (
+            numericKeyValue >= 0 && numericKeyValue < fact.length &&
+            checkFactMatch(fact[numericKeyValue], val)
+          ) {
+            return true;
+          }
+        }
+      }
+    } else if (isObject(fact)) {
+      const factObj = fact as JSONObject;
+      const branchEntries = Object.entries(nodeSelector);
+      for (const [at, val] of branchEntries) {
+        if (at in factObj) {
+          // console.log("descending into ", at, factObj[at], val);
+          if (checkFactMatch(factObj[at], val)) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
 
 function* collect(
   session: Session<MemorySpace>,
