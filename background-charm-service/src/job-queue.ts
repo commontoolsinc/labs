@@ -53,9 +53,6 @@ export class JobQueue {
     );
   }
 
-  /**
-   * Add a job to the queue
-   */
   async addJob<T extends Job>(
     jobData: Omit<
       T,
@@ -79,14 +76,11 @@ export class JobQueue {
     return jobId;
   }
 
-  /**
-   * Add an execute charm job
-   */
-  async addExecuteCharmJob(
+  addExecuteCharmJob(
     charm: BGCharmEntry,
     priority: number = 3,
   ): Promise<string> {
-    return await this.addJob<ExecuteCharmJob>({
+    return this.addJob<ExecuteCharmJob>({
       type: JobType.EXECUTE_CHARM,
       integrationId: charm.integration,
       spaceId: charm.space,
@@ -95,23 +89,17 @@ export class JobQueue {
     });
   }
 
-  /**
-   * Add a maintenance job
-   */
-  async addMaintenanceJob(
+  addMaintenanceJob(
     task: "cleanup" | "stats" | "reset",
     priority: number = 10,
-  ): Promise<string> {
-    return await this.addJob<MaintenanceJob>({
+  ) {
+    return this.addJob<MaintenanceJob>({
       type: JobType.MAINTENANCE,
       task,
       priority,
     });
   }
 
-  /**
-   * Start the job consumer
-   */
   startConsumer(): void {
     if (this.consumerRunning) {
       log("Job consumer is already running");
@@ -123,9 +111,6 @@ export class JobQueue {
     log("Job consumer started");
   }
 
-  /**
-   * Stop the job consumer
-   */
   async stopConsumer(): Promise<void> {
     log("Stopping job consumer...");
     this.consumerRunning = false;
@@ -149,9 +134,6 @@ export class JobQueue {
     log("Job consumer stopped");
   }
 
-  /**
-   * Get the job consumer status
-   */
   getStatus(): {
     running: boolean;
     activeJobs: number;
@@ -164,9 +146,6 @@ export class JobQueue {
     };
   }
 
-  /**
-   * Main consumer loop
-   */
   private async runConsumerLoop(): Promise<void> {
     log("Starting job consumer loop");
 
@@ -210,9 +189,6 @@ export class JobQueue {
     }
   }
 
-  /**
-   * Get the next job to process from the queue
-   */
   private async getNextJob(): Promise<Job | null> {
     // Get all pending jobs
     const pendingJobs: Job[] = [];
@@ -268,9 +244,6 @@ export class JobQueue {
     }
   }
 
-  /**
-   * Process a job
-   */
   private async processJob(job: Job): Promise<void> {
     const startTime = Date.now();
     let success = false;
@@ -291,53 +264,42 @@ export class JobQueue {
       try {
         // CRITICAL FIX: Special handling for execute_charm jobs
         if (job.type === JobType.EXECUTE_CHARM) {
-          try {
-            // Use a longer timeout for execute charm jobs
-            resultData = await Promise.race([
-              handler.handle(job),
-              new Promise((_resolve, reject) => {
-                setTimeout(
-                  () =>
-                    reject(
-                      new Error(`Job execution timed out after ${timeout}ms`),
-                    ),
-                  timeout,
-                );
-              }),
-            ]);
-
-            // Explicitly check the result of execute charm jobs
-            if (
-              resultData && typeof resultData === "object" &&
-              "success" in resultData
-            ) {
-              // If the handler explicitly returns success: false, respect that
-              success = resultData.success === true;
-              if (!success && "error" in resultData) {
-                error = resultData.error as string;
-                throw new Error(error || "Unknown error in charm execution");
-              }
-            } else {
-              success = true;
-            }
-
-            if (success) {
-              log(
-                `Job ${job.id} completed successfully (${
-                  Date.now() - startTime
-                }ms)`,
+          // Use a longer timeout for execute charm jobs
+          resultData = await Promise.race([
+            handler.handle(job),
+            new Promise((_resolve, reject) => {
+              setTimeout(
+                () =>
+                  reject(
+                    new Error(`Job execution timed out after ${timeout}ms`),
+                  ),
+                timeout,
               );
-            } else {
-              log(
-                `Job ${job.id} failed (${Date.now() - startTime}ms): ${
-                  error || "Unknown error"
-                }`,
-              );
+            }),
+          ]);
+
+          // Explicitly check the result of execute charm jobs
+          if (
+            resultData && typeof resultData === "object" &&
+            "success" in resultData
+          ) {
+            // If the handler explicitly returns success: false, respect that
+            success = resultData.success === true;
+            if (!success && "error" in resultData) {
+              error = resultData.error as string;
               throw new Error(error || "Unknown error in charm execution");
             }
-          } catch (e) {
-            // Re-throw to outer catch
-            throw e;
+          } else {
+            success = true;
+          }
+
+          const duration = Date.now() - startTime;
+          if (success) {
+            log(`Job ${job.id} completed successfully (${duration}ms)`);
+          } else {
+            error = error || "Unknown error in charm execution";
+            log(`Job ${job.id} failed (${duration}ms): ${error}`);
+            throw new Error(error);
           }
         } else {
           // Regular handling for other job types
@@ -354,11 +316,8 @@ export class JobQueue {
             }),
           ]);
           success = true;
-          log(
-            `Job ${job.id} completed successfully (${
-              Date.now() - startTime
-            }ms)`,
-          );
+          const duration = Date.now() - startTime;
+          log(`Job ${job.id} completed successfully (${duration}ms)`);
         }
       } catch (e) {
         error = e instanceof Error ? e.message : String(e);
