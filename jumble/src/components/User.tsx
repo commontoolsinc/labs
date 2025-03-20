@@ -104,6 +104,25 @@ export function User() {
     console.log(command, state);
     status.current = state;
   });
+
+  // Add refs to store the eased count values
+  const easedPushCountRef = useRef(0);
+  const easedPullCountRef = useRef(0);
+  const easedErrorCountRef = useRef(0);
+
+  // Add timestamps for minimum animation durations
+  const lastPushTimestampRef = useRef(0);
+  const lastPullTimestampRef = useRef(0);
+  const lastErrorTimestampRef = useRef(0);
+
+  // Minimum animation duration in milliseconds
+  const MIN_ANIMATION_DURATION = 1500;
+
+  // Helper function for easing
+  const ease = (current: number, target: number, factor: number = 0.1) => {
+    return current + (target - current) * factor;
+  };
+
   // Animation logic with requestAnimationFrame
   useEffect(() => {
     // Animation function
@@ -119,26 +138,67 @@ export function User() {
         return;
       }
 
+      const now = Date.now();
+
       // Get the current status every frame
       const currentStatus = status.current;
 
-      // Clean buffer - remove activities older than 2 seconds
-      const now = Date.now();
-
-      // Update the status message in the tooltip
-      let statusMessage = "Click to log out";
-
-      // Calculate push, pull, and error counts
-      const pushCount = Object.values(currentStatus.push).filter((v) =>
+      // Calculate actual push, pull, and error counts
+      const actualPushCount = Object.values(currentStatus.push).filter((v) =>
         v.ok
       ).length;
-      const pullCount =
+      const actualPullCount =
         Object.values(currentStatus.pull).filter((v) => v.ok).length;
       const pushErrorCount =
         Object.values(currentStatus.push).filter((v) => v.error).length;
       const pullErrorCount =
         Object.values(currentStatus.pull).filter((v) => v.error).length;
-      const totalErrorCount = pushErrorCount + pullErrorCount;
+      const actualErrorCount = pushErrorCount + pullErrorCount;
+
+      // Track when counts change to maintain minimum animation duration
+      if (actualPushCount > Math.round(easedPushCountRef.current)) {
+        lastPushTimestampRef.current = now;
+      }
+      if (actualPullCount > Math.round(easedPullCountRef.current)) {
+        lastPullTimestampRef.current = now;
+      }
+      if (actualErrorCount > Math.round(easedErrorCountRef.current)) {
+        lastErrorTimestampRef.current = now;
+      }
+
+      // Calculate whether we should still show animations based on minimum duration
+      const pushActive = actualPushCount > 0 ||
+        (now - lastPushTimestampRef.current < MIN_ANIMATION_DURATION);
+      const pullActive = actualPullCount > 0 ||
+        (now - lastPullTimestampRef.current < MIN_ANIMATION_DURATION);
+      const errorActive = actualErrorCount > 0 ||
+        (now - lastErrorTimestampRef.current < MIN_ANIMATION_DURATION);
+
+      // Enhanced easing with time-based falloff
+      const easingFactor = 0.06; // Slightly slower easing for better visibility
+      easedPushCountRef.current = ease(
+        easedPushCountRef.current,
+        pushActive ? Math.max(actualPushCount, 0.01) : 0,
+        easingFactor,
+      );
+      easedPullCountRef.current = ease(
+        easedPullCountRef.current,
+        pullActive ? Math.max(actualPullCount, 0.01) : 0,
+        easingFactor,
+      );
+      easedErrorCountRef.current = ease(
+        easedErrorCountRef.current,
+        errorActive ? Math.max(actualErrorCount, 0.01) : 0,
+        easingFactor,
+      );
+
+      // Round for display - only show integers
+      const displayPushCount = Math.round(easedPushCountRef.current);
+      const displayPullCount = Math.round(easedPullCountRef.current);
+      const displayErrorCount = Math.round(easedErrorCountRef.current);
+
+      // Use these eased counts for animation and display
+      let statusMessage = "Click to log out";
 
       // Check for connection state
       if (currentStatus.connection.pending) {
@@ -198,42 +258,43 @@ export function User() {
         currentStatus.connection.ready && currentStatus.connection.ready.ok
       ) {
         // Connection is ready and established
-        // Only show non-zero values in the status
         const statusParts = [];
 
-        if (pushCount > 0) {
-          statusParts.push(`↑${pushCount}`);
+        // Only show whole numbers in the status display
+        if (displayPushCount > 0) {
+          statusParts.push(`↑${displayPushCount}`);
         }
 
-        if (pullCount > 0) {
-          statusParts.push(`↓${pullCount}`);
+        if (displayPullCount > 0) {
+          statusParts.push(`↓${displayPullCount}`);
         }
 
-        if (totalErrorCount > 0) {
-          statusParts.push(`!${totalErrorCount}`);
+        if (displayErrorCount > 0) {
+          statusParts.push(`!${displayErrorCount}`);
         }
 
-        // If all counts are zero, just show "Connected"
         statusMessage = statusParts.length > 0
           ? `Status: ${statusParts.join(" ")}`
           : "Connected";
 
-        if (Object.keys(currentStatus.push).length > 0) {
+        // Use both active state and eased counts for animation properties
+        if (pushActive) {
+          // Animation intensity based on eased count or minimum value for visibility
+          const intensity = Math.max(easedPushCountRef.current, 0.3);
+
           // Make ring visible with faster increase for push events
           opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
 
-          // Spin counter-clockwise for push events, speed based on number of pending requests
-          const speed = Math.min(pushCount * 3, 12);
-          rotationRef.current -= speed; // Counter-clockwise rotation
+          // Spin counter-clockwise for push events
+          const speed = Math.min(intensity * 3, 12);
+          rotationRef.current -= speed;
 
           // Set bright orange color for push events
-          circle.setAttribute("stroke", "#FF5722"); // Bright orange color
+          circle.setAttribute("stroke", "#FF5722");
           circle.setAttribute("strokeDasharray", "6 6");
-
-          // Make stroke width thicker for better visibility
           circle.setAttribute("strokeWidth", "3");
 
-          // Start or amplify bounce - use smaller values for subtle effect
+          // Amplify bounce effect
           bounceRef.current = Math.min(bounceRef.current + 0.4, 1.5);
 
           // Apply subtle scale bounce to avatar
@@ -245,27 +306,46 @@ export function User() {
           avatarRef.current.style.boxShadow = `0 0 ${
             bounceRef.current * 3
           }px #FF5722`;
-        } else if (Object.keys(currentStatus.pull).length > 0) {
+        } else if (pullActive) {
+          // Animation intensity based on eased count or minimum value for visibility
+          const intensity = Math.max(easedPullCountRef.current, 0.3);
+
           // Make ring visible with faster increase for pull events
           opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
 
-          // Spin clockwise for pull events, speed based on number of pending pulls
-          const speed = Math.min(pullCount * 3, 12);
-          rotationRef.current += speed; // Clockwise rotation
+          // Spin clockwise for pull events
+          const speed = Math.min(intensity * 3, 12);
+          rotationRef.current += speed;
 
           // Make sure the ring color is green for pull events
-          circle.setAttribute("stroke", "#00BF57"); // Green color
+          circle.setAttribute("stroke", "#00BF57");
           circle.setAttribute("strokeDasharray", "6 6");
-
-          // Reset stroke width
           circle.setAttribute("strokeWidth", "2.5");
 
-          // Reduce bounce for pull events
+          // Reduce bounce for pull events but maintain some animation
           bounceRef.current = Math.max(bounceRef.current - 0.2, 0);
 
           // Reset avatar
           avatarRef.current.style.transform = "scale(1)";
           avatarRef.current.style.boxShadow = "none";
+        } else if (errorActive) {
+          // Special animation for errors that persists for the minimum duration
+          const pulseIntensity = (Math.sin(now / 300) + 1) / 2;
+
+          opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
+
+          // Subtle rotation for error state
+          rotationRef.current += Math.sin(now / 200) * 0.5;
+
+          // Use red color for errors
+          circle.setAttribute("stroke", "#FF0000");
+          circle.setAttribute("strokeDasharray", "3 3");
+          circle.setAttribute("strokeWidth", String(2 + pulseIntensity));
+
+          // Subtle error animation for avatar
+          avatarRef.current.style.boxShadow = `0 0 ${
+            4 * pulseIntensity
+          }px #FF0000`;
         } else {
           // Fade out ring
           opacityRef.current = Math.max(opacityRef.current - 0.1, 0);
@@ -309,7 +389,7 @@ export function User() {
       // Update tooltip text content in the animation loop
       tooltipRef.current.textContent = statusMessage;
 
-      // Apply ring opacity
+      // Apply ring opacity with a minimum for animation visibility
       svgRef.current.style.opacity = opacityRef.current.toString();
 
       // Apply rotation to the ring
