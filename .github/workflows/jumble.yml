@@ -34,7 +34,7 @@ jobs:
           VITE_BUILD_SOURCEMAPS: "true"
 
       - name: Create Sentry release and upload source maps
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/jumble-sentry'
+        if: github.ref == 'refs/heads/main'
         working-directory: jumble
         run: |
           # Create a release with version based on commit SHA
