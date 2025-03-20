@@ -1,0 +1,20 @@
+
+I need help fixing GitHub issue #813: ""Trying to connect, please wait" message in `CharmList` should be centered"
+
+## Issue Details
+URL: https://github.com/commontoolsinc/labs/issues/813
+State: OPEN
+Created: 20/03/2025, 1:46:46 pm
+Updated: 20/03/2025, 1:46:46 pm
+Labels: enhancement, ux
+No assignees
+No milestone
+
+## Description
+Similar to the empty state for when there are zero charms, also in `CharmList.tsx`, we can center and format the information nicely.
+
+## Comments
+No comments on this issue.
+
+Please analyze all the information above and provide a complete fix for this issue.
+Explain your approach and any considerations.
