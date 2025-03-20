@@ -5,8 +5,6 @@ import { Identity } from "@commontools/identity";
 import { storage } from "@commontools/runner";
 import { memory } from "@/routes/storage/memory.ts";
 
-const port = env.PORT;
-
 // Initialize storage with signer
 const initializeStorage = async () => {
   try {
@@ -72,7 +70,7 @@ const handleShutdown = async () => {
 
 // Start server with the abort controller
 function startServer() {
-  console.log(`Server is starting on port http://${env.HOST}:${port}`);
+  console.log(`Server is starting on port http://${env.HOST}:${env.PORT}`);
 
   Sentry.init({
     dsn: env.SENTRY_DSN,
@@ -81,7 +79,8 @@ function startServer() {
   });
 
   const serverOptions = {
-    port,
+    hostname: env.HOST,
+    port: env.PORT,
     signal: ac.signal,
     onError: (error: unknown) => {
       console.error("Server error:", error);
@@ -91,14 +90,13 @@ function startServer() {
     onListen: ({ port, hostname }: { port: number; hostname: string }) => {
       console.log(`Server running on http://${hostname}:${port}`);
     },
-    hostname: env.HOST,
   };
 
   try {
     Deno.serve(serverOptions, app.fetch);
   } catch (err) {
     if (err instanceof Deno.errors.AddrInUse) {
-      console.error(`Port ${port} is already in use`);
+      console.error(`Port ${env.PORT} is already in use`);
       Deno.exit(1);
     }
     console.error("Failed to start server:", err);
