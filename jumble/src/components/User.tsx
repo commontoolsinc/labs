@@ -68,7 +68,8 @@ export function useStorageBroadcast(callback: (data: any) => void) {
 export function User() {
   const { session, clearAuthentication } = useAuthentication();
   const [did, setDid] = useState<string | undefined>(undefined);
-  const [status, setStatus] = useState(Inspector.create());
+  const status = useRef(Inspector.create());
+  const tooltipRef = useRef<HTMLDivElement>(null);
 
   // Animation refs
   const svgRef = useRef<SVGSVGElement>(null);
@@ -95,16 +96,20 @@ export function User() {
 
   // Listen for real events
   useStorageBroadcast((command: Inspector.Command) => {
-    const state = Inspector.update(status, command);
+    if (!status.current) {
+      throw new Error("Status is not initialized");
+    }
+
+    const state = Inspector.update(status.current, command);
     console.log(command, state);
-    setStatus(state);
+    status.current = state;
   });
 
   // Animation logic with requestAnimationFrame
   useEffect(() => {
     // Animation function
     const animate = () => {
-      if (!svgRef.current || !avatarRef.current) {
+      if (!svgRef.current || !avatarRef.current || !tooltipRef.current) {
         animationRef.current = requestAnimationFrame(animate);
         return;
       }
@@ -115,33 +120,23 @@ export function User() {
         return;
       }
 
+      // Get the current status every frame
+      const currentStatus = status.current;
+
       // Clean buffer - remove activities older than 2 seconds
       const now = Date.now();
-      // activityBufferRef.current = activityBufferRef.current.filter(
-      //   (activity: any) => now - activity.timestamp < 2000,
-      // );
 
-      // // Determine animation state based on buffer
-      // const hasActivity = activityBufferRef.current.length > 0;
-
-      // // Count receive and send activities
-      // const receiveActivities = activityBufferRef.current.filter(
-      //   (activity: any) =>
-      //     now - activity.timestamp < 1000 && activity.type === "receive",
-      // ).length;
-
-      // const sendActivities = activityBufferRef.current.filter(
-      //   (activity: any) =>
-      //     now - activity.timestamp < 1000 && activity.type === "send",
-      // ).length;
+      // Update the status message in the tooltip
+      let statusMessage = "Click to log out";
 
       // Check for connection state
-      if (status.connection.pending) {
+      if (currentStatus.connection.pending) {
         // Create pulsing effect using sine wave
         const pulseIntensity = (Math.sin(now / 100) + 1) / 2; // Values between 0 and 1
 
         // Determine if this is first connection attempt or a reconnection
-        const isReconnection = status.connection.pending.error !== undefined;
+        const isReconnection =
+          currentStatus.connection.pending.error !== undefined;
 
         if (isReconnection) {
           // This is a reconnection attempt after a failure
@@ -163,6 +158,10 @@ export function User() {
               8 * pulseIntensity
             }px #FF0000`;
           }
+
+          // Update status message for reconnection
+          statusMessage =
+            `Offline - Reconnecting... (${currentStatus.connection.pending.error.reason})`;
         } else {
           // This is initial connection attempt
           opacityRef.current = 0.3 + (pulseIntensity * 0.4); // Pulse between 0.3 and 0.7 opacity
@@ -181,14 +180,17 @@ export function User() {
           if (avatarRef.current) {
             avatarRef.current.style.boxShadow = "none";
           }
+
+          // Update status message for initial connection
+          statusMessage = "Connecting...";
         }
       } // Check for push activities (sending to remote)
-      else if (Object.keys(status.push).length > 0) {
+      else if (Object.keys(currentStatus.push).length > 0) {
         // Make ring visible with faster increase for push events
         opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
 
         // Spin counter-clockwise for push events, speed based on number of pending requests
-        const pendingPushes = Object.keys(status.push).length;
+        const pendingPushes = Object.keys(currentStatus.push).length;
         const speed = Math.min(pendingPushes * 3, 12);
         rotationRef.current -= speed; // Counter-clockwise rotation
 
@@ -211,13 +213,16 @@ export function User() {
         avatarRef.current.style.boxShadow = `0 0 ${
           bounceRef.current * 3
         }px #FF5722`;
+
+        // Update status message for push
+        statusMessage = `Sending... (${pendingPushes} pending)`;
       } // Check for pull activities (receiving from remote)
-      else if (Object.keys(status.pull).length > 0) {
+      else if (Object.keys(currentStatus.pull).length > 0) {
         // Make ring visible with faster increase for pull events
         opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
 
         // Spin clockwise for pull events, speed based on number of pending pulls
-        const pendingPulls = Object.keys(status.pull).length;
+        const pendingPulls = Object.keys(currentStatus.pull).length;
         const speed = Math.min(pendingPulls * 3, 12);
         rotationRef.current += speed; // Clockwise rotation
 
@@ -234,6 +239,9 @@ export function User() {
         // Reset avatar
         avatarRef.current.style.transform = "scale(1)";
         avatarRef.current.style.boxShadow = "none";
+
+        // Update status message for pull
+        statusMessage = `Receiving... (${pendingPulls} pending)`;
       } // No activity
       else {
         // Fade out ring
@@ -252,7 +260,13 @@ export function User() {
         // Reset avatar
         avatarRef.current.style.transform = "scale(1)";
         avatarRef.current.style.boxShadow = "none";
+
+        // Default status message
+        statusMessage = "Click to log out";
       }
+
+      // Update tooltip text content in the animation loop
+      tooltipRef.current.textContent = statusMessage;
 
       // Apply ring opacity
       svgRef.current.style.opacity = opacityRef.current.toString();
@@ -276,19 +290,7 @@ export function User() {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [status]);
-
-  const statusMessage = status.connection.pending
-    ? status.connection.pending.error
-      ? `Offline - Reconnecting... (${status.connection.pending.error.reason})`
-      : "Connecting..."
-    : Object.keys(status.push).length > 0
-    ? `Sending... (${Object.keys(status.push).length} pending)`
-    : Object.keys(status.pull).length > 0
-    ? `Receiving... (${Object.keys(status.pull).length} pending)`
-    : "Click to log out";
-
-  console.log(statusMessage);
+  }, []); // Empty dependency array as we're checking status.current in every frame
 
   return (
     <div className="relative">
@@ -332,8 +334,11 @@ export function User() {
         }}
         className="relative group flex items-center rounded-full text-sm cursor-pointer"
       >
-        <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[1000]">
-          {statusMessage}
+        <div
+          ref={tooltipRef}
+          className="absolute top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[1000]"
+        >
+          Click to log out
         </div>
       </div>
     </div>
