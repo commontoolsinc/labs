@@ -289,8 +289,8 @@ export function User() {
           const speed = Math.min(intensity * 3, 12);
           rotationRef.current -= speed;
 
-          // Set bright orange color for push events
-          circle.setAttribute("stroke", "#FF5722");
+          // Set green color for push events (changed from orange to green)
+          circle.setAttribute("stroke", "#00BF57");
           circle.setAttribute("strokeDasharray", "6 6");
           circle.setAttribute("strokeWidth", "3");
 
@@ -302,10 +302,10 @@ export function User() {
             (Math.sin(now / 100) * 0.02 * bounceRef.current);
           avatarRef.current.style.transform = `scale(${scaleAmount})`;
 
-          // Set bright orange color for avatar glow during push
+          // Set green glow for avatar during push (changed from orange to green)
           avatarRef.current.style.boxShadow = `0 0 ${
             bounceRef.current * 3
-          }px #FF5722`;
+          }px #00BF57`;
         } else if (pullActive) {
           // Animation intensity based on eased count or minimum value for visibility
           const intensity = Math.max(easedPullCountRef.current, 0.3);
