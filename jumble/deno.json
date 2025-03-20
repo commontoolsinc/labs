@@ -8,13 +8,11 @@
     "integration": "deno test -A ./integration/*.test.ts"
   },
   "lint": {
-    "exclude": ["node_modules/", ".vite/", "public/"]
-  },
-  "compilerOptions": {
-    "jsx": "react-jsx",
-    "jsxImportSource": "react",
-    "checkJs": false,
-    "noExternalResolve": true
+    "exclude": [
+      "node_modules/",
+      ".vite/",
+      "public/"
+    ]
   },
   "imports": {
     "@/": "./src/",
