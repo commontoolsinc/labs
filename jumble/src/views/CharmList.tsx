@@ -103,7 +103,19 @@ export default function CharmList() {
   const { lastSyncTime } = useSyncedStatus();
 
   if (lastSyncTime == null) {
-    return <div>Trying to connect, please wait</div>;
+    return (
+      <div className="flex flex-col items-center justify-center h-[70vh] text-center p-8">
+        <div className="mb-6">
+          <ShapeLogo />
+        </div>
+        <h2 className="text-2xl font-semibold text-gray-800 mb-4">
+          Trying to connect
+        </h2>
+        <p className="text-gray-600 mb-6 max-w-md">
+          Please wait while we establish a connection...
+        </p>
+      </div>
+    );
   }
 
   if (!charms || charms.length === 0) {
