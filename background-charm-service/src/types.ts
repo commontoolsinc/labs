@@ -94,7 +94,6 @@ export interface JobResult {
 export interface CharmStateEntry {
   // Identifiers
   charmId: string;
-  integrationId: string;
   spaceId: string;
 
   // Status

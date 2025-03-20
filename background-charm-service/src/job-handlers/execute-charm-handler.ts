@@ -65,7 +65,6 @@ export class ExecuteCharmHandler implements JobHandler {
     const isDisabled = await this.stateManager.isCharmDisabled(
       spaceId,
       charmId,
-      integrationId,
     );
     if (isDisabled) {
       log(`Charm is disabled: ${spaceId}/${charmId} but running anyway`);
@@ -86,7 +85,6 @@ export class ExecuteCharmHandler implements JobHandler {
       await this.stateManager.updateAfterExecution(
         spaceId,
         charmId,
-        integrationId,
         true, // success
         executionTimeMs,
       );
@@ -104,7 +102,6 @@ export class ExecuteCharmHandler implements JobHandler {
       const state = await this.stateManager.updateAfterExecution(
         spaceId,
         charmId,
-        integrationId,
         false, // failure
         executionTimeMs,
         error instanceof Error ? error : new Error(errorMessage),
@@ -115,7 +112,7 @@ export class ExecuteCharmHandler implements JobHandler {
         log(
           `Disabling charm ${spaceId}/${charmId} after ${state.consecutiveFailures} consecutive failures`,
         );
-        await this.stateManager.disableCharm(spaceId, charmId, integrationId);
+        await this.stateManager.disableCharm(spaceId, charmId);
       }
 
       return {
