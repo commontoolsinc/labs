@@ -98,6 +98,7 @@ export const generateNewRecipeVersion = async (
     name,
   });
 
+  // Pass the newSpec so it's properly persisted and can be displayed/edited
   const newCharm = await compileAndRunRecipe(
     charmManager,
     newRecipeSrc,
@@ -266,7 +267,7 @@ export async function castNewRecipe(
 
   const input = turnCellsIntoAliases(scrubbed);
 
-  return compileAndRunRecipe(charmManager, newRecipeSrc, goal, input);
+  return compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, input);
 }
 
 export async function compileRecipe(

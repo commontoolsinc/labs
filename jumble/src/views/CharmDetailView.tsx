@@ -264,6 +264,7 @@ function useCodeEditor(
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
   const [workingSrc, setWorkingSrc] = useState<string | undefined>(undefined);
+  const [workingSpec, setWorkingSpec] = useState<string | undefined>(undefined);
   const { replicaName } = useParams<CharmRouteParams>();
 
   useEffect(() => {
@@ -273,21 +274,24 @@ function useCodeEditor(
       } else {
         setWorkingSrc(extractUserCode(iframeRecipe.src ?? "") ?? "");
       }
+      setWorkingSpec(iframeRecipe.spec);
     }
   }, [iframeRecipe, charm, showFullCode]);
 
-  const hasUnsavedChanges = showFullCode
+  const hasSourceChanges = showFullCode
     ? workingSrc !== iframeRecipe?.src
     : injectUserCode(workingSrc ?? "") !== iframeRecipe?.src;
+  const hasSpecChanges = workingSpec !== iframeRecipe?.spec;
+  const hasUnsavedChanges = hasSourceChanges || hasSpecChanges;
 
   const saveChanges = useCallback(() => {
     const src = showFullCode ? workingSrc : injectUserCode(workingSrc ?? "");
-    if (src && iframeRecipe && charm) {
+    if (src && iframeRecipe && charm && workingSpec) {
       generateNewRecipeVersion(
         charmManager,
         charm,
         src,
-        iframeRecipe.spec,
+        workingSpec, // Use the edited spec
       ).then((newCharm) => {
         navigate(createPath("charmShow", {
           charmId: charmId(newCharm)!,
@@ -295,12 +299,14 @@ function useCodeEditor(
         }));
       });
     }
-  }, [workingSrc, iframeRecipe, charm, navigate, replicaName]);
+  }, [workingSrc, workingSpec, iframeRecipe, charm, navigate, replicaName, showFullCode, charmManager]);
 
   return {
     fullSrc: iframeRecipe?.src ?? "",
     workingSrc,
     setWorkingSrc,
+    workingSpec,
+    setWorkingSpec,
     hasUnsavedChanges,
     saveChanges,
   };
@@ -807,13 +813,21 @@ const CodeTab = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
   const [showFullCode, setShowFullCode] = useState(false);
+  const [activeEditor, setActiveEditor] = useState<'code' | 'spec'>('code');
 
-  const { fullSrc, workingSrc, setWorkingSrc, hasUnsavedChanges, saveChanges } =
-    useCodeEditor(
-      charm,
-      iframeRecipe,
-      showFullCode,
-    );
+  const { 
+    fullSrc, 
+    workingSrc, 
+    setWorkingSrc, 
+    workingSpec, 
+    setWorkingSpec, 
+    hasUnsavedChanges, 
+    saveChanges 
+  } = useCodeEditor(
+    charm,
+    iframeRecipe,
+    showFullCode,
+  );
   const templateVersion = extractVersionTag(fullSrc);
 
   useEffect(() => {
@@ -851,7 +865,26 @@ const CodeTab = () => {
             Show Full Template
           </label>
         </div>
+        
+        {/* Editor type selector */}
+        <div className="flex border border-gray-300 rounded-full overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setActiveEditor('code')}
+            className={`px-3 py-1 text-xs ${activeEditor === 'code' ? 'bg-black text-white' : 'bg-gray-100'}`}
+          >
+            Code
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveEditor('spec')}
+            className={`px-3 py-1 text-xs ${activeEditor === 'spec' ? 'bg-black text-white' : 'bg-gray-100'}`}
+          >
+            Specification
+          </button>
+        </div>
       </div>
+      
       <div className="px-4 flex-grow flex flex-col overflow-hidden">
         {hasUnsavedChanges && (
           <div className="mt-4 flex justify-end">
@@ -865,20 +898,33 @@ const CodeTab = () => {
           </div>
         )}
 
-        <div className="flex-grow overflow-hidden border border-black h-full">
-          <CodeMirror
-            value={workingSrc || ""}
-            theme="dark"
-            extensions={[javascript()]}
-            onChange={setWorkingSrc}
-            basicSetup={{
-              lineNumbers: true,
-              foldGutter: true,
-              indentOnInput: true,
-            }}
-            style={{ height: "100%", overflow: "auto" }}
-          />
-        </div>
+        {activeEditor === 'code' && (
+          <div className="flex-grow overflow-hidden border border-black h-full">
+            <CodeMirror
+              value={workingSrc || ""}
+              theme="dark"
+              extensions={[javascript()]}
+              onChange={setWorkingSrc}
+              basicSetup={{
+                lineNumbers: true,
+                foldGutter: true,
+                indentOnInput: true,
+              }}
+              style={{ height: "100%", overflow: "auto" }}
+            />
+          </div>
+        )}
+
+        {activeEditor === 'spec' && (
+          <div className="flex-grow overflow-hidden border border-black h-full">
+            <textarea
+              value={workingSpec || ""}
+              onChange={(e) => setWorkingSpec(e.target.value)}
+              className="w-full h-full p-4 font-mono text-sm resize-none"
+              style={{ height: "100%", overflow: "auto" }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -895,6 +941,7 @@ const DataTab = () => {
     false,
   );
   const [isResultSchemaExpanded, setIsResultSchemaExpanded] = useState(false);
+  const [isSpecExpanded, setIsSpecExpanded] = useState(false);
   const [isLineageExpanded, setIsLineageExpanded] = useState(false);
 
   if (!charm) return null;
@@ -1019,6 +1066,26 @@ const DataTab = () => {
                     fontSize: "0.875rem",
                   }}
                 />
+              </div>
+            )}
+          </div>
+
+          {/* Added Specification section */}
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={() => setIsSpecExpanded(!isSpecExpanded)}
+              className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+            >
+              <span className="text-md font-semibold">Specification</span>
+              <span>{isSpecExpanded ? "▼" : "▶"}</span>
+            </button>
+
+            {isSpecExpanded && (
+              <div className="border border-gray-300 rounded p-2 bg-gray-50">
+                <div className="whitespace-pre-wrap font-mono text-sm p-2">
+                  {iframeRecipe.spec || "No specification available"}
+                </div>
               </div>
             )}
           </div>
