@@ -104,7 +104,6 @@ export function User() {
     console.log(command, state);
     status.current = state;
   });
-
   // Animation logic with requestAnimationFrame
   useEffect(() => {
     // Animation function
@@ -128,6 +127,18 @@ export function User() {
 
       // Update the status message in the tooltip
       let statusMessage = "Click to log out";
+
+      // Calculate push, pull, and error counts
+      const pushCount = Object.values(currentStatus.push).filter((v) =>
+        v.ok
+      ).length;
+      const pullCount =
+        Object.values(currentStatus.pull).filter((v) => v.ok).length;
+      const pushErrorCount =
+        Object.values(currentStatus.push).filter((v) => v.error).length;
+      const pullErrorCount =
+        Object.values(currentStatus.pull).filter((v) => v.error).length;
+      const totalErrorCount = pushErrorCount + pullErrorCount;
 
       // Check for connection state
       if (currentStatus.connection.pending) {
@@ -159,9 +170,8 @@ export function User() {
             }px #FF0000`;
           }
 
-          // Update status message for reconnection
-          statusMessage =
-            `Offline - Reconnecting... (${currentStatus.connection.pending.error.reason})`;
+          // Update status message for reconnection with error
+          statusMessage = "Reconnecting...";
         } else {
           // This is initial connection attempt
           opacityRef.current = 0.3 + (pulseIntensity * 0.4); // Pulse between 0.3 and 0.7 opacity
@@ -184,66 +194,97 @@ export function User() {
           // Update status message for initial connection
           statusMessage = "Connecting...";
         }
-      } // Check for push activities (sending to remote)
-      else if (Object.keys(currentStatus.push).length > 0) {
-        // Make ring visible with faster increase for push events
-        opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
+      } else if (
+        currentStatus.connection.ready && currentStatus.connection.ready.ok
+      ) {
+        // Connection is ready and established
+        // Only show non-zero values in the status
+        const statusParts = [];
 
-        // Spin counter-clockwise for push events, speed based on number of pending requests
-        const pendingPushes = Object.keys(currentStatus.push).length;
-        const speed = Math.min(pendingPushes * 3, 12);
-        rotationRef.current -= speed; // Counter-clockwise rotation
+        if (pushCount > 0) {
+          statusParts.push(`↑${pushCount}`);
+        }
 
-        // Set bright orange color for push events
-        circle.setAttribute("stroke", "#FF5722"); // Bright orange color
-        circle.setAttribute("strokeDasharray", "6 6");
+        if (pullCount > 0) {
+          statusParts.push(`↓${pullCount}`);
+        }
 
-        // Make stroke width thicker for better visibility
-        circle.setAttribute("strokeWidth", "3");
+        if (totalErrorCount > 0) {
+          statusParts.push(`!${totalErrorCount}`);
+        }
 
-        // Start or amplify bounce - use smaller values for subtle effect
-        bounceRef.current = Math.min(bounceRef.current + 0.4, 1.5);
+        // If all counts are zero, just show "Connected"
+        statusMessage = statusParts.length > 0
+          ? `Status: ${statusParts.join(" ")}`
+          : "Connected";
 
-        // Apply subtle scale bounce to avatar
-        const scaleAmount = 1 +
-          (Math.sin(now / 100) * 0.02 * bounceRef.current);
-        avatarRef.current.style.transform = `scale(${scaleAmount})`;
+        if (Object.keys(currentStatus.push).length > 0) {
+          // Make ring visible with faster increase for push events
+          opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
 
-        // Set bright orange color for avatar glow during push
-        avatarRef.current.style.boxShadow = `0 0 ${
-          bounceRef.current * 3
-        }px #FF5722`;
+          // Spin counter-clockwise for push events, speed based on number of pending requests
+          const speed = Math.min(pushCount * 3, 12);
+          rotationRef.current -= speed; // Counter-clockwise rotation
 
-        // Update status message for push
-        statusMessage = `Sending... (${pendingPushes} pending)`;
-      } // Check for pull activities (receiving from remote)
-      else if (Object.keys(currentStatus.pull).length > 0) {
-        // Make ring visible with faster increase for pull events
-        opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
+          // Set bright orange color for push events
+          circle.setAttribute("stroke", "#FF5722"); // Bright orange color
+          circle.setAttribute("strokeDasharray", "6 6");
 
-        // Spin clockwise for pull events, speed based on number of pending pulls
-        const pendingPulls = Object.keys(currentStatus.pull).length;
-        const speed = Math.min(pendingPulls * 3, 12);
-        rotationRef.current += speed; // Clockwise rotation
+          // Make stroke width thicker for better visibility
+          circle.setAttribute("strokeWidth", "3");
 
-        // Make sure the ring color is green for pull events
-        circle.setAttribute("stroke", "#00BF57"); // Green color
-        circle.setAttribute("strokeDasharray", "6 6");
+          // Start or amplify bounce - use smaller values for subtle effect
+          bounceRef.current = Math.min(bounceRef.current + 0.4, 1.5);
 
-        // Reset stroke width
-        circle.setAttribute("strokeWidth", "2.5");
+          // Apply subtle scale bounce to avatar
+          const scaleAmount = 1 +
+            (Math.sin(now / 100) * 0.02 * bounceRef.current);
+          avatarRef.current.style.transform = `scale(${scaleAmount})`;
 
-        // Reduce bounce for pull events
-        bounceRef.current = Math.max(bounceRef.current - 0.2, 0);
+          // Set bright orange color for avatar glow during push
+          avatarRef.current.style.boxShadow = `0 0 ${
+            bounceRef.current * 3
+          }px #FF5722`;
+        } else if (Object.keys(currentStatus.pull).length > 0) {
+          // Make ring visible with faster increase for pull events
+          opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
 
-        // Reset avatar
-        avatarRef.current.style.transform = "scale(1)";
-        avatarRef.current.style.boxShadow = "none";
+          // Spin clockwise for pull events, speed based on number of pending pulls
+          const speed = Math.min(pullCount * 3, 12);
+          rotationRef.current += speed; // Clockwise rotation
 
-        // Update status message for pull
-        statusMessage = `Receiving... (${pendingPulls} pending)`;
-      } // No activity
-      else {
+          // Make sure the ring color is green for pull events
+          circle.setAttribute("stroke", "#00BF57"); // Green color
+          circle.setAttribute("strokeDasharray", "6 6");
+
+          // Reset stroke width
+          circle.setAttribute("strokeWidth", "2.5");
+
+          // Reduce bounce for pull events
+          bounceRef.current = Math.max(bounceRef.current - 0.2, 0);
+
+          // Reset avatar
+          avatarRef.current.style.transform = "scale(1)";
+          avatarRef.current.style.boxShadow = "none";
+        } else {
+          // Fade out ring
+          opacityRef.current = Math.max(opacityRef.current - 0.1, 0);
+
+          // Slow down rotation
+          rotationRef.current *= 0.9;
+
+          // Reset stroke width
+          circle.setAttribute("strokeWidth", "2.5");
+          circle.setAttribute("strokeDasharray", "6 6");
+
+          // Reduce bounce
+          bounceRef.current = Math.max(bounceRef.current - 0.2, 0);
+
+          // Reset avatar
+          avatarRef.current.style.transform = "scale(1)";
+          avatarRef.current.style.boxShadow = "none";
+        }
+      } else {
         // Fade out ring
         opacityRef.current = Math.max(opacityRef.current - 0.1, 0);
 
@@ -336,7 +377,7 @@ export function User() {
       >
         <div
           ref={tooltipRef}
-          className="absolute top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[1000]"
+          className="absolute top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[9999]"
         >
           Click to log out
         </div>
