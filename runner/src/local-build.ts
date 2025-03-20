@@ -5,15 +5,21 @@ import * as zod from "zod";
 import * as zodToJsonSchema from "zod-to-json-schema";
 import * as merkleReference from "merkle-reference";
 
+let DOMParser: any;
+
+// NOTE(ja): importing JSDOM in browser throws an error :(
 async function getDOMParser() {
+  if (DOMParser) {
+    return DOMParser;
+  }
   if (globalThis.window?.DOMParser) {
-    return globalThis.window.DOMParser;
+    DOMParser = globalThis.window.DOMParser;
   } else {
-    // NOTE(ja): importing JSDOM in browser throws an error :(
     const { JSDOM } = await import("jsdom");
     const jsdom = new JSDOM("");
-    return jsdom.window.DOMParser;
+    DOMParser = jsdom.window.DOMParser;
   }
+  return DOMParser;
 }
 
 // NOTE(ja): this isn't currently doing typechecking, but it could...
@@ -123,10 +129,12 @@ export const tsToExports = async (
     }
   };
 
+  const DOMParser = await getDOMParser();
+
   const wrappedCode = `
     (async function(require) {
         const exports = {};
-        globalThis.DOMParser = await ${getDOMParser.toString()}();
+        globalThis.DOMParser = DOMParser;
         ${js}
         return exports;
     })`;
