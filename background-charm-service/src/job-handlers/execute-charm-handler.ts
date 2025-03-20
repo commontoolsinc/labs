@@ -7,7 +7,7 @@ import * as Session from "../session.ts";
 import { CharmManager } from "@commontools/charm";
 import type { DID } from "@commontools/identity";
 import { CharmTimeoutError } from "../errors/index.ts";
-import { getConfig } from "../config.ts";
+import { env } from "../config.ts";
 import {
   createTimeoutController,
   getSharedWorkerPool,
@@ -21,16 +21,14 @@ export class ExecuteCharmHandler implements JobHandler {
   private stateManager: StateManager;
   private managerCache = new Map<string, CharmManager>();
   private workerPool: WorkerPool<any, any>;
-  private config: ReturnType<typeof getConfig>;
 
   constructor(kv: Deno.Kv) {
     this.stateManager = new StateManager(kv);
-    this.config = getConfig();
 
     // Get the shared worker pool instance
     const workerUrl = new URL("../utils/charm-worker.ts", import.meta.url).href;
     this.workerPool = getSharedWorkerPool({
-      maxWorkers: this.config.maxConcurrentJobs,
+      maxWorkers: env.MAX_CONCURRENT_JOBS,
       workerUrl,
       workerOptions: {
         type: "module",
@@ -46,7 +44,7 @@ export class ExecuteCharmHandler implements JobHandler {
     });
 
     log(
-      `Initialized worker pool with ${this.config.maxConcurrentJobs} max workers`,
+      `Initialized worker pool with ${env.MAX_CONCURRENT_JOBS} max workers`,
     );
   }
 
@@ -141,25 +139,18 @@ export class ExecuteCharmHandler implements JobHandler {
   }): Promise<void> {
     // Create a timeout controller for the worker execution
     const { controller, clear: clearTimeout } = createTimeoutController(
-      this.config.charmExecutionTimeoutMs,
+      env.CHARM_EXECUTION_TIMEOUT_MS,
     );
 
     try {
-      // Get operator password and toolshed URL for the worker
-      const operatorPass = this.config.operatorPass;
-      const toolshedUrl = this.config.toolshedUrl;
-
-      // Submit task to worker pool
-      log(
-        `Submitting charm ${charmId} to worker pool`,
-      );
+      log(`Submitting charm ${charmId} to worker pool`);
 
       // this spawns the actual worker process
       const task = this.workerPool.execute({
         spaceId: space,
         charmId,
-        operatorPass,
-        toolshedUrl,
+        operatorPass: env.OPERATOR_PASS,
+        toolshedUrl: env.TOOLSHED_API_URL,
       });
 
       // Convert AbortSignal to a promise that rejects when aborted
@@ -167,10 +158,10 @@ export class ExecuteCharmHandler implements JobHandler {
         controller.signal.addEventListener("abort", () => {
           reject(
             new CharmTimeoutError(
-              `Charm execution timed out after ${this.config.charmExecutionTimeoutMs}ms`,
+              `Charm execution timed out after ${env.CHARM_EXECUTION_TIMEOUT_MS}ms`,
               space as string,
               charmId || "",
-              this.config.charmExecutionTimeoutMs,
+              env.CHARM_EXECUTION_TIMEOUT_MS,
             ),
           );
         });
@@ -210,12 +201,9 @@ export class ExecuteCharmHandler implements JobHandler {
       return this.managerCache.get(spaceKey)!;
     }
 
-    // Get operator password from config
-    const operatorPass = this.config.operatorPass;
-
     // Create new session and manager
     const session = await Session.open({
-      passphrase: operatorPass,
+      passphrase: env.OPERATOR_PASS,
       name: "~background-service",
       space,
     });

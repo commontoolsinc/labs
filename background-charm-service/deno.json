@@ -1,8 +1,7 @@
 {
   "tasks": {
     "start": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts",
-    "gmail": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts --only=gmail",
-    "discord": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts --only=discord",
+    "help": "deno run --unstable-kv -A --unstable-worker-options src/cli.ts --help",
     "add-admin-charm": "deno run -A cast-admin.ts --recipePath=../recipes/bgAdmin.tsx",
     "test": "deno test",
     "check": "deno check src/**/*.ts",
