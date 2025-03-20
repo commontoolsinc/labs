@@ -1,4 +1,3 @@
-import { KVServiceOptions } from "./types.ts";
 import { JobQueue } from "./job-queue.ts";
 import { StateManager } from "./state-manager.ts";
 import { log } from "./utils.ts";

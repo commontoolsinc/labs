@@ -1,9 +1,4 @@
-import {
-  CharmStateEntry,
-  IntegrationCellConfig,
-  KV_PREFIXES,
-  ServiceStateEntry,
-} from "./types.ts";
+import { CharmStateEntry, KV_PREFIXES, ServiceStateEntry } from "./types.ts";
 import { log } from "./utils.ts";
 
 /**
@@ -76,9 +71,8 @@ export class StateManager {
   async getCharmState(
     spaceId: string,
     charmId: string,
-    integrationId: string,
   ): Promise<CharmStateEntry | null> {
-    const key = [...KV_PREFIXES.CHARM_STATE, integrationId, spaceId, charmId];
+    const key = [...KV_PREFIXES.CHARM_STATE, spaceId, charmId];
     const result = await this.kv.get<CharmStateEntry>(key);
     return result.value;
   }
@@ -89,7 +83,6 @@ export class StateManager {
   async setCharmState(state: CharmStateEntry): Promise<void> {
     const key = [
       ...KV_PREFIXES.CHARM_STATE,
-      state.integrationId,
       state.spaceId,
       state.charmId,
     ];
@@ -102,14 +95,12 @@ export class StateManager {
   async updateCharmState(
     spaceId: string,
     charmId: string,
-    integrationId: string,
     updates: Partial<CharmStateEntry>,
   ): Promise<CharmStateEntry> {
     // Get existing state or create default
-    const existing = await this.getCharmState(spaceId, charmId, integrationId);
+    const existing = await this.getCharmState(spaceId, charmId);
     const baseState: CharmStateEntry = existing || {
       charmId,
-      integrationId,
       spaceId,
       disabled: false,
       lastExecuted: null,
@@ -140,18 +131,16 @@ export class StateManager {
   async updateAfterExecution(
     spaceId: string,
     charmId: string,
-    integrationId: string,
     success: boolean,
     executionTimeMs: number,
     error?: Error,
   ): Promise<CharmStateEntry> {
     // Get current state
-    const existing = await this.getCharmState(spaceId, charmId, integrationId);
+    const existing = await this.getCharmState(spaceId, charmId);
 
     // Create base state if it doesn't exist
     const baseState: CharmStateEntry = existing || {
       charmId,
-      integrationId,
       spaceId,
       disabled: false,
       lastExecuted: null,
@@ -210,7 +199,7 @@ export class StateManager {
     });
 
     // Apply updates
-    return this.updateCharmState(spaceId, charmId, integrationId, updates);
+    return this.updateCharmState(spaceId, charmId, updates);
   }
 
   /**
@@ -219,14 +208,11 @@ export class StateManager {
   async disableCharm(
     spaceId: string,
     charmId: string,
-    integrationId: string,
   ): Promise<void> {
-    await this.updateCharmState(spaceId, charmId, integrationId, {
+    await this.updateCharmState(spaceId, charmId, {
       disabled: true,
     });
-    log(
-      `Disabled charm ${spaceId}/${charmId} from integration ${integrationId}`,
-    );
+    log(`Disabled charm ${spaceId}/${charmId}`);
   }
 
   /**
@@ -235,28 +221,10 @@ export class StateManager {
   async isCharmDisabled(
     spaceId: string,
     charmId: string,
-    integrationId: string,
   ): Promise<boolean> {
     // FIXME(ja): we should check if the charm is no longer in the charm list too!
-    const state = await this.getCharmState(spaceId, charmId, integrationId);
+    const state = await this.getCharmState(spaceId, charmId);
     return state?.disabled || false;
-  }
-
-  /**
-   * Get all charm states for an integration
-   */
-  async getCharmStatesByIntegration(
-    integrationId: string,
-  ): Promise<CharmStateEntry[]> {
-    const prefix = [...KV_PREFIXES.CHARM_STATE, integrationId];
-    const entries = this.kv.list<CharmStateEntry>({ prefix });
-    const states: CharmStateEntry[] = [];
-
-    for await (const entry of entries) {
-      states.push(entry.value);
-    }
-
-    return states;
   }
 
   /**
@@ -346,57 +314,6 @@ export class StateManager {
     await this.updateServiceState(updates);
   }
 
-  // ====== INTEGRATION CONFIG METHODS ======
-
-  /**
-   * Get an integration configuration
-   */
-  async getIntegrationConfig(
-    integrationId: string,
-  ): Promise<IntegrationCellConfig | null> {
-    const key = [...KV_PREFIXES.INTEGRATION_CONFIG, integrationId];
-    const result = await this.kv.get<IntegrationCellConfig>(key);
-    return result.value;
-  }
-
-  /**
-   * Set an integration configuration
-   */
-  async setIntegrationConfig(
-    integrationId: string,
-    config: IntegrationCellConfig,
-  ): Promise<void> {
-    // Store a serializable version of the config without function references
-    const serializableConfig = {
-      id: config.id,
-      name: config.name,
-      spaceId: config.spaceId,
-      cellCauseName: config.cellCauseName,
-      // Don't store functions - they'll be provided by the integration when needed
-    };
-
-    const key = [...KV_PREFIXES.INTEGRATION_CONFIG, integrationId];
-    await this.kv.set(key, serializableConfig);
-  }
-
-  /**
-   * Get all integration configurations
-   */
-  async getAllIntegrationConfigs(): Promise<IntegrationCellConfig[]> {
-    const entries = this.kv.list<IntegrationCellConfig>({
-      prefix: KV_PREFIXES.INTEGRATION_CONFIG,
-    });
-    const configs: IntegrationCellConfig[] = [];
-
-    for await (const entry of entries) {
-      configs.push(entry.value);
-    }
-
-    return configs;
-  }
-
-  // ====== LOGGING METHODS ======
-
   /**
    * Log the current state
    */
@@ -411,15 +328,6 @@ export class StateManager {
       const allCharmStates = await this.getAllCharmStates();
       const totalCharms = allCharmStates.length;
       const disabledCharms = allCharmStates.filter((s) => s.disabled).length;
-
-      // Group by integration
-      const integrationGroups = new Map<string, CharmStateEntry[]>();
-      for (const state of allCharmStates) {
-        if (!integrationGroups.has(state.integrationId)) {
-          integrationGroups.set(state.integrationId, []);
-        }
-        integrationGroups.get(state.integrationId)!.push(state);
-      }
 
       // Calculate runtime
       const uptime = this.formatUptime(Date.now() - serviceState.startTime);
@@ -446,29 +354,6 @@ export class StateManager {
       log(`Cycles completed: ${serviceState.cyclesCompleted}`);
       log("");
 
-      // Log integration stats
-      for (const [integrationId, states] of integrationGroups.entries()) {
-        const enabledCount = states.filter((s) => !s.disabled).length;
-        const totalExecs = states.reduce(
-          (sum, s) => sum + s.totalExecutions,
-          0,
-        );
-        const successExecs = states.reduce(
-          (sum, s) => sum + s.totalSuccesses,
-          0,
-        );
-        const integrationSuccessRate = totalExecs > 0
-          ? (successExecs / totalExecs * 100).toFixed(2)
-          : "100.00";
-
-        log(`Integration: ${integrationId}`);
-        log(`- Charms: ${states.length} (${enabledCount} enabled)`);
-        log(`- Total executions: ${totalExecs}`);
-        log(`- Success rate: ${integrationSuccessRate}%`);
-      }
-
-      log("");
-
       // Log problematic charms
       const problematicCharms = allCharmStates
         .filter((s) => s.consecutiveFailures > 0)
@@ -479,7 +364,6 @@ export class StateManager {
         for (const state of problematicCharms.slice(0, 10)) { // Show top 10 most problematic
           const status = state.disabled ? "DISABLED" : "ENABLED";
           log(`- ${state.spaceId}/${state.charmId} [${status}]`);
-          log(`  Integration: ${state.integrationId}`);
           log(
             `  Success rate: ${
               (state.totalSuccesses / state.totalExecutions * 100).toFixed(2)

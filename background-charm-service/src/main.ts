@@ -65,7 +65,6 @@ async function main() {
   log("Press Ctrl+C to stop");
 }
 
-// Run the main function
 if (import.meta.main) {
   main().catch((error) => {
     console.error("Fatal error:", error);

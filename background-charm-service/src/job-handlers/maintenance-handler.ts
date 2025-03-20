@@ -80,50 +80,12 @@ export class MaintenanceHandler implements JobHandler {
       0,
     );
 
-    // Organize by integration
-    const integrationStats = new Map<string, {
-      charms: number;
-      disabled: number;
-      executions: number;
-      successes: number;
-      failures: number;
-    }>();
-
-    for (const state of allCharmStates) {
-      if (!integrationStats.has(state.integrationId)) {
-        integrationStats.set(state.integrationId, {
-          charms: 0,
-          disabled: 0,
-          executions: 0,
-          successes: 0,
-          failures: 0,
-        });
-      }
-
-      const stats = integrationStats.get(state.integrationId)!;
-      stats.charms++;
-      if (state.disabled) stats.disabled++;
-      stats.executions += state.totalExecutions;
-      stats.successes += state.totalSuccesses;
-      stats.failures += state.totalFailures;
-    }
-
     // Log stats
     log("=== Service Statistics ===");
     log(`Total charms: ${totalCharms} (${disabledCharms} disabled)`);
     log(
       `Total executions: ${totalExecutions} (${totalSuccesses} successes, ${totalFailures} failures)`,
     );
-
-    for (const [id, stats] of integrationStats.entries()) {
-      const successRate = stats.executions > 0
-        ? (stats.successes / stats.executions * 100).toFixed(2)
-        : "100.00";
-
-      log(
-        `Integration ${id}: ${stats.charms} charms, ${successRate}% success rate`,
-      );
-    }
 
     // Get worker pool stats - only attempt to retrieve if the shared pool exists
     try {
@@ -157,7 +119,6 @@ export class MaintenanceHandler implements JobHandler {
       successRate: totalExecutions > 0
         ? (totalSuccesses / totalExecutions * 100).toFixed(2)
         : "100.00",
-      integrationStats: Object.fromEntries(integrationStats),
     };
   }
 
@@ -180,7 +141,6 @@ export class MaintenanceHandler implements JobHandler {
       await this.stateManager.updateCharmState(
         charm.spaceId,
         charm.charmId,
-        charm.integrationId,
         {
           disabled: false,
           consecutiveFailures: 0,
