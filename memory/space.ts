@@ -267,6 +267,7 @@ export const connect = async <Subject extends MemorySpace>({
     addMemoryAttributes(span, { operation: "connect" });
     span.setAttribute("space.url", url.toString());
 
+    let database = null;
     try {
       const result = readAddress(url);
       if (result.error) {
@@ -275,13 +276,20 @@ export const connect = async <Subject extends MemorySpace>({
       const { address, subject } = result.ok;
       span.setAttribute("space.subject", subject);
 
-      const database = await new Database(address ?? ":memory:", {
+      database = await new Database(address ?? ":memory:", {
         create: false,
       });
       database.exec(PREPARE);
       const session = new Space(subject as Subject, database);
       return { ok: session };
     } catch (cause) {
+      if (database) {
+        try {
+          database.close();
+        } catch (closeError) {
+          console.error("Failed to close database after error:", closeError);
+        }
+      }
       return { error: Error.connection(url, cause as SqliteError) };
     }
   });
@@ -294,6 +302,7 @@ export const open = async <Subject extends MemorySpace>({
     addMemoryAttributes(span, { operation: "open" });
     span.setAttribute("space.url", url.toString());
 
+    let database = null;
     try {
       const result = readAddress(url);
       if (result.error) {
@@ -302,13 +311,23 @@ export const open = async <Subject extends MemorySpace>({
       const { address, subject } = result.ok;
       span.setAttribute("space.subject", subject);
 
-      const database = await new Database(address ?? ":memory:", {
+      database = await new Database(address ?? ":memory:", {
         create: true,
       });
       database.exec(PREPARE);
       const session = new Space(subject as Subject, database);
       return { ok: session };
     } catch (cause) {
+      // Ensure we close the database if it was opened but failed later
+      if (database) {
+        try {
+          database.close();
+        } catch (closeError) {
+          // Just log the close error, but return the original error
+          console.error("Failed to close database after error:", closeError);
+          span.setAttribute("space.close_error", true);
+        }
+      }
       return { error: Error.connection(url, cause as SqliteError) };
     }
   });
