@@ -1,11 +1,23 @@
 import { css, html, LitElement, PropertyValues } from "lit";
-import { customElement, property } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
 import * as IPC from "./ipc.ts";
 import { getIframeContextHandler } from "./context.ts";
 import OuterFrame from "./outer-frame.ts";
+import {
+  HealthCheck,
+  HealthCheckAbort,
+  HealthCheckTimeout,
+} from "./health-check.ts";
+import { sleep } from "@commontools/utils/sleep";
 
 let FRAME_IDS = 0;
+
+// Delay, in ms, after starting page load before
+// health checks result in freezing content.
+const HEALTH_CHECK_LOAD_DELAY = 5000;
+// The time frame, in ms, that content must respond to within
+// in order to pass the health check.
+const HEALTH_CHECK_TIMEOUT = 100;
 
 // @summary A sandboxed iframe to execute arbitrary scripts.
 // @tag common-iframe-sandbox
@@ -44,6 +56,8 @@ export class CommonIframeSandboxElement extends LitElement {
   private iframeRef: Ref<HTMLIFrameElement> = createRef();
   private initialized: boolean = false;
   private subscriptions: Map<string, any> = new Map();
+  // Timestamp of when the inner frame was loaded.
+  private pageLoadTimestamp: number = 0;
 
   // Called when the outer frame emits
   // `IPCGuestMessageType.Ready`, only once, upon
@@ -80,6 +94,10 @@ export class CommonIframeSandboxElement extends LitElement {
 
     switch (outerMessage.type) {
       case IPC.IPCGuestMessageType.Load: {
+        this.pageLoadTimestamp = performance.now();
+        if (this.contentSupportsHealthCheck()) {
+          this.requestHealthCheck();
+        }
         this.dispatchEvent(new CustomEvent("load"));
         return;
       }
@@ -205,9 +223,7 @@ export class CommonIframeSandboxElement extends LitElement {
         const promise = IframeHandler.onLLMRequest(this.context, payload);
         const instanceId = this.instanceId;
         promise.then((result: object) => {
-          if (this.instanceId !== instanceId) {
-            // Inner frame was reloaded. This LLM response was
-            // from a previous page. Abort.
+          if (!this.ensureSameDocument(instanceId)) {
             return;
           }
           this.toGuest({
@@ -221,9 +237,7 @@ export class CommonIframeSandboxElement extends LitElement {
             },
           });
         }, (error: any) => {
-          if (this.instanceId !== instanceId) {
-            // Inner frame was reloaded. This LLM response was
-            // from a previous page. Abort.
+          if (!this.ensureSameDocument(instanceId)) {
             return;
           }
           this.toGuest({
@@ -254,9 +268,7 @@ export class CommonIframeSandboxElement extends LitElement {
           error = e;
         }
 
-        if (this.instanceId !== instanceId) {
-          // Inner frame was reloaded. This response was
-          // from a previous page. Abort.
+        if (!this.ensureSameDocument(instanceId)) {
           return;
         }
 
@@ -276,9 +288,7 @@ export class CommonIframeSandboxElement extends LitElement {
       case IPC.GuestMessageType.Perform: {
         const instanceId = this.instanceId;
         IframeHandler.onPerform(this.context, message.data).then((result) => {
-          if (this.instanceId !== instanceId) {
-            // Inner frame was reloaded. This response was
-            // from a previous page. Abort.
+          if (!this.ensureSameDocument(instanceId)) {
             return;
           }
 
@@ -292,6 +302,14 @@ export class CommonIframeSandboxElement extends LitElement {
             },
           });
         });
+        return;
+      }
+      case IPC.GuestMessageType.Pong: {
+        if (!this.healthCheck) {
+          return;
+        }
+
+        this.healthCheck.tryFulfill(message.data);
       }
     }
   }
@@ -316,6 +334,79 @@ export class CommonIframeSandboxElement extends LitElement {
     });
   }
 
+  private healthCheck?: HealthCheck;
+
+  private async requestHealthCheck() {
+    if (this.healthCheck) {
+      this.healthCheck.abort();
+      this.healthCheck = undefined;
+    }
+
+    const instanceId = this.instanceId;
+
+    const startJitter = performance.now();
+    // Wait between 100-500ms to schedule
+    // the next health check to avoid janky cycles.
+    const jitter = 100 + (Math.random() * 400);
+    await sleep(jitter);
+
+    // If the jitter took longer than expected by HEALTH_CHECK_TIMEOUT,
+    // the inner frame could have blocked the main thread while waiting
+    // on jitter. We see this in Firefox.
+    // Using iframes with different domains should run this in a separate thread,
+    // but as we're using srcdoc iframe, it's likely to always block main thread here.
+    if ((performance.now() - startJitter) > jitter + HEALTH_CHECK_TIMEOUT) {
+      this.onHealthCheckFailure(new HealthCheckTimeout());
+    }
+
+    if (!this.ensureSameDocument(instanceId)) {
+      return;
+    }
+
+    this.healthCheck = new HealthCheck(HEALTH_CHECK_TIMEOUT);
+    this.healthCheck.result().then(
+      () => this.requestHealthCheck(),
+      (e) => this.onHealthCheckFailure(e),
+    );
+
+    this.toGuest({
+      id: this.frameId,
+      type: IPC.IPCHostMessageType.Passthrough,
+      data: {
+        type: IPC.HostMessageType.Ping,
+        data: this.healthCheck.nonce,
+      },
+    });
+  }
+
+  private onHealthCheckFailure(e: Error) {
+    // Ignore aborted health checks.
+    if (e.name === HealthCheckAbort.prototype.name) {
+      return;
+    }
+
+    // Ignore if health checks fail near page load -- let
+    // things settle a bit, and queue up another check.
+    if (
+      (performance.now() - this.pageLoadTimestamp) < HEALTH_CHECK_LOAD_DELAY
+    ) {
+      this.requestHealthCheck();
+      return;
+    }
+
+    this.toGuest({
+      id: this.frameId,
+      type: IPC.IPCHostMessageType.Freeze,
+    });
+  }
+
+  // This is to be called with the `instanceId` of a request
+  // after an async boundary to ensure the inner frame
+  // was not reloaded.
+  private ensureSameDocument(instanceId: number): boolean {
+    return this.instanceId === instanceId;
+  }
+
   private notifySubscribers(key: string, value: any) {
     const response: IPC.IPCHostMessage = {
       id: this.frameId,
@@ -330,6 +421,14 @@ export class CommonIframeSandboxElement extends LitElement {
 
   private toGuest(event: IPC.IPCHostMessage) {
     this.iframeRef.value?.contentWindow?.postMessage(event, "*");
+  }
+
+  // In lieu of versioning, check the content to see
+  // if there is a ping handler; otherwise, older charms
+  // will always fail health check, as it cannot respond
+  // to the ping.
+  private contentSupportsHealthCheck() {
+    return /\<PING-HANDLER\>/.test(this.src);
   }
 
   private boundOnMessage = this.onMessage.bind(this);
