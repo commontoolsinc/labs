@@ -3,6 +3,9 @@
 // Configuration (you can move these to a config file)
 const REPO_PATH = Deno.cwd(); // Assumes script is run from repo root
 const BRANCH_PREFIX = "fix/claude-";
+// Define temporary files path to exclude from git
+const PROMPT_FILE = `${REPO_PATH}/.claude-prompt.tmp`;
+const PR_DESC_FILE = `${REPO_PATH}/.pr-desc.tmp`;
 
 interface GitHubIssue {
   number: number;
@@ -135,8 +138,7 @@ Explain your approach and any considerations.
 `;
 
     // Store prompt to a temporary file for reference
-    const promptFile = `${REPO_PATH}/.claude-prompt.tmp`;
-    await Deno.writeTextFile(promptFile, fixPrompt);
+    await Deno.writeTextFile(PROMPT_FILE, fixPrompt);
 
     // Invoke Claude Code to fix the issue
     console.log("Invoking Claude Code to analyze and fix the issue...");
@@ -205,6 +207,25 @@ Keep your response focused on the technical details that would be useful in a PR
       console.warn("Warning: Failed to generate PR summary, using default");
     }
 
+    // Write PR description to a temporary file
+    const prDescription = `
+Fixes #${issue.number}
+
+${prSummary}
+
+This PR was created with Claude Code assistance.
+`;
+    await Deno.writeTextFile(PR_DESC_FILE, prDescription);
+
+    // Create a gitignore for temp files before committing
+    console.log("Ensuring temporary files are not committed...");
+
+    // Add temp files to .gitignore for this commit only
+    const gitIgnoreCmd = new Deno.Command("git", {
+      args: ["update-index", "--skip-worktree", PROMPT_FILE, PR_DESC_FILE],
+    });
+    await gitIgnoreCmd.output();
+
     // Commit the changes
     const commitMessage = `Fix #${issue.number}: ${issue.title}`;
     await new Deno.Command("git", { args: ["add", "."] }).output();
@@ -213,17 +234,6 @@ Keep your response focused on the technical details that would be useful in a PR
 
     // Create the PR
     console.log("Creating PR...");
-    const prDescription = `
-Fixes #${issue.number}
-
-${prSummary}
-
-This PR was created with Claude Code assistance.
-`;
-
-    const prDescFile = `${REPO_PATH}/.pr-desc.tmp`;
-    await Deno.writeTextFile(prDescFile, prDescription);
-
     const prProcess = new Deno.Command("gh", {
       args: [
         "pr",
@@ -231,7 +241,7 @@ This PR was created with Claude Code assistance.
         "--title",
         commitMessage,
         "--body-file",
-        prDescFile,
+        PR_DESC_FILE,
       ],
       stdin: "inherit",
       stdout: "inherit",
@@ -239,10 +249,15 @@ This PR was created with Claude Code assistance.
     });
     await prProcess.output();
 
+    // Unset the skip-worktree flag
+    await new Deno.Command("git", {
+      args: ["update-index", "--no-skip-worktree", PROMPT_FILE, PR_DESC_FILE],
+    }).output();
+
     // Clean up temporary files
     try {
-      await Deno.remove(promptFile);
-      await Deno.remove(prDescFile);
+      await Deno.remove(PROMPT_FILE);
+      await Deno.remove(PR_DESC_FILE);
     } catch (error) {
       console.error("Error cleaning up temporary files:", error);
     }

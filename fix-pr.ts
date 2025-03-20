@@ -204,7 +204,8 @@ async function main() {
       return commentText;
     }).join("\n");
 
-    // Prepare prompt for Claude Code
+    // Create a temporary file for the prompt
+    const promptFileName = ".claude-prompt-pr.tmp";
     const prompt = `
 I need help applying fixes suggested in code review comments for PR #${prNumber}.
 Here are the review comments with suggestions:
@@ -215,10 +216,13 @@ Please provide the exact code changes needed to address these review comments.
 Focus only on implementing the specific suggestions mentioned in the comments.
 `;
 
+    // Write the prompt to a temporary file
+    await Deno.writeTextFile(promptFileName, prompt);
+
     // Invoke Claude Code to implement the fixes
     console.log("Asking Claude Code to apply the suggested fixes...");
     const claudeProcess = new Deno.Command("claude", {
-      args: [prompt],
+      args: [promptFileName],
       stdin: "inherit",
       stdout: "inherit",
       stderr: "inherit",
@@ -233,6 +237,16 @@ Focus only on implementing the specific suggestions mentioned in the comments.
     // Read a line from stdin
     const buf = new Uint8Array(1024);
     await Deno.stdin.read(buf);
+
+    // Remove temporary prompt file
+    try {
+      await Deno.remove(promptFileName);
+    } catch (e) {
+      console.warn(
+        `Warning: Could not remove temporary file ${promptFileName}`,
+        e,
+      );
+    }
 
     // Commit the changes
     console.log("Committing changes...");
