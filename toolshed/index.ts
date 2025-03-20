@@ -6,13 +6,15 @@ import { storage } from "@commontools/runner";
 import { memory } from "@/routes/storage/memory.ts";
 
 // Initialize storage with signer
+// FIXME(ja): should we do this even on memory-only toolsheds?
 const initializeStorage = async () => {
   try {
     console.log("Initializing storage signer...");
     const signer = await Identity.fromPassphrase(env.IDENTITY_PASSPHRASE);
     storage.setSigner(signer);
-    storage.setRemoteStorage(new URL(env.MEMORY_URL));
     console.log("Storage signer initialized successfully");
+    storage.setRemoteStorage(new URL(env.MEMORY_URL));
+    console.log("Configured to remote storage:", env.MEMORY_URL);
   } catch (error) {
     console.error("Failed to initialize storage signer:", error);
     throw error;
@@ -69,8 +71,9 @@ const handleShutdown = async () => {
 };
 
 // Start server with the abort controller
-function startServer() {
+async function startServer() {
   console.log(`Server is starting on port http://${env.HOST}:${env.PORT}`);
+  await initializeStorage();
 
   Sentry.init({
     dsn: env.SENTRY_DSN,
