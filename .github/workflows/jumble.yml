@@ -28,7 +28,7 @@ jobs:
           VITE_STORAGE_TYPE: "remote"
           TOOLSHED_API_URL: ${{ secrets.TOOLSHED_API_URL }}
           VITE_TOOLSHED_API_URL: ${{ secrets.TOOLSHED_API_URL }}
-          VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
           VITE_ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}
           VITE_COMMIT_SHA: ${{ github.sha }}
           VITE_BUILD_SOURCEMAPS: "true"
