@@ -410,6 +410,13 @@ function createRegularCell<T>(
 
       // Append the new values to the array.
       diffAndUpdate(ref, [...array, ...valuesToWrite], log, cause);
+
+      // Hacky retry logic for push only. See storage.ts for details on this
+      // retry approach and what we should really be doing instead.
+      if (!ref.cell.retry) ref.cell.retry = [];
+      ref.cell.retry.push((newBaseValue: any[]) =>
+        diffAndUpdate(ref, [...newBaseValue, ...valuesToWrite], log, cause)
+      );
     },
     equals: (other: Cell<any>) =>
       JSON.stringify(self) === JSON.stringify(other),

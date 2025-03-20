@@ -15,6 +15,7 @@ import { VolatileStorageProvider } from "./storage/volatile.ts";
 import { Signer } from "@commontools/identity";
 import { isBrowser } from "@commontools/utils/env";
 import { sleep } from "@commontools/utils/sleep";
+import { TransactionResult } from "@commontools/memory";
 
 export function log(fn: () => any[]) {
   debug(() => {
@@ -613,6 +614,14 @@ class StorageImpl implements Storage {
         .map(({ doc }) => [doc, this.writeValues.get(doc)!]),
     );
 
+    // Transfer retry callbacks into this storage job, clear them in the doc
+    storageJobs.forEach((value, doc) => {
+      if (doc.retry?.length) {
+        value.retry = doc.retry;
+        doc.retry = [];
+      }
+    });
+
     // Reset batch: Everything coming in now will be processed in the next round
     const currentResolve = this.currentBatchResolve;
     this.currentBatch = [];
@@ -644,7 +653,7 @@ class StorageImpl implements Storage {
     // Sort storage jobs by space
     const storageJobsBySpace = new Map<
       string,
-      { entityId: EntityId; value: any }[]
+      { entityId: EntityId; value: StorageValue }[]
     >();
     storageJobs.forEach((value, doc) => {
       const space = doc.space;
@@ -654,14 +663,114 @@ class StorageImpl implements Storage {
 
     // Write all storage jobs to storage, in parallel
     await Promise.all(
-      Array.from(storageJobsBySpace.keys()).map((space) =>
-        this._getStorageProviderForSpace(space).send(
-          storageJobsBySpace.get(space)!.map(({ entityId, value }) => ({
-            entityId,
-            value,
-          })),
-        )
-      ),
+      storageJobsBySpace.entries().map(([space, jobs]) => {
+        const storage = this._getStorageProviderForSpace(space);
+
+        // This is a violating abstractions as it's specific to remote storage.
+        // Most of storage.ts should eventually be refactored away between what
+        // docs do and remote storage does.
+        //
+        // Also, this is a hacky version to do retries, and what we instead want
+        // is a coherent concept of a transaction across the stack, all the way
+        // to scheduler, tied to events, etc. and then retry logic will happen
+        // at that level.
+        //
+        // So consider the below a hack to implement transaction retries just
+        // for Cell.push, to solve some short term pain around loosing charms
+        // when the charm list is being updated.
+
+        const updatesFromRetry: [DocImpl<any>, StorageValue][] = [];
+        let retries = 0;
+        function retryOnConflict(
+          result: Awaited<ReturnType<typeof storage.send>>,
+        ) {
+          const txResult = result as Awaited<TransactionResult>;
+          if (txResult.error?.name === "ConflictError") {
+            if (retries++ > 100) {
+              console.error("too many retries on conflict");
+              return result;
+            }
+
+            // If nothing in the job has a way to retry, give up
+            if (!jobs.some((job) => job.value.retry?.length)) return result;
+
+            const conflict = txResult.error.conflict;
+
+            let conflictJob;
+            for (const job of jobs) {
+              if (
+                RemoteStorageProvider.toEntity(job.entityId) === conflict.of
+              ) {
+                conflictJob = job;
+                break;
+              }
+            }
+
+            if (!conflictJob) {
+              console.warn(
+                "no conflicting job found. that should not happen.",
+                conflict.of,
+              );
+              return result;
+            }
+
+            // If there is no way to retry, give up
+            if (conflictJob.value.retry?.length) {
+              // Retry with new value
+              const newBaseValue: StorageValue =
+                conflict.actual?.is as unknown as StorageValue ?? {};
+
+              try {
+                // Apply changes again
+                const newValue = conflictJob.value.retry.reduce(
+                  (acc, curr) => ({
+                    ...acc,
+                    value: curr(acc),
+                  }),
+                  newBaseValue ?? {} as StorageValue,
+                );
+
+                updatesFromRetry.push([
+                  getDocByEntityId(space, conflictJob.entityId)!,
+                  newValue,
+                ]);
+
+                // Replace job with new value
+                jobs[jobs.indexOf(conflictJob)] = {
+                  ...conflictJob,
+                  value: newValue,
+                };
+              } catch (e) {
+                console.error("error applying retry", e);
+                return result;
+              }
+            } else {
+              // Fallback: Remove offending transaction
+              // NOTE: The new value will arrive via subscribeToChanges
+              jobs.splice(jobs.indexOf(conflictJob), 1);
+            }
+
+            return storage.send(jobs);
+          }
+
+          return result;
+        }
+
+        return storage.send(jobs).then((result) =>
+          result.error &&
+            (result as Awaited<TransactionResult>).error?.name ===
+              "ConflictError"
+            ? retryOnConflict(result)
+            : result
+        ).then((result) => {
+          if (result.ok) {
+            // Apply updates from retry, if transaction ultimately succeeded
+            updatesFromRetry.forEach(([doc, value]) =>
+              this._batchForDoc(doc, value.value, value.source)
+            );
+          }
+        });
+      }),
     );
 
     // Finally, clear and resolve loading promise for all loaded cells
