@@ -17,7 +17,11 @@ let FRAME_IDS = 0;
 const HEALTH_CHECK_LOAD_DELAY = 5000;
 // The time frame, in ms, that content must respond to within
 // in order to pass the health check.
-const HEALTH_CHECK_TIMEOUT = 100;
+//
+// Should be rather low, but currently it's too likely for a
+// charm to spend a lot of time processing. Consider
+// forcing different processes for iframes in the future!
+const HEALTH_CHECK_TIMEOUT = 3000;
 
 // @summary A sandboxed iframe to execute arbitrary scripts.
 // @tag common-iframe-sandbox
