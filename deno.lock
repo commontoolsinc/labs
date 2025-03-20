@@ -75,6 +75,7 @@
     "npm:@scalar/hono-api-reference@~0.5.165": "0.5.184_hono@4.7.4",
     "npm:@scure/bip39@^1.5.4": "1.5.4",
     "npm:@sentry/deno@^9.3.0": "9.5.0",
+    "npm:@sentry/react@^9.7.0": "9.7.0_react@18.3.1",
     "npm:@shoelace-style/shoelace@^2.19.1": "2.20.0_@types+react@18.3.18",
     "npm:@tailwindcss/typography@~0.5.16": "0.5.16_tailwindcss@4.0.13",
     "npm:@tailwindcss/vite@^4.0.1": "4.0.13_vite@6.2.1__@types+node@22.12.0__lightningcss@1.29.2_@types+node@22.12.0_lightningcss@1.29.2",
@@ -2131,6 +2132,42 @@
         "@scure/base"
       ]
     },
+    "@sentry-internal/browser-utils@9.7.0": {
+      "integrity": "sha512-1wVd8mCvbeGs3wSDZFYQ9RE8I8Ii8iQ2wnHKbONk645RIT6FwSCPHlnFKWYSFVxo85Wm6SFbKcv1zvTNXUVhfQ==",
+      "dependencies": [
+        "@sentry/core@9.7.0"
+      ]
+    },
+    "@sentry-internal/feedback@9.7.0": {
+      "integrity": "sha512-Ld51wOfXYO90++ZGBuVF/5PAMBnVWFfvvleXRgA9VaL2hq296+tLXYVccHTgH+dZmwjJgsybDAxHdj+k1FFnmw==",
+      "dependencies": [
+        "@sentry/core@9.7.0"
+      ]
+    },
+    "@sentry-internal/replay-canvas@9.7.0": {
+      "integrity": "sha512-E/XESnVLV+CUyrucrxK2kHpEKTDrz7LTBwjnt3FDHA8MfwMRX+np0sYjvcIRWAG4xxBOYBGlWD2+n0Y2pqYa2Q==",
+      "dependencies": [
+        "@sentry-internal/replay",
+        "@sentry/core@9.7.0"
+      ]
+    },
+    "@sentry-internal/replay@9.7.0": {
+      "integrity": "sha512-JOwwqe3JtcbkvC/hM7qr1x40lk3K5zm8r2HHVKVLzrf6cAuLF9x17R7h+0cDOHcilacbtIQQ9Fjjb63a1/iDLQ==",
+      "dependencies": [
+        "@sentry-internal/browser-utils",
+        "@sentry/core@9.7.0"
+      ]
+    },
+    "@sentry/browser@9.7.0": {
+      "integrity": "sha512-G2AZuWAfatv30rFWYcbAZNnty9826ld8k+EucYLtDGN0uBdHXX9XT/x7/C8dprtV16jGWzrfvMza8C7Z4uj8BA==",
+      "dependencies": [
+        "@sentry-internal/browser-utils",
+        "@sentry-internal/feedback",
+        "@sentry-internal/replay",
+        "@sentry-internal/replay-canvas",
+        "@sentry/core@9.7.0"
+      ]
+    },
     "@sentry/core@8.9.2": {
       "integrity": "sha512-ixm8NISFlPlEo3FjSaqmq4nnd13BRHoafwJ5MG+okCz6BKGZ1SexEggP42/QpGvDprUUHnfncG6WUMgcarr1zA==",
       "dependencies": [
@@ -2141,10 +2178,22 @@
     "@sentry/core@9.5.0": {
       "integrity": "sha512-NMqyFdyg26ECAfnibAPKT8vvAt4zXp4R7dYtQnwJKhEJEVkgAshcNYeJ2D95ZLMVOqlqhTtTPnw1vqf+v9ePZg=="
     },
+    "@sentry/core@9.7.0": {
+      "integrity": "sha512-EprjtU7F6eltB4Nx8fzWFXsfAC/6yNGuKo2bHKeIAmNufjD0X4ifz+iB3d0pKuwsn9jQbLrQTIGwKdTO3dstFw=="
+    },
     "@sentry/deno@9.5.0": {
       "integrity": "sha512-YGFcCY8hWYeZ/U6MK7SVx9k4++F8HbXtQBv6yMO6xzyobfFrZD3MpBD+47tV8Mu9z3F6v7o6BkNjMXNVvWlYFg==",
       "dependencies": [
         "@sentry/core@9.5.0"
+      ]
+    },
+    "@sentry/react@9.7.0_react@18.3.1": {
+      "integrity": "sha512-qD3Jb1/fvofdw5+aC/ARJNu1lVO6Ndoma15V+jjKH+rBaYAXftkboUvhTzvpAM8o1tw3jbioJDQlmIHehUzjzg==",
+      "dependencies": [
+        "@sentry/browser",
+        "@sentry/core@9.7.0",
+        "hoist-non-react-statics",
+        "react"
       ]
     },
     "@sentry/types@8.9.2": {
@@ -4383,6 +4432,12 @@
     },
     "hls.js@1.5.20": {
       "integrity": "sha512-uu0VXUK52JhihhnN/MVVo1lvqNNuhoxkonqgO3IpjvQiGpJBdIXMGkofjQb/j9zvV7a1SW8U9g1FslWx/1HOiQ=="
+    },
+    "hoist-non-react-statics@3.3.2": {
+      "integrity": "sha512-/gGivxi8JPKWNm/W0jSmzcMPpfpPLc3dY/6GxhX2hQ9iGj3aDfklV4ET7NjKpSinLpJ5vafa9iiGIEZg10SfBw==",
+      "dependencies": [
+        "react-is"
+      ]
     },
     "hono-pino@0.7.2_hono@4.7.4_pino@9.6.0": {
       "integrity": "sha512-uLJOngId4Ia2eHXnCPE8xpyMVkh+AGxAkHZKgvZk8YkmuTbcVDDUMe7aHMEz+YLqCDgd/Hk9ytVmmoQ8QTUXgQ==",
@@ -6920,6 +6975,7 @@
           "npm:@react-spring/web@^9.7.5",
           "npm:@react-three/drei@^9.121.4",
           "npm:@react-three/fiber@^8.17.14",
+          "npm:@sentry/react@^9.7.0",
           "npm:@tailwindcss/typography@~0.5.16",
           "npm:@tailwindcss/vite@^4.0.1",
           "npm:@types/node@^22.12.0",
