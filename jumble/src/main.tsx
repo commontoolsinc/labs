@@ -3,7 +3,8 @@ import { createRoot } from "react-dom/client";
 import { onError } from "@commontools/runner";
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
 // Import Sentry browser SDK for Deno environment
-import * as Sentry from "npm:@sentry/browser";
+import * as Sentry from "@sentry/browser";
+import { ErrorBoundary } from "@sentry/react";
 import "./styles/index.css";
 import Shell from "@/views/Shell.tsx";
 import { CharmsProvider } from "@/contexts/CharmsContext.tsx";
@@ -52,7 +53,7 @@ onError((error) => {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Sentry.ErrorBoundary fallback={<div>An error has occurred</div>}>
+    <ErrorBoundary fallback={<div>An error has occurred</div>}>
       <AuthenticationProvider>
         <CharmsProvider>
           <ActionManagerProvider>
@@ -111,6 +112,6 @@ createRoot(document.getElementById("root")!).render(
           </ActionManagerProvider>
         </CharmsProvider>
       </AuthenticationProvider>
-    </Sentry.ErrorBoundary>
+    </ErrorBoundary>
   </StrictMode>,
 );
