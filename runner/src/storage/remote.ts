@@ -7,6 +7,9 @@ import type {
   MemorySpace,
   Protocol,
   Query,
+  Result,
+  Subscribe,
+  Transaction,
   UCAN,
 } from "@commontools/memory/interface";
 import * as Memory from "@commontools/memory/consumer";
@@ -178,15 +181,6 @@ export class RemoteStorageProvider implements StorageProvider {
 
         // store subscription so it can be reused.
         local.remote.set(of, subscription);
-
-        // Log subscription creation to inspector
-        this.inspect({
-          subscription: {
-            entity: of,
-            subscriberCount: subscription.subscribers.size,
-            totalSubscriptions: local.remote.size,
-          },
-        });
       }
     }
 
@@ -274,18 +268,7 @@ export class RemoteStorageProvider implements StorageProvider {
 
     const transaction = { changes: Changes.from(facts) };
 
-    this.inspect({ transact: transaction });
-
     const result = await memory.transact(transaction);
-    // Report memory state metrics after transaction
-    this.inspect({
-      commit: {
-        result: result,
-        spaces: this.state.size,
-        subscriptions: remote.size,
-        localChanges: local.size,
-      },
-    });
 
     // Once we have a result of the transaction we clear out local facts we
     // created, we need to do this otherwise subsequent transactions will
@@ -332,7 +315,7 @@ export class RemoteStorageProvider implements StorageProvider {
   ): T {
     this.inspector?.postMessage({
       ...message,
-      timestamp: new Date().toISOString(),
+      time: Date.now(),
     });
     return message;
   }
@@ -390,9 +373,9 @@ export class RemoteStorageProvider implements StorageProvider {
 
   onTimeout(socket: WebSocket) {
     this.inspect({
-      timeout: {
-        connectionStatus: "timeout",
-        description:
+      disconnect: {
+        reason: "timeout",
+        message:
           `Aborting connection after failure to connect in ${this.settings.connectionTimeout}ms`,
       },
     });
@@ -407,10 +390,7 @@ export class RemoteStorageProvider implements StorageProvider {
 
     // Report connection to inspector
     this.inspect({
-      connected: {
-        connectionStatus: "connected",
-        connectionCount: this.connectionCount,
-      },
+      connect: { attempt: this.connectionCount },
     });
 
     // If we did have connection
@@ -454,7 +434,6 @@ export class RemoteStorageProvider implements StorageProvider {
   post(
     invocation: Memory.UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>,
   ) {
-    this.inspect({ invoke: invocation });
     this.connection!.send(Codec.UCAN.toString(invocation));
   }
 
@@ -465,9 +444,9 @@ export class RemoteStorageProvider implements StorageProvider {
     if (this.connection === socket) {
       // Report disconnection to inspector
       this.inspect({
-        disconnected: {
-          connectionStatus: "disconnected",
+        disconnect: {
           reason: event.type,
+          description: `Disconnected because of the ${event.type}`,
         },
       });
 
@@ -548,6 +527,7 @@ export interface Subscriber {
 class Subscription<Space extends MemorySpace> {
   reader!: ReadableStreamDefaultReader;
   query!: Memory.QueryView<Space, Protocol<Space>>;
+  subscription!: ReturnType<typeof this.query.subscribe>;
 
   static spawn<Space extends MemorySpace>(
     session: Memory.MemorySpaceSession<Space>,
@@ -567,9 +547,10 @@ class Subscription<Space extends MemorySpace> {
 
   connect() {
     const query = this.session.query(this.selector);
-    const reader = query.subscribe().getReader();
+    const subscription = query.subscribe();
     this.query = query;
-    this.reader = reader;
+    this.subscription = subscription;
+    this.reader = subscription.getReader();
 
     // TODO(gozala): Need to do this cleaner, but for now we just
     // broadcast when query returns so cell circuitry picks up changes.
@@ -584,11 +565,21 @@ class Subscription<Space extends MemorySpace> {
     return this.query.facts[0];
   }
 
+  inspect<T>(
+    message: T,
+  ): T {
+    this.inspector?.postMessage({
+      ...message,
+      time: Date.now(),
+    });
+    return message;
+  }
+
   broadcast() {
     const { value } = this;
     this.inspector?.postMessage({
-      update: {
-        query: this.query.invocation,
+      integrate: {
+        url: this.subscription.toURL(),
         value,
       },
     });

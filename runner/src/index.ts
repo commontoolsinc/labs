@@ -11,6 +11,7 @@ export type { DocImpl } from "./doc.ts";
 export type { Cell, CellLink, Stream } from "./cell.ts";
 export type { QueryResult } from "./query-result-proxy.ts";
 export type { ReactivityLog } from "./scheduler.ts";
+export * as StorageInspector from "./storage/inspector.ts";
 export { getDoc, isDoc } from "./doc.ts";
 export {
   getCell,

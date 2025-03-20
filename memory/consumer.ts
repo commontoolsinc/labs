@@ -407,7 +407,7 @@ class QueryView<
     const subscription = new QuerySubscriptionInvocation(this);
     this.session.execute(subscription);
 
-    return subscription.readable;
+    return subscription;
   }
 }
 
@@ -494,5 +494,25 @@ class QuerySubscriptionInvocation<
   }
   integrate(differential: Selection<Space>) {
     this.controller?.enqueue(differential);
+  }
+
+  getReader() {
+    return this.readable.getReader();
+  }
+
+  async *[Symbol.asyncIterator]() {
+    const reader = this.getReader();
+    try {
+      while (true) {
+        const next = await reader.read();
+        if (next.done) {
+          break;
+        } else {
+          yield next.value;
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
   }
 }
