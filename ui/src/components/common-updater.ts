@@ -9,6 +9,8 @@ export class CommonUpdaterElement extends LitElement {
         --button-background: #000;
         --button-color: #fff;
         --button-height: 40px;
+        --button-success-background: #2e7d32;
+        --button-error-background: #d32f2f;
         display: block;
       }
 
@@ -32,12 +34,31 @@ export class CommonUpdaterElement extends LitElement {
         text-wrap: nowrap;
         width: 100%;
       }
+
+      .button[data-state="pending"] {
+        cursor: wait;
+        opacity: 0.7;
+      }
+
+      .button[data-state="success"] {
+        background-color: var(--button-success-background);
+      }
+
+      .button[data-state="error"] {
+        background-color: var(--button-error-background);
+      }
     `,
   ];
   declare state: Cell<any>;
   declare integration: string;
+  private updateState: "idle" | "pending" | "success" | "error" = "idle";
 
-  private handleClick() {
+  private async handleClick() {
+    if (this.updateState === "pending") return;
+
+    this.updateState = "pending";
+    this.requestUpdate();
+
     const charmId = globalThis.location.pathname.split("/")[2];
     const cleanCharmId = charmId?.split(/[-?/]/)[0];
     const space = this.state.getAsCellLink().space;
@@ -46,18 +67,49 @@ export class CommonUpdaterElement extends LitElement {
       space,
       integration: this.integration!,
     };
-    console.log("payload", payload);
 
-    fetch(`/api/integrations/bg`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }).then((res) => res.json()).then(console.log);
+    try {
+      const response = await fetch(`/api/integrations/bg`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+
+      if (result.success) {
+        this.updateState = "success";
+      } else {
+        console.log("updater error", result);
+        this.updateState = "error";
+      }
+    } catch (error) {
+      console.log("updater error", error);
+      this.updateState = "error";
+    }
+
+    this.requestUpdate();
+
+    // Reset state after 3 seconds
+    setTimeout(() => {
+      this.updateState = "idle";
+      this.requestUpdate();
+    }, 3000);
   }
 
   override render() {
+    const buttonText = {
+      idle: "Register Charm for Updates",
+      pending: "Registering...",
+      success: "Successfully Registered!",
+      error: "Registration Failed",
+    }[this.updateState];
+
     return html`
-      <button class="button" @click=${this.handleClick}>
-        Register Charm for Updates
+      <button 
+        class="button" 
+        @click=${this.handleClick}
+        data-state=${this.updateState}
+      >
+        ${buttonText}
       </button>
     `;
   }

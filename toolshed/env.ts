@@ -91,6 +91,9 @@ const EnvSchema = z.object({
 
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),
+
+  // Identity signer passphrase for storage authentication
+  IDENTITY_PASSPHRASE: z.string().default("implicit trust"),
 });
 
 export type env = z.infer<typeof EnvSchema>;
