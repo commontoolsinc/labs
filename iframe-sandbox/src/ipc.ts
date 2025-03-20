@@ -257,8 +257,7 @@ export function isGuestMessage(message: any): message is GuestMessage {
     case GuestMessageType.Write: {
       return Array.isArray(message.data) &&
         message.data.length === 2 &&
-        typeof message.data[0] === "string" &&
-        message.data[1] != null;
+        typeof message.data[0] === "string";
     }
     case GuestMessageType.Perform: {
       return isTaskPerform(message.data);
