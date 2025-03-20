@@ -19,8 +19,6 @@ function showHelp() {
     "A robust service for running charms in the background with health monitoring",
   );
   console.log("");
-  console.log("Usage: deno run -A cli.ts");
-  console.log("");
   console.log("env:");
   console.log(env);
   Deno.exit(0);
@@ -42,15 +40,7 @@ async function main() {
   // Open KV database
   const kv = await Deno.openKv(`${env.KV_STORE_DIR}/bg.sqlite`);
 
-  // Create service with merged config
-  const service = new BackgroundCharmService({
-    kv,
-    cycleIntervalMs: env.CYCLE_INTERVAL_MS,
-    maxConcurrentJobs: env.MAX_CONCURRENT_JOBS,
-    maxRetries: env.MAX_RETRIES,
-    logIntervalMs: env.LOG_INTERVAL_MS,
-    maxConsecutiveFailures: env.MAX_CONSECUTIVE_FAILURES,
-  });
+  const service = new BackgroundCharmService(kv);
 
   // Initialize service
   await service.initialize();

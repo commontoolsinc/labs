@@ -132,14 +132,3 @@ export interface ServiceStateEntry {
   // Version
   version: string;
 }
-
-// Service options
-export interface KVServiceOptions {
-  kv: Deno.Kv;
-  cycleIntervalMs?: number;
-  maxConcurrentJobs?: number;
-  maxRetries?: number;
-  charmTimeoutMs?: number;
-  logIntervalMs?: number;
-  maxConsecutiveFailures?: number;
-}
