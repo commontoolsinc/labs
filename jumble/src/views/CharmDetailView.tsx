@@ -278,9 +278,11 @@ function useCodeEditor(
     }
   }, [iframeRecipe, charm, showFullCode]);
 
-  const hasUnsavedChanges = showFullCode
-    ? workingSrc !== iframeRecipe?.src || workingSpec !== iframeRecipe?.spec
-    : injectUserCode(workingSrc ?? "") !== iframeRecipe?.src || workingSpec !== iframeRecipe?.spec;
+  const hasSourceChanges = showFullCode
+    ? workingSrc !== iframeRecipe?.src
+    : injectUserCode(workingSrc ?? "") !== iframeRecipe?.src;
+  const hasSpecChanges = workingSpec !== iframeRecipe?.spec;
+  const hasUnsavedChanges = hasSourceChanges || hasSpecChanges;
 
   const saveChanges = useCallback(() => {
     const src = showFullCode ? workingSrc : injectUserCode(workingSrc ?? "");
