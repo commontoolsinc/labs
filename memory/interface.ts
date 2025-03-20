@@ -734,12 +734,12 @@ export type LeafSelectorGroup = LeafSelector[];
 //   }
 // }
 export type LeafSelector = {
-  select: JSONSelector;
+  schema: JSONSelector;
 
   /**
    * Represents schema referenced by {@link SelfSelector}
    */
-  context: JSONSelector;
+  rootSchema: JSONSelector;
 };
 
 export type GraphSelectorConjunct = {
@@ -800,6 +800,7 @@ export type ObjectSelector = {
   properties?: Record<string, JSONSelector>;
   // If some match it means subset.
   additionalProperties?: boolean | JSONSelector;
+  required?: [string];
 };
 
 export type ArraySelector = {

@@ -1153,8 +1153,8 @@ test("list single fact with graph query", DB, async (session) => {
         _: {
           ["v"]: [
             {
-              select: { "type": "integer" },
-              context: {
+              schema: { "type": "integer" },
+              rootSchema: {
                 "type": "object",
                 "properties": { "v": { "type": "integer" } },
               },
@@ -1216,8 +1216,8 @@ test(
           _: {
             ["v"]: [
               {
-                select: { "type": "integer" },
-                context: {
+                schema: { "type": "integer" },
+                rootSchema: {
                   "type": "object",
                   "properties": { "v": { "type": "integer" } },
                 },
@@ -1271,7 +1271,7 @@ test(
       subject: space.did(),
       changes: Changes.from([v1]),
     });
-    const write = session.transact(tr);
+    const write = await session.transact(tr);
     assert(write.ok);
 
     const sampleGraphSelector: GraphSelector = {
@@ -1280,8 +1280,8 @@ test(
           _: {
             ["c"]: [
               {
-                select: { "type": "integer" },
-                context: {
+                schema: { "type": "integer" },
+                rootSchema: {
                   "type": "object",
                   "properties": { "c": { "type": "integer" } },
                 },
@@ -1304,6 +1304,74 @@ test(
 
     assertEquals(result, {
       ok: { [space.did()]: {} },
+    });
+  },
+);
+
+test(
+  "list single fact with graph query and schema filter using $ref",
+  DB,
+  async (session) => {
+    const v1 = Fact.assert({
+      the,
+      of: doc,
+      is: {
+        "name": "Bob",
+        "left": { "name": "Alice" },
+        "right": { "name": "Charlie " },
+      },
+    });
+    const tr = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v1]),
+    });
+    const write = await session.transact(tr);
+    assert(write.ok);
+
+    const sampleGraphSelector: GraphSelector = {
+      [doc]: {
+        [the]: {
+          _: {
+            ["left"]: [
+              {
+                schema: {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "left": { "$ref": "#" },
+                    "right": { "$ref": "#" },
+                  },
+                  "required": ["name"],
+                },
+                rootSchema: {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "left": { "$ref": "#" },
+                    "right": { "$ref": "#" },
+                  },
+                  "required": ["name"],
+                },
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const result = session.queryGraph({
+      cmd: "/memory/graph/query@0.1",
+      iss: alice.did(),
+      sub: space.did(),
+      args: {
+        select: sampleGraphSelector,
+      },
+      prf: [],
+    });
+
+    assertEquals(result, {
+      ok: { [space.did()]: Changes.from([v1]) },
     });
   },
 );

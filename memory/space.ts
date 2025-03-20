@@ -503,6 +503,7 @@ export const selectGraph = <Space extends MemorySpace>(
 };
 
 // Check whether this fact has anything matching our query
+// FIXME(@ubik2) need to handle aliases in here
 function checkFactMatch(
   fact: JSONValue | undefined,
   nodeSelector: NodeSelector,
@@ -519,34 +520,31 @@ function checkFactMatch(
     if (
       fact === undefined || fact === null || isString(fact) || isNumber(fact)
     ) {
-      // TODO: I'm not sure this is what I want. I want to see when an object was replaced
+      // TODO(@ubik2) I'm not sure this is what I want. I want to see when an object was replaced
       // with a primitive, because that nullifies the object.
+      // If I view these as must match, we shouldn't return these.
+      // For example, if my query expects a version property with type number, and
+      // and we set it to a string, we could just ignore it.
       return true;
     } else if (Array.isArray(fact)) {
       const branchEntries = Object.entries(nodeSelector);
       for (const [at, val] of branchEntries) {
         const numericKeyValue = new Number(at).valueOf();
-        if (!Number.isInteger(numericKeyValue)) {
-          // our branch wants a string property, but it's pointing at an array -- no match
-          continue;
-        } else {
-          if (
-            numericKeyValue >= 0 && numericKeyValue < fact.length &&
-            checkFactMatch(fact[numericKeyValue], val)
-          ) {
-            return true;
-          }
+        // our branch may want a string property, but if it's pointing at an array this is not a match
+        if (
+          Number.isInteger(numericKeyValue) &&
+          numericKeyValue >= 0 && numericKeyValue < fact.length &&
+          checkFactMatch(fact[numericKeyValue], val)
+        ) {
+          return true;
         }
       }
     } else if (isObject(fact)) {
       const factObj = fact as JSONObject;
       const branchEntries = Object.entries(nodeSelector);
       for (const [at, val] of branchEntries) {
-        if (at in factObj) {
-          // console.log("descending into ", at, factObj[at], val);
-          if (checkFactMatch(factObj[at], val)) {
-            return true;
-          }
+        if (at in factObj && checkFactMatch(factObj[at], val)) {
+          return true;
         }
       }
     }
@@ -560,8 +558,8 @@ function* collect(
   selector: NodeSelector,
 ): any {
   if (Array.isArray(selector)) {
-    for (const { select, context } of selector) {
-      switch (select.type) {
+    for (const { schema, rootSchema } of selector) {
+      switch (schema.type) {
         case "object": {
           break;
         }
@@ -569,8 +567,8 @@ function* collect(
           break;
         }
         case undefined: {
-          if (select.$ref) {
-          } else if (select.anyOf) {
+          if (schema.$ref) {
+          } else if (schema.anyOf) {
           } else {
           }
         }
