@@ -686,6 +686,10 @@ class StorageImpl implements Storage {
         ) {
           const txResult = result as Awaited<TransactionResult>;
           if (txResult.error?.name === "ConflictError") {
+            const conflict = txResult.error.conflict;
+
+            log(() => ["conflict", conflict]);
+
             if (retries++ > 100) {
               console.error("too many retries on conflict");
               return result;
@@ -693,8 +697,6 @@ class StorageImpl implements Storage {
 
             // If nothing in the job has a way to retry, give up
             if (!jobs.some((job) => job.value.retry?.length)) return result;
-
-            const conflict = txResult.error.conflict;
 
             let conflictJob;
             for (const job of jobs) {
@@ -717,18 +719,16 @@ class StorageImpl implements Storage {
             // If there is no way to retry, give up
             if (conflictJob.value.retry?.length) {
               // Retry with new value
-              const newBaseValue: StorageValue =
+              let newValue: StorageValue =
                 conflict.actual?.is as unknown as StorageValue ?? {};
 
               try {
                 // Apply changes again
-                const newValue = conflictJob.value.retry.reduce(
-                  (acc, curr) => ({
-                    ...acc,
-                    value: curr(acc),
-                  }),
-                  newBaseValue ?? {} as StorageValue,
-                );
+                conflictJob.value.retry.forEach((retry) => {
+                  newValue = { ...newValue, ...retry(newValue.value) };
+                });
+
+                log(() => ["retry with", newValue]);
 
                 updatesFromRetry.push([
                   getDocByEntityId(space, conflictJob.entityId)!,
