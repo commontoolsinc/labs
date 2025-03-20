@@ -2,7 +2,7 @@
   "tasks": {
     "dev": "deno run -A --node-modules-dir=auto npm:vite",
     "dev-local": "TOOLSHED_API_URL=http://localhost:8000 deno run -A --node-modules-dir=auto npm:vite",
-    "build": "deno run -A --node-modules-dir=auto npm:vite build",
+    "build": "VITE_BUILD_SOURCEMAPS=true deno run -A --node-modules-dir=auto npm:vite build",
     "preview": "deno run -A --node-modules-dir=auto npm:vite preview",
     "test": "echo 'No tests to run.'",
     "integration": "deno test -A ./integration/*.test.ts"
@@ -24,6 +24,7 @@
     "@react-spring/web": "npm:@react-spring/web@^9.7.5",
     "@react-three/drei": "npm:@react-three/drei@^9.121.4",
     "@react-three/fiber": "npm:@react-three/fiber@^8.17.14",
+    "@sentry/react": "npm:@sentry/react@^9.7.0",
     "@tailwindcss/typography": "npm:@tailwindcss/typography@^0.5.16",
     "@tailwindcss/vite": "npm:@tailwindcss/vite@^4.0.1",
     "@types/node": "npm:@types/node@^22.12.0",
