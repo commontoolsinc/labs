@@ -276,7 +276,7 @@ export const connect = async <Subject extends MemorySpace>({
       const { address, subject } = result.ok;
       span.setAttribute("space.subject", subject);
 
-      database = new Database(address ?? ":memory:", {
+      database = await new Database(address ?? ":memory:", {
         create: false,
       });
       database.exec(PREPARE);
@@ -311,7 +311,7 @@ export const open = async <Subject extends MemorySpace>({
       const { address, subject } = result.ok;
       span.setAttribute("space.subject", subject);
 
-      database = new Database(address ?? ":memory:", {
+      database = await new Database(address ?? ":memory:", {
         create: true,
       });
       database.exec(PREPARE);
