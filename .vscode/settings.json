@@ -7,5 +7,13 @@
   },
   "[typescriptreact]": {
     "editor.defaultFormatter": "denoland.vscode-deno"
-  }
+  },
+  "deno.disablePaths": [
+    "**/node_modules",
+    "**/.vite",
+    "**/dist",
+    "**/build"
+  ],
+  "deno.cacheOnSave": true,
+  "deno.maxTsServerMemory": 3072
 }

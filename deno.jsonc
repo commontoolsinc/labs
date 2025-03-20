@@ -33,12 +33,18 @@
     ],
     "types": [
       "./jumble/src/global.d.ts"
-    ]
+    ],
+    "noExternalResolve": true,
+    "skipLibCheck": true
   },
   "exclude": [
     "jumble/.vite/deps/",
     "**/node_modules/",
-    "**/.vite/"
+    "**/.vite/",
+    "**/dist/",
+    "**/build/",
+    "**/.cache/",
+    "**/coverage/"
   ],
   "lint": {
     "exclude": [
