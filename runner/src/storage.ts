@@ -47,7 +47,26 @@ export interface Storage {
    */
   setRemoteStorage(url: URL): void;
 
+  /**
+   * Check if remote storage URL is set.
+   *
+   * @returns True if remote storage URL is set, false otherwise.
+   */
+  hasRemoteStorage(): boolean;
+
+  /**
+   * Set signer for authenticating storage operations.
+   *
+   * @param signer - Signer to set.
+   */
   setSigner(signer: Signer): void;
+
+  /**
+   * Check if signer is set.
+   *
+   * @returns True if signer is set, false otherwise.
+   */
+  hasSigner(): boolean;
 
   /**
    * Load cell from storage. Will also subscribe to new changes.
@@ -195,8 +214,16 @@ class StorageImpl implements Storage {
     this.remoteStorageUrl = url;
   }
 
+  hasRemoteStorage(): boolean {
+    return this.remoteStorageUrl !== undefined;
+  }
+
   setSigner(signer: Signer): void {
     this.signer = signer;
+  }
+  
+  hasSigner(): boolean {
+    return this.signer !== undefined;
   }
 
   syncCellById<T>(

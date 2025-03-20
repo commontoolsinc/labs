@@ -2,7 +2,7 @@ import * as Memory from "@commontools/memory";
 import env from "@/env.ts";
 
 const result = await Memory.Provider.open({
-  store: new URL(env.MEMORY_URL),
+  store: new URL(env.MEMORY_DIR),
 });
 
 if (result.error) {
