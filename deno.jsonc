@@ -33,9 +33,7 @@
     ],
     "types": [
       "./jumble/src/global.d.ts"
-    ],
-    "noExternalResolve": true,
-    "skipLibCheck": true
+    ]
   },
   "exclude": [
     "jumble/.vite/deps/",
