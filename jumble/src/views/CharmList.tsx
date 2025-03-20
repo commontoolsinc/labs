@@ -109,6 +109,7 @@ const CharmTable = (
     useCharmHover();
   const [selectedCharms, setSelectedCharms] = useState<string[]>([]);
   const hoveredCharmInstance = charms.find((c) => charmId(c) === hoveredCharm);
+  const [trash] = useCell(charmManager.getTrash());
 
   const toggleCharmSelection = (id: string) => {
     setSelectedCharms((prev) =>
@@ -211,26 +212,49 @@ const CharmTable = (
                     <CharmLink charm={charm} showHash className="font-medium" />
                   </td>
                   <td className="px-6 py-4">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        charmManager.remove({ "/": id! });
-                      }}
-                      className="text-gray-400 hover:text-red-500 transition-colors"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="20"
-                        height="20"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
+                    {trash && Array.isArray(trash) && trash.some((item: Cell<Charm>) => charmId(item) === charmId(charm)) ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          charmManager.restoreFromTrash({ "/": id! });
+                        }}
+                        className="text-gray-400 hover:text-green-500 transition-colors"
                       >
-                        <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                      </svg>
-                    </button>
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="20"
+                          height="20"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path d="M3 12h18M12 3v18" />
+                        </svg>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          charmManager.remove({ "/": id! });
+                        }}
+                        className="text-gray-400 hover:text-red-500 transition-colors"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="20"
+                          height="20"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                        </svg>
+                      </button>
+                    )}
                   </td>
                 </tr>
               );
@@ -322,7 +346,24 @@ export default function CharmList() {
           {replicaName && trash && trash.length > 0
             ? (
               <>
-                <div className="mb-4 flex justify-end">
+                <div className="mb-4 flex justify-between">
+                  <button
+                    onClick={async () => {
+                      if (
+                        confirm(
+                          "Are you sure you want to restore all items from trash?",
+                        )
+                      ) {
+                        for (const charm of trash) {
+                          await charmManager.restoreFromTrash({ "/": charmId(charm)! });
+                        }
+                      }
+                    }}
+                    className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
+                    type="button"
+                  >
+                    Restore All
+                  </button>
                   <button
                     onClick={async () => {
                       if (
