@@ -40,7 +40,6 @@ const outputSchema = {
 
 const updater = handler<{ delta: number }, { counter: number }>(
   ({ delta }, state) => {
-    console.log("updating counter", delta, state);
     state.counter = (state.counter ?? 0) + (delta ?? 1);
   },
 );

@@ -26,7 +26,7 @@ const envSchema = z.object({
   MAINTENANCE_JOB_TIMEOUT_MS: z.coerce.number().positive().default(60_000),
 
   // External service URLs
-  TOOLSHED_API_URL: z.string().default("https://toolshed.saga-castor.ts.net/"),
+  TOOLSHED_API_URL: z.string().default("http://localhost:8000"),
 
   // Authentication
   OPERATOR_PASS: z.string().default("implicit trust"),
