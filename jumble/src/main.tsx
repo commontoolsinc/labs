@@ -2,7 +2,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { onError } from "@commontools/runner";
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
-import * as Sentry from "@sentry/react";
+// Import Sentry browser SDK for Deno environment
+import * as Sentry from "npm:@sentry/browser";
 import "./styles/index.css";
 import Shell from "@/views/Shell.tsx";
 import { CharmsProvider } from "@/contexts/CharmsContext.tsx";
@@ -26,9 +27,7 @@ Sentry.init({
   dsn: import.meta.env.VITE_SENTRY_DSN,
   environment: import.meta.env.VITE_ENVIRONMENT || "development",
   release: import.meta.env.VITE_COMMIT_SHA || "development",
-  // Enable tracing if needed
-  // integrations: [new Sentry.BrowserTracing()],
-  // Set tracesSampleRate to 1.0 to capture 100% of transactions for performance monitoring
+  // Performance monitoring (optional, commented out by default)
   // tracesSampleRate: 1.0,
 });
 
@@ -44,23 +43,16 @@ setupIframe();
 
 // Show an alert on the first error in a handler or lifted function.
 let errorCount = 0;
-onError((error) =>
+onError((error) => {
   !errorCount++ &&
-  globalThis.alert("Uncaught error in recipe: " + error.message)
-);
+    globalThis.alert("Uncaught error in recipe: " + error.message);
+  // Also send to Sentry
+  Sentry.captureException(error);
+});
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <Sentry.ErrorBoundary fallback={<div>An error has occurred</div>}>
-      return{" "}
-      <button
-        onClick={() => {
-          throw new Error("This is your first error!");
-        }}
-      >
-        Break the world
-      </button>;
-
       <AuthenticationProvider>
         <CharmsProvider>
           <ActionManagerProvider>

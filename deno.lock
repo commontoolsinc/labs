@@ -74,6 +74,8 @@
     "npm:@react-three/fiber@^8.17.14": "8.18.0_react@18.3.1_react-dom@18.3.1__react@18.3.1_three@0.173.0_@types+react@18.3.18",
     "npm:@scalar/hono-api-reference@~0.5.165": "0.5.184_hono@4.7.4",
     "npm:@scure/bip39@^1.5.4": "1.5.4",
+    "npm:@sentry/browser@*": "9.7.0",
+    "npm:@sentry/cli@*": "2.42.4",
     "npm:@sentry/deno@^9.3.0": "9.5.0",
     "npm:@sentry/react@^9.7.0": "9.7.0_react@18.3.1",
     "npm:@shoelace-style/shoelace@^2.19.1": "2.20.0_@types+react@18.3.18",
@@ -2168,6 +2170,44 @@
         "@sentry/core@9.7.0"
       ]
     },
+    "@sentry/cli-darwin@2.42.4": {
+      "integrity": "sha512-PZV4Y97VDWBR4rIt0HkJfXaBXlebIN2s/FDzC3iHINZE5OG62CDFsnC4/lbGlf2/UZLDaGGIK7mYwSHhTvN+HQ=="
+    },
+    "@sentry/cli-linux-arm64@2.42.4": {
+      "integrity": "sha512-Ex8vRnryyzC/9e43daEmEqPS+9uirY/l6Hw2lAvhBblFaL7PTWNx52H+8GnYGd9Zy2H3rWNyBDYfHwnErg38zA=="
+    },
+    "@sentry/cli-linux-arm@2.42.4": {
+      "integrity": "sha512-lBn0oeeg62h68/4Eo6zbPq99Idz5t0VRV48rEU/WKeM4MtQCvG/iGGQ3lBFW2yNiUBzXZIK9poXLEcgbwmcRVw=="
+    },
+    "@sentry/cli-linux-i686@2.42.4": {
+      "integrity": "sha512-IBJg0aHjsLCL4LvcFa3cXIjA+4t5kPqBT9y+PoDu4goIFxYD8zl7mbUdGJutvJafTk8Akf4ss4JJXQBjg019zA=="
+    },
+    "@sentry/cli-linux-x64@2.42.4": {
+      "integrity": "sha512-gXI5OEiOSNiAEz7VCE6AZcAgHJ47mlgal3+NmbE8XcHmFOnyDws9FNie6PJAy8KZjXi3nqoBP9JVAbnmOix3uA=="
+    },
+    "@sentry/cli-win32-i686@2.42.4": {
+      "integrity": "sha512-vZuR3UPHKqOMniyrijrrsNwn9usaRysXq78F6WV0cL0ZyPLAmY+KBnTDSFk1Oig2pURnzaTm+RtcZu2fc8mlzg=="
+    },
+    "@sentry/cli-win32-x64@2.42.4": {
+      "integrity": "sha512-OIBj3uaQ6nAERSm5Dcf8UIhyElEEwMNsZEEppQpN4IKl0mrwb/57AznM23Dvpu6GR8WGbVQUSolt879YZR5E9g=="
+    },
+    "@sentry/cli@2.42.4": {
+      "integrity": "sha512-BoSZDAWJiz/40tu6LuMDkSgwk4xTsq6zwqYoUqLU3vKBR/VsaaQGvu6EWxZXORthfZU2/5Agz0+t220cge6VQw==",
+      "dependencies": [
+        "@sentry/cli-darwin",
+        "@sentry/cli-linux-arm",
+        "@sentry/cli-linux-arm64",
+        "@sentry/cli-linux-i686",
+        "@sentry/cli-linux-x64",
+        "@sentry/cli-win32-i686",
+        "@sentry/cli-win32-x64",
+        "https-proxy-agent@5.0.1",
+        "node-fetch",
+        "progress",
+        "proxy-from-env",
+        "which"
+      ]
+    },
     "@sentry/core@8.9.2": {
       "integrity": "sha512-ixm8NISFlPlEo3FjSaqmq4nnd13BRHoafwJ5MG+okCz6BKGZ1SexEggP42/QpGvDprUUHnfncG6WUMgcarr1zA==",
       "dependencies": [
@@ -3340,6 +3380,12 @@
     "acorn@8.14.1": {
       "integrity": "sha512-OvQ/2pUDKmgfCg++xsTX1wGxfTaszcHVcTctW4UJB4hibJx2HXxxO5UmVgyjMa+ZDsiaf5wWLXYpRWMmBI0QHg=="
     },
+    "agent-base@6.0.2": {
+      "integrity": "sha512-RZNwNclF7+MS/8bDg70amg32dyeZGZxiDuQmZxKLAlQjr3jGyLx+4Kkk58UO7D2QdgFIQCovuSuZESne6RG6XQ==",
+      "dependencies": [
+        "debug@4.4.0"
+      ]
+    },
     "agent-base@7.1.3": {
       "integrity": "sha512-jRR5wdylq8CkOe6hei19GGZnxM6rBGwFl3Bg0YItGDimvjGtAvdZk4Pu6Cl4u4Igsws4a1fd1Vq3ezrhn4KmFw=="
     },
@@ -4261,7 +4307,7 @@
       "integrity": "sha512-LDODD4TMYx7XXdpwxAVRAIAuB0bzv0s+ywFonY46k126qzQHT9ygyoa9tncmOiQmmDrik65UYsEkv3lbfqQ3yQ==",
       "dependencies": [
         "extend",
-        "https-proxy-agent",
+        "https-proxy-agent@7.0.6",
         "is-stream",
         "node-fetch",
         "uuid"
@@ -4504,14 +4550,21 @@
     "http-proxy-agent@7.0.2": {
       "integrity": "sha512-T1gkAiYYDWYx3V5Bmyu7HcfcvL7mUrTWiM6yOfa3PIphViJ/gFPbvidQ+veqSOHci/PxBcDabeUNCzpOODJZig==",
       "dependencies": [
-        "agent-base",
+        "agent-base@7.1.3",
+        "debug@4.4.0"
+      ]
+    },
+    "https-proxy-agent@5.0.1": {
+      "integrity": "sha512-dFcAjpTQFgoLMzC2VwU+C/CbS7uRL0lWmxDITmqm7C+7F0Odmj6s9l6alZc6AELXhrnggM2CeWSXHGOdX2YtwA==",
+      "dependencies": [
+        "agent-base@6.0.2",
         "debug@4.4.0"
       ]
     },
     "https-proxy-agent@7.0.6": {
       "integrity": "sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==",
       "dependencies": [
-        "agent-base",
+        "agent-base@7.1.3",
         "debug@4.4.0"
       ]
     },
@@ -4734,7 +4787,7 @@
         "form-data",
         "html-encoding-sniffer",
         "http-proxy-agent",
-        "https-proxy-agent",
+        "https-proxy-agent@7.0.6",
         "is-potential-custom-element-name",
         "nwsapi",
         "parse5@7.2.1",
@@ -5471,11 +5524,11 @@
       "integrity": "sha512-TEB8ESquiLMc0lV8vcd5Ql/JAKAoyzHFXaStwjkzpOpC5Yv+pIzLfHvjTSdf3vpa2bMiUQrg9i6276yn8666aA==",
       "dependencies": [
         "@tootallnate/quickjs-emscripten",
-        "agent-base",
+        "agent-base@7.1.3",
         "debug@4.4.0",
         "get-uri",
         "http-proxy-agent",
-        "https-proxy-agent",
+        "https-proxy-agent@7.0.6",
         "pac-resolver",
         "socks-proxy-agent"
       ]
@@ -5664,10 +5717,10 @@
     "proxy-agent@6.5.0": {
       "integrity": "sha512-TmatMXdr2KlRiA2CyDu8GqR8EjahTG3aY3nXjdzFyoZbmB8hrBsTyMezhULIXKnC0jpfjlmiZ3+EaCzoInSu/A==",
       "dependencies": [
-        "agent-base",
+        "agent-base@7.1.3",
         "debug@4.4.0",
         "http-proxy-agent",
-        "https-proxy-agent",
+        "https-proxy-agent@7.0.6",
         "lru-cache@7.18.3",
         "pac-proxy-agent",
         "proxy-from-env",
@@ -6152,7 +6205,7 @@
     "socks-proxy-agent@8.0.5": {
       "integrity": "sha512-HehCEsotFqbPW9sJ8WVYB6UbmIMv7kUUORIF2Nncq4VQvBfNBLibW9YZR5dlYCSUhwcD628pRllm7n+E+YTzJw==",
       "dependencies": [
-        "agent-base",
+        "agent-base@7.1.3",
         "debug@4.4.0",
         "socks"
       ]
