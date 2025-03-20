@@ -7,6 +7,13 @@
     "test": "echo 'No tests to run.'",
     "integration": "deno test -A ./integration/*.test.ts"
   },
+  "lint": {
+    "exclude": [
+      ".vite/",
+      "public/",
+      "dist/"
+    ]
+  },
   "imports": {
     "@/": "./src/",
     "@codemirror/view": "npm:@codemirror/view@^6.36.2",

@@ -38,7 +38,11 @@
   "exclude": [
     "jumble/.vite/deps/",
     "**/node_modules/",
-    "**/.vite/"
+    "**/.vite/",
+    "**/dist/",
+    "**/build/",
+    "**/.cache/",
+    "**/coverage/"
   ],
   "lint": {
     "exclude": [

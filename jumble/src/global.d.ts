@@ -1,11 +1,5 @@
 /// <reference types="vite/client" />
 
-// Allow any modules to be imported even if they don't have type definitions
-declare module "*" {
-  const content: any;
-  export default content;
-}
-
 // Define CodeMirror component
 declare module "@uiw/react-codemirror" {
   interface CodeMirrorProps {
