@@ -562,6 +562,8 @@ Create an interactive React component that fulfills the user's request. Focus on
 - Define a title with \`const title = 'Your App Name';\`
 - Implement both \`onLoad\` and \`onReady\` functions
 - Use Tailwind CSS for styling with tasteful defaults
+- Do not write <svg> inline, use emoji for icons
+- Carefully avoid infinite loops and recursion that may cause performance issues
 
 ## Code Structure
 1. React and ReactDOM are pre-imported - don't import them again
