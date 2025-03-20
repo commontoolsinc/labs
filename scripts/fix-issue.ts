@@ -1,11 +1,36 @@
 #!/usr/bin/env -S deno run --allow-run --allow-read --allow-write
 
+// Function to find the git repository root
+async function findRepoRoot(): Promise<string> {
+  try {
+    const gitRootProcess = new Deno.Command("git", {
+      args: ["rev-parse", "--show-toplevel"],
+    });
+    const gitRootOutput = await gitRootProcess.output();
+
+    if (gitRootOutput.success) {
+      const repoRoot = new TextDecoder().decode(gitRootOutput.stdout).trim();
+      console.log(`Found repository root: ${repoRoot}`);
+      return repoRoot;
+    } else {
+      console.warn(
+        "Warning: Could not determine git repository root. Using current directory.",
+      );
+      return Deno.cwd();
+    }
+  } catch (error) {
+    console.warn("Warning: Error finding git repository root:", error);
+    console.warn("Using current directory instead.");
+    return Deno.cwd();
+  }
+}
+
 // Configuration (you can move these to a config file)
-const REPO_PATH = Deno.cwd(); // Assumes script is run from repo root
+let REPO_PATH = Deno.cwd(); // Will be updated to repo root in main()
 const BRANCH_PREFIX = "fix/claude-";
 // Define temporary files path to exclude from git
-const PROMPT_FILE = `${REPO_PATH}/.claude-prompt.tmp`;
-const PR_DESC_FILE = `${REPO_PATH}/.pr-desc.tmp`;
+let PROMPT_FILE: string;
+let PR_DESC_FILE: string;
 
 interface GitHubIssue {
   number: number;
@@ -28,6 +53,17 @@ interface IssueComment {
 
 async function main() {
   try {
+    // Find the repository root
+    REPO_PATH = await findRepoRoot();
+
+    // Change to repository root
+    Deno.chdir(REPO_PATH);
+    console.log(`Working directory changed to repository root: ${REPO_PATH}`);
+
+    // Update file paths now that we have the repo root
+    PROMPT_FILE = `${REPO_PATH}/.claude-prompt.tmp`;
+    PR_DESC_FILE = `${REPO_PATH}/.pr-desc.tmp`;
+
     // Get issue number from command line
     const issueNumber = Deno.args[0];
     if (!issueNumber) {
