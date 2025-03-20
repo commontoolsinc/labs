@@ -27,8 +27,7 @@ Sentry.init({
   dsn: import.meta.env.VITE_SENTRY_DSN,
   environment: import.meta.env.VITE_ENVIRONMENT || "development",
   release: import.meta.env.VITE_COMMIT_SHA || "development",
-  // Performance monitoring (optional, commented out by default)
-  // tracesSampleRate: 1.0,
+  tracesSampleRate: 1.0,
 });
 
 const ReplicaRedirect = () => {
