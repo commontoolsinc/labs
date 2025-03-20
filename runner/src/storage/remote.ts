@@ -161,7 +161,7 @@ export class RemoteStorageProvider implements StorageProvider {
   }
 
   subscribe(entityId: EntityId) {
-    const { the } = this;
+    const { the, inspector } = this;
     const of = RemoteStorageProvider.toEntity(entityId);
     const local = this.mount(this.workspace);
     let subscription = local.remote.get(of);
@@ -173,6 +173,7 @@ export class RemoteStorageProvider implements StorageProvider {
         subscription = Subscription.spawn(
           local.memory,
           { select: { [of]: { [the]: {} } } },
+          inspector,
         );
 
         // store subscription so it can be reused.
@@ -424,8 +425,7 @@ export class RemoteStorageProvider implements StorageProvider {
     while (this.connection === socket) {
       // First drain the queued commands if we have them.
       for (const command of queue) {
-        this.inspect({ send: command });
-        socket.send(Codec.UCAN.toString(command));
+        this.post(command);
         queue.delete(command);
       }
 
@@ -441,8 +441,7 @@ export class RemoteStorageProvider implements StorageProvider {
       // Now we make sure that our socket is still a current connection as we
       // may have lost connection while waiting to read a command.
       if (this.connection === socket) {
-        this.inspect({ send: command });
-        socket.send(Codec.UCAN.toString(command));
+        this.post(command);
       } // If it is no longer our connection we simply add the command into a
       // queue so it will be send once connection is reopen.
       else {
@@ -450,6 +449,13 @@ export class RemoteStorageProvider implements StorageProvider {
         break;
       }
     }
+  }
+
+  post(
+    invocation: Memory.UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>,
+  ) {
+    this.inspect({ invoke: invocation });
+    this.connection!.send(Codec.UCAN.toString(invocation));
   }
 
   onDisconnect(event: Event) {
@@ -546,13 +552,15 @@ class Subscription<Space extends MemorySpace> {
   static spawn<Space extends MemorySpace>(
     session: Memory.MemorySpaceSession<Space>,
     selector: Query["args"],
+    inspector?: BroadcastChannel,
   ) {
-    return new Subscription(session, selector);
+    return new Subscription(session, selector, new Set(), inspector);
   }
   constructor(
     public session: Memory.MemorySpaceSession<Space>,
     public selector: Query["args"],
-    public subscribers: Set<Subscriber> = new Set(),
+    public subscribers: Set<Subscriber>,
+    public inspector?: BroadcastChannel,
   ) {
     this.connect();
   }
@@ -578,6 +586,13 @@ class Subscription<Space extends MemorySpace> {
 
   broadcast() {
     const { value } = this;
+    this.inspector?.postMessage({
+      update: {
+        query: this.query.invocation,
+        value,
+      },
+    });
+
     for (const subscriber of this.subscribers) {
       subscriber(value);
     }

@@ -3,17 +3,29 @@ import {
   AuthorizationError,
   ConflictError,
   ConnectionError,
+  ConsumerCommand,
+  ConsumerCommandInvocation,
+  MemorySpace,
+  Protocol,
+  ProviderCommand,
   Query,
   QueryError,
   QueryResult,
+  refer,
+  Subscribe,
   Transaction,
   TransactionError,
   TransactionResult,
+  UCAN,
 } from "@commontools/memory";
 
 import { useEffect, useRef, useState } from "react";
 
-interface StorageEvent {
+interface MemoryChange {
+  post: UCAN<ConsumerCommandInvocation<Protocol>>;
+
+  receipt: ProviderCommand<Protocol>;
+
   transact?: {
     changes: Record<string, any>;
   };
@@ -23,11 +35,11 @@ interface StorageEvent {
     subscriptions: number;
     localChanges: number;
   };
-  send?: {
-    command: {
-      cmd: string;
-    };
-  };
+  // send?: {
+  //   command: {
+  //     cmd: string;
+  //   };
+  // };
   receive?: {
     the: string;
     of: string;
@@ -77,7 +89,7 @@ export type Result<Ok extends object = object, Failure extends Error = Error> =
   | { ok: Ok; error?: void }
   | { ok?: void; error: Failure };
 
-export type Status<Ready extends object, Pending extends object> =
+export type Status<Pending extends object, Ready = Pending> =
   | { pending: Pending; ready?: void; time: Time }
   | { pending?: void; ready: Ready; time: Time };
 
@@ -95,12 +107,12 @@ export type PullError =
   | AuthorizationError;
 
 export type PullStatus = {
-  pending: Record<string, Query>;
+  pending: Record<string, UCAN<Query>>;
   failed: Record<string, PushError>;
 };
 
 export type PushStatus = {
-  pending: Record<string, Transaction>;
+  pending: Record<string, UCAN<Transaction>>;
   failed: Record<string, PullError>;
 };
 
@@ -109,30 +121,142 @@ export type SubscriptionStatus = {
   active: Record<string, object>;
 };
 
-export interface MemoryStatus {
+class MemoryStatus {
   /**
    * Status of the connection to the upstream. If pending it will contain
    * result holding potentially an error which occurred causing a reconnection
    * if pending and result is ok it is an initial connection.
    */
-  connection: Status<object, Result<object, Error>>;
+  connection: Status<Result<object, Error>>;
 
   /**
    * If pending holds inflight transaction. If ready shows status of the last
    * transaction.
    */
-  push: Record<string, Result<Transaction, PushError & { time: Time }>>;
+  push: Record<string, Result<UCAN<Transaction>, PushError & { time: Time }>>;
 
   /**
    * If pending shows set of active queries, if ready shows last query result.
    */
-  pull: Record<string, Result<Query, PullError & { time: Time }>>;
+  pull: Record<string, Result<UCAN<Query>, PullError & { time: Time }>>;
 
   /**
    * Status of current subscriptions.
    */
-  subscriptions: Record<string, { query: Query; merging?: Transaction }>;
+  subscriptions: Record<string, {
+    source: UCAN<Subscribe>;
+    merging?: Transaction;
+  }>;
+
+  constructor(
+    connection: typeof this.connection,
+    push: typeof this.push,
+    pull: typeof this.pull,
+    subscriptions: typeof this.subscriptions,
+  ) {
+    this.connection = connection;
+    this.push = push;
+    this.pull = pull;
+    this.subscriptions = subscriptions;
+  }
+
+  static new(time = Date.now()) {
+    return new this(
+      { pending: { ok: {} }, time },
+      {},
+      {},
+      {},
+    );
+  }
+
+  static update(state: MemoryStatus, change: MemoryChange) {
+    if (change.post) {
+      return MemoryStatus.post(state, change.post);
+    } else if (change.receipt) {
+      return MemoryStatus.receipt(state, change.receipt);
+    }
+  }
+
+  static post(
+    state: MemoryStatus,
+    { invocation, authorization }: UCAN<ConsumerCommandInvocation<Protocol>>,
+  ) {
+    const [id] = Object.keys(authorization.access);
+    const url = `job:${id}`;
+    switch (invocation.cmd) {
+      case "/memory/transact": {
+        state.push[url] = { ok: { invocation, authorization } };
+        return state;
+      }
+      case "/memory/query": {
+        state.pull[url] = { ok: { invocation, authorization } };
+        return state;
+      }
+      case "/memory/query/subscribe": {
+        const { subscriptions } = state;
+        subscriptions[url] = { source: { invocation, authorization } };
+        return state;
+      }
+      case "/memory/query/unsubscribe": {
+        delete state.subscriptions[invocation.args.source];
+        return state;
+      }
+      default: {
+        console.error(`Unknown invocation`, invocation);
+      }
+    }
+  }
+
+  static receipt(
+    state: MemoryStatus,
+    receipt: ProviderCommand<Protocol>,
+  ) {
+    switch (receipt.the) {
+      case "task/effect":
+        return MemoryStatus.effect(state, receipt);
+      case "task/return":
+        return MemoryStatus.return(state, receipt);
+    }
+  }
+
+  static effect(
+    state: MemoryStatus,
+    { is: transaction, of }: { is: Transaction; of: string },
+  ) {
+  }
+
+  static return(
+    state: MemoryStatus,
+    { is: result, of }: { is: Result; of: string },
+  ) {
+    if (state.pull[of]) {
+      if (result.error) {
+        state.pull[of] = {
+          error: Object.assign(result.error as PullError, { time: Date.now() }),
+        };
+      } else {
+        delete state.pull[of];
+      }
+    } else if (state.push[of]) {
+      if (result.error) {
+        state.push[of] = {
+          error: Object.assign(result.error as PushError, { time: Date.now() }),
+        };
+      } else {
+        delete state.push[of];
+      }
+    } else if (state.subscriptions[of]) {
+      delete state.subscriptions[of];
+    }
+  }
 }
+
+const reset = (): MemoryStatus => ({
+  connection: { pending: { ok: {} }, time: Date.now() },
+  push: {},
+  pull: {},
+  subscriptions: {},
+});
 
 export function User() {
   const { session, clearAuthentication } = useAuthentication();
