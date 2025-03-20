@@ -3,8 +3,21 @@ import * as commonHtml from "@commontools/html";
 import * as commonBuilder from "@commontools/builder";
 import * as zod from "zod";
 import * as zodToJsonSchema from "zod-to-json-schema";
-
 import * as merkleReference from "merkle-reference";
+
+async function getDOMParser() {
+  if (globalThis.window?.DOMParser) {
+    return globalThis.window.DOMParser;
+  } else {
+    // Dynamically import JSDOM only when needed
+    const { JSDOM, VirtualConsole } = await import("jsdom");
+    const virtualConsole = new VirtualConsole();
+    const jsdom = new JSDOM("", {
+      virtualConsole,
+    });
+    return new jsdom.window.DOMParser();
+  }
+}
 
 // NOTE(ja): this isn't currently doing typechecking, but it could...
 
@@ -113,15 +126,19 @@ export const tsToExports = async (
     }
   };
 
+  console.log(getDOMParser.toString());
+  console.log(await getDOMParser());
+
   const wrappedCode = `
-    (function(require) {
+    (async function(require) {
         const exports = {};
+        globalThis.DOMParser = await ${getDOMParser.toString()}();
         ${js}
         return exports;
-    })(${customRequire.toString()})`;
+    })`;
 
   try {
-    const exports = eval(wrappedCode);
+    const exports = await eval(wrappedCode)(customRequire);
     return { exports };
   } catch (e) {
     return { errors: (e as Error).message };

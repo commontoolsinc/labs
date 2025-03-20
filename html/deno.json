@@ -5,7 +5,5 @@
     "test": "deno test --allow-env"
   },
   "imports": {
-    "@types/jsdom": "npm:@types/jsdom@^21.1.7",
-    "jsdom": "npm:jsdom"
   }
 }
