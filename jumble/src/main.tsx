@@ -1,7 +1,16 @@
-import { StrictMode } from "react";
+import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { onError } from "@commontools/runner";
-import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
+import {
+  BrowserRouter as Router,
+  createBrowserRouter,
+  createRoutesFromChildren,
+  matchRoutes,
+  Route,
+  Routes,
+  useLocation,
+  useNavigationType,
+} from "react-router-dom";
 import * as Sentry from "@sentry/react";
 import { ErrorBoundary } from "@sentry/react";
 import "./styles/index.css";
@@ -28,7 +37,18 @@ Sentry.init({
   environment: import.meta.env.VITE_ENVIRONMENT || "development",
   release: import.meta.env.VITE_COMMIT_SHA || "development",
   tracesSampleRate: 1.0,
+  integrations: [
+    Sentry.reactRouterV7BrowserTracingIntegration({
+      useEffect,
+      useLocation,
+      useNavigationType,
+      createRoutesFromChildren,
+      matchRoutes,
+    }),
+  ],
 });
+
+const SentryRoutes = Sentry.withSentryReactRouterV7Routing(Routes);
 
 const ReplicaRedirect = () => {
   const savedReplica = localStorage.getItem("lastReplica");
@@ -58,7 +78,7 @@ createRoot(document.getElementById("root")!).render(
             <BackgroundTaskProvider>
               <LanguageModelProvider>
                 <Router>
-                  <Routes>
+                  <SentryRoutes>
                     {/* Redirect root to saved replica or default */}
                     <Route
                       path={ROUTES.root}
@@ -103,7 +123,7 @@ createRoot(document.getElementById("root")!).render(
                       path={ROUTES.utilityJsonGen}
                       element={<GenerateJSONView />}
                     />
-                  </Routes>
+                  </SentryRoutes>
                 </Router>
               </LanguageModelProvider>
             </BackgroundTaskProvider>

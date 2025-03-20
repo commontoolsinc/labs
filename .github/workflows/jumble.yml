@@ -29,7 +29,7 @@ jobs:
           TOOLSHED_API_URL: ${{ secrets.TOOLSHED_API_URL }}
           VITE_TOOLSHED_API_URL: ${{ secrets.TOOLSHED_API_URL }}
           VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
-          VITE_ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}
+          VITE_ENVIRONMENT: ${{ secrets.VITE_ENVIRONMENT }}
           VITE_COMMIT_SHA: ${{ github.sha }}
           VITE_BUILD_SOURCEMAPS: "true"
 
