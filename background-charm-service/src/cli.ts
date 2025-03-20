@@ -4,7 +4,7 @@ import { BackgroundCharmService } from "./service.ts";
 import { log } from "./utils.ts";
 import { setBobbyServerUrl, storage } from "@commontools/runner";
 // Import environment configuration
-import { env, getConfig, mergeConfigWithArgs } from "./config.ts";
+import { env } from "./config.ts";
 
 // Initialize storage and Bobby server
 storage.setRemoteStorage(new URL(env.TOOLSHED_API_URL));
@@ -19,53 +19,16 @@ function showHelp() {
     "A robust service for running charms in the background with health monitoring",
   );
   console.log("");
-  console.log("Usage: deno run -A cli.ts [options]");
+  console.log("Usage: deno run -A cli.ts");
   console.log("");
-  console.log("Options:");
-  console.log(
-    "  --interval=<seconds>       Update interval in seconds (default: 60)",
-  );
-  console.log(
-    "  --failures=<number>        Disable after N consecutive failures (default: 5)",
-  );
-  console.log(
-    "  --log-interval=<seconds>   Log status interval in seconds (default: 300)",
-  );
-  console.log(
-    `  --only=<name>          Only run charms for this integration (default: all)`,
-  );
-
-  console.log("  --initialize               Initialize integration cell");
-  console.log(
-    "  --max-concurrent=<number>  Max concurrent jobs (default: 5)",
-  );
-  console.log(
-    "  --max-retries=<number>     Max retry attempts for failed jobs (default: 3)",
-  );
-  console.log("  --help                     Show this help message");
+  console.log("env:");
+  console.log(env);
   Deno.exit(0);
 }
 
 async function main() {
-  // Parse command line arguments
   const args = parseArgs(Deno.args, {
-    string: [
-      // "charms",
-      "interval",
-      "failures",
-      "log-interval",
-      "max-concurrent",
-      "max-retries",
-      "only",
-    ],
-    boolean: ["help", "initialize"],
-    default: {
-      interval: 60,
-      failures: 5,
-      "log-interval": 300,
-      "max-concurrent": 5,
-      "max-retries": 3,
-    },
+    boolean: ["help"],
   });
 
   // Show help if requested
@@ -79,20 +42,14 @@ async function main() {
   // Open KV database
   const kv = await Deno.openKv(`${env.KV_STORE_DIR}/bg.sqlite`);
 
-  // Get base configuration from environment variables
-  const baseConfig = getConfig();
-
-  // Merge with command line arguments (CLI args override env vars)
-  const config = mergeConfigWithArgs(baseConfig, args);
-
   // Create service with merged config
   const service = new BackgroundCharmService({
     kv,
-    cycleIntervalMs: config.cycleIntervalMs,
-    maxConcurrentJobs: config.maxConcurrentJobs,
-    maxRetries: config.maxRetries,
-    logIntervalMs: config.logIntervalMs,
-    maxConsecutiveFailures: config.maxConsecutiveFailures,
+    cycleIntervalMs: env.CYCLE_INTERVAL_MS,
+    maxConcurrentJobs: env.MAX_CONCURRENT_JOBS,
+    maxRetries: env.MAX_RETRIES,
+    logIntervalMs: env.LOG_INTERVAL_MS,
+    maxConsecutiveFailures: env.MAX_CONSECUTIVE_FAILURES,
   });
 
   // Initialize service

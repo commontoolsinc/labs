@@ -2,7 +2,7 @@ import { KVServiceOptions } from "./types.ts";
 import { JobQueue } from "./job-queue.ts";
 import { StateManager } from "./state-manager.ts";
 import { log } from "./utils.ts";
-import { env, getConfig } from "./config.ts";
+import { env } from "./config.ts";
 import { getSharedWorkerPool } from "./utils/common.ts";
 import { WorkerPool } from "./utils/worker-pool.ts";
 import { BGCharmEntry, getBGUpdaterCharmsCell } from "@commontools/utils";
@@ -15,19 +15,14 @@ export class BackgroundCharmService {
   private kv: Deno.Kv;
   private queue: JobQueue;
   private stateManager: StateManager;
-  private integrations: Set<string>;
-  private cycleIntervalMs: number;
   private cycleTimer: number | null = null;
   private isRunning = false;
   private globalErrorHandlerInstalled = false;
-  private maxConsecutiveFailures: number;
-  private config: ReturnType<typeof getConfig>;
   private workerPool: WorkerPool<any, any> | null = null;
   private charmsCell: any | null = null;
 
   constructor(options: KVServiceOptions) {
     this.kv = options.kv;
-    this.config = getConfig();
 
     // Apply options, using env values as fallbacks
     this.queue = new JobQueue(this.kv, {
@@ -38,12 +33,8 @@ export class BackgroundCharmService {
 
     this.stateManager = new StateManager(
       this.kv,
-      options.logIntervalMs ?? env.LOG_INTERVAL_MS,
+      env.LOG_INTERVAL_MS,
     );
-    this.integrations = new Set<string>();
-    this.cycleIntervalMs = options.cycleIntervalMs ?? env.CYCLE_INTERVAL_MS;
-    this.maxConsecutiveFailures = options.maxConsecutiveFailures ??
-      env.MAX_CONSECUTIVE_FAILURES;
 
     // Initialize the shared worker pool
     this.initializeWorkerPool();
@@ -52,11 +43,10 @@ export class BackgroundCharmService {
     this.installGlobalErrorHandlers();
 
     log("Background Charm Service constructed");
-    log(
-      `Configuration: cycleInterval=${this.cycleIntervalMs}ms, maxConcurrentJobs=${
-        options.maxConcurrentJobs ?? env.MAX_CONCURRENT_JOBS
-      }`,
-    );
+    log(` - cycleInterval=${env.CYCLE_INTERVAL_MS}ms`);
+    log(` - maxConcurrentJobs=${env.MAX_CONCURRENT_JOBS}`);
+    log(` - maxRetries=${env.MAX_RETRIES}`);
+    log(` - pollingIntervalMs=${env.POLLING_INTERVAL_MS}`);
   }
 
   /**
@@ -68,7 +58,7 @@ export class BackgroundCharmService {
 
     // Initialize the shared worker pool
     this.workerPool = getSharedWorkerPool({
-      maxWorkers: this.config.maxConcurrentJobs,
+      maxWorkers: env.MAX_CONCURRENT_JOBS,
       workerUrl,
       workerOptions: {
         type: "module",
@@ -166,9 +156,9 @@ export class BackgroundCharmService {
           }`,
         );
       });
-    }, this.cycleIntervalMs) as unknown as number;
+    }, env.CYCLE_INTERVAL_MS) as unknown as number;
 
-    log(`Service started, cycle interval: ${this.cycleIntervalMs}ms`);
+    log(`Service started, cycle interval: ${env.CYCLE_INTERVAL_MS}ms`);
   }
 
   /**
@@ -256,7 +246,6 @@ export class BackgroundCharmService {
    */
   async getStatus(): Promise<{
     running: boolean;
-    integrations: string[];
     queueStatus: {
       running: boolean;
       activeJobs: number;
@@ -268,7 +257,6 @@ export class BackgroundCharmService {
 
     return {
       running: this.isRunning,
-      integrations: Array.from(this.integrations),
       queueStatus: this.queue.getStatus(),
       serviceState,
     };
