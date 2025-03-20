@@ -9,9 +9,9 @@
   },
   "lint": {
     "exclude": [
-      "node_modules/",
       ".vite/",
-      "public/"
+      "public/",
+      "dist/"
     ]
   },
   "imports": {
