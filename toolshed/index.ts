@@ -23,11 +23,10 @@ const initializeStorage = async () => {
 
 export type AppType = typeof app;
 
-// Create AbortController for graceful shutdown
-const controller = new AbortController();
-
-// Handle shutdown signals (SIGINT, SIGTERM)
+// Graceful shutdown with timeout
+const ac = new AbortController();
 let isShuttingDown = false;
+const SHUTDOWN_TIMEOUT = 10000; // 10 seconds
 
 const handleShutdown = async () => {
   if (isShuttingDown) {
@@ -38,22 +37,31 @@ const handleShutdown = async () => {
   isShuttingDown = true;
   console.log("Shutdown signal received, closing server...");
 
-  // Remove signal listeners to prevent multiple shutdown attempts
-  Deno.removeSignalListener("SIGINT", handleShutdown);
-  Deno.removeSignalListener("SIGTERM", handleShutdown);
-
-  // Abort the server
-  controller.abort();
+  // Create a timeout promise
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error("Shutdown timed out")), SHUTDOWN_TIMEOUT);
+  });
 
   try {
-    // Close the memory system gracefully
-    console.log("Closing memory system...");
-    const result = await memory.close();
-    if (result.error) {
-      console.error("Error closing memory:", result.error);
-    } else {
-      console.log("Memory system closed successfully");
-    }
+    // Race between graceful shutdown and timeout
+    await Promise.race([
+      (async () => {
+        // Remove signal listeners to prevent multiple shutdown attempts
+        Deno.removeSignalListener("SIGINT", handleShutdown);
+        Deno.removeSignalListener("SIGTERM", handleShutdown);
+
+        ac.abort();
+
+        console.log("Closing memory system...");
+        const result = await memory.close();
+        if (result.error) {
+          console.error("Error closing memory:", result.error);
+        } else {
+          console.log("Memory system closed successfully");
+        }
+      })(),
+      timeoutPromise,
+    ]);
   } catch (err) {
     console.error("Error during shutdown:", err);
   }
@@ -63,16 +71,31 @@ const handleShutdown = async () => {
 };
 
 // Start server with the abort controller
-async function startServer() {
-  console.log(`Server is starting on port http://localhost:${port}`);
+function startServer() {
+  console.log(`Server is starting on port http://${env.HOST}:${port}`);
 
   Sentry.init({
     dsn: env.SENTRY_DSN,
     tracesSampleRate: 1.0,
+    environment: env.ENV || "development",
   });
 
+  const serverOptions = {
+    port,
+    signal: ac.signal,
+    onError: (error: unknown) => {
+      console.error("Server error:", error);
+      Sentry.captureException(error);
+      return new Response("Internal Server Error", { status: 500 });
+    },
+    onListen: ({ port, hostname }: { port: number; hostname: string }) => {
+      console.log(`Server running on http://${hostname}:${port}`);
+    },
+    hostname: env.HOST,
+  };
+
   try {
-    await Deno.serve({ port, signal: controller.signal }, app.fetch);
+    Deno.serve(serverOptions, app.fetch);
   } catch (err) {
     if (err instanceof Deno.errors.AddrInUse) {
       console.error(`Port ${port} is already in use`);
@@ -82,14 +105,9 @@ async function startServer() {
     Deno.exit(1);
   }
 }
-// Register signal handlers
+
 Deno.addSignalListener("SIGINT", handleShutdown);
 Deno.addSignalListener("SIGTERM", handleShutdown);
-
-// Log when server closes
-controller.signal.addEventListener("abort", () => {
-  console.log("Server shutting down...");
-});
 
 if (import.meta.main) {
   startServer();

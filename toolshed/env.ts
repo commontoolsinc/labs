@@ -4,6 +4,7 @@ import * as Path from "@std/path";
 // NOTE: This is where we define the environment variable types and defaults.
 const EnvSchema = z.object({
   ENV: z.string().default("development"),
+  HOST: z.string().default("0.0.0.0"),
   PORT: z.coerce.number().default(8000),
   LOG_LEVEL: z.enum([
     "fatal",
