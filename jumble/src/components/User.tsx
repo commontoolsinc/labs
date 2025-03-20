@@ -135,79 +135,106 @@ export function User() {
       //     now - activity.timestamp < 1000 && activity.type === "send",
       // ).length;
 
-      // Check for disconnected state - this has priority over all
+      // Check for connection state
       if (status.connection.pending) {
         // Create pulsing effect using sine wave
         const pulseIntensity = (Math.sin(now / 100) + 1) / 2; // Values between 0 and 1
-        opacityRef.current = 0.3 + (pulseIntensity * 0.6); // Pulse between 0.3 and 0.9 opacity
 
-        // Stop rotation for disconnected state
-        rotationRef.current = 0;
+        // Determine if this is first connection attempt or a reconnection
+        const isReconnection = status.connection.pending.error !== undefined;
 
-        // Set red color for disconnected state
-        circle.setAttribute("stroke", "#ffffff");
+        if (isReconnection) {
+          // This is a reconnection attempt after a failure
+          opacityRef.current = 0.3 + (pulseIntensity * 0.6); // Pulse between 0.3 and 0.9 opacity
 
-        // Use solid stroke for disconnected state
-        circle.setAttribute("strokeDasharray", "none");
-        circle.setAttribute("strokeWidth", String(2 + pulseIntensity)); // Pulse stroke width too
+          // Stop rotation for disconnected state
+          rotationRef.current = 0;
 
-        // Add pulsing red glow to avatar
-        if (avatarRef.current) {
-          avatarRef.current.style.boxShadow = `0 0 ${
-            8 * pulseIntensity
-          }px #FF0000`;
+          // Set red color for disconnected state
+          circle.setAttribute("stroke", "#FF0000");
+
+          // Use solid stroke for disconnected state
+          circle.setAttribute("strokeDasharray", "none");
+          circle.setAttribute("strokeWidth", String(2 + pulseIntensity)); // Pulse stroke width too
+
+          // Add pulsing red glow to avatar
+          if (avatarRef.current) {
+            avatarRef.current.style.boxShadow = `0 0 ${
+              8 * pulseIntensity
+            }px #FF0000`;
+          }
+        } else {
+          // This is initial connection attempt
+          opacityRef.current = 0.3 + (pulseIntensity * 0.4); // Pulse between 0.3 and 0.7 opacity
+
+          // Slow rotation for connecting state
+          rotationRef.current += 2;
+
+          // Set blue color for connecting state
+          circle.setAttribute("stroke", "#4285F4");
+
+          // Use dashed stroke for connecting state
+          circle.setAttribute("strokeDasharray", "6 6");
+          circle.setAttribute("strokeWidth", "2.5");
+
+          // No special glow for avatar during initial connection
+          if (avatarRef.current) {
+            avatarRef.current.style.boxShadow = "none";
+          }
         }
-      } // Check for transact (send) events - they have second priority
-      // else if (sendActivities > 0) {
-      //   // Make ring visible with faster increase for transact events
-      //   opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
+      } // Check for push activities (sending to remote)
+      else if (Object.keys(status.push).length > 0) {
+        // Make ring visible with faster increase for push events
+        opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
 
-      //   // Spin counter-clockwise for transact events, speed based on frequency
-      //   const speed = Math.min(sendActivities * 3, 12);
-      //   rotationRef.current -= speed; // Counter-clockwise rotation
+        // Spin counter-clockwise for push events, speed based on number of pending requests
+        const pendingPushes = Object.keys(status.push).length;
+        const speed = Math.min(pendingPushes * 3, 12);
+        rotationRef.current -= speed; // Counter-clockwise rotation
 
-      //   // Set bright orange color for transact events instead of purple
-      //   circle.setAttribute("stroke", "#FF5722"); // Bright orange color for transact
-      //   circle.setAttribute("strokeDasharray", "6 6");
+        // Set bright orange color for push events
+        circle.setAttribute("stroke", "#FF5722"); // Bright orange color
+        circle.setAttribute("strokeDasharray", "6 6");
 
-      //   // Make stroke width thicker for better visibility
-      //   circle.setAttribute("strokeWidth", "3");
+        // Make stroke width thicker for better visibility
+        circle.setAttribute("strokeWidth", "3");
 
-      //   // Start or amplify bounce - use smaller values for subtle effect
-      //   bounceRef.current = Math.min(bounceRef.current + 0.4, 1.5);
+        // Start or amplify bounce - use smaller values for subtle effect
+        bounceRef.current = Math.min(bounceRef.current + 0.4, 1.5);
 
-      //   // Apply subtle scale bounce to avatar
-      //   const scaleAmount = 1 +
-      //     (Math.sin(now / 100) * 0.02 * bounceRef.current);
-      //   avatarRef.current.style.transform = `scale(${scaleAmount})`;
+        // Apply subtle scale bounce to avatar
+        const scaleAmount = 1 +
+          (Math.sin(now / 100) * 0.02 * bounceRef.current);
+        avatarRef.current.style.transform = `scale(${scaleAmount})`;
 
-      //   // Set bright orange color for avatar glow during transact
-      //   avatarRef.current.style.boxShadow = `0 0 ${
-      //     bounceRef.current * 3
-      //   }px #FF5722`;
-      // } // Handle receive events (if no transact events)
-      // else if (receiveActivities > 0) {
-      //   // Make ring visible with faster increase for receive events
-      //   opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
+        // Set bright orange color for avatar glow during push
+        avatarRef.current.style.boxShadow = `0 0 ${
+          bounceRef.current * 3
+        }px #FF5722`;
+      } // Check for pull activities (receiving from remote)
+      else if (Object.keys(status.pull).length > 0) {
+        // Make ring visible with faster increase for pull events
+        opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
 
-      //   // Spin clockwise for receive events, speed based on frequency
-      //   const speed = Math.min(receiveActivities * 3, 12);
-      //   rotationRef.current += speed; // Clockwise rotation
+        // Spin clockwise for pull events, speed based on number of pending pulls
+        const pendingPulls = Object.keys(status.pull).length;
+        const speed = Math.min(pendingPulls * 3, 12);
+        rotationRef.current += speed; // Clockwise rotation
 
-      //   // Make sure the ring color is green for receive events
-      //   circle.setAttribute("stroke", "#00BF57"); // Less bright green
-      //   circle.setAttribute("strokeDasharray", "6 6");
+        // Make sure the ring color is green for pull events
+        circle.setAttribute("stroke", "#00BF57"); // Green color
+        circle.setAttribute("strokeDasharray", "6 6");
 
-      //   // Reset stroke width
-      //   circle.setAttribute("strokeWidth", "2.5");
+        // Reset stroke width
+        circle.setAttribute("strokeWidth", "2.5");
 
-      //   // Reduce bounce for receive events
-      //   bounceRef.current = Math.max(bounceRef.current - 0.2, 0);
+        // Reduce bounce for pull events
+        bounceRef.current = Math.max(bounceRef.current - 0.2, 0);
 
-      //   // Reset avatar
-      //   avatarRef.current.style.transform = "scale(1)";
-      //   avatarRef.current.style.boxShadow = "none";
-      // } // No activity
+        // Reset avatar
+        avatarRef.current.style.transform = "scale(1)";
+        avatarRef.current.style.boxShadow = "none";
+      } // No activity
       else {
         // Fade out ring
         opacityRef.current = Math.max(opacityRef.current - 0.1, 0);
@@ -250,6 +277,18 @@ export function User() {
       }
     };
   }, [status]);
+
+  const statusMessage = status.connection.pending
+    ? status.connection.pending.error
+      ? `Offline - Reconnecting... (${status.connection.pending.error.reason})`
+      : "Connecting..."
+    : Object.keys(status.push).length > 0
+    ? `Sending... (${Object.keys(status.push).length} pending)`
+    : Object.keys(status.pull).length > 0
+    ? `Receiving... (${Object.keys(status.pull).length} pending)`
+    : "Click to log out";
+
+  console.log(statusMessage);
 
   return (
     <div className="relative">
@@ -294,9 +333,7 @@ export function User() {
         className="relative group flex items-center rounded-full text-sm cursor-pointer"
       >
         <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[1000]">
-          {status.connection.pending
-            ? "Offline - Reconnecting..."
-            : "Click to log out"}
+          {statusMessage}
         </div>
       </div>
     </div>

@@ -434,6 +434,9 @@ export class RemoteStorageProvider implements StorageProvider {
   post(
     invocation: Memory.UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>,
   ) {
+    this.inspect({
+      send: invocation,
+    });
     this.connection!.send(Codec.UCAN.toString(invocation));
   }
 
