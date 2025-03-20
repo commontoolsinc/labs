@@ -3,6 +3,7 @@ import env from "@/env.ts";
 import * as Sentry from "@sentry/deno";
 import { Identity } from "@commontools/identity";
 import { storage } from "@commontools/runner";
+import { memory } from "@/routes/storage/memory.ts";
 
 const port = env.PORT;
 
@@ -22,23 +23,40 @@ const initializeStorage = async () => {
 
 export type AppType = typeof app;
 
-// Initialize and start the server
-const startServer = async () => {
-  // Initialize signer before starting server
-  await initializeStorage();
+// Create AbortController for graceful shutdown
+const controller = new AbortController();
 
-  console.log(`Server is running on port http://localhost:${port}`);
+// Handle shutdown signals (SIGINT, SIGTERM)
+const handleShutdown = async () => {
+  console.log("Shutdown signal received, closing server...");
 
-  Sentry.init({
-    dsn: env.SENTRY_DSN,
-    tracesSampleRate: 1.0,
-  });
+  // Abort the server
+  controller.abort();
 
-  Deno.serve({ port }, app.fetch);
+  try {
+    // Close the memory system gracefully
+    console.log("Closing memory system...");
+    const result = await memory.close();
+    if (result.error) {
+      console.error("Error closing memory:", result.error);
+    } else {
+      console.log("Memory system closed successfully");
+    }
+  } catch (err) {
+    console.error("Error during shutdown:", err);
+  }
+
+  console.log("Shutdown complete");
 };
 
-// Start server and handle errors
-startServer().catch((error) => {
-  console.error("Failed to start server:", error);
-  Deno.exit(1);
+// Register signal handlers
+Deno.addSignalListener("SIGINT", handleShutdown);
+Deno.addSignalListener("SIGTERM", handleShutdown);
+
+// Start server with the abort controller
+Deno.serve({ port, signal: controller.signal }, app.fetch);
+
+// Log when server closes
+controller.signal.addEventListener("abort", () => {
+  console.log("Server shutting down...");
 });
