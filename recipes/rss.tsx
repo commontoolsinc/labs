@@ -38,7 +38,7 @@ const RSSImporterInputs = {
       properties: {
         feedUrl: {
           type: "string",
-          description: "RSS feed URL",
+          description: "RSS/Atom feed URL",
           default: "",
         },
         limit: {
@@ -51,7 +51,7 @@ const RSSImporterInputs = {
     },
   },
   required: ["settings"],
-  description: "RSS Feed Importer",
+  description: "RSS/Atom Feed Importer",
 } as const satisfies JSONSchema;
 
 const ResultSchema = {
@@ -104,60 +104,116 @@ async function fetchRSSFeed(
   try {
     const response = await fetch(feedUrl);
     const text = await response.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, "text/xml");
 
-    // Simple XML parsing function
-    const parseXML = (xml: string) => {
-      const getContent = (str: string, tag: string) => {
-        const regex = new RegExp(`<${tag}[^>]*>(.*?)<\/${tag}>`, "s");
-        const match = str.match(regex);
-        return match ? match[1].trim() : "";
-      };
+    // Helper function to get text content from an element
+    const getTextContent = (element: Element | null, tagName: string) => {
+      const el = element?.getElementsByTagName(tagName)[0];
+      return el?.textContent?.trim() || "";
+    };
 
-      const items: FeedItem[] = [];
-      const itemRegex = /<item[\s\S]*?<\/item>/g;
-      const itemMatches = xml.match(itemRegex) || [];
+    // Helper function to get attribute value
+    const getAttributeValue = (
+      element: Element | null,
+      tagName: string,
+      attrName: string,
+    ) => {
+      const el = element?.getElementsByTagName(tagName)[0];
+      return el?.getAttribute(attrName) || "";
+    };
 
-      itemMatches.slice(0, maxResults).forEach((itemStr) => {
-        const id = getContent(itemStr, "guid") ||
-          getContent(itemStr, "link") ||
+    const items: FeedItem[] = [];
+
+    // Check if it's an Atom feed
+    const isAtom = doc.querySelector("feed") !== null;
+
+    if (isAtom) {
+      // Parse Atom feed
+      const entries = doc.getElementsByTagName("entry");
+
+      for (let i = 0; i < Math.min(entries.length, maxResults); i++) {
+        const entry = entries[i];
+
+        // In Atom, id is mandatory
+        const id = getTextContent(entry, "id") || Math.random().toString(36);
+
+        // Skip if we already have this item
+        if (state.items.get().some((item) => item.id === id)) {
+          continue;
+        }
+
+        // Parse link - in Atom links are elements with href attributes
+        const link = getAttributeValue(entry, "link", "href");
+
+        // For content, check content tag first, then summary
+        const content = getTextContent(entry, "content") ||
+          getTextContent(entry, "summary");
+
+        // For author, it might be nested as <author><name>Author</name></author>
+        let author = "";
+        const authorEl = entry.getElementsByTagName("author")[0];
+        if (authorEl) {
+          author = getTextContent(authorEl, "name");
+        }
+
+        // For pubDate, Atom uses <published> or <updated>
+        const pubDate = getTextContent(entry, "published") ||
+          getTextContent(entry, "updated");
+
+        items.push({
+          id,
+          title: getTextContent(entry, "title"),
+          link,
+          description: getTextContent(entry, "summary"),
+          pubDate,
+          author,
+          content,
+        });
+      }
+    } else {
+      // Parse RSS feed
+      const rssItems = doc.getElementsByTagName("item");
+
+      for (let i = 0; i < Math.min(rssItems.length, maxResults); i++) {
+        const item = rssItems[i];
+
+        const id = getTextContent(item, "guid") ||
+          getTextContent(item, "link") ||
           Math.random().toString(36);
 
-        if (state.items.get().some((item) => item.id === id)) {
-          return;
+        if (state.items.get().some((existingItem) => existingItem.id === id)) {
+          continue;
         }
 
         items.push({
           id,
-          title: getContent(itemStr, "title"),
-          link: getContent(itemStr, "link"),
-          description: getContent(itemStr, "description"),
-          pubDate: getContent(itemStr, "pubDate"),
-          author: getContent(itemStr, "author"),
-          content: getContent(itemStr, "content:encoded") ||
-            getContent(itemStr, "description"),
+          title: getTextContent(item, "title"),
+          link: getTextContent(item, "link"),
+          description: getTextContent(item, "description"),
+          pubDate: getTextContent(item, "pubDate"),
+          author: getTextContent(item, "author"),
+          content: getTextContent(item, "content:encoded") ||
+            getTextContent(item, "description"),
         });
-      });
-
-      return items;
-    };
-
-    const newItems = parseXML(text);
-
-    if (newItems.length > 0) {
-      newItems.forEach((item) => {
-        item[ID] = item.id;
-      });
-      state.items.push(...newItems);
+      }
     }
 
-    return { items: newItems };
+    if (items.length > 0) {
+      items.forEach((item) => {
+        item[ID] = item.id;
+      });
+      state.items.push(...items);
+    }
+
+    return { items };
   } catch (error) {
-    console.error("Error fetching RSS feed:", error);
+    console.error("Error fetching feed:", error);
     return { items: [] };
   }
 }
 
-const rssUpdater = handler(
+const feedUpdater = handler(
   {},
   {
     type: "object",
@@ -198,11 +254,11 @@ export default recipe(
     });
 
     return {
-      [NAME]: str`RSS Feed Importer ${settings.feedUrl}`,
+      [NAME]: str`RSS/Atom Feed Importer ${settings.feedUrl}`,
       [UI]: (
         <div style="display: flex; gap: 10px; flex-direction: column; padding: 25px;">
           <h2 style="font-size: 20px; font-weight: bold;">
-            RSS Feed Items: {derive(items, (items) => items.length)}
+            Feed Items: {derive(items, (items) => items.length)}
           </h2>
 
           <common-hstack gap="sm">
@@ -224,7 +280,7 @@ export default recipe(
                 <common-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.feedUrl}
-                  placeholder="https://example.com/feed.xml"
+                  placeholder="https://example.com/feed.xml or https://example.com/atom.xml"
                   oncommon-input={updateFeedUrl({
                     feedUrl: settings.feedUrl,
                   })}
@@ -262,7 +318,7 @@ export default recipe(
         </div>
       ),
       items,
-      bgUpdater: rssUpdater({ items, settings }),
+      bgUpdater: feedUpdater({ items, settings }),
     };
   },
 );

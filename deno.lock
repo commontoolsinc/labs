@@ -6876,11 +6876,13 @@
       "npm:@codemirror/lang-markdown@^6.3.2",
       "npm:@noble/ed25519@^2.2.3",
       "npm:@scure/bip39@^1.5.4",
+      "npm:@types/jsdom@^21.1.7",
       "npm:@vercel/otel@^1.10.1",
       "npm:@web/test-runner@*",
       "npm:ai@^4.1.5",
       "npm:esbuild@*",
       "npm:hono@^4.7.0",
+      "npm:jsdom@*",
       "npm:lit@^3.2.1",
       "npm:merkle-reference@^2.0.1",
       "npm:multiformats@^13.3.2",
@@ -6902,12 +6904,6 @@
             "npm:vitest@^2.1.1"
           ]
         }
-      },
-      "html": {
-        "dependencies": [
-          "npm:@types/jsdom@^21.1.7",
-          "npm:jsdom@*"
-        ]
       },
       "identity": {
         "dependencies": [
