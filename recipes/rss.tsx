@@ -318,7 +318,7 @@ export default recipe(
         </div>
       ),
       items,
-      rssUpdater: feedUpdater({ items, settings }),
+      bgUpdater: feedUpdater({ items, settings }),
     };
   },
 );

@@ -9,13 +9,10 @@ async function getDOMParser() {
   if (globalThis.window?.DOMParser) {
     return globalThis.window.DOMParser;
   } else {
-    // Dynamically import JSDOM only when needed
-    const { JSDOM, VirtualConsole } = await import("jsdom");
-    const virtualConsole = new VirtualConsole();
-    const jsdom = new JSDOM("", {
-      virtualConsole,
-    });
-    return new jsdom.window.DOMParser();
+    // NOTE(ja): importing JSDOM in browser throws an error :(
+    const { JSDOM } = await import("jsdom");
+    const jsdom = new JSDOM("");
+    return jsdom.window.DOMParser;
   }
 }
 
@@ -125,9 +122,6 @@ export const tsToExports = async (
         throw new Error(`Module not found: ${moduleName}`);
     }
   };
-
-  console.log(getDOMParser.toString());
-  console.log(await getDOMParser());
 
   const wrappedCode = `
     (async function(require) {
