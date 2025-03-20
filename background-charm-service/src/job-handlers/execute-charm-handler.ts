@@ -43,9 +43,7 @@ export class ExecuteCharmHandler implements JobHandler {
       },
     });
 
-    log(
-      `Initialized worker pool with ${env.MAX_CONCURRENT_JOBS} max workers`,
-    );
+    log(`Initialized ${env.MAX_CONCURRENT_JOBS} worker pool`);
   }
 
   /**
