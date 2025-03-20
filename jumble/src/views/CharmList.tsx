@@ -12,10 +12,7 @@ import { Cell } from "@commontools/runner";
 import ShapeLogo from "@/assets/ShapeLogo.tsx";
 import { MdOutlineStar } from "react-icons/md";
 import { useSyncedStatus } from "@/contexts/SyncStatusContext.tsx";
-import { CharmRenderer } from "@/components/CharmRunner.tsx";
-import { CharmLink } from "@/components/CharmLink.tsx";
-import { HoverPreview } from "@/components/HoverPreview.tsx";
-import { useCharmHover } from "@/hooks/use-charm-hover.ts";
+import { CharmTable } from "@/components/CharmTable.tsx";
 
 export interface CommonDataEvent extends CustomEvent {
   detail: {
@@ -95,183 +92,6 @@ function CharmPreview(
     </CommonCard>
   );
 }
-
-interface CharmTableProps {
-  charms: Cell<Charm>[];
-  replicaName: string;
-  charmManager: any;
-}
-
-const CharmTable = (
-  { charms, replicaName, charmManager }: CharmTableProps,
-) => {
-  const { hoveredCharm, previewPosition, handleMouseMove, handleMouseLeave } =
-    useCharmHover();
-  const [selectedCharms, setSelectedCharms] = useState<string[]>([]);
-  const hoveredCharmInstance = charms.find((c) => charmId(c) === hoveredCharm);
-  const [trash] = useCell(charmManager.getTrash());
-
-  const toggleCharmSelection = (id: string) => {
-    setSelectedCharms((prev) =>
-      prev.includes(id)
-        ? prev.filter((charmId) => charmId !== id)
-        : [...prev, id]
-    );
-  };
-
-  const handleMoveToTrash = async () => {
-    if (selectedCharms.length === 0) return;
-
-    if (
-      confirm(
-        `Are you sure you want to move ${selectedCharms.length} charm${
-          selectedCharms.length > 1 ? "s" : ""
-        } to trash?`,
-      )
-    ) {
-      // Process each selected charm
-      for (const id of selectedCharms) {
-        await charmManager.remove({ "/": id });
-      }
-      // Clear selection after moving to trash
-      setSelectedCharms([]);
-    }
-  };
-
-  const selectAllCharms = () => {
-    if (selectedCharms.length === charms.length) {
-      // If all are selected, deselect all
-      setSelectedCharms([]);
-    } else {
-      // Otherwise select all
-      setSelectedCharms(charms.map((charm) => charmId(charm)!));
-    }
-  };
-
-  return (
-    <div className="
-      border border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.5)] rounded-[4px] transition-all
-      transition-[border,box-shadow,transform] duration-100 ease-in-out
-      group relative
-    ">
-      {selectedCharms.length > 0 && (
-        <div className="bg-gray-100 p-4 border-b flex justify-between items-center">
-          <div className="text-sm">
-            {selectedCharms.length}{" "}
-            charm{selectedCharms.length !== 1 ? "s" : ""} selected
-          </div>
-          <button
-            type="button"
-            onClick={handleMoveToTrash}
-            className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
-          >
-            Move {selectedCharms.length} to Trash
-          </button>
-        </div>
-      )}
-      <div className="overflow-hidden w-full rounded-[4px]">
-        <table className="w-full text-sm text-left text-gray-500 rounded-[4px]">
-          <thead className="text-xs text-gray-700 uppercase bg-gray-50">
-            <tr>
-              <th scope="col" className="px-6 py-3">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4"
-                  onChange={selectAllCharms}
-                  checked={selectedCharms.length > 0 &&
-                    selectedCharms.length === charms.length}
-                />
-              </th>
-              <th scope="col" className="px-6 py-3">Name</th>
-              <th scope="col" className="px-6 py-3">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {charms.map((charm) => {
-              const id = charmId(charm);
-              const isSelected = selectedCharms.includes(id!);
-
-              return (
-                <tr
-                  key={id}
-                  className={`bg-white border-b hover:bg-gray-50 relative ${
-                    isSelected ? "bg-blue-50" : ""
-                  }`}
-                  onMouseMove={(e) => handleMouseMove(e, id!)}
-                  onMouseLeave={handleMouseLeave}
-                >
-                  <td className="px-6 py-4">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4"
-                      checked={isSelected}
-                      onChange={() => toggleCharmSelection(id!)}
-                    />
-                  </td>
-                  <td className="px-6 py-4 font-medium text-gray-900">
-                    <CharmLink charm={charm} showHash className="font-medium" />
-                  </td>
-                  <td className="px-6 py-4">
-                    {trash && Array.isArray(trash) && trash.some((item: Cell<Charm>) => charmId(item) === charmId(charm)) ? (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          charmManager.restoreFromTrash({ "/": id! });
-                        }}
-                        className="text-gray-400 hover:text-green-500 transition-colors"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="20"
-                          height="20"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <path d="M3 12h18M12 3v18" />
-                        </svg>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          charmManager.remove({ "/": id! });
-                        }}
-                        className="text-gray-400 hover:text-red-500 transition-colors"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="20"
-                          height="20"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                        </svg>
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {hoveredCharm && hoveredCharmInstance && (
-        <HoverPreview
-          charm={hoveredCharmInstance}
-          position={previewPosition}
-        />
-      )}
-    </div>
-  );
-};
 
 export default function CharmList() {
   const { replicaName } = useParams<{ replicaName: string }>();
@@ -355,7 +175,9 @@ export default function CharmList() {
                         )
                       ) {
                         for (const charm of trash) {
-                          await charmManager.restoreFromTrash({ "/": charmId(charm)! });
+                          await charmManager.restoreFromTrash({
+                            "/": charmId(charm)!,
+                          });
                         }
                       }
                     }}
@@ -384,6 +206,7 @@ export default function CharmList() {
                   charms={trash}
                   replicaName={replicaName}
                   charmManager={charmManager}
+                  viewMode="trash"
                 />
               </>
             )
