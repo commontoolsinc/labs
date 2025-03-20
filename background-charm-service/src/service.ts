@@ -21,13 +21,13 @@ export class BackgroundCharmService {
   private workerPool: WorkerPool<any, any> | null = null;
   private charmsCell: any | null = null;
 
-  constructor(options: KVServiceOptions) {
-    this.kv = options.kv;
+  constructor(kv: Deno.Kv) {
+    this.kv = kv;
 
     // Apply options, using env values as fallbacks
     this.queue = new JobQueue(this.kv, {
-      maxConcurrentJobs: options.maxConcurrentJobs ?? env.MAX_CONCURRENT_JOBS,
-      maxRetries: options.maxRetries ?? env.MAX_RETRIES,
+      maxConcurrentJobs: env.MAX_CONCURRENT_JOBS,
+      maxRetries: env.MAX_RETRIES,
       pollingIntervalMs: env.POLLING_INTERVAL_MS,
     });
 
