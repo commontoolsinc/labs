@@ -77,7 +77,7 @@ export interface ExecuteCharmJob extends Job {
 // Maintenance job
 export interface MaintenanceJob extends Job {
   type: JobType.MAINTENANCE;
-  task: "cleanup" | "stats" | "reset";
+  task: "cleanup" | "stats" | "reset" | "all";
 }
 
 // Job result

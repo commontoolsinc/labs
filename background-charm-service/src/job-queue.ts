@@ -34,7 +34,7 @@ export class JobQueue {
   private maxRetries: number;
   private pollingIntervalMs: number;
   private activeJobs = new Set<string>();
-  private handlers: Record<JobType, JobHandler>;
+  public handlers: Record<JobType, JobHandler>;
 
   constructor(kv: Deno.Kv, options: JobQueueOptions = {}) {
     this.kv = kv;
@@ -42,10 +42,17 @@ export class JobQueue {
     this.maxRetries = options.maxRetries ?? 3;
     this.pollingIntervalMs = options.pollingIntervalMs ?? 100;
 
+    // Create handlers
+    const executeCharmHandler = new ExecuteCharmHandler(kv);
+    const maintenanceHandler = new MaintenanceHandler(kv);
+    
+    // Provide this queue to the maintenance handler
+    maintenanceHandler.setJobQueue(this);
+    
     // Register handlers
     this.handlers = {
-      [JobType.EXECUTE_CHARM]: new ExecuteCharmHandler(kv),
-      [JobType.MAINTENANCE]: new MaintenanceHandler(kv),
+      [JobType.EXECUTE_CHARM]: executeCharmHandler,
+      [JobType.MAINTENANCE]: maintenanceHandler,
     };
 
     log(
@@ -76,10 +83,14 @@ export class JobQueue {
     return jobId;
   }
 
+  /**
+   * Add a charm execution job
+   */
   addExecuteCharmJob(
     charm: BGCharmEntry,
     priority: number = 3,
   ): Promise<string> {
+    // Add a new job
     return this.addJob<ExecuteCharmJob>({
       type: JobType.EXECUTE_CHARM,
       integrationId: charm.integration,
@@ -90,7 +101,7 @@ export class JobQueue {
   }
 
   addMaintenanceJob(
-    task: "cleanup" | "stats" | "reset",
+    task: "cleanup" | "stats" | "reset" | "all",
     priority: number = 10,
   ) {
     return this.addJob<MaintenanceJob>({
