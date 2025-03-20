@@ -12,6 +12,7 @@ interface PRComment {
   path?: string;
   line?: number;
   diffHunk?: string;
+  isResolved?: boolean;
 }
 
 interface PRReview {
@@ -91,6 +92,7 @@ async function main() {
             path: c.path,
             line: c.line || c.position,
             diffHunk: c.diff_hunk,
+            isResolved: c.resolved || false,
           }));
         }
       } catch (e) {
@@ -130,6 +132,7 @@ async function main() {
               author: review.author,
               body: `${review.state} review: ${review.body}`,
               createdAt: review.submittedAt,
+              isResolved: false,
             });
           }
         }
@@ -165,6 +168,7 @@ async function main() {
             author: { login: c.user?.login || "Unknown" },
             body: c.body || "",
             createdAt: c.created_at || "",
+            isResolved: false,
           })).filter((c: PRComment) =>
             c.body.includes("```") ||
             c.body.toLowerCase().includes("suggestion")
@@ -177,17 +181,22 @@ async function main() {
       }
     }
 
-    if (reviewComments.length === 0) {
-      console.log("No review comments with suggestions found.");
+    // Filter out resolved comments
+    const unresolvedComments = reviewComments.filter((comment) =>
+      !comment.isResolved
+    );
+
+    if (unresolvedComments.length === 0) {
+      console.log("No unresolved review comments with suggestions found.");
       Deno.exit(0);
     }
 
     console.log(
-      `Found ${reviewComments.length} review comments with potential suggestions.`,
+      `Found ${unresolvedComments.length} unresolved review comments with potential suggestions.`,
     );
 
     // Format comments for Claude prompt
-    const commentsText = reviewComments.map((c) => {
+    const commentsText = unresolvedComments.map((c) => {
       let commentText = `Comment by ${c.author.login} on ${
         new Date(c.createdAt).toLocaleString()
       }:\n`;
