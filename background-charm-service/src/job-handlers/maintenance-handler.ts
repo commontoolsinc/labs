@@ -3,7 +3,6 @@ import { Job, JobType, MaintenanceJob } from "../types.ts";
 import { StateManager } from "../state-manager.ts";
 import { JobQueue } from "../job-queue.ts";
 import { log } from "../utils.ts";
-import { getSharedWorkerPool } from "../utils/common.ts";
 import { WorkerPool } from "../utils/worker-pool.ts";
 
 /**
@@ -12,10 +11,26 @@ import { WorkerPool } from "../utils/worker-pool.ts";
 export class MaintenanceHandler implements JobHandler {
   private kv: Deno.Kv;
   private stateManager: StateManager;
+  private jobQueue: JobQueue | null = null;
+  private workerPool: WorkerPool<any, any> | null = null;
 
   constructor(kv: Deno.Kv) {
     this.kv = kv;
     this.stateManager = new StateManager(kv);
+  }
+
+  /**
+   * Set the job queue reference to avoid recreating it
+   */
+  setJobQueue(queue: JobQueue): void {
+    this.jobQueue = queue;
+  }
+
+  /**
+   * Set the worker pool reference to avoid recreating it
+   */
+  setWorkerPool(pool: WorkerPool<any, any>): void {
+    this.workerPool = pool;
   }
 
   /**
@@ -38,6 +53,12 @@ export class MaintenanceHandler implements JobHandler {
         return await this.updateStats();
       case "reset":
         return await this.resetDisabledCharms();
+      case "all":
+        // Run all maintenance tasks sequentially
+        log("Running all maintenance tasks");
+        await this.updateStats();
+        await this.runCleanup();
+        return await this.resetDisabledCharms();
       default:
         throw new Error(`Unknown maintenance task: ${task}`);
     }
@@ -47,9 +68,14 @@ export class MaintenanceHandler implements JobHandler {
    * Run cleanup task
    */
   private async runCleanup(): Promise<unknown> {
-    // Clean up old jobs
-    const jobQueue = new JobQueue(this.kv);
-    const cleaned = await jobQueue.cleanup();
+    // Use the existing job queue if available, or create a new one
+    if (!this.jobQueue) {
+      log("Warning: No job queue reference provided to maintenance handler");
+    }
+    
+    const cleaned = this.jobQueue 
+      ? await this.jobQueue.cleanup()
+      : 0;
 
     return {
       cleanedJobs: cleaned,
@@ -87,25 +113,11 @@ export class MaintenanceHandler implements JobHandler {
       `Total executions: ${totalExecutions} (${totalSuccesses} successes, ${totalFailures} failures)`,
     );
 
-    // Get worker pool stats - only attempt to retrieve if the shared pool exists
-    try {
-      // We don't need to pass all options since we're just checking if the pool exists
-      // URL is required so pass a dummy value - it won't create a new pool if one exists
-      const workerPool = getSharedWorkerPool({
-        maxWorkers: 1,
-        workerUrl: "dummy-url",
-      });
-
-      // Use the public method to report stats
-      if (workerPool) {
-        (workerPool as WorkerPool<any, any>).reportWorkerStats();
-      }
-    } catch (error) {
-      log(
-        `Error retrieving worker pool stats: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+    // Use existing worker pool if available
+    if (this.workerPool) {
+      this.workerPool.reportWorkerStats();
+    } else {
+      log("Warning: No worker pool reference provided to maintenance handler");
     }
 
     // Return stats for result

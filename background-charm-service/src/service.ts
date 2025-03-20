@@ -7,6 +7,8 @@ import { WorkerPool } from "./utils/worker-pool.ts";
 import { BGCharmEntry, getBGUpdaterCharmsCell } from "@commontools/utils";
 import { storage } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
+import { JobType } from "./types.ts";
+import { MaintenanceHandler } from "./job-handlers/maintenance-handler.ts";
 /**
  * Background Charm Service using Deno KV and job queues
  */
@@ -37,6 +39,9 @@ export class BackgroundCharmService {
 
     // Initialize the shared worker pool
     this.initializeWorkerPool();
+    
+    // Connect worker pool to maintenance handler
+    this.connectWorkerPool();
 
     // Install global error handlers
     this.installGlobalErrorHandlers();
@@ -71,6 +76,25 @@ export class BackgroundCharmService {
         },
       },
     });
+  }
+  
+  /**
+   * Connect worker pool to maintenance handler
+   */
+  private connectWorkerPool(): void {
+    if (!this.workerPool) {
+      log("Warning: Worker pool not initialized, cannot connect to maintenance handler");
+      return;
+    }
+    
+    // Get the maintenance handler from the job queue
+    const maintenanceHandler = this.queue.handlers?.[JobType.MAINTENANCE];
+    if (maintenanceHandler && maintenanceHandler instanceof MaintenanceHandler) {
+      maintenanceHandler.setWorkerPool(this.workerPool);
+      log("Connected worker pool to maintenance handler");
+    } else {
+      log("Warning: Could not connect worker pool to maintenance handler");
+    }
   }
 
   /**
@@ -125,6 +149,35 @@ export class BackgroundCharmService {
     this.charmsCell = await getBGUpdaterCharmsCell();
     await storage.syncCell(this.charmsCell, true);
     await storage.synced();
+
+    // Setup reactive callback for charm changes
+    this.charmsCell.sink(async (bgCharms: BGCharmEntry[]) => {
+      log(`Charm cell updated: ${bgCharms.length} charms`);
+      
+      let queued = 0;
+      let skipped = 0;
+      
+      // Queue each non-disabled charm for execution when the cell changes
+      for (const charm of bgCharms) {
+        // Check if charm is disabled in state manager
+        const isDisabled = await this.stateManager.isCharmDisabled(
+          charm.space, 
+          charm.charmId
+        );
+        
+        if (isDisabled) {
+          log(`Skipping disabled charm on update: ${charm.space}/${charm.charmId}`);
+          skipped++;
+          continue;
+        }
+        
+        // Add to queue if not disabled
+        this.queue.addExecuteCharmJob(charm);
+        queued++;
+      }
+      
+      log(`Cell update: queued ${queued} charms, skipped ${skipped} disabled charms`);
+    });
 
     log("Background Charm Service initialized");
   }
@@ -205,25 +258,37 @@ export class BackgroundCharmService {
     log("Starting cycle");
 
     try {
-      // Check for new charms to watch
+      // Process charms from cell for periodic execution
       if (this.charmsCell) {
         const charms = (this.charmsCell.get() || []) as BGCharmEntry[];
-        log(`Found ${charms.length} charms to watch`);
+        log(`Cycle: processing ${charms.length} charms from cell`);
+        
+        let queued = 0;
+        let skipped = 0;
 
-        // add each charm to the service
         for (const charm of charms) {
+          // Check if charm is disabled in state manager
+          const isDisabled = await this.stateManager.isCharmDisabled(
+            charm.space, 
+            charm.charmId
+          );
+          
+          if (isDisabled) {
+            log(`Skipping disabled charm: ${charm.space}/${charm.charmId}`);
+            skipped++;
+            continue;
+          }
+          
+          // Add to queue if not disabled
           this.queue.addExecuteCharmJob(charm);
+          queued++;
         }
+        
+        log(`Queued ${queued} charms, skipped ${skipped} disabled charms`);
       }
 
-      // Queue a maintenance job for statistics (lowest priority)
-      await this.queue.addMaintenanceJob("stats", 1);
-
-      // Queue a maintenance job for cleanup (low priority)
-      await this.queue.addMaintenanceJob("cleanup", 2);
-
-      // Queue a maintenance job for resetting disabled charms (medium-low priority)
-      await this.queue.addMaintenanceJob("reset", 3);
+      // Queue a single maintenance job for all maintenance tasks (medium priority)
+      await this.queue.addMaintenanceJob("all", 3);
 
       // Update cycle end time
       await this.stateManager.updateCycleStats(false);
