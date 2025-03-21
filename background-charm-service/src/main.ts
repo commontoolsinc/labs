@@ -4,7 +4,7 @@ import { BackgroundCharmService } from "./service.ts";
 import { log } from "./utils.ts";
 import { setBobbyServerUrl, storage } from "@commontools/runner";
 // Import environment configuration
-import { env } from "./config.ts";
+import { env } from "./env.ts";
 
 // Initialize storage and Bobby server
 storage.setRemoteStorage(new URL(env.TOOLSHED_API_URL));
@@ -37,10 +37,7 @@ async function main() {
 
   log("Starting Background Charm Service");
 
-  // Open KV database
-  const kv = await Deno.openKv(`${env.KV_STORE_DIR}/bg.sqlite`);
-
-  const service = new BackgroundCharmService(kv);
+  const service = new BackgroundCharmService();
 
   // Initialize service
   await service.initialize();
@@ -49,7 +46,6 @@ async function main() {
   const shutdown = () => {
     console.log("Shutting down service...");
     service.stop().then(() => {
-      kv.close();
       Deno.exit(0);
     });
   };

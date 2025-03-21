@@ -35,47 +35,14 @@ export function getSharedWorkerPool(options: {
 }): WorkerPool<any, any> {
   if (!sharedWorkerPool) {
     sharedWorkerPool = new WorkerPool(options);
-    log(`Created shared worker pool with ${options.maxWorkers} max workers`);
   }
   return sharedWorkerPool;
 }
 
-/**
- * Find an updater stream in a charm by checking common stream names
- * This is a centralized implementation of the findUpdaterStream functionality
- */
 export function findUpdaterStream(charm: Cell<Charm>): Stream<any> | null {
-  // Check for known updater streams
-  const streamNames = [
-    "bgUpdater",
-  ];
-
-  for (const name of streamNames) {
-    const stream = charm.key(name);
-    if (isStream(stream)) {
-      // Log which stream we found to help debugging
-      log(
-        `Found stream '${name}' in charm ${
-          charm.entityId ? charm.entityId["/"] : "unknown"
-        }`,
-      );
-      return stream;
-    }
-  }
-
-  // If no stream found, log all available keys in the charm
-  const charmId = charm.entityId ? charm.entityId["/"] : "unknown";
-  try {
-    const keys = Object.keys(charm.toJSON());
-    log(
-      `No updater stream found in charm ${charmId}. Available keys: ${
-        keys.join(", ")
-      }`,
-    );
-  } catch (error) {
-    log(
-      `No updater stream found in charm ${charmId} and could not enumerate keys`,
-    );
+  const stream = charm.key("bgUpdater");
+  if (isStream(stream)) {
+    return stream;
   }
 
   return null;

@@ -1,30 +1,22 @@
 /// <reference lib="deno.unstable" />
-import { JobHandler } from "./base-handler.ts";
-import { ExecuteCharmJob, Job, JobType } from "../types.ts";
-import { StateManager } from "../state-manager.ts";
+
+import { ExecuteCharmJob, Job } from "../types.ts";
 import { log } from "../utils.ts";
-import * as Session from "../session.ts";
 import { CharmManager } from "@commontools/charm";
-import type { DID } from "@commontools/identity";
+import { type DID, Session } from "@commontools/identity";
 import { CharmTimeoutError } from "../errors/index.ts";
-import { env } from "../config.ts";
+import { env } from "../env.ts";
 import {
   createTimeoutController,
   getSharedWorkerPool,
 } from "../utils/common.ts";
 import { WorkerPool } from "../utils/worker-pool.ts";
 
-/**
- * Handler for execute charm jobs
- */
-export class ExecuteCharmHandler implements JobHandler {
-  private stateManager: StateManager;
+export class ExecuteCharmHandler {
   private managerCache = new Map<string, CharmManager>();
   private workerPool: WorkerPool<any, any>;
 
-  constructor(kv: Deno.Kv) {
-    this.stateManager = new StateManager(kv);
-
+  constructor() {
     // Get the shared worker pool instance
     const workerUrl = new URL("../utils/charm-worker.ts", import.meta.url).href;
     this.workerPool = getSharedWorkerPool({
@@ -42,82 +34,53 @@ export class ExecuteCharmHandler implements JobHandler {
         },
       },
     });
-
-    log(`Initialized ${env.MAX_CONCURRENT_JOBS} worker pool`);
   }
 
   /**
    * Handle an execute charm job
    */
   async handle(job: Job): Promise<unknown> {
-    if (job.type !== JobType.EXECUTE_CHARM) {
-      throw new Error(`Invalid job type: ${job.type}`);
-    }
+    const entry = job.bgCharmEntry.get();
 
-    const executeJob = job as ExecuteCharmJob;
-    const { integrationId, spaceId, charmId } = executeJob;
-
-    log(`Executing charm: ${spaceId}/${charmId} (${integrationId})`);
-
-    // Check if charm is disabled
-    const isDisabled = await this.stateManager.isCharmDisabled(
-      spaceId,
-      charmId,
-    );
-    if (isDisabled) {
-      log(`Charm is disabled: ${spaceId}/${charmId} but running anyway`);
-      return { skipped: true, reason: "disabled" };
-    }
+    log(`Executing ${entry.integration} ${entry.charmId} (${entry.space})`);
 
     const startTime = Date.now();
 
     try {
       // Execute the charm - passing integration ID for Gmail-specific handling
       await this.executeCharmWithWorker({
-        space: spaceId as DID,
-        charmId,
+        space: entry.space as DID,
+        charmId: entry.charmId,
       });
 
       // If we get here, the charm succeeded (timeout function will throw on failure)
       const executionTimeMs = Date.now() - startTime;
-      await this.stateManager.updateAfterExecution(
-        spaceId,
-        charmId,
-        true, // success
-        executionTimeMs,
-      );
 
-      log(`Successfully executed charm: ${charmId} (${executionTimeMs}ms)`);
+      log(`Successfully executed: ${entry.charmId} (${executionTimeMs}ms)`);
       return { success: true, executionTimeMs };
     } catch (error) {
       const errorMessage = error instanceof Error
         ? error.message
         : String(error);
-      log(`Error executing charm ${spaceId}/${charmId}: ${errorMessage}`);
-
-      // Update state with failure
-      const executionTimeMs = Date.now() - startTime;
-      const state = await this.stateManager.updateAfterExecution(
-        spaceId,
-        charmId,
-        false, // failure
-        executionTimeMs,
-        error instanceof Error ? error : new Error(errorMessage),
+      log(
+        `Error executing charm ${entry.space}/${entry.charmId}: ${errorMessage}`,
+        { error: true },
       );
+      const executionTimeMs = Date.now() - startTime;
 
-      // Check if we should disable this charm
-      if (state.consecutiveFailures >= 5) { // TODO(@jakedahn): Make configurable
-        log(
-          `Disabling charm ${spaceId}/${charmId} after ${state.consecutiveFailures} consecutive failures`,
-        );
-        await this.stateManager.disableCharm(spaceId, charmId);
-      }
+      // // Check if we should disable this charm
+      // if (state.consecutiveFailures >= 5) { // TODO(@jakedahn): Make configurable
+      //   log(
+      //     `Disabling charm ${spaceId}/${charmId} after ${state.consecutiveFailures} consecutive failures`,
+      //   );
+      //   await this.stateManager.disableCharm(spaceId, charmId);
+      // }
 
       return {
         success: false,
         error: errorMessage,
         executionTimeMs,
-        consecutiveFailures: state.consecutiveFailures,
+        // consecutiveFailures: state.consecutiveFailures,
       };
     }
   }
@@ -174,38 +137,5 @@ export class ExecuteCharmHandler implements JobHandler {
       // Always clear the timeout to prevent memory leaks
       clearTimeout();
     }
-  }
-
-  /**
-   * Shutdown the handler and its resources
-   */
-  // deno-lint-ignore require-await
-  async shutdown(): Promise<void> {
-    // We're not shutting down the worker pool here since it's shared
-    // The service will handle shutting down the shared pool
-    log("ExecuteCharmHandler shutdown complete");
-  }
-
-  /**
-   * Get or create a charm manager for a space
-   */
-  private async getManagerForSpace(space: DID): Promise<CharmManager> {
-    const spaceKey = space.toString();
-
-    if (this.managerCache.has(spaceKey)) {
-      return this.managerCache.get(spaceKey)!;
-    }
-
-    // Create new session and manager
-    const session = await Session.open({
-      passphrase: env.OPERATOR_PASS,
-      name: "~background-service",
-      space,
-    });
-
-    const manager = new CharmManager(session);
-    this.managerCache.set(spaceKey, manager);
-
-    return manager;
   }
 }

@@ -7,8 +7,7 @@ import {
   storage,
   Stream,
 } from "@commontools/runner";
-import type { DID } from "@commontools/identity";
-import * as Session from "../session.ts";
+import { type DID, Session } from "@commontools/identity";
 import { log } from "../utils.ts";
 
 /**
@@ -71,7 +70,7 @@ export default async function runCharm(
     return { success: true };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`Error running charm ${spaceId}/${charmId}: ${errorMessage}`);
+    log(errorMessage, { error: true });
     return { success: false, message: errorMessage };
   }
 }
