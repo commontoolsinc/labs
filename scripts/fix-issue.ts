@@ -93,7 +93,7 @@ async function main() {
     const issue: GitHubIssue = JSON.parse(issueJSON);
 
     // Get comments from the issue object directly
-    let comments = issue.comments || [];
+    const comments = issue.comments || [];
     console.log(
       `Retrieved ${comments.length} comments for issue #${issueNumber}`,
     );
