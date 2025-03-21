@@ -25,27 +25,12 @@ iframe {
   width: 100vw;
   border: none;
 }
-
-body[frozen] iframe {
-  display: none; 
-}
-#frozen-message {
-  display: none;
-  font-family: monospace;
-  margin: 40% auto;
-  text-align: center;
-  font-size: 20px;
-}
-body[frozen] #frozen-message {
-  display: block; 
-}
   <\/style>
 <\/head>
 <body>
 <iframe
   allow="clipboard-write"
   sandbox="allow-scripts"><\/iframe>
-<div id="frozen-message">🤨 Charm crashed! 🤨</div>
 <script>
 const iframe = document.querySelector("iframe");
 const HOST_ORIGIN = "${HOST_ORIGIN}";
@@ -91,16 +76,11 @@ function onMessage(e) {
         return;
       }
       case "load-document": {
-        document.body.removeAttribute("frozen");
         iframe.srcdoc = e.data.data;
         return;
       }
       case "passthrough": {
         toInner(e.data.data);
-        return;
-      }
-      case "freeze": {
-        document.body.setAttribute("frozen", "");
         return;
       }
     }

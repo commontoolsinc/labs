@@ -28,8 +28,6 @@ export enum IPCHostMessageType {
   LoadDocument = "load-document",
   // Host instructing guest to pass through a `HostMessage`.
   Passthrough = "passthrough",
-  // Host instructing guest to remove inner content (due to failed HealthCheck)
-  Freeze = "freeze",
 }
 
 /**
@@ -39,8 +37,7 @@ export enum IPCHostMessageType {
 export type IPCHostMessage =
   | { id: any; type: IPCHostMessageType.Init }
   | { id: any; type: IPCHostMessageType.LoadDocument; data: string }
-  | { id: any; type: IPCHostMessageType.Passthrough; data: HostMessage }
-  | { id: any; type: IPCHostMessageType.Freeze };
+  | { id: any; type: IPCHostMessageType.Passthrough; data: HostMessage };
 
 export enum IPCGuestMessageType {
   // Guest alerting the host that it is ready.
