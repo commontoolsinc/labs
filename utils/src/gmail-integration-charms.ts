@@ -138,6 +138,8 @@ export async function getBGUpdaterCellCharmsCell(): Promise<
   const charmsCell = getCell(SYSTEM_SPACE_ID, CELL_CAUSE, schema);
 
   // Ensure the cell is synced
+  // FIXME(ja): does True do the right thing here? Does this mean: I REALLY REALLY
+  // INSIST THAT YOU HAVE THIS CELL ON THE SERVER!
   await storage.syncCell(charmsCell, true);
   await storage.synced();
 

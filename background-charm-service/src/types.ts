@@ -35,20 +35,3 @@ export interface Job {
   status: JobStatus;
   timeoutMs: number;
 }
-
-// Execute charm job
-export interface ExecuteCharmJob extends Job {
-  integrationId: string;
-  spaceId: string;
-  charmId: string;
-}
-
-// Job result
-export interface JobResult {
-  jobId: string;
-  success: boolean;
-  error?: string;
-  data?: unknown;
-  completedAt: number;
-  executionTimeMs: number;
-}
