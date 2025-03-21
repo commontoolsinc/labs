@@ -720,40 +720,20 @@ export type BranchSelector = {
   [at: string]: NodeSelector;
 };
 
-export type NodeSelector = LeafSelectorGroup | BranchSelector;
-
-// Acts like a join
-export type LeafSelectorGroup = LeafSelector[];
-
+export type NodeSelector = SchemaContext[] | BranchSelector;
 // {
 //   a: {
 //     b: [{
 //       schema: { type: 'string' },
-//       context: { type: 'string' }
-//     }]
+//       rootSchema: { type: 'string' }
+//     }],
 //   }
 // }
-export type LeafSelector = {
+
+// This is a schema, together with its rootSchema for resolving $ref entries
+export type SchemaContext = {
   schema: JSONSelector;
-
-  /**
-   * Represents schema referenced by {@link SelfSelector}
-   */
   rootSchema: JSONSelector;
-};
-
-export type GraphSelectorConjunct = {
-  /**
-   * Path within the JSON value to be extracted.
-   */
-  at: string[];
-
-  value: JSONSelector;
-
-  /**
-   * Represents schema referenced by {@link SelfSelector}
-   */
-  context: JSONSelector;
 };
 
 export type Pointer =
@@ -777,21 +757,23 @@ export type PointerV1 = {
   };
 };
 
+export type EmptyObject = Record<string | number | symbol, never>;
 /**
  * Simplification of JSONSchema only concerned with selection.
  */
 export type JSONSelector =
   | ScalarSelector
-  | SelfSelector
   | ObjectSelector
   | ArraySelector
-  | ConjunctSelector;
+  | { $ref: string }
+  | { anyOf: JSONSelector[] }
+  | boolean
+  | EmptyObject;
 
 export type ScalarSelector =
   | { type: "null" }
   | { type: "boolean" }
   | { type: "string" }
-  | { type: "integer" }
   | { type: "number" };
 
 export type ObjectSelector = {
@@ -807,18 +789,6 @@ export type ArraySelector = {
   type: "array";
   // Match any full traversal
   items?: JSONSelector;
-};
-
-export type ConjunctSelector = {
-  type?: undefined;
-  $ref?: undefined;
-  // Join behavior
-  anyOf: JSONSelector[];
-};
-
-export type SelfSelector = {
-  type?: undefined;
-  $ref: "#";
 };
 
 export type Operation = Transaction | Query | Subscribe | Unsubscribe;
@@ -862,6 +832,22 @@ export type Selector = Select<
 export type Selection<Space extends MemorySpace = MemorySpace> = {
   [space in Space]: FactSelection;
 };
+
+// export type FactSelectionList<
+//   T extends The = The,
+//   Of extends Entity = Entity,
+//   Is extends JSONValue = JSONValue,
+// > = {
+//   [of in Of]: {
+//     [the in T]: {
+//       [cause: Cause]: RetractFact | AssertFact<Is>[];
+//     };
+//   };
+// };
+
+// export type SelectionList<Space extends MemorySpace = MemorySpace> = {
+//   [space in Space]: FactSelectionList;
+// };
 
 export type Unit = NonNullable<unknown>;
 

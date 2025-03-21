@@ -7,17 +7,11 @@ import { fromString, refer } from "./reference.ts";
 import { unclaimed } from "./fact.ts";
 import { from as toChanges, set } from "./changes.ts";
 import { create as createCommit, the as COMMIT_THE } from "./commit.ts";
-import {
-  addMemoryAttributes,
-  recordResult,
-  traceAsync,
-  traceSync,
-} from "./telemetry.ts";
+import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
   Assert,
   Assertion,
   AsyncResult,
-  BranchSelector,
   Cause,
   Claim,
   Commit,
@@ -27,21 +21,19 @@ import type {
   DIDKey,
   Entity,
   Fact,
-  FactSelection,
   GraphQuery,
   GraphSubscription,
   JSONObject,
   JSONValue,
-  LeafSelector,
   MemorySpace,
   NodeSelector,
   Pointer,
-  Principal,
   Query,
   QueryError,
   Reference,
   Result,
   Retract,
+  SchemaContext,
   Selection,
   SpaceSession,
   SystemError,
@@ -470,11 +462,18 @@ export const isPointer = (value: JSONValue): value is Pointer => {
     typeof source?.cell?.["/"] === "string";
 };
 
+export type LeafResult = JSONValue | undefined;
+export type ResultTree = LeafResult[] | BranchResult;
+export type BranchResult = {
+  [at: string]: ResultTree;
+};
+
 export const selectGraph = <Space extends MemorySpace>(
   session: Session<Space>,
   { select }: GraphSubscription["args"],
 ): Selection<Space>[Space] => {
   const selection = {};
+  const resultTree: ResultTree = {};
   const selectorEntries = Object.entries(select);
   for (const [of, attributes] of selectorEntries) {
     const attributeEntries = Object.entries(attributes);
@@ -484,15 +483,17 @@ export const selectGraph = <Space extends MemorySpace>(
         for (
           const fact of selectFacts(session, { the, of: of as Entity, cause })
         ) {
-          // We're going to do this in two passes.
-          // The first goes through and decides whether this fact has anything matching our query
-          // The second goes through and filters the fact.is to be limited to match the schemas
-          if (checkFactMatch(fact.is, branches)) {
+          // the actual matches are all arrays, since for each leaf,
+          // we have a list of schema filters.
+          const result = checkFactMatch(fact.is, branches);
+          // TODO: check for any non-undefined
+          if (result) {
+            //console.log("result: ", result);
             set(
               selection,
               [fact.of, fact.the],
               fact.cause,
-              fact.is !== undefined ? { is: fact.is } : {},
+              result !== undefined ? { is: result } : {},
             );
           }
         }
@@ -504,92 +505,175 @@ export const selectGraph = <Space extends MemorySpace>(
 
 // Check whether this fact has anything matching our query
 // FIXME(@ubik2) need to handle aliases in here
+// TODO(@ubik2) this would be better with a tree walking callback
 function checkFactMatch(
-  fact: JSONValue | undefined,
+  factIs: JSONValue | undefined,
   nodeSelector: NodeSelector,
-): boolean {
-  // console.log("Checking fact match for ", fact, nodeSelector);
+): (JSONValue | undefined)[] | JSONValue | undefined {
   if (Array.isArray(nodeSelector)) {
-    // nodeSelector is a LeafSelectorGroup
-    for (const branch of nodeSelector) {
-      // check if fact.is complies with branch.schema
-      return true;
-    }
+    // nodeSelector is a SchemaContext[]
+    const result = nodeSelector.map((schemaContext) =>
+      (factIs === undefined)
+        ? undefined
+        : getSchemaIntersection(factIs, schemaContext)
+    );
+    //console.log("match: ", result);
+    return result;
   } else {
     // nodeSelector is a BranchSelector, so walk down
     if (
-      fact === undefined || fact === null || isString(fact) || isNumber(fact)
+      factIs == undefined || factIs === null || isString(factIs) ||
+      isNumber(factIs)
     ) {
-      // TODO(@ubik2) I'm not sure this is what I want. I want to see when an object was replaced
-      // with a primitive, because that nullifies the object.
-      // If I view these as must match, we shouldn't return these.
-      // For example, if my query expects a version property with type number, and
-      // and we set it to a string, we could just ignore it.
-      return true;
-    } else if (Array.isArray(fact)) {
+      // If we have a basic fact at this level, we still want to walk down and set the matches
+      // to undefined for everything below us.
+      return setResponse(nodeSelector, undefined);
+    } else if (Array.isArray(factIs)) {
       const branchEntries = Object.entries(nodeSelector);
+      const rv: Record<string, any> = {};
       for (const [at, val] of branchEntries) {
         const numericKeyValue = new Number(at).valueOf();
         // our branch may want a string property, but if it's pointing at an array this is not a match
         if (
           Number.isInteger(numericKeyValue) &&
-          numericKeyValue >= 0 && numericKeyValue < fact.length &&
-          checkFactMatch(fact[numericKeyValue], val)
+          numericKeyValue >= 0 && numericKeyValue < factIs.length
         ) {
-          return true;
+          rv[numericKeyValue.toString()] = checkFactMatch(
+            factIs[numericKeyValue],
+            val,
+          );
+        } else {
+          rv[at] = setResponse(val, undefined);
         }
       }
-    } else if (isObject(fact)) {
-      const factObj = fact as JSONObject;
+      return rv;
+    } else if (isObject(factIs)) {
+      const factObj = factIs as JSONObject;
       const branchEntries = Object.entries(nodeSelector);
+      const rv: Record<string, any> = {};
       for (const [at, val] of branchEntries) {
-        if (at in factObj && checkFactMatch(factObj[at], val)) {
-          return true;
+        if (at in factObj) {
+          rv[at] = checkFactMatch(factObj[at], val);
+        } else {
+          rv[at] = setResponse(val, undefined);
         }
       }
+      return rv;
     }
   }
-  return false;
+  //console.log("didn't expect this: ", factIs, nodeSelector);
+  return undefined;
 }
 
-function* collect(
-  session: Session<MemorySpace>,
-  value: JSONValue,
-  selector: NodeSelector,
+// Since our NodeSelector may be a hierarchy, we want an easy way to build
+// and populate that tree.
+function setResponse(
+  nodeSelector: NodeSelector,
+  value: JSONValue | undefined,
 ): any {
-  if (Array.isArray(selector)) {
-    for (const { schema, rootSchema } of selector) {
-      switch (schema.type) {
-        case "object": {
-          break;
+  if (Array.isArray(nodeSelector)) {
+    return nodeSelector.map((_item) => value);
+  } else {
+    const branchEntries = Object.entries(nodeSelector);
+    const rv: Record<string, any> = {};
+    for (const [at, val] of branchEntries) {
+      rv[at] = setResponse(val, value);
+    }
+    return rv;
+  }
+}
+
+// We have a query with a schema, and
+function getSchemaIntersection(
+  object: JSONValue,
+  { schema, rootSchema }: SchemaContext,
+): JSONValue | undefined {
+  console.log("testing object: ", schema, object);
+  if (schema == true || isObject(schema) && Object.keys(schema).length == 0) {
+    // These values in a schema match any object
+    return object;
+  } else if (schema == false) {
+    return undefined;
+  }
+  if (!isObject(schema)) {
+    console.log("schema is not an object", schema);
+  }
+  if ("$ref" in schema) {
+    // At some point, this should be extended to support more than just '#'
+    if (schema["$ref"] != "#") {
+      console.log("Unsupported $ref in schema: ", schema["$ref"]);
+    }
+    if (rootSchema === undefined) {
+      console.log("Unsupported $ref without root schema: ", schema["$ref"]);
+      return undefined;
+    }
+    schema = rootSchema;
+  }
+  const schemaObj = schema as Record<string, any>;
+  if (object === null) {
+    return ("type" in schemaObj && schemaObj["type"] == "null")
+      ? object
+      : undefined;
+  } else if (isString(object)) {
+    return ("type" in schemaObj && schemaObj["type"] == "string")
+      ? object
+      : undefined;
+  } else if (isNumber(object)) {
+    return ("type" in schemaObj && schemaObj["type"] == "number")
+      ? object
+      : undefined;
+  } else if (Array.isArray(object)) {
+    if ("type" in schemaObj && schemaObj["type"] == "array") {
+      const arrayObj = [];
+      for (const item of object) {
+        const val = getSchemaIntersection(item, {
+          schema: schemaObj["items"],
+          rootSchema,
+        });
+        if (val === undefined) {
+          // this array is invalid, since one or more items do not match the schema
+          return undefined;
         }
-        case "array": {
-          break;
-        }
-        case undefined: {
-          if (schema.$ref) {
-          } else if (schema.anyOf) {
-          } else {
+        arrayObj.push(val);
+      }
+      return arrayObj;
+    }
+    return undefined;
+  } else if (isObject(object)) {
+    const filteredObj: Record<string, JSONValue> = {};
+    if ("type" in schemaObj && schemaObj["type"] == "object") {
+      for (const [propKey, propValue] of Object.entries(object)) {
+        if (isObject(schemaObj.properties) && propKey in schemaObj.properties) {
+          const val = getSchemaIntersection(
+            propValue,
+            { schema: schemaObj.properties[propKey], rootSchema },
+          );
+          if (val !== undefined) {
+            filteredObj[propKey] = val;
+          }
+        } else if (isObject(schemaObj.additionalProperties)) {
+          const val = getSchemaIntersection(
+            propValue,
+            { schema: schemaObj.additionalProperties, rootSchema },
+          );
+          if (val !== undefined) {
+            filteredObj[propKey] = val;
           }
         }
       }
-    }
-  } else {
-    for (const [key, branches] of Object.entries(selector)) {
-      if (Array.isArray(value)) {
-        const member = value[key as unknown as number] as JSONValue | undefined;
-        if (member) {
-          yield* collect(session, member, branches);
-        } else if (typeof value === "object") {
-          // FIXME: robin - commented out to avoid error
-          //const member = value[key];
+      // Check that all required fields are present
+      if ("required" in schemaObj) {
+        const required = schemaObj["required"] as string[];
+        if (Array.isArray(required)) {
+          for (const requiredProperty of required) {
+            if (!(requiredProperty in filteredObj)) {
+              return undefined;
+            }
+          }
         }
       }
-      if (typeof value === "object") {
-        // FIXME: robin - changed this from fact to value,
-        // but unclear what it should be
-        yield* collect(session, value, branches);
-      }
+      console.log("filteredObj", filteredObj);
+      return filteredObj;
     }
   }
 }
