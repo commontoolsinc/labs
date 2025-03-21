@@ -66,16 +66,12 @@ export class VolatileStorageProvider extends BaseStorageProvider {
       const valueString = JSON.stringify(value);
       // Should only happen because of doNotNotify, this is used to simulate a conflict
       if (value && this.lastValues.get(key) !== valueString) {
-        log(
-          () => [
-            "conflict volatile",
-            this.spaceName,
-            key,
-            this.lastValues.get(key),
-            valueString,
-          ],
-        );
-        this.lastValues.set(key, valueString); // Simulate storage catching up
+        log(() => ["conflict", key, this.lastValues.get(key), valueString]);
+
+        // Simulate storage catching up
+        this.lastValues.set(key, valueString);
+        this.notifySubscribers(key, value);
+
         return Promise.resolve({
           // Bare bones ConflictError from RemoteStorageProvider
           // Just what the current storage provider needs to resolve conflicts

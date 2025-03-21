@@ -16,6 +16,7 @@ import { Signer } from "@commontools/identity";
 import { isBrowser } from "@commontools/utils/env";
 import { sleep } from "@commontools/utils/sleep";
 import { TransactionResult } from "@commontools/memory";
+import { defer } from "@commontools/utils";
 
 export function log(fn: () => any[]) {
   debug(() => {
@@ -199,14 +200,10 @@ class StorageImpl implements Storage {
 
   private currentBatch: Job[] = [];
   private currentBatchProcessing = false;
-  private currentBatchResolve: () => void = () => {};
-  private currentBatchPromise: Promise<void> = new Promise((
-    r,
-  ) => (this.currentBatchResolve = r));
+  private currentBatchResolve: (() => void) | undefined;
+  private currentBatchPromise: Promise<void> = Promise.resolve();
   private lastBatchTime: number = 0;
   private lastBatchDebounceCount: number = 0;
-  private debounceTimeout: number | null = null;
-  private batchStartTime: number = 0;
 
   private cancel: Cancel;
   private addCancel: AddCancel;
@@ -222,7 +219,7 @@ class StorageImpl implements Storage {
   setSigner(signer: Signer): void {
     this.signer = signer;
   }
-  
+
   hasSigner(): boolean {
     return this.signer !== undefined;
   }
@@ -249,11 +246,6 @@ class StorageImpl implements Storage {
   }
 
   synced(): Promise<void> {
-    // If there's no batch processing and no pending batch, resolve immediately
-    if (!this.currentBatchProcessing && this.currentBatch.length === 0) {
-      return Promise.resolve();
-    }
-
     return this.currentBatchPromise;
   }
 
@@ -345,10 +337,9 @@ class StorageImpl implements Storage {
 
     // Create a promise that gets resolved once the doc and all its
     // dependencies are loaded. It'll return the doc when done.
-    const docIsLoadingPromise = new Promise<void>((r) =>
-      this.loadingResolves.set(doc, r)
-    ).then(() => doc);
-    this.docIsLoading.set(doc, docIsLoadingPromise);
+    const { promise, resolve } = defer<void, Error>();
+    this.loadingResolves.set(doc, resolve);
+    this.docIsLoading.set(doc, promise.then(() => doc));
 
     this._addToBatch([{ doc: doc, type: "sync" }]);
 
@@ -623,11 +614,7 @@ class StorageImpl implements Storage {
     });
 
     // Reset batch: Everything coming in now will be processed in the next round
-    const currentResolve = this.currentBatchResolve;
     this.currentBatch = [];
-    this.currentBatchPromise = new Promise((
-      r,
-    ) => (this.currentBatchResolve = r));
 
     // Don't update docs while they might be updating.
     await idle();
@@ -661,6 +648,7 @@ class StorageImpl implements Storage {
       storageJobsBySpace.get(space)!.push({ entityId: doc.entityId!, value });
     });
 
+    log(() => ["storage jobs start"]);
     // Write all storage jobs to storage, in parallel
     await Promise.all(
       storageJobsBySpace.entries().map(([space, jobs]) => {
@@ -683,7 +671,7 @@ class StorageImpl implements Storage {
         let retries = 0;
         function retryOnConflict(
           result: Awaited<ReturnType<typeof storage.send>>,
-        ) {
+        ): ReturnType<typeof storage.send> {
           const txResult = result as Awaited<TransactionResult>;
           if (txResult.error?.name === "ConflictError") {
             const conflict = txResult.error.conflict;
@@ -692,29 +680,27 @@ class StorageImpl implements Storage {
 
             if (retries++ > 100) {
               console.error("too many retries on conflict");
-              return result;
+              return Promise.resolve(result);
             }
 
             // If nothing in the job has a way to retry, give up
-            if (!jobs.some((job) => job.value.retry?.length)) return result;
-
-            let conflictJob;
-            for (const job of jobs) {
-              if (
-                RemoteStorageProvider.toEntity(job.entityId) === conflict.of
-              ) {
-                conflictJob = job;
-                break;
-              }
+            if (!jobs.some((job) => job.value.retry?.length)) {
+              return Promise.resolve(result);
             }
 
-            if (!conflictJob) {
+            const conflictJobIndex = jobs.findIndex((job) =>
+              RemoteStorageProvider.toEntity(job.entityId) === conflict.of
+            );
+
+            if (conflictJobIndex === -1) {
               console.warn(
                 "no conflicting job found. that should not happen.",
                 conflict.of,
               );
-              return result;
+              return Promise.resolve(result);
             }
+
+            const conflictJob = jobs[conflictJobIndex];
 
             // If there is no way to retry, give up
             if (conflictJob.value.retry?.length) {
@@ -725,7 +711,7 @@ class StorageImpl implements Storage {
               try {
                 // Apply changes again
                 conflictJob.value.retry.forEach((retry) => {
-                  newValue = { ...newValue, ...retry(newValue.value) };
+                  newValue = { ...newValue, value: retry(newValue.value) };
                 });
 
                 log(() => ["retry with", newValue]);
@@ -736,53 +722,48 @@ class StorageImpl implements Storage {
                 ]);
 
                 // Replace job with new value
-                jobs[jobs.indexOf(conflictJob)] = {
+                jobs[conflictJobIndex] = {
                   ...conflictJob,
                   value: newValue,
                 };
               } catch (e) {
                 console.error("error applying retry", e);
-                return result;
+                return Promise.resolve(result);
               }
             } else {
               // Fallback: Remove offending transaction
               // NOTE: The new value will arrive via subscribeToChanges
-              jobs.splice(jobs.indexOf(conflictJob), 1);
+              jobs.splice(conflictJobIndex, 1);
             }
 
-            return storage.send(jobs);
+            return storage.send(jobs).then((result) => retryOnConflict(result));
           }
 
-          return result;
+          return Promise.resolve(result);
         }
 
-        return storage.send(jobs).then((result) =>
-          result.error &&
-            (result as Awaited<TransactionResult>).error?.name ===
-              "ConflictError"
-            ? retryOnConflict(result)
-            : result
-        ).then((result) => {
-          if (result.ok) {
-            // Apply updates from retry, if transaction ultimately succeeded
-            updatesFromRetry.forEach(([doc, value]) =>
-              this._batchForDoc(doc, value.value, value.source)
-            );
-          }
-        });
+        log(() => ["sending to storage", jobs]);
+        return storage.send(jobs).then((result) => retryOnConflict(result))
+          .then((result) => {
+            if (result.ok) {
+              // Apply updates from retry, if transaction ultimately succeeded
+              updatesFromRetry.forEach(([doc, value]) =>
+                this._batchForDoc(doc, value.value, value.source)
+              );
+            }
+            return result;
+          });
       }),
     );
+    log(() => ["storage jobs done"]);
 
     // Finally, clear and resolve loading promise for all loaded cells
     for (const doc of loadedDocs) {
-      const resolve = this.loadingResolves.get(doc);
+      log(() => ["resolve loading promise", JSON.stringify(doc.entityId)]);
       this.loadingPromises.delete(doc);
       this.docIsLoading.delete(doc);
-      resolve?.();
+      this.loadingResolves.get(doc)?.();
     }
-
-    // Notify everyone waiting for the batch to finish
-    currentResolve();
   }
 
   /**
@@ -797,53 +778,62 @@ class StorageImpl implements Storage {
    * will be processed next.
    *
    * @param batch - Batch to add.
-   * @returns Promise that resolves when the batch is processed.
    */
-  private _addToBatch(batch: Job[]): Promise<void> {
+  private _addToBatch(batch: Job[]) {
     this.currentBatch.push(...batch);
 
     if (!this.currentBatchProcessing) {
-      this.currentBatchProcessing = true;
-      const now = Date.now();
+      ({
+        promise: this.currentBatchPromise,
+        resolve: this.currentBatchResolve,
+      } = defer<void, Error>());
 
-      // Check if we're processing batches too rapidly
-      const timeSinceLastBatch = now - this.lastBatchTime;
-      const needsDebounce = timeSinceLastBatch < 100;
-
-      const executeTask = () => {
-        this.batchStartTime = Date.now();
-        this._processCurrentBatch().then(() => {
-          this.currentBatchProcessing = false;
-          this.lastBatchTime = Date.now(); // Record when batch finished
-
-          // If more items accumulated during processing, schedule the next batch
-          if (this.currentBatch.length > 0) {
-            // Pass empty array to signal this is a continuation
-            this._addToBatch([]);
-          }
-        });
-      };
-
-      if (needsDebounce) {
-        // Increase debounce count (capped at 17)
-        if (this.lastBatchDebounceCount < 17) this.lastBatchDebounceCount++;
-
-        // First 10 have no delay, then exponential: 50, 100, 200, 400, ..., 1600
-        const exp = Math.max(0, this.lastBatchDebounceCount - 10) ** 2;
-        const delay = 50 * exp * (1 + Math.random());
-
-        if (delay > 1000) console.warn(`debouncing by ${delay}ms`);
-
-        // Set timeout to execute the batch after delay
-        this.debounceTimeout = setTimeout(executeTask, delay);
-      } else {
-        // Reset counter if we're not debouncing
-        this.lastBatchDebounceCount = 0;
-        queueMicrotask(executeTask);
-      }
+      this._runBatchesUntilSettled();
     }
+  }
 
-    return this.currentBatchPromise;
+  private _runBatchesUntilSettled(): void {
+    this.currentBatchProcessing = true;
+
+    const now = Date.now();
+
+    // Check if we're processing batches too rapidly
+    const timeSinceLastBatch = now - this.lastBatchTime;
+    const needsDebounce = timeSinceLastBatch < 100;
+
+    const executeTask = () => {
+      this._processCurrentBatch().then(() => {
+        this.lastBatchTime = Date.now(); // Record when batch finished
+
+        // If more items accumulated during processing, schedule the next batch
+        if (this.currentBatch.length > 0) {
+          log(() => ["next batch immediately", this.currentBatch.length]);
+          this._runBatchesUntilSettled();
+        } else {
+          log(() => ["no more items, resolve"]);
+          this.currentBatchProcessing = false;
+          this.currentBatchResolve?.();
+        }
+      });
+    };
+
+    if (needsDebounce) {
+      // Increase debounce count (capped at 17)
+      if (this.lastBatchDebounceCount < 17) this.lastBatchDebounceCount++;
+
+      // First 10 have no delay, then exponential: 50, 100, 200, 400, ..., 1600
+      const exp = Math.max(0, this.lastBatchDebounceCount - 10) ** 2;
+      const delay = 50 * exp * (1 + Math.random());
+
+      if (delay > 1000) console.warn(`debouncing by ${delay}ms`);
+
+      // Set timeout to execute the batch after delay
+      setTimeout(executeTask, delay);
+    } else {
+      // Reset counter if we're not debouncing
+      this.lastBatchDebounceCount = 0;
+      queueMicrotask(executeTask);
+    }
   }
 
   private _subscribeToChanges(doc: DocImpl<any>): void {
