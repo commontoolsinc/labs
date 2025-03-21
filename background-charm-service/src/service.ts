@@ -38,9 +38,9 @@ export class BackgroundCharmService {
       } else {
         this.state.set(cellLink, {
           bgCharmEntry: c,
-          disabled: !c.get().enabled,
-          lastExecuted: null,
-          lastFinished: null,
+          disabled: c.get().disabledAt !== null,
+          lastExecuted: c.get().lastRun ?? null,
+          lastFinished: c.get().lastRun ?? null,
           consecutiveFailures: 0,
           lastError: null,
           lastErrorTimestamp: null,

@@ -14,6 +14,8 @@ export const CharmEntrySchema = {
     integration: { type: "string" },
     createdAt: { type: "number" },
     updatedAt: { type: "number" },
+    disabledAt: { type: "number", default: null },
+    lastRun: { type: "number", default: null },
     enabled: { type: "boolean" },
     runs: { type: "number", default: 0 },
   },

@@ -21,7 +21,7 @@ onError((e) => {
 /**
  * Process a task to execute a charm
  */
-async function processTask(taskId: string, data: any): Promise<void> {
+async function processTask(taskId: string, data: any) {
   const { spaceId, charmId, operatorPass, toolshedUrl } = data;
 
   try {

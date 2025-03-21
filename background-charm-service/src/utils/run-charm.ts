@@ -58,7 +58,11 @@ export default async function runCharm(
     // FIXME(ja): should we terminate the charm somehow?
     return { success: true };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = typeof error === "string"
+      ? error
+      : error instanceof Error
+      ? error.message
+      : String(error);
     log(errorMessage, { error: true });
     return { success: false, message: errorMessage };
   }

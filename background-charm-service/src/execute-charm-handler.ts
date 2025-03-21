@@ -7,29 +7,14 @@ import {
   getSharedWorkerPool,
 } from "./utils/common.ts";
 import { WorkerPool } from "./utils/worker-pool.ts";
-import { sleep } from "../../utils/src/sleep.ts";
+import { sleep } from "@commontools/utils";
 
 export class ExecuteCharmHandler {
   private workerPool: WorkerPool<any, any>;
 
   constructor() {
     // Get the shared worker pool instance
-    const workerUrl = new URL("./utils/charm-worker.ts", import.meta.url).href;
-    this.workerPool = getSharedWorkerPool({
-      maxWorkers: env.MAX_CONCURRENT_JOBS,
-      workerUrl,
-      workerOptions: {
-        type: "module",
-        deno: {
-          permissions: {
-            read: true,
-            write: true,
-            net: true,
-            env: true,
-          },
-        },
-      },
-    });
+    this.workerPool = getSharedWorkerPool(env.MAX_CONCURRENT_JOBS);
   }
 
   async handle(
@@ -41,33 +26,34 @@ export class ExecuteCharmHandler {
 
     const startTime = Date.now();
 
-    try {
-      // Execute the charm - passing integration ID for Gmail-specific handling
-      await this.executeCharmWithWorker({
-        space: entry.space as DID,
-        charmId: entry.charmId,
-      });
+    // Execute the charm
+    const result = await this.executeCharmWithWorker({
+      space: entry.space as DID,
+      charmId: entry.charmId,
+    });
 
-      log(
-        `Successfully executed: ${entry.charmId} (${Date.now() - startTime}ms)`,
-      );
-      return { success: true };
-    } catch (error) {
-      const errorMessage = error instanceof Error
-        ? error.message
-        : String(error);
-      log(
-        `Error executing charm ${entry.space}/${entry.charmId}: ${errorMessage} (${
-          Date.now() - startTime
-        }ms)`,
-        { error: true },
-      );
+    log(
+      `Successfully executed: ${entry.charmId} (${Date.now() - startTime}ms)`,
+    );
+    return { success: true };
+    // } catch ({ error }) {
+    //   console.log("execute-charm-handler error", { error });
+    //   const errorMessage = typeof error === "string"
+    //     ? error
+    //     : error instanceof Error
+    //     ? error.message
+    //     : String(error);
+    //   log(
+    //     `Error executing charm ${entry.space}/${entry.charmId}: ${errorMessage} (${
+    //       Date.now() - startTime
+    //     }ms)`,
+    //     { error: true },
+    //   );
 
-      return {
-        success: false,
-        error: errorMessage,
-      };
-    }
+    //   return {
+    //     success: false,
+    //     error: errorMessage,
+    //   };
   }
 
   private async executeCharmWithWorker({
@@ -76,41 +62,40 @@ export class ExecuteCharmHandler {
   }: {
     space: DID;
     charmId: string;
-  }): Promise<void> {
-    // Create a timeout controller for the worker execution
-    const { controller, clear: clearTimeout } = createTimeoutController(
-      env.CHARM_EXECUTION_TIMEOUT_MS,
-    );
+  }): Promise<{ success: boolean; error?: string }> {
+    log(`Submitting charm ${charmId} to worker pool`);
 
-    try {
-      log(`Submitting charm ${charmId} to worker pool`);
+    // this spawns the actual worker process
+    const task = this.workerPool.execute({
+      spaceId: space,
+      charmId,
+      operatorPass: env.OPERATOR_PASS,
+      toolshedUrl: env.TOOLSHED_API_URL,
+    });
 
-      // this spawns the actual worker process
-      const task = this.workerPool.execute({
-        spaceId: space,
-        charmId,
-        operatorPass: env.OPERATOR_PASS,
-        toolshedUrl: env.TOOLSHED_API_URL,
-      });
+    const timeout = env.CHARM_EXECUTION_TIMEOUT_MS;
 
-      // FIXME(ja): we need to actually kill the worker process?
-      const result = await Promise.race([
-        task,
-        sleep(env.CHARM_EXECUTION_TIMEOUT_MS).then(() => ({
-          error:
-            `charm execution timed out after ${env.CHARM_EXECUTION_TIMEOUT_MS}ms`,
-        })),
-      ]);
+    // FIXME(ja): we need to actually kill the worker!
+    const result = await Promise.race([
+      task,
+      sleep(timeout).then(() => ({
+        error: `charm execution timed out after ${timeout}ms`,
+      })),
+    ]);
 
-      // Check if the result indicates an error
-      if (result && typeof result === "object" && "error" in result) {
-        throw new Error(result.error as string);
-      }
+    console.log("execute-charm-handler", result);
 
-      log(`Worker pool successfully executed charm: ${charmId}`);
-    } finally {
-      // Always clear the timeout to prevent memory leaks
-      clearTimeout();
+    if (result && typeof result === "object" && "error" in result) {
+      return {
+        success: false,
+        error: result.error as string,
+      };
     }
+
+    log(`Worker pool successfully executed charm: ${charmId}`);
+
+    return {
+      success: true,
+    };
   }
 }

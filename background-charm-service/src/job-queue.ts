@@ -113,16 +113,31 @@ export class JobQueue {
       this.activeJobs.add(job);
       this.processJob(job)
         .catch((e) => {
-          log(e instanceof Error ? e.message : String(e), {
-            error: true,
-          });
+          log(
+            typeof e === "string"
+              ? e
+              : e instanceof Error
+              ? e.message
+              : String(e),
+            {
+              error: true,
+            },
+          );
           return {
             success: false,
-            error: e instanceof Error ? e.message : String(e),
+            error: typeof e === "string"
+              ? e
+              : e instanceof Error
+              ? e.message
+              : String(e),
           };
         })
         .then((result) => {
-          console.log(result);
+          job.bgCharmEntry.update({
+            disabledAt: result.success ? undefined : Date.now(),
+            lastRun: Date.now(),
+          });
+          console.log("job queue", result);
         })
         .finally(() => {
           this.activeJobs.delete(job);

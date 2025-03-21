@@ -5,14 +5,12 @@ import { Cell, isStream, Stream } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
 import { WorkerPool } from "./worker-pool.ts";
 
-// Create a singleton worker pool that can be shared across the application
-let sharedWorkerPool: WorkerPool<any, any> | null = null;
-
-/**
- * Get or create the shared worker pool
- */
-export function getSharedWorkerPool(options: {
+export type WorkerPoolOptions = {
   maxWorkers: number;
+  maxWorkerLifetimeMs: number;
+  workerMaxBusyTimeMs: number;
+  maxWorkerTasks: number;
+  maxQueueLength: number;
   workerUrl: string;
   workerOptions?: {
     type?: "classic" | "module";
@@ -31,9 +29,35 @@ export function getSharedWorkerPool(options: {
   };
   taskTimeout?: number;
   healthCheckIntervalMs?: number;
-}): WorkerPool<any, any> {
+};
+
+// Create a singleton worker pool that can be shared across the application
+let sharedWorkerPool: WorkerPool<any, any> | null = null;
+
+export function getSharedWorkerPool(
+  maxWorkers: number,
+): WorkerPool<any, any> {
   if (!sharedWorkerPool) {
-    sharedWorkerPool = new WorkerPool(options);
+    const workerUrl = new URL("./charm-worker.ts", import.meta.url).href;
+    sharedWorkerPool = new WorkerPool({
+      maxWorkers,
+      maxWorkerLifetimeMs: 8 * 60 * 60 * 1000, // 8 hours
+      maxWorkerTasks: 1000,
+      maxQueueLength: 1000,
+      workerMaxBusyTimeMs: 2 * 60 * 1000, // 2 min
+      workerUrl,
+      workerOptions: {
+        type: "module",
+        deno: {
+          permissions: {
+            read: true,
+            write: true,
+            net: true,
+            env: true,
+          },
+        },
+      },
+    });
   }
   return sharedWorkerPool;
 }
