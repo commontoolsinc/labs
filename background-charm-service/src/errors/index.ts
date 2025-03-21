@@ -1,10 +1,3 @@
-/**
- * Custom error classes for the Background Charm Service
- */
-
-/**
- * Base error class for all service errors
- */
 export class ServiceError extends Error {
   constructor(message: string) {
     super(message);
@@ -13,9 +6,6 @@ export class ServiceError extends Error {
   }
 }
 
-/**
- * Error thrown when a charm execution times out
- */
 export class CharmTimeoutError extends ServiceError {
   constructor(
     message: string,
@@ -28,9 +18,6 @@ export class CharmTimeoutError extends ServiceError {
   }
 }
 
-/**
- * Error thrown when authentication fails
- */
 export class AuthenticationError extends ServiceError {
   constructor(
     message: string,
@@ -41,9 +28,6 @@ export class AuthenticationError extends ServiceError {
   }
 }
 
-/**
- * Error thrown when token refresh fails
- */
 export class TokenRefreshError extends AuthenticationError {
   constructor(
     message: string,
@@ -54,9 +38,6 @@ export class TokenRefreshError extends AuthenticationError {
   }
 }
 
-/**
- * Error thrown when a job in the queue fails
- */
 export class JobError extends ServiceError {
   constructor(
     message: string,
@@ -68,9 +49,6 @@ export class JobError extends ServiceError {
   }
 }
 
-/**
- * Error thrown when a job times out
- */
 export class JobTimeoutError extends JobError {
   constructor(
     message: string,
@@ -83,9 +61,6 @@ export class JobTimeoutError extends JobError {
   }
 }
 
-/**
- * Error thrown when a charm couldn't be found or loaded
- */
 export class CharmNotFoundError extends ServiceError {
   constructor(
     message: string,
@@ -97,22 +72,6 @@ export class CharmNotFoundError extends ServiceError {
   }
 }
 
-/**
- * Error thrown when an integration couldn't be loaded or is misconfigured
- */
-export class IntegrationError extends ServiceError {
-  constructor(
-    message: string,
-    public readonly integrationId: string,
-  ) {
-    super(message);
-    Object.setPrototypeOf(this, IntegrationError.prototype);
-  }
-}
-
-/**
- * Error thrown when a worker process fails or crashes
- */
 export class WorkerError extends ServiceError {
   constructor(
     message: string,
@@ -123,9 +82,6 @@ export class WorkerError extends ServiceError {
   }
 }
 
-/**
- * Helper function to format an error for logging
- */
 export function formatError(error: unknown): string {
   if (error instanceof Error) {
     return `${error.name}: ${error.message}`;

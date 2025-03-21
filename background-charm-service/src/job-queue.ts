@@ -1,19 +1,9 @@
-import {
-  ExecuteCharmJob,
-  Job,
-  JobResult,
-  JobStatus,
-  JobType,
-  KV_PREFIXES,
-  MaintenanceJob,
-} from "./types.ts";
+import { ExecuteCharmJob, Job, JobResult, JobStatus } from "./types.ts";
 import { log } from "./utils.ts";
 
 // Import handlers
-import { JobHandler } from "./job-handlers/base-handler.ts";
 import { ExecuteCharmHandler } from "./job-handlers/execute-charm-handler.ts";
-import { MaintenanceHandler } from "./job-handlers/maintenance-handler.ts";
-import { BGCharmEntry } from "@commontools/utils";
+import { BGCharmEntry, sleep } from "@commontools/utils";
 
 /**
  * Options for the job queue
@@ -28,86 +18,37 @@ export interface JobQueueOptions {
  * Job queue system for handling background tasks
  */
 export class JobQueue {
-  private kv: Deno.Kv;
   private consumerRunning = false;
   private maxConcurrentJobs: number;
   private maxRetries: number;
   private pollingIntervalMs: number;
-  private activeJobs = new Set<string>();
-  public handlers: Record<JobType, JobHandler>;
+  private activeJobs = new Set<Job>();
+  private pendingJobs: Job[] = [];
+  private executeCharmHandler = new ExecuteCharmHandler();
 
-  constructor(kv: Deno.Kv, options: JobQueueOptions = {}) {
-    this.kv = kv;
+  constructor(options: JobQueueOptions = {}) {
     this.maxConcurrentJobs = options.maxConcurrentJobs ?? 5;
     this.maxRetries = options.maxRetries ?? 3;
     this.pollingIntervalMs = options.pollingIntervalMs ?? 100;
 
-    // Create handlers
-    const executeCharmHandler = new ExecuteCharmHandler(kv);
-    const maintenanceHandler = new MaintenanceHandler(kv);
-    
-    // Provide this queue to the maintenance handler
-    maintenanceHandler.setJobQueue(this);
-    
-    // Register handlers
-    this.handlers = {
-      [JobType.EXECUTE_CHARM]: executeCharmHandler,
-      [JobType.MAINTENANCE]: maintenanceHandler,
-    };
-
-    log(
-      `Job queue initialized with maxConcurrentJobs=${this.maxConcurrentJobs}, maxRetries=${this.maxRetries}`,
-    );
+    log(`Job queue initialized`);
+    log(` - maxConcurrentJobs: ${this.maxConcurrentJobs}`);
+    log(` - maxRetries: ${this.maxRetries}`);
+    log(` - pollingIntervalMs: ${this.pollingIntervalMs}`);
   }
 
-  async addJob<T extends Job>(
-    jobData: Omit<
-      T,
-      "id" | "createdAt" | "retryCount" | "status" | "maxRetries"
-    >,
-  ): Promise<string> {
-    const jobId = crypto.randomUUID();
-    const job: Job = {
-      id: jobId,
+  addExecuteCharmJob(
+    bg: BGCharmEntry,
+    { priority, maxRetries }: { priority?: number; maxRetries?: number } = {},
+  ) {
+    this.pendingJobs.push({
+      bgCharmEntry: bg,
+      priority: priority ?? 3,
       createdAt: Date.now(),
       retryCount: 0,
-      maxRetries: this.maxRetries,
+      maxRetries: maxRetries ?? this.maxRetries,
+      timeoutMs: 30000,
       status: "pending",
-      ...jobData,
-    };
-
-    // Add to KV
-    await this.kv.set([...KV_PREFIXES.JOB_QUEUE, jobId], job);
-    log(`Added job to queue: ${jobId} (type=${job.type})`);
-
-    return jobId;
-  }
-
-  /**
-   * Add a charm execution job
-   */
-  addExecuteCharmJob(
-    charm: BGCharmEntry,
-    priority: number = 3,
-  ): Promise<string> {
-    // Add a new job
-    return this.addJob<ExecuteCharmJob>({
-      type: JobType.EXECUTE_CHARM,
-      integrationId: charm.integration,
-      spaceId: charm.space,
-      charmId: charm.charmId,
-      priority,
-    });
-  }
-
-  addMaintenanceJob(
-    task: "cleanup" | "stats" | "reset" | "all",
-    priority: number = 10,
-  ) {
-    return this.addJob<MaintenanceJob>({
-      type: JobType.MAINTENANCE,
-      task,
-      priority,
     });
   }
 
@@ -145,113 +86,42 @@ export class JobQueue {
     log("Job consumer stopped");
   }
 
-  getStatus(): {
-    running: boolean;
-    activeJobs: number;
-    activeJobIds: string[];
-  } {
+  getStatus() {
     return {
       running: this.consumerRunning,
       activeJobs: this.activeJobs.size,
-      activeJobIds: Array.from(this.activeJobs),
+      pendingJobs: this.pendingJobs.length,
     };
   }
 
   private async runConsumerLoop(): Promise<void> {
-    log("Starting job consumer loop");
-
     while (this.consumerRunning) {
       try {
         // Check if we can process more jobs
         if (this.activeJobs.size >= this.maxConcurrentJobs) {
-          // Wait a bit and check again
-          await new Promise((resolve) =>
-            setTimeout(resolve, this.pollingIntervalMs)
-          );
+          await sleep(this.pollingIntervalMs);
           continue;
         }
 
         // Get next job from queue
-        const job = await this.getNextJob();
+        const job = this.pendingJobs.shift();
 
         if (!job) {
-          // No jobs, wait a bit
-          await new Promise((resolve) =>
-            setTimeout(resolve, this.pollingIntervalMs)
-          );
+          await sleep(this.pollingIntervalMs);
           continue;
         }
 
-        log(`Processing job: ${job.id} (type=${job.type})`);
-
-        // Process job in the background
-        this.activeJobs.add(job.id);
+        this.activeJobs.add(job);
         this.processJob(job).finally(() => {
-          this.activeJobs.delete(job.id);
+          this.activeJobs.delete(job);
         });
       } catch (error) {
-        log(
-          `Error in job consumer: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-        await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait a bit on error
+        // FIXME(ja): should we remove the job from the queue/activeJobs?
+        log(error instanceof Error ? error.message : String(error), {
+          error: true,
+        });
+        await sleep(1000);
       }
-    }
-  }
-
-  private async getNextJob(): Promise<Job | null> {
-    // Get all pending jobs
-    const pendingJobs: Job[] = [];
-    const entries = this.kv.list<Job>({ prefix: KV_PREFIXES.JOB_QUEUE });
-
-    for await (const entry of entries) {
-      const job = entry.value;
-      if (job.status === "pending") {
-        pendingJobs.push(job);
-
-        // Get versionstamp for later usage
-        job._versionstamp = entry.versionstamp;
-      }
-    }
-
-    if (pendingJobs.length === 0) {
-      return null;
-    }
-
-    // Sort by priority (higher first) and then by creation time (older first)
-    pendingJobs.sort((a, b) => {
-      if (a.priority !== b.priority) {
-        return b.priority - a.priority; // Higher priority first
-      }
-      return a.createdAt - b.createdAt; // Older first
-    });
-
-    // Pick the highest priority job
-    const job = pendingJobs[0];
-
-    try {
-      // Mark as processing using atomic operations to avoid race conditions
-      const jobKey = [...KV_PREFIXES.JOB_QUEUE, job.id];
-      const result = await this.kv.atomic()
-        .check({ key: jobKey, versionstamp: job._versionstamp as string })
-        .set(jobKey, { ...job, status: "processing" })
-        .commit();
-
-      if (!result.ok) {
-        // Job was modified by another process
-        return null;
-      }
-
-      // Remove internal versionstamp property
-      const { _versionstamp, ...cleanJob } = job;
-      return { ...cleanJob, status: "processing" };
-    } catch (error) {
-      const errorMessage = error instanceof Error
-        ? error.message
-        : String(error);
-      log(`Error marking job ${job.id} as processing: ${errorMessage}`);
-      return null;
     }
   }
 
@@ -261,238 +131,48 @@ export class JobQueue {
     let error: string | undefined;
     let resultData: unknown;
 
-    log(`Starting job ${job.id} (${job.type})`);
+    const entry = job.bgCharmEntry.get();
+
+    log(`Starting ${entry.integration} ${entry.charmId} (${entry.space})`);
 
     try {
-      // Get the appropriate handler
-      const handler = this.handlers[job.type];
-      if (!handler) {
-        throw new Error(`No handler for job type: ${job.type}`);
+      resultData = await Promise.race([
+        this.executeCharmHandler.handle(job),
+        new Promise((_resolve, reject) => {
+          setTimeout(() => reject("Job timed out"), job.timeoutMs);
+        }),
+      ]);
+
+      // FIXME(ja): HERE
+
+      if (
+        resultData && typeof resultData === "object" &&
+        "success" in resultData
+      ) {
+        // If the handler explicitly returns success: false, respect that
+        success = resultData.success === true;
+        if (!success && "error" in resultData) {
+          error = resultData.error as string;
+          throw new Error(error || "Unknown error in charm execution");
+        }
+      } else {
+        success = true;
       }
 
-      // Execute with timeout (based on job type)
-      const timeout = this.getTimeoutForJobType(job.type);
-      try {
-        // CRITICAL FIX: Special handling for execute_charm jobs
-        if (job.type === JobType.EXECUTE_CHARM) {
-          // Use a longer timeout for execute charm jobs
-          resultData = await Promise.race([
-            handler.handle(job),
-            new Promise((_resolve, reject) => {
-              setTimeout(
-                () =>
-                  reject(
-                    new Error(`Job execution timed out after ${timeout}ms`),
-                  ),
-                timeout,
-              );
-            }),
-          ]);
-
-          // Explicitly check the result of execute charm jobs
-          if (
-            resultData && typeof resultData === "object" &&
-            "success" in resultData
-          ) {
-            // If the handler explicitly returns success: false, respect that
-            success = resultData.success === true;
-            if (!success && "error" in resultData) {
-              error = resultData.error as string;
-              throw new Error(error || "Unknown error in charm execution");
-            }
-          } else {
-            success = true;
-          }
-
-          const duration = Date.now() - startTime;
-          if (success) {
-            log(`Job ${job.id} completed successfully (${duration}ms)`);
-          } else {
-            error = error || "Unknown error in charm execution";
-            log(`Job ${job.id} failed (${duration}ms): ${error}`);
-            throw new Error(error);
-          }
-        } else {
-          // Regular handling for other job types
-          resultData = await Promise.race([
-            handler.handle(job),
-            new Promise((_resolve, reject) => {
-              setTimeout(
-                () =>
-                  reject(
-                    new Error(`Job execution timed out after ${timeout}ms`),
-                  ),
-                timeout,
-              );
-            }),
-          ]);
-          success = true;
-          const duration = Date.now() - startTime;
-          log(`Job ${job.id} completed successfully (${duration}ms)`);
-        }
-      } catch (e) {
-        error = e instanceof Error ? e.message : String(e);
-        throw e; // Re-throw for outer catch
+      const duration = Date.now() - startTime;
+      if (success) {
+        log(
+          `Job ${job.bgCharmEntry.charmId} completed successfully (${duration}ms)`,
+        );
+      } else {
+        error = error || "Unknown error in charm execution";
+        log(`Job ${job.bgCharmEntry.charmId} failed (${duration}ms): ${error}`);
+        throw new Error(error);
       }
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
-      log(`Job ${job.id} (${job.type}) failed: ${error}`);
-
-      try {
-        // Get fresh copy of job in case it was updated
-        const jobKey = [...KV_PREFIXES.JOB_QUEUE, job.id];
-        const freshJobResult = await this.kv.get<Job>(jobKey);
-        const freshJob = freshJobResult.value;
-
-        if (!freshJob) {
-          log(`Job ${job.id} no longer exists, skipping update`);
-          return;
-        }
-
-        // Update job status based on retry policy
-        if (freshJob.retryCount < freshJob.maxRetries) {
-          // Retry the job
-          const updatedJob = {
-            ...freshJob,
-            retryCount: freshJob.retryCount + 1,
-            status: "pending" as JobStatus,
-          };
-
-          // Add exponential backoff delay
-          const backoffMs = Math.min(
-            30000,
-            1000 * Math.pow(2, freshJob.retryCount),
-          );
-          log(
-            `Retrying job ${job.id} after ${backoffMs}ms (attempt ${updatedJob.retryCount} of ${freshJob.maxRetries})`,
-          );
-
-          setTimeout(() => {
-            this.kv.set(jobKey, updatedJob)
-              .catch((err) =>
-                log(`Error scheduling job retry: ${err.message}`)
-              );
-          }, backoffMs);
-        } else {
-          // Mark as failed
-          const failedJob = { ...freshJob, status: "failed" as JobStatus };
-          await this.kv.set(jobKey, failedJob);
-
-          // Store failed job result
-          const jobResult: JobResult = {
-            jobId: job.id,
-            success: false,
-            error,
-            completedAt: Date.now(),
-            executionTimeMs: Date.now() - startTime,
-          };
-
-          await this.kv.set([...KV_PREFIXES.JOB_RESULTS, job.id], jobResult);
-          log(
-            `Job ${job.id} permanently failed after ${freshJob.maxRetries} attempts`,
-          );
-        }
-      } catch (updateError) {
-        const errorMessage = updateError instanceof Error
-          ? updateError.message
-          : String(updateError);
-        log(`Error updating job status: ${errorMessage}`);
-      }
-
-      return;
+      log(`Job ${job.bgCharmEntry.charmId} failed: ${error}`);
+      throw e; // Re-throw for outer catch
     }
-
-    try {
-      // Get fresh copy of job in case it was updated
-      const jobKey = [...KV_PREFIXES.JOB_QUEUE, job.id];
-      const freshJobResult = await this.kv.get<Job>(jobKey);
-      const freshJob = freshJobResult.value;
-
-      if (!freshJob) {
-        log(`Job ${job.id} no longer exists, skipping update`);
-        return;
-      }
-
-      // Job completed successfully
-      const completedJob = { ...freshJob, status: "completed" as JobStatus };
-      await this.kv.set(jobKey, completedJob);
-
-      // Store result
-      const jobResult: JobResult = {
-        jobId: job.id,
-        success: true,
-        data: resultData,
-        completedAt: Date.now(),
-        executionTimeMs: Date.now() - startTime,
-      };
-
-      await this.kv.set([...KV_PREFIXES.JOB_RESULTS, job.id], jobResult);
-    } catch (updateError) {
-      const errorMessage = updateError instanceof Error
-        ? updateError.message
-        : String(updateError);
-      log(`Error updating job status: ${errorMessage}`);
-    }
-  }
-
-  /**
-   * Get appropriate timeout based on job type
-   */
-  private getTimeoutForJobType(type: JobType): number {
-    switch (type) {
-      case JobType.EXECUTE_CHARM:
-        return 30000; // 30 seconds for charm execution
-      case JobType.MAINTENANCE:
-        return 60000; // 60 seconds for maintenance tasks
-      default:
-        return 30000; // Default 30 seconds
-    }
-  }
-
-  /**
-   * Get a job result
-   */
-  async getJobResult(jobId: string): Promise<JobResult | null> {
-    const result = await this.kv.get<JobResult>([
-      ...KV_PREFIXES.JOB_RESULTS,
-      jobId,
-    ]);
-    return result.value;
-  }
-
-  /**
-   * Cleanup old jobs and results
-   */
-  async cleanup(maxAgeMs: number = 86400000): Promise<number> {
-    let count = 0;
-    const cutoff = Date.now() - maxAgeMs;
-
-    // Clean up completed and failed jobs
-    const jobs = this.kv.list<Job>({ prefix: KV_PREFIXES.JOB_QUEUE });
-    for await (const entry of jobs) {
-      const job = entry.value;
-      if (
-        (job.status === "completed" || job.status === "failed") &&
-        job.createdAt < cutoff
-      ) {
-        await this.kv.delete(entry.key);
-        count++;
-      }
-    }
-
-    // Clean up job results
-    const results = this.kv.list<JobResult>({
-      prefix: KV_PREFIXES.JOB_RESULTS,
-    });
-    for await (const entry of results) {
-      const result = entry.value;
-      if (result.completedAt < cutoff) {
-        await this.kv.delete(entry.key);
-        count++;
-      }
-    }
-
-    log(`Cleaned up ${count} old jobs and results`);
-    return count;
   }
 }
