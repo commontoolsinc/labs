@@ -6,6 +6,7 @@ import {
   UCAN,
 } from "@commontools/memory";
 import * as Inspector from "@commontools/runner/storage/inspector";
+import { FaArrowDown, FaArrowUp, FaExclamationTriangle } from "react-icons/fa";
 
 import { useEffect, useRef, useState } from "react";
 
@@ -54,6 +55,65 @@ interface MemoryChange {
   timestamp: string;
 }
 
+// Safe palette colors (avoiding red and green)
+const AVATAR_COLORS = [
+  "#4285F4", // Blue
+  "#FBBC05", // Yellow
+  "#9C27B0", // Purple
+  "#FF6D00", // Orange
+  "#3949AB", // Indigo
+  "#00ACC1", // Cyan
+  "#8D6E63", // Brown
+  "#5E35B1", // Deep Purple
+  "#FB8C00", // Dark Orange
+  "#039BE5", // Light Blue
+  "#C0CA33", // Lime
+  "#F06292", // Pink
+  "#546E7A", // Blue Grey
+];
+
+// SVG shape templates - cute shapes with rounded corners
+const AVATAR_SHAPES = [
+  // Rounded square
+  (color: string) => `
+    <svg width="30" height="30" viewBox="0 0 30 30">
+      <rect x="3" y="3" width="24" height="24" rx="8" fill="${color}" />
+    </svg>
+  `,
+  // Star shape
+  (color: string) => `
+    <svg width="30" height="30" viewBox="0 0 30 30">
+      <path d="M15 3 L18 12 L27 12 L20 18 L23 27 L15 21 L7 27 L10 18 L3 12 L12 12 Z" fill="${color}" />
+    </svg>
+  `,
+  // Flower/Sun shape
+  (color: string) => `
+    <svg width="30" height="30" viewBox="0 0 30 30">
+      <circle cx="15" cy="15" r="9" fill="${color}" />
+      <circle cx="15" cy="4" r="3" fill="${color}" />
+      <circle cx="15" cy="26" r="3" fill="${color}" />
+      <circle cx="4" cy="15" r="3" fill="${color}" />
+      <circle cx="26" cy="15" r="3" fill="${color}" />
+      <circle cx="7" cy="7" r="3" fill="${color}" />
+      <circle cx="23" cy="23" r="3" fill="${color}" />
+      <circle cx="7" cy="23" r="3" fill="${color}" />
+      <circle cx="23" cy="7" r="3" fill="${color}" />
+    </svg>
+  `,
+  // Cloud shape
+  (color: string) => `
+    <svg width="30" height="30" viewBox="0 0 30 30">
+      <path d="M10 20 Q5 20 5 15 Q5 10 10 10 Q10 5 15 5 Q20 5 20 10 Q25 10 25 15 Q25 20 20 20 Z" fill="${color}" />
+    </svg>
+  `,
+  // Hexagon
+  (color: string) => `
+    <svg width="30" height="30" viewBox="0 0 30 30">
+      <path d="M15 4 L25 9.5 L25 20.5 L15 26 L5 20.5 L5 9.5 Z" fill="${color}" />
+    </svg>
+  `,
+];
+
 export function useStorageBroadcast(callback: (data: any) => void) {
   useEffect(() => {
     const messages = new BroadcastChannel("storage/remote");
@@ -70,6 +130,8 @@ export function User() {
   const [did, setDid] = useState<string | undefined>(undefined);
   const status = useRef(Inspector.create());
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const [avatarColor, setAvatarColor] = useState<string>("");
+  const [avatarShape, setAvatarShape] = useState<string>("");
 
   // Animation refs
   const svgRef = useRef<SVGSVGElement>(null);
@@ -78,21 +140,37 @@ export function User() {
   const opacityRef = useRef(0);
   const bounceRef = useRef(0);
   const avatarRef = useRef<HTMLDivElement>(null);
+  const pushErrorRef = useRef<HTMLDivElement>(null);
+  const pullErrorRef = useRef<HTMLDivElement>(null);
 
-  // Avatar color calculation
+  // Avatar generation based on DID
   useEffect(() => {
     if (!session) return;
     setDid(session.as.did());
     return () => setDid(undefined);
   }, [session]);
 
-  let h = "0", s = "50%";
-  const l = "50%";
-  if (did) {
-    const index = did.length - 4;
-    h = `${did.charCodeAt(index) + did.charCodeAt(index + 1)}`;
-    s = `${50 + ((did.charCodeAt(index + 2) - 49) / 73) * 50}%`;
-  }
+  // Generate consistent avatar based on DID
+  useEffect(() => {
+    if (!did) return;
+
+    // Deterministic but random-looking selection
+    const hashSum = Array.from(did).reduce(
+      (sum, char, i) => sum + char.charCodeAt(0) * (i + 1),
+      0,
+    );
+
+    // Select color from palette
+    const colorIndex = hashSum % AVATAR_COLORS.length;
+    const selectedColor = AVATAR_COLORS[colorIndex];
+    setAvatarColor(selectedColor);
+
+    // Select shape
+    const shapeIndex = Math.floor(hashSum / AVATAR_COLORS.length) %
+      AVATAR_SHAPES.length;
+    const selectedShape = AVATAR_SHAPES[shapeIndex](selectedColor);
+    setAvatarShape(selectedShape);
+  }, [did]);
 
   // Listen for real events
   useStorageBroadcast((command: Inspector.Command) => {
@@ -220,8 +298,8 @@ export function User() {
           circle.setAttribute("stroke", "#FF0000");
 
           // Use solid stroke for disconnected state
-          circle.setAttribute("strokeDasharray", "none");
-          circle.setAttribute("strokeWidth", String(2 + pulseIntensity)); // Pulse stroke width too
+          circle.setAttribute("stroke-dasharray", "none");
+          circle.setAttribute("stroke-width", String(2 + pulseIntensity)); // Pulse stroke width too
 
           // Add pulsing red glow to avatar
           if (avatarRef.current) {
@@ -243,8 +321,8 @@ export function User() {
           circle.setAttribute("stroke", "#4285F4");
 
           // Use dashed stroke for connecting state
-          circle.setAttribute("strokeDasharray", "6 6");
-          circle.setAttribute("strokeWidth", "2.5");
+          circle.setAttribute("stroke-dasharray", "6 6");
+          circle.setAttribute("stroke-width", "2.5");
 
           // No special glow for avatar during initial connection
           if (avatarRef.current) {
@@ -258,6 +336,12 @@ export function User() {
         currentStatus.connection.ready && currentStatus.connection.ready.ok
       ) {
         // Connection is ready and established
+
+        // Set a default opacity for a stable connection
+        // This will keep the circle visible in a stable state
+        const baseOpacity = 0.6; // Increased from 0.3 to make it more visible
+
+        // Update the status parts for the tooltip
         const statusParts = [];
 
         // Only show whole numbers in the status display
@@ -274,8 +358,8 @@ export function User() {
         }
 
         statusMessage = statusParts.length > 0
-          ? `Status: ${statusParts.join(" ")}`
-          : "Connected";
+          ? `${statusParts.join(" ")}`
+          : "Idle";
 
         // Use both active state and eased counts for animation properties
         if (pushActive) {
@@ -291,8 +375,9 @@ export function User() {
 
           // Set green color for push events (changed from orange to green)
           circle.setAttribute("stroke", "#00BF57");
-          circle.setAttribute("strokeDasharray", "6 6");
-          circle.setAttribute("strokeWidth", "3");
+          // Use dashed stroke for push events (active data transfer)
+          circle.setAttribute("stroke-dasharray", "6 6");
+          circle.setAttribute("stroke-width", "3");
 
           // Amplify bounce effect
           bounceRef.current = Math.min(bounceRef.current + 0.4, 1.5);
@@ -319,8 +404,9 @@ export function User() {
 
           // Make sure the ring color is green for pull events
           circle.setAttribute("stroke", "#00BF57");
-          circle.setAttribute("strokeDasharray", "6 6");
-          circle.setAttribute("strokeWidth", "2.5");
+          // Use dashed stroke for pull events (active data transfer)
+          circle.setAttribute("stroke-dasharray", "6 6");
+          circle.setAttribute("stroke-width", "2.5");
 
           // Reduce bounce for pull events but maintain some animation
           bounceRef.current = Math.max(bounceRef.current - 0.2, 0);
@@ -339,23 +425,53 @@ export function User() {
 
           // Use red color for errors
           circle.setAttribute("stroke", "#FF0000");
-          circle.setAttribute("strokeDasharray", "3 3");
-          circle.setAttribute("strokeWidth", String(2 + pulseIntensity));
+          // Use dashed stroke for error state
+          circle.setAttribute("stroke-dasharray", "3 3");
+          circle.setAttribute("stroke-width", String(2 + pulseIntensity));
 
           // Subtle error animation for avatar
           avatarRef.current.style.boxShadow = `0 0 ${
             4 * pulseIntensity
           }px #FF0000`;
-        } else {
-          // Fade out ring
-          opacityRef.current = Math.max(opacityRef.current - 0.1, 0);
 
-          // Slow down rotation
+          // Determine if there are push errors or pull errors
+          const pushErrorCount =
+            Object.values(currentStatus.push).filter((v) => v.error).length;
+          const pullErrorCount = Object.values(currentStatus.pull).filter((v) =>
+            v.error
+          ).length;
+
+          // Show the appropriate error indicator
+          if (pushErrorRef.current && pushErrorCount > 0) {
+            // Flash animation using opacity
+            pushErrorRef.current.style.opacity =
+              (Math.sin(now / 200) + 1) / 2 > 0.5 ? "1" : "0.7";
+            pushErrorRef.current.style.display = "flex";
+          } else if (pushErrorRef.current) {
+            pushErrorRef.current.style.display = "none";
+          }
+
+          if (pullErrorRef.current && pullErrorCount > 0) {
+            // Flash animation using opacity
+            pullErrorRef.current.style.opacity =
+              (Math.sin(now / 200) + 1) / 2 > 0.5 ? "1" : "0.7";
+            pullErrorRef.current.style.display = "flex";
+          } else if (pullErrorRef.current) {
+            pullErrorRef.current.style.display = "none";
+          }
+        } else {
+          // Stable connection state - show a solid green ring
+          opacityRef.current = baseOpacity; // Keep the circle visible at the base opacity
+
+          // Slow down any existing rotation
           rotationRef.current *= 0.9;
 
-          // Reset stroke width
-          circle.setAttribute("strokeWidth", "2.5");
-          circle.setAttribute("strokeDasharray", "6 6");
+          // Set green color for stable connection
+          circle.setAttribute("stroke", "#00BF57");
+
+          // Use solid stroke for stable connection - using the correct attribute name
+          circle.setAttribute("stroke-dasharray", "none");
+          circle.setAttribute("stroke-width", "2");
 
           // Reduce bounce
           bounceRef.current = Math.max(bounceRef.current - 0.2, 0);
@@ -363,6 +479,10 @@ export function User() {
           // Reset avatar
           avatarRef.current.style.transform = "scale(1)";
           avatarRef.current.style.boxShadow = "none";
+
+          // Hide error indicators when not in error state
+          if (pushErrorRef.current) pushErrorRef.current.style.display = "none";
+          if (pullErrorRef.current) pullErrorRef.current.style.display = "none";
         }
       } else {
         // Fade out ring
@@ -372,8 +492,8 @@ export function User() {
         rotationRef.current *= 0.9;
 
         // Reset stroke width
-        circle.setAttribute("strokeWidth", "2.5");
-        circle.setAttribute("strokeDasharray", "6 6");
+        circle.setAttribute("stroke-width", "2.5");
+        circle.setAttribute("stroke-dasharray", "6 6");
 
         // Reduce bounce
         bounceRef.current = Math.max(bounceRef.current - 0.2, 0);
@@ -412,7 +532,6 @@ export function User() {
       }
     };
   }, []); // Empty dependency array as we're checking status.current in every frame
-
   return (
     <div className="relative">
       {/* SVG Ring with requestAnimationFrame animation */}
@@ -441,20 +560,79 @@ export function User() {
         />
       </svg>
 
-      {/* User Avatar */}
+      {/* User Avatar Container */}
       <div
-        id="user-avatar"
-        ref={avatarRef}
+        id="user-avatar-container"
         onClick={clearAuthentication}
+        className="relative group cursor-pointer"
         style={{
           width: "30px",
           height: "30px",
-          backgroundColor: `hsl(${h}, ${s}, ${l})`,
-          transition: "box-shadow 0.2s ease",
-          transformOrigin: "center center",
         }}
-        className="relative group flex items-center rounded-full text-sm cursor-pointer"
       >
+        <div
+          ref={avatarRef}
+          style={{
+            width: "30px",
+            height: "30px",
+            transition: "box-shadow 0.2s ease",
+            transformOrigin: "center center",
+            borderRadius: "50%",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+          dangerouslySetInnerHTML={{ __html: avatarShape }}
+        />
+
+        {/* Push Error Indicator */}
+        <div
+          ref={pushErrorRef}
+          style={{
+            display: "none",
+            position: "absolute",
+            top: "-8px",
+            right: "-8px",
+            backgroundColor: "red",
+            borderRadius: "50%",
+            width: "18px",
+            height: "18px",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 0 5px rgba(255,0,0,0.7)",
+            zIndex: 10,
+          }}
+        >
+          <div className="flex items-center">
+            <FaExclamationTriangle size={8} color="white" />
+            <FaArrowUp size={6} color="white" />
+          </div>
+        </div>
+
+        {/* Pull Error Indicator */}
+        <div
+          ref={pullErrorRef}
+          style={{
+            display: "none",
+            position: "absolute",
+            bottom: "-8px",
+            right: "-8px",
+            backgroundColor: "red",
+            borderRadius: "50%",
+            width: "18px",
+            height: "18px",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 0 5px rgba(255,0,0,0.7)",
+            zIndex: 10,
+          }}
+        >
+          <div className="flex items-center">
+            <FaExclamationTriangle size={8} color="white" />
+            <FaArrowDown size={6} color="white" />
+          </div>
+        </div>
+
         <div
           ref={tooltipRef}
           className="absolute top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[9999]"
