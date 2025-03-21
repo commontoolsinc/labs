@@ -40,6 +40,7 @@ import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { useCharmMentions } from "@/components/CommandCenter.tsx";
 import { formatPromptWithMentions } from "@/utils/format.ts";
 import { CharmLink } from "@/components/CharmLink.tsx";
+import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
 
 type Tab = "iterate" | "code" | "data";
 type OperationType = "iterate" | "extend";
@@ -95,111 +96,111 @@ const useCharmOperationContext = () => {
 
 // =================== Custom Hooks ===================
 
-// Hook for managing bottom sheet functionality
-function useBottomSheet(initialHeight = 585) {
-  const [sheetHeight, setSheetHeight] = useState<number>(initialHeight);
-  const [isResizing, setIsResizing] = useState(false);
-  const resizeStartY = useRef<number | null>(null);
-  const startHeight = useRef<number | null>(null);
+// // Hook for managing bottom sheet functionality
+// function useBottomSheet(initialHeight = 585) {
+//   const [sheetHeight, setSheetHeight] = useState<number>(initialHeight);
+//   const [isResizing, setIsResizing] = useState(false);
+//   const resizeStartY = useRef<number | null>(null);
+//   const startHeight = useRef<number | null>(null);
 
-  const handleResizeStart = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      resizeStartY.current = e.clientY;
-      startHeight.current = sheetHeight;
-      setIsResizing(true);
+//   const handleResizeStart = useCallback(
+//     (e: React.MouseEvent) => {
+//       e.preventDefault();
+//       resizeStartY.current = e.clientY;
+//       startHeight.current = sheetHeight;
+//       setIsResizing(true);
 
-      // Add a layer over the entire document to capture events
-      const overlay = document.createElement("div");
-      overlay.id = "resize-overlay";
-      overlay.style.position = "fixed";
-      overlay.style.top = "0";
-      overlay.style.left = "0";
-      overlay.style.width = "100%";
-      overlay.style.height = "100%";
-      overlay.style.zIndex = "9999";
-      overlay.style.cursor = "ns-resize";
-      document.body.appendChild(overlay);
+//       // Add a layer over the entire document to capture events
+//       const overlay = document.createElement("div");
+//       overlay.id = "resize-overlay";
+//       overlay.style.position = "fixed";
+//       overlay.style.top = "0";
+//       overlay.style.left = "0";
+//       overlay.style.width = "100%";
+//       overlay.style.height = "100%";
+//       overlay.style.zIndex = "9999";
+//       overlay.style.cursor = "ns-resize";
+//       document.body.appendChild(overlay);
 
-      const handleResizeMove = (e: MouseEvent) => {
-        if (resizeStartY.current !== null && startHeight.current !== null) {
-          const diff = resizeStartY.current - e.clientY;
-          const newHeight = Math.max(
-            150,
-            Math.min(globalThis.innerHeight * 0.8, startHeight.current + diff),
-          );
-          setSheetHeight(newHeight);
-        }
-      };
+//       const handleResizeMove = (e: MouseEvent) => {
+//         if (resizeStartY.current !== null && startHeight.current !== null) {
+//           const diff = resizeStartY.current - e.clientY;
+//           const newHeight = Math.max(
+//             150,
+//             Math.min(globalThis.innerHeight * 0.8, startHeight.current + diff),
+//           );
+//           setSheetHeight(newHeight);
+//         }
+//       };
 
-      const handleResizeEnd = () => {
-        resizeStartY.current = null;
-        startHeight.current = null;
-        setIsResizing(false);
+//       const handleResizeEnd = () => {
+//         resizeStartY.current = null;
+//         startHeight.current = null;
+//         setIsResizing(false);
 
-        // Remove overlay
-        const overlay = document.getElementById("resize-overlay");
-        if (overlay) {
-          document.body.removeChild(overlay);
-        }
+//         // Remove overlay
+//         const overlay = document.getElementById("resize-overlay");
+//         if (overlay) {
+//           document.body.removeChild(overlay);
+//         }
 
-        document.removeEventListener("mousemove", handleResizeMove);
-        document.removeEventListener("mouseup", handleResizeEnd);
-      };
+//         document.removeEventListener("mousemove", handleResizeMove);
+//         document.removeEventListener("mouseup", handleResizeEnd);
+//       };
 
-      document.addEventListener("mousemove", handleResizeMove);
-      document.addEventListener("mouseup", handleResizeEnd);
-    },
-    [sheetHeight],
-  );
+//       document.addEventListener("mousemove", handleResizeMove);
+//       document.addEventListener("mouseup", handleResizeEnd);
+//     },
+//     [sheetHeight],
+//   );
 
-  const handleTouchResizeStart = useCallback(
-    (e: React.TouchEvent) => {
-      e.preventDefault();
-      if (e.touches.length === 1) {
-        resizeStartY.current = e.touches[0].clientY;
-        startHeight.current = sheetHeight;
-        setIsResizing(true);
-      }
+//   const handleTouchResizeStart = useCallback(
+//     (e: React.TouchEvent) => {
+//       e.preventDefault();
+//       if (e.touches.length === 1) {
+//         resizeStartY.current = e.touches[0].clientY;
+//         startHeight.current = sheetHeight;
+//         setIsResizing(true);
+//       }
 
-      const handleTouchMove = (e: TouchEvent) => {
-        if (
-          resizeStartY.current !== null &&
-          startHeight.current !== null &&
-          e.touches.length === 1
-        ) {
-          const diff = resizeStartY.current - e.touches[0].clientY;
-          const newHeight = Math.max(
-            150,
-            Math.min(globalThis.innerHeight * 0.8, startHeight.current + diff),
-          );
-          setSheetHeight(newHeight);
-        }
-      };
+//       const handleTouchMove = (e: TouchEvent) => {
+//         if (
+//           resizeStartY.current !== null &&
+//           startHeight.current !== null &&
+//           e.touches.length === 1
+//         ) {
+//           const diff = resizeStartY.current - e.touches[0].clientY;
+//           const newHeight = Math.max(
+//             150,
+//             Math.min(globalThis.innerHeight * 0.8, startHeight.current + diff),
+//           );
+//           setSheetHeight(newHeight);
+//         }
+//       };
 
-      const handleTouchEnd = () => {
-        resizeStartY.current = null;
-        startHeight.current = null;
-        setIsResizing(false);
-        document.removeEventListener("touchmove", handleTouchMove);
-        document.removeEventListener("touchend", handleTouchEnd);
-      };
+//       const handleTouchEnd = () => {
+//         resizeStartY.current = null;
+//         startHeight.current = null;
+//         setIsResizing(false);
+//         document.removeEventListener("touchmove", handleTouchMove);
+//         document.removeEventListener("touchend", handleTouchEnd);
+//       };
 
-      document.addEventListener("touchmove", handleTouchMove, {
-        passive: false,
-      });
-      document.addEventListener("touchend", handleTouchEnd);
-    },
-    [sheetHeight],
-  );
+//       document.addEventListener("touchmove", handleTouchMove, {
+//         passive: false,
+//       });
+//       document.addEventListener("touchend", handleTouchEnd);
+//     },
+//     [sheetHeight],
+//   );
 
-  return {
-    sheetHeight,
-    isResizing,
-    handleResizeStart,
-    handleTouchResizeStart,
-  };
-}
+//   return {
+//     sheetHeight,
+//     isResizing,
+//     handleResizeStart,
+//     handleTouchResizeStart,
+//   };
+// }
 
 // Hook for tab management
 function useTabNavigation() {
@@ -1257,14 +1258,18 @@ const BottomSheet = ({
 }: {
   children: (activeTab: Tab, isResizing: boolean) => React.ReactNode;
 }) => {
-  const { sheetHeight, isResizing, handleResizeStart, handleTouchResizeStart } =
-    useBottomSheet();
+  const {
+    drawerHeight,
+    isResizing,
+    handleResizeStart,
+    handleTouchResizeStart,
+  } = useResizableDrawer({ initialHeight: 585, resizeDirection: "down" });
   const { activeTab, handleTabChange } = useTabNavigation();
 
   return (
     <div
       className="bottom-sheet border-t-2 border-black bg-white shadow-lg flex flex-col"
-      style={{ height: `${sheetHeight}px` }}
+      style={{ height: `${drawerHeight}px` }}
     >
       {/* Resize Handle */}
       <div
