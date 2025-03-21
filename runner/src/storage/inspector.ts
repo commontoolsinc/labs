@@ -11,7 +11,7 @@ import {
   Transaction,
   TransactionError,
   UCAN,
-  Variant
+  Variant,
 } from "@commontools/memory/interface";
 import { JSONValue } from "../../../builder/src/index.ts";
 
@@ -51,8 +51,7 @@ export interface ConnectionError extends Error {
   reason: "timeout" | "error" | "close";
   time: Time;
 }
-
-class Model {
+export interface Model {
   /**
    * Status of the connection to the upstream. If pending it will contain
    * result holding potentially an error which occurred causing a reconnection
@@ -80,11 +79,28 @@ class Model {
     updated?: Time;
     value: JSONValue | undefined;
   }>;
+}
+
+class Model {
+  connection: Status<Result<Connect, ConnectionError>>;
+  push: PushState;
+  pull: PullState;
+  subscriptions: Record<string, {
+    source: Subscribe;
+    opened: Time;
+    updated?: Time;
+    value: JSONValue | undefined;
+  }>;
   constructor(
-    connection: typeof this.connection,
-    push: typeof this.push,
-    pull: typeof this.pull,
-    subscriptions: typeof this.subscriptions,
+    connection: Status<Result<Connect, ConnectionError>>,
+    push: PushState,
+    pull: PullState,
+    subscriptions: Record<string, {
+      source: Subscribe;
+      opened: Time;
+      updated?: Time;
+      value: JSONValue | undefined;
+    }>,
   ) {
     this.connection = connection;
     this.push = push;
