@@ -46,7 +46,7 @@ export function isValidCharmId(id: string): boolean {
   return !!id && id.length === 59;
 }
 
-const managerCache = new WeakMap<string, CharmManager>();
+const managerCache = new Map<string, CharmManager>();
 export async function getManagerForSpace(space: DID): Promise<CharmManager> {
   const spaceKey = space.toString();
 
