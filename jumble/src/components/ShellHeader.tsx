@@ -49,7 +49,6 @@ export function ShellHeader(
       className="flex bg-gray-50 items-center justify-between border-b-2 p-2"
       style={{ backgroundColor: style?.color }}
       onClick={handleHeaderClick}
-      title="Click empty space to change header color"
     >
       <div className="header-start flex items-center gap-2">
         <NavLink

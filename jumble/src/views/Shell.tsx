@@ -26,7 +26,7 @@ export default function Shell() {
         <div className="flex flex-col shell h-full bg-gray-50 border-2 border-black">
           <ShellHeader session={session} charmId={charmId} />
 
-          <div className="relative h-full overflow-y-auto">
+          <div className="h-full overflow-y-auto">
             <Outlet />
           </div>
 
