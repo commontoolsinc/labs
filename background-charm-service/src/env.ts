@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 const envSchema = z.object({
-  KV_STORE_DIR: z.string().default(".cache"),
   // Job queue settings
   MAX_CONCURRENT_JOBS: z.coerce.number().positive().default(5),
   MAX_RETRIES: z.coerce.number().nonnegative().default(3),
@@ -14,9 +13,6 @@ const envSchema = z.object({
 
   // Timeouts (in milliseconds)
   CHARM_EXECUTION_TIMEOUT_MS: z.coerce.number().positive().default(30_000),
-  TOKEN_REFRESH_TIMEOUT_MS: z.coerce.number().positive().default(10_000),
-  SCAN_INTEGRATION_TIMEOUT_MS: z.coerce.number().positive().default(20_000),
-  MAINTENANCE_JOB_TIMEOUT_MS: z.coerce.number().positive().default(60_000),
 
   // External service URLs
   TOOLSHED_API_URL: z.string().default("http://localhost:8000"),

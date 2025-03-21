@@ -1,6 +1,3 @@
-/// <reference lib="deno.unstable" />
-
-import { CharmManager } from "@commontools/charm";
 import type { DID } from "@commontools/identity";
 import { Job } from "./types.ts";
 import { log } from "./utils.ts";
@@ -10,10 +7,9 @@ import {
   createTimeoutController,
   getSharedWorkerPool,
 } from "./utils/common.ts";
-import WorkerPool from "./utils/worker-pool.ts";
+import { WorkerPool } from "./utils/worker-pool.ts";
 
 export class ExecuteCharmHandler {
-  private managerCache = new Map<string, CharmManager>();
   private workerPool: WorkerPool<any, any>;
 
   constructor() {
@@ -36,7 +32,9 @@ export class ExecuteCharmHandler {
     });
   }
 
-  async handle(job: Job): Promise<unknown> {
+  async handle(
+    job: Job,
+  ): Promise<{ success: boolean; executionTimeMs: number; error?: string }> {
     const entry = job.bgCharmEntry.get();
 
     log(`Executing ${entry.integration} ${entry.charmId} (${entry.space})`);
@@ -65,26 +63,14 @@ export class ExecuteCharmHandler {
       );
       const executionTimeMs = Date.now() - startTime;
 
-      // // Check if we should disable this charm
-      // if (state.consecutiveFailures >= 5) { // TODO(@jakedahn): Make configurable
-      //   log(
-      //     `Disabling charm ${spaceId}/${charmId} after ${state.consecutiveFailures} consecutive failures`,
-      //   );
-      //   await this.stateManager.disableCharm(spaceId, charmId);
-      // }
-
       return {
         success: false,
         error: errorMessage,
         executionTimeMs,
-        // consecutiveFailures: state.consecutiveFailures,
       };
     }
   }
 
-  /**
-   * Execute a charm using the worker pool
-   */
   private async executeCharmWithWorker({
     space,
     charmId,
@@ -109,6 +95,7 @@ export class ExecuteCharmHandler {
       });
 
       // Convert AbortSignal to a promise that rejects when aborted
+      // FIXME(ja): we need to actually kill the worker process?
       const abort = new Promise<never>((_, reject) => {
         controller.signal.addEventListener("abort", () => {
           reject(
