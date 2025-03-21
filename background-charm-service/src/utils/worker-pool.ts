@@ -2,7 +2,7 @@
  * Worker pool for managing worker processes
  */
 import { log } from "../utils.ts";
-import { WorkerError } from "../errors/index.ts";
+import { WorkerError } from "../errors.ts";
 
 // Generic worker options interface
 interface GenericWorkerOptions {
