@@ -114,7 +114,12 @@ export class WorkerPool<T, R> {
       this.workers[index].worker.terminate();
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
-      log(`Error terminating worker ${workerId}: ${errorMessage}`);
+      const workerInfo = this.workers[index];
+      log(
+        `Error terminating worker ${workerId}: ${errorMessage} (created: ${
+          new Date(workerInfo.createdAt || 0).toISOString()
+        }, tasks processed: ${workerInfo.tasksProcessed}, busy: ${workerInfo.busy})`,
+      );
     }
 
     this.workers.splice(index, 1);
@@ -443,7 +448,7 @@ export class WorkerPool<T, R> {
     this.taskQueue = [];
 
     // Clean up any remaining message handlers
-    for (const [taskId, handler] of this.activeMessageHandlers.entries()) {
+    for (const [_taskId, handler] of this.activeMessageHandlers.entries()) {
       for (const workerInfo of this.workers) {
         try {
           workerInfo.worker.removeEventListener("message", handler);
@@ -457,46 +462,25 @@ export class WorkerPool<T, R> {
     log("Worker pool shutdown complete");
   }
 
-  /**
-   * Get the number of active workers
-   */
   getActiveWorkerCount(): number {
     return this.workers.filter((w) => w.busy).length;
   }
 
-  /**
-   * Get the total number of workers in the pool
-   */
   getTotalWorkerCount(): number {
     return this.workers.length;
   }
 
-  /**
-   * Get the number of queued tasks
-   */
   getQueuedTaskCount(): number {
     return this.taskQueue.length;
   }
 
-  // Log stats periodically
   private startStatsReporting(intervalMs: number = 60000): void {
     setInterval(() => {
-      this.reportStats();
+      this.reportWorkerStats();
     }, intervalMs);
   }
 
-  /**
-   * Public method to report worker pool stats
-   * Can be called by external services to log current stats
-   */
   public reportWorkerStats(): void {
-    this.reportStats();
-  }
-
-  /**
-   * Report internal statistics about the worker pool
-   */
-  private reportStats(): void {
     log(`Worker Pool Stats:
       - Tasks: ${this.stats.tasksCompleted} completed, ${this.stats.tasksFailed} failed
       - Workers: ${this.getActiveWorkerCount()} busy / ${this.workers.length} total, ${this.stats.workersCreated} created, ${this.stats.workersRecycled} recycled
