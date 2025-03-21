@@ -99,11 +99,15 @@ export class JobQueue {
           continue;
         }
 
-        // Get next job from queue
         const job = this.pendingJobs.shift();
 
         if (!job) {
           await sleep(this.pollingIntervalMs);
+          continue;
+        }
+
+        // don't let the same charm run concurrently
+        if (this.activeJobs.has(job)) {
           continue;
         }
 
@@ -123,52 +127,26 @@ export class JobQueue {
 
   private async processJob(job: Job): Promise<void> {
     const startTime = Date.now();
-    let success = false;
-    let error: string | undefined;
-    let resultData: unknown;
-
     const entry = job.bgCharmEntry.get();
 
     log(`Starting ${entry.integration} ${entry.charmId} (${entry.space})`);
 
     try {
-      resultData = await Promise.race([
+      const resultData = await Promise.race([
         this.executeCharmHandler.handle(job),
-        new Promise((_resolve, reject) => {
-          setTimeout(() => reject("Job timed out"), job.timeoutMs);
-        }),
+        sleep(job.timeoutMs).then(() => ({ success: false, error: "Timeout" })),
       ]);
 
-      // FIXME(ja): HERE
-
-      if (
-        resultData && typeof resultData === "object" &&
-        "success" in resultData
-      ) {
-        // If the handler explicitly returns success: false, respect that
-        success = resultData.success === true;
-        if (!success && "error" in resultData) {
-          error = resultData.error as string;
-          throw new Error(error || "Unknown error in charm execution");
-        }
-      } else {
-        success = true;
+      if (resultData.success === false) {
+        throw new Error(resultData.error ?? "Unknown error in charm execution");
       }
 
       const duration = Date.now() - startTime;
-      if (success) {
-        log(
-          `Job ${job.bgCharmEntry.charmId} completed successfully (${duration}ms)`,
-        );
-      } else {
-        error = error || "Unknown error in charm execution";
-        log(`Job ${job.bgCharmEntry.charmId} failed (${duration}ms): ${error}`);
-        throw new Error(error);
-      }
+      log(`Job ${entry.charmId} completed successfully (${duration}ms)`);
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-      log(`Job ${job.bgCharmEntry.charmId} failed: ${error}`);
-      throw e; // Re-throw for outer catch
+      const error = e instanceof Error ? e.message : String(e);
+      log(`Job ${entry.charmId} failed: ${error}`);
+      throw e;
     }
   }
 }

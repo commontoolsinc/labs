@@ -37,6 +37,8 @@ export default async function runCharm(
     });
 
     // Create a new manager (not reusing from a cache)
+    // FIXME(ja): I don't think we need the full manager!
+    // or fix the fact that manager does wayyyyyy too much download?
     const manager = new CharmManager(session);
     const runningCharm = await manager.get(charmId, true);
     if (!runningCharm) {
@@ -49,10 +51,8 @@ export default async function runCharm(
       throw new Error(`No updater stream found for charm: ${charmId}`);
     }
 
-    // Execute the charm by sending a message to the updater stream
     updater.send({});
 
-    // waits for all pending actions to complete
     await idle();
 
     // FIXME(ja): should we terminate the charm somehow?
