@@ -95,13 +95,7 @@ export async function addCharmToBG({
 /**
  * Get the BGUpdater charms cell
  */
-export async function getBGUpdaterCharmsCell(
-  asCell?: false,
-): Promise<Cell<BGCharmEntry[]>>;
-export async function getBGUpdaterCharmsCell(
-  asCell: true,
-): Promise<Cell<Cell<BGCharmEntry>[]>>;
-export async function getBGUpdaterCharmsCell(asCell = false) {
+export async function getBGUpdaterCharmsCell() {
   if (!storage.hasSigner()) {
     throw new Error("Storage has no signer");
   }
@@ -109,22 +103,37 @@ export async function getBGUpdaterCharmsCell(asCell = false) {
   if (!storage.hasRemoteStorage()) {
     throw new Error("Storage has no remote storage");
   }
-  let schema;
+  const schema = bgUpdaterCharmsSchema.properties.charms;
 
-  if (asCell) {
-    schema = {
-      type: "array",
-      items: {
-        type: "object",
-        properties: CharmEntrySchema.properties,
-        asCell: true,
-      },
-      default: [],
-      asCell: true,
-    } as JSONSchema;
-  } else {
-    schema = bgUpdaterCharmsSchema.properties.charms;
+  const charmsCell = getCell(SYSTEM_SPACE_ID, CELL_CAUSE, schema);
+
+  // Ensure the cell is synced
+  await storage.syncCell(charmsCell, true);
+  await storage.synced();
+
+  return charmsCell;
+}
+
+export async function getBGUpdaterCellCharmsCell(): Promise<
+  Cell<Cell<BGCharmEntry>[]>
+> {
+  if (!storage.hasSigner()) {
+    throw new Error("Storage has no signer");
   }
+
+  if (!storage.hasRemoteStorage()) {
+    throw new Error("Storage has no remote storage");
+  }
+  const schema = {
+    type: "array",
+    items: {
+      type: "object",
+      properties: CharmEntrySchema.properties,
+      asCell: true,
+    },
+    default: [],
+    asCell: true,
+  } as const satisfies JSONSchema;
 
   const charmsCell = getCell(SYSTEM_SPACE_ID, CELL_CAUSE, schema);
 

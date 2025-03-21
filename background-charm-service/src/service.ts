@@ -1,6 +1,9 @@
 import { Identity } from "@commontools/identity";
 import { type Cell, type CellLink, storage } from "@commontools/runner";
-import { type BGCharmEntry, getBGUpdaterCharmsCell } from "@commontools/utils";
+import {
+  type BGCharmEntry,
+  getBGUpdaterCellCharmsCell,
+} from "@commontools/utils";
 import { JobQueue } from "./job-queue.ts";
 import { log } from "./utils.ts";
 import { env } from "./env.ts";
@@ -19,7 +22,7 @@ export class BackgroundCharmService {
   async initialize() {
     storage.setRemoteStorage(new URL(env.MEMORY_URL));
     storage.setSigner(await Identity.fromPassphrase(env.OPERATOR_PASS));
-    this.charmsCell = await getBGUpdaterCharmsCell(true);
+    this.charmsCell = await getBGUpdaterCellCharmsCell();
     await storage.syncCell(this.charmsCell, true);
     await storage.synced();
 
