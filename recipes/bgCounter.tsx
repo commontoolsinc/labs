@@ -23,6 +23,7 @@ const updaterSchema = {
 const inputSchema = schema({
   type: "object",
   properties: {
+    error: { type: "string", default: "" },
     counter: { type: "number", default: 0 },
   },
 });
@@ -38,13 +39,23 @@ const outputSchema = {
   },
 } as const satisfies JSONSchema;
 
-const updater = handler<{ delta: number }, { counter: number }>(
+const updater = handler<{ delta: number }, { counter: number; error: string }>(
   ({ delta }, state) => {
+    if (state.error) {
+      console.error("testing throwing an error! in updater");
+      throw new Error(state.error);
+    }
     state.counter = (state.counter ?? 0) + (delta ?? 1);
   },
 );
 
-export default recipe(inputSchema, outputSchema, ({ counter }) => {
+const updateError = handler<{ detail: { value: string } }, { error: string }>(
+  ({ detail }, state) => {
+    state.error = detail?.value ?? "";
+  },
+);
+
+export default recipe(inputSchema, outputSchema, ({ counter, error }) => {
   derive(counter, (counter) => {
     console.log("counter#", counter);
   });
@@ -52,16 +63,22 @@ export default recipe(inputSchema, outputSchema, ({ counter }) => {
     [NAME]: str`Counter: ${derive(counter, (counter) => counter)}`,
     [UI]: (
       <div>
-        <button type="button" onClick={updater({ counter })}>
+        <button type="button" onClick={updater({ counter, error })}>
           Update Counter
         </button>
+        <p>If error is set, the update function will throw an error.</p>
+        <common-input
+          value={error}
+          placeholder="Error"
+          oncommon-input={updateError({ error })}
+        />
         <common-updater $state={counter} integration="counter" />
         <div>
           {counter}
         </div>
       </div>
     ),
-    bgUpdater: updater({ counter }),
+    bgUpdater: updater({ counter, error }),
     counter,
   };
 });

@@ -67,7 +67,7 @@ export class JobQueue {
     if (this.activeJobs.size > 0) {
       log(`Waiting for ${this.activeJobs.size} active jobs to complete...`);
       await Promise.race([
-        new Promise((resolve) => setTimeout(resolve, 10000)), // 10 sec timeout
+        sleep(10000),
         new Promise((resolve) => {
           const checkInterval = setInterval(() => {
             if (this.activeJobs.size === 0) {
@@ -92,61 +92,56 @@ export class JobQueue {
 
   private async runConsumerLoop(): Promise<void> {
     while (this.consumerRunning) {
-      try {
-        // Check if we can process more jobs
-        if (this.activeJobs.size >= this.maxConcurrentJobs) {
-          await sleep(this.pollingIntervalMs);
-          continue;
-        }
+      if (this.activeJobs.size >= this.maxConcurrentJobs) {
+        await sleep(this.pollingIntervalMs);
+        continue;
+      }
 
-        const job = this.pendingJobs.shift();
+      const job = this.pendingJobs.shift();
 
-        if (!job) {
-          await sleep(this.pollingIntervalMs);
-          continue;
-        }
+      if (!job) {
+        await sleep(this.pollingIntervalMs);
+        continue;
+      }
 
-        // don't let the same charm run concurrently
-        if (this.activeJobs.has(job)) {
-          continue;
-        }
+      // skip any jobs already running...
+      // FIXME(ja): is job actually the same for a specific bgcharmentry?
+      if (this.activeJobs.has(job)) {
+        continue;
+      }
 
-        this.activeJobs.add(job);
-        this.processJob(job).finally(() => {
+      this.activeJobs.add(job);
+      this.processJob(job)
+        .catch((e) => {
+          log(e instanceof Error ? e.message : String(e), {
+            error: true,
+          });
+          return {
+            success: false,
+            error: e instanceof Error ? e.message : String(e),
+          };
+        })
+        .then((result) => {
+          console.log(result);
+        })
+        .finally(() => {
           this.activeJobs.delete(job);
         });
-      } catch (error) {
-        // FIXME(ja): should we remove the job from the queue/activeJobs?
-        log(error instanceof Error ? error.message : String(error), {
-          error: true,
-        });
-        await sleep(1000);
-      }
     }
   }
 
-  private async processJob(job: Job): Promise<void> {
-    const startTime = Date.now();
+  private processJob(
+    job: Job,
+  ): Promise<{ success: boolean; error?: string }> {
     const entry = job.bgCharmEntry.get();
-
     log(`Starting ${entry.integration} ${entry.charmId} (${entry.space})`);
 
-    try {
-      const resultData = await Promise.race([
-        this.executeCharmHandler.handle(job),
-        sleep(job.timeoutMs).then(() => ({ success: false, error: "Timeout" })),
-      ]);
-
-      if (resultData.success === false) {
-        throw new Error(resultData.error ?? "Unknown error in charm execution");
-      }
-
-      const duration = Date.now() - startTime;
-      log(`Job ${entry.charmId} completed successfully (${duration}ms)`);
-    } catch (e) {
-      const error = e instanceof Error ? e.message : String(e);
-      log(`Job ${entry.charmId} failed: ${error}`);
-      throw e;
-    }
+    return Promise.race([
+      this.executeCharmHandler.handle(job),
+      sleep(job.timeoutMs).then(() => ({
+        success: false,
+        error: "Timeout",
+      })),
+    ]);
   }
 }

@@ -5,12 +5,18 @@
 
 import runCharm from "./run-charm.ts";
 import { log } from "../utils.ts";
-import { setBobbyServerUrl, storage } from "@commontools/runner";
+import { onError, setBobbyServerUrl, storage } from "@commontools/runner";
 
 function initializeWorker(toolshedUrl: string): void {
   storage.setRemoteStorage(new URL(toolshedUrl));
   setBobbyServerUrl(toolshedUrl);
 }
+
+// NOTE(ja): capture errors in the charm
+let latestError: Error | null = null;
+onError((e) => {
+  latestError = e;
+});
 
 /**
  * Process a task to execute a charm
@@ -23,9 +29,17 @@ async function processTask(taskId: string, data: any): Promise<void> {
 
     initializeWorker(toolshedUrl);
 
+    latestError = null;
     const result = await runCharm({ spaceId, charmId, operatorPass });
 
-    self.postMessage({ taskId, result });
+    if (latestError) {
+      self.postMessage({
+        taskId,
+        error: String(latestError),
+      });
+    } else {
+      self.postMessage({ taskId, result });
+    }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     log(`Worker error for task ${taskId}: ${errorMessage}`);
