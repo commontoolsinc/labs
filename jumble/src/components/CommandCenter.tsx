@@ -15,7 +15,6 @@ import {
   getCommands,
   InputCommandItem,
   MenuCommandItem,
-  PlaceholderCommandItem,
   SelectCommandItem,
   TranscribeCommandItem,
 } from "./commands.ts";
@@ -26,7 +25,6 @@ import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { charmId } from "@/utils/charms.ts";
 import { formatPromptWithMentions } from "@/utils/format.ts";
 import { NAME } from "@commontools/builder";
-import { LuSend } from "react-icons/lu";
 
 function CommandProcessor({
   mode,

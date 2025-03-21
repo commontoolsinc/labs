@@ -1,10 +1,9 @@
 import React, { useRef } from "react";
 import { render } from "@commontools/html";
 import { UI } from "@commontools/builder";
-import { charmSchema } from "@commontools/charm";
+import { charmSchema, fixItCharm } from "@commontools/charm";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { useNavigate } from "react-router-dom";
-import { fixItCharm } from "@/utils/charm-operations.ts";
 import { LuX } from "react-icons/lu";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import { createPath } from "@/routes.ts";

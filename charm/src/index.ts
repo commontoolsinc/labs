@@ -17,4 +17,10 @@ export {
   extractVersionTag,
   injectUserCode,
 } from "./iframe/static.ts";
+export {
+  addGithubRecipe,
+  castSpellAsCharm,
+  fixItCharm,
+  renameCharm,
+} from "./commands.ts";
 export { getIframeRecipe, type IFrameRecipe } from "./iframe/recipe.ts";
