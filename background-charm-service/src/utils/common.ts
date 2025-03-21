@@ -3,17 +3,14 @@
  */
 import { Cell, isStream, Stream } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
-import { log } from "../utils.ts";
 import { WorkerPool } from "./worker-pool.ts";
 
-// Create a singleton worker pool that can be shared across the application
-let sharedWorkerPool: WorkerPool<any, any> | null = null;
-
-/**
- * Get or create the shared worker pool
- */
-export function getSharedWorkerPool(options: {
+export type WorkerPoolOptions = {
   maxWorkers: number;
+  maxWorkerLifetimeMs: number;
+  workerMaxBusyTimeMs: number;
+  maxWorkerTasks: number;
+  maxQueueLength: number;
   workerUrl: string;
   workerOptions?: {
     type?: "classic" | "module";
@@ -32,50 +29,43 @@ export function getSharedWorkerPool(options: {
   };
   taskTimeout?: number;
   healthCheckIntervalMs?: number;
-}): WorkerPool<any, any> {
+};
+
+// Create a singleton worker pool that can be shared across the application
+let sharedWorkerPool: WorkerPool<any, any> | null = null;
+
+export function getSharedWorkerPool(
+  maxWorkers: number,
+): WorkerPool<any, any> {
   if (!sharedWorkerPool) {
-    sharedWorkerPool = new WorkerPool(options);
-    log(`Created shared worker pool with ${options.maxWorkers} max workers`);
+    const workerUrl = new URL("./charm-worker.ts", import.meta.url).href;
+    sharedWorkerPool = new WorkerPool({
+      maxWorkers,
+      maxWorkerLifetimeMs: 8 * 60 * 60 * 1000, // 8 hours
+      maxWorkerTasks: 1000,
+      maxQueueLength: 1000,
+      workerMaxBusyTimeMs: 2 * 60 * 1000, // 2 min
+      workerUrl,
+      workerOptions: {
+        type: "module",
+        deno: {
+          permissions: {
+            read: true,
+            write: true,
+            net: true,
+            env: true,
+          },
+        },
+      },
+    });
   }
   return sharedWorkerPool;
 }
 
-/**
- * Find an updater stream in a charm by checking common stream names
- * This is a centralized implementation of the findUpdaterStream functionality
- */
 export function findUpdaterStream(charm: Cell<Charm>): Stream<any> | null {
-  // Check for known updater streams
-  const streamNames = [
-    "bgUpdater",
-  ];
-
-  for (const name of streamNames) {
-    const stream = charm.key(name);
-    if (isStream(stream)) {
-      // Log which stream we found to help debugging
-      log(
-        `Found stream '${name}' in charm ${
-          charm.entityId ? charm.entityId["/"] : "unknown"
-        }`,
-      );
-      return stream;
-    }
-  }
-
-  // If no stream found, log all available keys in the charm
-  const charmId = charm.entityId ? charm.entityId["/"] : "unknown";
-  try {
-    const keys = Object.keys(charm.toJSON());
-    log(
-      `No updater stream found in charm ${charmId}. Available keys: ${
-        keys.join(", ")
-      }`,
-    );
-  } catch (error) {
-    log(
-      `No updater stream found in charm ${charmId} and could not enumerate keys`,
-    );
+  const stream = charm.key("bgUpdater");
+  if (isStream(stream)) {
+    return stream;
   }
 
   return null;

@@ -1,29 +1,7 @@
-/**
- * Worker pool for managing worker processes
- */
 import { log } from "../utils.ts";
-import { WorkerError } from "../errors/index.ts";
-
-// Generic worker options interface
-interface GenericWorkerOptions {
-  type?: "classic" | "module";
-  name?: string;
-  [key: string]: unknown;
-}
-
-export interface WorkerPoolOptions {
-  maxWorkers: number;
-  workerUrl: URL | string;
-  workerOptions?: GenericWorkerOptions;
-  initTimeout?: number;
-  taskTimeout?: number;
-  healthCheckIntervalMs?: number;
-  workerMaxBusyTimeMs?: number;
-  maxWorkerLifetime?: number; // Max lifetime of a worker in ms
-  maxWorkerTasks?: number; // Max tasks a worker can process before recycling
-  workerStartupTimeout?: number; // Timeout for worker startup
-}
-
+import { sleep } from "@commontools/utils";
+import type { WorkerPoolOptions } from "./common.ts";
+import { resolve } from "@std/path/resolve";
 export interface WorkerTask<T, R> {
   id: string;
   data: T;
@@ -64,10 +42,7 @@ export class WorkerPool<T, R> {
   };
 
   constructor(options: WorkerPoolOptions) {
-    this.options = {
-      initTimeout: 10000, // 10 second default timeout for worker initialization
-      ...options,
-    };
+    this.options = options;
 
     log(`Worker pool initialized with maxWorkers=${options.maxWorkers}`);
 
@@ -116,7 +91,12 @@ export class WorkerPool<T, R> {
       this.workers[index].worker.terminate();
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
-      log(`Error terminating worker ${workerId}: ${errorMessage}`);
+      const workerInfo = this.workers[index];
+      log(
+        `Error terminating worker ${workerId}: ${errorMessage} (created: ${
+          new Date(workerInfo.createdAt || 0).toISOString()
+        }, tasks processed: ${workerInfo.tasksProcessed}, busy: ${workerInfo.busy})`,
+      );
     }
 
     this.workers.splice(index, 1);
@@ -168,7 +148,7 @@ export class WorkerPool<T, R> {
           log(`Worker ${workerId} error: ${event.message}`);
           this.handleWorkerError(
             workerId,
-            new WorkerError(event.message, workerId),
+            new Error(`Worker ${workerId} error: ${event.message}`),
           );
         };
 
@@ -181,7 +161,7 @@ export class WorkerPool<T, R> {
           ? error.message
           : String(error);
         log(`Error creating worker ${workerId}: ${errorMessage}`);
-        throw new WorkerError(`Failed to create worker ${workerId}`, workerId);
+        throw new Error(`Failed to create worker ${workerId}`);
       }
     }
 
@@ -198,9 +178,9 @@ export class WorkerPool<T, R> {
 
       // If worker has exceeded max lifetime
       if (
-        this.options.maxWorkerLifetime &&
+        this.options.maxWorkerLifetimeMs &&
         workerInfo.createdAt &&
-        (now - workerInfo.createdAt > this.options.maxWorkerLifetime)
+        (now - workerInfo.createdAt > this.options.maxWorkerLifetimeMs)
       ) {
         if (!workerInfo.busy) {
           workersToRecycle.push(workerInfo.id);
@@ -263,7 +243,7 @@ export class WorkerPool<T, R> {
    */
   async execute(data: T): Promise<R> {
     if (this.isShuttingDown) {
-      throw new Error("Worker pool is shutting down");
+      return { success: false, error: "Worker pool is shutting down" };
     }
 
     return await new Promise<R>((resolve, reject) => {
@@ -285,16 +265,11 @@ export class WorkerPool<T, R> {
         this.stats.maxQueueLength = this.taskQueue.length;
       }
 
-      // Try to process immediately
       this.processQueue();
     });
   }
 
-  /**
-   * Process the task queue
-   */
   private processQueue(): void {
-    // Process tasks until queue is empty or no workers available
     while (this.taskQueue.length > 0) {
       const workerInfo = this.getAvailableWorker();
       if (!workerInfo) {
@@ -308,97 +283,58 @@ export class WorkerPool<T, R> {
     }
   }
 
-  /**
-   * Execute a task on a worker
-   */
-  private executeTask(
+  private async executeTask(
     worker: Worker,
     workerId: string,
     task: WorkerTask<T, R>,
-  ): void {
-    log(`Executing task ${task.id} on worker ${workerId}`);
+  ) {
+    log(`Starting task on worker ${workerId}`);
 
     // Track execution start time
     const startTime = Date.now();
-
-    // Create timeout to catch stuck workers
-    const taskTimeout = setTimeout(() => {
-      log(
-        `Task ${task.id} timed out on worker ${workerId}, terminating worker`,
-      );
-      worker.removeEventListener("message", messageHandler);
-      this.activeMessageHandlers.delete(task.id);
-
-      // Update stats
+    const timeout = this.options.taskTimeout || 1000;
+    const taskTimeout = sleep(timeout).then(() => {
       this.stats.taskTimeouts++;
-      this.stats.tasksFailed++;
+      return { success: false, error: `Task timeout after ${timeout}ms` };
+    });
 
-      this.handleWorkerError(
-        workerId,
-        new WorkerError(
-          `Task timeout after ${this.options.taskTimeout}ms`,
-          workerId,
-        ),
-      );
-      task.reject(
-        new Error(`Task timed out after ${this.options.taskTimeout}ms`),
-      );
-    }, this.options.taskTimeout || 60000);
+    const response = new Promise<{ success: boolean; error?: string }>(
+      (resolve) => {
+        const messageHandler = (event: MessageEvent) => {
+          worker.removeEventListener("message", messageHandler);
+          this.activeMessageHandlers.delete(task.id);
+          resolve(event.data as { success: boolean; error?: string });
+        };
 
-    // Set up message handler for this specific task
-    const messageHandler = (event: MessageEvent) => {
-      // Clear timeout when we get any response
-      clearTimeout(taskTimeout);
+        worker.addEventListener("message", messageHandler);
+        this.activeMessageHandlers.set(task.id, messageHandler);
+      },
+    );
 
-      if (event.data.error) {
-        // Task failed
-        const errorMessage = event.data.error;
-        log(`Task ${task.id} failed on worker ${workerId}: ${errorMessage}`);
-        task.reject(new Error(errorMessage));
-      } else {
-        // Task succeeded
-        log(`Task ${task.id} completed on worker ${workerId}`);
-        task.resolve(event.data.result);
-      }
-
-      // Clean up
-      worker.removeEventListener("message", messageHandler);
-      this.activeMessageHandlers.delete(task.id);
-
-      // Mark worker as available
-      const workerInfo = this.workers.find((w) => w.id === workerId);
-      if (workerInfo) {
-        workerInfo.busy = false;
-        workerInfo.busySince = undefined;
-        workerInfo.tasksProcessed++;
-      }
-
-      // Calculate task execution time
-      const executionTime = Date.now() - startTime;
-
-      // Update stats
-      if (event.data.error) {
-        this.stats.tasksFailed++;
-      } else {
-        this.stats.tasksCompleted++;
-        this.stats.totalTaskTime += executionTime;
-      }
-
-      // Process next task if any
-      this.processQueue();
-    };
-
-    // Add message handler and store it for potential cleanup
-    worker.addEventListener("message", messageHandler);
-    this.activeMessageHandlers.set(task.id, messageHandler);
-
-    // Send task to worker
     worker.postMessage({ taskId: task.id, data: task.data });
+    const result = await Promise.race([response, taskTimeout]);
+
+    this.stats.totalTaskTime += Date.now() - startTime;
+    console.log("result", result);
+    if (result.error) {
+      this.stats.tasksFailed++;
+      task.reject(new Error(result.error));
+    } else {
+      this.stats.tasksCompleted++;
+      task.resolve("success");
+    }
+    // FIXME(ja): ooof - we shouldn't do this!
+    // this.processQueue();
+
+    //   // Mark worker as available
+    //   const workerInfo = this.workers.find((w) => w.id === workerId);
+    //   if (workerInfo) {
+    //     workerInfo.busy = false;
+    //     workerInfo.busySince = undefined;
+    //     workerInfo.tasksProcessed++;
+    //   }
   }
 
-  /**
-   * Shut down the worker pool
-   */
   async shutdown(): Promise<void> {
     log("Shutting down worker pool");
     this.isShuttingDown = true;
@@ -448,7 +384,7 @@ export class WorkerPool<T, R> {
     this.taskQueue = [];
 
     // Clean up any remaining message handlers
-    for (const [taskId, handler] of this.activeMessageHandlers.entries()) {
+    for (const [_taskId, handler] of this.activeMessageHandlers.entries()) {
       for (const workerInfo of this.workers) {
         try {
           workerInfo.worker.removeEventListener("message", handler);
@@ -462,46 +398,25 @@ export class WorkerPool<T, R> {
     log("Worker pool shutdown complete");
   }
 
-  /**
-   * Get the number of active workers
-   */
   getActiveWorkerCount(): number {
     return this.workers.filter((w) => w.busy).length;
   }
 
-  /**
-   * Get the total number of workers in the pool
-   */
   getTotalWorkerCount(): number {
     return this.workers.length;
   }
 
-  /**
-   * Get the number of queued tasks
-   */
   getQueuedTaskCount(): number {
     return this.taskQueue.length;
   }
 
-  // Log stats periodically
   private startStatsReporting(intervalMs: number = 60000): void {
     setInterval(() => {
-      this.reportStats();
+      this.reportWorkerStats();
     }, intervalMs);
   }
 
-  /**
-   * Public method to report worker pool stats
-   * Can be called by external services to log current stats
-   */
   public reportWorkerStats(): void {
-    this.reportStats();
-  }
-
-  /**
-   * Report internal statistics about the worker pool
-   */
-  private reportStats(): void {
     log(`Worker Pool Stats:
       - Tasks: ${this.stats.tasksCompleted} completed, ${this.stats.tasksFailed} failed
       - Workers: ${this.getActiveWorkerCount()} busy / ${this.workers.length} total, ${this.stats.workersCreated} created, ${this.stats.workersRecycled} recycled
