@@ -11,10 +11,9 @@ import {
   Transaction,
   TransactionError,
   UCAN,
-  Variant,
+  Variant
 } from "@commontools/memory/interface";
 import { JSONValue } from "../../../builder/src/index.ts";
-import { connect } from "../../../memory/consumer.ts";
 
 export type Status<Pending extends object, Ready = Pending> =
   | { pending: Pending; ready?: void; time: Time }
