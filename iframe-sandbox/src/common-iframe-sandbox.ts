@@ -17,10 +17,9 @@ let FRAME_IDS = 0;
 const HEALTH_CHECK_LOAD_DELAY = 5000;
 // The time frame, in ms, that content must respond to within
 // in order to pass the health check.
-//
+
 // Should be rather low, but currently it's too likely for a
-// charm to spend a lot of time processing. Consider
-// forcing different processes for iframes in the future!
+// charm to spend a lot of time processing.
 const HEALTH_CHECK_TIMEOUT = 3000;
 
 // @summary A sandboxed iframe to execute arbitrary scripts.
@@ -33,14 +32,17 @@ export class CommonIframeSandboxElement extends LitElement {
   static override properties = {
     src: { type: String, attribute: false },
     context: { type: Object, attribute: false },
+    crashed: { type: Boolean, attribute: false, state: true },
   };
   declare src: string;
   declare context?: object;
+  declare crashed: boolean;
 
   constructor() {
     super();
     this.src = "";
     this.context = undefined;
+    this.crashed = false;
   }
 
   static override styles = css`
@@ -49,7 +51,23 @@ export class CommonIframeSandboxElement extends LitElement {
     width: 100%;
     height: 100%;
     overflow: hidden;
-    }
+    background-color: #ddd;
+  }
+  #crash-message {
+    width: 50%;
+    margin: 20px auto;
+    display: flex;
+    flex-direction: column;
+    text-align: center;
+  }
+  #crash-message > * {
+    flex: 1; 
+  }
+  #crash-message button {
+    font-size: 20px;
+    background-color: white;
+    border: 1px solid black;
+  }
   `;
 
   // Static id for this component for its lifetime.
@@ -398,10 +416,8 @@ export class CommonIframeSandboxElement extends LitElement {
       return;
     }
 
-    this.toGuest({
-      id: this.frameId,
-      type: IPC.IPCHostMessageType.Freeze,
-    });
+    this.crashed = true;
+    this.initialized = false;
   }
 
   // This is to be called with the `instanceId` of a request
@@ -421,6 +437,10 @@ export class CommonIframeSandboxElement extends LitElement {
       },
     };
     this.toGuest(response);
+  }
+
+  private onCrashReload() {
+    this.crashed = false;
   }
 
   private toGuest(event: IPC.IPCHostMessage) {
@@ -454,6 +474,14 @@ export class CommonIframeSandboxElement extends LitElement {
   }
 
   override render() {
+    if (this.crashed) {
+      return html`
+      <div id="crash-message">
+        <div class="message">🤨 Charm crashed! 🤨</div>
+        <button @click=${this.onCrashReload}>Reload</button>
+      </div>
+      `;
+    }
     return html`
       <iframe
         ${ref(this.iframeRef)}
