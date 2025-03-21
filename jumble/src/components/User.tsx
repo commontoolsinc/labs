@@ -17,7 +17,7 @@ const COLORS = {
   RED: "#FF0000",
 };
 
-const MIN_ANIMATION_DURATION = 1500;
+const MIN_ANIMATION_DURATION = 800;
 
 // Safe palette colors (avoiding red and green)
 const AVATAR_COLORS = [
@@ -44,10 +44,11 @@ const AVATAR_SHAPES = [
       <rect x="3" y="3" width="24" height="24" rx="8" fill="${color}" />
     </svg>
   `,
-  // Star shape
+  // Pudgy Star shape
   (color: string) => `
     <svg width="30" height="30" viewBox="0 0 30 30">
-      <path d="M15 3 L18 12 L27 12 L20 18 L23 27 L15 21 L7 27 L10 18 L3 12 L12 12 Z" fill="${color}" />
+      <path d="M15 5 L17.5 12 L25 12 L19.5 17 L21.5 24 L15 20 L8.5 24 L10.5 17 L5 12 L12.5 12 Z" fill="${color}" />
+      <circle cx="15" cy="15" r="7" fill="${color}" />
     </svg>
   `,
   // Flower/Sun shape
@@ -70,10 +71,11 @@ const AVATAR_SHAPES = [
       <path d="M10 20 Q5 20 5 15 Q5 10 10 10 Q10 5 15 5 Q20 5 20 10 Q25 10 25 15 Q25 20 20 20 Z" fill="${color}" />
     </svg>
   `,
-  // Hexagon
+  // Pudgy Hexagon
   (color: string) => `
     <svg width="30" height="30" viewBox="0 0 30 30">
       <path d="M15 4 L25 9.5 L25 20.5 L15 26 L5 20.5 L5 9.5 Z" fill="${color}" />
+      <path d="M15 6 L23 10.5 L23 19.5 L15 24 L7 19.5 L7 10.5 Z" fill="${color}" stroke="${color}" stroke-width="2" stroke-linejoin="round" />
     </svg>
   `,
 ];
@@ -164,6 +166,15 @@ export function User() {
   const [did, setDid] = useState<string | undefined>(undefined);
   const { status, updateStatus } = useStatusMonitor();
   const { avatarShape } = useAvatarGenerator(did);
+
+  // Define avatar size constant
+  const AVATAR_SIZE = 24;
+  // Calculate SVG size (avatar size + padding)
+  const SVG_SIZE = AVATAR_SIZE + 8;
+  // SVG center coordinate
+  const SVG_CENTER = SVG_SIZE / 2;
+  // SVG radius
+  const SVG_RADIUS = SVG_CENTER - 2;
 
   // Refs
   const tooltipRef = useRef<HTMLDivElement>(null);
@@ -261,10 +272,19 @@ export function User() {
         easingFactor,
       );
 
-      // Display counts
-      const displayPushCount = Math.round(easedPushCountRef.current);
-      const displayPullCount = Math.round(easedPullCountRef.current);
-      const displayErrorCount = Math.round(easedErrorCountRef.current);
+      // Display counts - even if count is 0 but animation is active, show at least 1
+      const displayPushCount =
+        pushActive && Math.round(easedPushCountRef.current) === 0
+          ? 1
+          : Math.round(easedPushCountRef.current);
+      const displayPullCount =
+        pullActive && Math.round(easedPullCountRef.current) === 0
+          ? 1
+          : Math.round(easedPullCountRef.current);
+      const displayErrorCount =
+        errorActive && Math.round(easedErrorCountRef.current) === 0
+          ? 1
+          : Math.round(easedErrorCountRef.current);
 
       // Default status message
       let statusMessage = "Click to log out";
@@ -459,7 +479,7 @@ export function User() {
       svgRef.current.style.opacity = opacityRef.current.toString();
       circle.setAttribute(
         "transform",
-        `rotate(${rotationRef.current}, 19, 19)`,
+        `rotate(${rotationRef.current}, ${SVG_CENTER}, ${SVG_CENTER})`,
       );
 
       // Continue animation
@@ -482,21 +502,23 @@ export function User() {
       {/* SVG Ring with requestAnimationFrame animation */}
       <svg
         ref={svgRef}
-        width="38"
-        height="38"
-        viewBox="0 0 38 38"
+        width={SVG_SIZE}
+        height={SVG_SIZE}
+        viewBox={`0 0 ${SVG_SIZE} ${SVG_SIZE}`}
         style={{
           position: "absolute",
           top: "-4px",
           left: "-4px",
           opacity: 0,
           pointerEvents: "none",
+          backgroundColor: "white",
+          borderRadius: "50%",
         }}
       >
         <circle
-          cx="19"
-          cy="19"
-          r="17"
+          cx={SVG_CENTER}
+          cy={SVG_CENTER}
+          r={SVG_RADIUS}
           fill="none"
           stroke={COLORS.BLUE}
           strokeWidth="2.5"
@@ -510,13 +532,13 @@ export function User() {
         id="user-avatar-container"
         onClick={clearAuthentication}
         className="relative group cursor-pointer"
-        style={{ width: "30px", height: "30px" }}
+        style={{ width: `${AVATAR_SIZE}px`, height: `${AVATAR_SIZE}px` }}
       >
         <div
           ref={avatarRef}
           style={{
-            width: "30px",
-            height: "30px",
+            width: `${AVATAR_SIZE}px`,
+            height: `${AVATAR_SIZE}px`,
             transition: "box-shadow 0.2s ease",
             transformOrigin: "center center",
             borderRadius: "50%",
