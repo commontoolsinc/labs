@@ -1,13 +1,13 @@
 import type { DID } from "@commontools/identity";
 import { Job } from "./types.ts";
 import { log } from "./utils.ts";
-import { CharmTimeoutError } from "./errors.ts";
 import { env } from "./env.ts";
 import {
   createTimeoutController,
   getSharedWorkerPool,
 } from "./utils/common.ts";
 import { WorkerPool } from "./utils/worker-pool.ts";
+import { sleep } from "../../utils/src/sleep.ts";
 
 export class ExecuteCharmHandler {
   private workerPool: WorkerPool<any, any>;
@@ -93,22 +93,14 @@ export class ExecuteCharmHandler {
         toolshedUrl: env.TOOLSHED_API_URL,
       });
 
-      // Convert AbortSignal to a promise that rejects when aborted
       // FIXME(ja): we need to actually kill the worker process?
-      const abort = new Promise<never>((_, reject) => {
-        controller.signal.addEventListener("abort", () => {
-          reject(
-            new CharmTimeoutError(
-              `Charm execution timed out after ${env.CHARM_EXECUTION_TIMEOUT_MS}ms`,
-              space as string,
-              charmId || "",
-              env.CHARM_EXECUTION_TIMEOUT_MS,
-            ),
-          );
-        });
-      });
-
-      const result = await Promise.race([task, abort]);
+      const result = await Promise.race([
+        task,
+        sleep(env.CHARM_EXECUTION_TIMEOUT_MS).then(() => ({
+          error:
+            `charm execution timed out after ${env.CHARM_EXECUTION_TIMEOUT_MS}ms`,
+        })),
+      ]);
 
       // Check if the result indicates an error
       if (result && typeof result === "object" && "error" in result) {

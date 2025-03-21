@@ -2,8 +2,6 @@
  * Worker pool for managing worker processes
  */
 import { log } from "../utils.ts";
-import { WorkerError } from "../errors.ts";
-
 // Generic worker options interface
 interface GenericWorkerOptions {
   type?: "classic" | "module";
@@ -168,7 +166,7 @@ export class WorkerPool<T, R> {
           log(`Worker ${workerId} error: ${event.message}`);
           this.handleWorkerError(
             workerId,
-            new WorkerError(event.message, workerId),
+            new Error(`Worker ${workerId} error: ${event.message}`),
           );
         };
 
@@ -181,7 +179,7 @@ export class WorkerPool<T, R> {
           ? error.message
           : String(error);
         log(`Error creating worker ${workerId}: ${errorMessage}`);
-        throw new WorkerError(`Failed to create worker ${workerId}`, workerId);
+        throw new Error(`Failed to create worker ${workerId}`);
       }
     }
 
@@ -335,10 +333,7 @@ export class WorkerPool<T, R> {
 
       this.handleWorkerError(
         workerId,
-        new WorkerError(
-          `Task timeout after ${this.options.taskTimeout}ms`,
-          workerId,
-        ),
+        new Error(`Task timeout after ${this.options.taskTimeout}ms`),
       );
       task.reject(
         new Error(`Task timed out after ${this.options.taskTimeout}ms`),
