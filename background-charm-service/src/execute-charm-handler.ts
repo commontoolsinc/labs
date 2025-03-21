@@ -34,7 +34,7 @@ export class ExecuteCharmHandler {
 
   async handle(
     job: Job,
-  ): Promise<{ success: boolean; executionTimeMs: number; error?: string }> {
+  ): Promise<{ success: boolean; error?: string }> {
     const entry = job.bgCharmEntry.get();
 
     log(`Executing ${entry.integration} ${entry.charmId} (${entry.space})`);
@@ -48,25 +48,24 @@ export class ExecuteCharmHandler {
         charmId: entry.charmId,
       });
 
-      // If we get here, the charm succeeded (timeout function will throw on failure)
-      const executionTimeMs = Date.now() - startTime;
-
-      log(`Successfully executed: ${entry.charmId} (${executionTimeMs}ms)`);
-      return { success: true, executionTimeMs };
+      log(
+        `Successfully executed: ${entry.charmId} (${Date.now() - startTime}ms)`,
+      );
+      return { success: true };
     } catch (error) {
       const errorMessage = error instanceof Error
         ? error.message
         : String(error);
       log(
-        `Error executing charm ${entry.space}/${entry.charmId}: ${errorMessage}`,
+        `Error executing charm ${entry.space}/${entry.charmId}: ${errorMessage} (${
+          Date.now() - startTime
+        }ms)`,
         { error: true },
       );
-      const executionTimeMs = Date.now() - startTime;
 
       return {
         success: false,
         error: errorMessage,
-        executionTimeMs,
       };
     }
   }
