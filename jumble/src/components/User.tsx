@@ -125,7 +125,6 @@ function useStatusMonitor() {
       throw new Error("Status is not initialized");
     }
     const state = Inspector.update(status.current, command);
-    console.log(command, state);
     status.current = state;
   }, []);
 
@@ -529,7 +528,7 @@ export function User() {
 
       {/* User Avatar Container */}
       <div
-        id="user-avatar-container"
+        id="user-avatar"
         onClick={clearAuthentication}
         className="relative group cursor-pointer"
         style={{ width: `${AVATAR_SIZE}px`, height: `${AVATAR_SIZE}px` }}
