@@ -3,7 +3,6 @@
  */
 import { Cell, isStream, Stream } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
-import { log } from "../utils.ts";
 import { WorkerPool } from "./worker-pool.ts";
 
 // Create a singleton worker pool that can be shared across the application

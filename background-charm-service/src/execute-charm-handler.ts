@@ -1,16 +1,16 @@
 /// <reference lib="deno.unstable" />
 
-import { ExecuteCharmJob, Job } from "../types.ts";
-import { log } from "../utils.ts";
 import { CharmManager } from "@commontools/charm";
-import { type DID, Session } from "@commontools/identity";
-import { CharmTimeoutError } from "../errors/index.ts";
-import { env } from "../env.ts";
+import type { DID } from "@commontools/identity";
+import { Job } from "./types.ts";
+import { log } from "./utils.ts";
+import { CharmTimeoutError } from "./errors.ts";
+import { env } from "./env.ts";
 import {
   createTimeoutController,
   getSharedWorkerPool,
-} from "../utils/common.ts";
-import { WorkerPool } from "../utils/worker-pool.ts";
+} from "./utils/common.ts";
+import WorkerPool from "./utils/worker-pool.ts";
 
 export class ExecuteCharmHandler {
   private managerCache = new Map<string, CharmManager>();
@@ -18,7 +18,7 @@ export class ExecuteCharmHandler {
 
   constructor() {
     // Get the shared worker pool instance
-    const workerUrl = new URL("../utils/charm-worker.ts", import.meta.url).href;
+    const workerUrl = new URL("./utils/charm-worker.ts", import.meta.url).href;
     this.workerPool = getSharedWorkerPool({
       maxWorkers: env.MAX_CONCURRENT_JOBS,
       workerUrl,
@@ -36,9 +36,6 @@ export class ExecuteCharmHandler {
     });
   }
 
-  /**
-   * Handle an execute charm job
-   */
   async handle(job: Job): Promise<unknown> {
     const entry = job.bgCharmEntry.get();
 

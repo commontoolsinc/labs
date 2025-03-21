@@ -1,18 +1,14 @@
-import { ExecuteCharmJob, Job, JobResult, JobStatus } from "./types.ts";
-import { log } from "./utils.ts";
-
-// Import handlers
-import { ExecuteCharmHandler } from "./job-handlers/execute-charm-handler.ts";
 import { BGCharmEntry, sleep } from "@commontools/utils";
 
-/**
- * Options for the job queue
- */
-export interface JobQueueOptions {
+import { Job } from "./types.ts";
+import { log } from "./utils.ts";
+import { ExecuteCharmHandler } from "./execute-charm-handler.ts";
+
+type JobQueueOptions = {
   maxConcurrentJobs?: number;
   maxRetries?: number;
   pollingIntervalMs?: number;
-}
+};
 
 /**
  * Job queue system for handling background tasks
