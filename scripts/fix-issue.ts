@@ -43,6 +43,7 @@ interface GitHubIssue {
   createdAt: string;
   updatedAt: string;
   milestone?: { title: string };
+  comments: IssueComment[];
 }
 
 interface IssueComment {
@@ -79,7 +80,7 @@ async function main() {
         "view",
         issueNumber,
         "--json",
-        "number,title,body,url,labels,assignees,state,createdAt,updatedAt,milestone",
+        "number,title,body,url,labels,assignees,state,createdAt,updatedAt,milestone,comments",
       ],
     });
     const issueOutput = await issueProcess.output();
@@ -91,29 +92,11 @@ async function main() {
     const issueJSON = new TextDecoder().decode(issueOutput.stdout);
     const issue: GitHubIssue = JSON.parse(issueJSON);
 
-    // Fetch comments on the issue
-    console.log(`Fetching comments for issue #${issueNumber}...`);
-    const commentsProcess = new Deno.Command("gh", {
-      args: [
-        "issue",
-        "view",
-        issueNumber,
-        "--comments",
-        "--json",
-        "author,body,createdAt",
-      ],
-    });
-    const commentsOutput = await commentsProcess.output();
-    let comments: IssueComment[] = [];
-
-    if (commentsOutput.success) {
-      const commentsJSON = new TextDecoder().decode(commentsOutput.stdout);
-      comments = JSON.parse(commentsJSON);
-    } else {
-      console.warn(
-        "Warning: Failed to fetch comments, proceeding without them",
-      );
-    }
+    // Get comments from the issue object directly
+    let comments = issue.comments || [];
+    console.log(
+      `Retrieved ${comments.length} comments for issue #${issueNumber}`,
+    );
 
     // Create a new branch for the fix
     const branchName = `${BRANCH_PREFIX}${issue.number}`;
