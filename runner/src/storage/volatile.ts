@@ -1,6 +1,7 @@
 import type { EntityId } from "@commontools/runner";
 import { log } from "../storage.ts";
 import { BaseStorageProvider, type StorageValue } from "./base.ts";
+import { RemoteStorageProvider } from "./remote.ts";
 
 /**
  * Volatile (in-memory) storage provider. Just for testing.
@@ -54,9 +55,36 @@ export class VolatileStorageProvider extends BaseStorageProvider {
 
   send<T = any>(
     batch: { entityId: EntityId; value: StorageValue<T> }[],
-  ): Promise<{ ok: object }> {
+    doNotNotify: boolean = false, // for testing
+  ): Promise<{ ok: object } | { error: Error }> {
     const spaceStorage = getOrCreateSpaceStorage(this.spaceName);
     const spaceSubscribers = getOrCreateSpaceSubscribers(this.spaceName);
+
+    for (const { entityId } of batch) {
+      const key = JSON.stringify(entityId);
+      const value = spaceStorage.get(key);
+      const valueString = JSON.stringify(value);
+      // Should only happen because of doNotNotify, this is used to simulate a conflict
+      if (value && this.lastValues.get(key) !== valueString) {
+        log(() => ["conflict", key, this.lastValues.get(key), valueString]);
+
+        // Simulate storage catching up
+        this.lastValues.set(key, valueString);
+        this.notifySubscribers(key, value);
+
+        return Promise.resolve({
+          // Bare bones ConflictError from RemoteStorageProvider
+          // Just what the current storage provider needs to resolve conflicts
+          error: {
+            name: "ConflictError",
+            conflict: {
+              of: RemoteStorageProvider.toEntity(entityId),
+              actual: { is: value },
+            },
+          } as unknown as Error,
+        });
+      }
+    }
 
     for (const { entityId, value } of batch) {
       const key = JSON.stringify(entityId);
@@ -65,7 +93,10 @@ export class VolatileStorageProvider extends BaseStorageProvider {
         log(() => ["send volatile", this.spaceName, key, valueString]);
         this.lastValues.set(key, valueString);
         spaceStorage.set(key, value);
-        spaceSubscribers.forEach((listener) => listener(key, value));
+        if (!doNotNotify) {
+          // For testing, this creates a conflict above
+          spaceSubscribers.forEach((listener) => listener(key, value));
+        }
       }
     }
 

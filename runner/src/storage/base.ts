@@ -4,6 +4,8 @@ import { log } from "../storage.ts";
 export interface StorageValue<T = any> {
   value: T;
   source?: EntityId;
+  // This is used on writes to retry on conflicts.
+  retry?: ((previousValue: T) => T)[];
 }
 
 export interface StorageProvider {
