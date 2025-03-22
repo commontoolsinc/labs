@@ -739,12 +739,17 @@ const Suggestions = () => {
           // Update variants with successful results
           results.forEach((result, index) => {
             if (result.status === "fulfilled" && result.value) {
-              setVariants((prev) => [...prev, result.value]);
-
-              // Set the first successful variant as selected
-              if (prev.length === 0) {
-                setSelectedVariant(result.value);
-              }
+              const successValue = result.value;
+              setVariants((existingPrev) => {
+                const newVariants = [...existingPrev, successValue];
+                
+                // Set the first successful variant as selected
+                if (existingPrev.length === 0) {
+                  setSelectedVariant(successValue);
+                }
+                
+                return newVariants;
+              });
             }
           });
         } else {
