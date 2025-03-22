@@ -10,6 +10,51 @@ import { ActionBar } from "@/components/ActionBar.tsx";
 import { CharmPublisher } from "@/components/Publish.tsx";
 import { useGlobalActions } from "@/hooks/use-global-actions.tsx";
 import { SyncStatusProvider } from "@/contexts/SyncStatusContext.tsx";
+import * as Process from "@/components/View.tsx";
+
+function* subscribe() {
+  const test = yield* Process.wait(Promise.resolve(1));
+
+  yield* Process.send("inc");
+}
+
+function* test() {
+  yield* Process.send("inc");
+
+  return { count: 0 };
+}
+
+const Counter = Process.service({
+  *init() {
+    yield* Process.spawn(function* () {
+      // while (true) {
+      yield* Process.sleep(1000);
+      yield* Process.send("inc");
+      // }
+    });
+
+    return { count: 0 };
+  },
+
+  *update({ count }, command: "inc" | "dec") {
+    switch (command) {
+      case "inc":
+        return { count: count + 1 };
+      case "dec":
+        return { count: count + 1 };
+      default:
+        return { count };
+    }
+  },
+});
+
+const CounterView = Counter.View((state, controller) => (
+  <button onClick={controller.dispatch("inc")}>{state.count}</button>
+));
+
+const CounterView2 = Counter.View((state, controller) => (
+  <h1 onClick={controller.dispatch("inc")}>{state.count}</h1>
+));
 
 export default function Shell() {
   const { charmId } = useParams<CharmRouteParams>();
@@ -33,6 +78,8 @@ export default function Shell() {
           <ActionBar />
           <CharmPublisher />
           <CommandCenter />
+          <CounterView />
+          <CounterView2 />
         </div>
       </SyncStatusProvider>
     </CharmsManagerProvider>
