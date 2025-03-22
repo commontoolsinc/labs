@@ -280,6 +280,9 @@ This PR was created with Claude Code assistance.
     await new Deno.Command("git", { args: ["commit", "-m", commitMessage] })
       .output();
 
+    // Create PR description file again (it was deleted by cleanupTempFiles)
+    await Deno.writeTextFile(PR_DESC_FILE, prDescription);
+
     // Create the PR
     console.log("Creating PR...");
     const prProcess = new Deno.Command("gh", {
