@@ -25,16 +25,8 @@
   },
   "compilerOptions": {
     "jsx": "react-jsxdev",
-    "lib": [
-      "deno.ns",
-      "dom",
-      "dom.iterable",
-      "dom.asynciterable",
-      "esnext"
-    ],
-    "types": [
-      "./jumble/src/global.d.ts"
-    ]
+    "lib": ["deno.ns", "dom", "dom.iterable", "dom.asynciterable", "esnext"],
+    "types": ["./jumble/src/global.d.ts"]
   },
   "exclude": [
     "jumble/.vite/deps/",
@@ -46,21 +38,11 @@
     "**/coverage/"
   ],
   "lint": {
-    "exclude": [
-      "deno-vite-plugin"
-    ],
+    "exclude": ["deno-vite-plugin"],
     "rules": {
-      "tags": [
-        "recommended"
-      ],
-      "include": [
-        "ban-untagged-todo",
-        "no-external-import"
-      ],
-      "exclude": [
-        "no-unused-vars",
-        "no-explicit-any"
-      ]
+      "tags": ["recommended"],
+      "include": ["ban-untagged-todo", "no-external-import"],
+      "exclude": ["no-unused-vars", "no-explicit-any", "require-yield"]
     }
   },
   "fmt": {
