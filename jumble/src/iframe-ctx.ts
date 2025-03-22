@@ -27,6 +27,8 @@ type WriteTracking = {
   pendingCallback: (() => void) | null; // Store the callback to execute when timeout fires
   writeCount: number;
   lastResetTime: number;
+  lastWriteTime: number; // Time of last successful write
+  lastProcessTime: number; // Time taken to process the last write
 };
 
 // Map to store write tracking by context and key
@@ -35,6 +37,7 @@ const writeTrackers = new Map<any, Map<string, WriteTracking>>();
 // Configuration
 const MAX_IMMEDIATE_WRITES_PER_SECOND = 20; // Allow 20 immediate writes per second
 const THROTTLED_WRITE_INTERVAL_MS = 100; // 0.1s interval after threshold
+const MAX_WRITE_DELAY_MS = 10000; // Maximum delay between writes (10s)
 
 // Throttle function that handles write rate limiting
 function throttle(context: any, key: string, callback: () => void): void {
@@ -51,41 +54,87 @@ function throttle(context: any, key: string, callback: () => void): void {
       pendingCallback: null,
       writeCount: 0,
       lastResetTime: Date.now(),
+      lastWriteTime: Date.now(),
+      lastProcessTime: 0,
     });
   }
 
   const tracking = contextMap.get(key)!;
   const now = Date.now();
+  const timeSinceLastWrite = now - (tracking.lastWriteTime || now);
 
-  // Reset counter if a second has passed
-  if (now - tracking.lastResetTime > 1000) {
+  // Calculate adaptive reset time based on processing time
+  const adaptiveResetTime = Math.max(
+    1000, // At least 1 second
+    Math.min(tracking.lastProcessTime * 10, MAX_WRITE_DELAY_MS), // But no more than 10s
+  );
+
+  // Reset counter if adaptive time has passed
+  if (now - tracking.lastResetTime > adaptiveResetTime) {
     tracking.writeCount = 0;
     tracking.lastResetTime = now;
+
+    // Clear any pending timeout since we're resetting counters
     if (tracking.pendingTimeout) {
       clearTimeout(tracking.pendingTimeout);
       tracking.pendingTimeout = null;
     }
   }
 
-  // If we're under the threshold, process immediately
-  if (tracking.writeCount < MAX_IMMEDIATE_WRITES_PER_SECOND) {
+  // Force a write if we haven't written in MAX_WRITE_DELAY_MS
+  const forceWrite = timeSinceLastWrite >= MAX_WRITE_DELAY_MS;
+
+  // Check if processing takes too long and should be throttled immediately
+  const slowProcessing =
+    tracking.lastProcessTime > THROTTLED_WRITE_INTERVAL_MS / 3;
+
+  // Process immediately if:
+  // 1. We're under the frequency threshold AND processing isn't slow, OR
+  // 2. We need to force a write due to timeout
+  if (
+    (tracking.writeCount < MAX_IMMEDIATE_WRITES_PER_SECOND &&
+      !slowProcessing) || forceWrite
+  ) {
     tracking.writeCount++;
+
+    // Measure processing time
+    const startTime = performance.now();
+
     // Execute callback immediately
     callback();
+
+    // Update tracking
+    tracking.lastWriteTime = now;
+    tracking.lastProcessTime = performance.now() - startTime;
   } else {
     // Update the callback to be executed when the timeout fires
     tracking.pendingCallback = callback;
 
     // Only set a new timeout if there isn't one already
     if (!tracking.pendingTimeout) {
+      // Calculate appropriate throttle interval based on processing time (at least 3x)
+      const throttleInterval = Math.max(
+        THROTTLED_WRITE_INTERVAL_MS,
+        Math.min(tracking.lastProcessTime * 3, MAX_WRITE_DELAY_MS), // Cap at 10 seconds
+      );
+
+      console.log("throttling writes", key, throttleInterval);
+
       tracking.pendingTimeout = setTimeout(() => {
+        // Measure processing time
+        const startTime = performance.now();
+
         // Execute the latest callback
         tracking.pendingCallback?.();
+
+        // Update tracking
+        tracking.lastWriteTime = Date.now();
+        tracking.lastProcessTime = performance.now() - startTime;
 
         // Clear the timeout reference
         tracking.pendingTimeout = null;
         tracking.pendingCallback = null;
-      }, THROTTLED_WRITE_INTERVAL_MS);
+      }, throttleInterval);
     }
   }
 }
