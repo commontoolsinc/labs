@@ -208,9 +208,17 @@ export function AuthenticationView() {
 
           // Store credentials before completing authentication
           if (!storedCredential) {
-            const storedCred = createPasskeyCredential(passkey.id());
-            saveCredential(storedCred);
-            setStoredCredential(storedCred);
+            // Ensure the ID is properly base64 encoded
+            const id = passkey.id();
+            // Verify it's valid base64 before storing
+            const isValidBase64 = /^[A-Za-z0-9+/=]*$/.test(id);
+            if (isValidBase64) {
+              const storedCred = createPasskeyCredential(id);
+              saveCredential(storedCred);
+              setStoredCredential(storedCred);
+            } else {
+              console.warn("Skipping credential storage: ID is not valid base64");
+            }
           }
 
           return passkey;

@@ -41,10 +41,24 @@ export function getPublicKeyCredentialDescriptor(
   storedCredential: StoredCredential | null,
 ): PublicKeyCredentialDescriptor | undefined {
   if (storedCredential?.method === "passkey") {
-    return {
-      id: Uint8Array.from(atob(storedCredential.id), (c) => c.charCodeAt(0)),
-      type: "public-key" as PublicKeyCredentialType,
-    };
+    try {
+      // Check if the string is valid base64
+      const isValidBase64 = /^[A-Za-z0-9+/=]*$/.test(storedCredential.id);
+      if (!isValidBase64) {
+        console.warn("Invalid base64 format in stored credential ID");
+        return undefined;
+      }
+      
+      return {
+        id: Uint8Array.from(atob(storedCredential.id), (c) => c.charCodeAt(0)),
+        type: "public-key" as PublicKeyCredentialType,
+      };
+    } catch (error) {
+      console.error("Error creating credential descriptor:", error);
+      // Clear the invalid credential to prevent future errors
+      clearStoredCredential();
+      return undefined;
+    }
   }
   return undefined;
 }
