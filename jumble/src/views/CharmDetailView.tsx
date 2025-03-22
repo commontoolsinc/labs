@@ -62,12 +62,21 @@ interface CharmOperationContextType {
   showVariants: boolean;
   setShowVariants: (show: boolean) => void;
   loading: boolean;
+  setLoading: (loading: boolean) => void;
   variants: Cell<Charm>[];
+  setVariants: (updater: (prev: Cell<Charm>[]) => Cell<Charm>[]) => void;
   selectedVariant: Cell<Charm> | null;
   setSelectedVariant: (variant: Cell<Charm> | null) => void;
   expectedVariantCount: number;
+  setExpectedVariantCount: (count: number) => void;
   handlePerformOperation: () => void;
   handleCancelVariants: () => void;
+  performOperation: (
+    charmId: string,
+    input: string,
+    model: string,
+    data: any,
+  ) => Promise<Cell<Charm>>;
 }
 
 const CharmOperationContext = createContext<CharmOperationContextType | null>(
@@ -464,12 +473,16 @@ function useCharmOperation() {
     showVariants,
     setShowVariants,
     loading,
+    setLoading,
     variants,
+    setVariants,
     selectedVariant,
     setSelectedVariant,
     expectedVariantCount,
+    setExpectedVariantCount,
     handlePerformOperation,
     handleCancelVariants,
+    performOperation,
   };
 }
 
@@ -655,22 +668,128 @@ const Suggestions = () => {
     setShowVariants,
     handlePerformOperation,
     setOperationType,
+    selectedModel,
+    setLoading,
+    setVariants,
+    setSelectedVariant,
+    setExpectedVariantCount,
+    operationType,
+    performOperation,
+    showVariants,
   } = useCharmOperationContext();
 
-  const handleSuggestion = (suggestion: CharmSuggestion) => {
-    setInput(suggestion.prompt);
+  const navigate = useNavigate();
+  const { replicaName } = useParams<CharmRouteParams>();
 
-    // Set the operation type based on suggestion type if possible
+  const { charmManager } = useCharmManager();
+
+  // Store selected suggestion in state to use in effects
+  const [selectedSuggestion, setSelectedSuggestion] = useState<
+    CharmSuggestion | null
+  >(null);
+
+  // React to suggestion selection
+  const handleSuggestion = useCallback((suggestion: CharmSuggestion) => {
+    // Set the operation type based on suggestion type
     if (suggestion.type.toLowerCase().includes("extend")) {
       setOperationType("extend");
     } else {
       setOperationType("iterate");
     }
 
-    setShowVariants(true);
-    // Use a micro-delay to ensure state updates before operation
-    setTimeout(() => handlePerformOperation(), 0);
-  };
+    // Update the input state
+    setInput(suggestion.prompt);
+
+    // Store the suggestion for the effect to handle
+    setSelectedSuggestion(suggestion);
+    setLoading(true);
+  }, [setOperationType, setInput, setLoading]);
+
+  // Handle the actual operation when selectedSuggestion changes
+  useEffect(() => {
+    if (!selectedSuggestion || !charm || !paramCharmId || !replicaName) {
+      return;
+    }
+
+    const runOperation = async () => {
+      try {
+        if (showVariants) {
+          // Variant workflow
+          setExpectedVariantCount(variantModels.length);
+          setVariants(() => []);
+
+          // Use Promise.all to collect all results
+          const promises = variantModels.map(async (model) => {
+            try {
+              return await performOperation(
+                charmId(charm)!,
+                selectedSuggestion.prompt,
+                model,
+                {}, // No mentions in suggestion text
+              );
+            } catch (error) {
+              console.error(`Error generating variant with ${model}:`, error);
+              return null;
+            }
+          });
+
+          // Wait for all operations to complete
+          const results = await Promise.allSettled(promises);
+
+          // Update variants with successful results
+          results.forEach((result, index) => {
+            if (result.status === "fulfilled" && result.value) {
+              const successValue = result.value;
+              setVariants((existingPrev) => {
+                const newVariants = [...existingPrev, successValue];
+                
+                // Set the first successful variant as selected
+                if (existingPrev.length === 0) {
+                  setSelectedVariant(successValue);
+                }
+                
+                return newVariants;
+              });
+            }
+          });
+        } else {
+          // Single model workflow
+          const newCharm = await performOperation(
+            charmId(charm)!,
+            selectedSuggestion.prompt,
+            selectedModel,
+            {}, // No mentions in suggestion text
+          );
+
+          navigate(createPath("charmShow", {
+            charmId: charmId(newCharm)!,
+            replicaName,
+          }));
+        }
+      } catch (error) {
+        console.error(`Operation error:`, error);
+      } finally {
+        setLoading(false);
+        // Clear the selected suggestion so we don't rerun this effect
+        setSelectedSuggestion(null);
+      }
+    };
+
+    runOperation();
+  }, [
+    selectedSuggestion,
+    charm,
+    paramCharmId,
+    replicaName,
+    showVariants,
+    selectedModel,
+    performOperation,
+    navigate,
+    setVariants,
+    setSelectedVariant,
+    setExpectedVariantCount,
+    setLoading,
+  ]);
 
   return (
     <div className="suggestions-container mb-4">
