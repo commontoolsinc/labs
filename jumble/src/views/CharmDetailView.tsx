@@ -62,12 +62,21 @@ interface CharmOperationContextType {
   showVariants: boolean;
   setShowVariants: (show: boolean) => void;
   loading: boolean;
+  setLoading: (loading: boolean) => void;
   variants: Cell<Charm>[];
+  setVariants: (updater: (prev: Cell<Charm>[]) => Cell<Charm>[]) => void;
   selectedVariant: Cell<Charm> | null;
   setSelectedVariant: (variant: Cell<Charm> | null) => void;
   expectedVariantCount: number;
+  setExpectedVariantCount: (count: number) => void;
   handlePerformOperation: () => void;
   handleCancelVariants: () => void;
+  performOperation: (
+    charmId: string,
+    input: string,
+    model: string,
+    data: any
+  ) => Promise<Cell<Charm>>;
 }
 
 const CharmOperationContext = createContext<CharmOperationContextType | null>(
@@ -464,12 +473,16 @@ function useCharmOperation() {
     showVariants,
     setShowVariants,
     loading,
+    setLoading,
     variants,
+    setVariants,
     selectedVariant,
     setSelectedVariant,
     expectedVariantCount,
+    setExpectedVariantCount,
     handlePerformOperation,
     handleCancelVariants,
+    performOperation,
   };
 }
 
@@ -655,21 +668,85 @@ const Suggestions = () => {
     setShowVariants,
     handlePerformOperation,
     setOperationType,
+    selectedModel,
+    setLoading,
+    setVariants,
+    setSelectedVariant,
+    setExpectedVariantCount,
+    operationType,
+    performOperation,
+    showVariants,
   } = useCharmOperationContext();
+  
+  const navigate = useNavigate();
+  const { replicaName } = useParams<CharmRouteParams>();
+  
+  const { charmManager } = useCharmManager();
 
   const handleSuggestion = (suggestion: CharmSuggestion) => {
-    setInput(suggestion.prompt);
-
-    // Set the operation type based on suggestion type if possible
+    // Set the operation type based on suggestion type
     if (suggestion.type.toLowerCase().includes("extend")) {
       setOperationType("extend");
     } else {
       setOperationType("iterate");
     }
 
-    setShowVariants(true);
-    // Use a micro-delay to ensure state updates before operation
-    setTimeout(() => handlePerformOperation(), 0);
+    // Update the input state
+    setInput(suggestion.prompt);
+
+    // Since React state updates are asynchronous, we'll create a function
+    // that directly uses the suggestion prompt instead of depending on
+    // the updated input state
+    if (!charm || !paramCharmId || !replicaName) return;
+    setLoading(true);
+
+    // Directly use suggestion.prompt instead of waiting for state to update
+    if (showVariants) {
+      // Variant workflow
+      setExpectedVariantCount(variantModels.length);
+      setVariants((prev) => []);
+      
+      // Run operations with each variant model
+      const gens = variantModels.map(async (model) => {
+        try {
+          // Since formatPromptWithMentions expects JSON, but we're passing plain text,
+          // we'll go straight to performOperation with the suggestion text
+          const newCharm = await performOperation(
+            charmId(charm)!,
+            suggestion.prompt, // Use suggestion text directly
+            model,
+            {} // No mentions in suggestion text
+          );
+          
+          setVariants((prev) => [...prev, newCharm]);
+          return newCharm;
+        } catch (error) {
+          console.error(`Error generating variant with ${model}:`, error);
+          return null;
+        }
+      });
+      
+      Promise.allSettled(gens).finally(() => {
+        setLoading(false);
+      });
+    } else {
+      // Single model workflow
+      performOperation(
+        charmId(charm)!,
+        suggestion.prompt, // Use suggestion text directly
+        selectedModel,
+        {} // No mentions in suggestion text
+      ).then((newCharm) => {
+        navigate(createPath("charmShow", {
+          charmId: charmId(newCharm)!,
+          replicaName,
+        }));
+        setLoading(false);
+      }).catch((error) => {
+        console.error(`Operation error:`, error);
+        setLoading(false);
+      });
+    }
   };
 
   return (
