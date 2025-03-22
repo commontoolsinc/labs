@@ -75,7 +75,7 @@ interface CharmOperationContextType {
     charmId: string,
     input: string,
     model: string,
-    data: any
+    data: any,
   ) => Promise<Cell<Charm>>;
 }
 
@@ -677,13 +677,19 @@ const Suggestions = () => {
     performOperation,
     showVariants,
   } = useCharmOperationContext();
-  
+
   const navigate = useNavigate();
   const { replicaName } = useParams<CharmRouteParams>();
-  
+
   const { charmManager } = useCharmManager();
 
-  const handleSuggestion = (suggestion: CharmSuggestion) => {
+  // Store selected suggestion in state to use in effects
+  const [selectedSuggestion, setSelectedSuggestion] = useState<
+    CharmSuggestion | null
+  >(null);
+
+  // React to suggestion selection
+  const handleSuggestion = useCallback((suggestion: CharmSuggestion) => {
     // Set the operation type based on suggestion type
     if (suggestion.type.toLowerCase().includes("extend")) {
       setOperationType("extend");
@@ -694,60 +700,91 @@ const Suggestions = () => {
     // Update the input state
     setInput(suggestion.prompt);
 
-    // Since React state updates are asynchronous, we'll create a function
-    // that directly uses the suggestion prompt instead of depending on
-    // the updated input state
-    if (!charm || !paramCharmId || !replicaName) return;
+    // Store the suggestion for the effect to handle
+    setSelectedSuggestion(suggestion);
     setLoading(true);
+  }, [setOperationType, setInput, setLoading]);
 
-    // Directly use suggestion.prompt instead of waiting for state to update
-    if (showVariants) {
-      // Variant workflow
-      setExpectedVariantCount(variantModels.length);
-      setVariants((prev) => []);
-      
-      // Run operations with each variant model
-      const gens = variantModels.map(async (model) => {
-        try {
-          // Since formatPromptWithMentions expects JSON, but we're passing plain text,
-          // we'll go straight to performOperation with the suggestion text
+  // Handle the actual operation when selectedSuggestion changes
+  useEffect(() => {
+    if (!selectedSuggestion || !charm || !paramCharmId || !replicaName) {
+      return;
+    }
+
+    const runOperation = async () => {
+      try {
+        if (showVariants) {
+          // Variant workflow
+          setExpectedVariantCount(variantModels.length);
+          setVariants(() => []);
+
+          // Use Promise.all to collect all results
+          const promises = variantModels.map(async (model) => {
+            try {
+              return await performOperation(
+                charmId(charm)!,
+                selectedSuggestion.prompt,
+                model,
+                {}, // No mentions in suggestion text
+              );
+            } catch (error) {
+              console.error(`Error generating variant with ${model}:`, error);
+              return null;
+            }
+          });
+
+          // Wait for all operations to complete
+          const results = await Promise.allSettled(promises);
+
+          // Update variants with successful results
+          results.forEach((result, index) => {
+            if (result.status === "fulfilled" && result.value) {
+              setVariants((prev) => [...prev, result.value]);
+
+              // Set the first successful variant as selected
+              if (prev.length === 0) {
+                setSelectedVariant(result.value);
+              }
+            }
+          });
+        } else {
+          // Single model workflow
           const newCharm = await performOperation(
             charmId(charm)!,
-            suggestion.prompt, // Use suggestion text directly
-            model,
-            {} // No mentions in suggestion text
+            selectedSuggestion.prompt,
+            selectedModel,
+            {}, // No mentions in suggestion text
           );
-          
-          setVariants((prev) => [...prev, newCharm]);
-          return newCharm;
-        } catch (error) {
-          console.error(`Error generating variant with ${model}:`, error);
-          return null;
+
+          navigate(createPath("charmShow", {
+            charmId: charmId(newCharm)!,
+            replicaName,
+          }));
         }
-      });
-      
-      Promise.allSettled(gens).finally(() => {
-        setLoading(false);
-      });
-    } else {
-      // Single model workflow
-      performOperation(
-        charmId(charm)!,
-        suggestion.prompt, // Use suggestion text directly
-        selectedModel,
-        {} // No mentions in suggestion text
-      ).then((newCharm) => {
-        navigate(createPath("charmShow", {
-          charmId: charmId(newCharm)!,
-          replicaName,
-        }));
-        setLoading(false);
-      }).catch((error) => {
+      } catch (error) {
         console.error(`Operation error:`, error);
+      } finally {
         setLoading(false);
-      });
-    }
-  };
+        // Clear the selected suggestion so we don't rerun this effect
+        setSelectedSuggestion(null);
+      }
+    };
+
+    runOperation();
+  }, [
+    selectedSuggestion,
+    charm,
+    paramCharmId,
+    replicaName,
+    showVariants,
+    selectedModel,
+    performOperation,
+    navigate,
+    setVariants,
+    setSelectedVariant,
+    setExpectedVariantCount,
+    setLoading,
+  ]);
 
   return (
     <div className="suggestions-container mb-4">
