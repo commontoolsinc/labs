@@ -11,6 +11,7 @@ import {
 import {
   AsyncResult,
   ConnectionError,
+  GraphQuery,
   GraphSubscription,
   MemorySession,
   MemorySpace as Subject,
@@ -77,6 +78,10 @@ export class Memory implements Session, MemorySession {
     return this.perform(() => query(this, source));
   }
 
+  queryGraph(source: GraphQuery): QueryResult {
+    return this.perform(() => queryGraph(this, source));
+  }
+
   close() {
     return this.perform(() => close(this));
   }
@@ -115,6 +120,24 @@ export const query = async (session: Session, query: Query) => {
 
     span.setAttribute("mount.status", "success");
     return space.query(query);
+  });
+};
+
+export const queryGraph = async (session: Session, query: GraphQuery) => {
+  return await traceAsync("memory.queryGraph", async (span) => {
+    addMemoryAttributes(span, {
+      operation: "queryGraph",
+      space: query.sub,
+    });
+
+    const { ok: space, error } = await mount(session, query.sub);
+    if (error) {
+      span.setAttribute("mount.status", "error");
+      return { error };
+    }
+
+    span.setAttribute("mount.status", "success");
+    return space.queryGraph(query);
   });
 };
 

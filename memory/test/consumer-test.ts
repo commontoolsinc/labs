@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertMatch } from "@std/assert";
+import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
 import * as Fact from "../fact.ts";
 import * as Transaction from "../transaction.ts";
 import * as Changes from "../changes.ts";
@@ -278,6 +278,42 @@ test("list different fact types", store, async (session) => {
       [subject.did()]: Changes.from([text]),
     },
     "lists text facts",
+  );
+});
+
+test("list multiple facts using graph query", store, async (session) => {
+  const clock = new Clock();
+  const memory = Consumer.open({ as: subject, session, clock })
+    .mount(subject.did());
+  const doc2 = `of:${refer({ doc: 2 })}` as const;
+
+  const facts = [
+    Fact.assert({ the, of: doc, is: { v: 1 } }),
+    Fact.assert({ the, of: doc2, is: { v: 2 } }),
+  ];
+
+  // Create multiple facts
+  await memory.transact({
+    changes: Changes.from(facts),
+  });
+
+  // queryGraph returns the facts with an is portion for each schema, so they're arrays
+  const wrappedFacts = facts.map((fact) =>
+    Fact.assert({ the: fact.the, of: fact.of, is: [fact.is] })
+  );
+
+  const result = await memory.queryGraph({
+    selectGraph: {
+      _: { [the]: { _: [{ schema: true, rootSchema: true }] } },
+    },
+  });
+  // assertExists(graphResult1.ok);
+  // const selection = graphResult1.ok;
+  // const result = { ok: graphResult1.ok, { [subject.did()]: selection.of }};
+  assertEquals(
+    result.ok?.selection,
+    { [subject.did()]: Changes.from(wrappedFacts) },
+    "lists multiple facts",
   );
 });
 

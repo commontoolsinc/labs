@@ -155,6 +155,11 @@ export type Protocol<Space extends MemorySpace = MemorySpace> = {
           source: Unsubscribe<Space>["args"],
         ): Task<Result<Unit, SystemError | AuthorizationError>>;
       };
+      graph: {
+        query(graphQuery: { selectGraph: GraphSelector; since?: number }): Task<
+          Result<Selection<Space>, AuthorizationError | QueryError>
+        >;
+      };
     };
   };
 };
@@ -438,6 +443,11 @@ export interface Session<Space extends MemorySpace = MemorySpace> {
    */
   query(source: Query<Space>): QueryResult<Space>;
 
+  /**
+   * Queries space for matching entities based on provided selector.
+   */
+  queryGraph(source: GraphQuery<Space>): QueryResult<Space>;
+
   close(): CloseResult;
 }
 
@@ -697,24 +707,56 @@ export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
 
 export type GraphSubscription<Space extends MemorySpace = MemorySpace> =
   Invocation<
-    "/memory/graph/subscribe@0.1",
+    "/memory/graph/subscribe",
     Space,
-    { select: GraphSelector; since?: number }
+    { selectGraph: GraphSelector; since?: number }
   >;
 
 export type GraphQuery<Space extends MemorySpace = MemorySpace> = Invocation<
-  "/memory/graph/query@0.1",
+  "/memory/graph/query",
   Space,
-  { select: GraphSelector; since?: number }
+  { selectGraph: GraphSelector; since?: number }
 >;
 
-export type GraphSelector = {
-  [of: Entity]: {
-    [the: The]: {
-      [cause: Cause]: NodeSelector;
-    };
-  };
-};
+// A normal Selector looks like this (with _ as wildcard cause):
+// {
+//   "of:ba4jcbvpq3k5sooggkwwosy6sqd3fhr5md7hroyf3bq3vrambqm4xkkus": {
+//     "application/json": {
+//       _: {
+//         is: {}
+//       }
+//     }
+//   }
+// }
+// A GraphSelector looks like this (with _ as wildcard cause):
+// {
+//   "of:ba4jcbvpq3k5sooggkwwosy6sqd3fhr5md7hroyf3bq3vrambqm4xkkus": {
+//     "application/json": {
+//       _: [{
+//         schema: { "type": "object" },
+//         rootSchema: { "type": "object" }
+//       }]
+//     }
+//   }
+// }
+// A GraphSelector could also look like this (with _ as wildcard cause):
+// {
+//   "of:ba4jcbvpq3k5sooggkwwosy6sqd3fhr5md7hroyf3bq3vrambqm4xkkus": {
+//     "application/json": {
+//       _: {
+//         "name": [{
+//           schema: { "type": "string" },
+//           rootSchema: { "type": "string" }
+//         }]
+//       }
+//     }
+//   }
+// }
+
+export type GraphSelector = Select<
+  Entity,
+  Select<The, Select<Cause, NodeSelector>>
+>;
 
 export type BranchSelector = {
   [at: string]: NodeSelector;
@@ -791,7 +833,12 @@ export type ArraySelector = {
   items?: JSONSelector;
 };
 
-export type Operation = Transaction | Query | Subscribe | Unsubscribe;
+export type Operation =
+  | Transaction
+  | Query
+  | GraphQuery
+  | Subscribe
+  | Unsubscribe;
 
 export type QueryResult<Space extends MemorySpace = MemorySpace> = AwaitResult<
   Selection<Space>,
@@ -962,7 +1009,7 @@ export interface QueryError extends Error {
   cause: SystemError;
 
   space: MemorySpace;
-  selector: Selector;
+  selector: Selector | GraphSelector;
 }
 
 /**

@@ -192,9 +192,9 @@ class Space<Subject extends MemorySpace = MemorySpace>
   }
 
   queryGraph(source: GraphQuery<Subject>) {
-    return traceSync("space.instance.query", (span) => {
+    return traceSync("space.instance.queryGraph", (span) => {
       addMemoryAttributes(span, {
-        operation: "query",
+        operation: "queryGraph",
         space: this.subject,
       });
 
@@ -470,18 +470,23 @@ export type BranchResult = {
 
 export const selectGraph = <Space extends MemorySpace>(
   session: Session<Space>,
-  { select }: GraphSubscription["args"],
+  { selectGraph, since }: GraphSubscription["args"],
 ): Selection<Space>[Space] => {
   const selection = {};
   const resultTree: ResultTree = {};
-  const selectorEntries = Object.entries(select);
+  const selectorEntries = Object.entries(selectGraph);
   for (const [of, attributes] of selectorEntries) {
     const attributeEntries = Object.entries(attributes);
     for (const [the, revisions] of attributeEntries) {
       const revisionEntries = Object.entries(revisions);
       for (const [cause, branches] of revisionEntries) {
         for (
-          const fact of selectFacts(session, { the, of: of as Entity, cause })
+          const fact of selectFacts(session, {
+            the,
+            of: of as Entity,
+            cause,
+            since,
+          })
         ) {
           // the actual matches are all arrays, since for each leaf,
           // we have a list of schema filters.
@@ -588,7 +593,7 @@ function getSchemaIntersection(
   object: JSONValue,
   { schema, rootSchema }: SchemaContext,
 ): JSONValue | undefined {
-  console.log("testing object: ", schema, object);
+  //console.log("testing object: ", schema, object);
   if (schema == true || isObject(schema) && Object.keys(schema).length == 0) {
     // These values in a schema match any object
     return object;
@@ -672,7 +677,7 @@ function getSchemaIntersection(
           }
         }
       }
-      console.log("filteredObj", filteredObj);
+      //console.log("filteredObj", filteredObj);
       return filteredObj;
     }
   }
@@ -946,7 +951,7 @@ export const queryGraph = <Space extends MemorySpace>(
     return {
       error: Error.query(
         command.sub,
-        command.args.select,
+        command.args.selectGraph,
         error as SqliteError,
       ),
     };

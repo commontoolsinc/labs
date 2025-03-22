@@ -14,6 +14,7 @@ import {
   ConsumerSession,
   DID,
   Entity,
+  GraphQuery,
   InferOf,
   Invocation,
   InvocationURL,
@@ -238,14 +239,22 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
     return this.session.invoke({
       cmd: "/memory/transact",
       sub: this.space,
-      args: source as Transaction["args"],
+      args: source,
     });
   }
   query(source: Query["args"]): QueryView<Space, Protocol<Space>> {
     const query = this.session.invoke({
       cmd: "/memory/query" as const,
       sub: this.space,
-      args: source as Query["args"],
+      args: source,
+    });
+    return QueryView.create(this.session, query);
+  }
+  queryGraph(source: GraphQuery["args"]): QueryView<Space, Protocol<Space>> {
+    const query = this.session.invoke({
+      cmd: "/memory/graph/query" as const,
+      sub: this.space,
+      args: source,
     });
     return QueryView.create(this.session, query);
   }
@@ -335,7 +344,9 @@ class QueryView<
     MemoryProtocol extends Protocol<Space>,
   >(
     session: MemoryConsumerSession<Space, MemoryProtocol>,
-    invocation: ConsumerInvocation<"/memory/query", MemoryProtocol>,
+    invocation:
+      | ConsumerInvocation<"/memory/query", MemoryProtocol>
+      | ConsumerInvocation<"/memory/graph/query", MemoryProtocol>,
   ): QueryView<Space, MemoryProtocol> {
     const view: QueryView<Space, MemoryProtocol> = new QueryView(
       session,
@@ -356,7 +367,9 @@ class QueryView<
 
   constructor(
     public session: MemoryConsumerSession<Space, MemoryProtocol>,
-    public invocation: ConsumerInvocation<"/memory/query", MemoryProtocol>,
+    public invocation:
+      | ConsumerInvocation<"/memory/query", MemoryProtocol>
+      | ConsumerInvocation<"/memory/graph/query", MemoryProtocol>,
     public promise: Promise<
       Result<QueryView<Space, MemoryProtocol>, QueryError | ConnectionError>
     >,

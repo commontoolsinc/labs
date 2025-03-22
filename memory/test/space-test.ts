@@ -1191,11 +1191,11 @@ test("list single fact with graph query", DB, async (session) => {
   };
 
   const result = session.queryGraph({
-    cmd: "/memory/graph/query@0.1",
+    cmd: "/memory/graph/query",
     iss: alice.did(),
     sub: space.did(),
     args: {
-      select: sampleGraphSelector,
+      selectGraph: sampleGraphSelector,
     },
     prf: [],
   });
@@ -1259,11 +1259,11 @@ test(
     };
 
     const result = session.queryGraph({
-      cmd: "/memory/graph/query@0.1",
+      cmd: "/memory/graph/query",
       iss: alice.did(),
       sub: space.did(),
       args: {
-        select: sampleGraphSelector,
+        selectGraph: sampleGraphSelector,
       },
       prf: [],
     });
@@ -1396,11 +1396,11 @@ test(
     };
 
     const result = session.queryGraph({
-      cmd: "/memory/graph/query@0.1",
+      cmd: "/memory/graph/query",
       iss: alice.did(),
       sub: space.did(),
       args: {
-        select: sampleGraphSelector,
+        selectGraph: sampleGraphSelector,
       },
       prf: [],
     });
@@ -1486,11 +1486,11 @@ test(
     };
 
     const result = session.queryGraph({
-      cmd: "/memory/graph/query@0.1",
+      cmd: "/memory/graph/query",
       iss: alice.did(),
       sub: space.did(),
       args: {
-        select: sampleGraphSelector,
+        selectGraph: sampleGraphSelector,
       },
       prf: [],
     });

@@ -200,6 +200,16 @@ class MemoryProviderSession<
           >,
         });
       }
+      case "/memory/graph/query": {
+        return this.perform({
+          the: "task/return",
+          of,
+          is: (await this.memory.queryGraph(invocation)) as Result<
+            Selection<Space>,
+            QueryError
+          >,
+        });
+      }
       case "/memory/transact": {
         return this.perform({
           the: "task/return",
