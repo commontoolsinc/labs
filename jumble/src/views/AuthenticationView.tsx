@@ -21,6 +21,7 @@ import {
   createPassphraseCredential,
   getPublicKeyCredentialDescriptor,
   getStoredCredential,
+  isValidBase64,
   saveCredential,
   type StoredCredential,
 } from "@/utils/credentials.ts";
@@ -211,8 +212,7 @@ export function AuthenticationView() {
             // Ensure the ID is properly base64 encoded
             const id = passkey.id();
             // Verify it's valid base64 before storing
-            const isValidBase64 = /^[A-Za-z0-9+/=]*$/.test(id);
-            if (isValidBase64) {
+            if (isValidBase64(id)) {
               const storedCred = createPasskeyCredential(id);
               saveCredential(storedCred);
               setStoredCredential(storedCred);

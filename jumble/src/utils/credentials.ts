@@ -10,6 +10,10 @@ export interface StoredCredential {
   method: AuthMethod;
 }
 
+export function isValidBase64(str: string): boolean {
+  return /^[A-Za-z0-9+/=]*$/.test(str);
+}
+
 export function getStoredCredential(): StoredCredential | null {
   const stored = localStorage.getItem("storedCredential");
   return stored ? JSON.parse(stored) : null;
@@ -43,8 +47,7 @@ export function getPublicKeyCredentialDescriptor(
   if (storedCredential?.method === "passkey") {
     try {
       // Check if the string is valid base64
-      const isValidBase64 = /^[A-Za-z0-9+/=]*$/.test(storedCredential.id);
-      if (!isValidBase64) {
+      if (!isValidBase64(storedCredential.id)) {
         console.warn("Invalid base64 format in stored credential ID");
         return undefined;
       }
