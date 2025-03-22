@@ -12,3 +12,5 @@ artifact
 _deno.lock
 
 !/jumble/integration/cache/llm-api-cache
+.claude-prompt.tmp
+.pr-desc.tmp
