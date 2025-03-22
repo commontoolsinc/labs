@@ -18,6 +18,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { flushSync } from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { type CharmRouteParams } from "@/routes.ts";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
@@ -658,18 +659,23 @@ const Suggestions = () => {
   } = useCharmOperationContext();
 
   const handleSuggestion = (suggestion: CharmSuggestion) => {
-    setInput(suggestion.prompt);
-
-    // Set the operation type based on suggestion type if possible
-    if (suggestion.type.toLowerCase().includes("extend")) {
-      setOperationType("extend");
-    } else {
-      setOperationType("iterate");
-    }
-
-    setShowVariants(true);
-    // Use a micro-delay to ensure state updates before operation
-    setTimeout(() => handlePerformOperation(), 0);
+    // Use flushSync to ensure state updates are applied synchronously
+    // before calling handlePerformOperation
+    flushSync(() => {
+      setInput(suggestion.prompt);
+      
+      // Set the operation type based on suggestion type if possible
+      if (suggestion.type.toLowerCase().includes("extend")) {
+        setOperationType("extend");
+      } else {
+        setOperationType("iterate");
+      }
+      
+      setShowVariants(true);
+    });
+    
+    // Now that state is updated, we can call handlePerformOperation directly
+    handlePerformOperation();
   };
 
   return (
