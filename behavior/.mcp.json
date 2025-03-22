@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "behavior": {
+      "type": "stdio",
+      "command": "/Users/ben/code/common-tools/labs/behavior/index.ts",
+      "args": [],
+      "env": {}
+    }
+  }
+}
