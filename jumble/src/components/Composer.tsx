@@ -651,15 +651,26 @@ export function Composer({
       const before = wordBefore && Editor.before(editor, wordBefore);
       const beforeRange = before && Editor.range(editor, before, start);
       const beforeText = beforeRange && Editor.string(editor, beforeRange);
+      
       const beforeMatch = beforeText && beforeText.match(/^@(\w+)$/);
+      
+      // If we detect exactly "@" at the end of the text, mock a match object
+      const isJustAtSymbol = beforeText && beforeText.endsWith('@') && 
+                           beforeText.length > 0 && beforeText[beforeText.length - 1] === '@';
+      
+      // Use either the regex match or our mock match for a single "@"
+      const finalBeforeMatch = isJustAtSymbol 
+        ? { 0: '@', 1: '' } // Mock match result for just "@"
+        : beforeMatch;
+        
       const after = Editor.after(editor, start);
       const afterRange = Editor.range(editor, start, after);
       const afterText = Editor.string(editor, afterRange);
       const afterMatch = afterText.match(/^(\s|$)/);
 
-      if (beforeMatch && afterMatch) {
+      if ((finalBeforeMatch || beforeMatch) && afterMatch && beforeRange) {
         setTarget(beforeRange);
-        setSearch(beforeMatch[1]);
+        setSearch(finalBeforeMatch ? finalBeforeMatch[1] : (beforeMatch ? beforeMatch[1] : ''));
         setIndex(0);
         return;
       }
