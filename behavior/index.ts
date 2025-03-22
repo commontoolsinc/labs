@@ -47,10 +47,40 @@ const incrementTool: Tool = {
   },
 };
 
+const fetchTool: Tool = {
+  name: "fetch",
+  description: "Fetch data from a URL",
+  inputSchema: {
+    type: "object",
+    properties: {
+      url: {
+        type: "string", 
+        description: "URL to fetch data from"
+      },
+      method: {
+        type: "string", 
+        description: "HTTP method to use (defaults to GET)"
+      },
+      headers: {
+        type: "object", 
+        description: "Request headers"
+      },
+      body: {
+        type: "object", 
+        description: "Request body"
+      }
+    },
+    required: ["url"],
+  },
+};
+
 // Initial state
 const state = {
   counter: 0,
-  messages: []
+  messages: [],
+  fetchHistory: [],
+  fetchCache: {},
+  isLoading: false
 };
 
 // Create the MCP server
@@ -67,6 +97,7 @@ const server = new Server(
       tools: {
         echo: {},
         increment: {},
+        fetch: {},
       },
     },
   },
@@ -113,9 +144,14 @@ server.setRequestHandler(
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   console.error("Handling ListToolsRequest");
   return {
-    tools: [echoTool, incrementTool],
+    tools: [echoTool, incrementTool, fetchTool],
   };
 });
+
+// Helper to create a cache key for fetch requests
+function createCacheKey(url: string, method = "GET"): string {
+  return `${method}-${url}`;
+}
 
 // Simple tool handler
 server.setRequestHandler(
@@ -155,6 +191,138 @@ server.setRequestHandler(
         }],
         isError: false,
       };
+    }
+    
+    if (toolName === "fetch") {
+      const url = args.url as string;
+      const method = (args.method as string) || "GET";
+      const headers = args.headers as Record<string, string> || {};
+      const body = args.body;
+      
+      console.error(`Fetch tool called with URL: ${url}, method: ${method}`);
+      
+      // Create cache key
+      const cacheKey = createCacheKey(url, method);
+      
+      // Check cache for recent responses (less than 5 minutes old)
+      const cachedResponse = state.fetchCache[cacheKey];
+      const now = Date.now();
+      
+      if (cachedResponse && (now - cachedResponse.timestamp < 5 * 60 * 1000)) {
+        console.error(`Using cached response for ${url}`);
+        
+        // Add to history that we're using cached data
+        state.fetchHistory.push({
+          url,
+          method,
+          timestamp: now,
+          status: "success",
+          response: cachedResponse.data,
+          fromCache: true
+        });
+        
+        return {
+          content: [{ 
+            type: "text", 
+            text: `Fetched (from cache): ${url}\n\n${JSON.stringify(cachedResponse.data, null, 2)}` 
+          }],
+          isError: false,
+        };
+      }
+      
+      // Add to history that we're starting a request
+      state.fetchHistory.push({
+        url,
+        method,
+        timestamp: now,
+        status: "pending"
+      });
+      
+      // Mark as loading
+      state.isLoading = true;
+      
+      try {
+        // Perform the fetch
+        console.error(`Performing fetch to ${url}`);
+        
+        // Prepare options for fetch
+        const options: RequestInit = {
+          method,
+          headers: headers || {},
+        };
+        
+        if (body) {
+          options.body = typeof body === "object" ? JSON.stringify(body) : String(body);
+        }
+        
+        // Execute the fetch request
+        const response = await fetch(url, options);
+        
+        // Try to parse as JSON, but fallback to text
+        let data;
+        const contentType = response.headers.get("content-type") || "";
+        
+        if (contentType.includes("application/json")) {
+          data = await response.json();
+        } else {
+          data = await response.text();
+        }
+        
+        // Update history and cache
+        const lastIndex = state.fetchHistory.length - 1;
+        if (lastIndex >= 0) {
+          state.fetchHistory[lastIndex] = {
+            ...state.fetchHistory[lastIndex],
+            status: "success",
+            response: data,
+            statusCode: response.status
+          };
+        }
+        
+        // Update cache
+        state.fetchCache[cacheKey] = {
+          data,
+          timestamp: now
+        };
+        
+        // No longer loading
+        state.isLoading = false;
+        
+        console.error(`Fetch successful for ${url}`);
+        
+        // Return the fetched data
+        return {
+          content: [{ 
+            type: "text", 
+            text: `Fetched: ${url}\n\n${JSON.stringify(data, null, 2)}` 
+          }],
+          isError: false,
+        };
+      } catch (error) {
+        console.error(`Fetch error for ${url}: ${error.message || String(error)}`);
+        
+        // Update history with error
+        const lastIndex = state.fetchHistory.length - 1;
+        if (lastIndex >= 0) {
+          state.fetchHistory[lastIndex] = {
+            ...state.fetchHistory[lastIndex],
+            status: "error",
+            error: error.message || String(error)
+          };
+        }
+        
+        // No longer loading
+        state.isLoading = false;
+        
+        // Return the error
+        return {
+          content: [{ 
+            type: "text", 
+            text: `Error fetching ${url}: ${error.message || String(error)}` 
+          }],
+          isError: true,
+        };
+      }
     }
     
     return {
