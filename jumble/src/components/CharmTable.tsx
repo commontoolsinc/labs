@@ -4,7 +4,6 @@ import { useState } from "react";
 import { Cell } from "@commontools/runner";
 import { useCharmHover } from "@/hooks/use-charm-hover.ts";
 import CharmLink from "@/components/CharmLink.tsx";
-import { HoverPreview } from "@/components/HoverPreview.tsx";
 
 interface ActionConfig {
   buttonAction: (ids: string[]) => Promise<void>;
@@ -56,10 +55,7 @@ export const CharmTable = ({
   charmManager,
   viewMode = "standard",
 }: CharmTableProps) => {
-  const { hoveredCharm, previewPosition, handleMouseMove, handleMouseLeave } =
-    useCharmHover();
   const [selectedCharms, setSelectedCharms] = useState<string[]>([]);
-  const hoveredCharmInstance = charms.find((c) => charmId(c) === hoveredCharm);
   const isTrashView = viewMode === "trash";
 
   const toggleCharmSelection = (id: string) => {
@@ -206,8 +202,6 @@ export const CharmTable = ({
                   className={`bg-white border-b hover:bg-gray-50 relative ${
                     isSelected ? "bg-blue-50" : ""
                   }`}
-                  onMouseMove={(e) => handleMouseMove(e, id!)}
-                  onMouseLeave={handleMouseLeave}
                 >
                   <td className="px-6 py-4">
                     <input
@@ -229,13 +223,6 @@ export const CharmTable = ({
           </tbody>
         </table>
       </div>
-
-      {hoveredCharm && hoveredCharmInstance && (
-        <HoverPreview
-          charm={hoveredCharmInstance}
-          position={previewPosition}
-        />
-      )}
     </div>
   );
 };

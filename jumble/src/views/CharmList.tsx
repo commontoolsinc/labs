@@ -77,7 +77,7 @@ function CharmPreview(
         </svg>
       </button>
       <NavLink to={`/${replicaName}/${charmId(charm)}`}>
-        <div>
+        <div className="h-full flex flex-col">
           <h3 className="text-xl font-semibold text-gray-800 mb-4">
             {(charm.get()[NAME] || "Unnamed Charm") +
               ` (#${charmId(charm)!.slice(-4)})`}
