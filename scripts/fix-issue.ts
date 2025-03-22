@@ -52,6 +52,26 @@ interface IssueComment {
   createdAt: string;
 }
 
+// Function to ensure temporary files are cleaned up
+async function cleanupTempFiles() {
+  try {
+    // Remove the temporary files if they exist
+    for (const file of [PROMPT_FILE, PR_DESC_FILE]) {
+      try {
+        await Deno.remove(file);
+        console.log(`Cleaned up temporary file: ${file}`);
+      } catch (error) {
+        // Ignore errors if file doesn't exist
+        if (!(error instanceof Deno.errors.NotFound)) {
+          console.error(`Error removing ${file}:`, error);
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Error during cleanup:", error);
+  }
+}
+
 async function main() {
   try {
     // Find the repository root
@@ -64,6 +84,10 @@ async function main() {
     // Update file paths now that we have the repo root
     PROMPT_FILE = `${REPO_PATH}/.claude-prompt.tmp`;
     PR_DESC_FILE = `${REPO_PATH}/.pr-desc.tmp`;
+
+    // Set up cleanup on program exit
+    Deno.addSignalListener("SIGINT", cleanupTempFiles);
+    Deno.addSignalListener("SIGTERM", cleanupTempFiles);
 
     // Get issue number from command line
     const issueNumber = Deno.args[0];
@@ -158,6 +182,9 @@ Explain your approach and any considerations.
 
     // Store prompt to a temporary file for reference
     await Deno.writeTextFile(PROMPT_FILE, fixPrompt);
+    console.log(
+      `Temporary files (${PROMPT_FILE}, ${PR_DESC_FILE}) will be created and automatically excluded from git.`,
+    );
 
     // Invoke Claude Code to fix the issue
     console.log("Invoking Claude Code to analyze and fix the issue...");
@@ -236,14 +263,16 @@ This PR was created with Claude Code assistance.
 `;
     await Deno.writeTextFile(PR_DESC_FILE, prDescription);
 
-    // Create a gitignore for temp files before committing
+    // Ensure temp files are ignored before committing
     console.log("Ensuring temporary files are not committed...");
 
-    // Add temp files to .gitignore for this commit only
-    const gitIgnoreCmd = new Deno.Command("git", {
+    // Add temp files to .gitignore locally
+    await new Deno.Command("git", {
       args: ["update-index", "--skip-worktree", PROMPT_FILE, PR_DESC_FILE],
-    });
-    await gitIgnoreCmd.output();
+    }).output();
+
+    // Clean up temporary files to ensure they're not present during commit
+    await cleanupTempFiles();
 
     // Commit the changes
     const commitMessage = `Fix #${issue.number}: ${issue.title}`;
@@ -268,22 +297,20 @@ This PR was created with Claude Code assistance.
     });
     await prProcess.output();
 
+    // Final cleanup
     // Unset the skip-worktree flag
     await new Deno.Command("git", {
       args: ["update-index", "--no-skip-worktree", PROMPT_FILE, PR_DESC_FILE],
     }).output();
 
-    // Clean up temporary files
-    try {
-      await Deno.remove(PROMPT_FILE);
-      await Deno.remove(PR_DESC_FILE);
-    } catch (error) {
-      console.error("Error cleaning up temporary files:", error);
-    }
+    // Make sure temporary files are cleaned up
+    await cleanupTempFiles();
 
     console.log("Done! PR created successfully.");
   } catch (error) {
     console.error("Error:", error);
+    // Make sure to clean up even if there's an error
+    await cleanupTempFiles();
     Deno.exit(1);
   }
 }
