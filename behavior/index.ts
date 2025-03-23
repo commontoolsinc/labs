@@ -13,6 +13,9 @@ import {
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 
+import { behavior as counterBehavior } from "./counter.ts";
+import { service, send } from "./state-machine.ts";
+
 // Extremely basic example MCP server that should be able to connect
 const DEBUG = true;
 
@@ -74,7 +77,7 @@ const fetchTool: Tool = {
   },
 };
 
-// Initial state
+// Set up global state
 const state = {
   counter: 0,
   messages: [],
@@ -82,6 +85,21 @@ const state = {
   fetchCache: {},
   isLoading: false
 };
+
+// Initialize state service using the Elm-inspired state machine
+const counterService = service(counterBehavior);
+
+// Subscribe to counter service state updates
+counterService.subscribe((service) => {
+  // Update our global state from the service state
+  state.counter = service.state.counter;
+  state.messages = service.state.messages;
+  
+  console.error("Counter state updated:", {
+    counter: state.counter,
+    messages: state.messages.length
+  });
+});
 
 // Create the MCP server
 const server = new Server(
@@ -166,7 +184,13 @@ server.setRequestHandler(
       const text = args.text as string;
       console.error(`Echo tool called with: ${text}`);
       
-      // Add to messages
+      // Use counter service to handle the echo command
+      counterService.execute({
+        type: "echo",
+        message: text
+      });
+      
+      // Add to messages in global state
       state.messages.push(text);
       
       // Return the correctly formatted response
@@ -180,8 +204,12 @@ server.setRequestHandler(
       const amount = typeof args.amount === 'number' ? args.amount : 1;
       console.error(`Increment tool called with amount: ${amount}`);
       
-      // Increment the counter
-      state.counter += amount;
+      // Use counter service to handle the increment command
+      for (let i = 0; i < amount; i++) {
+        counterService.execute({
+          type: "increment"
+        });
+      }
       
       // Return the updated counter
       return {
