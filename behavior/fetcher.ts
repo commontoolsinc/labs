@@ -1,66 +1,15 @@
 // labs/behavior/fetcher.ts
-import { Behavior, FX, Wait } from "./state-machine.ts";
+import { Behavior, FX, wait } from "./state-machine.ts";
+import { createCommandDef, CommandsFromRegistry } from "./behavior-utils.ts";
 
-// Define effect for HTTP requests
-export interface FetchFX<T> extends FX<T> {
-  type: "fetch";
-  url: string;
-  options?: RequestInit;
-}
-
-// Create fetch effect helper
-export function fetch<T>(url: string, options?: RequestInit): FetchFX<T> {
-  return {
-    type: "fetch",
-    url,
-    options,
-  };
-}
-
-// Enhanced command definition with waiting conditions
-interface CommandDef<
-  P extends Record<string, unknown> = Record<string, never>,
-> {
-  type: string;
-  description: string;
-  params: P;
-  required?: Array<keyof P>;
-  // Wait condition metadata
-  wait?: {
-    condition: (state: any, previousState: any) => boolean;
-    timeout?: number;
-    resultExtractor?: (state: any) => any;
-    errorDetector?: (state: any) => { isError: boolean; message?: string };
-  };
-}
-
-// Enhanced command factory
-const createCommand = <T extends string, P extends Record<string, unknown>>(
-  type: T,
-  description: string,
-  params: P = {} as P,
-  required: Array<keyof P> = [],
-  wait?: {
-    condition: (state: any, previousState: any) => boolean;
-    timeout?: number;
-    resultExtractor?: (state: any) => any;
-    errorDetector?: (state: any) => { isError: boolean; message?: string };
-  },
-): CommandDef<P> => ({
-  type,
-  description,
-  params,
-  required,
-  wait,
-});
-
+// Enhanced command registry with fetch-related commands
 export const CommandRegistry = {
-  fetch: createCommand(
+  fetch: createCommandDef(
     "fetch",
     "Fetch data from a URL",
     {
       url: { type: "string", description: "URL to fetch data from" },
-      method: { type: "string", description: "HTTP method to use" },
+      method: { type: "string", description: "HTTP method to use (defaults to GET)" },
       body: { type: "object", description: "Request body" },
       headers: { type: "object", description: "Request headers" },
     },
@@ -86,7 +35,7 @@ export const CommandRegistry = {
       },
     },
   ),
-  clearCache: createCommand(
+  clearCache: createCommandDef(
     "clearCache",
     "Clear the request cache",
     {},
@@ -98,7 +47,7 @@ export const CommandRegistry = {
         Object.keys(previousState.cache).length > 0,
     },
   ),
-  clearHistory: createCommand(
+  clearHistory: createCommandDef(
     "clearHistory",
     "Clear the request history",
     {},
@@ -110,52 +59,19 @@ export const CommandRegistry = {
         previousState.history.length > 0,
     },
   ),
-  retryRequest: createCommand(
-    "retryRequest",
-    "Retry a previous request",
-    {
-      index: { type: "integer", description: "Index of the request to retry" },
-    },
-    ["index"],
-    {
-      // Wait until loading is done
-      condition: (state) => state.isLoading === false,
-      timeout: 10000,
-      // Extract the response from the last history item
-      resultExtractor: (state) => {
-        const history = state.history;
-        const lastRequest = history[history.length - 1];
-        return lastRequest?.response;
-      },
-    },
-  ),
 };
 
 // Derive Command type from the registry
-type CommandRegistry = typeof CommandRegistry;
-type CommandTypes = keyof CommandRegistry;
-
-// Define payload type for each command based on its params
-type CommandPayload<T extends CommandTypes> = {
-  [K in keyof CommandRegistry[T]["params"]]: unknown;
-};
-
-// Final Command type derived from the registry
-export type Command =
-  | {
-    [T in CommandTypes]: { type: T } & CommandPayload<T>;
-  }[CommandTypes]
-  | {
+export type Command = CommandsFromRegistry<typeof CommandRegistry> | 
+  { 
     type: "fetchSuccess";
     url: string;
-    method: string;
     response: unknown;
     cacheKey: string;
-  }
-  | {
+  } |
+  {
     type: "fetchError";
     url: string;
-    method: string;
     error: string;
   };
 
@@ -177,14 +93,40 @@ export type Model = {
 };
 
 // Helper to create a cache key
-function createCacheKey(url: string, options?: RequestInit): string {
-  return `${options?.method || "GET"}-${url}`;
+function createCacheKey(url: string, method = "GET"): string {
+  return `${method}-${url}`;
+}
+
+// Effect to perform a fetch operation
+// This will be yielded from the generator
+class FetchEffect<T = unknown> {
+  constructor(
+    public url: string,
+    public options?: RequestInit
+  ) {}
+
+  // This will be executed by the state machine runner
+  async execute(): Promise<T> {
+    try {
+      const response = await fetch(this.url, this.options);
+      const contentType = response.headers.get("content-type") || "";
+      
+      // Try to parse as JSON but fallback to text, based on content type
+      if (contentType.includes("application/json")) {
+        return await response.json() as T;
+      } else {
+        return await response.text() as unknown as T;
+      }
+    } catch (error) {
+      throw error;
+    }
+  }
 }
 
 // Create behavior for our state machine
 export const behavior: Behavior<Model, Command> = {
   *init() {
-    console.error("Initializing behavior service");
+    console.error("Initializing fetcher behavior service");
     return {
       cache: {},
       history: [],
@@ -203,7 +145,7 @@ export const behavior: Behavior<Model, Command> = {
         const body = command.body;
 
         // Create cache key
-        const cacheKey = createCacheKey(url, { method, headers, body });
+        const cacheKey = createCacheKey(url, method);
 
         // Check if we have a cached response and it's fresh (less than 5 minutes old)
         const cachedResponse = model.cache[cacheKey];
@@ -231,36 +173,50 @@ export const behavior: Behavior<Model, Command> = {
         }];
 
         // Start loading
-        const newModel = { ...model, history: newHistory, isLoading: true };
+        const updatedModel = { ...model, history: newHistory, isLoading: true };
 
-        try {
-          // Instead of yielding the fetch effect directly, use our FX type
-          const options: RequestInit = {
-            method,
-            headers: headers || {},
-          };
-
-          if (body) {
-            options.body = typeof body === "object" ? JSON.stringify(body) : body;
-          }
-
-          console.error(`Creating fetch effect for: ${url}`);
-          const fetchEffect = {
-            type: "fetch",
-            url,
-            options,
-          };
-          yield fetchEffect;
-        } catch (error) {
-          console.error(`Error creating fetch effect: ${error}`);
+        // Prepare options for fetch
+        const options: RequestInit = {
+          method,
+          headers: headers || {},
+        };
+        
+        if (body) {
+          options.body = typeof body === "object" ? JSON.stringify(body) : String(body);
         }
-
-        return newModel;
+        
+        // Yield a fetch effect - this will be handled by the state machine runner
+        // The result will be available when we return to the generator
+        try {
+          // Use the state machine's wait function to suspend until fetch completes
+          const data = yield* wait(new FetchEffect(url, options).execute());
+          
+          // When we get here, the fetch has completed successfully
+          // We'll send a fetchSuccess command to update the state
+          yield {
+            type: "fetchSuccess",
+            url,
+            response: data,
+            cacheKey,
+          };
+          
+          // Return the updated model
+          return updatedModel;
+        } catch (error) {
+          // If an error occurred, send an error command
+          yield {
+            type: "fetchError",
+            url,
+            error: error instanceof Error ? error.message : String(error),
+          };
+          
+          // Return the updated model
+          return updatedModel;
+        }
       }
 
       case "fetchSuccess": {
         const url = command.url;
-        const method = command.method;
         const cacheKey = command.cacheKey;
         const response = command.response;
 
@@ -296,7 +252,6 @@ export const behavior: Behavior<Model, Command> = {
 
       case "fetchError": {
         const url = command.url;
-        const method = command.method;
         const error = command.error;
 
         // Update the last history item with the error
@@ -323,99 +278,8 @@ export const behavior: Behavior<Model, Command> = {
         return { ...model, history: [] };
       }
 
-      case "retryRequest": {
-        const index = command.index as number;
-        const requestToRetry = model.history[index];
-
-        if (!requestToRetry) {
-          return model;
-        }
-
-        try {
-          // Create a new fetch effect from the history item
-          const fetchEffect = {
-            type: "fetch",
-            url: requestToRetry.url,
-            options: {
-              method: requestToRetry.method || "GET",
-            },
-          };
-          yield fetchEffect;
-        } catch (error) {
-          console.error(`Error creating retry fetch effect: ${error}`);
-        }
-
-        // Add to history that we're retrying
-        const newHistory = [...model.history, {
-          ...requestToRetry,
-          timestamp: Date.now(),
-          status: "pending",
-        }];
-
-        return { ...model, history: newHistory, isLoading: true };
-      }
-
       default:
         return model;
     }
-  },
-
-  // Handle effects
-  *handle(effect: FX<Command>) {
-    console.error(`Handling effect: ${JSON.stringify(effect)}`);
-
-    if (effect && typeof effect === 'object' && 'type' in effect && effect.type === "fetch") {
-      try {
-        console.error(`Executing fetch to ${effect.url}`);
-        // Use global fetch function available in Deno
-        const response = yield new Wait(globalThis.fetch(effect.url, effect.options));
-        let data;
-
-        // Try to parse as JSON, but fallback to text if it fails
-        try {
-          // Properly wrap the JSON parsing promise in a Wait object
-          data = yield new Wait(response.json());
-        } catch {
-          // Properly wrap the text parsing promise in a Wait object
-          data = yield new Wait(response.text());
-        }
-
-        console.error(
-          `Fetch successful with data: ${
-            JSON.stringify(data).substring(0, 100)
-          }...`,
-        );
-
-        // Create a success command
-        const url = effect.url;
-        const method = effect.options?.method || "GET";
-        const cacheKey = createCacheKey(url, effect.options);
-
-        return {
-          type: "fetchSuccess",
-          url,
-          method,
-          response: data,
-          cacheKey,
-        };
-      } catch (error) {
-        console.error(`Fetch error: ${error}`);
-
-        // Create an error command
-        return {
-          type: "fetchError",
-          url: effect.url,
-          method: effect.options?.method || "GET",
-          error: error instanceof Error ? error.message : String(error),
-        };
-      }
-    }
-
-    return null;
-  },
-
-  // We no longer need this process method since we're handling fetch responses directly
-  *process(model, _effectResult) {
-    return model;
-  },
+  }
 };

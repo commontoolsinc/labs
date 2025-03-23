@@ -10,145 +10,95 @@ import {
   ListToolsRequestSchema,
   ReadResourceRequest,
   ReadResourceRequestSchema,
-  Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { behavior as counterBehavior } from "./counter.ts";
-import { service, send } from "./state-machine.ts";
+import { behavior as counterBehavior, CommandRegistry as CounterRegistry, Command as CounterCommand } from "./counter.ts";
+import { behavior as fetcherBehavior, CommandRegistry as FetcherRegistry, Command as FetcherCommand } from "./fetcher.ts";
+import { service } from "./state-machine.ts";
+import { createToolsFromRegistry, waitForCompletion } from "./behavior-utils.ts";
 
-// Extremely basic example MCP server that should be able to connect
-const DEBUG = true;
-
-// Create simple tools
-const echoTool: Tool = {
-  name: "echo",
-  description: "Echoes back the input text",
-  inputSchema: {
-    type: "object",
-    properties: {
-      text: {
-        type: "string",
-        description: "The text to echo back",
-      },
-    },
-    required: ["text"],
-  },
-};
-
-const incrementTool: Tool = {
-  name: "increment",
-  description: "Increments the counter by a given amount",
-  inputSchema: {
-    type: "object",
-    properties: {
-      amount: {
-        type: "number",
-        description: "The amount to increment by (defaults to 1)",
-      },
-    },
-    required: [],
-  },
-};
-
-const fetchTool: Tool = {
-  name: "fetch",
-  description: "Fetch data from a URL",
-  inputSchema: {
-    type: "object",
-    properties: {
-      url: {
-        type: "string", 
-        description: "URL to fetch data from"
-      },
-      method: {
-        type: "string", 
-        description: "HTTP method to use (defaults to GET)"
-      },
-      headers: {
-        type: "object", 
-        description: "Request headers"
-      },
-      body: {
-        type: "object", 
-        description: "Request body"
-      }
-    },
-    required: ["url"],
-  },
-};
-
-// Set up global state
-const state = {
-  counter: 0,
-  messages: [],
-  fetchHistory: [],
-  fetchCache: {},
-  isLoading: false
-};
-
-// Initialize state service using the Elm-inspired state machine
+// Create the state machine services
 const counterService = service(counterBehavior);
+const fetcherService = service(fetcherBehavior);
 
-// Subscribe to counter service state updates
-counterService.subscribe((service) => {
-  // Update our global state from the service state
-  state.counter = service.state.counter;
-  state.messages = service.state.messages;
-  
-  console.error("Counter state updated:", {
-    counter: state.counter,
-    messages: state.messages.length
-  });
-});
+// Combine all tools from different registries
+const combinedRegistry = {
+  ...CounterRegistry,
+  ...FetcherRegistry,
+};
 
-// Create the MCP server
+// Create tools from the combined registry
+const tools = createToolsFromRegistry(combinedRegistry);
+
+// Initialize MCP server
 const server = new Server(
   {
-    name: "simple-echo-server",
+    name: "behavior-server",
     version: "0.1.0",
   },
   {
     capabilities: {
       resources: {
-        read: ["state://current"],
+        read: ["state://counter", "state://fetcher"],
       },
-      tools: {
-        echo: {},
-        increment: {},
-        fetch: {},
-      },
+      tools: Object.fromEntries(tools.map(tool => [tool.name, {}])),
     },
   },
 );
 
-// Simple resources handler
+// List available resources
 server.setRequestHandler(ListResourcesRequestSchema, async () => {
   console.error("Handling ListResourcesRequest");
   return {
     resources: [
       {
-        uri: "state://current",
+        uri: "state://counter",
         mimeType: "application/json",
-        name: "Current State",
+        name: "Counter State",
+      },
+      {
+        uri: "state://fetcher",
+        mimeType: "application/json",
+        name: "Fetcher State",
       },
     ],
   };
 });
 
-// Simple resource reader
+// Read state resources
 server.setRequestHandler(
   ReadResourceRequestSchema,
   async (request: ReadResourceRequest) => {
     const uri = request.params.uri;
     console.error(`Handling ReadResourceRequest for ${uri}`);
 
-    if (uri === "state://current") {
+    if (uri === "state://counter") {
+      // Initialize the state machine if not already initialized
+      if (!counterService.state) {
+        counterService.advance(counterService.behavior.init());
+      }
+      
       return {
         contents: [
           {
             uri,
             mimeType: "application/json",
-            text: JSON.stringify(state, null, 2),
+            text: JSON.stringify(counterService.state, null, 2),
+          },
+        ],
+      };
+    } else if (uri === "state://fetcher") {
+      // Initialize the state machine if not already initialized
+      if (!fetcherService.state) {
+        fetcherService.advance(fetcherService.behavior.init());
+      }
+      
+      return {
+        contents: [
+          {
+            uri,
+            mimeType: "application/json",
+            text: JSON.stringify(fetcherService.state, null, 2),
           },
         ],
       };
@@ -158,203 +108,97 @@ server.setRequestHandler(
   },
 );
 
-// Simple tool listing
+// List tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   console.error("Handling ListToolsRequest");
-  return {
-    tools: [echoTool, incrementTool, fetchTool],
-  };
+  return { tools };
 });
 
-// Helper to create a cache key for fetch requests
-function createCacheKey(url: string, method = "GET"): string {
-  return `${method}-${url}`;
-}
-
-// Simple tool handler
+// Handle tool calls
 server.setRequestHandler(
   CallToolRequestSchema,
   async (request: CallToolRequest): Promise<CallToolResult> => {
-    console.error(`Tool call request: ${JSON.stringify(request)}`);
-    
     const toolName = request.params.name;
-    const args = request.params.arguments ?? {};
+    const args = request.params.arguments || {};
     
-    if (toolName === "echo") {
-      const text = args.text as string;
-      console.error(`Echo tool called with: ${text}`);
-      
-      // Use counter service to handle the echo command
-      counterService.execute({
-        type: "echo",
-        message: text
-      });
-      
-      // Add to messages in global state
-      state.messages.push(text);
-      
-      // Return the correctly formatted response
+    console.error(`Tool call received: ${toolName} with args:`, args);
+    
+    // Check if the tool exists in our registry
+    if (!(toolName in combinedRegistry)) {
       return {
-        content: [{ type: "text", text: `Echo: ${text}` }],
-        isError: false,
+        content: [{ type: "text", text: `Unknown tool: ${toolName}` }],
+        isError: true,
       };
     }
     
-    if (toolName === "increment") {
-      const amount = typeof args.amount === 'number' ? args.amount : 1;
-      console.error(`Increment tool called with amount: ${amount}`);
-      
-      // Use counter service to handle the increment command
-      for (let i = 0; i < amount; i++) {
-        counterService.execute({
-          type: "increment"
-        });
+    // Get the command definition
+    const commandDef = combinedRegistry[toolName as keyof typeof combinedRegistry];
+    
+    // Handle counter commands
+    if (toolName in CounterRegistry) {
+      // Initialize the state machine if not already initialized
+      if (!counterService.state) {
+        counterService.advance(counterService.behavior.init());
       }
       
-      // Return the updated counter
-      return {
-        content: [{ 
-          type: "text", 
-          text: `Counter incremented by ${amount}. New value: ${state.counter}` 
-        }],
-        isError: false,
-      };
+      // Save the pre-command state for comparison
+      const prevState = { ...counterService.state };
+      
+      // Build the command payload
+      const command = {
+        type: toolName,
+        ...args,
+      } as CounterCommand;
+      
+      // Execute the command through the state machine
+      counterService.execute(command);
+      
+      // Wait for command completion based on its wait conditions
+      const result = await waitForCompletion(
+        commandDef,
+        counterService.state,
+        prevState,
+        toolName,
+        args
+      );
+      
+      return result;
     }
     
-    if (toolName === "fetch") {
-      const url = args.url as string;
-      const method = (args.method as string) || "GET";
-      const headers = args.headers as Record<string, string> || {};
-      const body = args.body;
-      
-      console.error(`Fetch tool called with URL: ${url}, method: ${method}`);
-      
-      // Create cache key
-      const cacheKey = createCacheKey(url, method);
-      
-      // Check cache for recent responses (less than 5 minutes old)
-      const cachedResponse = state.fetchCache[cacheKey];
-      const now = Date.now();
-      
-      if (cachedResponse && (now - cachedResponse.timestamp < 5 * 60 * 1000)) {
-        console.error(`Using cached response for ${url}`);
-        
-        // Add to history that we're using cached data
-        state.fetchHistory.push({
-          url,
-          method,
-          timestamp: now,
-          status: "success",
-          response: cachedResponse.data,
-          fromCache: true
-        });
-        
-        return {
-          content: [{ 
-            type: "text", 
-            text: `Fetched (from cache): ${url}\n\n${JSON.stringify(cachedResponse.data, null, 2)}` 
-          }],
-          isError: false,
-        };
+    // Handle fetcher commands 
+    if (toolName in FetcherRegistry) {
+      // Initialize the state machine if not already initialized
+      if (!fetcherService.state) {
+        fetcherService.advance(fetcherService.behavior.init());
       }
       
-      // Add to history that we're starting a request
-      state.fetchHistory.push({
-        url,
-        method,
-        timestamp: now,
-        status: "pending"
-      });
+      // Save the pre-command state for comparison
+      const prevState = { ...fetcherService.state };
       
-      // Mark as loading
-      state.isLoading = true;
+      // Build the command payload - the fetch effect is handled inside the state machine
+      const command = {
+        type: toolName,
+        ...args,
+      } as FetcherCommand;
       
-      try {
-        // Perform the fetch
-        console.error(`Performing fetch to ${url}`);
-        
-        // Prepare options for fetch
-        const options: RequestInit = {
-          method,
-          headers: headers || {},
-        };
-        
-        if (body) {
-          options.body = typeof body === "object" ? JSON.stringify(body) : String(body);
-        }
-        
-        // Execute the fetch request
-        const response = await fetch(url, options);
-        
-        // Try to parse as JSON, but fallback to text
-        let data;
-        const contentType = response.headers.get("content-type") || "";
-        
-        if (contentType.includes("application/json")) {
-          data = await response.json();
-        } else {
-          data = await response.text();
-        }
-        
-        // Update history and cache
-        const lastIndex = state.fetchHistory.length - 1;
-        if (lastIndex >= 0) {
-          state.fetchHistory[lastIndex] = {
-            ...state.fetchHistory[lastIndex],
-            status: "success",
-            response: data,
-            statusCode: response.status
-          };
-        }
-        
-        // Update cache
-        state.fetchCache[cacheKey] = {
-          data,
-          timestamp: now
-        };
-        
-        // No longer loading
-        state.isLoading = false;
-        
-        console.error(`Fetch successful for ${url}`);
-        
-        // Return the fetched data
-        return {
-          content: [{ 
-            type: "text", 
-            text: `Fetched: ${url}\n\n${JSON.stringify(data, null, 2)}` 
-          }],
-          isError: false,
-        };
-      } catch (error) {
-        console.error(`Fetch error for ${url}: ${error.message || String(error)}`);
-        
-        // Update history with error
-        const lastIndex = state.fetchHistory.length - 1;
-        if (lastIndex >= 0) {
-          state.fetchHistory[lastIndex] = {
-            ...state.fetchHistory[lastIndex],
-            status: "error",
-            error: error.message || String(error)
-          };
-        }
-        
-        // No longer loading
-        state.isLoading = false;
-        
-        // Return the error
-        return {
-          content: [{ 
-            type: "text", 
-            text: `Error fetching ${url}: ${error.message || String(error)}` 
-          }],
-          isError: true,
-        };
-      }
+      // Execute the command through the state machine
+      fetcherService.execute(command);
+      
+      // Wait for command completion based on its wait conditions
+      const result = await waitForCompletion(
+        commandDef,
+        fetcherService.state,
+        prevState,
+        toolName,
+        args
+      );
+      
+      return result;
     }
     
+    // Should never get here
     return {
-      content: [{ type: "text", text: `Unknown tool: ${toolName}` }],
+      content: [{ type: "text", text: `Unknown command handling for: ${toolName}` }],
       isError: true,
     };
   },

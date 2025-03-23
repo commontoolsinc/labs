@@ -1,89 +1,63 @@
-import { Behavior, FX, sleep } from "./state-machine.ts";
+import { Behavior, FX } from "./state-machine.ts";
+import { CommandDef, createCommandDef, CommandsFromRegistry } from "./behavior-utils.ts";
 
-// Define command metadata with params type for inference
-interface CommandDef<
-  P extends Record<string, unknown> = Record<string, never>,
-> {
-  type: string;
-  description: string;
-  params: P;
-  required?: Array<keyof P>;
-  // Add wait condition metadata
-  wait?: {
-    condition: (state: any, previousState: any) => boolean;
-    timeout?: number;
-    resultExtractor?: (state: any) => any;
-    errorDetector?: (state: any) => { isError: boolean; message?: string };
-  };
-}
-
-// Command registry with strong typing
+// Define command registry with strong typing using the helper
 export const CommandRegistry = {
-  echo: {
-    type: "echo",
-    description: "Echo back a message",
-    params: {
-      message: { type: "string", description: "Message to echo back" },
+  echo: createCommandDef(
+    "echo",
+    "Echoes back the input text",
+    {
+      text: { type: "string", description: "The text to echo back" },
     },
-    required: ["message" as const],
-    // Add a simple wait condition that always returns true
-    wait: {
+    ["text" as const],
+    {
       condition: () => true,
       timeout: 5000,
       resultExtractor: (state) => state
     }
-  },
-  increment: {
-    type: "increment",
-    description: "Increment the counter",
-    params: {},
-    // Add wait condition to ensure the increment has been processed
-    wait: {
+  ),
+  increment: createCommandDef(
+    "increment",
+    "Increments the counter by a given amount",
+    {
+      amount: { type: "number", description: "The amount to increment by (defaults to 1)" },
+    },
+    [],
+    {
       condition: (state, prevState) => state.counter > prevState.counter,
       timeout: 5000,
       resultExtractor: (state) => ({ counter: state.counter })
     }
-  },
-  decrement: {
-    type: "decrement",
-    description: "Decrement the counter",
-    params: {},
-    // Add wait condition to ensure the decrement has been processed
-    wait: {
+  ),
+  decrement: createCommandDef(
+    "decrement",
+    "Decrements the counter",
+    {},
+    [],
+    {
       condition: (state, prevState) => state.counter < prevState.counter,
       timeout: 5000,
       resultExtractor: (state) => ({ counter: state.counter })
     }
-  },
-  reset: {
-    type: "reset",
-    description: "Reset the counter to zero",
-    params: {},
-    // Add wait condition to ensure the reset has been processed
-    wait: {
+  ),
+  reset: createCommandDef(
+    "reset",
+    "Reset the counter to zero",
+    {},
+    [],
+    {
       condition: (state) => state.counter === 0,
       timeout: 5000,
       resultExtractor: (state) => ({ counter: state.counter })
     }
-  },
-} as const;
-
-// Derive Command type from the registry
-type CommandRegistry = typeof CommandRegistry;
-type CommandTypes = keyof CommandRegistry;
-
-// Define payload type for each command based on its params
-type CommandPayload<T extends CommandTypes> = {
-  [K in keyof CommandRegistry[T]["params"]]: unknown;
+  ),
 };
 
-// Final Command type derived from the registry
-type Command = {
-  [T in CommandTypes]: { type: T } & CommandPayload<T>;
-}[CommandTypes];
+// Derive Command type from the registry using the utility type
+export type Command = CommandsFromRegistry<typeof CommandRegistry>;
 
 // Model type
-type Model = {
+export type Model = {
   messages: string[];
   counter: number;
 };
@@ -99,12 +73,12 @@ export const behavior: Behavior<Model, Command> = {
   *update(model: Model, command: Command) {
     switch (command.type) {
       case "echo": {
-        const newMessages = [...model.messages, command.message as string];
+        const newMessages = [...model.messages, command.text as string];
         return { ...model, messages: newMessages };
       }
       case "increment": {
-        // Directly update the counter without sleep
-        return { ...model, counter: model.counter + 1 };
+        const amount = typeof command.amount === 'number' ? command.amount : 1;
+        return { ...model, counter: model.counter + amount };
       }
       case "decrement": {
         return { ...model, counter: model.counter - 1 };
@@ -115,14 +89,5 @@ export const behavior: Behavior<Model, Command> = {
       default:
         return model;
     }
-  },
-  // Add handle and process methods to ensure proper completion
-  *handle(effect) {
-    // No custom handling needed for basic effects
-    return undefined;
-  },
-  *process(model, result) {
-    // Ensure we return a properly structured response when processing results
-    return model;
-  },
+  }
 };

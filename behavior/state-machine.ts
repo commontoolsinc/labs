@@ -146,6 +146,11 @@ class Service<Model, Command> {
       this.idle = false;
       while (this.inbox.length > 0 || this.queue.length > 0) {
         for (const command of this.inbox.splice(0)) {
+          // Initialize the state if it doesn't exist yet
+          if (!this.state) {
+            this.advance(this.behavior.init());
+          }
+          
           this.state = this.advance(this.behavior.update(this.state, command));
         }
 
@@ -154,12 +159,38 @@ class Service<Model, Command> {
             this.inbox.push(effect.command);
           } else if (effect instanceof Spawn) {
             this.spawn(effect);
+          } else if (effect instanceof Wait) {
+            // Handle Wait directly
+            this.handleWait(effect);
+          } else if (effect && typeof effect === 'object' && 'execute' in effect && typeof effect.execute === 'function') {
+            // Handle custom effect objects with execute method (like FetchEffect)
+            this.handleCustomEffect(effect);
           }
         }
       }
 
       this.idle = true;
       this.notify();
+    }
+  }
+  
+  async handleWait(effect: Wait) {
+    try {
+      const result = await effect.promise;
+      this.inbox.push(result as unknown as Command);
+    } catch (error) {
+      console.error("Error in wait effect:", error);
+    }
+  }
+  
+  async handleCustomEffect(effect: any) {
+    try {
+      if (typeof effect.execute === 'function') {
+        const result = await effect.execute();
+        this.inbox.push(result as Command);
+      }
+    } catch (error) {
+      console.error("Error in custom effect:", error);
     }
   }
 
@@ -175,9 +206,26 @@ class Service<Model, Command> {
         if (value instanceof Send) {
           this.execute(value.command);
         } else if (value instanceof Wait) {
-          state = await value.promise;
+          try {
+            state = await value.promise;
+          } catch (error) {
+            console.error("Error in spawned wait:", error);
+            work.throw(error);
+          }
+        } else if (value && typeof value === 'object' && 'execute' in value && typeof value.execute === 'function') {
+          try {
+            state = await value.execute();
+          } catch (error) {
+            console.error("Error in spawned custom effect:", error);
+            work.throw(error);
+          }
         } else {
-          state = await value.execute();
+          try {
+            state = await value.execute();
+          } catch (error) {
+            console.error("Error in spawned effect:", error);
+            work.throw(error);
+          }
         }
       }
     }
@@ -186,12 +234,32 @@ class Service<Model, Command> {
   advance(task: Task<FX<Command>, Model>) {
     const work = task[Symbol.iterator]();
     while (true) {
-      const step = work.next();
-      if (step.done) {
-        this.state = step.value;
-        return this.state;
-      } else {
-        this.queue.push(step.value);
+      try {
+        const step = work.next();
+        if (step.done) {
+          this.state = step.value;
+          return this.state;
+        } else {
+          const effect = step.value;
+          if (effect instanceof Send) {
+            this.queue.push(effect);
+          } else if (effect instanceof Spawn) {
+            this.queue.push(effect);
+          } else if (effect instanceof Wait) {
+            this.queue.push(effect);
+          } else if (effect && typeof effect === 'object' && 'execute' in effect && typeof effect.execute === 'function') {
+            // Handle custom effect objects with execute method (like FetchEffect)
+            this.queue.push(effect as any);
+          } else if (effect && typeof effect === 'object' && 'type' in effect) {
+            // Handle command objects directly
+            this.inbox.push(effect as unknown as Command);
+          } else {
+            console.error("Unknown effect type:", effect);
+          }
+        }
+      } catch (error) {
+        console.error("Error in advance:", error);
+        throw error;
       }
     }
   }
@@ -225,30 +293,6 @@ class Service<Model, Command> {
     }
   }
 }
-
-// /**
-//  * Define react component as state machine.
-//  *
-//  * @example
-//  * ```js
-//  * const Counter = View({
-//  *   init() {
-//  *    return { state: { count: 0 } };
-//  *   },
-//  *   update({ count }: { count: number }, command: "inc" | "dec") {
-//  *     switch (command) {
-//  *       case "inc":
-//  *         return { state: { count: count + 1 } };
-//  *       case "dec":
-//  *         return { state: { count: count + 1 } };
-//  *       default:
-//  *         return { state: { count } };
-//  *     }
-//  *   },
-//  * });
-//  * ```
-//  *
-//  */
 
 export { Service as Process };
 export default Service;
