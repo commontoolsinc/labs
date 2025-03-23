@@ -1,22 +1,19 @@
 import { Identity } from "@commontools/identity";
-import { type Cell, type CellLink, storage } from "@commontools/runner";
+import { type Cell, storage } from "@commontools/runner";
 import {
   type BGCharmEntry,
   getBGUpdaterCellCharmsCell,
 } from "@commontools/utils";
-import { JobQueue } from "./job-queue.ts";
 import { log } from "./utils.ts";
 import { env } from "./env.ts";
-import type { CharmStateEntry } from "./types.ts";
+import { SpaceStation } from "./space-station.ts";
 
 export class BackgroundCharmService {
   private charmsCell: Cell<Cell<BGCharmEntry>[]> | null = null;
   private isRunning = false;
-  private state: Map<CellLink, CharmStateEntry> = new Map();
-  private queue: JobQueue = new JobQueue();
+  private spaceStation: Map<string, SpaceStation> = new Map();
 
   constructor() {
-    this.queue.startConsumer();
   }
 
   async initialize() {
@@ -25,28 +22,6 @@ export class BackgroundCharmService {
     this.charmsCell = await getBGUpdaterCellCharmsCell();
     await storage.syncCell(this.charmsCell, true);
     await storage.synced();
-
-    this.charmsCell.sink((cs) => this.ensureCharms(cs));
-  }
-
-  private ensureCharms(charms: Cell<BGCharmEntry>[]) {
-    (charms.get() as Cell<BGCharmEntry>[]).forEach((c) => {
-      const cellLink = c.getAsCellLink();
-      if (this.state.has(cellLink)) {
-        console.log("charm already exists in state");
-        // FIXME(ja): check to see if we need to re-enable/disable the charm!
-      } else {
-        this.state.set(cellLink, {
-          bgCharmEntry: c,
-          disabled: !c.get().enabled,
-          lastExecuted: null,
-          lastFinished: null,
-          consecutiveFailures: 0,
-          lastError: null,
-          lastErrorTimestamp: null,
-        });
-      }
-    });
   }
 
   start() {
@@ -56,43 +31,45 @@ export class BackgroundCharmService {
     }
 
     this.isRunning = true;
-
-    this.runCycle();
+    this.charmsCell.sink((cs) => this.ensureCharms(cs.get()));
   }
 
-  /**
-   * Stop the service
-   */
-  async stop(): Promise<void> {
+  stop() {
+    // FIXME(ja): stop listening to the charms cell ?
     if (!this.isRunning) {
       log("Service is not running");
       return;
     }
 
-    this.isRunning = false;
-
-    log("Syncing to storage");
-    await storage.synced();
-    log("Service stopped");
+    const promises = Array.from(this.spaceStation.values()).map(
+      (spaceStation) => spaceStation.stop(),
+    );
+    return Promise.allSettled(promises);
   }
 
-  // for now we can run everything every "cycle" but also add immediate
-  // execution when new charms are added
-  private runCycle() {
-    let skipped = 0;
-    let queued = 0;
+  // FIXME(ja): spacestations should watch their own charms!
+  // Note(ja): this assumes that sync won't return an empty
+  // array / partial results!
+  private ensureCharms(charms: Cell<BGCharmEntry>[]) {
+    if (!this.isRunning) {
+      log("ignoring charms update because service asked to stop");
+      return;
+    }
 
-    this.state.forEach((state) => {
-      if (state.disabled) {
-        log("charm is disabled, skipping");
-        skipped++;
-        return;
+    const dids = charms.map((c) => c.get().space);
+    console.log("ensureCharms", dids);
+
+    for (const did of new Set(dids)) {
+      let spaceStation = this.spaceStation.get(did);
+      if (!spaceStation) {
+        spaceStation = new SpaceStation({ did });
+        this.spaceStation.set(did, spaceStation);
+        spaceStation.start();
       }
 
-      this.queue.addExecuteCharmJob(state.bgCharmEntry);
-      queued++;
-    });
-
-    log(`Queued ${queued} charms, skipped ${skipped} disabled charms`);
+      // we are only filtering charms because until the FIXME above is fixed
+      const didCharms = charms.filter((c) => c.get().space === did);
+      spaceStation.watch(didCharms);
+    }
   }
 }
