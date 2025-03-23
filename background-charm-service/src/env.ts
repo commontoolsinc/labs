@@ -14,12 +14,9 @@ const envSchema = z.object({
   // Timeouts (in milliseconds)
   CHARM_EXECUTION_TIMEOUT_MS: z.coerce.number().positive().default(30_000),
 
-  // External service URLs
-  TOOLSHED_API_URL: z.string().default("http://localhost:8000"),
-
-  // Authentication
+  // Toolshed configuration
   OPERATOR_PASS: z.string().default("implicit trust"),
-  MEMORY_URL: z.string().default("http://localhost:8000"),
+  TOOLSHED_API_URL: z.string().default("http://localhost:8000"),
 
   // Background Charm Service
   SERVICE_DID: z.string().default(

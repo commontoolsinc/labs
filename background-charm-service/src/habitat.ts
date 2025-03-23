@@ -61,12 +61,9 @@ export class Habitat {
       toolshed_url: toolshedUrl,
       operator_pass: operatorPass,
     }).catch((err) => {
-      console.error(`Failed to initialize habitat ${this.did}:`, err);
-      throw err;
+      console.error(`Failed to setup habitat ${this.did}:`, err);
     }).then(() => {
       this.ready = true;
-    }).finally(() => {
-      console.log("init finished");
     });
   }
 
@@ -106,7 +103,7 @@ export class Habitat {
     return this.call("runCharm", { charm: charm.get() });
   }
 
-  shutdown(): Promise<void> {
+  shutdown() {
     return this.call("shutdown").catch(() => {
       console.log(
         "Failed to shutdown habitat gracefully, terminating with unknown status.",

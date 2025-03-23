@@ -5,6 +5,8 @@ import { Habitat } from "./habitat.ts";
 
 type SpaceStationOptions = {
   did: string;
+  toolshedUrl: string;
+  operatorPass: string;
   maxConcurrentJobs?: number;
   maxRetries?: number;
   pollingIntervalMs?: number;
@@ -34,7 +36,11 @@ export class SpaceStation {
     this.pollingIntervalMs = options.pollingIntervalMs ?? 100;
     this.deactivationTimeoutMs = options.deactivationTimeoutMs ?? 10000;
     this.rerunIntervalMs = options.rerunIntervalMs ?? 6000;
-    this.habitat = new Habitat(this.did);
+    this.habitat = new Habitat(
+      this.did,
+      options.toolshedUrl,
+      options.operatorPass,
+    );
     this.timeoutMs = options.timeoutMs ?? 10000;
     log(`Space station initialized`);
     log(` - did: ${this.did}`);

@@ -17,7 +17,7 @@ export class BackgroundCharmService {
   }
 
   async initialize() {
-    storage.setRemoteStorage(new URL(env.MEMORY_URL));
+    storage.setRemoteStorage(new URL(env.TOOLSHED_API_URL));
     storage.setSigner(await Identity.fromPassphrase(env.OPERATOR_PASS));
     this.charmsCell = await getBGUpdaterCellCharmsCell();
     await storage.syncCell(this.charmsCell, true);
@@ -62,7 +62,11 @@ export class BackgroundCharmService {
     for (const did of new Set(dids)) {
       let spaceStation = this.spaceStation.get(did);
       if (!spaceStation) {
-        spaceStation = new SpaceStation({ did });
+        spaceStation = new SpaceStation({
+          did,
+          toolshedUrl: env.TOOLSHED_API_URL,
+          operatorPass: env.OPERATOR_PASS,
+        });
         this.spaceStation.set(did, spaceStation);
         spaceStation.start();
       }
