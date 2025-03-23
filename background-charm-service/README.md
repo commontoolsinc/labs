@@ -1,111 +1,75 @@
 # Background Charm Service
 
-A service for running background charms with integration capabilities.
+A service for running background charms with isolation and monitoring
+capabilities.
 
-FIXME(ja): all of this is built on a lie: If update method is async (uses
+**FIXME(ja): all of this is built on a lie: If update method is async (uses
 fetch - like gmail) the handler will "finish" while work is still happening!
 Because many updaters are async we don't receive exceptions (mark them as
-failing) or know when to properly reschedule them.
+failing) or know when to properly reschedule them.**
 
 ## Overview
 
 The Background Charm Service runs charms in the background with:
 
-- In-memory job queue with concurrency control
-- Worker pooling for isolated charm execution
-- Automatic error handling and cleanup
-- Simple integration model
-- Lightweight monitoring
+- Space-based isolation for charm execution
+- Habitat workers for isolated charm environments
+- Automatic charm scheduling and execution
+- Error handling and status tracking
+- Simple monitoring and management
 
 ## Architecture
 
-Core Components
+### Core Components
 
 1. **BackgroundCharmService** (service.ts)
    - Main orchestrator that coordinates all components
-   - Manages service lifecycle and charm execution
-   - Uses simple in-memory state tracking
+   - Manages service lifecycle and charm discovery
+   - Creates and manages SpaceStations for each space
 
-2. **JobQueue** (job-queue.ts)
-   - Straightforward in-memory queue with priority
-   - Manages job concurrency and timeouts
-   - Provides continuous job processing
+2. **SpaceStation** (space-station.ts)
+   - Manages charms for a specific space
+   - Schedules and tracks charm execution
+   - Maintains charm status (enabled/disabled, last run time, errors)
+   - Communicates with a dedicated Habitat
 
-3. **ExecuteCharmHandler** (execute-charm-handler.ts)
-   - Handles charm execution via worker pool
-   - Manages charm execution lifecycles
+3. **Habitat** (habitat.ts)
+   - Isolated execution environment for a space
+   - Manages worker lifecycle and communication
+   - Provides a safe execution environment for charms
 
-Worker System
+4. **Worker** (worker.ts)
+   - Runs in an isolated thread
+   - Sets up a session for a specific space
+   - Handles charm loading and execution
+   - Reports results back to the Habitat
 
-4. **WorkerPool** (utils/worker-pool.ts)
-   - Manages isolated worker processes
-   - Handles worker lifecycle and task distribution
-   - Recycles workers based on health criteria
+### Execution Flow
 
-5. **CharmWorker** (utils/charm-worker.ts)
-   - Isolated execution environment for charms
-   - Reports results back to the main thread
+1. The service discovers background charms from the central toolshed-system list
+   of charms
+2. For each unique space, a SpaceStation is created
+3. Each SpaceStation creates its own Habitat with an isolated worker
+4. The SpaceStation schedules and executes charms through its Habitat
+5. The worker runs each charm and reports results back
+6. The SpaceStation tracks status and schedules re-runs based on results
 
-6. **RunCharm** (utils/run-charm.ts)
-   - Core utility for executing charms
-   - Creates sessions and triggers updater streams
+## Isolation Model
 
-## Worker Model & Isolation
+The service provides isolation at multiple levels:
 
-### Process Model
+- **Space Isolation**: Each space gets its own SpaceStation and Habitat
+- **Worker Isolation**: Each Habitat uses a Web Worker for thread-level
+  isolation
+- **Session Isolation**: Each worker has its own session with proper permissions
+- **Error Isolation**: Errors in one charm do not affect other charms or spaces
 
-The service uses Web Workers for charm execution, which means:
+This model enables:
 
-- Each worker runs in its own JavaScript thread (not OS process)
-- Workers have isolated memory spaces and cannot directly access main thread
-  memory
-- All communication happens through message passing
-- State is not shared between workers
-
-### Isolation Guarantees
-
-- Memory Isolation: Each worker has its own JavaScript heap
-- Error Isolation: Crashes in one worker do not affect others
-- Resource Isolation: Each worker manages its own connections and resources
-
-### Operational Characteristics
-
-1. State Management
-   - Main thread uses simple in-memory tracking for worker status
-   - Workers maintain their own execution state
-   - No cross-worker state sharing
-
-2. Resource Management
-   - Each worker initializes fresh connections
-   - Resources are scoped to individual task executions
-   - Workers are recycled after reaching lifetime or task limits
-
-3. Failure Modes
-   - Worker crashes do not affect other workers
-   - Failed workers are automatically recycled
-   - Long-running workers are forcefully terminated
-
-### Limitations
-
-- Not true OS-level process isolation
-- Memory limits are shared within the JS runtime
-- CPU scheduling depends on JS runtime implementation
-- File system access is shared at runtime level
-
-### Potential Improvements
-
-- Implement intelligent worker routing based on charm needs
-- Add metrics collection for performance analysis
-- Introduce more sophisticated error recovery strategies
-- Optimize worker recycling based on memory usage patterns
-
-### Charm Integration
-
-```tsx
-<common-updater $state={state} integration="rss" />;
-```
-
-then expose a bound `bgUpdater` handler in your result
+- Running charms from different spaces without interference
+- Protecting against crashes and resource exhaustion
+- Ensuring proper permission boundaries between spaces
+- Providing detailed status tracking per charm
 
 ## Development
 
@@ -115,16 +79,31 @@ then expose a bound `bgUpdater` handler in your result
 
 ### Running the Service
 
-There are two main commands for running the service:
-
-1. Add admin charm:
+Start the service:
 
 ```
-TOOLSHED_API_URL=http://localhost:8000 deno task add-admin-charm
+TOOLSHED_API_URL=http://localhost:8000 OPERATOR_PASS=your-passphrase deno task start
 ```
 
-2. Start the service:
+### Environment Variables
 
-```
-TOOLSHED_API_URL=http://localhost:8000 MEMORY_URL=http://localhost:8000 deno task start
-```
+- `TOOLSHED_API_URL`: URL to the toolshed API
+- `OPERATOR_PASS`: Passphrase for the operator identity
+- `POLLING_INTERVAL_MS`: (Optional) Interval for job queue polling
+- `MAX_CONCURRENT_JOBS`: (Optional) Maximum concurrent jobs per space
+
+### Monitoring
+
+The service provides status information for each space and charm:
+
+- Enabled/disabled status
+- Last execution time
+- Last success/failure
+- Error information for failed charms
+
+## Charm Integration
+
+To create a background charm:
+
+1. Create a charm with a `bgUpdater` stream handler
+2. Use the common-updater component to register for background updates
