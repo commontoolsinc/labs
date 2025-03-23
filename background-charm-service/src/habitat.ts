@@ -13,10 +13,14 @@ export class Habitat {
   private pending = new Map<number, PendingResponse>();
   private timeoutMs: number = 10000;
   private ready: boolean = false;
+  private operatorPass: string;
+  private toolshedUrl: string;
 
   constructor(did: string, toolshedUrl: string, operatorPass: string) {
     console.log(`Creating habitat ${did}`);
     this.did = did;
+    this.toolshedUrl = toolshedUrl;
+    this.operatorPass = operatorPass;
 
     this.worker = new Worker(
       new URL("./worker.ts", import.meta.url).href,
@@ -97,7 +101,11 @@ export class Habitat {
   runCharm(
     charm: Cell<BGCharmEntry>,
   ): Promise<{ success: boolean; data?: any }> {
-    return this.call("runCharm", { charm: charm.get() });
+    const bgCharm = charm.get();
+    return this.call("runCharm", {
+      charm: bgCharm.charmId,
+      operator_pass: this.operatorPass,
+    });
   }
 
   shutdown() {

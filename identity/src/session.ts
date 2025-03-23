@@ -2,6 +2,13 @@ import { Identity } from "./identity.ts";
 import { type DID } from "./interface.ts";
 export const ANYONE = "common user";
 
+export type Session = {
+  private: boolean;
+  name: string;
+  space: DID;
+  as: Identity;
+};
+
 export const open = async (
   { passphrase, space, name }: {
     passphrase: string;
