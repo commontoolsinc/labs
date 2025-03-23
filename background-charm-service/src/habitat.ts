@@ -12,15 +12,11 @@ export class Habitat {
   private msgId: number = 0;
   private pending = new Map<number, PendingResponse>();
   private timeoutMs: number = 10000;
-  private ready: boolean = false;
-  private operatorPass: string;
-  private toolshedUrl: string;
+  public ready: boolean = false;
 
-  constructor(did: string, toolshedUrl: string, operatorPass: string) {
+  constructor(did: string) {
     console.log(`Creating habitat ${did}`);
     this.did = did;
-    this.toolshedUrl = toolshedUrl;
-    this.operatorPass = operatorPass;
 
     this.worker = new Worker(
       new URL("./worker.ts", import.meta.url).href,
@@ -30,7 +26,6 @@ export class Habitat {
       },
     );
     this.connectWorker();
-    this.setupWorker(toolshedUrl, operatorPass);
   }
 
   private connectWorker() {
@@ -57,20 +52,22 @@ export class Habitat {
     };
   }
 
-  private setupWorker(toolshedUrl: string, operatorPass: string) {
-    this.call("setup", {
+  public setupWorker(toolshedUrl: string, operatorPass: string) {
+    return this.call("setup", {
       did: this.did,
       toolshed_url: toolshedUrl,
       operator_pass: operatorPass,
     }).catch((err) => {
-      console.error(`Failed to setup habitat ${this.did}:`, err);
+      console.error(`Habitat ${this.did} worker setup failed:`, err);
     }).then(() => {
       this.ready = true;
+      console.log(`Habitat ${this.did} ready for work`);
     });
   }
 
   // send a message and return a promise that resolves with the response
-  call(type: string, data?: any): Promise<any> {
+  private call(type: string, data?: any): Promise<any> {
+    // Only allow "setup" calls when not ready
     if (type !== "setup" && !this.ready) {
       return Promise.reject(new Error("Worker not initialized"));
     }
@@ -82,7 +79,7 @@ export class Habitat {
       // Set up a timeout in case the worker doesn't respond
       const timeout = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Worker timed out executing ${type}`));
+        reject(new Error(`Worker timed out while calling ${type}`));
       }, this.timeoutMs);
 
       this.pending.set(id, {
@@ -98,17 +95,13 @@ export class Habitat {
     });
   }
 
-  runCharm(
+  public runCharm(
     charm: Cell<BGCharmEntry>,
   ): Promise<{ success: boolean; data?: any }> {
-    const bgCharm = charm.get();
-    return this.call("runCharm", {
-      charm: bgCharm.charmId,
-      operator_pass: this.operatorPass,
-    });
+    return this.call("runCharm", { charm: charm.get().charmId });
   }
 
-  shutdown() {
+  public shutdown() {
     return this.call("shutdown").catch(() => {
       console.log(
         "Failed to shutdown habitat gracefully, terminating with unknown status.",

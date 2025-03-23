@@ -3,40 +3,6 @@
  */
 import { Cell, isStream, Stream } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
-import { WorkerPool } from "./worker-pool.ts";
-
-// Create a singleton worker pool that can be shared across the application
-let sharedWorkerPool: WorkerPool<any, any> | null = null;
-
-/**
- * Get or create the shared worker pool
- */
-export function getSharedWorkerPool(options: {
-  maxWorkers: number;
-  workerUrl: string;
-  workerOptions?: {
-    type?: "classic" | "module";
-    name?: string;
-    deno?: {
-      permissions?: {
-        read?: boolean;
-        write?: boolean;
-        net?: boolean;
-        env?: boolean;
-        run?: boolean;
-        ffi?: boolean;
-        hrtime?: boolean;
-      };
-    };
-  };
-  taskTimeout?: number;
-  healthCheckIntervalMs?: number;
-}): WorkerPool<any, any> {
-  if (!sharedWorkerPool) {
-    sharedWorkerPool = new WorkerPool(options);
-  }
-  return sharedWorkerPool;
-}
 
 export function findUpdaterStream(charm: Cell<Charm>): Stream<any> | null {
   const stream = charm.key("bgUpdater");

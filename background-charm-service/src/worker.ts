@@ -15,7 +15,7 @@ let spaceId: DID;
 let latestError: Error | null = null;
 let currentSession: any = null;
 let manager: CharmManager | null = null;
-let loadedCharms = new Map<string, Cell<Charm>>();
+const loadedCharms = new Map<string, Cell<Charm>>();
 
 // Capture errors in the charm
 onError((e) => {
@@ -25,6 +25,11 @@ onError((e) => {
 async function setup(
   data: { did: string; toolshed_url: string; operator_pass: string },
 ) {
+  if (initialized) {
+    console.log(`Worker: Already initialized, skipping setup`);
+    return { setup: true, alreadyInitialized: true };
+  }
+
   const { did, toolshed_url, operator_pass } = data || {};
   if (!did) {
     throw new Error("Worker missing did");
@@ -52,7 +57,7 @@ async function setup(
   // Initialize charm manager
   manager = new CharmManager(currentSession);
 
-  console.log(`Worker: Initialized habitat ${did}`);
+  console.log(`Worker: ${did} initialized`);
   initialized = true;
   return { setup: true };
 }
@@ -78,20 +83,14 @@ async function shutdown() {
   return { shutdown: true };
 }
 
-async function runCharm(data: { charm: string; operator_pass: string }) {
-  if (!initialized) {
-    throw new Error("Worker not initialized");
-  }
-  if (!currentSession || !manager) {
+async function runCharm(data: { charm: string }) {
+  if (!manager) {
     throw new Error("Worker session not initialized");
   }
 
-  const { charm: charmId, operator_pass } = data || {};
+  const { charm: charmId } = data || {};
   if (!charmId) {
     throw new Error("Missing required parameter: charm");
-  }
-  if (!operator_pass) {
-    throw new Error("Missing required parameter: operator_pass");
   }
 
   console.log(`Worker: Running charm ${spaceId}/${charmId}`);

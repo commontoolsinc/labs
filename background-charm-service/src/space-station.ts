@@ -17,7 +17,6 @@ type SpaceStationOptions = {
 
 export class SpaceStation {
   private did: string;
-  private running = false;
   private maxConcurrentJobs: number;
   private maxRetries: number;
   private pollingIntervalMs: number;
@@ -36,11 +35,7 @@ export class SpaceStation {
     this.pollingIntervalMs = options.pollingIntervalMs ?? 100;
     this.deactivationTimeoutMs = options.deactivationTimeoutMs ?? 10000;
     this.rerunIntervalMs = options.rerunIntervalMs ?? 6000;
-    this.habitat = new Habitat(
-      this.did,
-      options.toolshedUrl,
-      options.operatorPass,
-    );
+    this.habitat = new Habitat(this.did);
     this.timeoutMs = options.timeoutMs ?? 10000;
     log(`Space station initialized`);
     log(` - did: ${this.did}`);
@@ -50,8 +45,16 @@ export class SpaceStation {
     log(` - deactivationTimeoutMs: ${this.deactivationTimeoutMs}`);
     log(` - rerunIntervalMs: ${this.rerunIntervalMs}`);
 
-    this.loop();
-    this.startRequeueLoop();
+    this.habitat.setupWorker(options.toolshedUrl, options.operatorPass).then(
+      () => {
+        log(`Habitat ${this.did} ready for work`);
+      },
+    ).catch((err) => {
+      log(`Failed to setup habitat: ${err}`);
+    });
+
+    this.execLoop();
+    this.requeueLoop();
   }
 
   // Update the list of charms to watch (removing any charms that are no longer in the list)
@@ -76,19 +79,12 @@ export class SpaceStation {
     log(`Space station monitoring ${newCharms.size} charms`);
   }
 
-  start(): void {
-    if (this.running) {
-      log("Space station is already running");
-      return;
-    }
-
+  start() {
     log("Space station started");
-    this.running = true;
   }
 
   async stop(): Promise<void> {
     log("Stopping space station...");
-    this.running = false;
 
     // Wait for active jobs to finish with a timeout
     if (this.activeJobs.size > 0) {
@@ -107,19 +103,20 @@ export class SpaceStation {
     }
 
     // FIXME(ja): stop web worker!
+    this.habitat.shutdown();
   }
 
   getStatus() {
     return {
-      running: this.running,
+      running: this.habitat.ready,
       activeJobs: this.activeJobs.size,
       pendingJobs: this.pendingJobs.length,
     };
   }
 
-  private async loop(): Promise<void> {
+  private async execLoop(): Promise<void> {
     while (true) {
-      if (!this.running) {
+      if (!this.habitat.ready) {
         await sleep(this.pollingIntervalMs);
         continue;
       }
@@ -187,10 +184,10 @@ export class SpaceStation {
     ]);
   }
 
-  private async startRequeueLoop(): Promise<void> {
+  private async requeueLoop(): Promise<void> {
     while (true) {
       await sleep(this.rerunIntervalMs);
-      if (this.running) {
+      if (this.habitat.ready) {
         for (const charmId of this.bgCharms.keys()) {
           if (
             !this.activeJobs.has(charmId) && !this.pendingJobs.includes(charmId)
@@ -199,6 +196,8 @@ export class SpaceStation {
             log(`Requeued charm: ${charmId}`);
           }
         }
+      } else {
+        await sleep(this.pollingIntervalMs);
       }
     }
   }
