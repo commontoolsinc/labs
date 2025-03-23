@@ -32,10 +32,8 @@ export class Habitat {
   private connectWorker() {
     this.worker.onmessage = (event: MessageEvent) => {
       const { id, result, error } = event.data || {};
-      console.log(`Habitat ${this.did} received message`, event.data);
       if (typeof id !== "number") return;
       const pending = this.pending.get(id);
-      console.log({ id, result, error });
       if (!pending) return;
       if (error) {
         pending.reject(new Error(error));
@@ -99,7 +97,6 @@ export class Habitat {
   runCharm(
     charm: Cell<BGCharmEntry>,
   ): Promise<{ success: boolean; data?: any }> {
-    console.log(`Running charm ${charm.get().charmId}`);
     return this.call("runCharm", { charm: charm.get() });
   }
 

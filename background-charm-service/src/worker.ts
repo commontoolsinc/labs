@@ -46,7 +46,7 @@ async function runCharm(data: { charm: string }) {
 
   await sleep(1000);
 
-  console.log(`Worker: simulating charm ${charm} run`);
+  console.log(`Worker: processing charm run`);
   return { success: true, charmId: charm };
 }
 
