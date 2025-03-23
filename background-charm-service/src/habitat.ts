@@ -12,23 +12,30 @@ export class Habitat {
   private msgId: number = 0;
   private pending = new Map<number, PendingResponse>();
   private timeoutMs: number = 10000;
+  private ready: boolean = false;
 
-  constructor(did: string) {
+  constructor(did: string, toolshedUrl: string, operatorPass: string) {
+    console.log(`Creating habitat ${did}`);
     this.did = did;
 
-    console.log(`Creating habitat ${did}`);
-    // Create a dedicated worker for this habitat.
     this.worker = new Worker(
       new URL("./worker.ts", import.meta.url).href,
       {
         type: "module",
-        name: `habitat-${did}`,
+        name: `habitat-${this.did}`,
       },
     );
+    this.connectWorker();
+    this.setupWorker(toolshedUrl, operatorPass);
+  }
+
+  private connectWorker() {
     this.worker.onmessage = (event: MessageEvent) => {
       const { id, result, error } = event.data || {};
+      console.log(`Habitat ${this.did} received message`, event.data);
       if (typeof id !== "number") return;
       const pending = this.pending.get(id);
+      console.log({ id, result, error });
       if (!pending) return;
       if (error) {
         pending.reject(new Error(error));
@@ -46,25 +53,37 @@ export class Habitat {
         this.pending.delete(id);
       });
     };
-    this.send("init", { did: this.did });
   }
 
-  send(type: string, data?: any) {
+  private setupWorker(toolshedUrl: string, operatorPass: string) {
+    this.call("setup", {
+      did: this.did,
+      toolshed_url: toolshedUrl,
+      operator_pass: operatorPass,
+    }).catch((err) => {
+      console.error(`Failed to initialize habitat ${this.did}:`, err);
+      throw err;
+    }).then(() => {
+      this.ready = true;
+    }).finally(() => {
+      console.log("init finished");
+    });
+  }
+
+  // send a message and return a promise that resolves with the response
+  call(type: string, data?: any): Promise<any> {
+    if (type !== "setup" && !this.ready) {
+      return Promise.reject(new Error("Worker not initialized"));
+    }
     const id = this.msgId++;
-    this.worker.postMessage({ id, type, data });
-    return id;
-  }
 
-  runCharm(
-    charm: Cell<BGCharmEntry>,
-  ): Promise<{ success: boolean; data?: any }> {
-    console.log(`Running charm ${charm.get().charmId}`);
-    const id = this.send("runCharm", { charm: charm.get() });
+    this.worker.postMessage({ id, type, data });
+
     return new Promise((resolve, reject) => {
-      // Set up a timeout in case the worker doesn't respond.
+      // Set up a timeout in case the worker doesn't respond
       const timeout = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Worker timed out executing charm ${charm.charmId}`));
+        reject(new Error(`Worker timed out executing ${type}`));
       }, this.timeoutMs);
 
       this.pending.set(id, {
@@ -80,32 +99,20 @@ export class Habitat {
     });
   }
 
-  shutdown(timeoutMs: number = 5000): Promise<void> {
-    const id = this.send("shutdown");
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        // If the worker doesn't respond in time, force terminate.
-        this.worker.terminate();
-        reject(
-          new Error(
-            `Worker did not shutdown gracefully within ${timeoutMs}ms, force terminated.`,
-          ),
-        );
-      }, this.timeoutMs);
+  runCharm(
+    charm: Cell<BGCharmEntry>,
+  ): Promise<{ success: boolean; data?: any }> {
+    console.log(`Running charm ${charm.get().charmId}`);
+    return this.call("runCharm", { charm: charm.get() });
+  }
 
-      this.pending.set(id, {
-        resolve: () => {
-          clearTimeout(timeout);
-          // After graceful shutdown, terminate the worker.
-          this.worker.terminate();
-          resolve();
-        },
-        reject: (err: any) => {
-          clearTimeout(timeout);
-          this.worker.terminate();
-          reject(err);
-        },
-      });
+  shutdown(): Promise<void> {
+    return this.call("shutdown").catch(() => {
+      console.log(
+        "Failed to shutdown habitat gracefully, terminating with unknown status.",
+      );
+    }).finally(() => {
+      this.worker?.terminate();
     });
   }
 }

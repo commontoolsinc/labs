@@ -1,32 +1,77 @@
 import { sleep } from "@commontools/utils";
+import { setBobbyServerUrl, storage } from "@commontools/runner";
+import { Identity } from "@commontools/identity";
+
+let initialized = false;
+async function setup(
+  data: { did: string; toolshed_url: string; operator_pass: string },
+) {
+  const { did, toolshed_url, operator_pass } = data || {};
+  if (!did) {
+    throw new Error("Missing required parameter: did");
+  }
+  if (!toolshed_url) {
+    throw new Error("Missing required parameter: toolshed_url");
+  }
+  if (!operator_pass) {
+    throw new Error("Missing required parameter: operator_pass");
+  }
+  storage.setRemoteStorage(new URL(toolshed_url));
+  storage.setSigner(await Identity.fromPassphrase(operator_pass));
+  setBobbyServerUrl(toolshed_url);
+
+  console.log(`Worker: Initialized habitat ${did}`);
+  initialized = true;
+  return { setup: true };
+}
+
+async function shutdown() {
+  if (!initialized) {
+    throw new Error("Worker not initialized");
+  }
+  console.log(`Worker: Shutting down habitat`);
+  await storage.synced();
+  await sleep(1000);
+  return { shutdown: true };
+}
+
+async function runCharm(data: { charm: string }) {
+  if (!initialized) {
+    throw new Error("Worker not initialized");
+  }
+  const { charm } = data || {};
+  if (!charm) {
+    throw new Error("Missing required parameter: charm");
+  }
+
+  await sleep(1000);
+
+  console.log(`Worker: simulating charm ${charm} run`);
+  return { success: true, charmId: charm };
+}
 
 self.onmessage = async (event: MessageEvent) => {
   const { id, type, data } = event.data || {};
 
-  if (type === "init") {
-    const { did } = data || {};
-    console.log(`Worker: Initialized habitat ${did}`);
-  }
-
-  if (type === "runCharm") {
-    try {
-      // Simulate some work (or run your actual charm logic here)
-      await sleep(1000);
-      console.log(`Worker: Running charm ${data.charm}`);
-      // Return a success result
-      self.postMessage({
-        id,
-        result: { success: true, charmId: data.charm },
-      });
-    } catch (error) {
-      self.postMessage({
-        id,
-        error: error instanceof Error ? error.message : String(error),
-      });
+  try {
+    if (type === "setup") {
+      const result = await setup(data);
+      self.postMessage({ id, result });
     }
-  } else if (type === "shutdown") {
-    // Optionally perform cleanup here
-    self.postMessage({ id, result: { shutdown: true } });
-    self.close(); // terminates the worker
+    if (type === "runCharm") {
+      const result = await runCharm(data);
+      self.postMessage({ id, result });
+    } else if (type === "shutdown") {
+      const result = await shutdown();
+      self.postMessage({ id, result });
+      self.close(); // terminates the worker
+    } else {
+      throw new Error(`Unknown message type: ${type}`);
+    }
+  } catch (error) {
+    self.postMessage({
+      id,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 };
