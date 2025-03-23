@@ -2,6 +2,11 @@
 
 A service for running background charms with integration capabilities.
 
+FIXME(ja): all of this is built on a lie: If update method is async (uses
+fetch - like gmail) the handler will "finish" while work is still happening!
+Because many updaters are async we don't receive exceptions (mark them as
+failing) or know when to properly reschedule them.
+
 ## Overview
 
 The Background Charm Service runs charms in the background with:
@@ -52,7 +57,8 @@ Worker System
 The service uses Web Workers for charm execution, which means:
 
 - Each worker runs in its own JavaScript thread (not OS process)
-- Workers have isolated memory spaces and cannot directly access main thread memory
+- Workers have isolated memory spaces and cannot directly access main thread
+  memory
 - All communication happens through message passing
 - State is not shared between workers
 
