@@ -7,3 +7,18 @@ Deno.test("Identity generates mnemonics", async () => {
   const identity2 = await Identity.fromMnemonic(mnemonic);
   assert(did, identity2.verifier.did());
 });
+
+Deno.test("Can generate into/read from PKCS8", async () => {
+  const pkcs8 = await Identity.generatePkcs8();
+  const identity = await Identity.fromPkcs8(pkcs8);
+  assert(identity.verifier.did());
+  // Change a byte, should be invalid pkcs8
+  pkcs8[1] = 0;
+  let throws = false;
+  try {
+    const identity = await Identity.fromPkcs8(pkcs8);
+  } catch (e) {
+    throws = true;
+  }
+  assert(throws, "Identity.fromPkcs8() throws with invalid pkcs8");
+});

@@ -1,6 +1,7 @@
 import { base58btc } from "multiformats/bases/base58";
 import { varint } from "multiformats";
 import { DIDKey } from "../interface.ts";
+import * as ed25519 from "@noble/ed25519";
 
 export const ED25519_ALG = "Ed25519";
 const ED25519_CODE = 0xed;
@@ -32,6 +33,24 @@ const PKCS8_PREFIX = new Uint8Array([
   32,
 ]);
 
+function arrayEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+export function pkcs8ToEd25519Raw(pkcs8: Uint8Array): Uint8Array {
+  if (pkcs8.length !== (PKCS8_PREFIX.length + ED25519_PUB_KEY_RAW_SIZE)) {
+    throw new Error("Invalid key length.");
+  }
+  if (!arrayEqual(pkcs8.subarray(0, 16), PKCS8_PREFIX)) {
+    throw new Error("Invalid key prefix.");
+  }
+  return new Uint8Array(pkcs8.subarray(16, 48));
+}
+
 // Private Ed25519 keys cannot be imported into Subtle Crypto in "raw" format.
 // Convert to "pkcs8" before doing so.
 //
@@ -39,6 +58,11 @@ const PKCS8_PREFIX = new Uint8Array([
 // via https://stackoverflow.com/a/79135112
 export function ed25519RawToPkcs8(rawPrivateKey: Uint8Array): Uint8Array {
   return new Uint8Array([...PKCS8_PREFIX, ...rawPrivateKey]);
+}
+
+// Generates a new random key in pkcs8 format.
+export function generateEd25519Pkcs8(): Uint8Array {
+  return ed25519RawToPkcs8(ed25519.utils.randomPrivateKey());
 }
 
 // Convert public key bytes into a `did:key:z...`.
