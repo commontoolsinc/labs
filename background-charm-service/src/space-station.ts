@@ -15,12 +15,17 @@ type SpaceStationOptions = {
   timeoutMs?: number;
 };
 
+type CharmStatus = {
+  bg: Cell<BGCharmEntry>;
+  enabled: boolean;
+};
+
 export class SpaceStation {
   private did: string;
   private maxConcurrentJobs: number;
   private maxRetries: number;
   private pollingIntervalMs: number;
-  private bgCharms = new Map<string, Cell<BGCharmEntry>>();
+  private state = new Map<string, CharmStatus>();
   private pendingJobs: string[] = [];
   private activeJobs = new Set<string>();
   private deactivationTimeoutMs: number;
@@ -59,24 +64,46 @@ export class SpaceStation {
 
   // Update the list of charms to watch (removing any charms that are no longer in the list)
   watch(bg: Cell<BGCharmEntry>[]) {
-    const oldCharms = Array.from(this.bgCharms.keys());
+    const localCharms = Array.from(this.state.keys());
 
-    const newCharms = new Set<string>();
+    const serverCharms = new Set<string>();
 
     for (const b of bg) {
-      const charm = b.get();
-      newCharms.add(charm.charmId);
+      const serverState = b.get();
+      serverCharms.add(serverState.charmId);
 
-      if (!oldCharms.includes(charm.charmId)) {
-        this.bgCharms.set(charm.charmId, b);
-        this.pendingJobs.push(charm.charmId);
+      const localState = this.state.get(serverState.charmId);
+
+      if (!localState) {
+        this.state.set(serverState.charmId, {
+          bg: b,
+          enabled: !serverState.disabledAt,
+        });
+        this.pendingJobs.push(serverState.charmId);
+      } else {
+        // if server thinks charms disabled state has changed, update our state
+        if (!serverState.disabledAt && !localState.enabled) {
+          this.state.set(serverState.charmId, {
+            ...localState,
+            enabled: true,
+          });
+          this.pendingJobs.push(serverState.charmId);
+        } else if (serverState.disabledAt && localState.enabled) {
+          this.state.set(serverState.charmId, {
+            ...localState,
+            enabled: false,
+          });
+          this.pendingJobs = this.pendingJobs.filter((job) =>
+            job !== serverState.charmId
+          );
+        }
       }
     }
 
-    const removedCharms = oldCharms.filter((key) => !newCharms.has(key));
-    removedCharms.forEach((key) => this.bgCharms.delete(key));
+    const removedCharms = localCharms.filter((key) => !serverCharms.has(key));
+    removedCharms.forEach((key) => this.state.delete(key));
 
-    log(`Space station monitoring ${newCharms.size} charms`);
+    log(`Space station monitoring ${serverCharms.size} charms`);
   }
 
   start() {
@@ -163,7 +190,7 @@ export class SpaceStation {
     charmId: string,
   ): Promise<{ success: boolean; error?: string }> {
     console.log("processCharm", charmId);
-    const charm = this.bgCharms.get(charmId);
+    const charm = this.state.get(charmId)?.bg;
     if (!charm) {
       return Promise.resolve({
         success: false,
@@ -181,16 +208,51 @@ export class SpaceStation {
         success: false,
         error: "Timeout while running charm",
       })),
-    ]);
+    ]).then((result) => {
+      if (!result.success) {
+        this.disableCharm(charmId);
+      } else {
+        this.enableCharm(charmId);
+      }
+      return result;
+    });
+  }
+
+  private enableCharm(charmId: string) {
+    const charm = this.state.get(charmId);
+    if (!charm) {
+      return;
+    }
+    charm.bg.set({
+      ...charm.bg.get(),
+      disabledAt: undefined,
+      lastRun: Date.now(),
+    });
+    charm.enabled = true;
+  }
+
+  private disableCharm(charmId: string) {
+    const charm = this.state.get(charmId);
+    if (!charm) {
+      return;
+    }
+    charm.bg.set({
+      ...charm.bg.get(),
+      disabledAt: Date.now(),
+      lastRun: Date.now(),
+    });
+    charm.enabled = false;
   }
 
   private async requeueLoop(): Promise<void> {
     while (true) {
       await sleep(this.rerunIntervalMs);
       if (this.habitat.ready) {
-        for (const charmId of this.bgCharms.keys()) {
+        for (const charmId of this.state.keys()) {
           if (
-            !this.activeJobs.has(charmId) && !this.pendingJobs.includes(charmId)
+            !this.activeJobs.has(charmId) &&
+            !this.pendingJobs.includes(charmId) &&
+            this.state.get(charmId)?.enabled
           ) {
             this.pendingJobs.push(charmId);
             log(`Requeued charm: ${charmId}`);

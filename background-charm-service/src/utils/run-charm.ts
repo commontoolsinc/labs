@@ -1,10 +1,5 @@
 import { CharmManager } from "@commontools/charm";
-import {
-  idle,
-  isStream,
-  setBobbyServerUrl,
-  storage,
-} from "@commontools/runner";
+import { idle, isStream } from "@commontools/runner";
 import { type DID, openSession } from "@commontools/identity";
 import { log } from "../utils.ts";
 
