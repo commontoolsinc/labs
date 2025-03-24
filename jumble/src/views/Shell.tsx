@@ -11,6 +11,7 @@ import { CharmPublisher } from "@/components/Publish.tsx";
 import { useGlobalActions } from "@/hooks/use-global-actions.tsx";
 import { SyncStatusProvider } from "@/contexts/SyncStatusContext.tsx";
 import * as Process from "@/components/View.tsx";
+import { DummyModelInspector } from "@/components/NetworkInspector.tsx";
 
 function* subscribe() {
   const test = yield* Process.wait(Promise.resolve(1));
@@ -78,8 +79,7 @@ export default function Shell() {
           <ActionBar />
           <CharmPublisher />
           <CommandCenter />
-          <CounterView />
-          <CounterView2 />
+          <DummyModelInspector />
         </div>
       </SyncStatusProvider>
     </CharmsManagerProvider>

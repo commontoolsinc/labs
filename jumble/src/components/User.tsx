@@ -9,6 +9,10 @@ import * as Inspector from "@commontools/runner/storage/inspector";
 import { FaArrowDown, FaArrowUp, FaExclamationTriangle } from "react-icons/fa";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useStatusMonitor,
+  useStorageBroadcast,
+} from "@/components/NetworkInspector.tsx";
 
 // Constants
 const COLORS = {
@@ -80,15 +84,6 @@ const AVATAR_SHAPES = [
   `,
 ];
 
-// Custom hooks
-export function useStorageBroadcast(callback: (data: any) => void) {
-  useEffect(() => {
-    const messages = new BroadcastChannel("storage/remote");
-    messages.onmessage = ({ data }) => callback(data);
-    return () => messages.close();
-  }, [callback]);
-}
-
 function useAvatarGenerator(did: string | undefined) {
   const [avatarColor, setAvatarColor] = useState("");
   const [avatarShape, setAvatarShape] = useState("");
@@ -115,20 +110,6 @@ function useAvatarGenerator(did: string | undefined) {
   }, [did]);
 
   return { avatarColor, avatarShape };
-}
-
-function useStatusMonitor() {
-  const status = useRef(Inspector.create());
-
-  const updateStatus = useCallback((command: Inspector.Command) => {
-    if (!status.current) {
-      throw new Error("Status is not initialized");
-    }
-    const state = Inspector.update(status.current, command);
-    status.current = state;
-  }, []);
-
-  return { status, updateStatus };
 }
 
 // Helper functions

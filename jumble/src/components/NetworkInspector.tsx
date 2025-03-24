@@ -1,8 +1,35 @@
 import * as Inspector from "@commontools/runner/storage/inspector";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
 import JsonView from "@uiw/react-json-view";
 import { githubDarkTheme } from "@uiw/react-json-view/githubDark";
+import { getDoc } from "@commontools/runner";
+
+import { useCell } from "@/hooks/use-cell.ts";
+const model = getDoc(Inspector.create(), "inspector", "").asCell();
+
+// Custom hooks
+export function useStorageBroadcast(callback: (data: any) => void) {
+  useEffect(() => {
+    const messages = new BroadcastChannel("storage/remote");
+    messages.onmessage = ({ data }) => callback(data);
+    return () => messages.close();
+  }, [callback]);
+}
+
+export function useStatusMonitor() {
+  const status = useRef(Inspector.create());
+
+  const updateStatus = useCallback((command: Inspector.Command) => {
+    if (!status.current) {
+      throw new Error("Status is not initialized");
+    }
+    const state = Inspector.update(status.current, command);
+    status.current = state;
+  }, []);
+
+  return { status, updateStatus };
+}
 
 // Mock data for testing the ModelInspector component
 const createMockModel = () => {
@@ -66,8 +93,11 @@ const createMockModel = () => {
 
 // Example usage with dummy data
 export const DummyModelInspector: React.FC = () => {
-  const mockModel = createMockModel();
-  return <ModelInspector model={mockModel} />;
+  const { status, updateStatus } = useStatusMonitor();
+  useStorageBroadcast(updateStatus);
+  if (!status.current) return null;
+
+  return <ModelInspector model={status.current} />;
 };
 const ModelInspector: React.FC<{ model: Inspector.Model }> = ({ model }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -76,6 +106,39 @@ const ModelInspector: React.FC<{ model: Inspector.Model }> = ({ model }) => {
   );
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState("");
+  const [, setRenderTrigger] = useState(0);
+  const rafRef = useRef<number | null>(null);
+  const lastRenderTimeRef = useRef(0);
+  
+  // Set up render loop with requestAnimationFrame when inspector is open
+  useEffect(() => {
+    if (!isOpen) {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      return;
+    }
+
+    const renderLoop = () => {
+      const now = performance.now();
+      // Limit to ~10 FPS when not actively receiving updates
+      if (now - lastRenderTimeRef.current > 100) {
+        setRenderTrigger(prev => (prev + 1) % 1000); // Force re-render
+        lastRenderTimeRef.current = now;
+      }
+      rafRef.current = requestAnimationFrame(renderLoop);
+    };
+    
+    rafRef.current = requestAnimationFrame(renderLoop);
+    
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [isOpen]);
 
   const formatTime = (time: number) => {
     const date = new Date(time);
