@@ -769,32 +769,6 @@ async function handleAddRemoteRecipe(
 export function getCommands(deps: CommandContext): CommandItem[] {
   return [
     {
-      id: "enable-network-inspector",
-      type: "action",
-      title: "Enable Network Inspector",
-      group: "Tools",
-      predicate: localStorage.getItem("networkInspectorVisible") !== "true",
-      handler: () => {
-        localStorage.setItem("networkInspectorVisible", "true");
-        deps.setOpen(false);
-        // Force a refresh to make sure the UI updates
-        window.dispatchEvent(new Event("networkInspectorUpdate"));
-      },
-    },
-    {
-      id: "disable-network-inspector",
-      type: "action",
-      title: "Disable Network Inspector",
-      group: "Tools",
-      predicate: localStorage.getItem("networkInspectorVisible") === "true",
-      handler: () => {
-        localStorage.setItem("networkInspectorVisible", "false");
-        deps.setOpen(false);
-        // Force a refresh to make sure the UI updates
-        window.dispatchEvent(new Event("networkInspectorUpdate"));
-      },
-    },
-    {
       id: "new-charm",
       type: "input",
       title: "New Charm",
@@ -1084,6 +1058,30 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       type: "menu",
       title: "Advanced",
       children: [
+        {
+          id: "enable-network-inspector",
+          type: "action",
+          title: "Enable Network Inspector",
+          predicate: localStorage.getItem("networkInspectorVisible") !== "true",
+          handler: () => {
+            localStorage.setItem("networkInspectorVisible", "true");
+            deps.setOpen(false);
+            // Refresh the page to ensure the setting takes effect
+            window.location.reload();
+          },
+        },
+        {
+          id: "disable-network-inspector",
+          type: "action",
+          title: "Disable Network Inspector",
+          predicate: localStorage.getItem("networkInspectorVisible") === "true",
+          handler: () => {
+            localStorage.setItem("networkInspectorVisible", "false");
+            deps.setOpen(false);
+            // Refresh the page to ensure the setting takes effect
+            window.location.reload();
+          },
+        },
         {
           id: "start-counter-job",
           type: "action",

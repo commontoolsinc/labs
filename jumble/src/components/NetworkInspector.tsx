@@ -302,6 +302,55 @@ const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean
       });
     }
   }, [model, filterText]);
+  
+  // Define helper functions for filtering to avoid circular dependencies
+  const filterItems = useCallback((items: any[], filter: string) => {
+    try {
+      const regex = new RegExp(filter, "i");
+      return items.filter((item) => {
+        return regex.test(item.id) ||
+          regex.test(item.type) ||
+          regex.test(JSON.stringify(item.result));
+      });
+    } catch (e) {
+      // If regex is invalid, fallback to simple string search
+      return items.filter((item) => {
+        const itemStr = JSON.stringify(item);
+        return itemStr.toLowerCase().includes(filter.toLowerCase());
+      });
+    }
+  }, []);
+  
+  // Functions to count items efficiently
+  const getActionCount = useCallback(() => {
+    if (!filterText) {
+      // If no filter, just count the keys
+      return Object.keys(model.push).length + Object.keys(model.pull).length;
+    } else {
+      // If filter is applied, we need a quick filtered count
+      const pushItems = Object.entries(model.push).map(([id, result]) => ({
+        id, type: "push", result
+      }));
+      const pullItems = Object.entries(model.pull).map(([id, result]) => ({
+        id, type: "pull", result
+      }));
+      const allItems = [...pushItems, ...pullItems];
+      return filterItems(allItems, filterText).length;
+    }
+  }, [model.push, model.pull, filterText, filterItems]);
+  
+  const getSubscriptionCount = useCallback(() => {
+    if (!filterText) {
+      // If no filter, just count the keys
+      return Object.keys(model.subscriptions).length;
+    } else {
+      // If filter is applied, we need to check filtered items
+      const subEntries = Object.entries(model.subscriptions).map(([id, sub]) => ({ 
+        id, sub, type: "subscription" 
+      }));
+      return filterItems(subEntries, filterText).length;
+    }
+  }, [model.subscriptions, filterText, filterItems]);
 
   const getFilteredSubscriptions = useCallback(() => {
     if (!filterText) return Object.entries(model.subscriptions);
@@ -374,7 +423,7 @@ const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean
                 }`}
                 onClick={() => setActiveTab("actions")}
               >
-                Actions
+                Actions ({getActionCount()})
               </button>
               <button
                 type="button"
@@ -385,17 +434,29 @@ const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean
                 }`}
                 onClick={() => setActiveTab("subscriptions")}
               >
-                Subscriptions
+                Subscriptions ({getSubscriptionCount()})
               </button>
             </div>
             <div className="flex items-center space-x-2">
-              <input
-                type="text"
-                placeholder="Filter..."
-                value={filterText}
-                onChange={(e) => setFilterText(e.target.value)}
-                className="w-32 px-2 py-0.5 text-xs bg-gray-800 border border-gray-700 rounded text-white"
-              />
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Filter..."
+                  value={filterText}
+                  onChange={(e) => setFilterText(e.target.value)}
+                  className={`w-32 px-2 py-0.5 text-xs bg-gray-800 border border-gray-700 rounded text-white ${
+                    filterText ? "border-blue-500" : ""
+                  }`}
+                />
+                {filterText && (
+                  <button 
+                    className="absolute right-1 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white"
+                    onClick={() => setFilterText("")}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
               <div>{connectionStatus()}</div>
             </div>
           </div>
