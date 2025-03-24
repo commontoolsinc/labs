@@ -62,7 +62,7 @@ setupIframe();
 
 // Show an alert on the first error in a handler or lifted function.
 let errorCount = 0;
-onError((error) => {
+onError((error: Error) => {
   !errorCount++ &&
     globalThis.alert("Uncaught error in recipe: " + error.message);
   // Also send to Sentry

@@ -53,13 +53,10 @@ describe("Storage", () => {
       };
       testDoc.send(testValue);
 
-      console.log("syncing testDoc");
       await storage.syncCell(testDoc);
-      console.log("synced testDoc");
 
       await storage2.sync(refDoc.entityId!);
       const value = storage2.get(refDoc.entityId!);
-      console.log("synced refDoc", value, refDoc.entityId);
       expect(value?.value).toEqual("hello");
     });
 

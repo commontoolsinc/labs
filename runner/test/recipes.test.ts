@@ -4,8 +4,9 @@ import { byRef, handler, JSONSchema, lift, recipe } from "@commontools/builder";
 import { run } from "../src/runner.ts";
 import { addModuleByRef } from "../src/module.ts";
 import { getDoc } from "../src/doc.ts";
-import { idle, onError } from "../src/scheduler.ts";
+import { type ErrorWithContext, idle, onError } from "../src/scheduler.ts";
 import { type Cell } from "../src/cell.ts";
+import { getRecipeId } from "../src/recipe-map.ts";
 
 describe("Recipe Runner", () => {
   it("should run a simple recipe", async () => {
@@ -674,8 +675,12 @@ describe("Recipe Runner", () => {
 
   it("failed handlers should be ignored", async () => {
     let errors = 0;
+    let lastError: ErrorWithContext | undefined;
 
-    onError(() => errors++);
+    onError((error: ErrorWithContext) => {
+      lastError = error;
+      errors++;
+    });
 
     const divHandler = handler<
       { divisor: number; dividend: number },
@@ -715,6 +720,12 @@ describe("Recipe Runner", () => {
     expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
 
+    expect(lastError?.recipeId).toBe(getRecipeId(divRecipe));
+    expect(lastError?.space).toBe("test");
+    expect(lastError?.charmId).toBe(
+      JSON.parse(JSON.stringify(charm.entityId))["/"],
+    );
+
     // NOTE(ja): this test is really important after a handler
     // fails the entire system crashes!!!!
     charm.asCell(["updater"]).send({ divisor: 10, dividend: 5 });
@@ -724,19 +735,21 @@ describe("Recipe Runner", () => {
 
   it("failed lifted functions should be ignored", async () => {
     let errors = 0;
+    let lastError: ErrorWithContext | undefined;
 
-    onError(() => errors++);
+    onError((error: ErrorWithContext) => {
+      lastError = error;
+      errors++;
+    });
 
     const divider = lift<
       { divisor: number; dividend: number },
       number
     >(
       ({ divisor, dividend }) => {
-        console.log("divider", divisor, dividend);
         if (dividend === 0) {
           throw new Error("division by zero");
         }
-        console.log("divider result", divisor / dividend);
         return divisor / dividend;
       },
     );
@@ -770,10 +783,15 @@ describe("Recipe Runner", () => {
     expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 10 });
 
+    expect(lastError?.recipeId).toBe(getRecipeId(divRecipe));
+    expect(lastError?.space).toBe("test");
+    expect(lastError?.charmId).toBe(
+      JSON.parse(JSON.stringify(charm.entityId))["/"],
+    );
+
     // Make sure it recovers:
     dividend.send(2);
     await idle();
-    console.log(charm.get());
     expect((charm.get() as any).result.$alias.cell).toBe(charm.sourceCell);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
   });
