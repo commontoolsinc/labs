@@ -9,7 +9,7 @@ export type Session = {
   as: Identity;
 };
 
-export const open = async (
+export const openSession = async (
   { passphrase, space, name }: {
     passphrase: string;
     space: DID;
@@ -22,7 +22,7 @@ export const open = async (
   as: await Identity.fromPassphrase(passphrase),
 });
 
-export const create = async (
+export const createSession = async (
   { passphrase, name }: { passphrase: string; name: string },
 ) => {
   const account = await Identity.fromPassphrase(passphrase);

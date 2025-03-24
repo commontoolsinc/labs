@@ -22,9 +22,7 @@ export class BackgroundCharmService {
     this.charmsCell = await getBGUpdaterCellCharmsCell();
     await storage.syncCell(this.charmsCell, true);
     await storage.synced();
-  }
 
-  start() {
     if (this.isRunning) {
       log("Service is already running");
       return;

@@ -8,7 +8,7 @@ import {
   setBobbyServerUrl,
   storage,
 } from "@commontools/runner";
-import { type DID, Identity, Session } from "@commontools/identity";
+import { type DID, Identity, open, type Session } from "@commontools/identity";
 
 let initialized = false;
 let spaceId: DID;
@@ -48,7 +48,7 @@ async function setup(
 
   // Initialize session
   spaceId = did as DID;
-  currentSession = await Session.open({
+  currentSession = await open({
     passphrase: operator_pass,
     name: "~background-service-worker",
     space: spaceId,

@@ -5,7 +5,7 @@ import {
   setBobbyServerUrl,
   storage,
 } from "@commontools/runner";
-import { type DID, Session } from "@commontools/identity";
+import { type DID, openSession } from "@commontools/identity";
 import { log } from "../utils.ts";
 
 /**
@@ -30,7 +30,7 @@ export default async function runCharm(
   try {
     // FIXME(ja): can we use cache now though?
     // Create a new session (this is important - we're not reusing an existing session)
-    const session = await Session.open({
+    const session = await openSession({
       passphrase: options.operatorPass,
       name: "~background-service-worker",
       space: spaceId,

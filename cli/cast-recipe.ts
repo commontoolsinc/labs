@@ -1,15 +1,12 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
 import {
-  type CellLink,
-  getCell,
-  getCellFromLink,
   getEntityId,
   isStream,
   setBobbyServerUrl,
   storage,
 } from "@commontools/runner";
-import { type DID, Identity, Session } from "@commontools/identity";
+import { type DID, Identity, openSession } from "@commontools/identity";
 
 const { spaceId, targetCellCause, recipePath, cause, name, quit } = parseArgs(
   Deno.args,
@@ -67,7 +64,7 @@ async function castRecipe() {
     console.log("Recipe compiled successfully");
 
     // Create session and charm manager (matching main.ts pattern)
-    const session = await Session.open({
+    const session = await openSession({
       passphrase: OPERATOR_PASS,
       name: name!,
       space: spaceId as DID,

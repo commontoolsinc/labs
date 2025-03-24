@@ -1,6 +1,6 @@
 import { Charm, CharmManager } from "@commontools/charm";
 import { Cell, getEntityId } from "@commontools/runner";
-import { DID, Session } from "@commontools/identity";
+import { DID, openSession, type Session } from "@commontools/identity";
 import { env } from "./env.ts";
 
 /**
@@ -55,7 +55,7 @@ export async function getManagerForSpace(space: DID): Promise<CharmManager> {
   }
 
   // Create new session and manager
-  const session = await Session.open({
+  const session = await openSession({
     passphrase: env.OPERATOR_PASS,
     name: "~background-service",
     space,
