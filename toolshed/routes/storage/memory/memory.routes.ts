@@ -106,7 +106,7 @@ export const GraphSelector = z.record(
     The,
     z.record(
       Cause,
-      z.any(),
+      z.object({}),
     ),
   ),
 );
@@ -174,6 +174,14 @@ export const Query = invocation(
       since: z.number().optional(),
     }),
   ]),
+);
+
+export const GraphQuery = invocation(
+  "/memory/graph/query",
+  z.object({
+    selectSchema: GraphSelector,
+    since: z.number().optional(),
+  }),
 );
 
 export const CommitData = z.object({

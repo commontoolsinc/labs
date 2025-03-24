@@ -176,6 +176,8 @@ export type CellLink = {
   space?: string;
   cell: DocImpl<any>;
   path: PropertyKey[];
+  schema?: JSONSchema;
+  rootSchema?: JSONSchema;
 };
 
 export function getCell<T>(
@@ -283,6 +285,13 @@ export function createCell<T>(
   // The corner case where during it's lifetime this changes from non-stream to stream
   // or vice versa will not be detected.
   const ref = resolveLinkToValue(doc, path);
+
+  // Use schema from alias if provided and no explicit schema was set
+  if (!schema && ref.schema) {
+    schema = ref.schema;
+    rootSchema = ref.rootSchema || ref.schema;
+  }
+
   if (isStreamAlias(ref.cell.getAtPath(ref.path))) {
     return createStreamCell(
       ref.cell,
@@ -333,12 +342,12 @@ function createRegularCell<T>(
   path: PropertyKey[],
   log?: ReactivityLog,
   schema?: JSONSchema,
-  contextSchema?: JSONSchema,
+  rootSchema?: JSONSchema,
 ): Cell<T> {
-  if (schema) doc.registerSchemaUse(path, schema, contextSchema);
+  if (schema) doc.registerSchemaUse(path, schema, rootSchema);
 
   const self = {
-    get: () => validateAndTransform(doc, path, schema, log, contextSchema),
+    get: () => validateAndTransform(doc, path, schema, log, rootSchema),
     set: (newValue: T) =>
       diffAndUpdate(
         resolvePath(doc, path, log),
@@ -420,16 +429,16 @@ function createRegularCell<T>(
         [...path, valueKey],
         log,
         currentSchema,
-        contextSchema,
+        rootSchema,
       ) as T extends Cell<infer S> ? Cell<S[K & keyof S]> : Cell<T[K]>;
     },
 
     asSchema: (newSchema?: JSONSchema) =>
       createCell(doc, path, log, newSchema, newSchema),
     withLog: (newLog: ReactivityLog) =>
-      createCell(doc, path, newLog, schema, contextSchema),
+      createCell(doc, path, newLog, schema, rootSchema),
     sink: (callback: (value: T) => Cancel | undefined) =>
-      subscribeToReferencedDocs(callback, doc, path, schema, contextSchema),
+      subscribeToReferencedDocs(callback, doc, path, schema, rootSchema),
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
     getAsCellLink: () =>
@@ -459,7 +468,7 @@ function createRegularCell<T>(
       );
     },
     schema,
-    rootSchema: contextSchema,
+    rootSchema,
   } as Cell<T>;
 
   return self;

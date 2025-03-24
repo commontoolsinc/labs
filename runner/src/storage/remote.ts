@@ -3,10 +3,12 @@ import { log } from "../storage.ts";
 import { type StorageProvider, type StorageValue } from "./base.ts";
 import type {
   Entity,
+  GraphQuery,
   JSONValue,
   MemorySpace,
   Protocol,
   Query,
+  SchemaContext,
   UCAN,
 } from "@commontools/memory/interface";
 import * as Memory from "@commontools/memory/consumer";
@@ -216,6 +218,24 @@ export class RemoteStorageProvider implements StorageProvider {
     }
   }
 
+  async syncSchema(
+    entityId: EntityId,
+    schemaContext: SchemaContext,
+  ): Promise<void> {
+    const subscription = this.subscribe(entityId);
+    if (subscription) {
+      // We add noop subscriber just to keep subscription alive.
+      subscription.subscribe(RemoteStorageProvider.sync);
+      // Then await for the query to be resolved because that is what
+      // caller will await on.
+      await subscription.query;
+    } else {
+      console.warn(
+        `⚠️ Reached maximum subscription limit on ${this.workspace}. Call to .sync is ignored`,
+      );
+      return new Promise(() => {});
+    }
+  }
   /**
    * Subscriber used by the .sync. We use the same one so we'll have at most one
    * per `.sync` per query.
@@ -500,20 +520,22 @@ class Subscription<Space extends MemorySpace> {
 
   static spawn<Space extends MemorySpace>(
     session: Memory.MemorySpaceSession<Space>,
-    selector: Query["args"],
+    selector: Query["args"] | GraphQuery["args"],
   ) {
     return new Subscription(session, selector);
   }
   constructor(
     public session: Memory.MemorySpaceSession<Space>,
-    public selector: Query["args"],
+    public selector: Query["args"] | GraphQuery["args"],
     public subscribers: Set<Subscriber> = new Set(),
   ) {
     this.connect();
   }
 
   connect() {
-    const query = this.session.query(this.selector);
+    const query = ("selectGraph" in this.selector)
+      ? this.session.queryGraph(this.selector)
+      : this.session.query(this.selector);
     const reader = query.subscribe().getReader();
     this.query = query;
     this.reader = reader;

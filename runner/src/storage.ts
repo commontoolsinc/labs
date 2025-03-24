@@ -14,6 +14,7 @@ import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to so
 import { VolatileStorageProvider } from "./storage/volatile.ts";
 import { Signer } from "@commontools/identity";
 import { isBrowser } from "@commontools/utils/env";
+import { SchemaContext } from "@commontools/memory/interface";
 
 export function log(fn: () => any[]) {
   debug(() => {
@@ -219,6 +220,21 @@ class StorageImpl implements Storage {
     return this.docIsLoading.get(entityCell) ?? entityCell;
   }
 
+  syncSchemaCell<T>(
+    subject: DocImpl<T> | Cell<any>,
+    schemaContext: SchemaContext,
+    expectedInStorage: boolean = false,
+  ): Promise<DocImpl<T>> | DocImpl<T> {
+    const entityCell = this._ensureSchemaIsSynced(
+      subject,
+      schemaContext,
+      expectedInStorage,
+    );
+
+    // If doc is loading, return the promise. Otherwise return immediately.
+    return this.docIsLoading.get(entityCell) ?? entityCell;
+  }
+
   synced(): Promise<void> {
     // If there's no batch processing and no pending batch, resolve immediately
     if (!this.currentBatchProcessing && this.currentBatch.length === 0) {
@@ -311,6 +327,49 @@ class StorageImpl implements Storage {
     // Start loading the doc and safe the promise for processBatch to await for
     const loadingPromise = this._getStorageProviderForSpace(doc.space)
       .sync(doc.entityId!, expectedInStorage)
+      .then(() => doc);
+    this.loadingPromises.set(doc, loadingPromise);
+
+    // Create a promise that gets resolved once the doc and all its
+    // dependencies are loaded. It'll return the doc when done.
+    const docIsLoadingPromise = new Promise<void>((r) =>
+      this.loadingResolves.set(doc, r)
+    ).then(() => doc);
+    this.docIsLoading.set(doc, docIsLoadingPromise);
+
+    this._addToBatch([{ doc: doc, type: "sync" }]);
+
+    // Return the doc, to make calls chainable.
+    return doc;
+  }
+
+  private _ensureSchemaIsSynced<T>(
+    doc: DocImpl<T> | Cell<any>,
+    schemaContext: SchemaContext,
+    expectedInStorage: boolean = false,
+  ): DocImpl<T> {
+    if (isCell(doc)) doc = doc.getAsCellLink().cell;
+    if (!isDoc(doc)) {
+      throw new Error("Invalid subject: " + JSON.stringify(doc));
+    }
+    if (!doc.entityId) throw new Error("Doc has no entity ID");
+
+    // If the doc is ephemeral, we don't need to load it from storage. We still
+    // add it to the map of known docs, so that we don't try to keep loading
+    // it.
+    if (doc.ephemeral) return doc;
+
+    // If the doc is already loaded or loading, return immediately.
+    if (this.docIsSyncing.has(doc)) return doc;
+
+    // Important that we set this _before_ the doc is loaded, as we can already
+    // populate the doc when loading dependencies and thus avoid circular
+    // references.
+    this.docIsSyncing.add(doc);
+
+    // Start loading the doc and safe the promise for processBatch to await for
+    const loadingPromise = this._getStorageProviderForSpace(doc.space)
+      .syncSchema(doc.entityId!, schemaContext, expectedInStorage)
       .then(() => doc);
     this.loadingPromises.set(doc, loadingPromise);
 

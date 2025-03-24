@@ -225,6 +225,7 @@ export interface MemorySession<Space extends MemorySpace> {
 export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {
   transact(source: Transaction<Space>["args"]): TransactionResult<Space>;
   query(source: Query["args"]): QueryView<Space, Protocol<Space>>;
+  queryGraph(source: GraphQuery["args"]): QueryView<Space, Protocol<Space>>;
 }
 
 export type { QueryView };

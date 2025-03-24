@@ -369,6 +369,16 @@ export class CharmManager {
   }
 
   async sync(entity: Cell<any>, waitForStorage: boolean = false) {
+    console.log("Called CharmManager.sync on ", entity);
+    await storage.syncCell(entity, waitForStorage);
+  }
+
+  async syncSchema(
+    entity: Cell<any>,
+    schema: JSONSchema,
+    waitForStorage: boolean = false,
+  ) {
+    console.log("Called CharmManager.sync on ", entity);
     await storage.syncCell(entity, waitForStorage);
   }
 }

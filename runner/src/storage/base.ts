@@ -1,9 +1,12 @@
 import type { Cancel, EntityId } from "@commontools/runner";
 import { log } from "../storage.ts";
+import { SchemaContext } from "@commontools/memory/interface";
 
 export interface StorageValue<T = any> {
   value: T;
   source?: EntityId;
+  // This is used on writes to retry on conflicts.
+  retry?: ((previousValue: T) => T)[];
 }
 
 export interface StorageProvider {
@@ -28,6 +31,21 @@ export interface StorageProvider {
    * @returns Promise that resolves when the value is synced.
    */
   sync(entityId: EntityId, expectedInStorage?: boolean): Promise<void>;
+
+  /**
+   * Sync a value from storage. Use `get()` to retrieve the value.
+   *
+   * @param entityId - Entity ID to sync.
+   * @param schemaContext - The schemaContext that determines what to sync.
+   * @param expectedInStorage - Wait for the value, it's assumed to be in
+   *   storage eventually.
+   * @returns Promise that resolves when the value is synced.
+   */
+  syncSchema(
+    entityId: EntityId,
+    schemaContext: SchemaContext,
+    expectedInStorage?: boolean,
+  ): Promise<void>;
 
   /**
    * Get a value from the local cache reflecting storage. Call `sync()` first.

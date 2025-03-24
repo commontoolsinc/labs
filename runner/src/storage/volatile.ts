@@ -1,6 +1,7 @@
 import type { EntityId } from "@commontools/runner";
 import { log } from "../storage.ts";
 import { BaseStorageProvider, type StorageValue } from "./base.ts";
+import { SchemaContext } from "@commontools/memory/interface";
 
 /**
  * Volatile (in-memory) storage provider. Just for testing.
@@ -76,6 +77,26 @@ export class VolatileStorageProvider extends BaseStorageProvider {
     entityId: EntityId,
     expectedInStorage: boolean = false,
   ): Promise<void> {
+    console.log("Called VolatileStorageProvider.sync on ", entityId);
+    const spaceStorage = getOrCreateSpaceStorage(this.spaceName);
+    const key = JSON.stringify(entityId);
+    log(
+      () => ["sync volatile", this.spaceName, key, this.lastValues.get(key)],
+    );
+    if (spaceStorage.has(key)) {
+      this.lastValues.set(key, JSON.stringify(spaceStorage.get(key)!));
+    } else if (!expectedInStorage) {
+      this.lastValues.delete(key);
+    }
+    return Promise.resolve();
+  }
+
+  syncSchema(
+    entityId: EntityId,
+    _schemaContext: SchemaContext,
+    expectedInStorage: boolean = false,
+  ): Promise<void> {
+    console.log("Called VolatileStorageProvider.syncSchema on ", entityId);
     const spaceStorage = getOrCreateSpaceStorage(this.spaceName);
     const key = JSON.stringify(entityId);
     log(
