@@ -1,6 +1,6 @@
 import { Cell, getCell, storage } from "@commontools/runner";
 import { JSONSchema, Schema } from "@commontools/builder";
-import { Identity } from "@commontools/identity";
+
 // This is the derived space id for toolshed-system
 export const SYSTEM_SPACE_ID =
   "did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88";
@@ -43,9 +43,6 @@ export const bgUpdaterCharmsSchema = {
 } as const satisfies JSONSchema;
 export type BGUpdaterCharmsSchema = Schema<typeof bgUpdaterCharmsSchema>;
 
-/**
- * Add a charm to the Gmail integration charms cell
- */
 export async function addCharmToBG({
   space,
   charmId,
