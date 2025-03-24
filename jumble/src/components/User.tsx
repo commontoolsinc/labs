@@ -168,6 +168,8 @@ export function User() {
   const rotationRef = useRef(0);
   const opacityRef = useRef(0);
   const bounceRef = useRef(0);
+  const easedPushCountRef = useRef(0);
+  const easedPullCountRef = useRef(0);
   
   // Use our shared animation smoothing hook
   const { updateValue, getValue, rafRef } = useAnimationSmoothing();
@@ -216,6 +218,10 @@ export function User() {
       const pushResult = updateValue("push", actualPushCount);
       const pullResult = updateValue("pull", actualPullCount);
       const errorResult = updateValue("error", actualErrorCount);
+      
+      // Update our refs with the eased values
+      easedPushCountRef.current = pushResult.value;
+      easedPullCountRef.current = pullResult.value;
       
       // Activity states based on the hook's results
       const pushActive = pushResult.isActive;
