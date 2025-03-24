@@ -4,6 +4,7 @@ import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
 import JsonView from "@uiw/react-json-view";
 import { githubDarkTheme } from "@uiw/react-json-view/githubDark";
 import { getDoc } from "@commontools/runner";
+import { useAnimationSmoothing } from "@/hooks/use-animation-smoothing.ts";
 
 import { useCell } from "@/hooks/use-cell.ts";
 const model = getDoc(Inspector.create(), "inspector", "").asCell();
@@ -107,8 +108,11 @@ const ModelInspector: React.FC<{ model: Inspector.Model }> = ({ model }) => {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState("");
   const [, setRenderTrigger] = useState(0);
-  const rafRef = useRef<number | null>(null);
   const lastRenderTimeRef = useRef(0);
+  const buttonTextRef = useRef<HTMLSpanElement>(null);
+  
+  // Use our animation smoothing hook
+  const { updateValue, getValue, rafRef } = useAnimationSmoothing();
   
   // Set up render loop with requestAnimationFrame when inspector is open
   useEffect(() => {
@@ -138,7 +142,53 @@ const ModelInspector: React.FC<{ model: Inspector.Model }> = ({ model }) => {
         rafRef.current = null;
       }
     };
-  }, [isOpen]);
+  }, [isOpen, rafRef]);
+  
+  // Update button text with counts using requestAnimationFrame
+  useEffect(() => {
+    const updateCounts = () => {
+      if (!buttonTextRef.current) {
+        rafRef.current = requestAnimationFrame(updateCounts);
+        return;
+      }
+      
+      // Count calculations
+      const actualPushCount = Object.values(model.push).filter(v => v.ok).length;
+      const actualPullCount = Object.values(model.pull).filter(v => v.ok).length;
+      const pushErrorCount = Object.values(model.push).filter(v => v.error).length;
+      const pullErrorCount = Object.values(model.pull).filter(v => v.error).length;
+      const actualErrorCount = pushErrorCount + pullErrorCount;
+      
+      // Update values with easing
+      const pushResult = updateValue("push", actualPushCount);
+      const pullResult = updateValue("pull", actualPullCount);
+      const errorResult = updateValue("error", actualErrorCount);
+      
+      // Create status text
+      const statusParts = [];
+      if (pushResult.value > 0) statusParts.push(`↑${pushResult.value}`);
+      if (pullResult.value > 0) statusParts.push(`↓${pullResult.value}`);
+      if (errorResult.value > 0) statusParts.push(`!${errorResult.value}`);
+      
+      const statusText = statusParts.length > 0 
+        ? `Inspector ${statusParts.join(" ")} ${isOpen ? "▼" : "▲"}`
+        : `Inspector ${isOpen ? "▼" : "▲"}`;
+        
+      buttonTextRef.current.textContent = statusText;
+      
+      // Continue animation
+      rafRef.current = requestAnimationFrame(updateCounts);
+    };
+    
+    // Start updating counts
+    rafRef.current = requestAnimationFrame(updateCounts);
+    
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, [model, isOpen, updateValue, rafRef]);
 
   const formatTime = (time: number) => {
     const date = new Date(time);
@@ -286,7 +336,7 @@ const ModelInspector: React.FC<{ model: Inspector.Model }> = ({ model }) => {
         onClick={() => setIsOpen(!isOpen)}
         className="absolute top-0 left-4 transform -translate-y-full bg-gray-800 text-white px-2 py-0.5 rounded-t-md text-xs"
       >
-        Inspector {isOpen ? "▼" : "▲"}
+        <span ref={buttonTextRef}>Inspector {isOpen ? "▼" : "▲"}</span>
       </button>
 
       {isOpen && (
