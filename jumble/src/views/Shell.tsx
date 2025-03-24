@@ -11,7 +11,8 @@ import { CharmPublisher } from "@/components/Publish.tsx";
 import { useGlobalActions } from "@/hooks/use-global-actions.tsx";
 import { SyncStatusProvider } from "@/contexts/SyncStatusContext.tsx";
 import * as Process from "@/components/View.tsx";
-import { DummyModelInspector } from "@/components/NetworkInspector.tsx";
+import { ToggleableNetworkInspector } from "@/components/NetworkInspector.tsx";
+import { NetworkInspectorProvider } from "@/contexts/NetworkInspectorContext.tsx";
 
 function* subscribe() {
   const test = yield* Process.wait(Promise.resolve(1));
@@ -57,6 +58,7 @@ const CounterView2 = Counter.View((state, controller) => (
   <h1 onClick={controller.dispatch("inc")}>{state.count}</h1>
 ));
 
+
 export default function Shell() {
   const { charmId } = useParams<CharmRouteParams>();
   useGlobalActions();
@@ -69,18 +71,20 @@ export default function Shell() {
   return (
     <CharmsManagerProvider>
       <SyncStatusProvider>
-        <div className="flex flex-col shell h-full bg-gray-50 border-2 border-black">
-          <ShellHeader session={session} charmId={charmId} />
+        <NetworkInspectorProvider>
+          <div className="flex flex-col shell h-full bg-gray-50 border-2 border-black">
+            <ShellHeader session={session} charmId={charmId} />
 
-          <div className="h-full overflow-y-auto">
-            <Outlet />
+            <div className="h-full overflow-y-auto">
+              <Outlet />
+            </div>
+
+            <ActionBar />
+            <CharmPublisher />
+            <CommandCenter />
+            <ToggleableNetworkInspector visible={localStorage.getItem("networkInspectorVisible") === "true"} />
           </div>
-
-          <ActionBar />
-          <CharmPublisher />
-          <CommandCenter />
-          <DummyModelInspector />
-        </div>
+        </NetworkInspectorProvider>
       </SyncStatusProvider>
     </CharmsManagerProvider>
   );

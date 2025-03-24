@@ -100,8 +100,17 @@ export const DummyModelInspector: React.FC = () => {
 
   return <ModelInspector model={status.current} />;
 };
-const ModelInspector: React.FC<{ model: Inspector.Model }> = ({ model }) => {
-  const [isOpen, setIsOpen] = useState(false);
+
+export const ToggleableNetworkInspector: React.FC<{ visible: boolean }> = ({ visible }) => {
+  const { status, updateStatus } = useStatusMonitor();
+  useStorageBroadcast(updateStatus);
+  
+  if (!visible || !status.current) return null;
+  
+  return <ModelInspector model={status.current} initiallyOpen={true} />;
+};
+const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean }> = ({ model, initiallyOpen = false }) => {
+  const [isOpen, setIsOpen] = useState(initiallyOpen);
   const [activeTab, setActiveTab] = useState<"actions" | "subscriptions">(
     "actions",
   );
