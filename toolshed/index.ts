@@ -1,17 +1,16 @@
 import app from "@/app.ts";
 import env from "@/env.ts";
 import * as Sentry from "@sentry/deno";
-import { Identity } from "@commontools/identity";
+import { identity } from "@/lib/identity.ts";
 import { storage } from "@commontools/runner";
 import { memory } from "@/routes/storage/memory.ts";
 
 // Initialize storage with signer
 // FIXME(ja): should we do this even on memory-only toolsheds?
-const initializeStorage = async () => {
+const initializeStorage = () => {
   try {
-    console.log("Initializing storage signer...");
-    const signer = await Identity.fromPassphrase(env.IDENTITY_PASSPHRASE);
-    storage.setSigner(signer);
+    console.log(`Initializing storage signer to ${identity.did()}...`);
+    storage.setSigner(identity);
     console.log("Storage signer initialized successfully");
     storage.setRemoteStorage(new URL(env.MEMORY_URL));
     console.log("Configured to remote storage:", env.MEMORY_URL);
@@ -71,9 +70,9 @@ const handleShutdown = async () => {
 };
 
 // Start server with the abort controller
-async function startServer() {
+function startServer() {
   console.log(`Server is starting on port http://${env.HOST}:${env.PORT}`);
-  await initializeStorage();
+  initializeStorage();
 
   Sentry.init({
     dsn: env.SENTRY_DSN,

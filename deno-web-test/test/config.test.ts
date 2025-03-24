@@ -1,5 +1,6 @@
 import { assert } from "@std/assert";
-import { decode, runDenoWebTest } from "./utils.ts";
+import { decode } from "@commontools/utils/encoding";
+import { runDenoWebTest } from "./utils.ts";
 
 const dirname = import.meta.dirname as string;
 
