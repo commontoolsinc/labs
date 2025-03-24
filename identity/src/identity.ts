@@ -67,6 +67,24 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return [new Identity(signer), mnemonic];
   }
 
+  // Generate a new keypair in PKCS8 form.
+  //
+  // Due to hiding access to private key material
+  // in the JS environment (via WebCrypto), we cannot
+  // simply "export" existing keys. If a key should
+  // be stored as PKCS8, generate it with this method.
+  static async generatePkcs8(): Promise<Uint8Array> {
+    // Not a promise, but force it for consistent interface
+    return await Ed25519Signer.generatePkcs8();
+  }
+
+  static async fromPkcs8<ID extends DIDKey>(
+    pkcs8: Uint8Array,
+  ): Promise<Identity<ID>> {
+    const signer = await Ed25519Signer.fromPkcs8<ID>(pkcs8);
+    return new Identity(signer);
+  }
+
   static async fromMnemonic<ID extends DIDKey>(
     mnemonic: string,
   ): Promise<Identity<ID>> {

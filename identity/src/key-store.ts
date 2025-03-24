@@ -80,11 +80,11 @@ class DB {
   ) {
     const req = globalThis.indexedDB.open(dbName, dbVersion);
     once(req, "upgradeneeded", onUpgrade);
-    once(req, "blocked", e => {
+    once(req, "blocked", (e) => {
       console.log("KeyStore: Blocked");
     });
     const db = await asyncWrap(req);
-    once(db, "versionchange", e => {
+    once(db, "versionchange", (e) => {
       console.log("KeyStore: VersionChange", e.oldVersion, e.newVersion);
     });
     return new DB(db);

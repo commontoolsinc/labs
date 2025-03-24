@@ -15,6 +15,7 @@ import {
 import { NobleEd25519Signer, NobleEd25519Verifier } from "./noble.ts";
 import * as bip39 from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
+import { generateEd25519Pkcs8, pkcs8ToEd25519Raw } from "./utils.ts";
 
 // Platform-specific implementation of an ED25519 Keypair.
 //
@@ -68,6 +69,17 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
   > {
     const mnemonic = bip39.generateMnemonic(wordlist, 256);
     return [await Ed25519Signer.fromMnemonic(mnemonic), mnemonic];
+  }
+
+  static generatePkcs8<ID extends DIDKey>(): Uint8Array {
+    return generateEd25519Pkcs8();
+  }
+
+  static async fromPkcs8<ID extends DIDKey>(
+    pkcs8: Uint8Array,
+  ): Promise<Ed25519Signer<ID>> {
+    const raw = pkcs8ToEd25519Raw(pkcs8);
+    return await Ed25519Signer.fromRaw(raw);
   }
 
   static async fromMnemonic<ID extends DIDKey>(
