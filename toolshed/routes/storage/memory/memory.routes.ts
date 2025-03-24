@@ -100,6 +100,17 @@ export const Selector = z.record(
   ),
 );
 
+export const GraphSelector = z.record(
+  Of,
+  z.record(
+    The,
+    z.record(
+      Cause,
+      z.any(),
+    ),
+  ),
+);
+
 const Access = z
   .record(
     z.string().describe(
@@ -153,10 +164,16 @@ export const Transaction = invocation(
 
 export const Query = invocation(
   "/memory/query",
-  z.object({
-    select: Selector,
-    since: z.number().optional(),
-  }),
+  z.union([
+    z.object({
+      select: Selector,
+      since: z.number().optional(),
+    }),
+    z.object({
+      selectGraph: GraphSelector,
+      since: z.number().optional(),
+    }),
+  ]),
 );
 
 export const CommitData = z.object({
@@ -214,7 +231,7 @@ export const ConnectionError = z
 export const QueryError = z.object({
   name: z.literal("QueryError"),
   cause: SystemError,
-  selector: Selector,
+  selector: z.union([Selector, GraphSelector]),
   message: z.string(),
   stack: z.string().optional(),
 });
