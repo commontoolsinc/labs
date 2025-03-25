@@ -54,10 +54,10 @@ export class BackgroundCharmService {
       return;
     }
 
-    const dids = charms.map((c) => c.get().space);
-    console.log("ensureCharms", dids);
+    const dids = new Set(charms.map((c) => c.get().space));
+    log(`monitoring ${dids.size} spaces`);
 
-    for (const did of new Set(dids)) {
+    for (const did of dids) {
       let spaceStation = this.spaceStation.get(did);
       if (!spaceStation) {
         spaceStation = new SpaceStation({

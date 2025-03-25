@@ -26,8 +26,8 @@ export class SpaceStation {
   private maxRetries: number;
   private pollingIntervalMs: number;
   private state = new Map<string, CharmStatus>();
-  private pendingJobs: string[] = [];
-  private activeJobs = new Set<string>();
+  private pendingCharms: string[] = [];
+  private activeCharms = new Set<string>();
   private deactivationTimeoutMs: number;
   private habitat: Habitat;
   private rerunIntervalMs: number;
@@ -79,7 +79,7 @@ export class SpaceStation {
           bg: b,
           enabled: !serverState.disabledAt,
         });
-        this.pendingJobs.push(serverState.charmId);
+        this.pendingCharms.push(serverState.charmId);
       } else {
         // if server thinks charms disabled state has changed, update our state
         if (!serverState.disabledAt && !localState.enabled) {
@@ -87,13 +87,13 @@ export class SpaceStation {
             ...localState,
             enabled: true,
           });
-          this.pendingJobs.push(serverState.charmId);
+          this.pendingCharms.push(serverState.charmId);
         } else if (serverState.disabledAt && localState.enabled) {
           this.state.set(serverState.charmId, {
             ...localState,
             enabled: false,
           });
-          this.pendingJobs = this.pendingJobs.filter((job) =>
+          this.pendingCharms = this.pendingCharms.filter((job) =>
             job !== serverState.charmId
           );
         }
@@ -114,13 +114,13 @@ export class SpaceStation {
     log("Stopping space station...");
 
     // Wait for active jobs to finish with a timeout
-    if (this.activeJobs.size > 0) {
-      log(`Waiting for ${this.activeJobs.size} active jobs to complete...`);
+    if (this.activeCharms.size > 0) {
+      log(`Waiting for ${this.activeCharms.size} active jobs to complete...`);
       await Promise.race([
         sleep(this.deactivationTimeoutMs),
         new Promise((resolve) => {
           const checkInterval = setInterval(() => {
-            if (this.activeJobs.size === 0) {
+            if (this.activeCharms.size === 0) {
               clearInterval(checkInterval);
               resolve(true);
             }
@@ -136,74 +136,66 @@ export class SpaceStation {
   getStatus() {
     return {
       running: this.habitat.ready,
-      activeJobs: this.activeJobs.size,
-      pendingJobs: this.pendingJobs.length,
+      activeJobs: this.activeCharms.size,
+      pendingJobs: this.pendingCharms.length,
     };
   }
 
   private async execLoop(): Promise<void> {
     while (true) {
       if (!this.habitat.ready) {
+        log("habitat not ready, sleeping");
         await sleep(this.pollingIntervalMs);
         continue;
       }
 
-      if (this.activeJobs.size >= this.maxConcurrentJobs) {
+      if (this.activeCharms.size >= this.maxConcurrentJobs) {
+        log("active jobs >= max concurrent jobs, sleeping");
         await sleep(this.pollingIntervalMs);
         continue;
       }
 
-      const job = this.pendingJobs.shift();
+      const charmId = this.pendingCharms.shift();
 
-      if (!job) {
+      // skip any charms already running...
+      if (!charmId || this.activeCharms.has(charmId)) {
         await sleep(this.pollingIntervalMs);
         continue;
       }
 
-      // skip any jobs already running...
-      // FIXME(ja): is job actually the same for a specific bgcharmentry?
-      if (this.activeJobs.has(job)) {
-        continue;
-      }
-
-      this.activeJobs.add(job);
-      this.processCharm(job)
-        .catch((e) => {
-          log(e instanceof Error ? e.message : String(e), {
-            error: true,
-          });
-          return {
-            success: false,
-            error: e instanceof Error ? e.message : String(e),
-          };
-        })
-        .then((result) => {
-          console.log(result);
-        })
-        .finally(() => {
-          this.activeJobs.delete(job);
-        });
+      this.processCharm(charmId);
     }
   }
 
   private processCharm(
     charmId: string,
-  ): Promise<{ success: boolean; error?: string }> {
-    console.log("processCharm", charmId);
-    const charm = this.state.get(charmId)?.bg;
-    if (!charm) {
-      return Promise.resolve({
-        success: false,
-        error: `Charm ${charmId} not found`,
+  ) {
+    log(`processCharm ${charmId}`);
+    const bg = this.state.get(charmId)?.bg;
+    if (!bg) {
+      log(`Charm ${charmId} not found in state`, {
+        error: true,
       });
+      return;
     }
 
     log(
-      `Starting ${charm.get().integration} ${charm.get().charmId} (${charm.get().space})`,
+      `Starting ${bg.get().integration} ${bg.get().charmId} (${bg.get().space})`,
     );
 
-    return Promise.race([
-      this.habitat.runCharm(charm),
+    this.activeCharms.add(charmId);
+
+    Promise.race([
+      this.habitat.runCharm(bg).catch((e) => {
+        log(e instanceof Error ? e.message : String(e), {
+          error: true,
+        });
+        return {
+          success: false,
+          error: e instanceof Error ? e.message : String(e),
+          charmId,
+        };
+      }),
       sleep(this.timeoutMs).then(() => ({
         success: false,
         error: "Timeout while running charm",
@@ -214,7 +206,8 @@ export class SpaceStation {
       } else {
         this.enableCharm(charmId);
       }
-      return result;
+    }).finally(() => {
+      this.activeCharms.delete(charmId);
     });
   }
 
@@ -250,11 +243,11 @@ export class SpaceStation {
       if (this.habitat.ready) {
         for (const charmId of this.state.keys()) {
           if (
-            !this.activeJobs.has(charmId) &&
-            !this.pendingJobs.includes(charmId) &&
+            !this.activeCharms.has(charmId) &&
+            !this.pendingCharms.includes(charmId) &&
             this.state.get(charmId)?.enabled
           ) {
-            this.pendingJobs.push(charmId);
+            this.pendingCharms.push(charmId);
             log(`Requeued charm: ${charmId}`);
           }
         }

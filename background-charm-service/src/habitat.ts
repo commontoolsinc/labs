@@ -1,5 +1,7 @@
 import { BGCharmEntry, sleep } from "@commontools/utils";
 import { Cell } from "@commontools/runner";
+import { defer } from "@commontools/utils";
+import { log } from "./utils.ts";
 
 type PendingResponse = {
   resolve: (result: any) => void;
@@ -15,14 +17,14 @@ export class Habitat {
   public ready: boolean = false;
 
   constructor(did: string) {
-    console.log(`Creating habitat ${did}`);
+    log(`Creating habitat ${did}`);
     this.did = did;
 
     this.worker = new Worker(
       new URL("./worker.ts", import.meta.url).href,
       {
         type: "module",
-        name: `habitat-${this.did}`,
+        name: `worker-${this.did}`,
       },
     );
     this.connectWorker();
@@ -30,24 +32,50 @@ export class Habitat {
 
   private connectWorker() {
     this.worker.onmessage = (event: MessageEvent) => {
-      const { id, result, error } = event.data || {};
-      if (typeof id !== "number") return;
-      const pending = this.pending.get(id);
-      if (!pending) return;
-      if (error) {
-        pending.reject(new Error(error));
-      } else {
-        pending.resolve(result);
+      const data = event.data as { msgId: number; result: any } | {
+        msgId: number;
+        error: string;
+      } | undefined;
+      if (!data) {
+        log(`${this.did}: Received response with no data`, {
+          error: true,
+        });
+        return;
       }
-      this.pending.delete(id);
+      if (typeof data.msgId !== "number") {
+        log(
+          `${this.did}: Received response with no msgId ${
+            JSON.stringify(data)
+          }`,
+          {
+            error: true,
+          },
+        );
+        return;
+      }
+      const pending = this.pending.get(data.msgId);
+      if (!pending) {
+        log(
+          `${this.did}: Received response with missing pending promise ${data.msgId}`,
+          {
+            error: true,
+          },
+        );
+        return;
+      }
+      if ("error" in data) {
+        pending.reject(new Error(data.error));
+      } else {
+        pending.resolve(data.result);
+      }
+      this.pending.delete(data.msgId);
     };
 
+    // FIXME(ja): what should we do if the worker is erroring?
+    // perhaps restart the worker?
     this.worker.onerror = (err) => {
-      console.error(`Worker error in habitat ${this.did}:`, err);
-      // Reject all pending promises.
-      this.pending.forEach(({ reject }, id) => {
-        reject(err);
-        this.pending.delete(id);
+      log(`${this.did}: Worker error:`, err, {
+        error: true,
       });
     };
   }
@@ -58,10 +86,12 @@ export class Habitat {
       toolshed_url: toolshedUrl,
       operator_pass: operatorPass,
     }).catch((err) => {
-      console.error(`Habitat ${this.did} worker setup failed:`, err);
+      log(`Habitat ${this.did} worker setup failed:`, err, {
+        error: true,
+      });
     }).then(() => {
       this.ready = true;
-      console.log(`Habitat ${this.did} ready for work`);
+      log(`Habitat ${this.did} ready for work`);
     });
   }
 
@@ -71,39 +101,33 @@ export class Habitat {
     if (type !== "setup" && !this.ready) {
       return Promise.reject(new Error("Worker not initialized"));
     }
-    const id = this.msgId++;
+    const msgId = this.msgId++;
 
-    this.worker.postMessage({ id, type, data });
+    const deferred = defer<any, Error>();
 
-    return new Promise((resolve, reject) => {
-      // Set up a timeout in case the worker doesn't respond
-      const timeout = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`Worker timed out while calling ${type}`));
-      }, this.timeoutMs);
+    const timeout = setTimeout(() => {
+      deferred.reject(new Error(`Worker timed out after ${this.timeoutMs}ms`));
+    }, this.timeoutMs);
 
-      this.pending.set(id, {
-        resolve: (result: any) => {
-          clearTimeout(timeout);
-          resolve(result);
-        },
-        reject: (error: any) => {
-          clearTimeout(timeout);
-          reject(error);
-        },
-      });
+    this.pending.set(msgId, deferred);
+
+    this.worker.postMessage({ msgId, type, data });
+
+    return deferred.promise.finally(() => {
+      clearTimeout(timeout);
+      this.pending.delete(msgId);
     });
   }
 
   public runCharm(
-    charm: Cell<BGCharmEntry>,
-  ): Promise<{ success: boolean; data?: any }> {
-    return this.call("runCharm", { charm: charm.get().charmId });
+    bg: Cell<BGCharmEntry>,
+  ): Promise<{ success: boolean; data?: any; charmId: string }> {
+    return this.call("runCharm", { charmId: bg.get().charmId });
   }
 
   public shutdown() {
     return this.call("shutdown").catch(() => {
-      console.log(
+      log(
         "Failed to shutdown habitat gracefully, terminating with unknown status.",
       );
     }).finally(() => {

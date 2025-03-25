@@ -1,4 +1,3 @@
-import { sleep } from "@commontools/utils";
 import { type Charm, CharmManager } from "@commontools/charm";
 import {
   Cell,
@@ -67,33 +66,31 @@ async function setup(
   return { setup: true };
 }
 
+// FIXME(ja) should we make sure we kill the worker?
 async function shutdown() {
   if (!initialized) {
-    throw new Error("Worker not initialized");
+    console.log(`Worker: Not initialized, skipping shutdown`);
+    return { shutdown: true };
   }
   console.log(`Worker: Shutting down habitat`);
 
-  // Clear charm cache
   loadedCharms.clear();
-
-  // Clear session and manager
   currentSession = null;
   manager = null;
 
   // Ensure storage is synced before shutdown
   await storage.synced();
-  await sleep(1000);
 
   initialized = false;
   return { shutdown: true };
 }
 
-async function runCharm(data: { charm: string }) {
+async function runCharm(data: { charmId: string }) {
   if (!manager) {
     throw new Error("Worker session not initialized");
   }
 
-  const { charm: charmId } = data || {};
+  const { charmId } = data || {};
   if (!charmId) {
     throw new Error("Missing required parameter: charm");
   }
@@ -146,7 +143,7 @@ async function runCharm(data: { charm: string }) {
       `Worker error executing charm ${spaceId}/${charmId}: ${errorMessage}`,
     );
 
-    // If there was an error, remove the charm from cache to force a reload next time
+    // FIXME(ja): this isn't enough to ensure we reload/stop the charm
     loadedCharms.delete(charmId);
 
     return {
@@ -158,18 +155,18 @@ async function runCharm(data: { charm: string }) {
 }
 
 self.onmessage = async (event: MessageEvent) => {
-  const { id, type, data } = event.data || {};
+  const { msgId, type, data } = event.data || {};
 
   try {
     if (type === "setup") {
       const result = await setup(data);
-      self.postMessage({ id, result });
+      self.postMessage({ msgId, result });
     } else if (type === "runCharm") {
       const result = await runCharm(data);
-      self.postMessage({ id, result });
+      self.postMessage({ msgId, result });
     } else if (type === "shutdown") {
       const result = await shutdown();
-      self.postMessage({ id, result });
+      self.postMessage({ msgId, result });
       self.close(); // terminates the worker
     } else {
       throw new Error(`Unknown message type: ${type}`);
@@ -177,7 +174,7 @@ self.onmessage = async (event: MessageEvent) => {
   } catch (error) {
     console.error(`Worker error:`, error);
     self.postMessage({
-      id,
+      msgId,
       error: error instanceof Error ? error.message : String(error),
     });
   }
