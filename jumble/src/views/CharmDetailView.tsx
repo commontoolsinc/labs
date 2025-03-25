@@ -403,16 +403,16 @@ const Variants = () => {
   if (variants.length === 0 && expectedVariantCount === 0) return null;
 
   return (
-    <div className="variants-container border-t-2 border-black pt-4 mb-4">
+    <div className="variants-container border-t-2 border-black dark:border-gray-600 pt-4 mb-4">
       <div className="flex justify-between items-center mb-2">
-        <h3 className="text-sm font-bold">
+        <h3 className="text-sm font-bold dark:text-dark-text-primary">
           Variants ({variants.length} of {expectedVariantCount})
         </h3>
         <div className="flex gap-2">
           <button
             type="button"
             onClick={handleCancelVariants}
-            className="px-3 py-1 text-sm text-gray-600 hover:text-black border border-gray-300"
+            className="px-3 py-1 text-sm text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-white border border-gray-300 dark:border-gray-600"
           >
             Clear
           </button>
@@ -446,7 +446,7 @@ const Variants = () => {
                   }
                 }
               }}
-              className="px-3 py-1 text-sm bg-black text-white hover:bg-gray-800"
+              className="px-3 py-1 text-sm bg-black dark:bg-gray-700 text-white hover:bg-gray-800 dark:hover:bg-gray-600"
             >
               Select
             </button>
@@ -458,15 +458,17 @@ const Variants = () => {
           <div
             onClick={() => setSelectedVariant(charm)}
             className={`variant-item min-w-48 h-32 border-2 cursor-pointer flex-shrink-0 ${
-              selectedVariant === charm ? "border-blue-500" : "border-black"
+              selectedVariant === charm
+                ? "border-blue-500"
+                : "border-black dark:border-gray-600"
             }`}
           >
             <div className="h-full flex flex-col overflow-hidden">
-              <div className="bg-gray-100 text-xs font-bold p-1 border-b border-gray-300">
+              <div className="bg-gray-100 dark:bg-dark-bg-tertiary text-xs font-bold p-1 border-b border-gray-300 dark:border-gray-600 dark:text-dark-text-primary">
                 Original
               </div>
               <div
-                className="flex-grow overflow-hidden relative"
+                className="flex-grow overflow-hidden relative dark:bg-dark-bg-secondary"
                 style={{ width: "100%", height: "100%" }}
               >
                 <div
@@ -499,16 +501,16 @@ const Variants = () => {
                 variantForModel && selectedVariant === variantForModel
                   ? "border-blue-500"
                   : variantForModel
-                  ? "border-black"
-                  : "border-dashed border-gray-300"
+                  ? "border-black dark:border-gray-600"
+                  : "border-dashed border-gray-300 dark:border-gray-600"
               }`}
             >
               <div className="h-full flex flex-col overflow-hidden">
-                <div className="bg-gray-100 text-xs font-bold p-1 border-b border-gray-300">
+                <div className="bg-gray-100 dark:bg-dark-bg-tertiary text-xs font-bold p-1 border-b border-gray-300 dark:border-gray-600 dark:text-dark-text-primary">
                   {(model.split(":")[1] || "Model").substring(0, 24)}
                 </div>
                 <div
-                  className="flex-grow overflow-hidden relative"
+                  className="flex-grow overflow-hidden relative dark:bg-dark-bg-secondary"
                   style={{ width: "100%", height: "100%" }}
                 >
                   {variantForModel
@@ -544,8 +546,6 @@ const Variants = () => {
             </div>
           );
         })}
-
-        {/* Remove the additional loading placeholders section that was here */}
       </div>
     </div>
   );
@@ -686,7 +686,9 @@ const Suggestions = () => {
 
   return (
     <div className="suggestions-container mb-4">
-      <h3 className="text-sm font-bold mb-2">Suggestions</h3>
+      <h3 className="text-sm font-bold mb-2 dark:text-dark-text-primary">
+        Suggestions
+      </h3>
       {loadingSuggestions
         ? (
           <div className="flex items-center justify-center p-4">
@@ -706,9 +708,9 @@ const Suggestions = () => {
                 type="button"
                 key={index}
                 onClick={() => handleSuggestion(suggestion)}
-                className="p-2 text-left text-sm border border-gray-300 hover:border-black hover:bg-gray-50 shadow-sm transition-all duration-100 ease-in-out cursor-pointer flex-shrink-0 min-w-40 max-w-96"
+                className="p-2 text-left text-sm border border-gray-300 dark:border-gray-600 hover:border-black dark:hover:border-gray-400 hover:bg-gray-50 dark:hover:bg-dark-bg-tertiary shadow-sm transition-all duration-100 ease-in-out cursor-pointer flex-shrink-0 min-w-40 max-w-96 dark:bg-dark-bg-secondary dark:text-dark-text-primary"
               >
-                <span className="font-medium text-xs uppercase text-gray-500 block">
+                <span className="font-medium text-xs uppercase text-gray-500 dark:text-gray-400 block">
                   {suggestion.type}
                 </span>
                 <p className="text-xs">{suggestion.prompt}</p>
@@ -748,7 +750,7 @@ const OperationTab = () => {
             className={`flex-1 py-2 text-center border-2 ${
               operationType === "iterate"
                 ? "border-black bg-black text-white"
-                : "border-gray-300 bg-white hover:border-gray-400"
+                : "border-gray-300 dark:border-gray-600 bg-white dark:bg-dark-bg-tertiary hover:border-gray-400 dark:hover:border-gray-500 dark:text-dark-text-primary"
             }`}
           >
             Iterate
@@ -759,7 +761,7 @@ const OperationTab = () => {
             className={`flex-1 py-2 text-center border-2 border-l-0 ${
               operationType === "extend"
                 ? "border-black bg-black text-white"
-                : "border-gray-300 bg-white hover:border-gray-400"
+                : "border-gray-300 dark:border-gray-600 bg-white dark:bg-dark-bg-tertiary hover:border-gray-400 dark:hover:border-gray-500 dark:text-dark-text-primary"
             }`}
           >
             Extend
@@ -767,7 +769,7 @@ const OperationTab = () => {
         </div>
 
         <div className="flex flex-col gap-2">
-          <div className="border border-gray-300">
+          <div className="border border-gray-300 dark:border-gray-600">
             <Composer
               placeholder={operationType === "iterate"
                 ? "Tweak your charm"
@@ -793,9 +795,12 @@ const OperationTab = () => {
                 id="variants"
                 checked={showVariants}
                 onChange={(e) => setShowVariants(e.target.checked)}
-                className="border-2 border-black mr-2"
+                className="border-2 border-black dark:border-gray-600 mr-2 accent-gray-500 dark:accent-blue-400 dark:bg-dark-bg-tertiary"
               />
-              <label htmlFor="variants" className="text-sm font-medium">
+              <label
+                htmlFor="variants"
+                className="text-sm font-medium dark:text-dark-text-primary"
+              >
                 Variants
               </label>
             </div>
@@ -803,7 +808,7 @@ const OperationTab = () => {
             <select
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value)}
-              className="p-1 border-2 border-black bg-white text-xs"
+              className="p-1 border-2 border-black dark:border-gray-600 bg-white dark:bg-dark-bg-tertiary text-xs dark:text-dark-text-primary"
             >
               <option value="anthropic:claude-3-7-sonnet-latest">
                 Claude 3.7 ✨
@@ -873,32 +878,34 @@ const CodeTab = () => {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex items-center gap-4 p-4">
-        <span className="px-2 py-1 inline rounded-full text-xs bg-gray-100 border border-gray-300">
+        <span className="px-2 py-1 inline rounded-full text-xs bg-gray-100 dark:bg-dark-bg-tertiary border border-gray-300 dark:border-gray-600 dark:text-dark-text-primary">
           <span>Template Version: {templateVersion ?? "Missing"}</span>
         </span>
-        <div className="flex items-center px-3 py-1 rounded-full bg-gray-100 border border-gray-300">
+        <div className="flex items-center px-3 py-1 rounded-full bg-gray-100 dark:bg-dark-bg-tertiary border border-gray-300 dark:border-gray-600">
           <input
             type="checkbox"
             id="fullCode"
             checked={showFullCode}
             onChange={(e) => setShowFullCode(e.target.checked)}
-            className="border-2 border-black mr-2"
+            className="border-2 border-black dark:border-gray-600 mr-2 accent-gray-500 dark:accent-blue-400"
           />
           <label
             htmlFor="fullCode"
-            className="text-xs font-medium cursor-pointer"
+            className="text-xs font-medium cursor-pointer dark:text-dark-text-primary"
           >
             Show Full Template
           </label>
         </div>
 
         {/* Editor type selector */}
-        <div className="flex border border-gray-300 rounded-full overflow-hidden">
+        <div className="flex border border-gray-300 dark:border-gray-600 rounded-full overflow-hidden">
           <button
             type="button"
             onClick={() => setActiveEditor("code")}
             className={`px-3 py-1 text-xs ${
-              activeEditor === "code" ? "bg-black text-white" : "bg-gray-100"
+              activeEditor === "code"
+                ? "bg-black dark:bg-gray-700 text-white"
+                : "bg-gray-100 dark:bg-dark-bg-tertiary dark:text-dark-text-primary"
             }`}
           >
             Code
@@ -907,7 +914,9 @@ const CodeTab = () => {
             type="button"
             onClick={() => setActiveEditor("spec")}
             className={`px-3 py-1 text-xs ${
-              activeEditor === "spec" ? "bg-black text-white" : "bg-gray-100"
+              activeEditor === "spec"
+                ? "bg-black dark:bg-gray-700 text-white"
+                : "bg-gray-100 dark:bg-dark-bg-tertiary dark:text-dark-text-primary"
             }`}
           >
             Specification
@@ -921,7 +930,7 @@ const CodeTab = () => {
             <button
               type="button"
               onClick={saveChanges}
-              className="px-4 py-2 bg-black text-white border-2 border-black disabled:opacity-50"
+              className="px-4 py-2 bg-black dark:bg-gray-700 text-white border-2 border-black dark:border-gray-600 disabled:opacity-50 hover:bg-gray-800 dark:hover:bg-gray-600"
             >
               Save Changes
             </button>
@@ -929,7 +938,7 @@ const CodeTab = () => {
         )}
 
         {activeEditor === "code" && (
-          <div className="flex-grow overflow-hidden border border-black h-full">
+          <div className="flex-grow overflow-hidden border border-black dark:border-gray-600 h-full">
             <CodeMirror
               value={workingSrc || ""}
               theme="dark"
@@ -946,11 +955,11 @@ const CodeTab = () => {
         )}
 
         {activeEditor === "spec" && (
-          <div className="flex-grow overflow-hidden border border-black h-full">
+          <div className="flex-grow overflow-hidden border border-black dark:border-gray-600 h-full">
             <textarea
               value={workingSpec || ""}
               onChange={(e) => setWorkingSpec(e.target.value)}
-              className="w-full h-full p-4 font-mono text-sm resize-none"
+              className="w-full h-full p-4 font-mono text-sm resize-none dark:bg-dark-bg-tertiary dark:text-white"
               style={{ height: "100%", overflow: "auto" }}
             />
           </div>
@@ -986,7 +995,7 @@ const DataTab = () => {
         charm={item.charm}
         showHash
       />&nbsp;
-      <span className="text-sm font-medium bg-gray-200 px-2 py-1 rounded">
+      <span className="text-sm font-medium bg-gray-200 dark:bg-dark-bg-tertiary px-2 py-1 rounded dark:text-dark-text-primary">
         {item.relation} at {new Date(item.timestamp).toLocaleString()}
       </span>
       <div className="ml-4">
@@ -1002,14 +1011,14 @@ const DataTab = () => {
           <button
             type="button"
             onClick={() => setIsArgumentExpanded(!isArgumentExpanded)}
-            className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+            className="w-full flex items-center justify-between p-2 bg-gray-100 dark:bg-dark-bg-tertiary border border-gray-300 dark:border-gray-600 mb-2 dark:text-dark-text-primary"
           >
             <span className="text-md font-semibold">Argument</span>
             <span>{isArgumentExpanded ? "▼" : "▶"}</span>
           </button>
 
           {isArgumentExpanded && (
-            <div className="border border-gray-300 rounded bg-gray-50 p-2">
+            <div className="border border-gray-300 dark:border-gray-600 rounded bg-gray-50 dark:bg-dark-bg-secondary p-2">
               {/* @ts-expect-error JsonView is imported as any */}
               <JsonView
                 value={translateCellsAndStreamsToPlainJSON(
@@ -1029,14 +1038,14 @@ const DataTab = () => {
         <button
           type="button"
           onClick={() => setIsResultExpanded(!isResultExpanded)}
-          className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+          className="w-full flex items-center justify-between p-2 bg-gray-100 dark:bg-dark-bg-tertiary border border-gray-300 dark:border-gray-600 mb-2 dark:text-dark-text-primary"
         >
           <span className="text-md font-semibold">Result</span>
           <span>{isResultExpanded ? "▼" : "▶"}</span>
         </button>
 
         {isResultExpanded && (
-          <div className="border border-gray-300 rounded bg-gray-50 p-2">
+          <div className="border border-gray-300 dark:border-gray-600 rounded bg-gray-50 dark:bg-dark-bg-secondary p-2">
             {/* @ts-expect-error JsonView is imported as any */}
             <JsonView
               value={translateCellsAndStreamsToPlainJSON(charm.get()) ?? {}}
@@ -1056,14 +1065,14 @@ const DataTab = () => {
               type="button"
               onClick={() =>
                 setIsArgumentSchemaExpanded(!isArgumentSchemaExpanded)}
-              className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+              className="w-full flex items-center justify-between p-2 bg-gray-100 dark:bg-dark-bg-tertiary border border-gray-300 dark:border-gray-600 mb-2 dark:text-dark-text-primary"
             >
               <span className="text-md font-semibold">Argument Schema</span>
               <span>{isArgumentSchemaExpanded ? "▼" : "▶"}</span>
             </button>
 
             {isArgumentSchemaExpanded && (
-              <div className="border border-gray-300 rounded p-2 bg-gray-50">
+              <div className="border border-gray-300 dark:border-gray-600 rounded p-2 bg-gray-50 dark:bg-dark-bg-secondary">
                 {/* @ts-expect-error JsonView is imported as any */}
                 <JsonView
                   value={iframeRecipe.argumentSchema || {}}
@@ -1080,14 +1089,14 @@ const DataTab = () => {
             <button
               type="button"
               onClick={() => setIsResultSchemaExpanded(!isResultSchemaExpanded)}
-              className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+              className="w-full flex items-center justify-between p-2 bg-gray-100 dark:bg-dark-bg-tertiary border border-gray-300 dark:border-gray-600 mb-2 dark:text-dark-text-primary"
             >
               <span className="text-md font-semibold">Result Schema</span>
               <span>{isResultSchemaExpanded ? "▼" : "▶"}</span>
             </button>
 
             {isResultSchemaExpanded && (
-              <div className="border border-gray-300 rounded p-2 bg-gray-50">
+              <div className="border border-gray-300 dark:border-gray-600 rounded p-2 bg-gray-50 dark:bg-dark-bg-secondary">
                 {/* @ts-expect-error JsonView is imported as any */}
                 <JsonView
                   value={iframeRecipe.resultSchema || {}}
@@ -1105,15 +1114,15 @@ const DataTab = () => {
             <button
               type="button"
               onClick={() => setIsSpecExpanded(!isSpecExpanded)}
-              className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+              className="w-full flex items-center justify-between p-2 bg-gray-100 dark:bg-dark-bg-tertiary border border-gray-300 dark:border-gray-600 mb-2 dark:text-dark-text-primary"
             >
               <span className="text-md font-semibold">Specification</span>
               <span>{isSpecExpanded ? "▼" : "▶"}</span>
             </button>
 
             {isSpecExpanded && (
-              <div className="border border-gray-300 rounded p-2 bg-gray-50">
-                <div className="whitespace-pre-wrap font-mono text-sm p-2">
+              <div className="border border-gray-300 dark:border-gray-600 rounded p-2 bg-gray-50 dark:bg-dark-bg-secondary">
+                <div className="whitespace-pre-wrap font-mono text-sm p-2 dark:text-dark-text-primary">
                   {iframeRecipe.spec || "No specification available"}
                 </div>
               </div>
@@ -1127,14 +1136,14 @@ const DataTab = () => {
           <button
             type="button"
             onClick={() => setIsLineageExpanded(!isLineageExpanded)}
-            className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+            className="w-full flex items-center justify-between p-2 bg-gray-100 dark:bg-dark-bg-tertiary border border-gray-300 dark:border-gray-600 mb-2 dark:text-dark-text-primary"
           >
             <span className="text-md font-semibold">Lineage</span>
             <span>{isLineageExpanded ? "▼" : "▶"}</span>
           </button>
 
           {isLineageExpanded && (
-            <div className="border border-gray-300 rounded p-2 bg-gray-50">
+            <div className="border border-gray-300 dark:border-gray-600 rounded p-2 bg-gray-50 dark:bg-dark-bg-secondary">
               {lineage.map((item) => Lineage(item))}
             </div>
           )}
@@ -1160,26 +1169,27 @@ const BottomSheet = ({
 
   return (
     <div
-      className="bottom-sheet border-t-2 border-black bg-white shadow-lg flex flex-col"
+      className="bottom-sheet border-t-2 border-black dark:border-gray-600 bg-white dark:bg-dark-bg-secondary shadow-lg flex flex-col"
       style={{ height: `${drawerHeight}px` }}
     >
       {/* Resize Handle */}
       <div
-        className="resize-handle h-6 w-full cursor-ns-resize flex items-center justify-center border-b border-gray-200 flex-shrink-0"
+        className="resize-handle h-6 w-full cursor-ns-resize flex items-center justify-center border-b border-gray-200 dark:border-gray-700 flex-shrink-0 dark:bg-dark-bg-tertiary"
         onMouseDown={handleResizeStart}
         onTouchStart={handleTouchResizeStart}
       >
-        <div className="w-16 h-1 bg-gray-300 rounded-full"></div>
+        <div className="w-16 h-1 bg-gray-300 dark:bg-gray-600 rounded-full">
+        </div>
       </div>
 
       {/* Tab Navigation */}
-      <div className="tabs flex gap-0 border-b border-gray-200 flex-shrink-0">
+      <div className="tabs flex gap-0 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
         <button
           type="button"
           onClick={() => handleTabChange("iterate")}
-          className={`px-4 py-2 flex-1 text-center ${
+          className={`px-4 py-2 flex-1 text-center dark:text-dark-text-primary ${
             activeTab === "iterate"
-              ? "bg-gray-100 font-bold border-b-2 border-black"
+              ? "bg-gray-100 dark:bg-dark-bg-tertiary font-bold border-b-2 border-black dark:border-white"
               : ""
           }`}
         >
@@ -1188,9 +1198,9 @@ const BottomSheet = ({
         <button
           type="button"
           onClick={() => handleTabChange("code")}
-          className={`px-4 py-2 flex-1 text-center ${
+          className={`px-4 py-2 flex-1 text-center dark:text-dark-text-primary ${
             activeTab === "code"
-              ? "bg-gray-100 font-bold border-b-2 border-black"
+              ? "bg-gray-100 dark:bg-dark-bg-tertiary font-bold border-b-2 border-black dark:border-white"
               : ""
           }`}
         >
@@ -1199,9 +1209,9 @@ const BottomSheet = ({
         <button
           type="button"
           onClick={() => handleTabChange("data")}
-          className={`px-4 py-2 flex-1 text-center ${
+          className={`px-4 py-2 flex-1 text-center dark:text-dark-text-primary ${
             activeTab === "data"
-              ? "bg-gray-100 font-bold border-b-2 border-black"
+              ? "bg-gray-100 dark:bg-dark-bg-tertiary font-bold border-b-2 border-black dark:border-white"
               : ""
           }`}
         >
@@ -1210,7 +1220,7 @@ const BottomSheet = ({
       </div>
 
       {/* Content Area - This is the scrollable container */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto dark:bg-dark-bg-secondary">
         {children(activeTab, isResizing)}
       </div>
     </div>
@@ -1243,10 +1253,10 @@ function CharmDetailView() {
         <div className="flex-grow overflow-hidden relative">
           {operationContextValue.loading && (
             <div
-              className="absolute inset-0 backdrop-blur-sm bg-white/60 flex flex-col items-center justify-center z-10 transition-opacity duration-300 ease-in-out"
+              className="absolute inset-0 backdrop-blur-sm bg-white/60 dark:bg-black/60 flex flex-col items-center justify-center z-10 transition-opacity duration-300 ease-in-out"
               style={{ opacity: operationContextValue.loading ? 1 : 0 }}
             >
-              <div className="text-lg font-bold">thinking</div>
+              <div className="text-lg font-bold dark:text-white">thinking</div>
               <LoadingSpinner
                 blendMode="exclusion"
                 height={1024}

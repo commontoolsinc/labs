@@ -14,6 +14,7 @@ import {
   useStorageBroadcast,
 } from "@/components/NetworkInspector.tsx";
 import { useAnimationSmoothing } from "@/hooks/use-animation-smoothing.ts";
+import { useTheme } from "@/contexts/ThemeContext.tsx";
 
 // Constants
 const COLORS = {
@@ -147,6 +148,7 @@ export function User() {
   const [did, setDid] = useState<string | undefined>(undefined);
   const { status, updateStatus } = useStatusMonitor();
   const { avatarShape } = useAvatarGenerator(did);
+  const { isDarkMode } = useTheme();
 
   // Define avatar size constant
   const AVATAR_SIZE = 24;
@@ -170,7 +172,7 @@ export function User() {
   const bounceRef = useRef(0);
   const easedPushCountRef = useRef(0);
   const easedPullCountRef = useRef(0);
-  
+
   // Use our shared animation smoothing hook
   const { updateValue, getValue, rafRef } = useAnimationSmoothing();
 
@@ -218,24 +220,26 @@ export function User() {
       const pushResult = updateValue("push", actualPushCount);
       const pullResult = updateValue("pull", actualPullCount);
       const errorResult = updateValue("error", actualErrorCount);
-      
+
       // Update our refs with the eased values
       easedPushCountRef.current = pushResult.value;
       easedPullCountRef.current = pullResult.value;
-      
+
       // Use the more detailed states from our animation hook
       // hasActualValue = currently has a real value > 0
       // hadRecentActivity = had activity within the min animation duration window
-      const pushActive = pushResult.hasActualValue; 
+      const pushActive = pushResult.hasActualValue;
       const pullActive = pullResult.hasActualValue;
       const errorActive = errorResult.hasActualValue;
-      
+
       // If we have actual activity or recent activity with a positive value, animate
       const hasPushValues = pushResult.value > 0;
       const hasPullValues = pullResult.value > 0;
-      const animatingPush = pushActive || (pushResult.hadRecentActivity && hasPushValues && !pullActive);
-      const animatingPull = pullActive || (pullResult.hadRecentActivity && hasPullValues && !pushActive);
-      
+      const animatingPush = pushActive ||
+        (pushResult.hadRecentActivity && hasPushValues && !pullActive);
+      const animatingPull = pullActive ||
+        (pullResult.hadRecentActivity && hasPullValues && !pushActive);
+
       // Display counts (the hook now handles minimum values)
       const displayPushCount = pushResult.value;
       const displayPullCount = pullResult.value;
@@ -454,21 +458,29 @@ export function User() {
   }, [updateValue, rafRef]);
 
   return (
-    <div className="relative">
-      {/* SVG Ring with requestAnimationFrame animation */}
+    <div className="relative group">
+      <div
+        ref={avatarRef}
+        className="user-avatar flex items-center justify-center cursor-pointer overflow-hidden bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-full"
+        style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
+        onClick={() => clearAuthentication()}
+      >
+        <div
+          className="w-full h-full flex items-center justify-center"
+          dangerouslySetInnerHTML={{ __html: avatarShape }}
+        >
+        </div>
+      </div>
+
       <svg
         ref={svgRef}
-        width={SVG_SIZE}
-        height={SVG_SIZE}
-        viewBox={`0 0 ${SVG_SIZE} ${SVG_SIZE}`}
+        className="absolute"
         style={{
-          position: "absolute",
-          top: "-4px",
-          left: "-4px",
-          opacity: 0,
-          pointerEvents: "none",
-          backgroundColor: "white",
-          borderRadius: "50%",
+          width: SVG_SIZE,
+          height: SVG_SIZE,
+          left: -4,
+          top: -4,
+          transform: `rotate(${rotationRef.current}deg)`,
         }}
       >
         <circle
@@ -477,87 +489,47 @@ export function User() {
           r={SVG_RADIUS}
           fill="none"
           stroke={COLORS.BLUE}
-          strokeWidth="2.5"
-          strokeDasharray="6 6"
-          strokeLinecap="round"
+          strokeWidth="1.5"
+          strokeDasharray="0"
         />
       </svg>
 
-      {/* User Avatar Container */}
+      {/* Activity indicators */}
       <div
-        id="user-avatar"
-        onClick={clearAuthentication}
-        className="relative group cursor-pointer"
-        style={{ width: `${AVATAR_SIZE}px`, height: `${AVATAR_SIZE}px` }}
+        ref={pushErrorRef}
+        className={`absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full ${
+          bounceRef.current > 0 ? "scale-110" : "scale-100"
+        } transition-transform`}
+        style={{ opacity: opacityRef.current }}
       >
-        <div
-          ref={avatarRef}
-          style={{
-            width: `${AVATAR_SIZE}px`,
-            height: `${AVATAR_SIZE}px`,
-            transition: "box-shadow 0.2s ease",
-            transformOrigin: "center center",
-            borderRadius: "50%",
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-          dangerouslySetInnerHTML={{ __html: avatarShape }}
-        />
-
-        {/* Push Error Indicator */}
-        <div
-          ref={pushErrorRef}
-          style={{
-            display: "none",
-            position: "absolute",
-            top: "-8px",
-            right: "-8px",
-            backgroundColor: "red",
-            borderRadius: "50%",
-            width: "18px",
-            height: "18px",
-            alignItems: "center",
-            justifyContent: "center",
-            boxShadow: "0 0 5px rgba(255,0,0,0.7)",
-            zIndex: 10,
-          }}
-        >
-          <div className="flex items-center">
-            <FaExclamationTriangle size={8} color="white" />
-            <FaArrowUp size={6} color="white" />
-          </div>
+        <div className="absolute inset-0 bg-red-500 rounded-full animate-ping opacity-75">
         </div>
+      </div>
 
-        {/* Pull Error Indicator */}
-        <div
-          ref={pullErrorRef}
-          style={{
-            display: "none",
-            position: "absolute",
-            bottom: "-8px",
-            right: "-8px",
-            backgroundColor: "red",
-            borderRadius: "50%",
-            width: "18px",
-            height: "18px",
-            alignItems: "center",
-            justifyContent: "center",
-            boxShadow: "0 0 5px rgba(255,0,0,0.7)",
-            zIndex: 10,
-          }}
-        >
-          <div className="flex items-center">
-            <FaExclamationTriangle size={8} color="white" />
-            <FaArrowDown size={6} color="white" />
-          </div>
+      <div
+        ref={pullErrorRef}
+        className={`absolute -bottom-1 -right-1 w-3 h-3 bg-orange-500 rounded-full ${
+          bounceRef.current > 0 ? "scale-110" : "scale-100"
+        } transition-transform`}
+        style={{ opacity: opacityRef.current }}
+      >
+        <div className="absolute inset-0 bg-orange-500 rounded-full animate-ping opacity-75">
         </div>
+      </div>
 
-        <div
-          ref={tooltipRef}
-          className="absolute top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[9999]"
-        >
-          Click to log out
+      {/* Tooltip */}
+      <div
+        ref={tooltipRef}
+        className="absolute right-0 top-full mt-2 p-2 rounded-md shadow-lg z-10 text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-dark-bg-tertiary text-black dark:text-dark-text-primary border border-gray-200 dark:border-dark-border"
+      >
+        <div className="text-center user-status">Status: Connected</div>
+        <div className="flex gap-1 items-center">
+          <FaArrowUp className="text-blue-500" />
+          <span className="push-count">0</span>
+          <FaArrowDown className="text-purple-500 ml-1" />
+          <span className="pull-count">0</span>
+          <FaExclamationTriangle className="text-orange-500 ml-1" />
+          <span className="error-count">0</span>
         </div>
       </div>
     </div>

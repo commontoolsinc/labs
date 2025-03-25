@@ -37,7 +37,7 @@ export function SpellPreview({ ui, className = "" }: SpellPreviewProps) {
   return (
     <div
       ref={previewRef}
-      className={`w-full bg-gray-50 rounded h-full pointer-events-none select-none ${className}`}
+      className={`w-full bg-gray-50 dark:bg-dark-bg-tertiary rounded h-full pointer-events-none select-none ${className}`}
     />
   );
 }

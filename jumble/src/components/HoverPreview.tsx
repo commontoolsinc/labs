@@ -36,7 +36,7 @@ export const HoverPreview = memo(
     return (
       <div
         key={key}
-        className="fixed z-50 w-128 pointer-events-none flex flex-col border border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.5)] rounded-[4px] animate-[fadeInScale_0.2s_ease-out]"
+        className="fixed z-50 w-128 pointer-events-none flex flex-col border border-black dark:border-gray-600 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.5)] dark:shadow-[4px_4px_0px_0px_rgba(80,80,80,0.5)] rounded-[4px] animate-[fadeInScale_0.2s_ease-out]"
         style={{
           left: `${position.x}px`,
           top: `${position.y}px`,
@@ -48,11 +48,11 @@ export const HoverPreview = memo(
           userSelect: "none",
         }}
       >
-        <CommonCard className="p-2 shadow-xl bg-white rounded-[4px] flex flex-col h-full">
-          <h3 className="text-xl font-semibold text-gray-800 mb-2">
+        <CommonCard className="p-2 shadow-xl bg-white dark:bg-dark-bg-secondary rounded-[4px] flex flex-col h-full">
+          <h3 className="text-xl font-semibold text-gray-800 dark:text-white mb-2">
             {name + ` (#${id!.slice(-4)})`}
           </h3>
-          <div className="flex-grow bg-gray-50 rounded border border-gray-100 pointer-events-none select-none overflow-hidden">
+          <div className="flex-grow bg-gray-50 dark:bg-dark-bg-tertiary rounded border border-gray-100 dark:border-dark-border pointer-events-none select-none overflow-hidden">
             <CharmRenderer
               className="w-full h-full rounded-[4px]"
               charm={charm}

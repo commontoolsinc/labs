@@ -8,6 +8,7 @@ import { getRecipe } from "@commontools/runner";
 import { createPath } from "@/routes.ts";
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
 import { AuthenticationView } from "@/views/AuthenticationView.tsx";
+import { useTheme } from "@/contexts/ThemeContext.tsx";
 
 function Launcher() {
   const { spellId, replicaName } = useParams<{
@@ -16,6 +17,7 @@ function Launcher() {
   }>();
   const navigate = useNavigate();
   const { charmManager, currentReplica } = useCharmManager();
+  const { isDarkMode } = useTheme();
 
   useEffect(() => {
     console.log("SpellbookLaunchView effect triggered", {
@@ -120,10 +122,12 @@ function Launcher() {
 
   return (
     <CharmsManagerProvider>
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex items-center justify-center h-screen bg-gray-50 dark:bg-dark-bg-primary">
         <div className="text-center">
-          <h1 className="text-2xl font-bold mb-4">Launching Spell...</h1>
-          <p className="text-gray-600">
+          <h1 className="text-2xl font-bold mb-4 dark:text-white">
+            Launching Spell...
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400">
             Please wait while we prepare your spell.
           </p>
         </div>

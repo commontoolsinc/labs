@@ -7,8 +7,10 @@ import { useAction } from "@/contexts/ActionManagerContext.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { NAME } from "@commontools/builder";
+import { useTheme } from "@/contexts/ThemeContext.tsx";
 
 export function useGlobalActions() {
+  const { isDarkMode } = useTheme();
   const { charmId, replicaName } = useParams<CharmRouteParams>();
   const location = useLocation();
 
@@ -23,7 +25,7 @@ export function useGlobalActions() {
       () => ({
         id: "command-palette",
         label: "Commands",
-        icon: <MdOutlineStar fill="black" size={28} />,
+        icon: <MdOutlineStar fill={isDarkMode ? "white" : "black"} size={28} />,
         onClick: () => {
           globalThis.dispatchEvent(new CustomEvent("open-command-center"));
         },
@@ -62,7 +64,7 @@ export function useGlobalActions() {
       () => ({
         id: "publish",
         label: "Publish",
-        icon: <MdShare fill="black" size={28} />,
+        icon: <MdShare fill={isDarkMode ? "white" : "black"} size={28} />,
         onClick: () => {
           globalThis.dispatchEvent(
             new CustomEvent("publish-charm", {

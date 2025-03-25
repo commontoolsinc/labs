@@ -51,7 +51,6 @@ export class CommonIframeSandboxElement extends LitElement {
     width: 100%;
     height: 100%;
     overflow: hidden;
-    background-color: #ddd;
   }
   #crash-message {
     width: 50%;

@@ -60,9 +60,9 @@ export default function SpellbookIndexView() {
     );
 
   return (
-    <div className="shell h-screen flex flex-col bg-gray-50 border-2 border-black">
+    <div className="shell h-screen flex flex-col bg-gray-50 dark:bg-dark-bg-primary border-2 border-black dark:border-gray-600">
       <SpellbookHeader />
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto dark:text-dark-text-primary">
         <div className="p-4 pb-8">{content}</div>
       </div>
     </div>

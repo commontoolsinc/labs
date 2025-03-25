@@ -120,12 +120,14 @@ export const CharmTable = ({
     const buttonConfig = isTrashView
       ? {
         action: () => charmManager.restoreFromTrash({ "/": id }),
-        className: "text-gray-400 hover:text-green-500 transition-colors",
+        className:
+          "text-gray-400 hover:text-green-500 dark:text-gray-500 dark:hover:text-green-400 transition-colors",
         icon: <RestoreIcon />,
       }
       : {
         action: () => charmManager.remove({ "/": id }),
-        className: "text-gray-400 hover:text-red-500 transition-colors",
+        className:
+          "text-gray-400 hover:text-red-500 dark:text-gray-500 dark:hover:text-red-400 transition-colors",
         icon: <TrashIcon />,
       };
 
@@ -157,13 +159,13 @@ export const CharmTable = ({
 
   return (
     <div className="
-      border border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.5)] rounded-[4px] transition-all
+      border border-black dark:border-gray-600 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.5)] dark:shadow-[4px_4px_0px_0px_rgba(80,80,80,0.5)] rounded-[4px] transition-all
       transition-[border,box-shadow,transform] duration-100 ease-in-out
-      group relative
+      group relative dark:bg-dark-bg-secondary
     ">
       {selectedCharms.length > 0 && (
-        <div className="bg-gray-100 p-4 border-b flex justify-between items-center">
-          <div className="text-sm">
+        <div className="bg-gray-100 dark:bg-dark-bg-tertiary p-4 border-b dark:border-dark-border flex justify-between items-center">
+          <div className="text-sm dark:text-dark-text-primary">
             {selectedCharms.length} charm{pluralSuffix} selected
           </div>
           <button
@@ -176,13 +178,13 @@ export const CharmTable = ({
         </div>
       )}
       <div className="overflow-hidden w-full rounded-[4px]">
-        <table className="w-full text-sm text-left text-gray-500 rounded-[4px]">
-          <thead className="text-xs text-gray-700 uppercase bg-gray-50">
+        <table className="w-full text-sm text-left text-gray-500 dark:text-dark-text-secondary rounded-[4px]">
+          <thead className="text-xs text-gray-700 dark:text-dark-text-primary uppercase bg-gray-50 dark:bg-dark-bg-tertiary">
             <tr>
               <th scope="col" className="px-6 py-3">
                 <input
                   type="checkbox"
-                  className="h-4 w-4"
+                  className="h-4 w-4 accent-gray-500 dark:accent-blue-400 dark:border-gray-500 dark:bg-dark-bg-tertiary"
                   onChange={selectAllCharms}
                   checked={allSelected}
                 />
@@ -199,19 +201,19 @@ export const CharmTable = ({
               return (
                 <tr
                   key={id}
-                  className={`bg-white border-b hover:bg-gray-50 relative ${
-                    isSelected ? "bg-blue-50" : ""
+                  className={`bg-white dark:bg-dark-bg-secondary border-b dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-bg-tertiary relative ${
+                    isSelected ? "bg-blue-50 dark:bg-blue-900/30" : ""
                   }`}
                 >
                   <td className="px-6 py-4">
                     <input
                       type="checkbox"
-                      className="h-4 w-4"
+                      className="h-4 w-4 accent-gray-500 dark:accent-blue-400 dark:border-gray-500 dark:bg-dark-bg-tertiary"
                       checked={isSelected}
                       onChange={() => toggleCharmSelection(id!)}
                     />
                   </td>
-                  <td className="px-6 py-4 font-medium text-gray-900">
+                  <td className="px-6 py-4 font-medium text-gray-900 dark:text-white">
                     <CharmLink charm={charm} showHash className="font-medium" />
                   </td>
                   <td className="px-6 py-4">

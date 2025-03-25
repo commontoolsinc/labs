@@ -11,7 +11,6 @@ html, body {
   margin: 0;
   height: 100vh;
   overflow: hidden;
-  background-color: #ddd;
 }
 
 * {
