@@ -223,15 +223,23 @@ export function User() {
       easedPushCountRef.current = pushResult.value;
       easedPullCountRef.current = pullResult.value;
       
-      // Activity states based on the hook's results
-      const pushActive = pushResult.isActive;
-      const pullActive = pullResult.isActive;
-      const errorActive = errorResult.isActive;
+      // Use the more detailed states from our animation hook
+      // hasActualValue = currently has a real value > 0
+      // hadRecentActivity = had activity within the min animation duration window
+      const pushActive = pushResult.hasActualValue; 
+      const pullActive = pullResult.hasActualValue;
+      const errorActive = errorResult.hasActualValue;
       
-      // Display counts - even if count is 0 but animation is active, show at least 1
-      const displayPushCount = pushActive && pushResult.value === 0 ? 1 : pushResult.value;
-      const displayPullCount = pullActive && pullResult.value === 0 ? 1 : pullResult.value;
-      const displayErrorCount = errorActive && errorResult.value === 0 ? 1 : errorResult.value;
+      // If we have actual activity or recent activity with a positive value, animate
+      const hasPushValues = pushResult.value > 0;
+      const hasPullValues = pullResult.value > 0;
+      const animatingPush = pushActive || (pushResult.hadRecentActivity && hasPushValues && !pullActive);
+      const animatingPull = pullActive || (pullResult.hadRecentActivity && hasPullValues && !pushActive);
+      
+      // Display counts (the hook now handles minimum values)
+      const displayPushCount = pushResult.value;
+      const displayPullCount = pullResult.value;
+      const displayErrorCount = errorResult.value;
 
       // Default status message
       let statusMessage = "Click to log out";
@@ -296,7 +304,7 @@ export function User() {
 
         statusMessage = statusParts.length > 0 ? statusParts.join(" ") : "Idle";
 
-        if (pushActive) {
+        if (animatingPush) {
           // Push events
           const intensity = Math.max(easedPushCountRef.current, 0.3);
           opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
@@ -321,7 +329,7 @@ export function User() {
           avatarRef.current.style.boxShadow = `0 0 ${
             bounceRef.current * 3
           }px ${COLORS.GREEN}`;
-        } else if (pullActive) {
+        } else if (animatingPull) {
           // Pull events
           const intensity = Math.max(easedPullCountRef.current, 0.3);
           opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
