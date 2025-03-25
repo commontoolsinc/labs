@@ -25,7 +25,10 @@ import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { charmId } from "@/utils/charms.ts";
 import { formatPromptWithMentions } from "@/utils/format.ts";
 import { NAME } from "@commontools/builder";
-import { useLiveSpecPreview, SpecPreviewModel } from "@/hooks/use-live-spec-preview.ts";
+import {
+  SpecPreviewModel,
+  useLiveSpecPreview,
+} from "@/hooks/use-live-spec-preview.ts";
 import { SpecPreview } from "@/components/SpecPreview.tsx";
 
 function CommandProcessor({
@@ -68,31 +71,38 @@ function CommandProcessor({
   switch (mode.type) {
     case "input":
       // State for preview model selection
-      const [previewModel, setPreviewModel] = useState<SpecPreviewModel>("fast");
-      
-      // Get spec preview as user types in command center
-      const { previewSpec, previewPlan, loading: isPreviewLoading } = useLiveSpecPreview(
-        inputValue, 
-        true, 
-        1000, 
-        previewModel
+      const [previewModel, setPreviewModel] = useState<SpecPreviewModel>(
+        "fast",
       );
-      
+
+      // Get spec preview as user types in command center
+      const { previewSpec, previewPlan, loading: isPreviewLoading } =
+        useLiveSpecPreview(
+          inputValue,
+          true,
+          1000,
+          previewModel,
+        );
+
       return (
         <Command.Group>
           <div className="flex flex-col gap-2 mb-4">
             <div className="relative">
               {/* The floating spec preview will be positioned above the composer */}
-              <SpecPreview 
+              <SpecPreview
                 spec={previewSpec}
                 plan={previewPlan}
                 loading={isPreviewLoading}
                 visible={true}
                 floating={true}
               />
-              
+
               <Composer
-                style={{ width: "100%", height: "96px", border: "1px solid #ccc" }}
+                style={{
+                  width: "100%",
+                  height: "96px",
+                  border: "1px solid #ccc",
+                }}
                 placeholder={mode.placeholder || "Enter input"}
                 value={inputValue}
                 onValueChange={setInputValue}
@@ -102,17 +112,22 @@ function CommandProcessor({
                 autoFocus
               />
             </div>
-            
-            <div className="flex justify-between items-center">
+
+            <ComposerSubmitBar
+              loading={context.loading}
+              operation="Send"
+              onSubmit={onSubmit}
+            >
               <div className="flex items-center space-x-2">
                 <div className="flex items-center text-xs">
-                  <label className="mr-2">Preview model:</label>
                   <div className="flex border border-gray-300 rounded-full overflow-hidden">
                     <button
                       type="button"
                       onClick={() => setPreviewModel("fast")}
                       className={`px-2 py-1 text-xs ${
-                        previewModel === "fast" ? "bg-black text-white" : "bg-gray-100"
+                        previewModel === "fast"
+                          ? "bg-black text-white"
+                          : "bg-gray-100"
                       }`}
                     >
                       Fast
@@ -121,7 +136,9 @@ function CommandProcessor({
                       type="button"
                       onClick={() => setPreviewModel("think")}
                       className={`px-2 py-1 text-xs ${
-                        previewModel === "think" ? "bg-black text-white" : "bg-gray-100"
+                        previewModel === "think"
+                          ? "bg-black text-white"
+                          : "bg-gray-100"
                       }`}
                     >
                       Precise
@@ -129,12 +146,7 @@ function CommandProcessor({
                   </div>
                 </div>
               </div>
-              <ComposerSubmitBar
-                loading={context.loading}
-                operation="Send"
-                onSubmit={onSubmit}
-              />
-            </div>
+            </ComposerSubmitBar>
           </div>
         </Command.Group>
       );
