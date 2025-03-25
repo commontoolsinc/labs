@@ -77,7 +77,7 @@ export async function addCharmToBG({
       integration,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      enabled: true,
+      disabledAt: undefined,
       runs: 0,
     });
 
@@ -112,9 +112,7 @@ export async function getBGUpdaterCharmsCell() {
   return charmsCell;
 }
 
-export async function getBGUpdaterCellCharmsCell(): Promise<
-  Cell<Cell<BGCharmEntry>[]>
-> {
+export async function newGetFunc(): Promise<Cell<Cell<BGCharmEntry>[]>> {
   if (!storage.hasSigner()) {
     throw new Error("Storage has no signer");
   }
@@ -125,12 +123,10 @@ export async function getBGUpdaterCellCharmsCell(): Promise<
   const schema = {
     type: "array",
     items: {
-      type: "object",
-      properties: CharmEntrySchema.properties,
+      ...CharmEntrySchema,
       asCell: true,
     },
     default: [],
-    asCell: true,
   } as const satisfies JSONSchema;
 
   const charmsCell = getCell(SYSTEM_SPACE_ID, CELL_CAUSE, schema);

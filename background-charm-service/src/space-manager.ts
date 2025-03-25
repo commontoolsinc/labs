@@ -82,7 +82,9 @@ export class SpaceManager {
           bg: b,
           enabled: !serverState.disabledAt,
         });
-        this.pendingCharms.push(serverState.charmId);
+        if (!serverState.disabledAt) {
+          this.pendingCharms.push(serverState.charmId);
+        }
       } else {
         // if server thinks charms disabled state has changed, update our state
         if (!serverState.disabledAt && !localState.enabled) {
@@ -96,8 +98,9 @@ export class SpaceManager {
             ...localState,
             enabled: false,
           });
-          this.pendingCharms = this.pendingCharms.filter((job) =>
-            job !== serverState.charmId
+          // remove newly disabled charm from pending list
+          this.pendingCharms = this.pendingCharms.filter((charmId) =>
+            charmId !== serverState.charmId
           );
         }
       }
@@ -105,6 +108,11 @@ export class SpaceManager {
 
     const removedCharms = localCharms.filter((key) => !serverCharms.has(key));
     removedCharms.forEach((key) => this.state.delete(key));
+    removedCharms.forEach((key) =>
+      this.pendingCharms = this.pendingCharms.filter((charmId) =>
+        charmId !== key
+      )
+    );
 
     log(`Charm scheduler monitoring ${serverCharms.size} charms`);
   }
@@ -146,6 +154,7 @@ export class SpaceManager {
 
   private async execLoop(): Promise<void> {
     while (true) {
+      // fixme(ja): we could await a race of the following:
       if (!this.workerController.ready) {
         log("worker controller not ready, sleeping");
         await sleep(this.pollingIntervalMs);
@@ -207,21 +216,20 @@ export class SpaceManager {
       if (!result.success) {
         this.disableCharm(charmId);
       } else {
-        this.enableCharm(charmId);
+        this.recordSuccess(charmId);
       }
     }).finally(() => {
       this.activeCharms.delete(charmId);
     });
   }
 
-  private enableCharm(charmId: string) {
+  private recordSuccess(charmId: string) {
     const charm = this.state.get(charmId);
     if (!charm) {
       return;
     }
     charm.bg.set({
       ...charm.bg.get(),
-      disabledAt: undefined,
       lastRun: Date.now(),
     });
     charm.enabled = true;
