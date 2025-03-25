@@ -171,10 +171,27 @@ export const setupIframe = () =>
         console.log("write", key, value, JSON.stringify(value));
         if (isCell(context)) {
           addCommonIDfromObjectID(value);
-          if (isObj(value) && !Array.isArray(value)) {
+          const currentValue = context.key(key).get();
+          const currentValueType = currentValue !== undefined
+            ? Array.isArray(currentValue) ? "array" : typeof currentValue
+            : undefined;
+          const type = context.key(key).schema?.type ??
+            currentValueType ?? typeof value;
+          if (type === "object" && isObj(value) && !Array.isArray(value)) {
             context.key(key).update(value);
-          } else {
+          } else if (
+            (type === "array" && Array.isArray(value)) ||
+            (type === "integer" && typeof value === "number") ||
+            (type === typeof value as string)
+          ) {
             context.key(key).set(value);
+          } else {
+            console.warn(
+              "write skipped due to type",
+              type,
+              value,
+              context.key(key).schema,
+            );
           }
         } else {
           context[key] = value;
