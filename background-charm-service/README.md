@@ -33,7 +33,7 @@ The Background Charm Service runs charms in the background with:
    - Maintains charm status (enabled/disabled, last run time, errors)
    - Communicates with a dedicated WorkerController
 
-3. **WorkerController** (execution-environment.ts)
+3. **WorkerController** (worker-controller.ts)
    - Manages communication with the Worker
    - Handles message passing and timeout tracking
    - Provides interface for charm execution
