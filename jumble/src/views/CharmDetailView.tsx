@@ -76,6 +76,8 @@ interface CharmOperationContextType {
   previewSpec: string;
   previewPlan: string;
   isPreviewLoading: boolean;
+  previewModel: SpecPreviewModel;
+  setPreviewModel: (model: SpecPreviewModel) => void;
   handlePerformOperation: () => void;
   handleCancelVariants: () => void;
   performOperation: (
@@ -401,6 +403,8 @@ function useCharmOperation() {
     previewSpec,
     previewPlan,
     isPreviewLoading,
+    previewModel,
+    setPreviewModel,
     handlePerformOperation,
     handleCancelVariants,
     performOperation,
@@ -766,6 +770,8 @@ const OperationTab = () => {
     previewSpec,
     previewPlan,
     isPreviewLoading,
+    previewModel,
+    setPreviewModel
   } = useCharmOperationContext();
 
   const mentions = useCharmMentions();

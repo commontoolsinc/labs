@@ -25,7 +25,7 @@ export function useLiveSpecPreview(
   // Map the model type to actual model identifiers
   const getModelId = useCallback((modelType: SpecPreviewModel) => {
     return modelType === "fast"
-      ? "google:gemini-2.0-flash"
+      ? "google:gemini-2.0-flash-thinking"
       : "anthropic:claude-3-7-sonnet-latest";
   }, []);
 
