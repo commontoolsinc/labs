@@ -223,10 +223,10 @@ export function User() {
       easedPushCountRef.current = pushResult.value;
       easedPullCountRef.current = pullResult.value;
       
-      // Activity states based on the hook's results
-      const pushActive = pushResult.isActive;
-      const pullActive = pullResult.isActive;
-      const errorActive = errorResult.isActive;
+      // Activity states based on actual values (not animation active flags)
+      const pushActive = pushResult.value > 0;
+      const pullActive = pullResult.value > 0;
+      const errorActive = errorResult.value > 0;
       
       // Display counts (the hook now handles minimum values)
       const displayPushCount = pushResult.value;
