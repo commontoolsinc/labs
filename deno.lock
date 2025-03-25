@@ -90,6 +90,7 @@
     "npm:@types/three@0.173": "0.173.0",
     "npm:@uiw/codemirror-theme-vscode@^4.23.7": "4.23.10_@codemirror+view@6.36.4",
     "npm:@uiw/react-codemirror@^4.23.7": "4.23.10_@babel+runtime@7.26.10_@codemirror+state@6.5.2_@codemirror+theme-one-dark@6.1.2_@codemirror+view@6.36.4_codemirror@6.0.1_react@18.3.1_react-dom@18.3.1__react@18.3.1_@codemirror+commands@6.8.0",
+    "npm:@uiw/react-json-view@*": "2.0.0-alpha.30_@babel+runtime@7.26.10_react@18.3.1_react-dom@18.3.1__react@18.3.1",
     "npm:@uiw/react-json-view@2.0.0-alpha.30": "2.0.0-alpha.30_@babel+runtime@7.26.10_react@18.3.1_react-dom@18.3.1__react@18.3.1",
     "npm:@use-gesture/react@^10.3.1": "10.3.1_react@18.3.1",
     "npm:@vercel/otel@^1.10.1": "1.10.4_@opentelemetry+api@1.9.0_@opentelemetry+api-logs@0.57.2_@opentelemetry+instrumentation@0.57.2__@opentelemetry+api@1.9.0_@opentelemetry+resources@1.30.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-logs@0.57.2__@opentelemetry+api@1.9.0_@opentelemetry+sdk-metrics@1.30.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-trace-base@1.30.1__@opentelemetry+api@1.9.0",

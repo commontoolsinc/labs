@@ -1,8 +1,16 @@
 import * as Inspector from "@commontools/runner/storage/inspector";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
-import JsonView from "@uiw/react-json-view";
+import JsonViewImport from "@uiw/react-json-view";
 import { githubDarkTheme } from "@uiw/react-json-view/githubDark";
+
+// Type assertion to help TypeScript understand this is a valid React component
+const JsonView: React.FC<{
+  value: any;
+  style: any;
+  collapsed?: number | boolean;
+}> = JsonViewImport as any;
+
 import { getDoc } from "@commontools/runner";
 import { useAnimationSmoothing } from "@/hooks/use-animation-smoothing.ts";
 
@@ -32,65 +40,6 @@ export function useStatusMonitor() {
   return { status, updateStatus };
 }
 
-// Mock data for testing the ModelInspector component
-const createMockModel = () => {
-  const now = Date.now();
-
-  return {
-    connection: {
-      ready: { ok: { attempt: 3 } },
-      time: now,
-    },
-    push: {
-      "job:tx1": {
-        ok: {
-          invocation: { cmd: "/memory/transact", args: { data: "example1" } },
-          authorization: { access: { "tx1": {} } },
-        },
-      },
-      "job:tx2": {
-        error: Object.assign(new Error("Transaction failed"), {
-          reason: "conflict",
-          time: now - 5000,
-        }),
-      },
-    },
-    pull: {
-      "job:query1": {
-        ok: {
-          invocation: { cmd: "/memory/query", args: { filter: "all" } },
-          authorization: { access: { "query1": {} } },
-        },
-      },
-      "job:query2": {
-        error: Object.assign(new Error("Query timed out"), {
-          reason: "timeout",
-          time: now - 2000,
-        }),
-      },
-    },
-    subscriptions: {
-      "job:sub1": {
-        source: { cmd: "/memory/query/subscribe", args: { topic: "updates" } },
-        opened: now - 10000,
-        updated: now - 1000,
-        value: { id: "update-123", status: "active", timestamp: now - 1000 },
-      },
-      "job:sub2": {
-        source: {
-          cmd: "/memory/query/subscribe",
-          args: { topic: "notifications" },
-        },
-        opened: now - 20000,
-        updated: now - 500,
-        value: [
-          { id: "notif-1", message: "New message received", read: false },
-          { id: "notif-2", message: "Task completed", read: true },
-        ],
-      },
-    },
-  } as Inspector.Model;
-};
 
 // Example usage with dummy data
 export const DummyModelInspector: React.FC = () => {
@@ -104,9 +53,9 @@ export const DummyModelInspector: React.FC = () => {
 export const ToggleableNetworkInspector: React.FC<{ visible: boolean }> = ({ visible }) => {
   const { status, updateStatus } = useStatusMonitor();
   useStorageBroadcast(updateStatus);
-  
+
   if (!visible || !status.current) return null;
-  
+
   return <ModelInspector model={status.current} initiallyOpen={true} />;
 };
 const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean }> = ({ model, initiallyOpen = false }) => {
@@ -119,10 +68,10 @@ const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean
   const [, setRenderTrigger] = useState(0);
   const lastRenderTimeRef = useRef(0);
   const buttonTextRef = useRef<HTMLSpanElement>(null);
-  
+
   // Use our animation smoothing hook
   const { updateValue, getValue, rafRef } = useAnimationSmoothing();
-  
+
   // Set up render loop with requestAnimationFrame when inspector is open
   useEffect(() => {
     if (!isOpen) {
@@ -142,9 +91,9 @@ const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean
       }
       rafRef.current = requestAnimationFrame(renderLoop);
     };
-    
+
     rafRef.current = requestAnimationFrame(renderLoop);
-    
+
     return () => {
       if (rafRef.current) {
         cancelAnimationFrame(rafRef.current);
@@ -152,7 +101,7 @@ const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean
       }
     };
   }, [isOpen, rafRef]);
-  
+
   // Update button text with counts using requestAnimationFrame
   useEffect(() => {
     const updateCounts = () => {
@@ -160,38 +109,38 @@ const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean
         rafRef.current = requestAnimationFrame(updateCounts);
         return;
       }
-      
+
       // Count calculations
       const actualPushCount = Object.values(model.push).filter(v => v.ok).length;
       const actualPullCount = Object.values(model.pull).filter(v => v.ok).length;
       const pushErrorCount = Object.values(model.push).filter(v => v.error).length;
       const pullErrorCount = Object.values(model.pull).filter(v => v.error).length;
       const actualErrorCount = pushErrorCount + pullErrorCount;
-      
+
       // Update values with easing
       const pushResult = updateValue("push", actualPushCount);
       const pullResult = updateValue("pull", actualPullCount);
       const errorResult = updateValue("error", actualErrorCount);
-      
+
       // Create status text
       const statusParts = [];
       if (pushResult.value > 0) statusParts.push(`↑${pushResult.value}`);
       if (pullResult.value > 0) statusParts.push(`↓${pullResult.value}`);
       if (errorResult.value > 0) statusParts.push(`!${errorResult.value}`);
-      
-      const statusText = statusParts.length > 0 
+
+      const statusText = statusParts.length > 0
         ? `Inspector ${statusParts.join(" ")} ${isOpen ? "▼" : "▲"}`
         : `Inspector ${isOpen ? "▼" : "▲"}`;
-        
+
       buttonTextRef.current.textContent = statusText;
-      
+
       // Continue animation
       rafRef.current = requestAnimationFrame(updateCounts);
     };
-    
+
     // Start updating counts
     rafRef.current = requestAnimationFrame(updateCounts);
-    
+
     return () => {
       if (rafRef.current) {
         cancelAnimationFrame(rafRef.current);
@@ -302,7 +251,7 @@ const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean
       });
     }
   }, [model, filterText]);
-  
+
   // Define helper functions for filtering to avoid circular dependencies
   const filterItems = useCallback((items: any[], filter: string) => {
     try {
@@ -320,7 +269,7 @@ const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean
       });
     }
   }, []);
-  
+
   // Functions to count items efficiently
   const getActionCount = useCallback(() => {
     if (!filterText) {
@@ -338,15 +287,15 @@ const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean
       return filterItems(allItems, filterText).length;
     }
   }, [model.push, model.pull, filterText, filterItems]);
-  
+
   const getSubscriptionCount = useCallback(() => {
     if (!filterText) {
       // If no filter, just count the keys
       return Object.keys(model.subscriptions).length;
     } else {
       // If filter is applied, we need to check filtered items
-      const subEntries = Object.entries(model.subscriptions).map(([id, sub]) => ({ 
-        id, sub, type: "subscription" 
+      const subEntries = Object.entries(model.subscriptions).map(([id, sub]) => ({
+        id, sub, type: "subscription"
       }));
       return filterItems(subEntries, filterText).length;
     }
@@ -449,7 +398,7 @@ const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean
                   }`}
                 />
                 {filterText && (
-                  <button 
+                  <button
                     className="absolute right-1 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white"
                     onClick={() => setFilterText("")}
                   >
