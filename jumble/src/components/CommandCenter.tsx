@@ -79,58 +79,64 @@ function CommandProcessor({
       );
       
       return (
-        <div className="flex flex-col gap-2">
-          <Composer
-            style={{ width: "100%", height: "96px", border: "1px solid #ccc" }}
-            placeholder={mode.placeholder || "Enter input"}
-            value={inputValue}
-            onValueChange={setInputValue}
-            mentions={charmMentions}
-            onSubmit={onSubmit}
-            disabled={context.loading}
-            autoFocus
-          />
-          <div className="flex justify-between items-center">
-            <div className="flex items-center space-x-2">
-              <div className="flex items-center text-xs">
-                <label className="mr-2">Preview model:</label>
-                <div className="flex border border-gray-300 rounded-full overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => setPreviewModel("fast")}
-                    className={`px-2 py-1 text-xs ${
-                      previewModel === "fast" ? "bg-black text-white" : "bg-gray-100"
-                    }`}
-                  >
-                    Fast
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewModel("think")}
-                    className={`px-2 py-1 text-xs ${
-                      previewModel === "think" ? "bg-black text-white" : "bg-gray-100"
-                    }`}
-                  >
-                    Precise
-                  </button>
+        <Command.Group>
+          <div className="flex flex-col gap-2 mb-4">
+            <div className="relative">
+              {/* The floating spec preview will be positioned above the composer */}
+              <SpecPreview 
+                spec={previewSpec}
+                plan={previewPlan}
+                loading={isPreviewLoading}
+                visible={true}
+                floating={true}
+              />
+              
+              <Composer
+                style={{ width: "100%", height: "96px", border: "1px solid #ccc" }}
+                placeholder={mode.placeholder || "Enter input"}
+                value={inputValue}
+                onValueChange={setInputValue}
+                mentions={charmMentions}
+                onSubmit={onSubmit}
+                disabled={context.loading}
+                autoFocus
+              />
+            </div>
+            
+            <div className="flex justify-between items-center">
+              <div className="flex items-center space-x-2">
+                <div className="flex items-center text-xs">
+                  <label className="mr-2">Preview model:</label>
+                  <div className="flex border border-gray-300 rounded-full overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setPreviewModel("fast")}
+                      className={`px-2 py-1 text-xs ${
+                        previewModel === "fast" ? "bg-black text-white" : "bg-gray-100"
+                      }`}
+                    >
+                      Fast
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewModel("think")}
+                      className={`px-2 py-1 text-xs ${
+                        previewModel === "think" ? "bg-black text-white" : "bg-gray-100"
+                      }`}
+                    >
+                      Precise
+                    </button>
+                  </div>
                 </div>
               </div>
+              <ComposerSubmitBar
+                loading={context.loading}
+                operation="Send"
+                onSubmit={onSubmit}
+              />
             </div>
-            <ComposerSubmitBar
-              loading={context.loading}
-              operation="Send"
-              onSubmit={onSubmit}
-            />
           </div>
-          
-          {/* Show spec preview for input commands */}
-          <SpecPreview 
-            spec={previewSpec}
-            plan={previewPlan}
-            loading={isPreviewLoading}
-            visible={true}
-          />
-        </div>
+        </Command.Group>
       );
 
     case "confirm":

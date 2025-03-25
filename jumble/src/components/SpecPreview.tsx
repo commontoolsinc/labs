@@ -1,11 +1,13 @@
 import React from "react";
 import { DitheredCube } from "./DitherCube.tsx";
+import { animated, useSpring } from "@react-spring/web";
 
 interface SpecPreviewProps {
   spec: string;
   plan: string;
   loading: boolean;
   visible: boolean;
+  floating?: boolean;
 }
 
 /**
@@ -15,16 +17,46 @@ export function SpecPreview({
   spec, 
   plan,
   loading, 
-  visible 
+  visible,
+  floating = false
 }: SpecPreviewProps) {
+  // Calculate if we have content to show
+  const hasContent = loading || plan || spec;
+  
+  // Animation for sliding in/out
+  const springProps = useSpring({
+    opacity: visible && hasContent ? 1 : 0,
+    transform: visible && hasContent ? 'translateY(0%)' : 'translateY(-20%)',
+    maxHeight: visible && hasContent ? '500px' : '0px',
+    config: {
+      tension: 280,
+      friction: 24
+    }
+  });
+
   if (!visible) return null;
+  
+  // Different styles based on whether it's floating or inline
+  const containerClasses = floating
+    ? "preview-container border-2 border-black bg-white shadow-lg rounded-md overflow-hidden fixed z-50"
+    : "preview-container border-t-2 border-black pt-2 bg-white";
 
   return (
-    <div className="preview-container border-t-2 border-black pt-4 mb-4">
-      <div className="flex justify-between items-center mb-2">
+    <animated.div 
+      className={containerClasses}
+      style={{
+        ...springProps,
+        ...(floating ? {
+          width: 'calc(100% - 2rem)',
+          left: '1rem',
+          bottom: 'calc(100% + 0.5rem)' // Position above the composer
+        } : {})
+      }}
+    >
+      <div className="flex justify-between items-center p-2">
         <h3 className="text-sm font-bold">Live Specification Preview</h3>
       </div>
-      <div className="border p-3 bg-gray-50 rounded">
+      <div className="border-t p-3 bg-gray-50">
         {loading ? (
           <div className="flex items-center justify-center p-4">
             <DitheredCube
@@ -40,7 +72,7 @@ export function SpecPreview({
             {plan && (
               <div>
                 <div className="text-xs font-bold mb-1">PLAN</div>
-                <div className="font-mono text-sm whitespace-pre-wrap">
+                <div className="font-mono text-sm whitespace-pre-wrap max-h-[200px] overflow-y-auto">
                   {plan}
                 </div>
               </div>
@@ -48,7 +80,7 @@ export function SpecPreview({
             {spec && (
               <div>
                 <div className="text-xs font-bold mb-1">SPEC</div>
-                <div className="font-mono text-sm whitespace-pre-wrap">
+                <div className="font-mono text-sm whitespace-pre-wrap max-h-[200px] overflow-y-auto">
                   {spec}
                 </div>
               </div>
@@ -61,6 +93,6 @@ export function SpecPreview({
           </div>
         )}
       </div>
-    </div>
+    </animated.div>
   );
 }

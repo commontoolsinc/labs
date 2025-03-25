@@ -42,6 +42,10 @@ import { formatPromptWithMentions } from "@/utils/format.ts";
 import { CharmLink } from "@/components/CharmLink.tsx";
 import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
 import { SpecPreview } from "@/components/SpecPreview.tsx";
+import {
+  SpecPreviewModel,
+  useLiveSpecPreview,
+} from "@/hooks/use-live-spec-preview.ts";
 
 type Tab = "iterate" | "code" | "data";
 type OperationType = "iterate" | "extend";
@@ -231,11 +235,6 @@ function useCodeEditor(
     saveChanges,
   };
 }
-
-import {
-  SpecPreviewModel,
-  useLiveSpecPreview,
-} from "@/hooks/use-live-spec-preview.ts";
 
 // Hook for charm operations (iterate or extend)
 function useCharmOperation() {
@@ -771,7 +770,7 @@ const OperationTab = () => {
     previewPlan,
     isPreviewLoading,
     previewModel,
-    setPreviewModel
+    setPreviewModel,
   } = useCharmOperationContext();
 
   const mentions = useCharmMentions();
@@ -826,7 +825,9 @@ const OperationTab = () => {
             operation={operationType === "iterate" ? "Iterate" : "Extend"}
             onSubmit={handlePerformOperation}
           >
-            <div className="flex items-center mr-2">
+            {/* TODO(bf): restore in https://github.com/commontoolsinc/labs/issues/876 */}
+            {
+              /* <div className="flex items-center mr-2">
               <input
                 type="checkbox"
                 id="preview"
@@ -866,7 +867,8 @@ const OperationTab = () => {
                   </button>
                 </div>
               </div>
-            )}
+            )} */
+            }
 
             <div className="flex items-center">
               <input
@@ -908,12 +910,15 @@ const OperationTab = () => {
 
       {/* Content Container with single scrollbar */}
       <div className="flex-grow overflow-auto mt-3 -mx-4 px-4">
-        <SpecPreview
+        {/* TODO(bf): restore in https://github.com/commontoolsinc/labs/issues/876 */}
+        {
+          /* <SpecPreview
           spec={previewSpec}
           plan={previewPlan}
           loading={isPreviewLoading}
           visible={showPreview}
-        />
+        /> */
+        }
         <Variants />
         <Suggestions />
       </div>
