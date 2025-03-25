@@ -4,6 +4,7 @@ import { type BGCharmEntry, newGetFunc } from "@commontools/utils";
 import { log } from "./utils.ts";
 import { env } from "./env.ts";
 import { SpaceManager } from "./space-manager.ts";
+import { useCancelGroup } from "@commontools/runner";
 
 export class BackgroundCharmService {
   private charmsCell: Cell<Cell<BGCharmEntry>[]> | null = null;
@@ -54,6 +55,8 @@ export class BackgroundCharmService {
     const dids = new Set(charms.map((c) => c.get().space));
     log(`monitoring ${dids.size} spaces`);
 
+    const [cancel, addCancel] = useCancelGroup();
+
     for (const did of dids) {
       let scheduler = this.charmSchedulers.get(did);
       if (!scheduler) {
@@ -68,7 +71,9 @@ export class BackgroundCharmService {
 
       // we are only filtering charms because until the FIXME above is fixed
       const didCharms = charms.filter((c) => c.get().space === did);
-      scheduler.watch(didCharms);
+      addCancel(scheduler.watch(didCharms));
     }
+
+    return cancel;
   }
 }
