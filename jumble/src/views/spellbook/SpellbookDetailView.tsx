@@ -29,6 +29,7 @@ import { ActionButton } from "@/components/spellbook/ActionButton.tsx";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader.tsx";
 import { SpellPreview } from "@/components/spellbook/SpellPreview.tsx";
 import { createPath } from "@/routes.ts";
+import { useTheme } from "@/contexts/ThemeContext.tsx";
 
 export default function SpellbookDetailView() {
   const { spellId } = useParams<{ spellId: string }>();
@@ -39,6 +40,7 @@ export default function SpellbookDetailView() {
   const [isCommentsExpanded, setIsCommentsExpanded] = useState(true);
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(true);
   const [commentText, setCommentText] = useState("");
+  const { isDarkMode } = useTheme();
 
   // FIXME(jake): This should be moved to its own context, but avoiding for now since it will change with webauthn
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
@@ -174,7 +176,7 @@ export default function SpellbookDetailView() {
   const content = loading || !spell || !spellId
     ? (
       <div className="container mx-auto">
-        <div className="text-center">Loading spell...</div>
+        <div className="text-center dark:text-white">Loading spell...</div>
       </div>
     )
     : (
@@ -182,15 +184,19 @@ export default function SpellbookDetailView() {
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold">{spell.title}</h1>
-              <p className="text-gray-600">by {spell.author}</p>
+              <h1 className="text-3xl font-bold dark:text-white">
+                {spell.title}
+              </h1>
+              <p className="text-gray-600 dark:text-gray-400">
+                by {spell.author}
+              </p>
             </div>
             <div className="flex flex-wrap gap-2 justify-end">
               {spell.tags.map((tag) => (
                 <NavLink
                   key={tag}
                   to={`/spellbook?q=${encodeURIComponent(tag)}`}
-                  className="text-sm bg-gray-100 px-2 py-1 border border-black hover:bg-gray-200 cursor-pointer transition-colors"
+                  className="text-sm bg-gray-100 dark:bg-dark-bg-tertiary dark:text-dark-text-primary px-2 py-1 border border-black dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-dark-bg-primary cursor-pointer transition-colors"
                 >
                   {tag}
                 </NavLink>
@@ -199,8 +205,8 @@ export default function SpellbookDetailView() {
           </div>
         </div>
 
-        <div className="bg-white border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]">
-          <div className="relative aspect-video w-full border-b-2 border-black overflow-hidden">
+        <div className="bg-white dark:bg-dark-bg-secondary border-2 border-black dark:border-gray-600 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] dark:shadow-[2px_2px_0px_0px_rgba(80,80,80,0.5)]">
+          <div className="relative aspect-video w-full border-b-2 border-black dark:border-gray-600 overflow-hidden">
             <SpellPreview ui={spell.ui} />
           </div>
 
@@ -217,7 +223,12 @@ export default function SpellbookDetailView() {
 
               <ActionButton
                 icon={
-                  <LuHeart size={24} className={isLiked ? "fill-black" : ""} />
+                  <LuHeart
+                    size={24}
+                    className={isLiked
+                      ? (isDarkMode ? "fill-white" : "fill-black")
+                      : ""}
+                  />
                 }
                 label={`${spell.likes.length} ${
                   spell.likes.length === 1 ? "Like" : "Likes"
@@ -238,7 +249,7 @@ export default function SpellbookDetailView() {
                   icon={<LuTrash2 size={24} />}
                   label="Delete"
                   onClick={handleDelete}
-                  className="text-red-600 hover:text-red-700"
+                  className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
                   popoverMessage="Delete spell"
                 />
               )}
@@ -265,8 +276,10 @@ export default function SpellbookDetailView() {
               popoverMessage=""
             />
             {isDescriptionExpanded && (
-              <div className="p-8 border-2 border-black">
-                <p className="text-gray-600 text-lg">{spell.description}</p>
+              <div className="p-8 border-2 border-black dark:border-gray-600 dark:bg-dark-bg-secondary">
+                <p className="text-gray-600 dark:text-gray-300 text-lg">
+                  {spell.description}
+                </p>
               </div>
             )}
           </div>
@@ -288,11 +301,11 @@ export default function SpellbookDetailView() {
             popoverMessage=""
           />
           {isCommentsExpanded && (
-            <div className="p-8 border-2 border-black">
+            <div className="p-8 border-2 border-black dark:border-gray-600 dark:bg-dark-bg-secondary">
               <div className="flex flex-col gap-6">
                 <div className="flex flex-col gap-2">
                   <textarea
-                    className="w-full px-3 py-2 bg-white border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] focus:outline-none focus:shadow-[2px_2px_0px_0px_rgba(0,0,0,0.7)] placeholder:text-gray-500"
+                    className="w-full px-3 py-2 bg-white dark:bg-dark-bg-tertiary dark:text-white border-2 border-black dark:border-gray-600 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] dark:shadow-[2px_2px_0px_0px_rgba(80,80,80,0.5)] focus:outline-none focus:shadow-[2px_2px_0px_0px_rgba(0,0,0,0.7)] dark:focus:shadow-[2px_2px_0px_0px_rgba(100,100,100,0.6)] placeholder:text-gray-500 dark:placeholder:text-gray-400"
                     placeholder="Add a comment..."
                     rows={3}
                     value={commentText}
@@ -301,7 +314,7 @@ export default function SpellbookDetailView() {
                   <div className="flex justify-end">
                     <button
                       type="button"
-                      className="px-4 py-2 bg-black text-white hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="px-4 py-2 bg-black dark:bg-gray-700 text-white hover:bg-gray-800 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={handleComment}
                       disabled={!commentText.trim()}
                     >
@@ -324,12 +337,16 @@ export default function SpellbookDetailView() {
                           alt={comment.author}
                           className="w-6 h-6 rounded-full"
                         />
-                        <span className="font-semibold">{comment.author}</span>
-                        <span className="text-gray-600 text-sm">
+                        <span className="font-semibold dark:text-white">
+                          {comment.author}
+                        </span>
+                        <span className="text-gray-600 dark:text-gray-400 text-sm">
                           {new Date(comment.createdAt).toLocaleDateString()}
                         </span>
                       </div>
-                      <p className="text-gray-800">{comment.content}</p>
+                      <p className="text-gray-800 dark:text-gray-200">
+                        {comment.content}
+                      </p>
                     </div>
                   ))}
               </div>
@@ -353,7 +370,7 @@ export default function SpellbookDetailView() {
             popoverMessage=""
           />
           {isDetailsExpanded && (
-            <div className="p-8 border-2 border-black">
+            <div className="p-8 border-2 border-black dark:border-gray-600 dark:bg-dark-bg-secondary">
               {/* @ts-expect-error JsonView is imported as any */}
               <JsonView
                 value={spell.data}
@@ -369,7 +386,7 @@ export default function SpellbookDetailView() {
     );
 
   return (
-    <div className="shell h-screen flex flex-col bg-gray-50 border-2 border-black">
+    <div className="shell h-screen flex flex-col bg-gray-50 dark:bg-dark-bg-primary border-2 border-black dark:border-gray-600">
       <SpellbookHeader />
       <div className="flex-1 overflow-auto">
         <div className="p-4 pb-8">{content}</div>

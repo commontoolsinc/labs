@@ -8,7 +8,7 @@ const ActionButton = (
 ) => (
   <>
     {children}
-    <div className="absolute top-[-40px] left-1/2 -translate-x-1/2 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+    <div className="absolute top-[-40px] left-1/2 -translate-x-1/2 bg-gray-800 dark:bg-dark-bg-tertiary text-white dark:text-dark-text-primary px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
       {label}
     </div>
   </>
@@ -16,10 +16,10 @@ const ActionButton = (
 
 const actionButtonStyles = `
   flex items-center justify-center w-12 h-12
-  border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]
-  hover:translate-y-[-2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,0.7)]
+  border-2 border-black dark:border-gray-600 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] dark:shadow-[2px_2px_0px_0px_rgba(80,80,80,0.5)]
+  hover:translate-y-[-2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,0.7)] dark:hover:shadow-[2px_2px_0px_0px_rgba(100,100,100,0.6)]
   transition-[border,box-shadow,transform] duration-100 ease-in-out
-  bg-white cursor-pointer relative group
+  bg-white dark:bg-dark-bg-secondary cursor-pointer relative group
   touch-action-manipulation tap-highlight-color-transparent
 `;
 

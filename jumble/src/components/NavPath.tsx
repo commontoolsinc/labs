@@ -3,6 +3,7 @@ import { NAME } from "@commontools/builder";
 import React, { useEffect } from "react";
 import { NavLink } from "react-router-dom";
 import { CharmLink } from "@/components/CharmLink.tsx";
+import { useTheme } from "@/contexts/ThemeContext.tsx";
 
 type NavPathProps = {
   replicaId: string | undefined;
@@ -11,6 +12,7 @@ type NavPathProps = {
 
 export function NavPath({ replicaId, charmId }: NavPathProps) {
   const { charmManager } = useCharmManager();
+  const { isDarkMode } = useTheme();
 
   const [charmName, setCharmName] = React.useState<string | null>(null);
 
@@ -40,7 +42,10 @@ export function NavPath({ replicaId, charmId }: NavPathProps) {
         <li>
           <NavLink
             to={`/${replicaId}`}
-            className={charmId ? "text-gray-500" : "text-black font-bold"}
+            className={({ isActive }) =>
+              isActive
+                ? "text-black dark:text-dark-text-primary font-bold"
+                : "text-gray-500 dark:text-dark-text-secondary"}
           >
             {replicaId}
           </NavLink>
@@ -49,14 +54,16 @@ export function NavPath({ replicaId, charmId }: NavPathProps) {
         {charmId && (
           <>
             <li>
-              <span className="text-gray-500">/</span>
+              <span className="text-gray-500 dark:text-dark-text-secondary">
+                /
+              </span>
             </li>
             <li>
               <CharmLink
                 charm={{ "/": charmId }}
                 replicaName={replicaId}
                 showHash={false}
-                className="text-gray-700 font-bold"
+                className="text-gray-700 dark:text-dark-text-primary font-bold"
               >
                 {charmName}
               </CharmLink>

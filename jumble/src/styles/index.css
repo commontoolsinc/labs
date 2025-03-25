@@ -1,6 +1,15 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+@theme {
+  --color-dark-bg-primary: #121212;
+  --color-dark-bg-secondary: #1E1E1E;
+  --color-dark-bg-tertiary: #2D2D2D;
+  --color-dark-text-primary: #E0E0E0;
+  --color-dark-text-secondary: #A0A0A0;
+  --color-dark-border: #333333;
+}
+
 @font-face {
   font-family: "JetBrainsMono";
   font-style: normal;
@@ -47,6 +56,12 @@ html {
   background-image: radial-gradient(#ccc 1px, transparent 1px);
   background-size: 10px 10px;
   padding: 15px;
+}
+
+/* Dark mode styles for root */
+.dark #root {
+  background-color: #121212;
+  background-image: radial-gradient(#333 1px, transparent 1px);
 }
 
 @media (max-width: 767px) {
@@ -110,4 +125,11 @@ html {
 
 .status-thinking {
   animation: pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Additional dark mode transitions */
+* {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-duration: 200ms;
+  transition-timing-function: ease-in-out;
 }

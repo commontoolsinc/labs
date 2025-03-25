@@ -12,7 +12,7 @@ import { useGlobalActions } from "@/hooks/use-global-actions.tsx";
 import { SyncStatusProvider } from "@/contexts/SyncStatusContext.tsx";
 import { ToggleableNetworkInspector } from "@/components/NetworkInspector.tsx";
 import { NetworkInspectorProvider } from "@/contexts/NetworkInspectorContext.tsx";
-
+import { useTheme } from "@/contexts/ThemeContext.tsx";
 
 export default function Shell() {
   const { charmId } = useParams<CharmRouteParams>();
@@ -27,7 +27,7 @@ export default function Shell() {
     <CharmsManagerProvider>
       <SyncStatusProvider>
         <NetworkInspectorProvider>
-          <div className="flex flex-col shell h-full bg-gray-50 border-2 border-black">
+          <div className="flex flex-col shell h-full bg-gray-50 dark:bg-dark-bg-primary border-2 border-black dark:border-dark-border dark:text-dark-text-primary">
             <ShellHeader session={session} charmId={charmId} />
 
             <div className="h-full overflow-y-auto">
@@ -37,7 +37,10 @@ export default function Shell() {
             <ActionBar />
             <CharmPublisher />
             <CommandCenter />
-            <ToggleableNetworkInspector visible={localStorage.getItem("networkInspectorVisible") === "true"} />
+            <ToggleableNetworkInspector
+              visible={localStorage.getItem("networkInspectorVisible") ===
+                "true"}
+            />
           </div>
         </NetworkInspectorProvider>
       </SyncStatusProvider>

@@ -39,47 +39,54 @@ import { LuSend } from "react-icons/lu";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 
 export function ComposerSubmitBar(
-  { loading, onSubmit, operation = "Go", children }: { loading: boolean; onSubmit: () => void; operation?: string; children?: React.ReactNode },
+  { loading, onSubmit, operation = "Go", children }: {
+    loading: boolean;
+    onSubmit: () => void;
+    operation?: string;
+    children?: React.ReactNode;
+  },
 ): JSX.Element {
   return (
     <div className="flex justify-between items-top w-full">
-      <label className="text-[10px] text-gray-400">
+      <label className="text-[10px] text-gray-400 dark:text-gray-500">
         Shift+Enter for new line<br />
         Type <code>@</code> to mention a charm
       </label>
 
       <div className="flex flex-row gap-2">
-      {children}
+        {children}
 
-      <button
-        type="button"
-        onClick={onSubmit}
-        disabled={loading}
-        className="px-4 py-2 text-sm bg-black text-white flex items-center gap-2 disabled:opacity-50"
-      >
-        {loading ? (
-          <span className="text-xs flex items-center gap-2">
-            <DitheredCube
-              animationSpeed={2}
-              width={16}
-              height={16}
-              animate
-              cameraZoom={12}
-            />
-            <span>Working...</span>
-          </span>
-        ) : (
-          <span className="text-xs flex items-center gap-2">
-            <span className="text-xs flex items-center gap-1">
-              <LuSend />
-              <span>{operation}</span>
-            </span>
-            <span className="hidden md:inline text-gray-400 font-bold italic">
-              (Enter)
-            </span>
-          </span>
-        )}
-      </button>
+        <button
+          type="button"
+          onClick={onSubmit}
+          disabled={loading}
+          className="px-4 py-2 text-sm bg-black dark:bg-gray-700 text-white flex items-center gap-2 disabled:opacity-50 transition-colors duration-200"
+        >
+          {loading
+            ? (
+              <span className="text-xs flex items-center gap-2">
+                <DitheredCube
+                  animationSpeed={2}
+                  width={16}
+                  height={16}
+                  animate
+                  cameraZoom={12}
+                />
+                <span>Working...</span>
+              </span>
+            )
+            : (
+              <span className="text-xs flex items-center gap-2">
+                <span className="text-xs flex items-center gap-1">
+                  <LuSend />
+                  <span>{operation}</span>
+                </span>
+                <span className="hidden md:inline text-gray-400 dark:text-gray-300 font-bold italic">
+                  (Enter)
+                </span>
+              </span>
+            )}
+        </button>
       </div>
     </div>
   );
@@ -651,18 +658,18 @@ export function Composer({
       const before = wordBefore && Editor.before(editor, wordBefore);
       const beforeRange = before && Editor.range(editor, before, start);
       const beforeText = beforeRange && Editor.string(editor, beforeRange);
-      
+
       const beforeMatch = beforeText && beforeText.match(/^@(\w+)$/);
-      
+
       // If we detect exactly "@" at the end of the text, mock a match object
-      const isJustAtSymbol = beforeText && beforeText.endsWith('@') && 
-                           beforeText.length > 0 && beforeText[beforeText.length - 1] === '@';
-      
+      const isJustAtSymbol = beforeText && beforeText.endsWith("@") &&
+        beforeText.length > 0 && beforeText[beforeText.length - 1] === "@";
+
       // Use either the regex match or our mock match for a single "@"
-      const finalBeforeMatch = isJustAtSymbol 
-        ? { 0: '@', 1: '' } // Mock match result for just "@"
+      const finalBeforeMatch = isJustAtSymbol
+        ? { 0: "@", 1: "" } // Mock match result for just "@"
         : beforeMatch;
-        
+
       const after = Editor.after(editor, start);
       const afterRange = Editor.range(editor, start, after);
       const afterText = Editor.string(editor, afterRange);
@@ -670,7 +677,11 @@ export function Composer({
 
       if ((finalBeforeMatch || beforeMatch) && afterMatch && beforeRange) {
         setTarget(beforeRange);
-        setSearch(finalBeforeMatch ? finalBeforeMatch[1] : (beforeMatch ? beforeMatch[1] : ''));
+        setSearch(
+          finalBeforeMatch
+            ? finalBeforeMatch[1]
+            : (beforeMatch ? beforeMatch[1] : ""),
+        );
         setIndex(0);
         return;
       }
@@ -698,71 +709,82 @@ export function Composer({
   return (
     <>
       <Slate editor={editor} initialValue={currentValue} onChange={onChange}>
-        <Editable
-          id="composer"
-          className={`p-2 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-          readOnly={readOnly || disabled}
-          renderElement={renderElement}
-          renderLeaf={renderLeaf}
-          onKeyDown={handleKeyDown}
-          onDOMBeforeInput={handleDOMBeforeInput}
-          placeholder={placeholder || "Enter some text..."}
-          renderPlaceholder={({
-            children,
-            attributes,
-          }) => (
-            <span {...attributes} className="p-2 inline-block text-gray-400">
-              {children}
-            </span>
+        <div
+          className={`composer-wrapper relative bg-white dark:bg-dark-bg-secondary text-black dark:text-dark-text-primary rounded border border-gray-300 dark:border-dark-border transition-colors duration-200 ${
+            disabled ? "opacity-50 cursor-not-allowed" : ""
+          }`}
+          style={style}
+        >
+          <Editable
+            id="composer"
+            className={`p-2 ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+            readOnly={readOnly || disabled}
+            renderElement={renderElement}
+            renderLeaf={renderLeaf}
+            onKeyDown={handleKeyDown}
+            onDOMBeforeInput={handleDOMBeforeInput}
+            placeholder={placeholder || "Enter some text..."}
+            renderPlaceholder={({
+              children,
+              attributes,
+            }) => (
+              <span {...attributes} className="p-2 inline-block text-gray-400">
+                {children}
+              </span>
+            )}
+            style={{
+              ...style,
+              overflowY: "auto",
+              minHeight: "100px", // Changed from 36px to 100px to accommodate ~4 lines
+              maxHeight: "200px",
+              height: "auto",
+              resize: "none",
+            }}
+          />
+          {!disabled && target && filteredMentions.length > 0 && (
+            <Portal>
+              <div
+                ref={ref}
+                className="absolute z-[9999] bg-white dark:bg-dark-bg-secondary rounded-md shadow-md p-1 max-h-[200px] overflow-y-auto"
+                style={{
+                  top: "-9999px",
+                  left: "-9999px",
+                  position: "absolute",
+                  maxHeight: "200px",
+                  pointerEvents: "auto",
+                }}
+              >
+                {filteredMentions.map((
+                  mention: { id: string; name: string },
+                  i: number,
+                ) => (
+                  <div
+                    key={mention.id}
+                    onClick={(e: ReactMouseEvent) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      Transforms.select(editor, target);
+                      insertMention(editor, mention.id, mention.name);
+                      setTarget(null);
+                    }}
+                    className={`px-3 py-1.5 rounded-sm cursor-pointer transition-colors duration-150
+                      ${
+                      i === index
+                        ? "bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200"
+                        : "hover:bg-gray-100 dark:hover:bg-dark-bg-tertiary"
+                    }`}
+                    onMouseDown={(e) => {
+                      // Prevent the click from dismissing the command palette
+                      e.stopPropagation();
+                    }}
+                  >
+                    {mention.name}
+                  </div>
+                ))}
+              </div>
+            </Portal>
           )}
-          style={{
-            ...style,
-            overflowY: "auto",
-            minHeight: "100px", // Changed from 36px to 100px to accommodate ~4 lines
-            maxHeight: "200px",
-            height: "auto",
-            resize: "none",
-          }}
-        />
-        {!disabled && target && filteredMentions.length > 0 && (
-          <Portal>
-            <div
-              ref={ref}
-              className="absolute z-[9999] bg-white rounded-md shadow-md p-1 max-h-[200px] overflow-y-auto"
-              style={{
-                top: "-9999px",
-                left: "-9999px",
-                position: "absolute",
-                maxHeight: "200px",
-                pointerEvents: "auto",
-              }}
-            >
-              {filteredMentions.map((
-                mention: { id: string; name: string },
-                i: number,
-              ) => (
-                <div
-                  key={mention.id}
-                  onClick={(e: ReactMouseEvent) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    Transforms.select(editor, target);
-                    insertMention(editor, mention.id, mention.name);
-                    setTarget(null);
-                  }}
-                  className={`px-3 py-1.5 rounded-sm cursor-pointer transition-colors duration-150
-                    ${i === index ? "bg-blue-100" : "hover:bg-gray-100"}`}
-                  onMouseDown={(e) => {
-                    // Prevent the click from dismissing the command palette
-                    e.stopPropagation();
-                  }}
-                >
-                  {mention.name}
-                </div>
-              ))}
-            </div>
-          </Portal>
-        )}
+        </div>
       </Slate>
     </>
   );
@@ -923,19 +945,18 @@ const Mention = ({
 }: RenderElementPropsFor<MentionElement>) => {
   const selected = useSelected();
   const focused = useFocused();
-
   return (
     <span
       {...attributes}
       contentEditable={false}
-      className={`px-1.5 py-1 mx-0.5 inline-block rounded bg-gray-200 text-sm ${
-        selected && focused ? "ring-2 ring-blue-300" : ""
+      className={`bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-1.5 py-0.5 rounded-sm font-medium ${
+        selected && focused
+          ? "outline outline-blue-500 dark:outline-blue-300 outline-2"
+          : ""
       }`}
     >
-      <span contentEditable={false}>
-        @{element.character}
-        {children}
-      </span>
+      @{element.character}
+      {children}
     </span>
   );
 };

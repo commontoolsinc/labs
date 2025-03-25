@@ -112,8 +112,12 @@ export const CharmLink: React.FC<CharmLinkProps> = ({
         aria-roledescription="charm-link"
         className={({ isActive }) => `
           charm-link font-medium transition-colors
-          hover:text-black hover:underline
-          ${isActive ? "text-black" : "text-gray-700"}
+          hover:text-black dark:hover:text-white hover:underline
+          ${
+          isActive
+            ? "text-black dark:text-white"
+            : "text-gray-700 dark:text-gray-300"
+        }
           ${className}
         `}
         onMouseMove={(e) =>
