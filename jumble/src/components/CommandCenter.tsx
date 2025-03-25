@@ -25,6 +25,8 @@ import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { charmId } from "@/utils/charms.ts";
 import { formatPromptWithMentions } from "@/utils/format.ts";
 import { NAME } from "@commontools/builder";
+import { useLiveSpecPreview } from "@/hooks/use-live-spec-preview.ts";
+import { SpecPreview } from "@/components/SpecPreview.tsx";
 
 function CommandProcessor({
   mode,
@@ -65,6 +67,9 @@ function CommandProcessor({
 
   switch (mode.type) {
     case "input":
+      // Get spec preview as user types in command center
+      const { previewSpec, previewPlan, loading: isPreviewLoading } = useLiveSpecPreview(inputValue, true);
+      
       return (
         <div className="flex flex-col gap-2">
           <Composer
@@ -81,6 +86,14 @@ function CommandProcessor({
             loading={context.loading}
             operation="Send"
             onSubmit={onSubmit}
+          />
+          
+          {/* Show spec preview for input commands */}
+          <SpecPreview 
+            spec={previewSpec}
+            plan={previewPlan}
+            loading={isPreviewLoading}
+            visible={true}
           />
         </div>
       );
