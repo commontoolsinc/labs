@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 
+const STORAGE_KEY = "networkInspectorVisible";
+const STORAGE_EVENT = "storage";
+
 export function useNetworkInspector() {
   const [visible, setVisible] = useState(false);
 
   // On first render, check localStorage for saved preference
   useEffect(() => {
     const updateFromStorage = () => {
-      const savedPreference = localStorage.getItem("networkInspectorVisible");
+      const savedPreference = localStorage.getItem(STORAGE_KEY);
       if (savedPreference !== null) {
         setVisible(savedPreference === "true");
       }
@@ -16,14 +19,10 @@ export function useNetworkInspector() {
     updateFromStorage();
 
     // Listen for changes in localStorage (for cross-tab synchronization)
-    globalThis.addEventListener("storage", updateFromStorage);
-    
-    // Also listen for our custom event for same-tab updates
-    globalThis.addEventListener("networkInspectorUpdate", updateFromStorage);
+    globalThis.addEventListener(STORAGE_EVENT, updateFromStorage);
 
     return () => {
-      globalThis.removeEventListener("storage", updateFromStorage);
-      globalThis.removeEventListener("networkInspectorUpdate", updateFromStorage);
+      globalThis.removeEventListener(STORAGE_EVENT, updateFromStorage);
     };
   }, []);
 
@@ -31,10 +30,7 @@ export function useNetworkInspector() {
   const toggleVisibility = (value?: boolean) => {
     const newValue = value !== undefined ? value : !visible;
     setVisible(newValue);
-    localStorage.setItem("networkInspectorVisible", String(newValue));
-    
-    // Dispatch an event to notify other components about the change
-    globalThis.dispatchEvent(new Event("networkInspectorUpdate"));
+    localStorage.setItem(STORAGE_KEY, String(newValue));
   };
 
   return {
