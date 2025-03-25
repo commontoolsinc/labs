@@ -228,10 +228,10 @@ export function User() {
       const pullActive = pullResult.isActive;
       const errorActive = errorResult.isActive;
       
-      // Display counts - even if count is 0 but animation is active, show at least 1
-      const displayPushCount = pushActive && pushResult.value === 0 ? 1 : pushResult.value;
-      const displayPullCount = pullActive && pullResult.value === 0 ? 1 : pullResult.value;
-      const displayErrorCount = errorActive && errorResult.value === 0 ? 1 : errorResult.value;
+      // Display counts (the hook now handles minimum values)
+      const displayPushCount = pushResult.value;
+      const displayPullCount = pullResult.value;
+      const displayErrorCount = errorResult.value;
 
       // Default status message
       let statusMessage = "Click to log out";
