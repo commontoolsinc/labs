@@ -22,7 +22,7 @@ let manager: CharmManager | null = null;
 const loadedCharms = new Map<string, Cell<Charm>>();
 
 // Capture errors in the charm
-onError((e) => {
+onError((e: Error) => {
   latestError = e;
 });
 
