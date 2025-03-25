@@ -230,7 +230,10 @@ function useCodeEditor(
   };
 }
 
-import { useLiveSpecPreview } from "@/hooks/use-live-spec-preview.ts";
+import {
+  SpecPreviewModel,
+  useLiveSpecPreview,
+} from "@/hooks/use-live-spec-preview.ts";
 
 // Hook for charm operations (iterate or extend)
 function useCharmOperation() {
@@ -257,12 +260,16 @@ function useCharmOperation() {
   );
   const [expectedVariantCount, setExpectedVariantCount] = useState(0);
 
+  // Preview model state
+  const [previewModel, setPreviewModel] = useState<SpecPreviewModel>("fast");
+
   // Live preview generation
-  const { 
-    previewSpec, 
-    previewPlan, 
-    loading: isPreviewLoading 
-  } = useLiveSpecPreview(input, showPreview);
+  const {
+    previewSpec,
+    previewPlan,
+    loading: isPreviewLoading,
+    model,
+  } = useLiveSpecPreview(input, showPreview, 250, previewModel);
 
   // Function that performs the selected operation (iterate or extend)
   const performOperation = useCallback(
@@ -825,7 +832,36 @@ const OperationTab = () => {
                 Live Preview
               </label>
             </div>
-          
+
+            {showPreview && (
+              <div className="flex items-center mr-2">
+                <div className="flex border border-gray-300 rounded-full overflow-hidden text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewModel("fast")}
+                    className={`px-2 py-1 text-xs ${
+                      previewModel === "fast"
+                        ? "bg-black text-white"
+                        : "bg-gray-100"
+                    }`}
+                  >
+                    Fast
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewModel("think")}
+                    className={`px-2 py-1 text-xs ${
+                      previewModel === "think"
+                        ? "bg-black text-white"
+                        : "bg-gray-100"
+                    }`}
+                  >
+                    Precise
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center">
               <input
                 type="checkbox"
@@ -866,7 +902,7 @@ const OperationTab = () => {
 
       {/* Content Container with single scrollbar */}
       <div className="flex-grow overflow-auto mt-3 -mx-4 px-4">
-        <SpecPreview 
+        <SpecPreview
           spec={previewSpec}
           plan={previewPlan}
           loading={isPreviewLoading}
