@@ -45,25 +45,3 @@ export function isValidDID(did: string): boolean {
 export function isValidCharmId(id: string): boolean {
   return !!id && id.length === 59;
 }
-
-const managerCache = new Map<string, CharmManager>();
-export async function getManagerForSpace(space: DID): Promise<CharmManager> {
-  const spaceKey = space.toString();
-
-  if (managerCache.has(spaceKey)) {
-    return managerCache.get(spaceKey)!;
-  }
-
-  // Create new session and manager
-  const session = await openSession({
-    passphrase: env.OPERATOR_PASS,
-    name: "~background-service",
-    space,
-  });
-
-  // FIXME OOF... this loads everything into memory
-  const manager = new CharmManager(session);
-  managerCache.set(spaceKey, manager);
-
-  return manager;
-}
