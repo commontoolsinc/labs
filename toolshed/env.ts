@@ -95,6 +95,9 @@ const EnvSchema = z.object({
 
   // Identity signer passphrase for storage authentication
   IDENTITY_PASSPHRASE: z.string().default("implicit trust"),
+
+  // URL of the toolshed API, for self-referring requests
+  TOOLSHED_API_URL: z.string().default("http://localhost:8000"),
 });
 
 export type env = z.infer<typeof EnvSchema>;
