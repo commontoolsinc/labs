@@ -9,7 +9,7 @@ export const applyProxy = (router: OpenAPIHono<AppBindings>) => {
     let proxiedUrl: string;
 
     // Only proxy asset files. For all other routes return index.html.
-    if (path.startsWith("/assets")) {
+    if (path.startsWith("/assets") || path.startsWith("/fonts")) {
       proxiedUrl = `${BASE_TARGET_URL}${path}`;
     } else {
       proxiedUrl = `${BASE_TARGET_URL}/index.html`;
