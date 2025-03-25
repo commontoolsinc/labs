@@ -93,11 +93,14 @@ const EnvSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),
 
-  // Identity signer passphrase for storage authentication
-  IDENTITY_PASSPHRASE: z.string().default("implicit trust"),
-
   // URL of the toolshed API, for self-referring requests
   TOOLSHED_API_URL: z.string().default("http://localhost:8000"),
+
+  // DEPRECATED: Identity signer passphrase for storage authentication
+  IDENTITY_PASSPHRASE: z.string().default("implicit trust"),
+
+  // Path to an identity key.
+  IDENTITY: z.string().default(""),
 });
 
 export type env = z.infer<typeof EnvSchema>;

@@ -8,6 +8,7 @@
     "charmdemo": "deno run --allow-read --allow-env --allow-net charm_demo.ts",
     "name2did": "deno run -A name2did.ts",
     "castRecipe": "deno run --allow-read --allow-env --allow-net cast-recipe.ts"
+    "key-gen": "deno run key-gen.ts"
   },
   "imports": {
     "open": "https://deno.land/x/open@v0.0.6/index.ts"

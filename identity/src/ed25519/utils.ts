@@ -1,7 +1,9 @@
 import { base58btc } from "multiformats/bases/base58";
+import { base64pad } from "multiformats/bases/base64";
 import { varint } from "multiformats";
 import { DIDKey } from "../interface.ts";
 import * as ed25519 from "@noble/ed25519";
+import { decode, encode } from "@commontools/utils/encoding";
 
 export const ED25519_ALG = "Ed25519";
 const ED25519_CODE = 0xed;
@@ -60,9 +62,36 @@ export function ed25519RawToPkcs8(rawPrivateKey: Uint8Array): Uint8Array {
   return new Uint8Array([...PKCS8_PREFIX, ...rawPrivateKey]);
 }
 
-// Generates a new random key in pkcs8 format.
+// Generates a new random key in pkcs8 format, pem encoded.
 export function generateEd25519Pkcs8(): Uint8Array {
   return ed25519RawToPkcs8(ed25519.utils.randomPrivateKey());
+}
+
+const BEGIN_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----";
+const END_PRIVATE_KEY = "-----END PRIVATE KEY-----";
+const NEW_LINE = "\n";
+
+export function toPEM(input: Uint8Array): Uint8Array {
+  const encoded = encode(base64pad.encode(input));
+  const header = encode(`${BEGIN_PRIVATE_KEY}${NEW_LINE}`);
+  const newLine = encode(NEW_LINE);
+  const footer = encode(END_PRIVATE_KEY);
+  const totalLength = header.length + encoded.length + newLine.length +
+    footer.length;
+  const pem = new Uint8Array(totalLength);
+  pem.set(header, 0);
+  pem.set(encoded, header.length);
+  pem.set(newLine, header.length + encoded.length);
+  pem.set(footer, header.length + encoded.length + newLine.length);
+  return pem;
+}
+
+export function fromPEM(input: Uint8Array): Uint8Array {
+  let decoded = decode(input);
+  decoded = decoded.replace(BEGIN_PRIVATE_KEY, "");
+  decoded = decoded.replace(END_PRIVATE_KEY, "");
+  decoded = decoded.replace(/\s/g, "");
+  return base64pad.decode(decoded);
 }
 
 // Convert public key bytes into a `did:key:z...`.

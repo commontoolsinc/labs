@@ -67,7 +67,7 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return [new Identity(signer), mnemonic];
   }
 
-  // Generate a new keypair in PKCS8 form.
+  // Generate a new keypair in PKCS8, PEM encoded form.
   //
   // Due to hiding access to private key material
   // in the JS environment (via WebCrypto), we cannot
@@ -78,6 +78,7 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return await Ed25519Signer.generatePkcs8();
   }
 
+  // Read a PKCS8/PEM key.
   static async fromPkcs8<ID extends DIDKey>(
     pkcs8: Uint8Array,
   ): Promise<Identity<ID>> {
