@@ -94,114 +94,6 @@ const useCharmOperationContext = () => {
   return context;
 };
 
-// =================== Custom Hooks ===================
-
-// // Hook for managing bottom sheet functionality
-// function useBottomSheet(initialHeight = 585) {
-//   const [sheetHeight, setSheetHeight] = useState<number>(initialHeight);
-//   const [isResizing, setIsResizing] = useState(false);
-//   const resizeStartY = useRef<number | null>(null);
-//   const startHeight = useRef<number | null>(null);
-
-//   const handleResizeStart = useCallback(
-//     (e: React.MouseEvent) => {
-//       e.preventDefault();
-//       resizeStartY.current = e.clientY;
-//       startHeight.current = sheetHeight;
-//       setIsResizing(true);
-
-//       // Add a layer over the entire document to capture events
-//       const overlay = document.createElement("div");
-//       overlay.id = "resize-overlay";
-//       overlay.style.position = "fixed";
-//       overlay.style.top = "0";
-//       overlay.style.left = "0";
-//       overlay.style.width = "100%";
-//       overlay.style.height = "100%";
-//       overlay.style.zIndex = "9999";
-//       overlay.style.cursor = "ns-resize";
-//       document.body.appendChild(overlay);
-
-//       const handleResizeMove = (e: MouseEvent) => {
-//         if (resizeStartY.current !== null && startHeight.current !== null) {
-//           const diff = resizeStartY.current - e.clientY;
-//           const newHeight = Math.max(
-//             150,
-//             Math.min(globalThis.innerHeight * 0.8, startHeight.current + diff),
-//           );
-//           setSheetHeight(newHeight);
-//         }
-//       };
-
-//       const handleResizeEnd = () => {
-//         resizeStartY.current = null;
-//         startHeight.current = null;
-//         setIsResizing(false);
-
-//         // Remove overlay
-//         const overlay = document.getElementById("resize-overlay");
-//         if (overlay) {
-//           document.body.removeChild(overlay);
-//         }
-
-//         document.removeEventListener("mousemove", handleResizeMove);
-//         document.removeEventListener("mouseup", handleResizeEnd);
-//       };
-
-//       document.addEventListener("mousemove", handleResizeMove);
-//       document.addEventListener("mouseup", handleResizeEnd);
-//     },
-//     [sheetHeight],
-//   );
-
-//   const handleTouchResizeStart = useCallback(
-//     (e: React.TouchEvent) => {
-//       e.preventDefault();
-//       if (e.touches.length === 1) {
-//         resizeStartY.current = e.touches[0].clientY;
-//         startHeight.current = sheetHeight;
-//         setIsResizing(true);
-//       }
-
-//       const handleTouchMove = (e: TouchEvent) => {
-//         if (
-//           resizeStartY.current !== null &&
-//           startHeight.current !== null &&
-//           e.touches.length === 1
-//         ) {
-//           const diff = resizeStartY.current - e.touches[0].clientY;
-//           const newHeight = Math.max(
-//             150,
-//             Math.min(globalThis.innerHeight * 0.8, startHeight.current + diff),
-//           );
-//           setSheetHeight(newHeight);
-//         }
-//       };
-
-//       const handleTouchEnd = () => {
-//         resizeStartY.current = null;
-//         startHeight.current = null;
-//         setIsResizing(false);
-//         document.removeEventListener("touchmove", handleTouchMove);
-//         document.removeEventListener("touchend", handleTouchEnd);
-//       };
-
-//       document.addEventListener("touchmove", handleTouchMove, {
-//         passive: false,
-//       });
-//       document.addEventListener("touchend", handleTouchEnd);
-//     },
-//     [sheetHeight],
-//   );
-
-//   return {
-//     sheetHeight,
-//     isResizing,
-//     handleResizeStart,
-//     handleTouchResizeStart,
-//   };
-// }
-
 // Hook for tab management
 function useTabNavigation() {
   const location = useLocation();
@@ -743,12 +635,12 @@ const Suggestions = () => {
               const successValue = result.value;
               setVariants((existingPrev) => {
                 const newVariants = [...existingPrev, successValue];
-                
+
                 // Set the first successful variant as selected
                 if (existingPrev.length === 0) {
                   setSelectedVariant(successValue);
                 }
-                
+
                 return newVariants;
               });
             }
