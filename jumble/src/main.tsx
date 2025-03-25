@@ -14,7 +14,7 @@ import {
 import * as Sentry from "@sentry/react";
 import { ErrorBoundary } from "@sentry/react";
 import "./styles/index.css";
-import Shell from "@/views/Shell.tsx";
+import Shell from "./views/Shell.tsx";
 import { CharmsProvider } from "@/contexts/CharmsContext.tsx";
 import CharmList from "@/views/CharmList.tsx";
 import CharmShowView from "@/views/CharmShowView.tsx";

@@ -1059,6 +1059,30 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       title: "Advanced",
       children: [
         {
+          id: "enable-network-inspector",
+          type: "action",
+          title: "Enable Network Inspector",
+          predicate: localStorage.getItem("networkInspectorVisible") !== "true",
+          handler: () => {
+            localStorage.setItem("networkInspectorVisible", "true");
+            deps.setOpen(false);
+            // Refresh the page to ensure the setting takes effect
+            globalThis.location.reload();
+          },
+        },
+        {
+          id: "disable-network-inspector",
+          type: "action",
+          title: "Disable Network Inspector",
+          predicate: localStorage.getItem("networkInspectorVisible") === "true",
+          handler: () => {
+            localStorage.setItem("networkInspectorVisible", "false");
+            deps.setOpen(false);
+            // Refresh the page to ensure the setting takes effect
+            globalThis.location.reload();
+          },
+        },
+        {
           id: "start-counter-job",
           type: "action",
           title: "Start Counter Job",
