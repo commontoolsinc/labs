@@ -8,7 +8,7 @@ type PendingResponse = {
   reject: (error: any) => void;
 };
 
-export class Habitat {
+export class WorkerController {
   private did: string;
   private worker: Worker;
   private msgId: number = 0;
@@ -17,7 +17,7 @@ export class Habitat {
   public ready: boolean = false;
 
   constructor(did: string) {
-    log(`Creating habitat ${did}`);
+    log(`Creating worker controller ${did}`);
     this.did = did;
 
     this.worker = new Worker(
@@ -86,12 +86,12 @@ export class Habitat {
       toolshed_url: toolshedUrl,
       operator_pass: operatorPass,
     }).catch((err) => {
-      log(`Habitat ${this.did} worker setup failed:`, err, {
+      log(`Worker controller ${this.did} worker setup failed:`, err, {
         error: true,
       });
     }).then(() => {
       this.ready = true;
-      log(`Habitat ${this.did} ready for work`);
+      log(`Worker controller ${this.did} ready for work`);
     });
   }
 
@@ -128,7 +128,7 @@ export class Habitat {
   public shutdown() {
     return this.call("shutdown").catch(() => {
       log(
-        "Failed to shutdown habitat gracefully, terminating with unknown status.",
+        "Failed to shutdown worker gracefully, terminating with unknown status.",
       );
     }).finally(() => {
       this.worker?.terminate();

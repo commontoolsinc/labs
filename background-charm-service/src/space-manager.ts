@@ -1,9 +1,9 @@
 import { BGCharmEntry, sleep } from "@commontools/utils";
 import { Cell } from "@commontools/runner";
 import { log } from "./utils.ts";
-import { Habitat } from "./habitat.ts";
+import { WorkerController } from "./worker-controller.ts";
 
-type SpaceStationOptions = {
+type CharmSchedulerOptions = {
   did: string;
   toolshedUrl: string;
   operatorPass: string;
@@ -20,7 +20,7 @@ type CharmStatus = {
   enabled: boolean;
 };
 
-export class SpaceStation {
+export class SpaceManager {
   private did: string;
   private maxConcurrentJobs: number;
   private maxRetries: number;
@@ -29,20 +29,20 @@ export class SpaceStation {
   private pendingCharms: string[] = [];
   private activeCharms = new Set<string>();
   private deactivationTimeoutMs: number;
-  private habitat: Habitat;
+  private workerController: WorkerController;
   private rerunIntervalMs: number;
   private timeoutMs: number;
 
-  constructor(options: SpaceStationOptions) {
+  constructor(options: CharmSchedulerOptions) {
     this.did = options.did;
     this.maxConcurrentJobs = options.maxConcurrentJobs ?? 5;
     this.maxRetries = options.maxRetries ?? 3;
     this.pollingIntervalMs = options.pollingIntervalMs ?? 100;
     this.deactivationTimeoutMs = options.deactivationTimeoutMs ?? 10000;
     this.rerunIntervalMs = options.rerunIntervalMs ?? 6000;
-    this.habitat = new Habitat(this.did);
+    this.workerController = new WorkerController(this.did);
     this.timeoutMs = options.timeoutMs ?? 10000;
-    log(`Space station initialized`);
+    log(`Charm scheduler initialized`);
     log(` - did: ${this.did}`);
     log(` - maxConcurrentJobs: ${this.maxConcurrentJobs}`);
     log(` - maxRetries: ${this.maxRetries}`);
@@ -50,12 +50,15 @@ export class SpaceStation {
     log(` - deactivationTimeoutMs: ${this.deactivationTimeoutMs}`);
     log(` - rerunIntervalMs: ${this.rerunIntervalMs}`);
 
-    this.habitat.setupWorker(options.toolshedUrl, options.operatorPass).then(
+    this.workerController.setupWorker(
+      options.toolshedUrl,
+      options.operatorPass,
+    ).then(
       () => {
-        log(`Habitat ${this.did} ready for work`);
+        log(`Worker controller ${this.did} ready for work`);
       },
     ).catch((err) => {
-      log(`Failed to setup habitat: ${err}`);
+      log(`Failed to setup worker controller: ${err}`);
     });
 
     this.execLoop();
@@ -103,15 +106,15 @@ export class SpaceStation {
     const removedCharms = localCharms.filter((key) => !serverCharms.has(key));
     removedCharms.forEach((key) => this.state.delete(key));
 
-    log(`Space station monitoring ${serverCharms.size} charms`);
+    log(`Charm scheduler monitoring ${serverCharms.size} charms`);
   }
 
   start() {
-    log("Space station started");
+    log("Charm scheduler started");
   }
 
   async stop(): Promise<void> {
-    log("Stopping space station...");
+    log("Stopping charm scheduler...");
 
     // Wait for active jobs to finish with a timeout
     if (this.activeCharms.size > 0) {
@@ -130,12 +133,12 @@ export class SpaceStation {
     }
 
     // FIXME(ja): stop web worker!
-    this.habitat.shutdown();
+    this.workerController.shutdown();
   }
 
   getStatus() {
     return {
-      running: this.habitat.ready,
+      running: this.workerController.ready,
       activeJobs: this.activeCharms.size,
       pendingJobs: this.pendingCharms.length,
     };
@@ -143,8 +146,8 @@ export class SpaceStation {
 
   private async execLoop(): Promise<void> {
     while (true) {
-      if (!this.habitat.ready) {
-        log("habitat not ready, sleeping");
+      if (!this.workerController.ready) {
+        log("worker controller not ready, sleeping");
         await sleep(this.pollingIntervalMs);
         continue;
       }
@@ -186,7 +189,7 @@ export class SpaceStation {
     this.activeCharms.add(charmId);
 
     Promise.race([
-      this.habitat.runCharm(bg).catch((e) => {
+      this.workerController.runCharm(bg).catch((e) => {
         log(e instanceof Error ? e.message : String(e), {
           error: true,
         });
@@ -240,7 +243,7 @@ export class SpaceStation {
   private async requeueLoop(): Promise<void> {
     while (true) {
       await sleep(this.rerunIntervalMs);
-      if (this.habitat.ready) {
+      if (this.workerController.ready) {
         for (const charmId of this.state.keys()) {
           if (
             !this.activeCharms.has(charmId) &&

@@ -6,12 +6,12 @@ import {
 } from "@commontools/utils";
 import { log } from "./utils.ts";
 import { env } from "./env.ts";
-import { SpaceStation } from "./space-station.ts";
+import { SpaceManager } from "./space-manager.ts";
 
 export class BackgroundCharmService {
   private charmsCell: Cell<Cell<BGCharmEntry>[]> | null = null;
   private isRunning = false;
-  private spaceStation: Map<string, SpaceStation> = new Map();
+  private charmSchedulers: Map<string, SpaceManager> = new Map();
 
   constructor() {
   }
@@ -39,13 +39,13 @@ export class BackgroundCharmService {
       return;
     }
 
-    const promises = Array.from(this.spaceStation.values()).map(
-      (spaceStation) => spaceStation.stop(),
+    const promises = Array.from(this.charmSchedulers.values()).map(
+      (scheduler) => scheduler.stop(),
     );
     return Promise.allSettled(promises);
   }
 
-  // FIXME(ja): spacestations should watch their own charms!
+  // FIXME(ja): space managers should watch their own charms!
   // Note(ja): this assumes that sync won't return an empty
   // array / partial results!
   private ensureCharms(charms: Cell<BGCharmEntry>[]) {
@@ -58,20 +58,20 @@ export class BackgroundCharmService {
     log(`monitoring ${dids.size} spaces`);
 
     for (const did of dids) {
-      let spaceStation = this.spaceStation.get(did);
-      if (!spaceStation) {
-        spaceStation = new SpaceStation({
+      let scheduler = this.charmSchedulers.get(did);
+      if (!scheduler) {
+        scheduler = new SpaceManager({
           did,
           toolshedUrl: env.TOOLSHED_API_URL,
           operatorPass: env.OPERATOR_PASS,
         });
-        this.spaceStation.set(did, spaceStation);
-        spaceStation.start();
+        this.charmSchedulers.set(did, scheduler);
+        scheduler.start();
       }
 
       // we are only filtering charms because until the FIXME above is fixed
       const didCharms = charms.filter((c) => c.get().space === did);
-      spaceStation.watch(didCharms);
+      scheduler.watch(didCharms);
     }
   }
 }

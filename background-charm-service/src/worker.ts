@@ -72,7 +72,7 @@ async function shutdown() {
     console.log(`Worker: Not initialized, skipping shutdown`);
     return { shutdown: true };
   }
-  console.log(`Worker: Shutting down habitat`);
+  console.log(`Worker: Shutting down execution environment`);
 
   loadedCharms.clear();
   currentSession = null;

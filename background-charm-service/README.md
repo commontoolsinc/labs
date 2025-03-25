@@ -12,11 +12,11 @@ failing) or know when to properly reschedule them.**
 
 The Background Charm Service runs charms in the background with:
 
-- Space-based isolation for charm execution
-- Habitat workers for isolated charm environments
-- Automatic charm scheduling and execution
-- Error handling and status tracking
-- Simple monitoring and management
+- Space-based isolation for charm execution (one web worker per space)
+- Isolated execution in web workers to prevent interference
+- Automatic charm scheduling and execution based on defined intervals
+- Error handling and status tracking for reliable operation
+- Simple monitoring and management of background processes
 
 ## Architecture
 
@@ -25,41 +25,41 @@ The Background Charm Service runs charms in the background with:
 1. **BackgroundCharmService** (service.ts)
    - Main orchestrator that coordinates all components
    - Manages service lifecycle and charm discovery
-   - Creates and manages SpaceStations for each space
+   - Creates and manages SpaceManagers for each space
 
-2. **SpaceStation** (space-station.ts)
+2. **SpaceManager** (space-manager.ts)
    - Manages charms for a specific space
    - Schedules and tracks charm execution
    - Maintains charm status (enabled/disabled, last run time, errors)
-   - Communicates with a dedicated Habitat
+   - Communicates with a dedicated WorkerController
 
-3. **Habitat** (habitat.ts)
-   - Isolated execution environment for a space
-   - Manages worker lifecycle and communication
-   - Provides a safe execution environment for charms
+3. **WorkerController** (execution-environment.ts)
+   - Manages communication with the Worker
+   - Handles message passing and timeout tracking
+   - Provides interface for charm execution
 
 4. **Worker** (worker.ts)
    - Runs in an isolated thread
    - Sets up a session for a specific space
    - Handles charm loading and execution
-   - Reports results back to the Habitat
+   - Reports results back to the WorkerController
 
 ### Execution Flow
 
 1. The service discovers background charms from the central toolshed-system list
    of charms
-2. For each unique space, a SpaceStation is created
-3. Each SpaceStation creates its own Habitat with an isolated worker
-4. The SpaceStation schedules and executes charms through its Habitat
+2. For each unique space, a SpaceManager is created
+3. Each SpaceManager creates its own WorkerController with an isolated worker
+4. The SpaceManager schedules and executes charms through its WorkerController
 5. The worker runs each charm and reports results back
-6. The SpaceStation tracks status and schedules re-runs based on results
+6. The SpaceManager tracks status and schedules re-runs based on results
 
 ## Isolation Model
 
 The service provides isolation at multiple levels:
 
-- **Space Isolation**: Each space gets its own SpaceStation and Habitat
-- **Worker Isolation**: Each Habitat uses a Web Worker for thread-level
+- **Space Isolation**: Each space gets its own SpaceManager and Worker
+- **Worker Isolation**: Each WorkerController uses a Web Worker for thread-level
   isolation
 - **Session Isolation**: Each worker has its own session with proper permissions
 - **Error Isolation**: Errors in one charm do not affect other charms or spaces
