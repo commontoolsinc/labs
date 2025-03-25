@@ -94,7 +94,10 @@ export abstract class BaseStorageProvider implements StorageProvider {
   >;
 
   abstract sync(entityId: EntityId, expectedInStorage: boolean): Promise<void>;
-
+  abstract syncSchema(
+    entityId: EntityId,
+    schemaContext: SchemaContext,
+  ): Promise<void>;
   abstract get<T = any>(entityId: EntityId): StorageValue<T> | undefined;
 
   sink<T = any>(

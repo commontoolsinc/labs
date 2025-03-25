@@ -186,6 +186,40 @@ export class RemoteStorageProvider implements StorageProvider {
     return subscription;
   }
 
+  subscribeSchema(entityId: EntityId, schemaContext: SchemaContext) {
+    const { the } = this;
+    const of = RemoteStorageProvider.toEntity(entityId);
+    const local = this.mount(this.workspace);
+    let subscription = local.remote.get(of);
+
+    if (!subscription) {
+      if (local.remote.size < this.settings.maxSubscriptionsPerSpace) {
+        // If we do not have a subscription yet we create a query and
+        // subscribe to it.
+        subscription = Subscription.spawn(
+          local.memory,
+          { select: { [of]: { [the]: {} } } },
+          { selectGraph: { [of]: { [the]: { "_": [schemaContext] } } } },
+        );
+
+        // store subscription so it can be reused.
+        local.remote.set(of, subscription);
+
+        // Log subscription creation to inspector
+        this.inspector?.postMessage({
+          subscription: {
+            entity: of,
+            subscriberCount: subscription.subscribers.size,
+            totalSubscriptions: local.remote.size,
+          },
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+
+    return subscription;
+  }
+
   sink<T = any>(
     entityId: EntityId,
     callback: (value: StorageValue<T>) => void,
@@ -222,7 +256,7 @@ export class RemoteStorageProvider implements StorageProvider {
     entityId: EntityId,
     schemaContext: SchemaContext,
   ): Promise<void> {
-    const subscription = this.subscribe(entityId);
+    const subscription = this.subscribeSchema(entityId, schemaContext);
     if (subscription) {
       // We add noop subscriber just to keep subscription alive.
       subscription.subscribe(RemoteStorageProvider.sync);
@@ -517,28 +551,37 @@ export interface Subscriber {
 class Subscription<Space extends MemorySpace> {
   reader!: ReadableStreamDefaultReader;
   query!: Memory.QueryView<Space, Protocol<Space>>;
+  graphQuery?: Memory.QueryView<Space, Protocol<Space>>;
 
   static spawn<Space extends MemorySpace>(
     session: Memory.MemorySpaceSession<Space>,
-    selector: Query["args"] | GraphQuery["args"],
+    selector: Query["args"],
+    graphSelector?: GraphQuery["args"],
   ) {
-    return new Subscription(session, selector);
+    return new Subscription(session, selector, graphSelector);
   }
   constructor(
     public session: Memory.MemorySpaceSession<Space>,
-    public selector: Query["args"] | GraphQuery["args"],
+    public selector: Query["args"],
+    public graphSelector?: GraphQuery["args"],
     public subscribers: Set<Subscriber> = new Set(),
   ) {
     this.connect();
   }
 
+  // Run an initial query to get the data, then subscribe to get updates
+  // In the case of a selector that is a GraphSelector, we will run the
+  // query with the graph selector, but subscribe to updates on the doc
+  // with a standard selector.
   connect() {
-    const query = ("selectGraph" in this.selector)
-      ? this.session.queryGraph(this.selector)
-      : this.session.query(this.selector);
+    if (this.graphSelector !== undefined) {
+      this.graphQuery = this.session.queryGraph(this.graphSelector);
+      this.graphQuery.promise.then(() => this.broadcast());
+    }
+    const query = this.session.query(this.selector as Query["args"]);
     const reader = query.subscribe().getReader();
-    this.query = query;
     this.reader = reader;
+    this.query = query;
 
     // TODO(gozala): Need to do this cleaner, but for now we just
     // broadcast when query returns so cell circuitry picks up changes.

@@ -1,6 +1,7 @@
 import {
   Cause,
   Entity,
+  GraphSelector,
   MemorySpace,
   Selector,
   The,
@@ -41,7 +42,7 @@ export const channels = function* (space: MemorySpace, selector: Selector) {
   }
 };
 
-export const fromSelector = function* (selector: Selector) {
+export const fromSelector = function* (selector: Selector | GraphSelector) {
   const all = [[undefined, {}]] as const;
   const entities = Object.entries(selector);
   for (const [of, attributes] of entities.length > 0 ? entities : all) {

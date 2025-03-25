@@ -15,6 +15,7 @@ import {
   DID,
   Entity,
   GraphQuery,
+  GraphSelector,
   InferOf,
   Invocation,
   InvocationURL,
@@ -379,7 +380,12 @@ class QueryView<
   }
 
   get selector() {
-    return (this.invocation.args as { select?: Selector }).select as Selector;
+    if ("select" in this.invocation.args) {
+      return (this.invocation.args as { select?: Selector }).select as Selector;
+    } else {
+      return (this.invocation.args as { selectGraph?: Selector })
+        .selectGraph as GraphSelector;
+    }
   }
 
   return(selection: Selection<InferOf<Protocol>>) {

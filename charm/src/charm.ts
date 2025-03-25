@@ -22,6 +22,7 @@ import {
 } from "@commontools/runner";
 import { storage } from "@commontools/runner";
 import { DID, Identity } from "@commontools/identity";
+import { JSONSelector } from "../../memory/interface.ts";
 
 export type Charm = {
   [NAME]?: string;
@@ -375,10 +376,13 @@ export class CharmManager {
 
   async syncSchema(
     entity: Cell<any>,
-    schema: JSONSchema,
+    schema: JSONSelector,
     waitForStorage: boolean = false,
   ) {
-    console.log("Called CharmManager.sync on ", entity);
-    await storage.syncCell(entity, waitForStorage);
+    await storage.syncSchemaCell(
+      entity,
+      { schema: schema, rootSchema: schema },
+      waitForStorage,
+    );
   }
 }
