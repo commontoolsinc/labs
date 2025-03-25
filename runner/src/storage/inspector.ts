@@ -81,7 +81,7 @@ export interface Model {
   }>;
 }
 
-class Model {
+export class Model {
   connection: Status<Result<Connect, ConnectionError>>;
   push: PushState;
   pull: PullState;
