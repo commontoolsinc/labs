@@ -1067,7 +1067,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
             localStorage.setItem("networkInspectorVisible", "true");
             deps.setOpen(false);
             // Refresh the page to ensure the setting takes effect
-            window.location.reload();
+            globalThis.location.reload();
           },
         },
         {
@@ -1079,7 +1079,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
             localStorage.setItem("networkInspectorVisible", "false");
             deps.setOpen(false);
             // Refresh the page to ensure the setting takes effect
-            window.location.reload();
+            globalThis.location.reload();
           },
         },
         {

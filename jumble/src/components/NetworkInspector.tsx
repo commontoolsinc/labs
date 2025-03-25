@@ -56,7 +56,7 @@ export const ToggleableNetworkInspector: React.FC<{ visible: boolean }> = ({ vis
 
   if (!visible || !status.current) return null;
 
-  return <ModelInspector model={status.current} initiallyOpen={true} />;
+  return <ModelInspector model={status.current} initiallyOpen />;
 };
 const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean }> = ({ model, initiallyOpen = false }) => {
   const [isOpen, setIsOpen] = useState(initiallyOpen);
@@ -399,6 +399,7 @@ const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean
                 />
                 {filterText && (
                   <button
+                    type="button"
                     className="absolute right-1 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white"
                     onClick={() => setFilterText("")}
                   >

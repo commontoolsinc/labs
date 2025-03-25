@@ -16,14 +16,14 @@ export function useNetworkInspector() {
     updateFromStorage();
 
     // Listen for changes in localStorage (for cross-tab synchronization)
-    window.addEventListener("storage", updateFromStorage);
+    globalThis.addEventListener("storage", updateFromStorage);
     
     // Also listen for our custom event for same-tab updates
-    window.addEventListener("networkInspectorUpdate", updateFromStorage);
+    globalThis.addEventListener("networkInspectorUpdate", updateFromStorage);
 
     return () => {
-      window.removeEventListener("storage", updateFromStorage);
-      window.removeEventListener("networkInspectorUpdate", updateFromStorage);
+      globalThis.removeEventListener("storage", updateFromStorage);
+      globalThis.removeEventListener("networkInspectorUpdate", updateFromStorage);
     };
   }, []);
 
@@ -34,7 +34,7 @@ export function useNetworkInspector() {
     localStorage.setItem("networkInspectorVisible", String(newValue));
     
     // Dispatch an event to notify other components about the change
-    window.dispatchEvent(new Event("networkInspectorUpdate"));
+    globalThis.dispatchEvent(new Event("networkInspectorUpdate"));
   };
 
   return {
