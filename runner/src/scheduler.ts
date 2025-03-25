@@ -203,11 +203,14 @@ async function execute() {
   const handler = eventQueue.shift();
   if (handler) {
     try {
-      await Promise.resolve(handler()).catch((error) => {
+      running = Promise.resolve(handler()).catch((error) => {
         handleError(error as Error, handler);
       });
+      await running;
     } catch (error) {
       handleError(error as Error, handler);
+    } finally {
+      running = undefined;
     }
   }
 
