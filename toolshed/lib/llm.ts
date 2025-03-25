@@ -1,11 +1,11 @@
 import { AppType } from "@/app.ts";
 import { hc } from "@hono/hono/client";
-
+import env from "@/env.ts";
 // NOTE(jake): Ideally this would be exposed via the hono client, but I wasn't
 // able to get it all wired up. Importing the route definition is fine for now.
 import type { GetModelsRouteQueryParams } from "@/routes/ai/llm/llm.routes.ts";
 
-const client = hc<AppType>("http://localhost:8000/");
+const client = hc<AppType>(env.TOOLSHED_API_URL);
 
 export async function listAvailableModels({
   capability,

@@ -7,7 +7,7 @@ import { createRouter } from "@/lib/create-app.ts";
 import { HealthResponseSchema } from "@/routes/health/health.handlers.ts";
 import { type AppType } from "@/app.ts";
 import type { AppRouteHandler } from "@/lib/types.ts";
-
+import env from "@/env.ts";
 const tags = ["Health RPC Client"];
 
 export const index = createRoute({
@@ -27,7 +27,7 @@ export const indexHandler: AppRouteHandler<typeof index> = async (c) => {
   // calls to endpoints within the application.
 
   // Create a client that points to the server. The URL would change for production.
-  const client = hc<AppType>("http://localhost:8000/");
+  const client = hc<AppType>(env.TOOLSHED_API_URL);
 
   // Call the health endpoint.
   const res = await client._health.$get();
