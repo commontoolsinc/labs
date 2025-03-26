@@ -21,6 +21,11 @@ const turndown = new TurndownService({
   emDelimiter: "*",
 });
 
+turndown.addRule("removeStyleTags", {
+  filter: ["style"],
+  replacement: "",
+});
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const EmailProperties = {
