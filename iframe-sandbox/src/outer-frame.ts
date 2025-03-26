@@ -30,7 +30,7 @@ iframe {
 <body>
 <iframe
   allow="clipboard-write"
-  sandbox="allow-scripts"><\/iframe>
+  sandbox="allow-scripts allow-modals"><\/iframe>
 <script>
 const iframe = document.querySelector("iframe");
 const HOST_ORIGIN = "${HOST_ORIGIN}";
