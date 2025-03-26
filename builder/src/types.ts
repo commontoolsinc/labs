@@ -103,6 +103,9 @@ export type JSONValue =
   | JSONValue[]
   | { [key: string]: JSONValue };
 
+// TODO(@ubik2) When specifying a JSONSchema, you can often use a boolean
+// This is particularly useful for specifying the schema of a property.
+// That will require reworking some things, so for now, I'm not doing it
 export type JSONSchema = {
   readonly type?:
     | "object"

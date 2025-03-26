@@ -204,7 +204,7 @@ class MemoryProviderSession<
         return this.perform({
           the: "task/return",
           of,
-          is: (await this.memory.queryGraph(invocation)) as Result<
+          is: (await this.memory.querySchema(invocation)) as Result<
             Selection<Space>,
             QueryError
           >,

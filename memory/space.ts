@@ -21,19 +21,21 @@ import type {
   DIDKey,
   Entity,
   Fact,
-  GraphQuery,
-  GraphSubscription,
   JSONObject,
   JSONValue,
   MemorySpace,
-  NodeSelector,
+  OptionalJSONValue,
   Pointer,
+  PointerV0,
   Query,
   QueryError,
   Reference,
   Result,
   Retract,
   SchemaContext,
+  SchemaPathSelector,
+  SchemaQuery,
+  SchemaSubscription,
   Selection,
   SpaceSession,
   SystemError,
@@ -45,6 +47,7 @@ import type {
 } from "./interface.ts";
 import * as Error from "./error.ts";
 import { isNumber, isObject, isString } from "./util.ts";
+import { arrayEqual } from "../runner/src/utils.ts";
 export * from "./interface.ts";
 
 export const PREPARE = `
@@ -191,14 +194,14 @@ class Space<Subject extends MemorySpace = MemorySpace>
     });
   }
 
-  queryGraph(source: GraphQuery<Subject>) {
-    return traceSync("space.instance.queryGraph", (span) => {
+  querySchema(source: SchemaQuery<Subject>) {
+    return traceSync("space.instance.querySchema", (span) => {
       addMemoryAttributes(span, {
-        operation: "queryGraph",
+        operation: "querySchema",
         space: this.subject,
       });
 
-      return queryGraph(this, source);
+      return querySchema(this, source);
     });
   }
 
@@ -462,24 +465,17 @@ export const isPointer = (value: JSONValue): value is Pointer => {
     typeof source?.cell?.["/"] === "string";
 };
 
-export type LeafResult = JSONValue | undefined;
-export type ResultTree = LeafResult[] | BranchResult;
-export type BranchResult = {
-  [at: string]: ResultTree;
-};
-
-export const selectGraph = <Space extends MemorySpace>(
+export const selectSchema = <Space extends MemorySpace>(
   session: Session<Space>,
-  { selectGraph, since }: GraphSubscription["args"],
+  { selectSchema, since }: SchemaSubscription["args"],
 ): Selection<Space>[Space] => {
   const selection = {};
-  const resultTree: ResultTree = {};
-  const selectorEntries = Object.entries(selectGraph);
+  const selectorEntries = Object.entries(selectSchema);
   for (const [of, attributes] of selectorEntries) {
     const attributeEntries = Object.entries(attributes);
     for (const [the, revisions] of attributeEntries) {
       const revisionEntries = Object.entries(revisions);
-      for (const [cause, branches] of revisionEntries) {
+      for (const [cause, nodeSelector] of revisionEntries) {
         for (
           const fact of selectFacts(session, {
             the,
@@ -488,17 +484,31 @@ export const selectGraph = <Space extends MemorySpace>(
             since,
           })
         ) {
-          // the actual matches are all arrays, since for each leaf,
-          // we have a list of schema filters.
-          const result = checkFactMatch(fact.is, branches);
-          // TODO: check for any non-undefined
-          if (result) {
+          //console.log("Checking fact match for : ", fact.is);
+          //console.log("Select Schema Selector: ", nodeSelector);
+          if (fact.is !== undefined) {
+            // FIXME(@ubik2) I don't want to check each fact. I only care about the last fact.
+            const result = checkFactMatch(
+              session,
+              fact.is,
+              [],
+              nodeSelector,
+              new Set<any>(),
+            );
+            //console.log("Result: ", result);
             //console.log("result: ", result);
             set(
               selection,
               [fact.of, fact.the],
               fact.cause,
               result !== undefined ? { is: result } : {},
+            );
+          } else {
+            set(
+              selection,
+              [fact.of, fact.the],
+              fact.cause,
+              {},
             );
           }
         }
@@ -508,95 +518,235 @@ export const selectGraph = <Space extends MemorySpace>(
   return selection;
 };
 
-// Check whether this fact has anything matching our query
-// FIXME(@ubik2) need to handle aliases in here
-// TODO(@ubik2) this would be better with a tree walking callback
-function checkFactMatch(
-  factIs: JSONValue | undefined,
-  nodeSelector: NodeSelector,
-): (JSONValue | undefined)[] | JSONValue | undefined {
-  if (Array.isArray(nodeSelector)) {
-    // nodeSelector is a SchemaContext[]
-    const result = nodeSelector.map((schemaContext) =>
-      (factIs === undefined)
-        ? undefined
-        : getSchemaIntersection(factIs, schemaContext)
-    );
-    //console.log("match: ", result);
-    return result;
-  } else {
-    // nodeSelector is a BranchSelector, so walk down
-    if (
-      factIs == undefined || factIs === null || isString(factIs) ||
-      isNumber(factIs)
-    ) {
-      // If we have a basic fact at this level, we still want to walk down and set the matches
-      // to undefined for everything below us.
-      return setResponse(nodeSelector, undefined);
-    } else if (Array.isArray(factIs)) {
-      const branchEntries = Object.entries(nodeSelector);
-      const rv: Record<string, any> = {};
-      for (const [at, val] of branchEntries) {
-        const numericKeyValue = new Number(at).valueOf();
-        // our branch may want a string property, but if it's pointing at an array this is not a match
-        if (
-          Number.isInteger(numericKeyValue) &&
-          numericKeyValue >= 0 && numericKeyValue < factIs.length
-        ) {
-          rv[numericKeyValue.toString()] = checkFactMatch(
-            factIs[numericKeyValue],
-            val,
-          );
-        } else {
-          rv[at] = setResponse(val, undefined);
-        }
+function getAtPath<Space extends MemorySpace>(
+  session: Session<Space>,
+  fact: JSONValue | undefined,
+  path: string[],
+  cells: Set<any>,
+) {
+  let cursor = fact;
+  //console.log("Called getAtPath", fact, path);
+  for (const [index, part] of path.entries()) {
+    if (cursor !== undefined && isPointer(cursor)) {
+      const loadedObj = loadPointer(session, cursor, cells);
+      return getAtPath(session, loadedObj, path.slice(index), cells);
+    }
+    if (isObject(cursor) && part in (cursor as JSONObject)) {
+      const cursorObj = cursor as JSONObject;
+      cursor = cursorObj[part] as JSONValue;
+    } else if (Array.isArray(cursor)) {
+      const numericKeyValue = new Number(part).valueOf();
+      if (
+        Number.isInteger(numericKeyValue) &&
+        numericKeyValue >= 0 && numericKeyValue < cursor.length
+      ) {
+        cursor = cursor[numericKeyValue];
+      } else {
+        return undefined;
       }
-      return rv;
-    } else if (isObject(factIs)) {
-      const factObj = factIs as JSONObject;
-      const branchEntries = Object.entries(nodeSelector);
-      const rv: Record<string, any> = {};
-      for (const [at, val] of branchEntries) {
-        if (at in factObj) {
-          rv[at] = checkFactMatch(factObj[at], val);
-        } else {
-          rv[at] = setResponse(val, undefined);
-        }
-      }
-      return rv;
+    } else {
+      // we can only descend into pointers, cursors and arrays
+      return undefined;
     }
   }
-  //console.log("didn't expect this: ", factIs, nodeSelector);
+  return cursor;
+}
+
+function loadPointer<Space extends MemorySpace>(
+  session: Session<Space>,
+  obj: JSONValue,
+  cells: Set<any>,
+): JSONValue | undefined {
+  //console.log("Cell Link: ", obj);
+  // TODO: could improve this to break out partial and complete
+  if (cells.has(obj)) {
+    console.log("Cycle Detected!");
+    // FIXME(@ubik2) Need to handle this
+    return null;
+  }
+  cells.add(obj);
+
+  const source = obj as Partial<Pointer>;
+  let cellTarget: string | undefined;
+  let path: string[];
+  if (typeof source?.$alias?.cell?.["/"] === "string") {
+    cellTarget = source.$alias.cell["/"];
+    path = source.$alias.path.map((p) => p.toString());
+  } else if (typeof source?.cell?.["/"] === "string") {
+    cellTarget = source.cell["/"];
+    path = (source as PointerV0).path.map((p) => p.toString());
+  } else {
+    console.log("Unable to load cell target");
+    return undefined;
+  }
+  const factSelector: FactSelector = {
+    the: "application/json",
+    of: `of:${cellTarget}`,
+    cause: SelectAll,
+  };
+  // A selection with no fact.is is essentially undefined
+  // We should be able to handle assertions and retractions
+  // We have no reason to assume the facts are in order, but
+  // for now, I'm pretending they are
+  // FIXME
+  const selection = {};
+  let lastFact = undefined;
+  for (const fact of selectFacts(session, factSelector)) {
+    set(
+      selection,
+      [fact.of, fact.the],
+      fact.cause,
+      fact.is,
+    );
+    //console.log("considering fact: ", fact);
+    lastFact = fact.is;
+  }
+  // FIXME(@ubik2) -- I'm missing something here. Most of my objects
+  // have a value property in the fact.is, and paths seem to be relative
+  // to that value property instead.
+  // This is probably something with StorageValue, since they generally have
+  // a source and a value.
+
+  // const hasValue = lastFact !== null && lastFact !== undefined &&
+  //   typeof lastFact === "object" && "value" in lastFact;
+  // if (hasValue) {
+  //   lastFact = (lastFact as JSONObject)["value"] as JSONValue;
+  // } else {
+  //   console.error("Fact did not have value");
+  // }
+
+  return getAtPath(session, lastFact, path, cells);
+}
+
+function resolveCells<Space extends MemorySpace>(
+  session: Session<Space>,
+  factIs: JSONValue,
+  cells: Set<any> = new Set<any>(),
+): JSONValue {
+  if (
+    factIs === undefined || factIs === null || isString(factIs) ||
+    isNumber(factIs) || typeof factIs === "boolean"
+  ) {
+    return factIs;
+  } else if (Array.isArray(factIs)) {
+    return factIs.map((item) => resolveCells(session, item, cells));
+  } else if (isObject(factIs)) {
+    // First, see if we need special handling
+    if (isPointer(factIs)) {
+      const resolvedFactIs = loadPointer(session, factIs, cells);
+      if (resolvedFactIs === undefined) {
+        console.log("Got broken link");
+        return null;
+      }
+      return resolveCells(session, resolvedFactIs, cells);
+    } else {
+      // Regular object
+      const resolvedObj: JSONObject = {};
+      for (const [key, value] of Object.entries(factIs)) {
+        resolvedObj[key] = resolveCells(session, value, cells);
+      }
+      return resolvedObj;
+    }
+  } else {
+    console.log("Encountered unexpected object: ", factIs);
+    return null;
+  }
+}
+
+// Check whether this fact has anything matching our query
+// TODO(@ubik2) this would be better with a tree walking callback
+// After this is complete, we may want to support cycles in our object
+function checkFactMatch<Space extends MemorySpace>(
+  session: Session<Space>,
+  factIs: JSONValue | undefined,
+  path: PropertyKey[],
+  nodeSelector: SchemaPathSelector,
+  cells: Set<any>,
+): OptionalJSONValue {
+  if (factIs !== undefined && isPointer(factIs)) {
+    factIs = loadPointer(session, factIs, cells);
+  }
+  if (arrayEqual(nodeSelector.path, path)) {
+    return (factIs === undefined) ? undefined : getSchemaIntersection(
+      session,
+      factIs,
+      nodeSelector.schemaContext,
+      cells,
+    );
+  } else {
+    // path.length should never be >= nodeSelector.path.length
+    if (
+      factIs === undefined || factIs === null || isString(factIs) ||
+      isNumber(factIs)
+    ) {
+      // If we have a basic fact at this level, we shouldn't include it
+      return undefined;
+    } else if (Array.isArray(factIs)) {
+      const nextSelectorPath = nodeSelector.path[path.length];
+      const numericKeyValue = new Number(nextSelectorPath).valueOf();
+      if (
+        Number.isInteger(numericKeyValue) &&
+        numericKeyValue >= 0 && numericKeyValue < factIs.length
+      ) {
+        // Our node selector is filtering to grab a single item from the array
+        const newPath = [...path];
+        newPath.push(numericKeyValue.toString());
+        // We can't return an array with undefined, and we don't want to move indices,
+        // so we'll fill the other fields with null. If we have no match, we can just
+        // skip returning this entirely.
+        const rv = Array(factIs.length).fill(null);
+        const subresult = checkFactMatch(
+          session,
+          factIs[numericKeyValue],
+          newPath,
+          nodeSelector,
+          cells,
+        );
+        if (subresult !== undefined) {
+          rv[numericKeyValue] = subresult;
+          return rv;
+        }
+      }
+      return undefined;
+    } else if (isObject(factIs)) {
+      const factObj = factIs as JSONObject;
+      const nextSelectorPath: string = nodeSelector.path[path.length];
+      const rv: Record<string, OptionalJSONValue> = {};
+      if (nextSelectorPath in factObj) {
+        const newPath = [...path];
+        newPath.push(nextSelectorPath);
+        const subresult = checkFactMatch(
+          session,
+          factObj[nextSelectorPath],
+          newPath,
+          nodeSelector,
+          cells,
+        );
+        if (subresult !== undefined) {
+          rv[nextSelectorPath] = subresult;
+          return rv;
+        }
+      }
+      return undefined;
+    }
+  }
+  console.log("didn't expect this: ", factIs, nodeSelector);
   return undefined;
 }
 
-// Since our NodeSelector may be a hierarchy, we want an easy way to build
-// and populate that tree.
-function setResponse(
-  nodeSelector: NodeSelector,
-  value: JSONValue | undefined,
-): any {
-  if (Array.isArray(nodeSelector)) {
-    return nodeSelector.map((_item) => value);
-  } else {
-    const branchEntries = Object.entries(nodeSelector);
-    const rv: Record<string, any> = {};
-    for (const [at, val] of branchEntries) {
-      rv[at] = setResponse(val, value);
-    }
-    return rv;
-  }
-}
-
-// We have a query with a schema, and
-function getSchemaIntersection(
+// We have a query with a schema, so see what portion of our object matches
+// We'll walk through the object while it matches our schema, handling pointers
+// along the way.
+function getSchemaIntersection<Space extends MemorySpace>(
+  session: Session<Space>,
   object: JSONValue,
   { schema, rootSchema }: SchemaContext,
+  cells: Set<any>,
 ): JSONValue | undefined {
   //console.log("testing object: ", schema, object);
-  if (schema == true || isObject(schema) && Object.keys(schema).length == 0) {
-    // These values in a schema match any object
-    return object;
+  if (schema == true || (isObject(schema) && Object.keys(schema).length == 0)) {
+    // These values in a schema match any object - resolve the rest of the cells, and return
+    return resolveCells(session, object, cells);
   } else if (schema == false) {
     return undefined;
   }
@@ -631,10 +781,10 @@ function getSchemaIntersection(
     if ("type" in schemaObj && schemaObj["type"] == "array") {
       const arrayObj = [];
       for (const item of object) {
-        const val = getSchemaIntersection(item, {
+        const val = getSchemaIntersection(session, item, {
           schema: schemaObj["items"],
           rootSchema,
-        });
+        }, cells);
         if (val === undefined) {
           // this array is invalid, since one or more items do not match the schema
           return undefined;
@@ -645,22 +795,45 @@ function getSchemaIntersection(
     }
     return undefined;
   } else if (isObject(object)) {
+    if (isPointer(object)) {
+      if (cells.has(object)) {
+        console.error("Cycle Detected!");
+        // FIXME(@ubik2) Need to handle this
+        return null;
+      }
+      cells.add(object);
+      const loaded = loadPointer(session, object, cells);
+      if (loaded !== undefined) {
+        object = loaded;
+      } else {
+        // If we can't load the target, pretend it's an empty object
+        console.error("Unable to load pointer");
+        object = {} as JSONValue;
+      }
+      // Start over, since the object type may be different
+      return getSchemaIntersection(
+        session,
+        object,
+        { schema, rootSchema },
+        cells,
+      );
+    }
     const filteredObj: Record<string, JSONValue> = {};
     if ("type" in schemaObj && schemaObj["type"] == "object") {
       for (const [propKey, propValue] of Object.entries(object)) {
         if (isObject(schemaObj.properties) && propKey in schemaObj.properties) {
-          const val = getSchemaIntersection(
-            propValue,
-            { schema: schemaObj.properties[propKey], rootSchema },
-          );
+          const val = getSchemaIntersection(session, propValue, {
+            schema: schemaObj.properties[propKey],
+            rootSchema,
+          }, cells);
           if (val !== undefined) {
             filteredObj[propKey] = val;
           }
         } else if (isObject(schemaObj.additionalProperties)) {
-          const val = getSchemaIntersection(
-            propValue,
-            { schema: schemaObj.additionalProperties, rootSchema },
-          );
+          const val = getSchemaIntersection(session, propValue, {
+            schema: schemaObj.additionalProperties,
+            rootSchema,
+          }, cells);
           if (val !== undefined) {
             filteredObj[propKey] = val;
           }
@@ -932,12 +1105,12 @@ export const query = <Space extends MemorySpace>(
   });
 };
 
-export const queryGraph = <Space extends MemorySpace>(
+export const querySchema = <Space extends MemorySpace>(
   session: Session<Space>,
-  command: GraphQuery<Space>,
+  command: SchemaQuery<Space>,
 ): Result<Selection<Space>, QueryError> => {
   try {
-    const result = session.store.transaction(selectGraph)(
+    const result = session.store.transaction(selectSchema)(
       session,
       command.args,
     );
@@ -951,7 +1124,7 @@ export const queryGraph = <Space extends MemorySpace>(
     return {
       error: Error.query(
         command.sub,
-        command.args.selectGraph,
+        command.args.selectSchema,
         error as SqliteError,
       ),
     };

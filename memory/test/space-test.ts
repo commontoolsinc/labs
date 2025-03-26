@@ -8,10 +8,12 @@ import { createTemporaryDirectory } from "../util.ts";
 import { refer } from "merkle-reference";
 
 import { alice, space } from "./principal.ts";
-import { GraphSelector } from "../space.ts";
+import { SchemaSelector } from "../space.ts";
 import { AssertFact, SchemaContext } from "../interface.ts";
 const the = "application/json";
 const doc = `of:${refer({ hello: "world" })}` as const;
+const doc2 = `of:${refer({ goodbye: "world" })}` as const;
+const doc3 = `of:${refer({ goodbye: "cruel world" })}` as const;
 
 // Helper function to make query comparisons easier
 // Since our result is returned with a match for each selector schema,
@@ -1160,7 +1162,7 @@ test("list excludes retracted facts", DB, async (session) => {
   );
 });
 
-test("list single fact with graph query", DB, async (session) => {
+test("list single fact with schema query", DB, async (session) => {
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
   const tr = Transaction.create({
     issuer: alice.did(),
@@ -1170,181 +1172,287 @@ test("list single fact with graph query", DB, async (session) => {
   const write = await session.transact(tr);
   assert(write.ok);
 
-  const subscriptions: SchemaContext[] = [
-    {
-      schema: { "type": "number" },
-      rootSchema: {
-        "type": "object",
-        "properties": { "v": { "type": "number" } },
-      },
+  const subscriptions: SchemaContext = {
+    schema: { "type": "number" },
+    rootSchema: {
+      "type": "object",
+      "properties": { "v": { "type": "number" } },
     },
-  ];
+  };
 
-  const sampleGraphSelector: GraphSelector = {
+  const sampleSchemaSelector: SchemaSelector = {
     [doc]: {
       [the]: {
         _: {
-          ["v"]: subscriptions,
+          path: ["v"],
+          schemaContext: subscriptions,
         },
       },
     },
   };
 
-  const result = session.queryGraph({
+  const result = session.querySchema({
     cmd: "/memory/graph/query",
     iss: alice.did(),
     sub: space.did(),
     args: {
-      selectGraph: sampleGraphSelector,
+      selectSchema: sampleSchemaSelector,
     },
     prf: [],
   });
 
-  assertExists(result.ok?.[space.did()]);
-  const facts = result.ok?.[space.did()][v1.of][v1.the] as Record<
-    string,
-    AssertFact<any>
-  >;
-  assertExists(facts);
-  assertEquals(getResultAtPath(facts, ["v"]), 1);
+  assertEquals(result, {
+    ok: { [space.did()]: Changes.from([v1]) },
+  });
 });
 
-// TODO(@ubik2)
 test(
-  "list single fact with graph query and schema filter",
+  "list fact through alias with schema query and schema filter",
+  DB,
+  async (session) => {
+    const v1 = Fact.assert({
+      the,
+      of: doc2,
+      is: {
+        "home": {
+          "name": "Mr. Bob Hope",
+          "street": "2466 Southridge Drive",
+          "city": "Palm Springs",
+        },
+        "work": {
+          "name": "Mr. Bob Hope",
+          "street": "2627 N Hollywood Way",
+          "city": "Burbank",
+        },
+      },
+    });
+
+    const v2 = Fact.assert({
+      the,
+      of: doc,
+      is: {
+        "address": {
+          "$alias": {
+            "cell": {
+              "/": doc2.slice(3), // strip off 'of:'
+            },
+            "path": ["home"],
+          },
+        },
+        "name": "Bob",
+      },
+    });
+
+    const tr1 = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v1]),
+    });
+    const write1 = await session.transact(tr1);
+    assert(write1.ok);
+    const tr2 = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v2]),
+    });
+    const write2 = await session.transact(tr2);
+    assert(write2.ok);
+
+    // We'll use a schema selector to exclude the name from the address, since we already have that
+    const schemaSelector: SchemaSelector = {
+      [doc]: {
+        [the]: {
+          _: {
+            path: ["address"],
+            schemaContext: {
+              schema: {
+                "type": "object",
+                "properties": {
+                  "street": { "type": "string" },
+                  "city": { "type": "string" },
+                },
+              },
+              rootSchema: {
+                "type": "object",
+                "properties": {
+                  "street": { "type": "string" },
+                  "city": { "type": "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const result = session.querySchema({
+      cmd: "/memory/graph/query",
+      iss: alice.did(),
+      sub: space.did(),
+      args: {
+        selectSchema: schemaSelector,
+      },
+      prf: [],
+    });
+
+    const cause = refer(Fact.unclaimed({ the, of: doc }));
+    // We should not have the name in the returned value, since our schema excludes it
+    const addressFact = {
+      [doc]: {
+        [the]: {
+          [cause.toString()]: {
+            is: {
+              "address": {
+                "street": "2466 Southridge Drive",
+                "city": "Palm Springs",
+              },
+            },
+          },
+        },
+      },
+    };
+
+    assertEquals(result, {
+      ok: { [space.did()]: addressFact },
+    });
+  },
+);
+
+test(
+  "list fact through multiple aliases",
   DB,
   async (session) => {
     const v1 = Fact.assert({
       the,
       of: doc,
       is: {
-        v: {
-          "address": {
-            "$alias": {
-              "cell": {
-                "/":
-                  "baedreicpmdsacbwn6d7rheirfutm3uulywizvjio72kppuls5lpq3f4mze",
-              },
-              "path": ["argument"],
-            },
+        "home": {
+          "name": {
+            "title": "Mr.",
+            "first": "Bob",
+            "last": "Hope",
           },
-          "name": "Bob",
+          "street": "2466 Southridge Drive",
+          "city": "Palm Springs",
+        },
+        "work": {
+          "name": {
+            "title": "Mr.",
+            "first": "Bob",
+            "last": "Hope",
+          },
+          "street": "2627 N Hollywood Way",
+          "city": "Burbank",
         },
       },
     });
-    const tr = Transaction.create({
-      issuer: alice.did(),
-      subject: space.did(),
-      changes: Changes.from([v1]),
-    });
-    const write = await session.transact(tr);
-    assert(write.ok);
 
-    const sampleGraphSelector: GraphSelector = {
-      [doc]: {
+    const v2 = Fact.assert({
+      the,
+      of: doc2,
+      is: {
+        "address": {
+          "$alias": {
+            "cell": {
+              "/": doc.slice(3), // strip off 'of:'
+            },
+            "path": ["home"],
+          },
+        },
+      },
+    });
+
+    const v3 = Fact.assert({
+      the,
+      of: doc3,
+      is: {
+        "emergency_contacts": [
+          {
+            "$alias": {
+              "cell": {
+                "/": doc2.slice(3), // strip off 'of:'
+              },
+              "path": ["address", "name"],
+            },
+          },
+        ],
+      },
+    });
+
+    for (const fact of [v1, v2, v3]) {
+      const tr = Transaction.create({
+        issuer: alice.did(),
+        subject: space.did(),
+        changes: Changes.from([fact]),
+      });
+      const write = await session.transact(tr);
+      assert(write.ok);
+    }
+
+    // We'll use a schema selector to exclude the name from the address, since we already have that
+    const schemaSelector: SchemaSelector = {
+      [doc3]: {
         [the]: {
           _: {
-            ["v"]: [
-              {
-                schema: { "type": "number" },
-                rootSchema: {
-                  "type": "object",
-                  "properties": { "v": { "type": "number" } },
+            path: ["emergency_contacts", "0", "first"],
+            schemaContext: {
+              schema: { "type": "string" },
+              rootSchema: {
+                "type": "object",
+                "properties": {
+                  "emergency-contacts": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "title": { "type": "string" },
+                        "first": { "type": "string" },
+                        "last": { "type": "string" },
+                      },
+                    },
+                  },
                 },
               },
-            ],
+            },
           },
         },
       },
     };
 
-    const result = session.queryGraph({
+    const result = session.querySchema({
       cmd: "/memory/graph/query",
       iss: alice.did(),
       sub: space.did(),
       args: {
-        selectGraph: sampleGraphSelector,
+        selectSchema: schemaSelector,
       },
       prf: [],
     });
 
-    assertExists(result.ok?.[space.did()]);
-    const facts = result.ok?.[space.did()][v1.of][v1.the] as Record<
-      string,
-      AssertFact<any>
-    >;
-    assertExists(facts);
-    // The object doesn't match the schema, so we return undefined
-    assertEquals(getResultAtPath(facts, ["v"]), undefined);
+    const cause = refer(Fact.unclaimed({ the, of: doc3 }));
+    // Our aliases and schema query path mean that we just get the first name
+    const addressFact = {
+      [doc3]: {
+        [the]: {
+          [cause.toString()]: {
+            is: {
+              "emergency_contacts": [{
+                "first": "Bob",
+              }],
+            },
+          },
+        },
+      },
+    };
+
+    assertEquals(result, {
+      ok: { [space.did()]: addressFact },
+    });
   },
 );
 
-// test(
-//   "list non-matching fact with graph query and schema filter",
-//   DB,
-//   async (session) => {
-//     const v1 = Fact.assert({
-//       the,
-//       of: doc,
-//       is: {
-//         v: {
-//           "address": {
-//             "$alias": {
-//               "cell": {
-//                 "/":
-//                   "baedreicpmdsacbwn6d7rheirfutm3uulywizvjio72kppuls5lpq3f4mze",
-//               },
-//               "path": ["argument"],
-//             },
-//           },
-//           "name": "Bob",
-//         },
-//       },
-//     });
-//     const tr = Transaction.create({
-//       issuer: alice.did(),
-//       subject: space.did(),
-//       changes: Changes.from([v1]),
-//     });
-//     const write = await session.transact(tr);
-//     assert(write.ok);
-
-//     const sampleGraphSelector: GraphSelector = {
-//       [doc]: {
-//         [the]: {
-//           _: {
-//             ["c"]: [
-//               {
-//                 schema: { "type": "number" },
-//                 rootSchema: {
-//                   "type": "object",
-//                   "properties": { "c": { "type": "number" } },
-//                 },
-//               },
-//             ],
-//           },
-//         },
-//       },
-//     };
-
-//     const result = session.queryGraph({
-//       cmd: "/memory/graph/query@0.1",
-//       iss: alice.did(),
-//       sub: space.did(),
-//       args: {
-//         select: sampleGraphSelector,
-//       },
-//       prf: [],
-//     });
-
-//     assertEquals(result, {
-//       ok: { [space.did()]: {} },
-//     });
-//   },
-// );
-
 test(
-  "list single fact with graph query and schema filter using $ref",
+  "list single fact with schema query and schema filter using $ref",
   DB,
   async (session) => {
     const v1 = Fact.assert({
@@ -1364,59 +1472,60 @@ test(
     const write = await session.transact(tr);
     assert(write.ok);
 
-    const sampleGraphSelector: GraphSelector = {
+    const schemaSelector: SchemaSelector = {
       [doc]: {
         [the]: {
           _: {
-            ["left"]: [
-              {
-                schema: {
-                  "type": "object",
-                  "properties": {
-                    "name": { "type": "string" },
-                    "left": { "$ref": "#" },
-                    "right": { "$ref": "#" },
-                  },
-                  "required": ["name"],
+            path: ["left"],
+            schemaContext: {
+              schema: {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "left": { "$ref": "#" },
+                  "right": { "$ref": "#" },
                 },
-                rootSchema: {
-                  "type": "object",
-                  "properties": {
-                    "name": { "type": "string" },
-                    "left": { "$ref": "#" },
-                    "right": { "$ref": "#" },
-                  },
-                  "required": ["name"],
-                },
+                "required": ["name"],
               },
-            ],
+              rootSchema: {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "left": { "$ref": "#" },
+                  "right": { "$ref": "#" },
+                },
+                "required": ["name"],
+              },
+            },
           },
         },
       },
     };
 
-    const result = session.queryGraph({
+    const result = session.querySchema({
       cmd: "/memory/graph/query",
       iss: alice.did(),
       sub: space.did(),
       args: {
-        selectGraph: sampleGraphSelector,
+        selectSchema: schemaSelector,
       },
       prf: [],
     });
 
-    assertExists(result.ok?.[space.did()]);
-    const facts = result.ok?.[space.did()][v1.of][v1.the] as Record<
-      string,
-      AssertFact<any>
-    >;
-    assertExists(facts);
-    assertEquals(getResultAtPath(facts, ["left"]), { "name": "Alice" });
+    const filteredFact = Fact.assert({
+      the,
+      of: doc,
+      is: { "left": { "name": "Alice" } },
+    });
+    assertEquals(result, {
+      ok: { [space.did()]: Changes.from([filteredFact]) },
+    });
   },
 );
 
+// This test may be too similer to the previous one
 test(
-  "list single fact with graph query and schema filter using $ref",
+  "list single fact with schema query and schema filter using $ref",
   DB,
   async (session) => {
     const v1 = Fact.assert({
@@ -1445,74 +1554,74 @@ test(
     const write = await session.transact(tr);
     assert(write.ok);
 
-    const sampleGraphSelector: GraphSelector = {
+    const schemaSelector: SchemaSelector = {
       [doc]: {
         [the]: {
           _: {
-            ["emails"]: [
-              {
-                schema: {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "sender": { "type": "string" },
-                      "subject": { "type": "string" },
-                    },
-                    "required": ["sender"],
-                  },
-                },
-                rootSchema: {
+            path: ["emails"],
+            schemaContext: {
+              schema: {
+                "type": "array",
+                "items": {
                   "type": "object",
                   "properties": {
-                    "emails": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "sender": { "type": "string" },
-                          "subject": { "type": "string" },
-                        },
-                        "required": ["sender"],
+                    "sender": { "type": "string" },
+                    "subject": { "type": "string" },
+                  },
+                  "required": ["sender"],
+                },
+              },
+              rootSchema: {
+                "type": "object",
+                "properties": {
+                  "emails": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sender": { "type": "string" },
+                        "subject": { "type": "string" },
                       },
+                      "required": ["sender"],
                     },
                   },
                 },
               },
-            ],
+            },
           },
         },
       },
     };
 
-    const result = session.queryGraph({
+    const result = session.querySchema({
       cmd: "/memory/graph/query",
       iss: alice.did(),
       sub: space.did(),
       args: {
-        selectGraph: sampleGraphSelector,
+        selectSchema: schemaSelector,
       },
       prf: [],
     });
 
     // We should be getting back the fact without the body
-    const filteredEmails = [
-      {
-        "sender": "spamsender@sweepstakes.com",
-        "subject": "You may have won the sweepstakes",
+    const filteredFact = Fact.assert({
+      the,
+      of: doc,
+      is: {
+        "emails": [
+          {
+            "sender": "spamsender@sweepstakes.com",
+            "subject": "You may have won the sweepstakes",
+          },
+          {
+            "sender": "boss@job.com",
+            "subject": "You're fired!",
+          },
+        ],
       },
-      {
-        "sender": "boss@job.com",
-        "subject": "You're fired!",
-      },
-    ];
-
-    assertExists(result.ok?.[space.did()]);
-    const facts = result.ok?.[space.did()][v1.of][v1.the] as Record<
-      string,
-      AssertFact<any>
-    >;
-    assertExists(facts);
-    assertEquals(getResultAtPath(facts, ["emails"]), filteredEmails);
+    });
+    assertEquals(result, {
+      ok: { [space.did()]: Changes.from([filteredFact]) },
+    });
   },
 );

@@ -100,7 +100,7 @@ export const Selector = z.record(
   ),
 );
 
-export const GraphSelector = z.record(
+export const SchemaSelector = z.record(
   Of,
   z.record(
     The,
@@ -164,22 +164,16 @@ export const Transaction = invocation(
 
 export const Query = invocation(
   "/memory/query",
-  z.union([
-    z.object({
-      select: Selector,
-      since: z.number().optional(),
-    }),
-    z.object({
-      selectGraph: GraphSelector,
-      since: z.number().optional(),
-    }),
-  ]),
+  z.object({
+    select: Selector,
+    since: z.number().optional(),
+  }),
 );
 
-export const GraphQuery = invocation(
+export const SchemaQuery = invocation(
   "/memory/graph/query",
   z.object({
-    selectSchema: GraphSelector,
+    selectSchema: SchemaSelector,
     since: z.number().optional(),
   }),
 );
@@ -239,7 +233,7 @@ export const ConnectionError = z
 export const QueryError = z.object({
   name: z.literal("QueryError"),
   cause: SystemError,
-  selector: z.union([Selector, GraphSelector]),
+  selector: z.union([Selector, SchemaSelector]),
   message: z.string(),
   stack: z.string().optional(),
 });

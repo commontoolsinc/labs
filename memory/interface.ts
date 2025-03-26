@@ -156,7 +156,9 @@ export type Protocol<Space extends MemorySpace = MemorySpace> = {
         ): Task<Result<Unit, SystemError | AuthorizationError>>;
       };
       graph: {
-        query(graphQuery: { selectGraph: GraphSelector; since?: number }): Task<
+        query(
+          schemaQuery: { selectSchema: SchemaSelector; since?: number },
+        ): Task<
           Result<Selection<Space>, AuthorizationError | QueryError>
         >;
       };
@@ -446,7 +448,7 @@ export interface Session<Space extends MemorySpace = MemorySpace> {
   /**
    * Queries space for matching entities based on provided selector.
    */
-  queryGraph(source: GraphQuery<Space>): QueryResult<Space>;
+  querySchema(source: SchemaQuery<Space>): QueryResult<Space>;
 
   close(): CloseResult;
 }
@@ -705,17 +707,17 @@ export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
   { source: InvocationURL<Reference<Subscribe<Space>>> }
 >;
 
-export type GraphSubscription<Space extends MemorySpace = MemorySpace> =
+export type SchemaSubscription<Space extends MemorySpace = MemorySpace> =
   Invocation<
     "/memory/graph/subscribe",
     Space,
-    { selectGraph: GraphSelector; since?: number }
+    { selectSchema: SchemaSelector; since?: number }
   >;
 
-export type GraphQuery<Space extends MemorySpace = MemorySpace> = Invocation<
+export type SchemaQuery<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/graph/query",
   Space,
-  { selectGraph: GraphSelector; since?: number }
+  { selectSchema: SchemaSelector; since?: number }
 >;
 
 // A normal Selector looks like this (with _ as wildcard cause):
@@ -728,49 +730,31 @@ export type GraphQuery<Space extends MemorySpace = MemorySpace> = Invocation<
 //     }
 //   }
 // }
-// A GraphSelector looks like this (with _ as wildcard cause):
-// {
-//   "of:ba4jcbvpq3k5sooggkwwosy6sqd3fhr5md7hroyf3bq3vrambqm4xkkus": {
-//     "application/json": {
-//       _: [{
-//         schema: { "type": "object" },
-//         rootSchema: { "type": "object" }
-//       }]
-//     }
-//   }
-// }
-// A GraphSelector could also look like this (with _ as wildcard cause):
+
+// A SchemaSelector looks like this (with _ as wildcard cause):
 // {
 //   "of:ba4jcbvpq3k5sooggkwwosy6sqd3fhr5md7hroyf3bq3vrambqm4xkkus": {
 //     "application/json": {
 //       _: {
-//         "name": [{
-//           schema: { "type": "string" },
-//           rootSchema: { "type": "string" }
-//         }]
+//         path: [],
+//         schemaContext: {
+//           schema: { "type": "object" },
+//           rootSchema: { "type": "object" }
+//         }
 //       }
 //     }
 //   }
 // }
 
-export type GraphSelector = Select<
+export type SchemaSelector = Select<
   Entity,
-  Select<The, Select<Cause, NodeSelector>>
+  Select<The, Select<Cause, SchemaPathSelector>>
 >;
 
-export type BranchSelector = {
-  [at: string]: NodeSelector;
+export type SchemaPathSelector = {
+  path: string[];
+  schemaContext: SchemaContext;
 };
-
-export type NodeSelector = SchemaContext[] | BranchSelector;
-// {
-//   a: {
-//     b: [{
-//       schema: { type: 'string' },
-//       rootSchema: { type: 'string' }
-//     }],
-//   }
-// }
 
 // This is a schema, together with its rootSchema for resolving $ref entries
 export type SchemaContext = {
@@ -836,7 +820,7 @@ export type ArraySelector = {
 export type Operation =
   | Transaction
   | Query
-  | GraphQuery
+  | SchemaQuery
   | Subscribe
   | Unsubscribe;
 
@@ -914,6 +898,15 @@ export type JSONValue =
 export interface JSONObject extends Record<string, JSONValue> {}
 
 export interface JSONArray extends ArrayLike<JSONValue> {}
+
+// Some weaker versions of JSONValue that allow for undefined
+export type OptionalJSONValue =
+  | JSONValue
+  | OptionalJSONObject
+  | OptionalJSONArray
+  | undefined;
+export interface OptionalJSONObject extends Record<string, OptionalJSONValue> {}
+export interface OptionalJSONArray extends ArrayLike<OptionalJSONValue> {}
 
 export type AsyncResult<T extends Unit = Unit, E extends Error = Error> =
   Promise<Result<T, E>>;
@@ -1009,7 +1002,7 @@ export interface QueryError extends Error {
   cause: SystemError;
 
   space: MemorySpace;
-  selector: Selector | GraphSelector;
+  selector: Selector | SchemaSelector;
 }
 
 /**

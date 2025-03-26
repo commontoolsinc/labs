@@ -281,7 +281,7 @@ test("list different fact types", store, async (session) => {
   );
 });
 
-test("list multiple facts using graph query", store, async (session) => {
+test("list multiple facts using schema query", store, async (session) => {
   const clock = new Clock();
   const memory = Consumer.open({ as: subject, session, clock })
     .mount(subject.did());
@@ -297,22 +297,18 @@ test("list multiple facts using graph query", store, async (session) => {
     changes: Changes.from(facts),
   });
 
-  // queryGraph returns the facts with an is portion for each schema, so they're arrays
-  const wrappedFacts = facts.map((fact) =>
-    Fact.assert({ the: fact.the, of: fact.of, is: [fact.is] })
-  );
-
-  const result = await memory.queryGraph({
-    selectGraph: {
-      _: { [the]: { _: [{ schema: true, rootSchema: true }] } },
+  const result = await memory.querySchema({
+    selectSchema: {
+      _: {
+        [the]: {
+          _: { path: [], schemaContext: { schema: true, rootSchema: true } },
+        },
+      },
     },
   });
-  // assertExists(graphResult1.ok);
-  // const selection = graphResult1.ok;
-  // const result = { ok: graphResult1.ok, { [subject.did()]: selection.of }};
   assertEquals(
     result.ok?.selection,
-    { [subject.did()]: Changes.from(wrappedFacts) },
+    { [subject.did()]: Changes.from(facts) },
     "lists multiple facts",
   );
 });

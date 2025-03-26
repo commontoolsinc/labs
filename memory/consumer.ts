@@ -14,8 +14,6 @@ import {
   ConsumerSession,
   DID,
   Entity,
-  GraphQuery,
-  GraphSelector,
   InferOf,
   Invocation,
   InvocationURL,
@@ -28,6 +26,8 @@ import {
   QueryError,
   Reference,
   Result,
+  SchemaQuery,
+  SchemaSelector,
   Seconds,
   Selection,
   Selector,
@@ -226,7 +226,7 @@ export interface MemorySession<Space extends MemorySpace> {
 export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {
   transact(source: Transaction<Space>["args"]): TransactionResult<Space>;
   query(source: Query["args"]): QueryView<Space, Protocol<Space>>;
-  queryGraph(source: GraphQuery["args"]): QueryView<Space, Protocol<Space>>;
+  querySchema(source: SchemaQuery["args"]): QueryView<Space, Protocol<Space>>;
 }
 
 export type { QueryView };
@@ -252,7 +252,7 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
     });
     return QueryView.create(this.session, query);
   }
-  queryGraph(source: GraphQuery["args"]): QueryView<Space, Protocol<Space>> {
+  querySchema(source: SchemaQuery["args"]): QueryView<Space, Protocol<Space>> {
     const query = this.session.invoke({
       cmd: "/memory/graph/query" as const,
       sub: this.space,
@@ -383,8 +383,8 @@ class QueryView<
     if ("select" in this.invocation.args) {
       return (this.invocation.args as { select?: Selector }).select as Selector;
     } else {
-      return (this.invocation.args as { selectGraph?: Selector })
-        .selectGraph as GraphSelector;
+      return (this.invocation.args as { selectSchema?: Selector })
+        .selectSchema as SchemaSelector;
     }
   }
 

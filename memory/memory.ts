@@ -4,20 +4,18 @@ import * as FS from "@std/fs";
 import {
   addChangesAttributes,
   addMemoryAttributes,
-  recordResult,
   traceAsync,
   traceSync,
 } from "./telemetry.ts";
 import {
   AsyncResult,
   ConnectionError,
-  GraphQuery,
-  GraphSubscription,
   MemorySession,
   MemorySpace as Subject,
   Query,
   QueryResult,
   Result,
+  SchemaQuery,
   SpaceSession,
   Subscriber,
   SubscribeResult,
@@ -78,8 +76,8 @@ export class Memory implements Session, MemorySession {
     return this.perform(() => query(this, source));
   }
 
-  queryGraph(source: GraphQuery): QueryResult {
-    return this.perform(() => queryGraph(this, source));
+  querySchema(source: SchemaQuery): QueryResult {
+    return this.perform(() => querySchema(this, source));
   }
 
   close() {
@@ -123,10 +121,10 @@ export const query = async (session: Session, query: Query) => {
   });
 };
 
-export const queryGraph = async (session: Session, query: GraphQuery) => {
-  return await traceAsync("memory.queryGraph", async (span) => {
+export const querySchema = async (session: Session, query: SchemaQuery) => {
+  return await traceAsync("memory.querySchema", async (span) => {
     addMemoryAttributes(span, {
-      operation: "queryGraph",
+      operation: "querySchema",
       space: query.sub,
     });
 
@@ -137,7 +135,7 @@ export const queryGraph = async (session: Session, query: GraphQuery) => {
     }
 
     span.setAttribute("mount.status", "success");
-    return space.queryGraph(query);
+    return space.querySchema(query);
   });
 };
 

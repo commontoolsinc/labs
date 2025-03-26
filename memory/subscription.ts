@@ -1,8 +1,8 @@
 import {
   Cause,
   Entity,
-  GraphSelector,
   MemorySpace,
+  SchemaSelector,
   Selector,
   The,
   Transaction,
@@ -42,12 +42,16 @@ export const channels = function* (space: MemorySpace, selector: Selector) {
   }
 };
 
-export const fromSelector = function* (selector: Selector | GraphSelector) {
+export const fromSelector = function* (selector: Selector | SchemaSelector) {
   const all = [[undefined, {}]] as const;
   const entities = Object.entries(selector);
   for (const [of, attributes] of entities.length > 0 ? entities : all) {
     const selector = Object.entries(attributes);
     for (const [the, members] of selector.length > 0 ? selector : all) {
+      // type checking is confused here
+      if (members === undefined || members === null) {
+        continue;
+      }
       const selector = Object.entries(members);
       for (
         const cause of selector.length > 0 ? Object.keys(selector) : [undefined]

@@ -3,12 +3,12 @@ import { log } from "../storage.ts";
 import { type StorageProvider, type StorageValue } from "./base.ts";
 import type {
   Entity,
-  GraphQuery,
   JSONValue,
   MemorySpace,
   Protocol,
   Query,
   SchemaContext,
+  SchemaQuery,
   UCAN,
 } from "@commontools/memory/interface";
 import * as Memory from "@commontools/memory/consumer";
@@ -199,7 +199,13 @@ export class RemoteStorageProvider implements StorageProvider {
         subscription = Subscription.spawn(
           local.memory,
           { select: { [of]: { [the]: {} } } },
-          { selectGraph: { [of]: { [the]: { "_": [schemaContext] } } } },
+          {
+            selectSchema: {
+              [of]: {
+                [the]: { "_": { path: [], schemaContext: schemaContext } },
+              },
+            },
+          },
         );
 
         // store subscription so it can be reused.
@@ -262,7 +268,7 @@ export class RemoteStorageProvider implements StorageProvider {
       subscription.subscribe(RemoteStorageProvider.sync);
       // Then await for the query to be resolved because that is what
       // caller will await on.
-      await subscription.query;
+      await subscription.schemaQuery;
     } else {
       console.warn(
         `⚠️ Reached maximum subscription limit on ${this.workspace}. Call to .sync is ignored`,
@@ -551,32 +557,54 @@ export interface Subscriber {
 class Subscription<Space extends MemorySpace> {
   reader!: ReadableStreamDefaultReader;
   query!: Memory.QueryView<Space, Protocol<Space>>;
-  graphQuery?: Memory.QueryView<Space, Protocol<Space>>;
+  schemaQuery?: Memory.QueryView<Space, Protocol<Space>>;
 
   static spawn<Space extends MemorySpace>(
     session: Memory.MemorySpaceSession<Space>,
     selector: Query["args"],
-    graphSelector?: GraphQuery["args"],
+    schemaSelector?: SchemaQuery["args"],
   ) {
-    return new Subscription(session, selector, graphSelector);
+    return new Subscription(session, selector, schemaSelector);
   }
   constructor(
     public session: Memory.MemorySpaceSession<Space>,
     public selector: Query["args"],
-    public graphSelector?: GraphQuery["args"],
+    public schemaSelector?: SchemaQuery["args"],
     public subscribers: Set<Subscriber> = new Set(),
   ) {
     this.connect();
   }
 
   // Run an initial query to get the data, then subscribe to get updates
-  // In the case of a selector that is a GraphSelector, we will run the
-  // query with the graph selector, but subscribe to updates on the doc
+  // In the case of a selector that is a SchemaSelector, we will run the
+  // query with the schema selector, but subscribe to updates on the doc
   // with a standard selector.
   connect() {
-    if (this.graphSelector !== undefined) {
-      this.graphQuery = this.session.queryGraph(this.graphSelector);
-      this.graphQuery.promise.then(() => this.broadcast());
+    if (this.schemaSelector !== undefined) {
+      // FIXME hacke
+      this.schemaQuery = this.session.querySchema(this.schemaSelector);
+      this.schemaQuery.promise.then((result) => {
+        // FIXME: Begin debugging
+        // console.log("Result of schema query from server: ", result);
+        // console.log("schemaSelector was ", this.schemaSelector);
+        // if ("ok" in result) {
+        //   const success = result["ok"] as Memory.QueryView<
+        //     Space,
+        //     Protocol<Space>
+        //   >;
+        //   for (const [k1, v1] of Object.entries(success.selection)) {
+        //     for (const [k2, v2] of Object.entries(v1 as Memory.FactSelection)) {
+        //       for (const [k3, v3] of Object.entries(v2)) {
+        //         for (const [k4, v4] of Object.entries(v3)) {
+        //           console.log("schema query internals:", v4.is);
+        //         }
+        //       }
+        //     }
+        //   }
+        // }
+        // FIXME: End debugging
+        this.broadcast();
+      });
     }
     const query = this.session.query(this.selector as Query["args"]);
     const reader = query.subscribe().getReader();
