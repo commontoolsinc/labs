@@ -1,13 +1,15 @@
-import { setIframeContextHandler } from "@commontools/iframe-sandbox";
+import { IPC, setIframeContextHandler } from "@commontools/iframe-sandbox";
 import {
   Action,
   addAction,
   addCommonIDfromObjectID,
+  idle,
   isCell,
   ReactivityLog,
   removeAction,
 } from "@commontools/runner";
 import { client as llm } from "@commontools/llm";
+import { isObj } from "@commontools/utils";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 // This is to prepare Proxy objects to be serialized
@@ -104,7 +106,11 @@ function setPreviousValue(context: any, key: string, value: any) {
 export const setupIframe = () =>
   setIframeContextHandler({
     read(context: any, key: string): any {
-      const data = isCell(context) ? context.key(key).get?.() : context?.[key];
+      const data = key === "*"
+        ? isCell(context) ? context.get() : context
+        : isCell(context)
+        ? context.key(key).get?.()
+        : context?.[key];
       const serialized = removeNonJsonData(data);
       console.log("read", key, serialized, JSON.stringify(serialized));
       setPreviousValue(context, key, JSON.stringify(serialized));
@@ -116,7 +122,11 @@ export const setupIframe = () =>
         console.log("write", key, value, JSON.stringify(value));
         if (isCell(context)) {
           addCommonIDfromObjectID(value);
-          context.key(key).set(value);
+          if (isObj(value) && !Array.isArray(value)) {
+            context.key(key).update(value);
+          } else {
+            context.key(key).set(value);
+          }
         } else {
           context[key] = value;
         }
@@ -130,7 +140,8 @@ export const setupIframe = () =>
     ): any {
       const action: Action = (log: ReactivityLog) => {
         const data = key === "*"
-          ? (isCell(context) ? context.withLog(log).get() : context)
+          // No withLog because we don't want to schedule more runs, see below
+          ? (isCell(context) ? context.get() : context)
           : (isCell(context)
             // get?.() because streams don't have a get, set undefined for those
             ? context.withLog(log).key(key).get?.()
@@ -142,6 +153,16 @@ export const setupIframe = () =>
           console.log("subscribe", key, serialized, previousValue);
           setPreviousValue(context, key, serializedString);
           callback(key, serialized);
+        }
+
+        // HACK(seefeld): We want to remove * support, but some existing iframes
+        // use it to know that data is available. So as a hack, we're
+        // unsubscribing from * here after the first time it's called.
+        // TODO(seefeld): Remove this and * support2025-04-15 or earlier.
+        if (key === "*") {
+          // Wait for idle to confuse the scheduler as it updates dependencies
+          // after running this function.
+          idle().then(() => removeAction(action));
         }
       };
 
@@ -172,5 +193,12 @@ export const setupIframe = () =>
       );
       console.log("onReadWebpageRequest res", res);
       return await res.json();
+    },
+    async onPerform(
+      context: unknown,
+      command: IPC.TaskPerform,
+    ): Promise<{ ok: object; error?: void } | { ok?: void; error: Error }> {
+      console.log("perform", command);
+      return await { error: new Error(`Command is not implemented`) };
     },
   });

@@ -47,15 +47,15 @@ export class LLMClient {
     const errors: Error[] = [];
 
     for (const model of models) {
-      try {
-        const fullRequest: LLMRequest = {
-          ...userRequest,
-          model,
-          stream: partialCB ? true : false,
-          messages: userRequest.messages.map(processMessage),
-          max_tokens: userRequest.max_tokens,
-        };
+      const fullRequest: LLMRequest = {
+        ...userRequest,
+        model,
+        stream: partialCB ? true : false,
+        messages: userRequest.messages.map(processMessage),
+        max_tokens: userRequest.max_tokens,
+      };
 
+      try {
         const response = await fetch(this.serverUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -84,7 +84,7 @@ export class LLMClient {
         // if we fail during streaming
         return await this.stream(response.body, partialCB);
       } catch (error) {
-        console.error(`Model "${model}" failed:`, error);
+        console.error(`Model "${model}" failed:`, error, fullRequest);
         errors.push(error as Error);
       }
     }

@@ -147,8 +147,6 @@ export async function fetchUserInfo(accessToken: string): Promise<UserInfo> {
   }
 }
 
-let signer: Signer | undefined;
-
 // Helper function to get auth cell and storage
 export async function getAuthCellAndStorage(docLink: CellLink | string) {
   try {
@@ -157,13 +155,9 @@ export async function getAuthCellAndStorage(docLink: CellLink | string) {
       ? JSON.parse(docLink)
       : docLink;
 
-    if (!signer) {
-      // FIXME(ja): we should load operator passphrase from env
-      signer = await Identity.fromPassphrase("implicit trust");
-      storage.setSigner(signer);
+    if (!storage.hasSigner() || !storage.hasRemoteStorage()) {
+      throw new Error("Unable to talk to storage: not configured.");
     }
-
-    storage.setRemoteStorage(new URL("http://localhost:8000"));
 
     // FIXME(ja): add the authcell schema!
     const authCell = getCellFromLink(
@@ -247,14 +241,6 @@ export async function getTokensFromAuthCell(
   }
 }
 
-// Format token info for response
-export function formatTokenInfo(tokenData: AuthData) {
-  return {
-    expiresAt: tokenData.expiresAt,
-    hasRefreshToken: !!tokenData.refreshToken,
-  };
-}
-
 // Standard error response
 export function createErrorResponse(c: Context, message: string, status = 400) {
   return c.json({
@@ -289,7 +275,7 @@ export function createLoginErrorResponse(c: any, errorMessage: string) {
 export function createRefreshSuccessResponse(
   c: any,
   message: string,
-  tokenInfo: { expiresAt?: number; hasRefreshToken: boolean },
+  tokenInfo: AuthData,
 ) {
   return c.json(
     {
@@ -364,4 +350,19 @@ export function createLogoutErrorResponse(
     },
     status,
   );
+}
+
+export function createBackgroundIntegrationSuccessResponse(
+  c: any,
+  message: string,
+) {
+  return c.json({ success: true, message }, 200) as any;
+}
+
+export function createBackgroundIntegrationErrorResponse(
+  c: any,
+  errorMessage: string,
+  status = 400,
+) {
+  return c.json({ success: false, error: errorMessage }, status) as any;
 }

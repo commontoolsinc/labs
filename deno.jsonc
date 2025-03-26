@@ -1,7 +1,9 @@
 {
   "workspace": [
+    "./background-charm-service",
     "./builder",
     "./charm",
+    "./charm-seeder",
     "./cli",
     "./deno-vite-plugin",
     "./deno-web-test",
@@ -18,21 +20,47 @@
   ],
   "tasks": {
     "check": "./scripts/check-all.sh",
-    "test-all": "./scripts/test-all.ts"
+    "test-all": "./scripts/test-all.ts",
+    "build-artifact": "./scripts/build-artifact.ts"
   },
   "compilerOptions": {
     "jsx": "react-jsxdev",
-    "lib": ["deno.ns", "dom", "dom.iterable", "dom.asynciterable", "esnext"],
-    "types": ["./jumble/src/global.d.ts"]
+    "lib": [
+      "deno.ns",
+      "dom",
+      "dom.iterable",
+      "dom.asynciterable",
+      "esnext"
+    ],
+    "types": [
+      "./jumble/src/global.d.ts"
+    ]
   },
+  "exclude": [
+    "jumble/.vite/deps/",
+    "**/node_modules/",
+    "**/.vite/",
+    "**/dist/",
+    "**/build/",
+    "**/.cache/",
+    "**/coverage/"
+  ],
   "lint": {
     "exclude": [
       "deno-vite-plugin"
     ],
     "rules": {
-      "tags": ["recommended"],
-      "include": ["ban-untagged-todo", "no-external-import"],
-      "exclude": ["no-unused-vars", "no-explicit-any"]
+      "tags": [
+        "recommended"
+      ],
+      "include": [
+        "ban-untagged-todo",
+        "no-external-import"
+      ],
+      "exclude": [
+        "no-unused-vars",
+        "no-explicit-any"
+      ]
     }
   },
   "fmt": {
@@ -43,20 +71,14 @@
     "proseWrap": "always"
   },
   "imports": {
-    "ai": "npm:ai@^4.1.5",
     "@astral/astral": "jsr:@astral/astral",
     "@cfworker/json-schema": "npm:@cfworker/json-schema@^4.1.0",
     "@cmd-johnson/oauth2-client": "jsr:@cmd-johnson/oauth2-client@^2.0.0",
     "@codemirror/lang-javascript": "npm:@codemirror/lang-javascript@^6.2.2",
     "@codemirror/lang-markdown": "npm:@codemirror/lang-markdown@^6.3.2",
-    "esbuild": "npm:esbuild",
     "@hono/hono": "npm:hono@^4.7.0",
-    "lit": "npm:lit@^3.2.1",
     "@luca/esbuild-deno-loader": "jsr:@luca/esbuild-deno-loader",
-    "merkle-reference": "npm:merkle-reference@^2.0.1",
-    "multiformats": "npm:multiformats@^13.3.2",
     "@noble/ed25519": "npm:@noble/ed25519@^2.2.3",
-    "react": "npm:react@^18.3.1",
     "@scure/bip39": "npm:@scure/bip39@^1.5.4",
     "@std/assert": "jsr:@std/assert@^1",
     "@std/async": "jsr:@std/async@^1",
@@ -69,11 +91,19 @@
     "@std/http": "jsr:@std/http@^1",
     "@std/path": "jsr:@std/path@^1",
     "@std/testing": "jsr:@std/testing@^1",
+    "@types/jsdom": "npm:@types/jsdom@^21.1.7",
     "@vercel/otel": "npm:@vercel/otel@^1.10.1",
-    "typescript": "npm:typescript",
-    "vite": "npm:vite@^6.0.11",
     "@web/test-runner": "npm:@web/test-runner",
-    "zod": "npm:zod@^3.24.1",
-    "zod-to-json-schema": "npm:zod-to-json-schema@^3.24.1"
+    "ai": "npm:ai@^4.1.5",
+    "esbuild": "npm:esbuild",
+    "jsdom": "npm:jsdom",
+    "lit": "npm:lit@^3.2.1",
+    "merkle-reference": "npm:merkle-reference@^2.0.1",
+    "multiformats": "npm:multiformats@^13.3.2",
+    "react": "npm:react@^18.3.1",
+    "typescript": "npm:typescript",
+    "vite": "npm:vite@^6.2.1",
+    "zod-to-json-schema": "npm:zod-to-json-schema@^3.24.1",
+    "zod": "npm:zod@^3.24.1"
   }
 }

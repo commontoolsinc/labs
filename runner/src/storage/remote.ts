@@ -7,8 +7,11 @@ import type {
   MemorySpace,
   Protocol,
   Query,
+  Result,
   SchemaContext,
   SchemaQuery,
+  Subscribe,
+  Transaction,
   UCAN,
 } from "@commontools/memory/interface";
 import * as Memory from "@commontools/memory/consumer";
@@ -54,6 +57,12 @@ export interface RemoteStorageProviderSettings {
    * space.
    */
   maxSubscriptionsPerSpace: number;
+
+  /**
+   * Amount of milliseconds we will spend waiting on WS connection before we
+   * abort.
+   */
+  connectionTimeout: number;
 }
 
 export interface RemoteStorageProviderOptions {
@@ -68,6 +77,7 @@ export interface RemoteStorageProviderOptions {
 
 const defaultSettings: RemoteStorageProviderSettings = {
   maxSubscriptionsPerSpace: 50_000,
+  connectionTimeout: 30_000,
 };
 
 export class RemoteStorageProvider implements StorageProvider {
@@ -93,6 +103,7 @@ export class RemoteStorageProvider implements StorageProvider {
   >;
 
   connectionCount = 0;
+  timeoutID = 0;
 
   constructor({
     address,
@@ -109,6 +120,7 @@ export class RemoteStorageProvider implements StorageProvider {
     this.the = the;
     this.settings = settings;
     this.inspector = inspector;
+    this.handleEvent = this.handleEvent.bind(this);
 
     const session = Memory.create({ as });
 
@@ -154,7 +166,7 @@ export class RemoteStorageProvider implements StorageProvider {
   }
 
   subscribe(entityId: EntityId) {
-    const { the } = this;
+    const { the, inspector } = this;
     const of = RemoteStorageProvider.toEntity(entityId);
     const local = this.mount(this.workspace);
     let subscription = local.remote.get(of);
@@ -166,20 +178,12 @@ export class RemoteStorageProvider implements StorageProvider {
         subscription = Subscription.spawn(
           local.memory,
           { select: { [of]: { [the]: {} } } },
+          undefined,
+          inspector,
         );
 
         // store subscription so it can be reused.
         local.remote.set(of, subscription);
-
-        // Log subscription creation to inspector
-        this.inspector?.postMessage({
-          subscription: {
-            entity: of,
-            subscriberCount: subscription.subscribers.size,
-            totalSubscriptions: local.remote.size,
-          },
-          timestamp: new Date().toISOString(),
-        });
       }
     }
 
@@ -187,7 +191,7 @@ export class RemoteStorageProvider implements StorageProvider {
   }
 
   subscribeSchema(entityId: EntityId, schemaContext: SchemaContext) {
-    const { the } = this;
+    const { the, inspector } = this;
     const of = RemoteStorageProvider.toEntity(entityId);
     const local = this.mount(this.workspace);
     let subscription = local.remote.get(of);
@@ -206,20 +210,11 @@ export class RemoteStorageProvider implements StorageProvider {
               },
             },
           },
+          inspector,
         );
 
         // store subscription so it can be reused.
         local.remote.set(of, subscription);
-
-        // Log subscription creation to inspector
-        this.inspector?.postMessage({
-          subscription: {
-            entity: of,
-            subscriberCount: subscription.subscribers.size,
-            totalSubscriptions: local.remote.size,
-          },
-          timestamp: new Date().toISOString(),
-        });
       }
     }
 
@@ -325,18 +320,7 @@ export class RemoteStorageProvider implements StorageProvider {
 
     const transaction = { changes: Changes.from(facts) };
 
-    this.inspector?.postMessage({ transact: transaction });
-
     const result = await memory.transact(transaction);
-    // Report memory state metrics after transaction
-    this.inspector?.postMessage({
-      state: {
-        spaces: this.state.size,
-        subscriptions: remote.size,
-        localChanges: local.size,
-      },
-      timestamp: new Date().toISOString(),
-    });
 
     // Once we have a result of the transaction we clear out local facts we
     // created, we need to do this otherwise subsequent transactions will
@@ -381,11 +365,17 @@ export class RemoteStorageProvider implements StorageProvider {
   inspect<T>(
     message: T,
   ): T {
-    this.inspector?.postMessage(message);
+    this.inspector?.postMessage({
+      ...message,
+      time: Date.now(),
+    });
     return message;
   }
 
   handleEvent(event: MessageEvent) {
+    // clear if we had timeout pending
+    clearTimeout(this.timeoutID);
+
     switch (event.type) {
       case "message":
         return this.onReceive(event.data);
@@ -395,12 +385,15 @@ export class RemoteStorageProvider implements StorageProvider {
         return this.onDisconnect(event);
       case "error":
         return this.onDisconnect(event);
+      case "timeout":
+        return this.onTimeout(event.target as WebSocket);
     }
   }
   connect() {
     const { connection } = this;
     // If we already have a connection we remove all the listeners from it.
     if (connection) {
+      clearTimeout(this.timeoutID);
       connection.removeEventListener("message", this);
       connection.removeEventListener("open", this);
       connection.removeEventListener("close", this);
@@ -411,6 +404,9 @@ export class RemoteStorageProvider implements StorageProvider {
     webSocketUrl.searchParams.set("space", this.workspace);
     const socket = new WebSocket(webSocketUrl.href);
     this.connection = socket;
+    // Start a timer so if connection is pending longer then `connectionTimeout`
+    // we should abort and retry.
+    this.setTimeout();
     socket.addEventListener("message", this);
     socket.addEventListener("open", this);
     socket.addEventListener("close", this);
@@ -419,14 +415,34 @@ export class RemoteStorageProvider implements StorageProvider {
     this.connectionCount += 1;
   }
 
+  setTimeout() {
+    this.timeoutID = setTimeout(
+      this.handleEvent,
+      this.settings.connectionTimeout,
+      { type: "timeout", target: this.connection },
+    );
+  }
+
+  onTimeout(socket: WebSocket) {
+    this.inspect({
+      disconnect: {
+        reason: "timeout",
+        message:
+          `Aborting connection after failure to connect in ${this.settings.connectionTimeout}ms`,
+      },
+    });
+
+    if (this.connection === socket) {
+      socket.close();
+    }
+  }
+
   async onOpen(socket: WebSocket) {
     const { reader, queue } = this;
 
     // Report connection to inspector
-    this.inspector?.postMessage({
-      connectionStatus: "connected",
-      connectionCount: this.connectionCount,
-      timestamp: new Date().toISOString(),
+    this.inspect({
+      connect: { attempt: this.connectionCount },
     });
 
     // If we did have connection
@@ -441,8 +457,7 @@ export class RemoteStorageProvider implements StorageProvider {
     while (this.connection === socket) {
       // First drain the queued commands if we have them.
       for (const command of queue) {
-        this.inspect({ send: command });
-        socket.send(Codec.UCAN.toString(command));
+        this.post(command);
         queue.delete(command);
       }
 
@@ -455,10 +470,10 @@ export class RemoteStorageProvider implements StorageProvider {
 
       const command = next.value!;
 
-      // Now we make that our socket is still a current connection as we may
-      // have lost connection while waiting to read a command.
+      // Now we make sure that our socket is still a current connection as we
+      // may have lost connection while waiting to read a command.
       if (this.connection === socket) {
-        socket.send(Codec.UCAN.toString(command));
+        this.post(command);
       } // If it is no longer our connection we simply add the command into a
       // queue so it will be send once connection is reopen.
       else {
@@ -468,16 +483,26 @@ export class RemoteStorageProvider implements StorageProvider {
     }
   }
 
+  post(
+    invocation: Memory.UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>,
+  ) {
+    this.inspect({
+      send: invocation,
+    });
+    this.connection!.send(Codec.UCAN.toString(invocation));
+  }
+
   onDisconnect(event: Event) {
     const socket = event.target as WebSocket;
     // If connection is `null` provider was closed and we do nothing on
     // disconnect.
     if (this.connection === socket) {
       // Report disconnection to inspector
-      this.inspector?.postMessage({
-        connectionStatus: "disconnected",
-        reason: event.type,
-        timestamp: new Date().toISOString(),
+      this.inspect({
+        disconnect: {
+          reason: event.type,
+          description: `Disconnected because of the ${event.type}`,
+        },
       });
 
       this.connect();
@@ -557,20 +582,29 @@ export interface Subscriber {
 class Subscription<Space extends MemorySpace> {
   reader!: ReadableStreamDefaultReader;
   query!: Memory.QueryView<Space, Protocol<Space>>;
+  subscription!: ReturnType<typeof this.query.subscribe>;
   schemaQuery?: Memory.QueryView<Space, Protocol<Space>>;
 
   static spawn<Space extends MemorySpace>(
     session: Memory.MemorySpaceSession<Space>,
     selector: Query["args"],
     schemaSelector?: SchemaQuery["args"],
+    inspector?: BroadcastChannel,
   ) {
-    return new Subscription(session, selector, schemaSelector);
+    return new Subscription(
+      session,
+      selector,
+      new Set(),
+      schemaSelector,
+      inspector,
+    );
   }
   constructor(
     public session: Memory.MemorySpaceSession<Space>,
     public selector: Query["args"],
+    public subscribers: Set<Subscriber>,
     public schemaSelector?: SchemaQuery["args"],
-    public subscribers: Set<Subscriber> = new Set(),
+    public inspector?: BroadcastChannel,
   ) {
     this.connect();
   }
@@ -581,35 +615,15 @@ class Subscription<Space extends MemorySpace> {
   // with a standard selector.
   connect() {
     if (this.schemaSelector !== undefined) {
-      // FIXME hacke
       this.schemaQuery = this.session.querySchema(this.schemaSelector);
       this.schemaQuery.promise.then((result) => {
-        // FIXME: Begin debugging
-        // console.log("Result of schema query from server: ", result);
-        // console.log("schemaSelector was ", this.schemaSelector);
-        // if ("ok" in result) {
-        //   const success = result["ok"] as Memory.QueryView<
-        //     Space,
-        //     Protocol<Space>
-        //   >;
-        //   for (const [k1, v1] of Object.entries(success.selection)) {
-        //     for (const [k2, v2] of Object.entries(v1 as Memory.FactSelection)) {
-        //       for (const [k3, v3] of Object.entries(v2)) {
-        //         for (const [k4, v4] of Object.entries(v3)) {
-        //           console.log("schema query internals:", v4.is);
-        //         }
-        //       }
-        //     }
-        //   }
-        // }
-        // FIXME: End debugging
         this.broadcast();
       });
     }
-    const query = this.session.query(this.selector as Query["args"]);
+    const query = this.session.query(this.selector);
     const reader = query.subscribe().getReader();
-    this.reader = reader;
     this.query = query;
+    this.reader = reader;
 
     // TODO(gozala): Need to do this cleaner, but for now we just
     // broadcast when query returns so cell circuitry picks up changes.
@@ -624,8 +638,25 @@ class Subscription<Space extends MemorySpace> {
     return this.query.facts[0];
   }
 
+  inspect<T>(
+    message: T,
+  ): T {
+    this.inspector?.postMessage({
+      ...message,
+      time: Date.now(),
+    });
+    return message;
+  }
+
   broadcast() {
     const { value } = this;
+    this.inspector?.postMessage({
+      integrate: {
+        url: this.subscription.toURL(),
+        value,
+      },
+    });
+
     for (const subscriber of this.subscribers) {
       subscriber(value);
     }

@@ -1,16 +1,19 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
+  BackgroundIntegrationRoute,
   CallbackRoute,
   LoginRoute,
   LogoutRoute,
   RefreshRoute,
 } from "./google-oauth.routes.ts";
 import {
+  type AuthData,
   type CallbackResult,
   clearAuthData,
   codeVerifiers,
+  createBackgroundIntegrationErrorResponse,
+  createBackgroundIntegrationSuccessResponse,
   createCallbackResponse,
-  createErrorResponse,
   createLoginErrorResponse,
   createLoginSuccessResponse,
   createLogoutErrorResponse,
@@ -19,11 +22,12 @@ import {
   createRefreshErrorResponse,
   createRefreshSuccessResponse,
   fetchUserInfo,
-  formatTokenInfo,
   getBaseUrl,
-  getTokensFromAuthCell,
   persistTokens,
 } from "./google-oauth.utils.ts";
+import { addCharmToBG } from "@commontools/utils";
+
+import { type CellLink } from "@commontools/runner";
 
 /**
  * Google OAuth Login Handler
@@ -41,12 +45,9 @@ export const login: AppRouteHandler<LoginRoute> = async (c) => {
       return createLoginErrorResponse(c, "Missing authCellId in request");
     }
 
-    // Encode the auth cell ID as state parameter
-    const authIdParam = btoa(JSON.stringify(payload.authCellId));
     const redirectUri = `${
       getBaseUrl(c.req.url)
     }/api/integrations/google-oauth/callback`;
-
     logger.debug({ redirectUri }, "Created redirect URI");
 
     // Create OAuth client
@@ -55,14 +56,18 @@ export const login: AppRouteHandler<LoginRoute> = async (c) => {
     // Generate authorization URL with PKCE
     const { uri, codeVerifier } = await client.code.getAuthorizationUri();
 
+    // Create state payload that includes the code verifier
+    const statePayload = btoa(JSON.stringify({
+      authCellId: payload.authCellId,
+      integrationCharmId: payload.integrationCharmId,
+      codeVerifier: codeVerifier,
+    }));
+
     // Add state parameter and other required params to the URL
     const authUrl = new URL(uri.toString());
-    authUrl.searchParams.set("state", authIdParam);
+    authUrl.searchParams.set("state", statePayload);
     authUrl.searchParams.set("access_type", "offline");
     authUrl.searchParams.set("prompt", "consent");
-
-    // Store the code verifier for later use in the callback
-    codeVerifiers.set(authIdParam, codeVerifier);
 
     logger.info({ authUrl: authUrl.toString() }, "Generated OAuth URL");
 
@@ -110,11 +115,22 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
       return createCallbackResponse(callbackResult);
     }
 
-    // Decode and parse the state parameter (contains the auth cell ID)
-    let decodedState: string;
+    // Decode and parse the state parameter
+    let decodedState: {
+      authCellId: string;
+      integrationCharmId: string;
+      codeVerifier: string;
+    };
+
     try {
       decodedState = JSON.parse(atob(state));
-      logger.info({ decodedState }, "Decoded state parameter");
+      logger.info({
+        decodedState: {
+          authCellId: decodedState.authCellId,
+          integrationCharmId: decodedState.integrationCharmId,
+          codeVerifier: decodedState.codeVerifier ? "present" : "missing",
+        },
+      }, "Decoded state parameter");
     } catch (error) {
       logger.error({ state, error }, "Failed to decode state parameter");
       const callbackResult: CallbackResult = {
@@ -124,13 +140,12 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
       return createCallbackResponse(callbackResult);
     }
 
-    // Get the code verifier for this state
-    const codeVerifier = codeVerifiers.get(state);
+    const codeVerifier = decodedState.codeVerifier;
     if (!codeVerifier) {
-      logger.error(state, "No code verifier found for state");
+      logger.error("No code verifier found in state parameter");
       const callbackResult: CallbackResult = {
         success: false,
-        error: "Invalid state parameter",
+        error: "Invalid state parameter: missing code verifier",
       };
       return createCallbackResponse(callbackResult);
     }
@@ -150,9 +165,6 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
       },
     );
 
-    // Clean up the code verifier
-    codeVerifiers.delete(state);
-
     logger.info(
       {
         accessTokenPrefix: tokens.accessToken.substring(0, 21) + "...",
@@ -166,9 +178,47 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
 
     // Fetch user info to verify the token
     const userInfo = await fetchUserInfo(tokens.accessToken);
+    const authCellLink = JSON.parse(decodedState?.authCellId) as CellLink;
 
     // Save tokens to auth cell
-    const tokenData = await persistTokens(tokens, userInfo, decodedState);
+    const tokenData = await persistTokens(tokens, userInfo, authCellLink);
+
+    // Add this charm to the Gmail integration charms cell
+    try {
+      // Get the charm ID and space from the decodedState (which is the auth cell ID)
+      const space = authCellLink.space;
+      const integrationCharmId = decodedState?.integrationCharmId;
+
+      if (space && integrationCharmId) {
+        logger.info(
+          { space, integrationCharmId },
+          "Adding Google integration charm to Gmail integrations",
+        );
+
+        const added = await addCharmToBG({
+          space,
+          charmId: integrationCharmId,
+          integration: "gmail",
+        });
+
+        if (added) {
+          logger.info("Added charm to Gmail integrations");
+        } else {
+          logger.info("Charm already exists in Gmail integrations");
+        }
+      } else {
+        logger.warn(
+          { decodedState },
+          "Could not extract space and charm ID from auth cell",
+        );
+      }
+    } catch (error) {
+      // Don't fail the main operation if this fails, just log it
+      logger.error(
+        { error },
+        "Failed to add charm to Gmail integrations, continuing anyway",
+      );
+    }
 
     // Prepare and return the success response
     const callbackResult: CallbackResult = {
@@ -177,7 +227,7 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
       details: {
         state: decodedState,
         scope,
-        tokenInfo: formatTokenInfo(tokenData),
+        tokenInfo: tokenData,
         userInfo,
         timestamp: new Date().toISOString(),
       },
@@ -200,76 +250,58 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
 export const refresh: AppRouteHandler<RefreshRoute> = async (c) => {
   const logger = c.get("logger");
 
+  let refreshToken: string;
+
   try {
     const payload = await c.req.json();
     logger.info({ payload }, "Received Google OAuth refresh request");
 
-    if (!payload.authCellId) {
-      logger.error("No authCellId provided in refresh request");
-      return createRefreshErrorResponse(c, "No authCellId provided");
+    if (!payload.refreshToken) {
+      logger.error("No refreshToken provided");
+      return createRefreshErrorResponse(c, "No refreshToken provided");
     }
 
+    refreshToken = payload.refreshToken;
+
+    // Get redirect URI for client creation
+    const baseUrl = getBaseUrl(c.req.url);
+    const redirectUri = `${baseUrl}/api/integrations/google-oauth/callback`;
+
+    // Create OAuth client
+    const client = createOAuthClient(redirectUri);
+
+    let newToken;
     try {
-      // Get current token data from auth cell
-      const currentToken = await getTokensFromAuthCell(payload.authCellId);
-
-      if (!currentToken.refreshToken) {
-        logger.error("No refresh token found in auth cell");
-        return createRefreshErrorResponse(c, "No refresh token found");
-      }
-
-      // Get redirect URI for client creation
-      const baseUrl = getBaseUrl(c.req.url);
-      const redirectUri = `${baseUrl}/api/integrations/google-oauth/callback`;
-
-      // Create OAuth client
-      const client = createOAuthClient(redirectUri);
-
-      // Refresh the token
-      const newToken = await client.refreshToken.refresh(
-        currentToken.refreshToken,
-      );
-
-      logger.info(
-        {
-          accessTokenPrefix: newToken.accessToken.substring(0, 21) + "...",
-          expiresAt: newToken.expiresIn
-            ? Date.now() + newToken.expiresIn * 1000
-            : undefined,
-          hasRefreshToken: !!newToken.refreshToken,
-        },
-        "Refreshed OAuth tokens",
-      );
-
-      // Keep existing refresh token if a new one wasn't provided
-      if (!newToken.refreshToken) {
-        newToken.refreshToken = currentToken.refreshToken;
-      }
-
-      // Fetch user info to verify the token
-      const userInfo = await fetchUserInfo(newToken.accessToken);
-
-      // Update tokens in auth cell
-      const updatedTokenData = await persistTokens(
-        newToken,
-        userInfo,
-        payload.authCellId,
-      );
-
-      // Return success response
-      return createRefreshSuccessResponse(
-        c,
-        "Token refreshed successfully",
-        formatTokenInfo(updatedTokenData),
-      );
+      newToken = await client.refreshToken.refresh(refreshToken);
     } catch (error) {
       logger.error({ error }, "Failed to refresh token");
-      return createRefreshErrorResponse(
-        c,
-        `Failed to refresh token. The refresh token may be invalid or expired: ${error}`,
-        401,
-      );
+      return createRefreshErrorResponse(c, "Failed to refresh token");
     }
+
+    logger.info(
+      {
+        accessTokenPrefix: newToken.accessToken.substring(0, 21) + "...",
+        expiresAt: newToken.expiresIn
+          ? Date.now() + newToken.expiresIn * 1000
+          : undefined,
+        hasRefreshToken: !!newToken.refreshToken,
+      },
+      "Refreshed OAuth tokens",
+    );
+
+    // Keep existing refresh token if a new one wasn't provided
+    if (!newToken.refreshToken) {
+      newToken.refreshToken = refreshToken;
+    }
+
+    const resp: AuthData = {
+      ...newToken,
+      expiresAt: newToken.expiresIn
+        ? Date.now() + newToken.expiresIn * 1000
+        : undefined,
+    };
+
+    return createRefreshSuccessResponse(c, "success", resp);
   } catch (error) {
     logger.error({ error }, "Failed to process refresh request");
     return createRefreshErrorResponse(c, "Failed to process refresh request");
@@ -320,5 +352,30 @@ export const logout: AppRouteHandler<LogoutRoute> = async (c) => {
   } catch (error: unknown) {
     logger.error({ error }, "Failed to process logout request");
     return createLogoutErrorResponse(c, "Failed to process logout request");
+  }
+};
+
+export const backgroundIntegration: AppRouteHandler<
+  BackgroundIntegrationRoute
+> = async (c) => {
+  const logger = c.get("logger");
+
+  try {
+    const payload = await c.req.json();
+
+    await addCharmToBG({
+      space: payload.space,
+      charmId: payload.charmId,
+      integration: payload.integration,
+    });
+
+    return createBackgroundIntegrationSuccessResponse(c, "success");
+  } catch (error) {
+    console.log("error", error);
+    logger.error({ error }, "Failed to process background integration request");
+    return createBackgroundIntegrationErrorResponse(
+      c,
+      "Failed to process background integration request",
+    );
   }
 };

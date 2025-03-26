@@ -7,7 +7,7 @@ import {
   setBobbyServerUrl,
   storage,
 } from "@commontools/runner";
-import * as Session from "./session.ts";
+import { Session } from "@commontools/identity";
 
 const { name, charmId, recipeFile, cause, quit } = parseArgs(Deno.args, {
   string: ["name", "charmId", "recipeFile", "cause"],

@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import { DID, Identity, KeyStore, PassKey } from "@commontools/identity";
 import { matchSpace } from "@/routes.ts";
+import { sleep } from "@commontools/utils/sleep";
 
 // Location in storage of root key.
 const ROOT_KEY = "$ROOT_KEY";
@@ -74,6 +75,11 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
   useEffect(() => {
     let ignore = false;
     async function getKeyStoreAndRoot() {
+      // There is some issue in CI where we wait on `KeyStore.open`
+      // indefinitely. Possibly on load, the indexedDB request is queued
+      // behind some startup processing. Waiting alleviates this issue.
+      await sleep(100);
+
       const keyStore = await KeyStore.open();
       const root = await keyStore.get(ROOT_KEY);
       if (!ignore) {
@@ -82,6 +88,7 @@ export const AuthenticationProvider: React.FC<{ children: React.ReactNode }> = (
       }
     }
     getKeyStoreAndRoot();
+
     return () => {
       ignore = true;
       setKeyStore(undefined);

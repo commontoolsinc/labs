@@ -1,5 +1,6 @@
 import {
   isOpaqueRefMarker,
+  type JSONSchema,
   type NodeFactory,
   type NodeRef,
   type Opaque,
@@ -13,6 +14,7 @@ import {
 import { hasValueAtPath, setValueAtPath } from "./utils.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { createNodeFactory } from "./module.ts";
+import { SchemaWithoutCell } from "./schema-to-ts.ts";
 
 let mapFactory: NodeFactory<any, any>;
 
@@ -29,7 +31,19 @@ let mapFactory: NodeFactory<any, any>;
 //
 // The proxy yields another proxy for each nested value, but still allows the
 // methods to be called. Setters just call .set() on the nested cell.
-export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
+export function opaqueRef<S extends JSONSchema>(
+  value: Opaque<SchemaWithoutCell<S>> | SchemaWithoutCell<S>,
+  schema: S,
+): OpaqueRef<SchemaWithoutCell<S>>;
+export function opaqueRef<T>(
+  value?: Opaque<T> | T,
+  schema?: JSONSchema,
+): OpaqueRef<T>;
+
+export function opaqueRef<T>(
+  value?: Opaque<T> | T,
+  schema?: JSONSchema,
+): OpaqueRef<T> {
   const store = {
     value,
     defaultValue: undefined,
@@ -43,6 +57,8 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
   function createNestedProxy(
     path: PropertyKey[],
     target?: any,
+    schema?: JSONSchema,
+    rootSchema: JSONSchema | undefined = schema,
   ): OpaqueRef<any> {
     const methods: OpaqueRefMethods<any> = {
       get: () => unsafe_materialize(unsafe_binding, path),
@@ -51,7 +67,28 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
           unsafe_materialize(unsafe_binding, path); // TODO(seefeld): Set value
         } else setValueAtPath(store, ["value", ...path], newValue);
       },
-      key: (key: PropertyKey) => createNestedProxy([...path, key]),
+      key: (key: PropertyKey) => {
+        // Determine child schema when accessing a property
+        let childSchema: JSONSchema | undefined;
+
+        if (schema?.type === "object") {
+          // For root object properties
+          childSchema = schema.properties?.[key as string] ||
+            (typeof schema.additionalProperties === "object"
+              ? schema.additionalProperties
+              : undefined);
+        } else if (schema?.type === "array") {
+          // For root array elements
+          childSchema = schema.items;
+        }
+
+        return createNestedProxy(
+          [...path, key],
+          key in methods ? methods[key as keyof OpaqueRefMethods<any>] : store,
+          childSchema,
+          childSchema ? rootSchema : undefined, // Only pass rootSchema if we have a child schema
+        );
+      },
       setDefault: (newValue: Opaque<any>) => {
         if (!hasValueAtPath(store, ["defaultValue", ...path])) {
           setValueAtPath(store, ["defaultValue", ...path], newValue);
@@ -66,6 +103,8 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
       export: () => ({
         cell: top,
         path,
+        schema,
+        rootSchema,
         ...store,
       }),
       unsafe_bindToRecipeAndPath: (
@@ -136,12 +175,9 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
       get(_, prop) {
         if (typeof prop === "symbol") {
           return methods[prop as keyof OpaqueRefMethods<any>];
-        } else if (prop in methods) {
-          return createNestedProxy(
-            [...path, prop],
-            methods[prop as keyof OpaqueRefMethods<any>],
-          );
-        } else return createNestedProxy([...path, prop], store);
+        } else {
+          return methods.key(prop);
+        }
       },
       set(_, prop, value) {
         methods.set({ [prop]: value });
@@ -152,7 +188,7 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
     return proxy;
   }
 
-  const top = createNestedProxy([], store) as OpaqueRef<T>;
+  const top = createNestedProxy([], store, schema) as OpaqueRef<T>;
 
   store.frame.opaqueRefs.add(top);
 

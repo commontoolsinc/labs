@@ -1,26 +1,24 @@
 import "./commands.css";
 import {
+  addGithubRecipe,
   castNewRecipe,
+  castSpellAsCharm,
   Charm,
   CharmManager,
   compileAndRunRecipe,
+  iterate,
+  renameCharm,
 } from "@commontools/charm";
 // Import NavigateFunction from our types rather than directly from react-router-dom
 import type { NavigateFunction } from "react-router-dom";
 import { charmId } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
-import {
-  Cell,
-  EntityId,
-  getEntityId,
-  getRecipe,
-  isStream,
-} from "@commontools/runner";
-import { extendCharm, iterateCharm } from "@/utils/charm-operations.ts";
+import { EntityId, isStream } from "@commontools/runner";
+import { extendCharm } from "@/utils/charm-operations.ts";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext.tsx";
 import { startCharmIndexing } from "@/utils/indexing.ts";
-import { generateJSON } from "@commontools/llm";
 import { createPath, createPathWithHash, ROUTES } from "@/routes.ts";
+import { grabCells, SourceSet } from "@/utils/format.ts";
 
 export type CommandType =
   | "action"
@@ -31,18 +29,69 @@ export type CommandType =
   | "transcribe"
   | "placeholder";
 
-export interface CommandItem {
+// Base interface with common properties
+interface BaseCommandItem {
   id: string;
   type: CommandType;
-  title: string; // No longer needs to be a function
-  placeholder?: string;
+  title: string;
   group?: string;
-  children?: CommandItem[]; // No longer needs to be a function
-  handler?: (value?: any) => Promise<void> | void; // No context param needed
-  validate?: (input: string) => boolean;
-  message?: string;
-  predicate?: boolean; // Can be computed value instead of function
+  predicate?: boolean;
 }
+
+// Action command
+export interface ActionCommandItem extends BaseCommandItem {
+  type: "action";
+  handler: () => Promise<void> | void;
+}
+
+// Input command
+export interface InputCommandItem extends BaseCommandItem {
+  type: "input";
+  placeholder?: string;
+  handler: (input: string, sources?: any) => Promise<void> | void;
+  validate?: (input: string) => boolean;
+}
+
+// Confirm command
+export interface ConfirmCommandItem extends BaseCommandItem {
+  type: "confirm";
+  message: string;
+  handler: (context: CommandContext) => Promise<void> | void;
+}
+
+// Select command
+export interface SelectCommandItem extends BaseCommandItem {
+  type: "select";
+  handler: (selected: any) => Promise<void> | void;
+}
+
+// Menu command
+export interface MenuCommandItem extends BaseCommandItem {
+  type: "menu";
+  children: CommandItem[];
+}
+
+// Transcribe command
+export interface TranscribeCommandItem extends BaseCommandItem {
+  type: "transcribe";
+  placeholder?: string;
+  handler: (transcription: string) => Promise<void> | void;
+}
+
+// Placeholder command
+export interface PlaceholderCommandItem extends BaseCommandItem {
+  type: "placeholder";
+}
+
+// Union type for all command types
+export type CommandItem =
+  | ActionCommandItem
+  | InputCommandItem
+  | ConfirmCommandItem
+  | SelectCommandItem
+  | MenuCommandItem
+  | TranscribeCommandItem
+  | PlaceholderCommandItem;
 
 export interface Recipe {
   argumentSchema: any; // Schema type from jsonschema
@@ -116,30 +165,6 @@ export interface SelectOption {
   title: string;
   value: any;
 }
-
-export const castSpellAsCharm = async (
-  charmManager: CharmManager,
-  recipeKey: string,
-  argument: Cell<any>,
-) => {
-  if (recipeKey && argument) {
-    console.log("Syncing...");
-    const recipeId = recipeKey.replace("spell-", "");
-    await charmManager.syncRecipeBlobby(recipeId);
-
-    const recipe = getRecipe(recipeId);
-    if (!recipe) return;
-
-    console.log("Casting...");
-    const charm: Cell<Charm> = await charmManager.runPersistent(
-      recipe,
-      argument,
-    );
-    return charm;
-  }
-  console.log("Failed to cast");
-  return null;
-};
 
 async function handleExecuteCharmAction(deps: CommandContext) {
   deps.setLoading(true);
@@ -224,13 +249,20 @@ async function handleExecuteCharmAction(deps: CommandContext) {
 }
 
 // Command handlers
-async function handleNewCharm(deps: CommandContext, input: string | undefined) {
-  if (!input) return;
+async function handleNewCharm(
+  deps: CommandContext,
+  input: string,
+  sources?: SourceSet,
+) {
   deps.setLoading(true);
+
   try {
-    // Generate JSON blob with an LLM
-    const dummyData = await generateJSON(input);
-    const newCharm = await castNewRecipe(deps.charmManager, dummyData, input);
+    // Pass the goal directly to castNewRecipe, which will handle the two-phase process
+    const newCharm = await castNewRecipe(
+      deps.charmManager,
+      input,
+      grabCells(sources),
+    );
     if (!newCharm) {
       throw new Error("Failed to cast charm");
     }
@@ -292,33 +324,38 @@ async function handleSearchCharms(deps: CommandContext) {
   }
 }
 
-function handleEditRecipe(
+async function handleEditRecipe(
   deps: CommandContext,
   input: string | undefined,
 ) {
   if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
   deps.setLoading(true);
-  iterateCharm(
-    deps.charmManager,
-    deps.focusedCharmId,
-    input,
-    deps.preferredModel,
-  ).then((newCharm) => {
+
+  const charm = (await deps.charmManager.get(deps.focusedCharmId, false))!;
+  try {
+    const newCharm = await iterate(
+      deps.charmManager,
+      charm,
+      input,
+      false,
+      deps.preferredModel,
+    );
     deps.navigate(createPath("charmShow", {
       charmId: charmId(newCharm)!,
       replicaName: deps.focusedReplicaId!,
     }));
-  }).catch((error) => {
-    console.error("Error editing recipe:", error);
-  }).finally(() => {
+  } catch (e) {
+    console.error("Error editing recipe:", e);
+  } finally {
     deps.setLoading(false); // FIXME(ja): load status should update on exception
     deps.setOpen(false);
-  });
+  }
 }
 
 async function handleExtendRecipe(
   deps: CommandContext,
-  input: string | undefined,
+  input?: string,
+  sources?: SourceSet,
 ) {
   if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
   deps.setLoading(true);
@@ -326,6 +363,7 @@ async function handleExtendRecipe(
     deps.charmManager,
     deps.focusedCharmId,
     input,
+    grabCells(sources),
   );
   deps.navigate(createPath("charmShow", {
     charmId: charmId(newCharm)!,
@@ -342,9 +380,7 @@ async function handleRenameCharm(
   if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
   deps.setLoading(true);
 
-  const charm = await deps.charmManager.get(deps.focusedCharmId);
-  if (!charm) return;
-  charm.key(NAME).set(input);
+  await renameCharm(deps.charmManager, deps.focusedCharmId, input);
 
   deps.setLoading(false);
   deps.setOpen(false);
@@ -413,7 +449,7 @@ async function handleImportJSON(deps: CommandContext) {
     const title = prompt("Enter a title for your imported recipe:");
     if (!title) return;
 
-    const newCharm = await castNewRecipe(deps.charmManager, data, title);
+    const newCharm = await castNewRecipe(deps.charmManager, title, data);
     if (!newCharm) throw new Error("Failed to create new charm");
 
     const id = charmId(newCharm);
@@ -698,21 +734,19 @@ async function handleUseSpellOnOtherData(deps: CommandContext) {
   }
 }
 
-async function handleAddGmailImporter(deps: CommandContext, filename: string) {
+async function handleAddRemoteRecipe(
+  deps: CommandContext,
+  filename: string,
+  name: string,
+) {
   deps.setLoading(true);
   try {
-    const response = await fetch(
-      `https://raw.githubusercontent.com/commontoolsinc/labs/refs/heads/main/recipes/${filename}?${Date.now()}`,
-    );
-    const src = await response.text();
-
-    const newCharm = await compileAndRunRecipe(
+    const newCharm = await addGithubRecipe(
       deps.charmManager,
-      src,
-      "GMail Importer",
+      filename,
+      name,
       {},
     );
-
     const id = charmId(newCharm);
     if (!id || !deps.focusedReplicaId) {
       throw new Error("Missing charm ID or replica name");
@@ -739,7 +773,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       type: "input",
       title: "New Charm",
       group: "Create",
-      handler: (input) => handleNewCharm(deps, input),
+      handler: (input, data) => handleNewCharm(deps, input, data),
     },
     {
       id: "search-charms",
@@ -851,7 +885,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       group: "Edit",
       predicate: !!deps.focusedCharmId,
       placeholder: "What you like to see?",
-      handler: (input) => handleExtendRecipe(deps, input),
+      handler: (input, data) => handleExtendRecipe(deps, input, data),
     },
     {
       id: "delete-charm",
@@ -1064,13 +1098,21 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           id: "add-gmail-importer",
           type: "action",
           title: "Add Gmail Importer",
-          handler: () => handleAddGmailImporter(deps, "gmail.tsx"),
+          handler: () =>
+            handleAddRemoteRecipe(deps, "gmail.tsx", "GMail Importer"),
         },
         {
           id: "add-gcal-importer",
           type: "action",
           title: "Add GCal Importer",
-          handler: () => handleAddGmailImporter(deps, "gcal.tsx"),
+          handler: () =>
+            handleAddRemoteRecipe(deps, "gcal.tsx", "GCal Importer"),
+        },
+        {
+          id: "add-rss-importer",
+          type: "action",
+          title: "Add RSS Importer",
+          handler: () => handleAddRemoteRecipe(deps, "rss.tsx", "RSS Importer"),
         },
       ],
     },

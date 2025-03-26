@@ -490,7 +490,7 @@ test("cancel subscription", store, async (session) => {
   query2.subscribe();
 
   assertEquals(query2.facts, [v2], "has facts from first transaction");
-  await subscription.cancel();
+  await subscription.close();
 
   const v3 = Fact.assert({ the, of: doc, is: { doc: 1, t: 3 }, cause: v1 });
 

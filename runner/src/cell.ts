@@ -400,6 +400,13 @@ function createRegularCell<T>(
         }
       });
 
+      // Hacky retry logic for push only. See storage.ts for details on this
+      // retry approach and what we should really be doing instead.
+      if (!ref.cell.retry) ref.cell.retry = [];
+      ref.cell.retry.push((newBaseValue: any[]) =>
+        diffAndUpdate(ref, [...newBaseValue, ...valuesToWrite], log, cause)
+      );
+
       // If there is no array yet, create it first. We have to do this as a
       // separate operation, so that in the next steps [ID] is properly anchored
       // in the array.

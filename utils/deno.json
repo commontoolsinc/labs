@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./defer": "./src/defer.ts",
-    "./env": "./src/env.ts"
+    "./env": "./src/env.ts",
+    "./sleep": "./src/sleep.ts"
   }
 }

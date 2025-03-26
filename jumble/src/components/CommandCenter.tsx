@@ -7,15 +7,21 @@ import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { DialogDescription, DialogTitle } from "@radix-ui/react-dialog";
 import { DitheredCube } from "./DitherCube.tsx";
 import {
+  ActionCommandItem,
   CommandContext,
   CommandItem,
   CommandMode,
+  ConfirmCommandItem,
   getCommands,
+  InputCommandItem,
+  MenuCommandItem,
+  SelectCommandItem,
+  TranscribeCommandItem,
 } from "./commands.ts";
 import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext.tsx";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
-import { Composer } from "@/components/Composer.tsx";
+import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { charmId } from "@/utils/charms.ts";
 import { formatPromptWithMentions } from "@/utils/format.ts";
 import { NAME } from "@commontools/builder";
@@ -34,7 +40,7 @@ function CommandProcessor({
   const [inputValue, setInputValue] = useState("");
   const charmMentions = useCharmMentions();
 
-  if (context.loading) {
+  if (context.loading && mode.type !== "input") {
     return (
       <Command.Group>
         <div className="flex items-center justify-center p-4">
@@ -44,27 +50,39 @@ function CommandProcessor({
     );
   }
 
+  const onSubmit = useCallback(async () => {
+    if (mode.type !== "input") {
+      return;
+    }
+    const { text, sources } = await formatPromptWithMentions(
+      inputValue,
+      charmManager,
+    );
+    if ((mode.command as InputCommandItem).handler) {
+      (mode.command as InputCommandItem).handler(text, sources);
+    }
+  }, [mode, inputValue, charmManager]);
+
   switch (mode.type) {
     case "input":
       return (
+        <div className="flex flex-col gap-2">
           <Composer
-            style={{ width: "100%", height: "96px" }}
+            style={{ width: "100%", height: "96px", border: "1px solid #ccc" }}
             placeholder={mode.placeholder || "Enter input"}
             value={inputValue}
             onValueChange={setInputValue}
             mentions={charmMentions}
+            onSubmit={onSubmit}
+            disabled={context.loading}
             autoFocus
-            onKeyDown={async (e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                const finalText = await formatPromptWithMentions(
-                  inputValue,
-                  charmManager,
-                );
-                mode.command.handler?.(finalText);
-              }
-            }}
           />
+          <ComposerSubmitBar
+            loading={context.loading}
+            operation="Send"
+            onSubmit={onSubmit}
+          />
+        </div>
       );
 
     case "confirm":
@@ -72,7 +90,11 @@ function CommandProcessor({
         <Command.Group heading="Confirm">
           <Command.Item
             value="yes"
-            onSelect={() => mode.command.handler?.(context)}
+            onSelect={() => {
+              if ((mode.command as ConfirmCommandItem).handler) {
+                (mode.command as ConfirmCommandItem).handler(context);
+              }
+            }}
           >
             Yes
           </Command.Item>
@@ -95,7 +117,11 @@ function CommandProcessor({
           {mode.options.map((option) => (
             <Command.Item
               key={option.id}
-              onSelect={() => mode.command.handler?.(option.value)}
+              onSelect={() => {
+                if ((mode.command as SelectCommandItem).handler) {
+                  (mode.command as SelectCommandItem).handler(option.value);
+                }
+              }}
             >
               {option.title}
             </Command.Item>
@@ -216,8 +242,8 @@ export function CommandCenter() {
       ): CommandItem | undefined => {
         for (const cmd of commands) {
           if (cmd.id === id) return cmd;
-          if (cmd.children) {
-            const found = findInCommands(cmd.children);
+          if ((cmd as MenuCommandItem).children) {
+            const found = findInCommands((cmd as MenuCommandItem).children!);
             if (found) return found;
           }
         }
@@ -355,10 +381,12 @@ export function CommandCenter() {
   const getCurrentCommands = () => {
     const commands = commandPathIds.length === 0
       ? allCommands
-      : getCommandById(commandPathIds[commandPathIds.length - 1])?.children ??
-        [];
+      : ((getCommandById(
+        commandPathIds[commandPathIds.length - 1],
+      ) as MenuCommandItem)?.children ??
+        []);
 
-    return commands.filter((cmd) => cmd.predicate !== false); // Show command unless predicate is explicitly false
+    return commands.filter((cmd: CommandItem) => cmd.predicate !== false); // Show command unless predicate is explicitly false
   };
 
   return (
@@ -410,13 +438,6 @@ export function CommandCenter() {
         {!loading && mode.type != "input" && mode.type != "transcribe" && (
           <Command.Empty>No results found.</Command.Empty>
         )}
-        {loading && (
-          <Command.Loading>
-            <div className="flex items-center justify-center p-4">
-              <span className="text-sm text-gray-500">Processing...</span>
-            </div>
-          </Command.Loading>
-        )}
 
         {mode.type === "main" || mode.type === "menu"
           ? (
@@ -432,7 +453,7 @@ export function CommandCenter() {
               {(() => {
                 const groups: Record<string, CommandItem[]> =
                   getCurrentCommands().reduce(
-                    (acc, cmd) => {
+                    (acc: Record<string, CommandItem[]>, cmd: CommandItem) => {
                       const group = cmd.group || "Other";
                       if (!acc[group]) acc[group] = [];
                       acc[group].push(cmd);
@@ -447,8 +468,10 @@ export function CommandCenter() {
                       <Command.Item
                         key={cmd.id}
                         onSelect={() => {
-                          if (cmd.children) {
-                            setCommandPathIds((prev) => [...prev, cmd.id]);
+                          if ((cmd as MenuCommandItem).children) {
+                            setCommandPathIds((
+                              prev: string[],
+                            ) => [...prev, cmd.id]);
                             setMode({
                               type: "menu",
                               path: [...commandPathIds, cmd.id],
@@ -457,10 +480,12 @@ export function CommandCenter() {
                           } else if (cmd.type === "action") {
                             // Only close if the handler doesn't return a Promise
                             // This allows async handlers that change mode to keep the palette open
-                            const result = cmd.handler?.(context);
+                            const actionCmd = cmd as ActionCommandItem;
+                            const result = actionCmd.handler?.();
                             if (
-                              !cmd.handler ||
-                              (!result && cmd.handler.length === 0)
+                              !actionCmd.handler ||
+                              (!result &&
+                                typeof actionCmd.handler === "function")
                             ) {
                               setOpen(false);
                             }
@@ -471,14 +496,18 @@ export function CommandCenter() {
                                 setMode({
                                   type: "input",
                                   command: cmd,
-                                  placeholder: cmd.placeholder || "Enter input",
+                                  placeholder:
+                                    (cmd as InputCommandItem).placeholder ||
+                                    "Enter input",
                                 });
                                 break;
                               case "confirm":
                                 setMode({
                                   type: "confirm",
                                   command: cmd,
-                                  message: cmd.message || "Are you sure?",
+                                  message:
+                                    (cmd as ConfirmCommandItem).message ||
+                                    "Are you sure?",
                                 });
                                 break;
                               case "select":
@@ -492,7 +521,8 @@ export function CommandCenter() {
                                 setMode({
                                   type: "transcribe",
                                   command: cmd,
-                                  placeholder: cmd.placeholder ||
+                                  placeholder: (cmd as TranscribeCommandItem)
+                                    .placeholder ||
                                     "Speak now...",
                                 });
                                 break;
@@ -511,7 +541,7 @@ export function CommandCenter() {
                         }}
                       >
                         {cmd.title}
-                        {cmd.children && " →"}
+                        {(cmd as MenuCommandItem).children && " →"}
                       </Command.Item>
                     ))}
                   </Command.Group>

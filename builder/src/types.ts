@@ -1,3 +1,5 @@
+import { isObj } from "@commontools/utils";
+
 export const ID: symbol = Symbol("ID, unique to the context");
 export const ID_FIELD: symbol = Symbol(
   "ID_FIELD, name of sibling that contains id",
@@ -41,9 +43,14 @@ export type OpaqueRefMethods<T> = {
     nodes: Set<NodeRef>;
     external?: any;
     name?: string;
+    schema?: JSONSchema;
+    rootSchema?: JSONSchema;
     frame: Frame;
   };
-  unsafe_bindToRecipeAndPath(recipe: Recipe, path: PropertyKey[]): void;
+  unsafe_bindToRecipeAndPath(
+    recipe: Recipe,
+    path: PropertyKey[],
+  ): void;
   unsafe_getExternal(): OpaqueRef<T>;
   map<S>(
     fn: (
@@ -130,7 +137,7 @@ export type JSONSchema = {
   readonly additionalProperties?: Readonly<JSONSchema> | boolean;
 };
 
-type Writable<T> = {
+export type Writable<T> = {
   -readonly [P in keyof T]: T[P] extends ReadonlyArray<infer U> ? Writable<U>[]
     : T[P] extends Readonly<infer U> ? Writable<U>
     : T[P];
@@ -139,11 +146,17 @@ type Writable<T> = {
 export type JSONSchemaWritable = Writable<JSONSchema>;
 
 export type Alias = {
-  $alias: { cell?: any; path: PropertyKey[] };
+  $alias: {
+    cell?: any;
+    path: PropertyKey[];
+    schema?: JSONSchema;
+    rootSchema?: JSONSchema;
+  };
 };
 
 export function isAlias(value: any): value is Alias {
-  return !!(value && value.$alias && Array.isArray(value.$alias.path));
+  return isObj(value) && isObj(value.$alias) &&
+    Array.isArray(value.$alias.path);
 }
 
 export type StreamAlias = {

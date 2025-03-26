@@ -3,6 +3,7 @@ import {
   Module,
   NAME,
   Recipe,
+  Schema,
   TYPE,
   UI,
 } from "@commontools/builder";
@@ -17,12 +18,14 @@ import {
   getRecipe,
   idle,
   isCell,
+  maybeGetCellLink,
   run,
   syncRecipeBlobby,
 } from "@commontools/runner";
 import { storage } from "@commontools/runner";
 import { DID, Identity } from "@commontools/identity";
 import { JSONSelector } from "../../memory/interface.ts";
+import { isObj } from "@commontools/utils";
 
 export type Charm = {
   [NAME]?: string;
@@ -30,19 +33,42 @@ export type Charm = {
   [key: string]: any;
 };
 
-export const charmSchema: JSONSchema = {
+export const charmSchema = {
   type: "object",
   properties: {
     [NAME]: { type: "string" },
     [UI]: { type: "object" },
   },
   required: [UI, NAME],
-} as const;
+} as const satisfies JSONSchema satisfies JSONSchema;
 
-export const charmListSchema: JSONSchema = {
+export const charmListSchema = {
   type: "array",
   items: { ...charmSchema, asCell: true },
-} as const;
+} as const satisfies JSONSchema satisfies JSONSchema;
+
+export const charmLineageSchema = {
+  type: "object",
+  properties: {
+    charm: { type: "object", asCell: true },
+    relation: { type: "string" },
+    timestamp: { type: "number" },
+  },
+  required: ["charm", "relation", "timestamp"],
+} as const satisfies JSONSchema;
+export type CharmLineage = Schema<typeof charmLineageSchema>;
+
+export const charmSourceCellSchema = {
+  type: "object",
+  properties: {
+    [TYPE]: { type: "string" },
+    lineage: {
+      type: "array",
+      items: charmLineageSchema,
+      default: [],
+    },
+  },
+} as const satisfies JSONSchema;
 
 export const processSchema = {
   type: "object",
@@ -107,9 +133,11 @@ export class CharmManager {
   private space: string;
   private charmsDoc: DocImpl<CellLink[]>;
   private pinned: DocImpl<CellLink[]>;
+  private trash: DocImpl<CellLink[]>;
 
   private charms: Cell<Cell<Charm>[]>;
   private pinnedCharms: Cell<Cell<Charm>[]>;
+  private trashedCharms: Cell<Cell<Charm>[]>;
 
   /**
    * Promise resolved when the charm manager gets the charm list.
@@ -122,10 +150,12 @@ export class CharmManager {
     this.space = this.session.space;
     this.charmsDoc = getDoc<CellLink[]>([], "charms", this.space);
     this.pinned = getDoc<CellLink[]>([], "pinned-charms", this.space);
+    this.trash = getDoc<CellLink[]>([], "trash", this.space);
     this.charms = this.charmsDoc.asCell([], undefined, charmListSchema);
 
     storage.setSigner(session.as);
     this.pinnedCharms = this.pinned.asCell([], undefined, charmListSchema);
+    this.trashedCharms = this.trash.asCell([], undefined, charmListSchema);
 
     this.ready = Promise.all(
       this.primaryDocs.map((doc) => storage.syncCell(doc)),
@@ -136,6 +166,7 @@ export class CharmManager {
     return [
       this.charmsDoc,
       this.pinned,
+      this.trash,
     ];
   }
 
@@ -161,9 +192,9 @@ export class CharmManager {
     }
   }
 
-  async unpin(charm: Cell<Charm>) {
+  async unpinById(charmId: EntityId) {
     await storage.syncCell(this.pinned);
-    const newPinnedCharms = filterOutEntity(this.pinnedCharms, charm);
+    const newPinnedCharms = filterOutEntity(this.pinnedCharms, charmId);
 
     if (newPinnedCharms.length !== this.pinnedCharms.get().length) {
       this.pinnedCharms.set(newPinnedCharms);
@@ -174,9 +205,53 @@ export class CharmManager {
     return false;
   }
 
+  async unpin(charm: Cell<Charm> | string | EntityId) {
+    const id = getEntityId(charm);
+    if (!id) return false;
+
+    return await this.unpinById(id);
+  }
+
   getPinned(): Cell<Cell<Charm>[]> {
     storage.syncCell(this.pinned);
     return this.pinnedCharms;
+  }
+
+  getTrash(): Cell<Cell<Charm>[]> {
+    storage.syncCell(this.trash);
+    return this.trashedCharms;
+  }
+
+  async restoreFromTrash(idOrCharm: string | EntityId | Cell<Charm>) {
+    await storage.syncCell(this.trash);
+    await storage.syncCell(this.charmsDoc);
+
+    const id = getEntityId(idOrCharm);
+    if (!id) return false;
+
+    // Find the charm in trash
+    const trashedCharm = this.trashedCharms.get().find((charm) =>
+      isSameEntity(charm, id)
+    );
+
+    if (!trashedCharm) return false;
+
+    // Remove from trash
+    const newTrashedCharms = filterOutEntity(this.trashedCharms, id);
+    this.trashedCharms.set(newTrashedCharms);
+
+    // Add back to charms
+    await this.add([trashedCharm]);
+
+    await idle();
+    return true;
+  }
+
+  async emptyTrash() {
+    await storage.syncCell(this.trash);
+    this.trashedCharms.set([]);
+    await idle();
+    return true;
   }
 
   // FIXME(ja): this says it returns a list of charm, but it isn't! you will
@@ -207,6 +282,7 @@ export class CharmManager {
   async get<T = Charm>(
     id: string | Cell<Charm>,
     runIt: boolean = true,
+    asSchema?: JSONSchema,
   ): Promise<Cell<T> | undefined> {
     // Load the charm from storage.
     let charm: Cell<Charm> | undefined;
@@ -236,25 +312,18 @@ export class CharmManager {
 
     let resultSchema: JSONSchema | undefined = recipe?.resultSchema;
 
-    // Unless there is a non-object schema, add UI and NAME properties if present
-    if (!resultSchema || resultSchema.type === "object") {
-      const { [UI]: hasUI, [NAME]: hasName } =
-        charm.getAsCellLink().cell.get() ?? {};
-      if (hasUI || hasName) {
-        // Copy the original schema, so we can modify properties without
-        // affecting other uses of the same spell.
+    // If there is no result schema, create one from top level properties that omits UI, NAME
+    if (!resultSchema) {
+      const resultValue = charm.get();
+      if (isObj(resultValue)) {
         resultSchema = {
-          ...resultSchema,
-          properties: {
-            ...resultSchema?.properties,
-          },
+          type: "object",
+          properties: Object.fromEntries(
+            Object.keys(resultValue).filter((key) => !key.startsWith("$")).map((
+              key,
+            ) => [key, {}]), // Empty schema == any
+          ),
         };
-        if (hasUI && !resultSchema.properties![UI]) {
-          (resultSchema.properties as any)[UI] = { type: "object" }; // TODO(seefeld): make this the vdom schema
-        }
-        if (hasName && !resultSchema.properties![NAME]) {
-          (resultSchema.properties as any)[NAME] = { type: "string" };
-        }
       }
     }
 
@@ -264,11 +333,16 @@ export class CharmManager {
       return run(undefined, undefined, charm.getAsCellLink().cell!).asCell(
         [],
         undefined,
-        resultSchema,
+        asSchema ?? resultSchema,
       );
     } else {
-      return charm.asSchema<T>(resultSchema);
+      return charm.asSchema<T>(asSchema ?? resultSchema);
     }
+  }
+
+  getLineage(charm: Cell<Charm>) {
+    return charm.getSourceCell(charmSourceCellSchema)?.key("lineage").get() ??
+      [];
   }
 
   async getCellById<T>(
@@ -295,16 +369,48 @@ export class CharmManager {
   }
 
   // note: removing a charm doesn't clean up the charm's cells
+  // Now moves the charm to trash instead of just removing it
   async remove(idOrCharm: string | EntityId | Cell<Charm>) {
     await storage.syncCell(this.charmsDoc);
+    await storage.syncCell(this.pinned);
+    await storage.syncCell(this.trash);
+
     const id = getEntityId(idOrCharm);
     if (!id) return false;
 
-    const newCharms = filterOutEntity(this.charms, id);
+    await this.unpin(idOrCharm);
 
+    // Find the charm in the main list
+    const charm = this.charms.get().find((c) => isSameEntity(c, id));
+    if (!charm) return false;
+
+    // Move to trash if not already there
+    if (!this.trashedCharms.get().some((c) => isSameEntity(c, id))) {
+      this.trashedCharms.push(charm);
+    }
+
+    // Remove from main list
+    const newCharms = filterOutEntity(this.charms, id);
     if (newCharms.length !== this.charms.get().length) {
       this.charms.set(newCharms);
+      await idle();
+      return true;
+    }
 
+    return false;
+  }
+
+  // Permanently delete a charm (from trash or directly)
+  async permanentlyDelete(idOrCharm: string | EntityId | Cell<Charm>) {
+    await storage.syncCell(this.trash);
+
+    const id = getEntityId(idOrCharm);
+    if (!id) return false;
+
+    // Remove from trash if present
+    const newTrashedCharms = filterOutEntity(this.trashedCharms, id);
+    if (newTrashedCharms.length !== this.trashedCharms.get().length) {
+      this.trashedCharms.set(newTrashedCharms);
       await idle();
       return true;
     }
@@ -319,21 +425,25 @@ export class CharmManager {
   ): Promise<Cell<Charm>> {
     await idle();
 
-    const syncAllMentionedCells = (
-      value: any,
-      promises: any[] = [],
-    ) => {
-      if (isCell(value)) {
-        promises.push(storage.syncCell(value.getAsCellLink().cell));
+    const seen = new Set<Cell<any>>();
+    const promises = new Set<Promise<any>>();
+
+    const syncAllMentionedCells = (value: any) => {
+      if (seen.has(value)) return;
+      seen.add(value);
+
+      const link = maybeGetCellLink(value);
+
+      if (link && link.cell) {
+        const maybePromise = storage.syncCell(link.cell);
+        if (maybePromise instanceof Promise) promises.add(maybePromise);
       } else if (typeof value === "object" && value !== null) {
-        for (const key in value) {
-          syncAllMentionedCells(value[key], promises);
-        }
+        for (const key in value) syncAllMentionedCells(value[key]);
       }
-      return promises;
     };
 
-    await Promise.all(syncAllMentionedCells(inputs));
+    syncAllMentionedCells(inputs);
+    await Promise.all(promises);
 
     const doc = await storage.syncCellById(
       this.space,

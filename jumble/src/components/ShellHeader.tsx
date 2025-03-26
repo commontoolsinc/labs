@@ -2,7 +2,6 @@ import { NavLink } from "react-router-dom";
 import ShapeLogo from "@/assets/ShapeLogo.tsx";
 import { NavPath } from "@/components/NavPath.tsx";
 import { User } from "@/components/User.tsx";
-import { useSyncedStatus } from "@/contexts/SyncStatusContext.tsx";
 import { useNamedCell } from "@/hooks/use-cell.ts";
 
 type ShellHeaderProps = {
@@ -28,7 +27,6 @@ const colorSchema = {
 export function ShellHeader(
   { session, charmId }: ShellHeaderProps,
 ) {
-  const { isSyncing, lastSyncTime } = useSyncedStatus();
   const colorSpace = session.space;
 
   const [style, setStyle] = useNamedCell(
@@ -51,7 +49,6 @@ export function ShellHeader(
       className="flex bg-gray-50 items-center justify-between border-b-2 p-2"
       style={{ backgroundColor: style?.color }}
       onClick={handleHeaderClick}
-      title="Click empty space to change header color"
     >
       <div className="header-start flex items-center gap-2">
         <NavLink

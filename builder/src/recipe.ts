@@ -107,8 +107,15 @@ export function recipe<T, R>(
   // and `outputs` with Value<> (which containts OpaqueRef<>) and/or default
   // values.
   const frame = pushFrame();
-  const inputs = opaqueRef<Required<T>>();
+
+  const jsonSchema = argumentSchema instanceof z.ZodType
+    ? (zodToJsonSchema(argumentSchema) as JSONSchema)
+    : argumentSchema as JSONSchema | undefined;
+
+  const inputs = opaqueRef<Required<T>>(undefined, jsonSchema);
+
   const outputs = fn!(inputs);
+
   const result = factoryFromRecipe<T, R>(
     argumentSchema,
     resultSchema,
@@ -125,7 +132,11 @@ export function recipeFromFrame<T, R>(
   resultSchema: JSONSchema | z.ZodTypeAny | undefined,
   fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
 ): RecipeFactory<T, R> {
-  const inputs = opaqueRef<Required<T>>();
+  const jsonSchema = argumentSchema instanceof z.ZodType
+    ? (zodToJsonSchema(argumentSchema) as JSONSchema)
+    : argumentSchema as JSONSchema | undefined;
+
+  const inputs = opaqueRef<Required<T>>(undefined, jsonSchema);
   const outputs = fn(inputs);
   return factoryFromRecipe<T, R>(argumentSchema, resultSchema, inputs, outputs);
 }

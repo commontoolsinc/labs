@@ -1,6 +1,6 @@
-import { CharmManager } from "@commontools/charm";
+import { CharmManager, charmSchema } from "@commontools/charm";
 import { Cell } from "@commontools/runner";
-import { Module, Recipe } from "@commontools/builder";
+import { Module, NAME, Recipe } from "@commontools/builder";
 import { parseComposerDocument } from "@/components/Composer.tsx";
 
 export function formatCell(
@@ -53,31 +53,92 @@ export function formatRecipe(recipe: Recipe | Module) {
 export async function formatPromptWithMentions(
   prompt: string,
   charmManager: CharmManager,
-) {
+): Promise<{ text: string; sources: Record<string, any> }> {
   const payload = await parseComposerDocument(
     prompt,
     charmManager,
   );
 
-  // Check if there are any sources before adding the sources section
-  const hasSources = payload.sources && Object.keys(payload.sources).length > 0;
+  // Create a mapping of IDs to source objects
+  const sourcesMap: Record<string, any> = {};
 
-  let finalText = payload.text;
+  // Process the text to inject IDs where mentions are
+  let processedText = payload.text;
 
-  // Only add sources section if there are actual sources
-  if (hasSources) {
-    finalText += `\n\n<sources>
-    ${
-      Object.entries(payload.sources).map(([id, source]) =>
-        `<source id="${id}">
-    ${`<title>${source.name || "Untitled"}</title>
-    ${source.cell ? formatCell(source.cell) : ""}
-    ${source.recipe ? formatRecipe(source.recipe) : ""}
-    </source>`}`
-      ).join("\n")
-    }
-    </sources>`;
+  // Check if there are any sources to process
+  if (payload.sources && Object.keys(payload.sources).length > 0) {
+    // Add each source to the map
+    Object.entries(payload.sources).forEach(([id, source]) => {
+      const shadowId = getCharmNameAsCamelCase(source.cell, sourcesMap);
+      sourcesMap[shadowId] = source;
+
+      // Replace the markdown link mention with the ID
+      // Format: [character](charm://id)
+      processedText = processedText.replace(
+        new RegExp(`\\[(.*?)\\]\\(charm://${id}\\)`, "g"),
+        `\`${shadowId}\``,
+      );
+    });
   }
 
-  return finalText;
+  return {
+    text: processedText,
+    sources: sourcesMap,
+  };
+}
+
+export function getCharmNameAsCamelCase(
+  cell: Cell<any>,
+  usedKeys: Record<string, any>,
+): string {
+  const charmName = toCamelCase(cell.asSchema(charmSchema).key(NAME).get());
+
+  let name = charmName;
+  let num = 0;
+
+  while (name in usedKeys) name = charmName + `${++num}`;
+
+  return name;
+}
+
+/**
+ * Converts a string of multiple words into camelCase format
+ * @param input - The string to convert
+ * @returns The camelCased string
+ *
+ * Examples:
+ * - "hello world" -> "helloWorld"
+ * - "The quick brown FOX" -> "theQuickBrownFox"
+ * - "this-is-a-test" -> "thisIsATest"
+ * - "already_camel_case" -> "alreadyCamelCase"
+ */
+function toCamelCase(input: string): string {
+  // Handle empty string case
+  if (!input) return "";
+
+  // Split the input string by non-alphanumeric characters
+  return input
+    .split(/[^a-zA-Z0-9]/)
+    .filter((word) => word.length > 0) // Remove empty strings
+    .map((word, index) => {
+      // First word should be all lowercase
+      if (index === 0) {
+        return word.toLowerCase();
+      }
+      // Other words should have their first letter capitalized and the rest lowercase
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join("");
+}
+
+export type SourceSet = { [id: string]: { name: string; cell: Cell<any> } };
+
+export function grabCells(sources?: SourceSet) {
+  const cells: { [id: string]: Cell<any> } = sources
+    ? Object.entries(sources).reduce((acc, [id, source]) => {
+      acc[id] = source.cell;
+      return acc;
+    }, {} as { [id: string]: Cell<any> })
+    : {};
+  return cells;
 }

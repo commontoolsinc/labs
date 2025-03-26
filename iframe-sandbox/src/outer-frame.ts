@@ -11,10 +11,11 @@ html, body {
   margin: 0;
   height: 100vh;
   overflow: hidden;
+  background-color: #ddd;
 }
 
 * {
-box-sizing: border-box;
+  box-sizing: border-box;
 }
 
 iframe {
@@ -27,9 +28,10 @@ iframe {
   <\/style>
 <\/head>
 <body>
-	<iframe
-    sandbox="allow-scripts"><\/iframe>
-	<script>
+<iframe
+  allow="clipboard-write"
+  sandbox="allow-scripts"><\/iframe>
+<script>
 const iframe = document.querySelector("iframe");
 const HOST_ORIGIN = "${HOST_ORIGIN}";
 const HOST_WINDOW = window.parent;

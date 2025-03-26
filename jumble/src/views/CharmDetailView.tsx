@@ -1,9 +1,15 @@
 import {
   Charm,
+  extractUserCode,
+  extractVersionTag,
   generateNewRecipeVersion,
   getIframeRecipe,
   IFrameRecipe,
+  injectUserCode,
+  iterate,
 } from "@commontools/charm";
+import { isCell, isStream } from "@commontools/runner";
+import { isObj } from "@commontools/utils";
 import React, {
   createContext,
   useCallback,
@@ -20,7 +26,7 @@ import { useCharm } from "@/hooks/use-charm.ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
-import { extendCharm, iterateCharm } from "@/utils/charm-operations.ts";
+import { extendCharm } from "@/utils/charm-operations.ts";
 import { charmId } from "@/utils/charms.ts";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import {
@@ -30,9 +36,10 @@ import {
 import { Cell } from "@commontools/runner";
 import { createPath } from "@/routes.ts";
 import JsonView from "@uiw/react-json-view";
-import { Composer } from "@/components/Composer.tsx";
+import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { useCharmMentions } from "@/components/CommandCenter.tsx";
 import { formatPromptWithMentions } from "@/utils/format.ts";
+import { CharmLink } from "@/components/CharmLink.tsx";
 
 type Tab = "iterate" | "code" | "data";
 type OperationType = "iterate" | "extend";
@@ -55,12 +62,21 @@ interface CharmOperationContextType {
   showVariants: boolean;
   setShowVariants: (show: boolean) => void;
   loading: boolean;
+  setLoading: (loading: boolean) => void;
   variants: Cell<Charm>[];
+  setVariants: (updater: (prev: Cell<Charm>[]) => Cell<Charm>[]) => void;
   selectedVariant: Cell<Charm> | null;
   setSelectedVariant: (variant: Cell<Charm> | null) => void;
   expectedVariantCount: number;
+  setExpectedVariantCount: (count: number) => void;
   handlePerformOperation: () => void;
   handleCancelVariants: () => void;
+  performOperation: (
+    charmId: string,
+    input: string,
+    model: string,
+    data: any,
+  ) => Promise<Cell<Charm>>;
 }
 
 const CharmOperationContext = createContext<CharmOperationContextType | null>(
@@ -253,27 +269,39 @@ function useSuggestions(charm: Cell<Charm> | null) {
 function useCodeEditor(
   charm: Cell<Charm> | null,
   iframeRecipe: IFrameRecipe | null,
+  showFullCode: boolean = false,
 ) {
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
   const [workingSrc, setWorkingSrc] = useState<string | undefined>(undefined);
+  const [workingSpec, setWorkingSpec] = useState<string | undefined>(undefined);
   const { replicaName } = useParams<CharmRouteParams>();
 
   useEffect(() => {
     if (charm && iframeRecipe) {
-      setWorkingSrc(iframeRecipe.src);
+      if (showFullCode) {
+        setWorkingSrc(iframeRecipe.src);
+      } else {
+        setWorkingSrc(extractUserCode(iframeRecipe.src ?? "") ?? "");
+      }
+      setWorkingSpec(iframeRecipe.spec);
     }
-  }, [iframeRecipe, charm]);
+  }, [iframeRecipe, charm, showFullCode]);
 
-  const hasUnsavedChanges = workingSrc !== iframeRecipe?.src;
+  const hasSourceChanges = showFullCode
+    ? workingSrc !== iframeRecipe?.src
+    : injectUserCode(workingSrc ?? "") !== iframeRecipe?.src;
+  const hasSpecChanges = workingSpec !== iframeRecipe?.spec;
+  const hasUnsavedChanges = hasSourceChanges || hasSpecChanges;
 
   const saveChanges = useCallback(() => {
-    if (workingSrc && iframeRecipe && charm) {
+    const src = showFullCode ? workingSrc : injectUserCode(workingSrc ?? "");
+    if (src && iframeRecipe && charm && workingSpec) {
       generateNewRecipeVersion(
         charmManager,
         charm,
-        workingSrc,
-        iframeRecipe.spec,
+        src,
+        workingSpec, // Use the edited spec
       ).then((newCharm) => {
         navigate(createPath("charmShow", {
           charmId: charmId(newCharm)!,
@@ -281,11 +309,23 @@ function useCodeEditor(
         }));
       });
     }
-  }, [workingSrc, iframeRecipe, charm, navigate, replicaName]);
+  }, [
+    workingSrc,
+    workingSpec,
+    iframeRecipe,
+    charm,
+    navigate,
+    replicaName,
+    showFullCode,
+    charmManager,
+  ]);
 
   return {
+    fullSrc: iframeRecipe?.src ?? "",
     workingSrc,
     setWorkingSrc,
+    workingSpec,
+    setWorkingSpec,
     hasUnsavedChanges,
     saveChanges,
   };
@@ -304,7 +344,7 @@ function useCharmOperation() {
     "anthropic:claude-3-7-sonnet-latest",
   );
   const [operationType, setOperationType] = useState<OperationType>("iterate");
-  const [showVariants, setShowVariants] = useState(true);
+  const [showVariants, setShowVariants] = useState(false);
   const [loading, setLoading] = useState(false);
   const [variants, setVariants] = useState<Cell<Charm>[]>([]);
   const [variantModelsMap, setVariantModelsMap] = useState<
@@ -319,23 +359,28 @@ function useCharmOperation() {
   const performOperation = useCallback(
     (
       charmId: string,
-      replicaName: string,
       input: string,
-      replace: boolean,
       model: string,
+      data: any,
     ) => {
       if (operationType === "iterate") {
-        return iterateCharm(
-          charmManager,
-          charmId,
-          input,
-          model,
-        );
+        // TODO(bf): do we use @-ref data for iterate?
+        return charmManager.get(charmId, false).then((fetched) => {
+          const charm = fetched!;
+          return iterate(
+            charmManager,
+            charm,
+            input,
+            false,
+            model,
+          );
+        });
       } else {
         return extendCharm(
           charmManager,
           charmId,
           input,
+          data,
         );
       }
     },
@@ -347,7 +392,7 @@ function useCharmOperation() {
     if (!input || !charm || !paramCharmId || !replicaName) return;
     setLoading(true);
 
-    const finalText = await formatPromptWithMentions(
+    const { text, sources } = await formatPromptWithMentions(
       input,
       charmManager,
     );
@@ -359,10 +404,9 @@ function useCharmOperation() {
       const gens = variantModels.map(async (model) => {
         const newCharm = await performOperation(
           charmId(charm)!,
-          replicaName!,
-          finalText,
-          false,
+          text,
           model,
+          sources,
         );
         // Store the variant and keep track of which model was used
         setVariants((prev) => [...prev, newCharm]);
@@ -386,10 +430,9 @@ function useCharmOperation() {
       try {
         const newCharm = await performOperation(
           charmId(charm)!,
-          replicaName,
-          finalText,
-          false,
+          text,
           selectedModel,
+          sources,
         );
         navigate(createPath("charmShow", {
           charmId: charmId(newCharm)!,
@@ -430,12 +473,16 @@ function useCharmOperation() {
     showVariants,
     setShowVariants,
     loading,
+    setLoading,
     variants,
+    setVariants,
     selectedVariant,
     setSelectedVariant,
     expectedVariantCount,
+    setExpectedVariantCount,
     handlePerformOperation,
     handleCancelVariants,
+    performOperation,
   };
 }
 
@@ -621,22 +668,128 @@ const Suggestions = () => {
     setShowVariants,
     handlePerformOperation,
     setOperationType,
+    selectedModel,
+    setLoading,
+    setVariants,
+    setSelectedVariant,
+    setExpectedVariantCount,
+    operationType,
+    performOperation,
+    showVariants,
   } = useCharmOperationContext();
 
-  const handleSuggestion = (suggestion: CharmSuggestion) => {
-    setInput(suggestion.prompt);
+  const navigate = useNavigate();
+  const { replicaName } = useParams<CharmRouteParams>();
 
-    // Set the operation type based on suggestion type if possible
+  const { charmManager } = useCharmManager();
+
+  // Store selected suggestion in state to use in effects
+  const [selectedSuggestion, setSelectedSuggestion] = useState<
+    CharmSuggestion | null
+  >(null);
+
+  // React to suggestion selection
+  const handleSuggestion = useCallback((suggestion: CharmSuggestion) => {
+    // Set the operation type based on suggestion type
     if (suggestion.type.toLowerCase().includes("extend")) {
       setOperationType("extend");
     } else {
       setOperationType("iterate");
     }
 
-    setShowVariants(true);
-    // Use a micro-delay to ensure state updates before operation
-    setTimeout(() => handlePerformOperation(), 0);
-  };
+    // Update the input state
+    setInput(suggestion.prompt);
+
+    // Store the suggestion for the effect to handle
+    setSelectedSuggestion(suggestion);
+    setLoading(true);
+  }, [setOperationType, setInput, setLoading]);
+
+  // Handle the actual operation when selectedSuggestion changes
+  useEffect(() => {
+    if (!selectedSuggestion || !charm || !paramCharmId || !replicaName) {
+      return;
+    }
+
+    const runOperation = async () => {
+      try {
+        if (showVariants) {
+          // Variant workflow
+          setExpectedVariantCount(variantModels.length);
+          setVariants(() => []);
+
+          // Use Promise.all to collect all results
+          const promises = variantModels.map(async (model) => {
+            try {
+              return await performOperation(
+                charmId(charm)!,
+                selectedSuggestion.prompt,
+                model,
+                {}, // No mentions in suggestion text
+              );
+            } catch (error) {
+              console.error(`Error generating variant with ${model}:`, error);
+              return null;
+            }
+          });
+
+          // Wait for all operations to complete
+          const results = await Promise.allSettled(promises);
+
+          // Update variants with successful results
+          results.forEach((result, index) => {
+            if (result.status === "fulfilled" && result.value) {
+              const successValue = result.value;
+              setVariants((existingPrev) => {
+                const newVariants = [...existingPrev, successValue];
+                
+                // Set the first successful variant as selected
+                if (existingPrev.length === 0) {
+                  setSelectedVariant(successValue);
+                }
+                
+                return newVariants;
+              });
+            }
+          });
+        } else {
+          // Single model workflow
+          const newCharm = await performOperation(
+            charmId(charm)!,
+            selectedSuggestion.prompt,
+            selectedModel,
+            {}, // No mentions in suggestion text
+          );
+
+          navigate(createPath("charmShow", {
+            charmId: charmId(newCharm)!,
+            replicaName,
+          }));
+        }
+      } catch (error) {
+        console.error(`Operation error:`, error);
+      } finally {
+        setLoading(false);
+        // Clear the selected suggestion so we don't rerun this effect
+        setSelectedSuggestion(null);
+      }
+    };
+
+    runOperation();
+  }, [
+    selectedSuggestion,
+    charm,
+    paramCharmId,
+    replicaName,
+    showVariants,
+    selectedModel,
+    performOperation,
+    navigate,
+    setVariants,
+    setSelectedVariant,
+    setExpectedVariantCount,
+    setLoading,
+  ]);
 
   return (
     <div className="suggestions-container mb-4">
@@ -720,91 +873,62 @@ const OperationTab = () => {
           </button>
         </div>
 
-        <div className="border border-gray-300">
-          <Composer
-            placeholder={operationType === "iterate"
-              ? "Tweak your charm"
-              : "Add new features to your charm"}
-            readOnly={false}
-            mentions={mentions}
-            value={input}
-            onValueChange={setInput}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-
-                handlePerformOperation();
-              }
-            }}
-            style={{ width: "100%", height: "96px" }}
-          />
-        </div>
-
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center">
-            <input
-              type="checkbox"
-              id="variants"
-              checked={showVariants}
-              onChange={(e) => setShowVariants(e.target.checked)}
-              className="border-2 border-black mr-2"
+        <div className="flex flex-col gap-2">
+          <div className="border border-gray-300">
+            <Composer
+              placeholder={operationType === "iterate"
+                ? "Tweak your charm"
+                : "Add new features to your charm"}
+              readOnly={false}
+              mentions={mentions}
+              value={input}
+              onValueChange={setInput}
+              onSubmit={handlePerformOperation}
+              disabled={loading}
+              style={{ width: "100%", height: "96px" }}
             />
-            <label htmlFor="variants" className="text-sm font-medium">
-              Variants
-            </label>
           </div>
 
-          <select
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
-            className="p-1 border-2 border-black bg-white text-xs"
+          <ComposerSubmitBar
+            loading={loading}
+            operation={operationType === "iterate" ? "Iterate" : "Extend"}
+            onSubmit={handlePerformOperation}
           >
-            <option value="anthropic:claude-3-7-sonnet-latest">
-              Claude 3.7 ✨
-            </option>
-            <option value="anthropic:claude-3-5-sonnet-latest">
-              Claude 3.5 ✨
-            </option>
-            <option value="groq:llama-3.3-70b-versatile">Llama 3.3 🔥</option>
-            <option value="openai:o3-mini-low-latest">o3-mini-low</option>
-            <option value="openai:o3-mini-medium-latest">o3-mini-medium</option>
-            <option value="openai:o3-mini-high-latest">o3-mini-high</option>
-            <option value="google:gemini-2.0-pro">Gemini 2.0</option>
-            <option value="perplexity:sonar-pro">Sonar Pro 🌐</option>
-          </select>
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="variants"
+                checked={showVariants}
+                onChange={(e) => setShowVariants(e.target.checked)}
+                className="border-2 border-black mr-2"
+              />
+              <label htmlFor="variants" className="text-sm font-medium">
+                Variants
+              </label>
+            </div>
 
-          <button
-            type="button"
-            onClick={handlePerformOperation}
-            disabled={loading || !input}
-            className="px-4 py-2 border-2 text-sm border-white bg-black text-white flex items-center gap-2 disabled:opacity-50"
-          >
-            {loading
-              ? (
-                <>
-                  <DitheredCube
-                    animationSpeed={2}
-                    width={16}
-                    height={16}
-                    animate
-                    cameraZoom={12}
-                  />
-                  <span>
-                    {operationType === "iterate"
-                      ? "Iterating..."
-                      : "Extending..."}
-                  </span>
-                </>
-              )
-              : (
-                <span className="text-xs">
-                  {operationType === "iterate" ? "Iterate" : "Extend"}{" "}
-                  <span className="hidden md:inline text-gray-400 font-bold italic">
-                    (⌘ + enter)
-                  </span>
-                </span>
-              )}
-          </button>
+            <select
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              className="p-1 border-2 border-black bg-white text-xs"
+            >
+              <option value="anthropic:claude-3-7-sonnet-latest">
+                Claude 3.7 ✨
+              </option>
+              <option value="anthropic:claude-3-5-sonnet-latest">
+                Claude 3.5 ✨
+              </option>
+              <option value="groq:qwen-qwq-32b">Qwen QwQ 32B 🧠</option>
+              <option value="groq:llama-3.3-70b-versatile">Llama 3.3 🔥</option>
+              <option value="openai:o3-mini-low-latest">o3-mini-low</option>
+              <option value="openai:o3-mini-medium-latest">
+                o3-mini-medium
+              </option>
+              <option value="openai:o3-mini-high-latest">o3-mini-high</option>
+              <option value="google:gemini-2.0-pro">Gemini 2.0</option>
+              <option value="perplexity:sonar-pro">Sonar Pro 🌐</option>
+            </select>
+          </ComposerSubmitBar>
         </div>
       </div>
 
@@ -821,11 +945,23 @@ const OperationTab = () => {
 const CodeTab = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
-  const { workingSrc, setWorkingSrc, hasUnsavedChanges, saveChanges } =
-    useCodeEditor(
-      charm,
-      iframeRecipe,
-    );
+  const [showFullCode, setShowFullCode] = useState(false);
+  const [activeEditor, setActiveEditor] = useState<"code" | "spec">("code");
+
+  const {
+    fullSrc,
+    workingSrc,
+    setWorkingSrc,
+    workingSpec,
+    setWorkingSpec,
+    hasUnsavedChanges,
+    saveChanges,
+  } = useCodeEditor(
+    charm,
+    iframeRecipe,
+    showFullCode,
+  );
+  const templateVersion = extractVersionTag(fullSrc);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -843,7 +979,50 @@ const CodeTab = () => {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="p-4 flex-grow flex flex-col overflow-hidden">
+      <div className="flex items-center gap-4 p-4">
+        <span className="px-2 py-1 inline rounded-full text-xs bg-gray-100 border border-gray-300">
+          <span>Template Version: {templateVersion ?? "Missing"}</span>
+        </span>
+        <div className="flex items-center px-3 py-1 rounded-full bg-gray-100 border border-gray-300">
+          <input
+            type="checkbox"
+            id="fullCode"
+            checked={showFullCode}
+            onChange={(e) => setShowFullCode(e.target.checked)}
+            className="border-2 border-black mr-2"
+          />
+          <label
+            htmlFor="fullCode"
+            className="text-xs font-medium cursor-pointer"
+          >
+            Show Full Template
+          </label>
+        </div>
+
+        {/* Editor type selector */}
+        <div className="flex border border-gray-300 rounded-full overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setActiveEditor("code")}
+            className={`px-3 py-1 text-xs ${
+              activeEditor === "code" ? "bg-black text-white" : "bg-gray-100"
+            }`}
+          >
+            Code
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveEditor("spec")}
+            className={`px-3 py-1 text-xs ${
+              activeEditor === "spec" ? "bg-black text-white" : "bg-gray-100"
+            }`}
+          >
+            Specification
+          </button>
+        </div>
+      </div>
+
+      <div className="px-4 flex-grow flex flex-col overflow-hidden">
         {hasUnsavedChanges && (
           <div className="mt-4 flex justify-end">
             <button
@@ -856,20 +1035,33 @@ const CodeTab = () => {
           </div>
         )}
 
-        <div className="flex-grow overflow-hidden border border-black h-full">
-          <CodeMirror
-            value={workingSrc || ""}
-            theme="dark"
-            extensions={[javascript()]}
-            onChange={setWorkingSrc}
-            basicSetup={{
-              lineNumbers: true,
-              foldGutter: true,
-              indentOnInput: true,
-            }}
-            style={{ height: "100%", overflow: "auto" }}
-          />
-        </div>
+        {activeEditor === "code" && (
+          <div className="flex-grow overflow-hidden border border-black h-full">
+            <CodeMirror
+              value={workingSrc || ""}
+              theme="dark"
+              extensions={[javascript()]}
+              onChange={setWorkingSrc}
+              basicSetup={{
+                lineNumbers: true,
+                foldGutter: true,
+                indentOnInput: true,
+              }}
+              style={{ height: "100%", overflow: "auto" }}
+            />
+          </div>
+        )}
+
+        {activeEditor === "spec" && (
+          <div className="flex-grow overflow-hidden border border-black h-full">
+            <textarea
+              value={workingSpec || ""}
+              onChange={(e) => setWorkingSpec(e.target.value)}
+              className="w-full h-full p-4 font-mono text-sm resize-none"
+              style={{ height: "100%", overflow: "auto" }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -879,18 +1071,40 @@ const CodeTab = () => {
 const DataTab = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
+  const { charmManager } = useCharmManager();
   const [isArgumentExpanded, setIsArgumentExpanded] = useState(false);
   const [isResultExpanded, setIsResultExpanded] = useState(false);
   const [isArgumentSchemaExpanded, setIsArgumentSchemaExpanded] = useState(
     false,
   );
   const [isResultSchemaExpanded, setIsResultSchemaExpanded] = useState(false);
+  const [isSpecExpanded, setIsSpecExpanded] = useState(false);
+  const [isLineageExpanded, setIsLineageExpanded] = useState(false);
 
   if (!charm) return null;
 
+  const lineage = charmManager.getLineage(charm);
+
+  const Lineage = (item: typeof lineage[number]) => (
+    <div
+      key={`lineage-${charmId(item.charm) || ""}`}
+    >
+      <CharmLink
+        charm={item.charm}
+        showHash
+      />&nbsp;
+      <span className="text-sm font-medium bg-gray-200 px-2 py-1 rounded">
+        {item.relation} at {new Date(item.timestamp).toLocaleString()}
+      </span>
+      <div className="ml-4">
+        {charmManager.getLineage(item.charm).map((item) => Lineage(item))}
+      </div>
+    </div>
+  );
+
   return (
     <div className="h-full overflow-auto p-4">
-      {charm.getSourceCell && (
+      {charm.getSourceCell() && (
         <div className="mb-4">
           <button
             type="button"
@@ -905,7 +1119,9 @@ const DataTab = () => {
             <div className="border border-gray-300 rounded bg-gray-50 p-2">
               {/* @ts-expect-error JsonView is imported as any */}
               <JsonView
-                value={charm.getSourceCell()?.get()?.argument || {}}
+                value={translateCellsAndStreamsToPlainJSON(
+                  charmManager.getArgument(charm)?.get(),
+                ) ?? {}}
                 style={{
                   background: "transparent",
                   fontSize: "0.875rem",
@@ -930,7 +1146,7 @@ const DataTab = () => {
           <div className="border border-gray-300 rounded bg-gray-50 p-2">
             {/* @ts-expect-error JsonView is imported as any */}
             <JsonView
-              value={charm.get() || {}}
+              value={translateCellsAndStreamsToPlainJSON(charm.get()) ?? {}}
               style={{
                 background: "transparent",
                 fontSize: "0.875rem",
@@ -990,7 +1206,46 @@ const DataTab = () => {
               </div>
             )}
           </div>
+
+          {/* Added Specification section */}
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={() => setIsSpecExpanded(!isSpecExpanded)}
+              className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+            >
+              <span className="text-md font-semibold">Specification</span>
+              <span>{isSpecExpanded ? "▼" : "▶"}</span>
+            </button>
+
+            {isSpecExpanded && (
+              <div className="border border-gray-300 rounded p-2 bg-gray-50">
+                <div className="whitespace-pre-wrap font-mono text-sm p-2">
+                  {iframeRecipe.spec || "No specification available"}
+                </div>
+              </div>
+            )}
+          </div>
         </>
+      )}
+
+      {lineage.length > 0 && (
+        <div className="mt-4">
+          <button
+            type="button"
+            onClick={() => setIsLineageExpanded(!isLineageExpanded)}
+            className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+          >
+            <span className="text-md font-semibold">Lineage</span>
+            <span>{isLineageExpanded ? "▼" : "▶"}</span>
+          </button>
+
+          {isLineageExpanded && (
+            <div className="border border-gray-300 rounded p-2 bg-gray-50">
+              {lineage.map((item) => Lineage(item))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -1128,6 +1383,51 @@ function CharmDetailView() {
       </div>
     </CharmOperationContext.Provider>
   );
+}
+
+function translateCellsAndStreamsToPlainJSON(
+  data: any,
+  partial: Set<any> = new Set(),
+  complete: Map<any, JSON | string> = new Map<any, JSON | string>(),
+): JSON | string {
+  // If we already have the serialized form of this object, just use that
+  const existing = complete.get(data);
+  if (existing !== undefined) {
+    return existing;
+  }
+  if (partial.has(data)) {
+    return "// circular reference";
+  }
+  partial.add(data);
+
+  let result: any;
+  if (isStream(data)) {
+    result = { "// stream": data.schema ?? "no schema" };
+  } else if (isCell(data)) {
+    result = {
+      "// cell": translateCellsAndStreamsToPlainJSON(
+        data.get(),
+        partial,
+        complete,
+      ),
+    };
+  } else if (Array.isArray(data)) {
+    result = data.map((value) =>
+      translateCellsAndStreamsToPlainJSON(value, partial, complete)
+    );
+  } else if (isObj(data)) {
+    result = Object.fromEntries(
+      Object.entries(data).map(([key, value]) => [
+        key,
+        translateCellsAndStreamsToPlainJSON(value, partial, complete),
+      ]),
+    );
+  } else {
+    result = data;
+  }
+  partial.delete(data);
+  complete.set(data, result);
+  return result;
 }
 
 export default CharmDetailView;

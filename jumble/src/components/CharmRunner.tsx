@@ -1,8 +1,9 @@
 import React, { useRef } from "react";
 import { render } from "@commontools/html";
+import { UI } from "@commontools/builder";
+import { charmSchema, fixItCharm } from "@commontools/charm";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { useNavigate } from "react-router-dom";
-import { fixItCharm } from "@/utils/charm-operations.ts";
 import { LuX } from "react-icons/lu";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import { createPath } from "@/routes.ts";
@@ -82,6 +83,17 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
   const { charmManager, currentReplica } = useCharmManager();
   const navigate = useNavigate();
 
+  // Store a reference to the current charm to detect changes
+  const prevCharmRef = useRef(charm);
+
+  // Clear error when charm changes
+  React.useEffect(() => {
+    if (prevCharmRef.current !== charm) {
+      setRuntimeError(null);
+      prevCharmRef.current = charm;
+    }
+  }, [charm]);
+
   const handleFixIt = React.useCallback(async () => {
     if (!runtimeError || isFixing) return;
     setIsFixing(true);
@@ -105,6 +117,9 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
     const container = containerRef.current;
     if (!container) return;
 
+    // Clear any previous errors when mounting a new charm
+    setRuntimeError(null);
+
     function handleIframeError(event: Event) {
       const customEvent = event as CustomEvent<Error>;
       setRuntimeError(customEvent.detail);
@@ -112,7 +127,7 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
 
     container.addEventListener("common-iframe-error", handleIframeError);
 
-    const cleanup = render(container, charm.key("$UI"));
+    const cleanup = render(container, charm.asSchema(charmSchema).key(UI));
 
     return () => {
       cleanup();
@@ -121,7 +136,7 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
         container.innerHTML = "";
       }
     };
-  }, [charm.key]);
+  }, [charm]);
 
   return (
     <>

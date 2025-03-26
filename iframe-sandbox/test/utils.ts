@@ -1,5 +1,6 @@
 import { CommonIframeSandboxElement } from "../src/common-iframe-sandbox.ts";
 import { setIframeContextHandler } from "../src/index.ts";
+import { sleep } from "@commontools/utils/sleep";
 
 type Callback = (key: string, value: any) => void;
 interface Context {
@@ -69,6 +70,9 @@ export function setIframeTestHandler() {
       // Not implemented
       return Promise.resolve({});
     },
+    async onPerform(context, command) {
+      return await { error: new Error(`Not implemented`) };
+    },
   });
 }
 
@@ -133,7 +137,7 @@ export async function waitForCondition(
     if (condition()) {
       return;
     }
-    await new Promise((resolve) => setTimeout(resolve, timeout));
+    await sleep(timeout);
   }
   throw new Error("waitForCondition tries exhausted");
 }

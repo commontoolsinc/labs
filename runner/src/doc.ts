@@ -272,6 +272,16 @@ export type DocImpl<T> = {
   ephemeral: boolean;
 
   /**
+   * Retry callbacks for the current value on cell. Will be cleared after a
+   * transaction goes through, whether it ultimately succeeds or not.
+   *
+   * See retry logic in storage.ts - this is a temporary approach, and notes
+   * there explain what should really happen. Hence the minimal possible
+   * code changes to get the current functionality.
+   */
+  retry?: ((previousValue: T) => T)[];
+
+  /**
    * Internal only: Used by builder to turn cells into proxies tied to them.
    * Useful when building a recipe that directly refers to existing cells, such
    * as a recipe created and returned by a handler.

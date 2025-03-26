@@ -4,6 +4,7 @@ import * as Path from "@std/path";
 // NOTE: This is where we define the environment variable types and defaults.
 const EnvSchema = z.object({
   ENV: z.string().default("development"),
+  HOST: z.string().default("0.0.0.0"),
   PORT: z.coerce.number().default(8000),
   LOG_LEVEL: z.enum([
     "fatal",
@@ -75,9 +76,13 @@ const EnvSchema = z.object({
   BLOBBY_REDIS_URL: z.string().default("redis://localhost:6379"),
   // ===========================================================================
   // Memory Store
-  MEMORY_URL: z.string().default(
+  //  - MEMORY_DIR is used by toolshed to access sqlite files for common-memory
+  //  - MEMORY_URL is used by toolshed to connect to memory endpoint
+  // ===========================================================================
+  MEMORY_DIR: z.string().default(
     new URL(`./cache/memory/`, Path.toFileUrl(`${Deno.cwd()}/`)).href,
   ),
+  MEMORY_URL: z.string().default("http://localhost:8000"),
   // ===========================================================================
   // Sentry DSN global middleware
   //   * /lib/create-app.ts
@@ -87,6 +92,9 @@ const EnvSchema = z.object({
 
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),
+
+  // Identity signer passphrase for storage authentication
+  IDENTITY_PASSPHRASE: z.string().default("implicit trust"),
 });
 
 export type env = z.infer<typeof EnvSchema>;

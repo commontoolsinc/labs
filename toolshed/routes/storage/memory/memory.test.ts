@@ -70,7 +70,7 @@ Deno.test("test transaction", async (t) => {
     memory.close();
   } finally {
     await server.shutdown();
-    Deno.removeSync(new URL(`./${space.did()}.sqlite`, env.MEMORY_URL));
+    Deno.removeSync(new URL(`./${space.did()}.sqlite`, env.MEMORY_DIR));
   }
 });
 
@@ -112,6 +112,6 @@ Deno.test("test consumer", async (t) => {
     session.close();
   } finally {
     await server.shutdown();
-    Deno.removeSync(new URL(`./${alice.did()}.sqlite`, env.MEMORY_URL));
+    Deno.removeSync(new URL(`./${alice.did()}.sqlite`, env.MEMORY_DIR));
   }
 });

@@ -13,32 +13,25 @@ import {
 } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const EmailProperties = {
+  id: { type: "string" },
+  threadId: { type: "string" },
+  labelIds: { type: "array", items: { type: "string" } },
+  snippet: { type: "string" },
+  subject: { type: "string" },
+  from: { type: "string" },
+  date: { type: "string" },
+  to: { type: "string" },
+  plainText: { type: "string" },
+  htmlContent: { type: "string" },
+} as const;
+
 const EmailSchema = {
   type: "object",
-  properties: {
-    id: { type: "string" },
-    threadId: { type: "string" },
-    labelIds: { type: "array", items: { type: "string" } },
-    snippet: { type: "string" },
-    subject: { type: "string" },
-    from: { type: "string" },
-    date: { type: "string" },
-    to: { type: "string" },
-    plainText: { type: "string" },
-    htmlContent: { type: "string" },
-  },
-  required: [
-    "id",
-    "threadId",
-    "labelIds",
-    "snippet",
-    "subject",
-    "from",
-    "date",
-    "to",
-    "plainText",
-    "htmlContent",
-  ],
+  properties: EmailProperties,
+  required: Object.keys(EmailProperties),
 } as const as JSONSchema;
 type Email = Schema<typeof EmailSchema>;
 
@@ -63,15 +56,6 @@ const AuthSchema = {
 } as const satisfies JSONSchema;
 type Auth = Schema<typeof AuthSchema>;
 
-const LabelSchema = {
-  type: "object",
-  properties: {
-    id: { type: "string" },
-    name: { type: "string" },
-  },
-} as const satisfies JSONSchema;
-type Label = Schema<typeof LabelSchema>;
-
 const GmailImporterInputs = {
   type: "object",
   properties: {
@@ -86,10 +70,10 @@ const GmailImporterInputs = {
         limit: {
           type: "number",
           description: "number of emails to import",
-          default: 10,
+          default: 100,
         },
       },
-      required: ["labels", "limit"],
+      required: ["gmailFilterQuery", "limit"],
     },
     auth: AuthSchema,
   },
@@ -100,52 +84,51 @@ const GmailImporterInputs = {
 const ResultSchema = {
   type: "object",
   properties: {
-    labels: {
-      type: "array",
-      items: LabelSchema,
-    },
     emails: {
       type: "array",
       items: {
         type: "object",
-        properties: {
-          id: { type: "string" },
-          threadId: { type: "string" },
-          labelIds: { type: "array", items: { type: "string" } },
-          snippet: { type: "string" },
-          subject: { type: "string" },
-          from: { type: "string" },
-          date: { type: "string" },
-          to: { type: "string" },
-          plainText: { type: "string" },
-          htmlContent: { type: "string" },
-        },
+        properties: EmailProperties,
       },
     },
     googleUpdater: { asStream: true, type: "object", properties: {} },
   },
 } as const satisfies JSONSchema;
 
-const updateLimit = handler(
-  {
-    type: "object",
-    properties: {
-      detail: {
-        type: "object",
-        properties: { value: { type: "string" } },
-        required: ["value"],
-      },
+const updateLimit = handler({
+  type: "object",
+  properties: {
+    detail: {
+      type: "object",
+      properties: { value: { type: "string" } },
+      required: ["value"],
     },
   },
-  {
-    type: "object",
-    properties: { limit: { type: "number", asCell: true } },
-    required: ["limit"],
-  },
-  ({ detail }, state) => {
-    state.limit.set(parseInt(detail?.value ?? "10") || 0);
-  },
-);
+}, {
+  type: "object",
+  properties: { limit: { type: "number", asCell: true } },
+  required: ["limit"],
+}, ({ detail }, state) => {
+  state.limit.set(parseInt(detail?.value ?? "100") || 0);
+});
+
+const refreshAuthToken = async (auth: Auth) => {
+  const body = {
+    refreshToken: auth.refreshToken,
+  };
+
+  console.log("refreshAuthToken", body);
+
+  const refresh_response = await fetch(
+    "/api/integrations/google-oauth/refresh",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  ).then((res) => res.json());
+
+  return refresh_response as Auth;
+};
 
 const googleUpdater = handler(
   {},
@@ -153,21 +136,16 @@ const googleUpdater = handler(
     type: "object",
     properties: {
       emails: { type: "array", items: EmailSchema, default: [], asCell: true },
-      auth: AuthSchema,
+      auth: { ...AuthSchema, asCell: true },
       settings: GmailImporterInputs.properties.settings,
-      labels: { type: "array", items: LabelSchema, default: [], asCell: true },
     },
-    required: ["emails", "auth", "settings", "labels"],
-  },
+    required: ["emails", "auth", "settings"],
+  } as const satisfies JSONSchema,
   (_event, state) => {
     console.log("googleUpdater!");
 
-    if (!state.auth.token) {
+    if (!state.auth.get().token) {
       console.warn("no token");
-      return;
-    }
-    if (state.auth.expiresAt && state.auth.expiresAt < Date.now()) {
-      console.warn("token expired at ", state.auth.expiresAt);
       return;
     }
 
@@ -176,13 +154,11 @@ const googleUpdater = handler(
     console.log("gmailFilterQuery", gmailFilterQuery);
 
     fetchEmail(
-      state.auth.token,
+      state.auth,
       state.settings.limit,
       gmailFilterQuery,
       state,
     );
-
-    fetchLabels(state.auth.token, state);
   },
 );
 
@@ -341,66 +317,29 @@ Accept: application/json
   }).filter((message): message is Email => message !== null);
 }
 
-// Add this helper function for sleeping
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function fetchLabels(
-  accessToken: string,
-  state: {
-    labels: Cell<Label[]>;
-  },
-) {
-  const existingLabels = new Set(
-    state.labels.get().map((label) => label.id),
-  );
-
-  try {
-    console.log("Fetching Gmail labels...");
-    const response = await fetch(
-      "https://gmail.googleapis.com/gmail/v1/users/me/labels",
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      },
-    );
-
-    const data = await response.json();
-
-    const labelData = data.labels.map((
-      label: { id: string; name: string },
-    ) => ({
-      id: label.id,
-      name: label.name,
-    }));
-
-    const newLabels = labelData.filter(
-      (label: { id: string }) => !existingLabels.has(label.id),
-    );
-
-    if (newLabels.length === 0) {
-      console.log("No new labels to fetch");
-      return { labels: [] };
-    }
-    state.labels.push(...newLabels);
-
-    return state.labels || [];
-  } catch (error) {
-    console.error("Error fetching Gmail labels:", error);
-    return [];
-  }
-}
-
 export async function fetchEmail(
-  accessToken: string,
-  maxResults: number = 10,
+  auth: Cell<Auth>,
+  maxResults: number = 100,
   gmailFilterQuery: string = "in:INBOX",
   state: {
     emails: Cell<Email[]>;
   },
 ) {
+  let cur = auth.get();
+
+  if (cur.expiresAt && Date.now() > cur.expiresAt) {
+    const resp = await refreshAuthToken(auth);
+    auth.set(resp);
+    console.log("refresh_data", resp);
+  }
+
+  cur = auth.get();
+
+  if (!cur.token) {
+    console.warn("no token");
+    return;
+  }
+
   const existingEmailIds = new Set(
     state.emails.get().map((email) => email.id),
   );
@@ -411,7 +350,7 @@ export async function fetchEmail(
     }&maxResults=${maxResults}`,
     {
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${cur.token}`,
       },
     },
   );
@@ -446,7 +385,7 @@ export async function fetchEmail(
     );
 
     try {
-      const emails = await processBatch(batchMessages, accessToken);
+      const emails = await processBatch(batchMessages, cur.token);
 
       // Filter out any duplicates by ID
       const newEmails = emails.filter((email) =>
@@ -496,14 +435,9 @@ export default recipe(
   ResultSchema,
   ({ settings, auth }) => {
     const emails = cell<Email[]>([]);
-    const labels = cell<Label[]>([]);
 
     derive(emails, (emails) => {
       console.log("emails", emails.length);
-    });
-
-    derive(labels, (labels) => {
-      console.log("labels results", labels.length);
     });
 
     return {
@@ -542,6 +476,16 @@ export default recipe(
                   })}
                 />
               </div>
+              <button
+                type="button"
+                onClick={googleUpdater({
+                  emails,
+                  auth,
+                  settings,
+                })}
+              >
+                Fetch Emails
+              </button>
             </common-vstack>
           </common-hstack>
           <common-google-oauth $auth={auth} />
@@ -577,8 +521,7 @@ export default recipe(
         </div>
       ),
       emails,
-      labels,
-      googleUpdater: googleUpdater({ emails, auth, settings, labels }),
+      bgUpdater: googleUpdater({ emails, auth, settings }),
     };
   },
 );

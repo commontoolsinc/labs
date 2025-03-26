@@ -6,8 +6,6 @@ import { Summary, TestFileResults } from "./interface.ts";
 
 export const tsToJs = (path: string): string => path.replace(/\.ts$/, ".js");
 
-export const wait = (ms: number) => new Promise((res) => setTimeout(res, ms));
-
 // Given a `Manifest`, moves harness code and bundled
 // tests to the manifest's `serverDir`.
 export const buildTestDir = async (manifest: Manifest) => {

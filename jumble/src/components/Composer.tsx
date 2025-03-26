@@ -35,6 +35,59 @@ import { createPortal } from "react-dom";
 import { CharmManager } from "../../../charm/src/index.ts";
 import { Module, Recipe, TYPE } from "@commontools/builder";
 import { Cell, getRecipe } from "@commontools/runner";
+import { LuSend } from "react-icons/lu";
+import { DitheredCube } from "@/components/DitherCube.tsx";
+
+export function ComposerSubmitBar(
+  { loading, onSubmit, operation = "Go", children }: { loading: boolean; onSubmit: () => void; operation?: string; children?: React.ReactNode },
+): JSX.Element {
+  return (
+    <div className="flex justify-between items-top w-full">
+      <label className="text-[10px] text-gray-400">
+        Shift+Enter for new line<br />
+        Type <code>@</code> to mention a charm
+      </label>
+
+      <div className="flex flex-row gap-2">
+      {children}
+
+      <button
+        type="button"
+        onClick={onSubmit}
+        disabled={loading}
+        className="px-4 py-2 text-sm bg-black text-white flex items-center gap-2 disabled:opacity-50"
+      >
+        {loading ? (
+          <span className="text-xs flex items-center gap-2">
+            <DitheredCube
+              animationSpeed={2}
+              width={16}
+              height={16}
+              animate
+              cameraZoom={12}
+            />
+            <span>Working...</span>
+          </span>
+        ) : (
+          <span className="text-xs flex items-center gap-2">
+            <span className="text-xs flex items-center gap-1">
+              <LuSend />
+              <span>{operation}</span>
+            </span>
+            <span className="hidden md:inline text-gray-400 font-bold italic">
+              (Enter)
+            </span>
+          </span>
+        )}
+      </button>
+      </div>
+    </div>
+  );
+}
+
+/** WISHLIST
+- inline code blocks for specifying keys / fields
+*/
 
 // First define a basic interface with the required ReactEditor methods plus our extensions
 interface EditorWithExtensions extends BaseEditor, ReactEditor {
@@ -89,7 +142,7 @@ export async function parseComposerDocument(
     let fullText = "";
     const mentions: string[] = [];
     const sources: {
-      [id: string]: { name: string; cell: Cell<any>; recipe?: Recipe | Module };
+      [id: string]: { name: string; cell: Cell<any> };
     } = {};
     const mentionIndices: Record<string, number> = {};
 
@@ -114,16 +167,9 @@ export async function parseComposerDocument(
               throw new Error(`Charm not found for mention ${node.id}`);
             }
 
-            const recipeId = charm.getSourceCell().get()[TYPE];
-            if (!recipeId) {
-              throw new Error(`Recipe ID not found for charm ${node.id}`);
-            }
-            const recipe = getRecipe(recipeId);
-
             sources[node.id] = {
               name: node.character || `Reference ${bibIndex}`,
-              cell: charm.getSourceCell(),
-              recipe: recipe,
+              cell: charm,
             };
 
             mentionIndices[node.id] = bibIndex;
@@ -298,40 +344,48 @@ const withShortcuts = (editor: CustomEditor) => {
       const block = Editor.above(editor, {
         match: (n) => SlateElement.isElement(n) && Editor.isBlock(editor, n),
       });
-      const path = block ? block[1] : [];
-      const start = Editor.start(editor, path);
-      const range = { anchor, focus: start };
-      const beforeText = Editor.string(editor, range) + text.slice(0, -1);
-      const type = SHORTCUTS[beforeText as keyof typeof SHORTCUTS];
 
-      if (type) {
-        Transforms.select(editor, range);
+      if (block) {
+        const [blockNode, path] = block;
+        const start = Editor.start(editor, path);
+        const range = { anchor, focus: start };
+        const beforeText = Editor.string(editor, range) + text.slice(0, -1);
 
-        if (!Range.isCollapsed(range)) {
-          Transforms.delete(editor);
-        }
+        // Check if the string before the cursor is a valid shortcut
+        const type = SHORTCUTS[beforeText as keyof typeof SHORTCUTS];
 
-        const newProperties: Partial<SlateElement> = {
-          type,
-        };
-        Transforms.setNodes<SlateElement>(editor, newProperties, {
-          match: (n) => SlateElement.isElement(n) && Editor.isBlock(editor, n),
-        });
+        if (type) {
+          Transforms.select(editor, range);
 
-        if (type === "list-item") {
-          const list: BulletedListElement = {
-            type: "bulleted-list",
-            children: [],
+          if (!Range.isCollapsed(range)) {
+            Transforms.delete(editor);
+          }
+
+          const newProperties: Partial<SlateElement> = {
+            type,
           };
-          Transforms.wrapNodes(editor, list, {
-            match: (n) =>
-              !Editor.isEditor(n) &&
-              SlateElement.isElement(n) &&
-              n.type === "list-item",
-          });
-        }
 
-        return;
+          Transforms.setNodes<SlateElement>(editor, newProperties, {
+            match: (n) =>
+              SlateElement.isElement(n) && Editor.isBlock(editor, n),
+          });
+
+          if (type === "list-item") {
+            const list: BulletedListElement = {
+              type: "bulleted-list",
+              children: [],
+            };
+
+            Transforms.wrapNodes(editor, list, {
+              match: (n) =>
+                !Editor.isEditor(n) &&
+                SlateElement.isElement(n) &&
+                n.type === "list-item",
+            });
+          }
+
+          return;
+        }
       }
     }
 
@@ -387,19 +441,21 @@ export function Composer({
   readOnly,
   value,
   onValueChange,
-  onKeyDown: externalOnKeyDown,
   style,
   mentions = [],
   autoFocus = false,
+  onSubmit,
+  disabled = false,
 }: {
   placeholder?: string;
   readOnly?: boolean;
   value: string;
   onValueChange: (value: string) => void;
-  onKeyDown?: (e: React.KeyboardEvent) => void;
   style?: React.CSSProperties;
   mentions?: Array<{ id: string; name: string }>;
   autoFocus?: boolean;
+  onSubmit?: () => void;
+  disabled?: boolean;
 }) {
   // Convert string value to Slate value format if needed
   const initialValue: Descendant[] = useMemo(() => {
@@ -455,6 +511,9 @@ export function Composer({
 
   const handleDOMBeforeInput = useCallback(
     (_: InputEvent) => {
+      // Don't process input when disabled
+      if (disabled) return;
+
       queueMicrotask(() => {
         const pendingDiffs = ReactEditor.androidPendingDiffs(editor);
 
@@ -487,15 +546,18 @@ export function Composer({
         }
       });
     },
-    [editor],
+    [editor, disabled],
   );
 
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
-      if (externalOnKeyDown) {
-        externalOnKeyDown(event as any);
+      // Don't process key events when disabled
+      if (disabled) {
+        event.preventDefault();
+        return;
       }
 
+      // Handle mention selection navigation
       if (target && filteredMentions.length > 0) {
         switch (event.key) {
           case "ArrowDown": {
@@ -515,7 +577,7 @@ export function Composer({
             break;
           }
           case "Tab":
-            // case "Enter":
+          case "Enter": // Allow Enter to select a mention when the mention menu is open
             event.preventDefault();
             Transforms.select(editor, target);
             insertMention(
@@ -530,9 +592,23 @@ export function Composer({
             setTarget(null);
             break;
         }
+      } else if (event.key === "Enter") {
+        if (event.shiftKey) {
+          // Manually insert a soft break/line break
+          event.preventDefault();
+          editor.insertText("\n");
+          return;
+        } else if (onSubmit) {
+          // Only trigger onSubmit when:
+          // 1. Enter is pressed (without Shift)
+          // 2. The mention menu is closed
+          // 3. There's an onSubmit handler
+          event.preventDefault();
+          onSubmit();
+        }
       }
     },
-    [filteredMentions, editor, index, target, externalOnKeyDown],
+    [filteredMentions, editor, index, target, onSubmit, disabled],
   );
 
   useEffect(() => {
@@ -564,6 +640,9 @@ export function Composer({
 
   // Handle editor changes including mention detection
   const onChange = useCallback(() => {
+    // Don't process changes when disabled
+    if (disabled) return;
+
     const { selection } = editor;
 
     if (selection && Range.isCollapsed(selection)) {
@@ -572,15 +651,26 @@ export function Composer({
       const before = wordBefore && Editor.before(editor, wordBefore);
       const beforeRange = before && Editor.range(editor, before, start);
       const beforeText = beforeRange && Editor.string(editor, beforeRange);
+      
       const beforeMatch = beforeText && beforeText.match(/^@(\w+)$/);
+      
+      // If we detect exactly "@" at the end of the text, mock a match object
+      const isJustAtSymbol = beforeText && beforeText.endsWith('@') && 
+                           beforeText.length > 0 && beforeText[beforeText.length - 1] === '@';
+      
+      // Use either the regex match or our mock match for a single "@"
+      const finalBeforeMatch = isJustAtSymbol 
+        ? { 0: '@', 1: '' } // Mock match result for just "@"
+        : beforeMatch;
+        
       const after = Editor.after(editor, start);
       const afterRange = Editor.range(editor, start, after);
       const afterText = Editor.string(editor, afterRange);
       const afterMatch = afterText.match(/^(\s|$)/);
 
-      if (beforeMatch && afterMatch) {
+      if ((finalBeforeMatch || beforeMatch) && afterMatch && beforeRange) {
         setTarget(beforeRange);
-        setSearch(beforeMatch[1]);
+        setSearch(finalBeforeMatch ? finalBeforeMatch[1] : (beforeMatch ? beforeMatch[1] : ''));
         setIndex(0);
         return;
       }
@@ -590,14 +680,28 @@ export function Composer({
 
     // Update the current value
     setCurrentValue(editor.children);
-  }, [editor]);
+  }, [editor, disabled]);
+
+  useEffect(() => {
+    if (autoFocus && editor && !disabled) {
+      // Small delay to ensure the editor is fully mounted
+      setTimeout(() => {
+        try {
+          ReactEditor.focus(editor);
+        } catch (error) {
+          console.warn("Failed to focus editor:", error);
+        }
+      }, 100);
+    }
+  }, [autoFocus, editor, disabled]);
+
   return (
     <>
       <Slate editor={editor} initialValue={currentValue} onChange={onChange}>
         <Editable
           id="composer"
-          className="p-2"
-          readOnly={readOnly}
+          className={`p-2 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          readOnly={readOnly || disabled}
           renderElement={renderElement}
           renderLeaf={renderLeaf}
           onKeyDown={handleKeyDown}
@@ -614,26 +718,23 @@ export function Composer({
           style={{
             ...style,
             overflowY: "auto",
-            minHeight: "36px",
+            minHeight: "100px", // Changed from 36px to 100px to accommodate ~4 lines
             maxHeight: "200px",
             height: "auto",
             resize: "none",
           }}
-          autoFocus={autoFocus}
         />
-        {target && filteredMentions.length > 0 && (
+        {!disabled && target && filteredMentions.length > 0 && (
           <Portal>
             <div
               ref={ref}
+              className="absolute z-[9999] bg-white rounded-md shadow-md p-1 max-h-[200px] overflow-y-auto"
               style={{
                 top: "-9999px",
                 left: "-9999px",
                 position: "absolute",
-                zIndex: 9999,
-                padding: "3px",
-                background: "white",
-                borderRadius: "4px",
-                boxShadow: "0 1px 5px rgba(0,0,0,.2)",
+                maxHeight: "200px",
+                pointerEvents: "auto",
               }}
             >
               {filteredMentions.map((
@@ -649,11 +750,11 @@ export function Composer({
                     insertMention(editor, mention.id, mention.name);
                     setTarget(null);
                   }}
-                  style={{
-                    padding: "1px 3px",
-                    borderRadius: "3px",
-                    cursor: "pointer",
-                    background: i === index ? "#B4D5FF" : "transparent",
+                  className={`px-3 py-1.5 rounded-sm cursor-pointer transition-colors duration-150
+                    ${i === index ? "bg-blue-100" : "hover:bg-gray-100"}`}
+                  onMouseDown={(e) => {
+                    // Prevent the click from dismissing the command palette
+                    e.stopPropagation();
                   }}
                 >
                   {mention.name}
@@ -716,7 +817,11 @@ const ElementComponent = (props: RenderElementProps) => {
 
   switch (elementType) {
     case "mention":
-      return <Mention {...props as RenderElementPropsFor<MentionElement>} />;
+      return (
+        <Mention {...props as RenderElementPropsFor<MentionElement>}>
+          {children}
+        </Mention>
+      );
     case "block-quote":
       return (
         <blockquote

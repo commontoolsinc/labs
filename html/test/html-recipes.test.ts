@@ -127,7 +127,7 @@ describe("recipes with HTML", () => {
     const parent = document.createElement("div");
     document.body.appendChild(parent);
     const cell = result.asCell<{ [UI]: VNode }>().key(UI);
-    render(parent, cell.get());
+    render(parent, cell);
 
     assert.equal(parent.innerHTML, "<div><div>test</div></div>");
   });

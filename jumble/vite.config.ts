@@ -6,7 +6,10 @@ import deno from "../deno-vite-plugin/src/index.ts";
 import tailwindcss from "@tailwindcss/vite";
 import * as path from "@std/path";
 
+const buildSourcemaps = Deno.env.get("VITE_BUILD_SOURCEMAPS") === "true";
 console.log("TOOLSHED_API_URL", Deno.env.get("TOOLSHED_API_URL"));
+console.log("Build source maps:", buildSourcemaps);
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [deno(), react(), tailwindcss() as any],
@@ -78,5 +81,8 @@ export default defineConfig({
     headers: {
       "Service-Worker-Allowed": "/data/",
     },
+  },
+  build: {
+    sourcemap: buildSourcemaps,
   },
 });

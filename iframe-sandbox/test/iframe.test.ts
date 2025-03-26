@@ -6,6 +6,7 @@ import {
   setIframeTestHandler,
   waitForCondition,
 } from "./utils.ts";
+import { sleep } from "@commontools/utils/sleep";
 
 setIframeTestHandler();
 
@@ -95,7 +96,7 @@ write("ready", true);
   await waitForCondition(() => context.get("unsubscribed") === true);
   context.set("a", 4);
   context.set("a", 5);
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await sleep(100);
   await waitForCondition(() =>
     compareDeepEquals(context.get("updates"), [["a", 2], ["a", 3]])
   );
