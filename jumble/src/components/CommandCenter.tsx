@@ -141,7 +141,7 @@ function CommandProcessor({
                           : "bg-gray-100"
                       }`}
                     >
-                      Precise
+                      Smart
                     </button>
                   </div>
                 </div>
