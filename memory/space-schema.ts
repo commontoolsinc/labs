@@ -165,7 +165,6 @@ function loadPointer<Space extends MemorySpace>(
     return tracker.get(obj);
   }
   //console.log("Cell Link: ", obj);
-  // TODO: could improve this to break out partial and complete
   if (!tracker.enter(obj)) {
     console.error("Cycle Detected!");
     // FIXME(@ubik2) Need to handle this
@@ -185,7 +184,13 @@ function loadPointer<Space extends MemorySpace>(
     tracker.exit(obj);
     return undefined;
   }
-  const lastFact = loadFirstJSONFact(session, `of:${cellTarget}`);
+  const selection = {};
+  loadFacts(selection, session, {
+    the: "application/json",
+    of: `of:${cellTarget}`,
+    cause: SelectAll,
+  });
+  const lastFact = getFirstFact(selection);
   const result = getAtPath(session, lastFact, path, tracker);
   tracker.exit(obj, result);
   return result;
@@ -227,27 +232,7 @@ function getFirstFact(
   return undefined;
 }
 
-function loadFirstFact<Space extends MemorySpace>(
-  session: Session<Space>,
-  the: The,
-  of: Entity,
-  cause: Cause = SelectAll,
-  since: number | undefined = undefined,
-): JSONValue | undefined {
-  const selection = {};
-  loadFacts(selection, session, { the, of, cause, since });
-  return getFirstFact(selection);
-}
-
-function loadFirstJSONFact<Space extends MemorySpace>(
-  session: Session<Space>,
-  of: Entity,
-  cause: Cause = SelectAll,
-  since: number | undefined = undefined,
-): JSONValue | undefined {
-  return loadFirstFact(session, "application/json", of, cause, since);
-}
-
+// Recursively resolve the cells
 function resolveCells<Space extends MemorySpace>(
   session: Session<Space>,
   factIs: JSONValue,
