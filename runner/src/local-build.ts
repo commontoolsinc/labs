@@ -4,7 +4,7 @@ import * as commonBuilder from "@commontools/builder";
 import * as zod from "zod";
 import * as zodToJsonSchema from "zod-to-json-schema";
 import * as merkleReference from "merkle-reference";
-import * as turndown from "turndown";
+import turndown from "turndown";
 
 let DOMParser: any;
 
