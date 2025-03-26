@@ -23,7 +23,9 @@ const turndown = new TurndownService({
 
 turndown.addRule("removeStyleTags", {
   filter: ["style"],
-  replacement: "",
+  replacement: function () {
+    return "";
+  },
 });
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
