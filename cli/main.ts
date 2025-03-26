@@ -7,7 +7,7 @@ import {
   setBobbyServerUrl,
   storage,
 } from "@commontools/runner";
-import { createSession } from "@commontools/identity";
+import { createSessionFromPassphrase } from "@commontools/identity";
 
 const { name, charmId, recipeFile, cause, quit } = parseArgs(Deno.args, {
   string: ["name", "charmId", "recipeFile", "cause"],
@@ -24,7 +24,7 @@ storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
 
 async function main() {
-  const session = await createSession({
+  const session = await createSessionFromPassphrase({
     passphrase: OPERATOR_PASS,
     name: name!,
   });

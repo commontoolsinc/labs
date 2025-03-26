@@ -3,11 +3,12 @@ import { Cell } from "@commontools/runner";
 import { log } from "./utils.ts";
 import { WorkerController } from "./worker-controller.ts";
 import { type Cancel, useCancelGroup } from "@commontools/runner";
+import { Identity } from "@commontools/identity";
 
 type CharmSchedulerOptions = {
   did: string;
   toolshedUrl: string;
-  operatorPass: string;
+  identity: Identity;
   maxConcurrentJobs?: number;
   maxRetries?: number;
   pollingIntervalMs?: number;
@@ -54,7 +55,7 @@ export class SpaceManager {
 
     this.workerController.setupWorker(
       options.toolshedUrl,
-      options.operatorPass,
+      options.identity,
     ).then(
       () => {
         log(`Worker controller ${this.did} ready for work`);

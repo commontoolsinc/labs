@@ -1,7 +1,12 @@
 import { BackgroundCharmService } from "./service.ts";
-import { log } from "./utils.ts";
+import { log, getIdentity } from "./utils.ts";
+import { env } from "./env.ts";
 
-const service = new BackgroundCharmService();
+const identity = await getIdentity(env.IDENTITY, env.OPERATOR_PASS);
+const service = new BackgroundCharmService({
+  identity,
+  toolshedUrl: env.TOOLSHED_API_URL,
+});
 
 const shutdown = () => {
   // @ts-ignore: Object is possibly 'undefined'
