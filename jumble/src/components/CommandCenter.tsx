@@ -69,7 +69,7 @@ function CommandProcessor({
   }, [mode, inputValue, charmManager]);
 
   switch (mode.type) {
-    case "input":
+    case "input": {
       // State for preview model selection
       const [previewModel, setPreviewModel] = useState<SpecPreviewModel>(
         "fast",
@@ -93,8 +93,8 @@ function CommandProcessor({
                 spec={previewSpec}
                 plan={previewPlan}
                 loading={isPreviewLoading}
-                visible={true}
-                floating={true}
+                visible
+                floating
               />
 
               <Composer
@@ -150,8 +150,9 @@ function CommandProcessor({
           </div>
         </Command.Group>
       );
+    }
 
-    case "confirm":
+    case "confirm": {
       return (
         <Command.Group heading="Confirm">
           <Command.Item
@@ -169,15 +170,17 @@ function CommandProcessor({
           </Command.Item>
         </Command.Group>
       );
+    }
 
-    case "transcribe":
+    case "transcribe": {
       return (
         <Command.Group>
           <TranscribeInput mode={mode} context={context} />
         </Command.Group>
       );
+    }
 
-    case "select":
+    case "select": {
       return (
         <>
           {mode.options.map((option) => (
@@ -194,6 +197,7 @@ function CommandProcessor({
           ))}
         </>
       );
+    }
 
     default:
       return null;
