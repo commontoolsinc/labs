@@ -1,12 +1,10 @@
 import { set } from "./changes.ts";
 import type {
-  Cause,
   Entity,
   FactSelection,
   JSONObject,
   JSONValue,
   MemorySpace,
-  OptionalJSONValue,
   Pointer,
   PointerV0,
   SchemaContext,
@@ -277,7 +275,7 @@ function checkFactMatch<Space extends MemorySpace>(
   path: PropertyKey[],
   nodeSelector: SchemaPathSelector,
   tracker: CycleTracker<JSONValue, JSONValue | undefined>,
-): OptionalJSONValue {
+): JSONValue | undefined {
   if (value !== undefined && isPointer(value)) {
     value = loadPointer(session, value, tracker);
   }
@@ -326,7 +324,7 @@ function checkFactMatch<Space extends MemorySpace>(
     } else if (isObject(value)) {
       const valueObj = value as JSONObject;
       const nextSelectorPath: string = nodeSelector.path[path.length];
-      const rv: Record<string, OptionalJSONValue> = {};
+      const rv: Record<string, JSONValue> = {};
       if (nextSelectorPath in valueObj) {
         const newPath = [...path];
         newPath.push(nextSelectorPath);

@@ -864,22 +864,6 @@ export type Selection<Space extends MemorySpace = MemorySpace> = {
   [space in Space]: FactSelection;
 };
 
-// export type FactSelectionList<
-//   T extends The = The,
-//   Of extends Entity = Entity,
-//   Is extends JSONValue = JSONValue,
-// > = {
-//   [of in Of]: {
-//     [the in T]: {
-//       [cause: Cause]: RetractFact | AssertFact<Is>[];
-//     };
-//   };
-// };
-
-// export type SelectionList<Space extends MemorySpace = MemorySpace> = {
-//   [space in Space]: FactSelectionList;
-// };
-
 export type Unit = NonNullable<unknown>;
 
 /**
@@ -898,15 +882,6 @@ export type JSONValue =
 export interface JSONObject extends Record<string, JSONValue> {}
 
 export interface JSONArray extends ArrayLike<JSONValue> {}
-
-// Some weaker versions of JSONValue that allow for undefined
-export type OptionalJSONValue =
-  | JSONValue
-  | OptionalJSONObject
-  | OptionalJSONArray
-  | undefined;
-export interface OptionalJSONObject extends Record<string, OptionalJSONValue> {}
-export interface OptionalJSONArray extends ArrayLike<OptionalJSONValue> {}
 
 export type AsyncResult<T extends Unit = Unit, E extends Error = Error> =
   Promise<Result<T, E>>;
