@@ -27,7 +27,7 @@ export function SpecPreview({
   const containerSpring = useSpring({
     opacity: visible && hasContent ? 1 : 0,
     transform: visible && hasContent ? "translateY(0%)" : "translateY(-20%)",
-    height: visible && hasContent ? "auto" : "0px", // Using height: auto for final state
+    height: visible && hasContent ? "auto" : 0, // Fix: use 0 instead of "0px" to avoid string/number type conflict
     width: visible && hasContent ? "100%" : "95%",
     config: {
       tension: 280,
@@ -87,8 +87,8 @@ export function SpecPreview({
           : {
             overflowY: "auto", // Always use overflow auto instead of hidden
             maxHeight: visible && hasContent
-              ? (loading ? "150px" : "calc(min(500px, 80vh))") // Constrain to 80% of viewport height
-              : "0px",
+              ? (loading ? 150 : "calc(min(500px, 80vh))") // Constrain to 80% of viewport height
+              : 0,
           }),
       }}
     >
