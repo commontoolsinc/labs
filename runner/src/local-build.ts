@@ -4,6 +4,7 @@ import * as commonBuilder from "@commontools/builder";
 import * as zod from "zod";
 import * as zodToJsonSchema from "zod-to-json-schema";
 import * as merkleReference from "merkle-reference";
+import turndown from "turndown";
 
 let DOMParser: any;
 
@@ -124,6 +125,8 @@ export const tsToExports = async (
         return merkleReference;
       case "zod-to-json-schema":
         return zodToJsonSchema;
+      case "turndown":
+        return turndown;
       default:
         throw new Error(`Module not found: ${moduleName}`);
     }

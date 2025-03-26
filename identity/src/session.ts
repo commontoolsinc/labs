@@ -2,7 +2,14 @@ import { Identity } from "./identity.ts";
 import { type DID } from "./interface.ts";
 export const ANYONE = "common user";
 
-export const open = async (
+export type Session = {
+  private: boolean;
+  name: string;
+  space: DID;
+  as: Identity;
+};
+
+export const openSession = async (
   { passphrase, space, name }: {
     passphrase: string;
     space: DID;
@@ -15,7 +22,7 @@ export const open = async (
   as: await Identity.fromPassphrase(passphrase),
 });
 
-export const create = async (
+export const createSession = async (
   { passphrase, name }: { passphrase: string; name: string },
 ) => {
   const account = await Identity.fromPassphrase(passphrase);

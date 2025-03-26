@@ -175,11 +175,13 @@ IMPORTANT:
  * Generates a complete specification, schema, and plan from a goal.
  * @param goal The user's goal or request
  * @param existingSchema Optional existing schema to use as a basis
+ * @param model Optional model identifier to use (defaults to claude-3-7-sonnet)
  * @returns Object containing title, description, specification, schema
  */
 export async function generateSpecAndSchema(
   goal: string,
   existingSchema?: JSONSchema,
+  model: string = "anthropic:claude-3-7-sonnet-latest",
 ): Promise<{
   spec: string;
   plan: string;
@@ -209,9 +211,9 @@ Based on this goal and the existing schema, please provide a title, description,
     userContent = goal;
   }
 
-  // Send the request to the LLM
+  // Send the request to the LLM using the specified model or default
   const response = await client.sendRequest({
-    model: "anthropic:claude-3-7-sonnet-latest",
+    model: model,
     system: systemPrompt,
     stream: false,
     messages: [

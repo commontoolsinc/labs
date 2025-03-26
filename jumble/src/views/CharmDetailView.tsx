@@ -10,6 +10,12 @@ import {
 } from "@commontools/charm";
 import { isCell, isStream } from "@commontools/runner";
 import { isObj } from "@commontools/utils";
+import {
+  CheckboxToggle,
+  CommonCheckbox,
+  CommonLabel,
+  ToggleButton,
+} from "../components/common/CommonToggle.tsx";
 import React, {
   createContext,
   useCallback,
@@ -40,6 +46,12 @@ import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { useCharmMentions } from "@/components/CommandCenter.tsx";
 import { formatPromptWithMentions } from "@/utils/format.ts";
 import { CharmLink } from "@/components/CharmLink.tsx";
+import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
+import { SpecPreview } from "@/components/SpecPreview.tsx";
+import {
+  SpecPreviewModel,
+  useLiveSpecPreview,
+} from "@/hooks/use-live-spec-preview.ts";
 
 type Tab = "iterate" | "code" | "data";
 type OperationType = "iterate" | "extend";
@@ -61,6 +73,8 @@ interface CharmOperationContextType {
   setOperationType: (type: OperationType) => void;
   showVariants: boolean;
   setShowVariants: (show: boolean) => void;
+  showPreview: boolean;
+  setShowPreview: (show: boolean) => void;
   loading: boolean;
   setLoading: (loading: boolean) => void;
   variants: Cell<Charm>[];
@@ -69,6 +83,11 @@ interface CharmOperationContextType {
   setSelectedVariant: (variant: Cell<Charm> | null) => void;
   expectedVariantCount: number;
   setExpectedVariantCount: (count: number) => void;
+  previewSpec: string;
+  previewPlan: string;
+  isPreviewLoading: boolean;
+  previewModel: SpecPreviewModel;
+  setPreviewModel: (model: SpecPreviewModel) => void;
   handlePerformOperation: () => void;
   handleCancelVariants: () => void;
   performOperation: (
@@ -92,114 +111,6 @@ const useCharmOperationContext = () => {
   }
   return context;
 };
-
-// =================== Custom Hooks ===================
-
-// Hook for managing bottom sheet functionality
-function useBottomSheet(initialHeight = 585) {
-  const [sheetHeight, setSheetHeight] = useState<number>(initialHeight);
-  const [isResizing, setIsResizing] = useState(false);
-  const resizeStartY = useRef<number | null>(null);
-  const startHeight = useRef<number | null>(null);
-
-  const handleResizeStart = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      resizeStartY.current = e.clientY;
-      startHeight.current = sheetHeight;
-      setIsResizing(true);
-
-      // Add a layer over the entire document to capture events
-      const overlay = document.createElement("div");
-      overlay.id = "resize-overlay";
-      overlay.style.position = "fixed";
-      overlay.style.top = "0";
-      overlay.style.left = "0";
-      overlay.style.width = "100%";
-      overlay.style.height = "100%";
-      overlay.style.zIndex = "9999";
-      overlay.style.cursor = "ns-resize";
-      document.body.appendChild(overlay);
-
-      const handleResizeMove = (e: MouseEvent) => {
-        if (resizeStartY.current !== null && startHeight.current !== null) {
-          const diff = resizeStartY.current - e.clientY;
-          const newHeight = Math.max(
-            150,
-            Math.min(globalThis.innerHeight * 0.8, startHeight.current + diff),
-          );
-          setSheetHeight(newHeight);
-        }
-      };
-
-      const handleResizeEnd = () => {
-        resizeStartY.current = null;
-        startHeight.current = null;
-        setIsResizing(false);
-
-        // Remove overlay
-        const overlay = document.getElementById("resize-overlay");
-        if (overlay) {
-          document.body.removeChild(overlay);
-        }
-
-        document.removeEventListener("mousemove", handleResizeMove);
-        document.removeEventListener("mouseup", handleResizeEnd);
-      };
-
-      document.addEventListener("mousemove", handleResizeMove);
-      document.addEventListener("mouseup", handleResizeEnd);
-    },
-    [sheetHeight],
-  );
-
-  const handleTouchResizeStart = useCallback(
-    (e: React.TouchEvent) => {
-      e.preventDefault();
-      if (e.touches.length === 1) {
-        resizeStartY.current = e.touches[0].clientY;
-        startHeight.current = sheetHeight;
-        setIsResizing(true);
-      }
-
-      const handleTouchMove = (e: TouchEvent) => {
-        if (
-          resizeStartY.current !== null &&
-          startHeight.current !== null &&
-          e.touches.length === 1
-        ) {
-          const diff = resizeStartY.current - e.touches[0].clientY;
-          const newHeight = Math.max(
-            150,
-            Math.min(globalThis.innerHeight * 0.8, startHeight.current + diff),
-          );
-          setSheetHeight(newHeight);
-        }
-      };
-
-      const handleTouchEnd = () => {
-        resizeStartY.current = null;
-        startHeight.current = null;
-        setIsResizing(false);
-        document.removeEventListener("touchmove", handleTouchMove);
-        document.removeEventListener("touchend", handleTouchEnd);
-      };
-
-      document.addEventListener("touchmove", handleTouchMove, {
-        passive: false,
-      });
-      document.addEventListener("touchend", handleTouchEnd);
-    },
-    [sheetHeight],
-  );
-
-  return {
-    sheetHeight,
-    isResizing,
-    handleResizeStart,
-    handleTouchResizeStart,
-  };
-}
 
 // Hook for tab management
 function useTabNavigation() {
@@ -345,6 +256,7 @@ function useCharmOperation() {
   );
   const [operationType, setOperationType] = useState<OperationType>("iterate");
   const [showVariants, setShowVariants] = useState(false);
+  const [showPreview, setShowPreview] = useState(true);
   const [loading, setLoading] = useState(false);
   const [variants, setVariants] = useState<Cell<Charm>[]>([]);
   const [variantModelsMap, setVariantModelsMap] = useState<
@@ -354,6 +266,17 @@ function useCharmOperation() {
     null,
   );
   const [expectedVariantCount, setExpectedVariantCount] = useState(0);
+
+  // Preview model state
+  const [previewModel, setPreviewModel] = useState<SpecPreviewModel>("think");
+
+  // Live preview generation
+  const {
+    previewSpec,
+    previewPlan,
+    loading: isPreviewLoading,
+    model,
+  } = useLiveSpecPreview(input, showPreview, 250, previewModel);
 
   // Function that performs the selected operation (iterate or extend)
   const performOperation = useCallback(
@@ -472,6 +395,8 @@ function useCharmOperation() {
     setOperationType,
     showVariants,
     setShowVariants,
+    showPreview,
+    setShowPreview,
     loading,
     setLoading,
     variants,
@@ -480,6 +405,11 @@ function useCharmOperation() {
     setSelectedVariant,
     expectedVariantCount,
     setExpectedVariantCount,
+    previewSpec,
+    previewPlan,
+    isPreviewLoading,
+    previewModel,
+    setPreviewModel,
     handlePerformOperation,
     handleCancelVariants,
     performOperation,
@@ -742,12 +672,12 @@ const Suggestions = () => {
               const successValue = result.value;
               setVariants((existingPrev) => {
                 const newVariants = [...existingPrev, successValue];
-                
+
                 // Set the first successful variant as selected
                 if (existingPrev.length === 0) {
                   setSelectedVariant(successValue);
                 }
-                
+
                 return newVariants;
               });
             }
@@ -838,8 +768,15 @@ const OperationTab = () => {
     setOperationType,
     showVariants,
     setShowVariants,
+    showPreview,
+    setShowPreview,
     loading,
     handlePerformOperation,
+    previewSpec,
+    previewPlan,
+    isPreviewLoading,
+    previewModel,
+    setPreviewModel,
   } = useCharmOperationContext();
 
   const mentions = useCharmMentions();
@@ -848,30 +785,16 @@ const OperationTab = () => {
   return (
     <div className="flex flex-col p-4">
       <div className="flex flex-col gap-3">
-        <div className="flex mb-2">
-          <button
-            type="button"
-            onClick={() => setOperationType("iterate")}
-            className={`flex-1 py-2 text-center border-2 ${
-              operationType === "iterate"
-                ? "border-black bg-black text-white"
-                : "border-gray-300 bg-white hover:border-gray-400"
-            }`}
-          >
-            Iterate
-          </button>
-          <button
-            type="button"
-            onClick={() => setOperationType("extend")}
-            className={`flex-1 py-2 text-center border-2 border-l-0 ${
-              operationType === "extend"
-                ? "border-black bg-black text-white"
-                : "border-gray-300 bg-white hover:border-gray-400"
-            }`}
-          >
-            Extend
-          </button>
-        </div>
+        <ToggleButton
+          options={[
+            { value: "iterate", label: "Iterate" },
+            { value: "extend", label: "Extend" },
+          ]}
+          value={operationType}
+          onChange={(value) => setOperationType(value as OperationType)}
+          size="large"
+          className="mb-2"
+        />
 
         <div className="flex flex-col gap-2">
           <div className="border border-gray-300">
@@ -894,18 +817,57 @@ const OperationTab = () => {
             operation={operationType === "iterate" ? "Iterate" : "Extend"}
             onSubmit={handlePerformOperation}
           >
-            <div className="flex items-center">
+            {/* TODO(bf): restore in https://github.com/commontoolsinc/labs/issues/876 */}
+            {
+              /* <div className="flex items-center mr-2">
               <input
                 type="checkbox"
-                id="variants"
-                checked={showVariants}
-                onChange={(e) => setShowVariants(e.target.checked)}
+                id="preview"
+                checked={showPreview}
+                onChange={(e) => setShowPreview(e.target.checked)}
                 className="border-2 border-black mr-2"
               />
-              <label htmlFor="variants" className="text-sm font-medium">
-                Variants
+              <label htmlFor="preview" className="text-sm font-medium">
+                Live Preview
               </label>
             </div>
+
+            {showPreview && (
+              <div className="flex items-center mr-2">
+                <div className="flex border border-gray-300 rounded-full overflow-hidden text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewModel("fast")}
+                    className={`px-2 py-1 text-xs ${
+                      previewModel === "fast"
+                        ? "bg-black text-white"
+                        : "bg-gray-100"
+                    }`}
+                  >
+                    Fast
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewModel("think")}
+                    className={`px-2 py-1 text-xs ${
+                      previewModel === "think"
+                        ? "bg-black text-white"
+                        : "bg-gray-100"
+                    }`}
+                  >
+                    Precise
+                  </button>
+                </div>
+              </div>
+            )} */
+            }
+
+            <CheckboxToggle
+              id="variants"
+              label="Variants"
+              checked={showVariants}
+              onChange={setShowVariants}
+            />
 
             <select
               value={selectedModel}
@@ -934,6 +896,15 @@ const OperationTab = () => {
 
       {/* Content Container with single scrollbar */}
       <div className="flex-grow overflow-auto mt-3 -mx-4 px-4">
+        {/* TODO(bf): restore in https://github.com/commontoolsinc/labs/issues/876 */}
+        {
+          /* <SpecPreview
+          spec={previewSpec}
+          plan={previewPlan}
+          loading={isPreviewLoading}
+          visible={showPreview}
+        /> */
+        }
         <Variants />
         <Suggestions />
       </div>
@@ -980,63 +951,42 @@ const CodeTab = () => {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex items-center gap-4 p-4">
-        <span className="px-2 py-1 inline rounded-full text-xs bg-gray-100 border border-gray-300">
-          <span>Template Version: {templateVersion ?? "Missing"}</span>
-        </span>
-        <div className="flex items-center px-3 py-1 rounded-full bg-gray-100 border border-gray-300">
-          <input
-            type="checkbox"
+        <CommonLabel size="small">
+          Template Version: {templateVersion ?? "Missing"}
+        </CommonLabel>
+        <div className="flex items-center gap-4">
+          <CommonCheckbox
             id="fullCode"
+            label="Show Full Template"
             checked={showFullCode}
-            onChange={(e) => setShowFullCode(e.target.checked)}
-            className="border-2 border-black mr-2"
+            onChange={setShowFullCode}
+            size="small"
           />
-          <label
-            htmlFor="fullCode"
-            className="text-xs font-medium cursor-pointer"
-          >
-            Show Full Template
-          </label>
-        </div>
 
-        {/* Editor type selector */}
-        <div className="flex border border-gray-300 rounded-full overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setActiveEditor("code")}
-            className={`px-3 py-1 text-xs ${
-              activeEditor === "code" ? "bg-black text-white" : "bg-gray-100"
-            }`}
-          >
-            Code
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveEditor("spec")}
-            className={`px-3 py-1 text-xs ${
-              activeEditor === "spec" ? "bg-black text-white" : "bg-gray-100"
-            }`}
-          >
-            Specification
-          </button>
+          <ToggleButton
+            options={[
+              { value: "code", label: "Code" },
+              { value: "spec", label: "Specification" },
+            ]}
+            value={activeEditor}
+            onChange={(value) => setActiveEditor(value as "code" | "spec")}
+            size="small"
+          />
         </div>
+        {hasUnsavedChanges && (
+          <button
+            type="button"
+            onClick={saveChanges}
+            className="px-2 py-1 text-xs bg-black text-white border-2 border-black disabled:opacity-50"
+          >
+            Save Changes
+          </button>
+        )}
       </div>
 
       <div className="px-4 flex-grow flex flex-col overflow-hidden">
-        {hasUnsavedChanges && (
-          <div className="mt-4 flex justify-end">
-            <button
-              type="button"
-              onClick={saveChanges}
-              className="px-4 py-2 bg-black text-white border-2 border-black disabled:opacity-50"
-            >
-              Save Changes
-            </button>
-          </div>
-        )}
-
         {activeEditor === "code" && (
-          <div className="flex-grow overflow-hidden border border-black h-full">
+          <div className="flex-grow overflow-hidden border-black border-2 h-full">
             <CodeMirror
               value={workingSrc || ""}
               theme="dark"
@@ -1093,9 +1043,9 @@ const DataTab = () => {
         charm={item.charm}
         showHash
       />&nbsp;
-      <span className="text-sm font-medium bg-gray-200 px-2 py-1 rounded">
+      <CommonLabel size="small">
         {item.relation} at {new Date(item.timestamp).toLocaleString()}
-      </span>
+      </CommonLabel>
       <div className="ml-4">
         {charmManager.getLineage(item.charm).map((item) => Lineage(item))}
       </div>
@@ -1257,14 +1207,18 @@ const BottomSheet = ({
 }: {
   children: (activeTab: Tab, isResizing: boolean) => React.ReactNode;
 }) => {
-  const { sheetHeight, isResizing, handleResizeStart, handleTouchResizeStart } =
-    useBottomSheet();
+  const {
+    drawerHeight,
+    isResizing,
+    handleResizeStart,
+    handleTouchResizeStart,
+  } = useResizableDrawer({ initialHeight: 585, resizeDirection: "down" });
   const { activeTab, handleTabChange } = useTabNavigation();
 
   return (
     <div
       className="bottom-sheet border-t-2 border-black bg-white shadow-lg flex flex-col"
-      style={{ height: `${sheetHeight}px` }}
+      style={{ height: `${drawerHeight}px` }}
     >
       {/* Resize Handle */}
       <div

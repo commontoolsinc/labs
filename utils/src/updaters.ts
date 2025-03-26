@@ -1,6 +1,6 @@
 import { Cell, getCell, storage } from "@commontools/runner";
 import { JSONSchema, Schema } from "@commontools/builder";
-import { Identity } from "@commontools/identity";
+
 // This is the derived space id for toolshed-system
 export const SYSTEM_SPACE_ID =
   "did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88";
@@ -13,8 +13,9 @@ export const CharmEntrySchema = {
     charmId: { type: "string" },
     integration: { type: "string" },
     createdAt: { type: "number" },
+    lastRun: { type: "number", default: null },
     updatedAt: { type: "number" },
-    enabled: { type: "boolean" },
+    disabledAt: { type: "number", default: null },
     runs: { type: "number", default: 0 },
   },
   required: [
@@ -43,9 +44,6 @@ export const bgUpdaterCharmsSchema = {
 } as const satisfies JSONSchema;
 export type BGUpdaterCharmsSchema = Schema<typeof bgUpdaterCharmsSchema>;
 
-/**
- * Add a charm to the Gmail integration charms cell
- */
 export async function addCharmToBG({
   space,
   charmId,
@@ -79,7 +77,7 @@ export async function addCharmToBG({
       integration,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      enabled: true,
+      disabledAt: undefined,
       runs: 0,
     });
 
@@ -95,9 +93,7 @@ export async function addCharmToBG({
 /**
  * Get the BGUpdater charms cell
  */
-export async function getBGUpdaterCharmsCell(): Promise<
-  Cell<BGCharmEntry[]>
-> {
+export async function getBGUpdaterCharmsCell() {
   if (!storage.hasSigner()) {
     throw new Error("Storage has no signer");
   }
@@ -105,14 +101,39 @@ export async function getBGUpdaterCharmsCell(): Promise<
   if (!storage.hasRemoteStorage()) {
     throw new Error("Storage has no remote storage");
   }
+  const schema = bgUpdaterCharmsSchema.properties.charms;
 
-  const charmsCell = getCell(
-    SYSTEM_SPACE_ID,
-    CELL_CAUSE,
-    bgUpdaterCharmsSchema.properties.charms,
-  );
+  const charmsCell = getCell(SYSTEM_SPACE_ID, CELL_CAUSE, schema);
 
   // Ensure the cell is synced
+  await storage.syncCell(charmsCell, true);
+  await storage.synced();
+
+  return charmsCell;
+}
+
+export async function newGetFunc(): Promise<Cell<Cell<BGCharmEntry>[]>> {
+  if (!storage.hasSigner()) {
+    throw new Error("Storage has no signer");
+  }
+
+  if (!storage.hasRemoteStorage()) {
+    throw new Error("Storage has no remote storage");
+  }
+  const schema = {
+    type: "array",
+    items: {
+      ...CharmEntrySchema,
+      asCell: true,
+    },
+    default: [],
+  } as const satisfies JSONSchema;
+
+  const charmsCell = getCell(SYSTEM_SPACE_ID, CELL_CAUSE, schema);
+
+  // Ensure the cell is synced
+  // FIXME(ja): does True do the right thing here? Does this mean: I REALLY REALLY
+  // INSIST THAT YOU HAVE THIS CELL ON THE SERVER!
   await storage.syncCell(charmsCell, true);
   await storage.synced();
 

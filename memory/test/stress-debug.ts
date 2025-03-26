@@ -9,8 +9,14 @@ import { alice, space } from "./principal.ts";
 
 const url = new URL(`./${space}.sqlite`, import.meta.url);
 
+// Some generated service key.
+const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
+
 const main = async () => {
-  const result = await Provider.open({ store: url });
+  const result = await Provider.open({
+    store: url,
+    serviceDid,
+  });
   const provider = result.ok!;
 
   const consumer = Consumer.open({

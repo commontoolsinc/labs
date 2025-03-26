@@ -13,7 +13,7 @@ import { hc } from "@hono/hono/client";
 import { type AppType } from "@/app.ts";
 import env from "@/env.ts";
 
-const client = hc<AppType>("http://localhost:8000");
+const client = hc<AppType>(env.TOOLSHED_API_URL);
 
 interface SpellData {
   spellbookTitle?: string;
@@ -140,7 +140,7 @@ export const createSpellHandler: AppRouteHandler<typeof createSpell> = async (
 
     return c.json({ success: true });
   } catch (error) {
-    logger.error({ error }, "Error creating spell");
+    logger.error(error, "Error creating spell");
     return c.json({ success: false }, 500);
   }
 };
@@ -172,7 +172,7 @@ export const listSpellsHandler: AppRouteHandler<typeof listSpells> = async (
 
     return c.json({ spells });
   } catch (error) {
-    logger.error({ error }, "Error listing spells");
+    logger.error(error, "Error listing spells");
     return c.json({ spells: [] }, 500);
   }
 };
@@ -196,7 +196,7 @@ export const getSpellHandler: AppRouteHandler<typeof getSpell> = async (c) => {
 
     return c.json(spell);
   } catch (error) {
-    logger.error({ error }, "Error getting spell");
+    logger.error(error, "Error getting spell");
     return c.json({ error: "Internal server error" }, 500);
   }
 };
@@ -262,7 +262,7 @@ export const toggleLikeHandler: AppRouteHandler<typeof toggleLike> = async (
       isLiked: !wasLiked,
     });
   } catch (error) {
-    logger.error({ error }, "Error toggling spell like");
+    logger.error(error, "Error toggling spell like");
     return c.json({
       success: false,
       likes: [],
@@ -346,7 +346,7 @@ export const createCommentHandler: AppRouteHandler<typeof createComment> =
         comment: newComment,
       });
     } catch (error) {
-      logger.error({ error }, "Error creating comment");
+      logger.error(error, "Error creating comment");
       return c.json({
         success: false,
         error: "Internal server error",
@@ -399,7 +399,7 @@ export const shareSpellHandler: AppRouteHandler<typeof shareSpell> = async (
       shares: currentShares + 1,
     });
   } catch (error) {
-    logger.error({ error }, "Error sharing spell");
+    logger.error(error, "Error sharing spell");
     return c.json({
       success: false,
       shares: 0,
@@ -450,7 +450,7 @@ export const trackRunHandler: AppRouteHandler<typeof trackRun> = async (c) => {
       runs: currentRuns + 1,
     });
   } catch (error) {
-    logger.error({ error }, "Error tracking spell run");
+    logger.error(error, "Error tracking spell run");
     return c.json({
       success: false,
       runs: 0,
@@ -485,7 +485,7 @@ export const deleteSpellHandler: AppRouteHandler<typeof deleteSpell> = async (
 
     return c.json({ success: true });
   } catch (error) {
-    logger.error({ error }, "Error deleting spell");
+    logger.error(error, "Error deleting spell");
     return c.json({ success: false }, 500);
   }
 };

@@ -12,20 +12,78 @@ import {
   UI,
 } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
+import TurndownService from "turndown";
+
+// Initialize turndown service
+const turndown = new TurndownService({
+  headingStyle: "atx",
+  codeBlockStyle: "fenced",
+  emDelimiter: "*",
+});
+
+turndown.addRule("removeStyleTags", {
+  filter: ["style"],
+  replacement: function () {
+    return "";
+  },
+});
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const EmailProperties = {
-  id: { type: "string" },
-  threadId: { type: "string" },
-  labelIds: { type: "array", items: { type: "string" } },
-  snippet: { type: "string" },
-  subject: { type: "string" },
-  from: { type: "string" },
-  date: { type: "string" },
-  to: { type: "string" },
-  plainText: { type: "string" },
-  htmlContent: { type: "string" },
+  id: {
+    type: "string",
+    title: "Email ID",
+    description: "Unique identifier for the email",
+  },
+  threadId: {
+    type: "string",
+    title: "Thread ID",
+    description: "Identifier for the email thread",
+  },
+  labelIds: {
+    type: "array",
+    items: { type: "string" },
+    title: "Labels",
+    description: "Gmail labels assigned to the email",
+  },
+  snippet: {
+    type: "string",
+    title: "Snippet",
+    description: "Brief preview of the email content",
+  },
+  subject: {
+    type: "string",
+    title: "Subject",
+    description: "Email subject line",
+  },
+  from: {
+    type: "string",
+    title: "From",
+    description: "Sender's email address",
+  },
+  date: {
+    type: "string",
+    title: "Date",
+    description: "Date and time when the email was sent",
+  },
+  to: { type: "string", title: "To", description: "Recipient's email address" },
+  plainText: {
+    type: "string",
+    title: "Plain Text Content",
+    description: "Email content in plain text format (often empty)",
+  },
+  htmlContent: {
+    type: "string",
+    title: "HTML Content",
+    description: "Email content in HTML format",
+  },
+  markdownContent: {
+    type: "string",
+    title: "Markdown Content",
+    description:
+      "Email content converted to Markdown format. Often best for processing email contents.",
+  },
 } as const;
 
 const EmailSchema = {
@@ -298,6 +356,22 @@ Accept: application/json
         }
       }
 
+      // Generate markdown content from HTML or plainText
+      let markdownContent = "";
+      if (htmlContent) {
+        try {
+          // Convert HTML to markdown using our custom converter
+          markdownContent = turndown.turndown(htmlContent);
+        } catch (error) {
+          console.error("Error converting HTML to markdown:", error);
+          // Fallback to plainText if HTML conversion fails
+          markdownContent = plainText;
+        }
+      } else {
+        // Use plainText as fallback if no HTML content
+        markdownContent = plainText;
+      }
+
       return {
         id: messageData.id,
         threadId: messageData.threadId,
@@ -309,6 +383,7 @@ Accept: application/json
         to: extractEmailAddress(to),
         plainText,
         htmlContent,
+        markdownContent,
       };
     } catch (error) {
       console.error("Error processing message part:", error);
@@ -496,6 +571,7 @@ export default recipe(
                   <th style="padding: 10px;">DATE</th>
                   <th style="padding: 10px;">SUBJECT</th>
                   <th style="padding: 10px;">LABEL</th>
+                  <th style="padding: 10px;">CONTENT</th>
                 </tr>
               </thead>
               <tbody>
@@ -512,6 +588,14 @@ export default recipe(
                         email,
                         (email) => email.labelIds.join(", "),
                       )}&nbsp;
+                    </td>
+                    <td style="border: 1px solid black; padding: 10px;">
+                      <details>
+                        <summary>Show Markdown</summary>
+                        <pre style="white-space: pre-wrap; max-height: 300px; overflow-y: auto;">
+                          {email.markdownContent}
+                        </pre>
+                      </details>
                     </td>
                   </tr>
                 ))}

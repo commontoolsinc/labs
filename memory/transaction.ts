@@ -1,13 +1,13 @@
 import type {
   Changes,
+  Clock,
   DID,
   MemorySpace,
   Meta,
+  Seconds,
   Transaction,
-  Clock,
-  Seconds
 } from "./interface.ts";
-import * as Settings from "./settings.ts"
+import * as Settings from "./settings.ts";
 export const create = <Space extends MemorySpace>({
   issuer,
   subject,
@@ -20,10 +20,10 @@ export const create = <Space extends MemorySpace>({
   subject: Space;
   changes: Changes;
   meta?: Meta;
-  clock?: Clock
-  ttl?: Seconds
+  clock?: Clock;
+  ttl?: Seconds;
 }): Transaction<Space> => {
-  const iat = clock.now()
+  const iat = clock.now();
   return {
     cmd: "/memory/transact",
     iss: issuer,
@@ -32,6 +32,6 @@ export const create = <Space extends MemorySpace>({
     ...(meta ? { meta } : undefined),
     prf: [],
     iat,
-    exp: iat + ttl
+    exp: iat + ttl,
   };
 };

@@ -25,16 +25,8 @@
   },
   "compilerOptions": {
     "jsx": "react-jsxdev",
-    "lib": [
-      "deno.ns",
-      "dom",
-      "dom.iterable",
-      "dom.asynciterable",
-      "esnext"
-    ],
-    "types": [
-      "./jumble/src/global.d.ts"
-    ]
+    "lib": ["deno.ns", "dom", "dom.iterable", "dom.asynciterable", "esnext"],
+    "types": ["./jumble/src/global.d.ts"]
   },
   "exclude": [
     "jumble/.vite/deps/",
@@ -46,21 +38,11 @@
     "**/coverage/"
   ],
   "lint": {
-    "exclude": [
-      "deno-vite-plugin"
-    ],
+    "exclude": ["deno-vite-plugin"],
     "rules": {
-      "tags": [
-        "recommended"
-      ],
-      "include": [
-        "ban-untagged-todo",
-        "no-external-import"
-      ],
-      "exclude": [
-        "no-unused-vars",
-        "no-explicit-any"
-      ]
+      "tags": ["recommended"],
+      "include": ["ban-untagged-todo", "no-external-import"],
+      "exclude": ["no-unused-vars", "no-explicit-any", "require-yield"]
     }
   },
   "fmt": {
@@ -101,6 +83,7 @@
     "merkle-reference": "npm:merkle-reference@^2.0.1",
     "multiformats": "npm:multiformats@^13.3.2",
     "react": "npm:react@^18.3.1",
+    "turndown": "npm:turndown@^7.1.2",
     "typescript": "npm:typescript",
     "vite": "npm:vite@^6.2.1",
     "zod-to-json-schema": "npm:zod-to-json-schema@^3.24.1",

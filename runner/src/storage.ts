@@ -710,112 +710,122 @@ class StorageImpl implements Storage {
     });
 
     log(() => ["storage jobs start"]);
-    // Write all storage jobs to storage, in parallel
-    await Promise.all(
-      storageJobsBySpace.entries().map(([space, jobs]) => {
-        const storage = this._getStorageProviderForSpace(space);
 
-        // This is a violating abstractions as it's specific to remote storage.
-        // Most of storage.ts should eventually be refactored away between what
-        // docs do and remote storage does.
-        //
-        // Also, this is a hacky version to do retries, and what we instead want
-        // is a coherent concept of a transaction across the stack, all the way
-        // to scheduler, tied to events, etc. and then retry logic will happen
-        // at that level.
-        //
-        // So consider the below a hack to implement transaction retries just
-        // for Cell.push, to solve some short term pain around loosing charms
-        // when the charm list is being updated.
+    const process = (
+      space: string,
+      jobs: { entityId: EntityId; value: StorageValue }[],
+    ): Promise<
+      { ok: object; err?: undefined } | { ok?: undefined; err?: Error }
+    > => {
+      const storage = this._getStorageProviderForSpace(space);
 
-        const updatesFromRetry: [DocImpl<any>, StorageValue][] = [];
-        let retries = 0;
-        function retryOnConflict(
-          result: Awaited<ReturnType<typeof storage.send>>,
-        ): ReturnType<typeof storage.send> {
-          const txResult = result as Awaited<TransactionResult>;
-          if (txResult.error?.name === "ConflictError") {
-            const conflict = txResult.error.conflict;
+      // This is a violating abstractions as it's specific to remote storage.
+      // Most of storage.ts should eventually be refactored away between what
+      // docs do and remote storage does.
+      //
+      // Also, this is a hacky version to do retries, and what we instead want
+      // is a coherent concept of a transaction across the stack, all the way
+      // to scheduler, tied to events, etc. and then retry logic will happen
+      // at that level.
+      //
+      // So consider the below a hack to implement transaction retries just
+      // for Cell.push, to solve some short term pain around loosing charms
+      // when the charm list is being updated.
 
-            log(() => ["conflict", conflict]);
+      const updatesFromRetry: [DocImpl<any>, StorageValue][] = [];
+      let retries = 0;
+      function retryOnConflict(
+        result: Awaited<ReturnType<typeof storage.send>>,
+      ): ReturnType<typeof storage.send> {
+        const txResult = result as Awaited<TransactionResult>;
+        if (txResult.error?.name === "ConflictError") {
+          const conflict = txResult.error.conflict;
 
-            if (retries++ > 100) {
-              console.error("too many retries on conflict");
-              return Promise.resolve(result);
-            }
+          log(() => ["conflict", conflict]);
 
-            // If nothing in the job has a way to retry, give up
-            if (!jobs.some((job) => job.value.retry?.length)) {
-              return Promise.resolve(result);
-            }
-
-            const conflictJobIndex = jobs.findIndex((job) =>
-              RemoteStorageProvider.toEntity(job.entityId) === conflict.of
-            );
-
-            if (conflictJobIndex === -1) {
-              console.warn(
-                "no conflicting job found. that should not happen.",
-                conflict.of,
-              );
-              return Promise.resolve(result);
-            }
-
-            const conflictJob = jobs[conflictJobIndex];
-
-            // If there is no way to retry, give up
-            if (conflictJob.value.retry?.length) {
-              // Retry with new value
-              let newValue: StorageValue =
-                conflict.actual?.is as unknown as StorageValue ?? {};
-
-              try {
-                // Apply changes again
-                conflictJob.value.retry.forEach((retry) => {
-                  newValue = { ...newValue, value: retry(newValue.value) };
-                });
-
-                log(() => ["retry with", newValue]);
-
-                updatesFromRetry.push([
-                  getDocByEntityId(space, conflictJob.entityId)!,
-                  newValue,
-                ]);
-
-                // Replace job with new value
-                jobs[conflictJobIndex] = {
-                  ...conflictJob,
-                  value: newValue,
-                };
-              } catch (e) {
-                console.error("error applying retry", e);
-                return Promise.resolve(result);
-              }
-            } else {
-              // Fallback: Remove offending transaction
-              // NOTE: The new value will arrive via subscribeToChanges
-              jobs.splice(conflictJobIndex, 1);
-            }
-
-            return storage.send(jobs).then((result) => retryOnConflict(result));
+          if (retries++ > 100) {
+            console.error("too many retries on conflict");
+            return Promise.resolve(result);
           }
 
-          return Promise.resolve(result);
+          // If nothing in the job has a way to retry, give up
+          if (!jobs.some((job) => job.value.retry?.length)) {
+            return Promise.resolve(result);
+          }
+
+          const conflictJobIndex = jobs.findIndex((job) =>
+            RemoteStorageProvider.toEntity(job.entityId) === conflict.of
+          );
+
+          if (conflictJobIndex === -1) {
+            console.warn(
+              "no conflicting job found. that should not happen.",
+              conflict.of,
+            );
+            return Promise.resolve(result);
+          }
+
+          const conflictJob = jobs[conflictJobIndex];
+
+          // If there is no way to retry, give up
+          if (conflictJob.value.retry?.length) {
+            // Retry with new value
+            let newValue: StorageValue =
+              conflict.actual?.is as unknown as StorageValue ?? {};
+
+            try {
+              // Apply changes again
+              conflictJob.value.retry.forEach((retry) => {
+                newValue = { ...newValue, value: retry(newValue.value) };
+              });
+
+              log(() => ["retry with", newValue]);
+
+              updatesFromRetry.push([
+                getDocByEntityId(space, conflictJob.entityId)!,
+                newValue,
+              ]);
+
+              // Replace job with new value
+              jobs[conflictJobIndex] = {
+                ...conflictJob,
+                value: newValue,
+              };
+            } catch (e) {
+              console.error("error applying retry", e);
+              return Promise.resolve(result);
+            }
+          } else {
+            // Fallback: Remove offending transaction
+            // NOTE: The new value will arrive via subscribeToChanges
+            jobs.splice(conflictJobIndex, 1);
+          }
+
+          return storage.send(jobs).then((result) => retryOnConflict(result));
         }
 
-        log(() => ["sending to storage", jobs]);
-        return storage.send(jobs).then((result) => retryOnConflict(result))
-          .then((result) => {
-            if (result.ok) {
-              // Apply updates from retry, if transaction ultimately succeeded
-              updatesFromRetry.forEach(([doc, value]) =>
-                this._batchForDoc(doc, value.value, value.source)
-              );
-            }
-            return result;
-          });
-      }),
-    );
+        return Promise.resolve(result);
+      }
+
+      log(() => ["sending to storage", jobs]);
+      return storage.send(jobs).then((result) => retryOnConflict(result))
+        .then((result) => {
+          if (result.ok) {
+            // Apply updates from retry, if transaction ultimately succeeded
+            updatesFromRetry.forEach(([doc, value]) =>
+              this._batchForDoc(doc, value.value, value.source)
+            );
+          }
+          return result;
+        });
+    };
+
+    // Write all storage jobs to storage, in parallel
+    const promiseJobs = [];
+    for (const [space, jobs] of storageJobsBySpace.entries()) {
+      promiseJobs.push(process(space, jobs));
+    }
+    await Promise.all(promiseJobs);
     log(() => ["storage jobs done"]);
 
     // Finally, clear and resolve loading promise for all loaded cells

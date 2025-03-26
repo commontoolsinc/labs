@@ -13,6 +13,9 @@ const space = bob;
 const doc = `of:${refer({ hello: "world" })}` as const;
 const the = "application/json";
 
+// Some generated service key.
+const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
+
 const test = (
   title: string,
   url: URL,
@@ -21,6 +24,7 @@ const test = (
   const unit = async () => {
     const open = await Memory.open({
       store: url,
+      serviceDid,
     });
 
     assert(open.ok, "Open create repository if it does not exist");

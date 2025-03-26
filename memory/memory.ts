@@ -24,6 +24,7 @@ import {
   TransactionResult,
 } from "./interface.ts";
 export * from "./interface.ts";
+import { type DID } from "@commontools/identity";
 
 interface Session {
   store: URL;
@@ -34,6 +35,8 @@ interface Session {
 export class Memory implements Session, MemorySession {
   store: URL;
   ready: Promise<unknown>;
+  #serviceDid: DID;
+
   constructor(
     options: Options,
     public subscribers: Set<Subscriber> = new Set(),
@@ -41,6 +44,11 @@ export class Memory implements Session, MemorySession {
   ) {
     this.store = options.store;
     this.ready = Promise.resolve();
+    this.#serviceDid = options.serviceDid;
+  }
+
+  serviceDid(): DID {
+    return this.#serviceDid;
   }
 
   get memory() {
@@ -218,6 +226,7 @@ export const mount = async (
 
 export interface Options {
   store: URL;
+  serviceDid: DID;
 }
 
 export const open = async (

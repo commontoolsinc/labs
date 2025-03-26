@@ -9,6 +9,11 @@ import * as Inspector from "@commontools/runner/storage/inspector";
 import { FaArrowDown, FaArrowUp, FaExclamationTriangle } from "react-icons/fa";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useStatusMonitor,
+  useStorageBroadcast,
+} from "@/components/NetworkInspector.tsx";
+import { useAnimationSmoothing } from "@/hooks/use-animation-smoothing.ts";
 
 // Constants
 const COLORS = {
@@ -80,15 +85,6 @@ const AVATAR_SHAPES = [
   `,
 ];
 
-// Custom hooks
-export function useStorageBroadcast(callback: (data: any) => void) {
-  useEffect(() => {
-    const messages = new BroadcastChannel("storage/remote");
-    messages.onmessage = ({ data }) => callback(data);
-    return () => messages.close();
-  }, [callback]);
-}
-
 function useAvatarGenerator(did: string | undefined) {
   const [avatarColor, setAvatarColor] = useState("");
   const [avatarShape, setAvatarShape] = useState("");
@@ -115,20 +111,6 @@ function useAvatarGenerator(did: string | undefined) {
   }, [did]);
 
   return { avatarColor, avatarShape };
-}
-
-function useStatusMonitor() {
-  const status = useRef(Inspector.create());
-
-  const updateStatus = useCallback((command: Inspector.Command) => {
-    if (!status.current) {
-      throw new Error("Status is not initialized");
-    }
-    const state = Inspector.update(status.current, command);
-    status.current = state;
-  }, []);
-
-  return { status, updateStatus };
 }
 
 // Helper functions
@@ -183,16 +165,14 @@ export function User() {
   const pullErrorRef = useRef<HTMLDivElement>(null);
 
   // Animation state refs
-  const animationRef = useRef<number | null>(null);
   const rotationRef = useRef(0);
   const opacityRef = useRef(0);
   const bounceRef = useRef(0);
   const easedPushCountRef = useRef(0);
   const easedPullCountRef = useRef(0);
-  const easedErrorCountRef = useRef(0);
-  const lastPushTimestampRef = useRef(0);
-  const lastPullTimestampRef = useRef(0);
-  const lastErrorTimestampRef = useRef(0);
+
+  // Use our shared animation smoothing hook
+  const { updateValue, getValue, rafRef } = useAnimationSmoothing();
 
   // Get DID from session
   useEffect(() => {
@@ -209,13 +189,13 @@ export function User() {
   useEffect(() => {
     const animate = () => {
       if (!svgRef.current || !avatarRef.current || !tooltipRef.current) {
-        animationRef.current = requestAnimationFrame(animate);
+        rafRef.current = requestAnimationFrame(animate);
         return;
       }
 
       const circle = svgRef.current.querySelector("circle");
       if (!circle) {
-        animationRef.current = requestAnimationFrame(animate);
+        rafRef.current = requestAnimationFrame(animate);
         return;
       }
 
@@ -234,56 +214,34 @@ export function User() {
         Object.values(currentStatus.pull).filter((v) => v.error).length;
       const actualErrorCount = pushErrorCount + pullErrorCount;
 
-      // Update timestamps for animation duration
-      if (actualPushCount > Math.round(easedPushCountRef.current)) {
-        lastPushTimestampRef.current = now;
-      }
-      if (actualPullCount > Math.round(easedPullCountRef.current)) {
-        lastPullTimestampRef.current = now;
-      }
-      if (actualErrorCount > Math.round(easedErrorCountRef.current)) {
-        lastErrorTimestampRef.current = now;
-      }
+      // Use our shared hook to update values with easing
+      const pushResult = updateValue("push", actualPushCount);
+      const pullResult = updateValue("pull", actualPullCount);
+      const errorResult = updateValue("error", actualErrorCount);
 
-      // Activity states
-      const pushActive = actualPushCount > 0 ||
-        (now - lastPushTimestampRef.current < MIN_ANIMATION_DURATION);
-      const pullActive = actualPullCount > 0 ||
-        (now - lastPullTimestampRef.current < MIN_ANIMATION_DURATION);
-      const errorActive = actualErrorCount > 0 ||
-        (now - lastErrorTimestampRef.current < MIN_ANIMATION_DURATION);
+      // Update our refs with the eased values
+      easedPushCountRef.current = pushResult.value;
+      easedPullCountRef.current = pullResult.value;
 
-      // Ease count values
-      const easingFactor = 0.06;
-      easedPushCountRef.current = ease(
-        easedPushCountRef.current,
-        pushActive ? Math.max(actualPushCount, 0.01) : 0,
-        easingFactor,
-      );
-      easedPullCountRef.current = ease(
-        easedPullCountRef.current,
-        pullActive ? Math.max(actualPullCount, 0.01) : 0,
-        easingFactor,
-      );
-      easedErrorCountRef.current = ease(
-        easedErrorCountRef.current,
-        errorActive ? Math.max(actualErrorCount, 0.01) : 0,
-        easingFactor,
-      );
+      // Use the more detailed states from our animation hook
+      // hasActualValue = currently has a real value > 0
+      // hadRecentActivity = had activity within the min animation duration window
+      const pushActive = pushResult.hasActualValue;
+      const pullActive = pullResult.hasActualValue;
+      const errorActive = errorResult.hasActualValue;
 
-      // Display counts - even if count is 0 but animation is active, show at least 1
-      const displayPushCount =
-        pushActive && Math.round(easedPushCountRef.current) === 0
-          ? 1
-          : Math.round(easedPushCountRef.current);
-      const displayPullCount =
-        pullActive && Math.round(easedPullCountRef.current) === 0
-          ? 1
-          : Math.round(easedPullCountRef.current);
-      const displayErrorCount =
-        errorActive && Math.round(easedErrorCountRef.current) === 0
-          ? 1
-          : Math.round(easedErrorCountRef.current);
+      // If we have actual activity or recent activity with a positive value, animate
+      const hasPushValues = pushResult.value > 0;
+      const hasPullValues = pullResult.value > 0;
+      const animatingPush = pushActive ||
+        (pushResult.hadRecentActivity && hasPushValues && !pullActive);
+      const animatingPull = pullActive ||
+        (pullResult.hadRecentActivity && hasPullValues && !pushActive);
+
+      // Display counts (the hook now handles minimum values)
+      const displayPushCount = pushResult.value;
+      const displayPullCount = pullResult.value;
+      const displayErrorCount = errorResult.value;
 
       // Default status message
       let statusMessage = "Click to log out";
@@ -348,7 +306,7 @@ export function User() {
 
         statusMessage = statusParts.length > 0 ? statusParts.join(" ") : "Idle";
 
-        if (pushActive) {
+        if (animatingPush) {
           // Push events
           const intensity = Math.max(easedPushCountRef.current, 0.3);
           opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
@@ -373,7 +331,7 @@ export function User() {
           avatarRef.current.style.boxShadow = `0 0 ${
             bounceRef.current * 3
           }px ${COLORS.GREEN}`;
-        } else if (pullActive) {
+        } else if (animatingPull) {
           // Pull events
           const intensity = Math.max(easedPullCountRef.current, 0.3);
           opacityRef.current = Math.min(opacityRef.current + 0.1, 0.9);
@@ -482,19 +440,20 @@ export function User() {
       );
 
       // Continue animation
-      animationRef.current = requestAnimationFrame(animate);
+      rafRef.current = requestAnimationFrame(animate);
     };
 
-    // Start animation
-    animationRef.current = requestAnimationFrame(animate);
+    // Start animation using our shared RAF reference
+    rafRef.current = requestAnimationFrame(animate);
 
     // Cleanup
     return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
       }
     };
-  }, []);
+  }, [updateValue, rafRef]);
 
   return (
     <div className="relative">

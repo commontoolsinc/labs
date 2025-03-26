@@ -1,5 +1,20 @@
 export type DID = `did:${string}:${string}`;
 export type DIDKey = `did:key:${string}`;
+export function isDID(input: any): input is DID {
+  // minimum string of `did:x:y`
+  if (
+    typeof input === "string" &&
+    input.length >= 7
+  ) {
+    const secondColon = input.indexOf(":", 4);
+    return input.startsWith("did:") &&
+      // has second colon
+      secondColon !== -1 &&
+      // does not have a third colon
+      input.indexOf(":", secondColon + 1) === -1;
+  }
+  return false;
+}
 
 /**
  * Some principal identified via DID identifier.

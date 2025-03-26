@@ -9,6 +9,9 @@ import { refer } from "merkle-reference";
 import { alice, bob, space as subject } from "./principal.ts";
 import { UTCUnixTimestampInSeconds } from "../interface.ts";
 
+// Some generated service key.
+const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
+
 class Clock {
   private timestamp: UTCUnixTimestampInSeconds;
   constructor() {
@@ -32,6 +35,7 @@ const test = (
 ) => {
   const unit = async () => {
     const open = await Provider.open({
+      serviceDid,
       store: url,
     });
 

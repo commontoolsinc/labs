@@ -39,7 +39,12 @@ import { LuSend } from "react-icons/lu";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 
 export function ComposerSubmitBar(
-  { loading, onSubmit, operation = "Go", children }: { loading: boolean; onSubmit: () => void; operation?: string; children?: React.ReactNode },
+  { loading, onSubmit, operation = "Go", children }: {
+    loading: boolean;
+    onSubmit: () => void;
+    operation?: string;
+    children?: React.ReactNode;
+  },
 ): JSX.Element {
   return (
     <div className="flex justify-between items-top w-full">
@@ -49,37 +54,39 @@ export function ComposerSubmitBar(
       </label>
 
       <div className="flex flex-row gap-2">
-      {children}
+        {children}
 
-      <button
-        type="button"
-        onClick={onSubmit}
-        disabled={loading}
-        className="px-4 py-2 text-sm bg-black text-white flex items-center gap-2 disabled:opacity-50"
-      >
-        {loading ? (
-          <span className="text-xs flex items-center gap-2">
-            <DitheredCube
-              animationSpeed={2}
-              width={16}
-              height={16}
-              animate
-              cameraZoom={12}
-            />
-            <span>Working...</span>
-          </span>
-        ) : (
-          <span className="text-xs flex items-center gap-2">
-            <span className="text-xs flex items-center gap-1">
-              <LuSend />
-              <span>{operation}</span>
-            </span>
-            <span className="hidden md:inline text-gray-400 font-bold italic">
-              (Enter)
-            </span>
-          </span>
-        )}
-      </button>
+        <button
+          type="button"
+          onClick={onSubmit}
+          disabled={loading}
+          className="px-4 py-2 text-sm bg-black text-white flex items-center gap-2 disabled:opacity-50"
+        >
+          {loading
+            ? (
+              <span className="text-xs flex items-center gap-2">
+                <DitheredCube
+                  animationSpeed={2}
+                  width={16}
+                  height={16}
+                  animate
+                  cameraZoom={12}
+                />
+                <span>Working...</span>
+              </span>
+            )
+            : (
+              <span className="text-xs flex items-center gap-2">
+                <span className="text-xs flex items-center gap-1">
+                  <LuSend />
+                  <span>{operation}</span>
+                </span>
+                <span className="hidden md:inline text-gray-400 font-bold italic">
+                  (Enter)
+                </span>
+              </span>
+            )}
+        </button>
       </div>
     </div>
   );
@@ -651,18 +658,18 @@ export function Composer({
       const before = wordBefore && Editor.before(editor, wordBefore);
       const beforeRange = before && Editor.range(editor, before, start);
       const beforeText = beforeRange && Editor.string(editor, beforeRange);
-      
+
       const beforeMatch = beforeText && beforeText.match(/^@(\w+)$/);
-      
+
       // If we detect exactly "@" at the end of the text, mock a match object
-      const isJustAtSymbol = beforeText && beforeText.endsWith('@') && 
-                           beforeText.length > 0 && beforeText[beforeText.length - 1] === '@';
-      
+      const isJustAtSymbol = beforeText && beforeText.endsWith("@") &&
+        beforeText.length > 0 && beforeText[beforeText.length - 1] === "@";
+
       // Use either the regex match or our mock match for a single "@"
-      const finalBeforeMatch = isJustAtSymbol 
-        ? { 0: '@', 1: '' } // Mock match result for just "@"
+      const finalBeforeMatch = isJustAtSymbol
+        ? { 0: "@", 1: "" } // Mock match result for just "@"
         : beforeMatch;
-        
+
       const after = Editor.after(editor, start);
       const afterRange = Editor.range(editor, start, after);
       const afterText = Editor.string(editor, afterRange);
@@ -670,7 +677,11 @@ export function Composer({
 
       if ((finalBeforeMatch || beforeMatch) && afterMatch && beforeRange) {
         setTarget(beforeRange);
-        setSearch(finalBeforeMatch ? finalBeforeMatch[1] : (beforeMatch ? beforeMatch[1] : ''));
+        setSearch(
+          finalBeforeMatch
+            ? finalBeforeMatch[1]
+            : (beforeMatch ? beforeMatch[1] : ""),
+        );
         setIndex(0);
         return;
       }
@@ -700,7 +711,7 @@ export function Composer({
       <Slate editor={editor} initialValue={currentValue} onChange={onChange}>
         <Editable
           id="composer"
-          className={`p-2 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          className={`p-2 ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
           readOnly={readOnly || disabled}
           renderElement={renderElement}
           renderLeaf={renderLeaf}

@@ -429,23 +429,33 @@ function instantiateJavaScriptNode(
         : inputsCell.getAsQueryResult([], undefined);
       const result = fn(argument);
 
-      // If handler returns a graph created by builder, run it
-      if (containsOpaqueRef(result)) {
-        const resultRecipe = recipeFromFrame(
-          "event handler result",
-          undefined,
-          () => result,
-        );
+      function postRun(result: any) {
+        // If handler returns a graph created by builder, run it
+        if (containsOpaqueRef(result)) {
+          const resultRecipe = recipeFromFrame(
+            "event handler result",
+            undefined,
+            () => result,
+          );
 
-        const resultCell = run(
-          resultRecipe,
-          undefined,
-          getDoc(undefined, { resultFor: cause }, processCell.space),
-        );
-        addCancel(cancels.get(resultCell));
+          const resultCell = run(
+            resultRecipe,
+            undefined,
+            getDoc(undefined, { resultFor: cause }, processCell.space),
+          );
+          addCancel(cancels.get(resultCell));
+        }
+
+        popFrame(frame);
+
+        return result;
       }
 
-      popFrame(frame);
+      if (result instanceof Promise) {
+        return result.then(postRun);
+      } else {
+        return postRun(result);
+      }
     };
 
     addCancel(addEventHandler(handler, stream));
@@ -472,36 +482,46 @@ function instantiateJavaScriptNode(
       );
       const result = fn(argument);
 
-      if (containsOpaqueRef(result)) {
-        const resultRecipe = recipeFromFrame(
-          "action result",
-          undefined,
-          () => result,
-        );
+      function postRun(result: any) {
+        if (containsOpaqueRef(result)) {
+          const resultRecipe = recipeFromFrame(
+            "action result",
+            undefined,
+            () => result,
+          );
 
-        resultCell = run(
-          resultRecipe,
-          undefined,
-          resultCell ??
-            getDoc(
-              undefined,
-              { resultFor: { inputs, outputs, fn: fn.toString() } },
-              processCell.space,
-            ),
-        );
-        addCancel(cancels.get(resultCell));
+          resultCell = run(
+            resultRecipe,
+            undefined,
+            resultCell ??
+              getDoc(
+                undefined,
+                { resultFor: { inputs, outputs, fn: fn.toString() } },
+                processCell.space,
+              ),
+          );
+          addCancel(cancels.get(resultCell));
 
-        sendValueToBinding(
-          processCell,
-          outputs,
-          { cell: resultCell, path: [] },
-          log,
-        );
-      } else {
-        sendValueToBinding(processCell, outputs, result, log);
+          sendValueToBinding(
+            processCell,
+            outputs,
+            { cell: resultCell, path: [] },
+            log,
+          );
+        } else {
+          sendValueToBinding(processCell, outputs, result, log);
+        }
+
+        popFrame(frame);
+
+        return result;
       }
 
-      popFrame(frame);
+      if (result instanceof Promise) {
+        return result.then(postRun);
+      } else {
+        return postRun(result);
+      }
     };
 
     addCancel(schedule(action, { reads, writes } satisfies ReactivityLog));

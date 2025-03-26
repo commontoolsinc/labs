@@ -1,6 +1,11 @@
 import type { DocImpl } from "./doc.ts";
 import type { Cancel } from "./cancel.ts";
 import { type CellLink } from "./cell.ts";
+import { getTopFrame, TYPE } from "@commontools/builder";
+import {
+  getCellLinkOrThrow,
+  isQueryResultForDereferencing,
+} from "./query-result-proxy.ts";
 
 export type Action = (log: ReactivityLog) => any;
 export type EventHandler = (event: any) => any;
@@ -13,7 +18,9 @@ const dependencies = new WeakMap<Action, ReactivityLog>();
 const cancels = new WeakMap<Action, Cancel[]>();
 const idlePromises: (() => void)[] = [];
 let loopCounter = new WeakMap<Action, number>();
-const errorHandlers = new Set<(error: Error) => void>();
+const errorHandlers = new Set<
+  ((error: Error) => void) | ((error: ErrorWithContext) => void)
+>();
 let running: Promise<void> | undefined = undefined;
 let scheduled = false;
 
@@ -113,7 +120,9 @@ export function idle() {
   });
 }
 
-export function onError(fn: (error: Error) => void) {
+export function onError(
+  fn: ((error: Error) => void) | ((error: ErrorWithContext) => void),
+) {
   errorHandlers.add(fn);
 }
 
@@ -153,9 +162,37 @@ function setDependencies(action: Action, log: ReactivityLog) {
   return reads;
 }
 
-function handleError(error: Error, context: any) {
-  console.error("caught error", error, context);
-  for (const handler of errorHandlers) handler(error);
+export type ErrorWithContext = Error & {
+  action: Action;
+  charmId: string;
+  space: string;
+  recipeId: string;
+};
+
+function handleError(error: Error, action: any) {
+  // TODO(seefeld): This is a rather hacky way to get the context, based on the
+  // unsafe_binding pattern. Once we replace that mechanism, let's add nicer
+  // abstractions for context here as well.
+  const frame = getTopFrame();
+
+  const errorWithContext = error as ErrorWithContext;
+  errorWithContext.action = action;
+
+  const sourceAsProxy = frame?.unsafe_binding?.materialize([]);
+
+  if (isQueryResultForDereferencing(sourceAsProxy)) {
+    const { cell: source } = getCellLinkOrThrow(sourceAsProxy);
+    errorWithContext.recipeId = source?.get()?.[TYPE];
+
+    const resultDoc = source?.get()?.resultRef?.cell;
+    errorWithContext.space = resultDoc?.space;
+    errorWithContext.charmId = JSON.parse(
+      JSON.stringify(resultDoc?.entityId ?? {}),
+    )["/"];
+  }
+
+  console.error("caught error", errorWithContext);
+  for (const handler of errorHandlers) handler(errorWithContext);
 }
 
 async function execute() {
@@ -166,11 +203,14 @@ async function execute() {
   const handler = eventQueue.shift();
   if (handler) {
     try {
-      await Promise.resolve(handler()).catch((error) => {
+      running = Promise.resolve(handler()).catch((error) => {
         handleError(error as Error, handler);
       });
+      await running;
     } catch (error) {
       handleError(error as Error, handler);
+    } finally {
+      running = undefined;
     }
   }
 

@@ -90,6 +90,7 @@
     "npm:@types/three@0.173": "0.173.0",
     "npm:@uiw/codemirror-theme-vscode@^4.23.7": "4.23.10_@codemirror+view@6.36.4",
     "npm:@uiw/react-codemirror@^4.23.7": "4.23.10_@babel+runtime@7.26.10_@codemirror+state@6.5.2_@codemirror+theme-one-dark@6.1.2_@codemirror+view@6.36.4_codemirror@6.0.1_react@18.3.1_react-dom@18.3.1__react@18.3.1_@codemirror+commands@6.8.0",
+    "npm:@uiw/react-json-view@*": "2.0.0-alpha.30_@babel+runtime@7.26.10_react@18.3.1_react-dom@18.3.1__react@18.3.1",
     "npm:@uiw/react-json-view@2.0.0-alpha.30": "2.0.0-alpha.30_@babel+runtime@7.26.10_react@18.3.1_react-dom@18.3.1__react@18.3.1",
     "npm:@use-gesture/react@^10.3.1": "10.3.1_react@18.3.1",
     "npm:@vercel/otel@^1.10.1": "1.10.4_@opentelemetry+api@1.9.0_@opentelemetry+api-logs@0.57.2_@opentelemetry+instrumentation@0.57.2__@opentelemetry+api@1.9.0_@opentelemetry+resources@1.30.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-logs@0.57.2__@opentelemetry+api@1.9.0_@opentelemetry+sdk-metrics@1.30.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-trace-base@1.30.1__@opentelemetry+api@1.9.0",
@@ -130,6 +131,7 @@
     "npm:tailwindcss@^4.0.6": "4.0.13",
     "npm:three@0.173": "0.173.0",
     "npm:ts-node@^10.9.2": "10.9.2_@types+node@22.12.0_typescript@5.8.2",
+    "npm:turndown@^7.1.2": "7.2.0",
     "npm:typescript@*": "5.8.2",
     "npm:typescript@^5.6.2": "5.8.2",
     "npm:vite@*": "6.2.1_@types+node@22.12.0",
@@ -1540,6 +1542,9 @@
     },
     "@mediapipe/tasks-vision@0.10.17": {
       "integrity": "sha512-CZWV/q6TTe8ta61cZXjfnnHsfWIdFhms03M9T7Cnd5y2mdpylJM0rF1qRq+wsQVRMLz1OYPVEBU9ph2Bx8cxrg=="
+    },
+    "@mixmark-io/domino@2.2.0": {
+      "integrity": "sha512-Y28PR25bHXUg88kCV7nivXrP2Nj2RueZ3/l/jdx6J9f8J4nsEGcgX0Qe6lt7Pa+J79+kPiJU3LguR6O/6zrLOw=="
     },
     "@monogrid/gainmap-js@3.1.0_three@0.173.0": {
       "integrity": "sha512-Obb0/gEd/HReTlg8ttaYk+0m62gQJmCblMOjHSMHRrBP2zdfKMHLCRbh/6ex9fSUJMKdjjIEiohwkbGD3wj2Nw==",
@@ -6553,6 +6558,12 @@
     "turbo-stream@2.4.0": {
       "integrity": "sha512-FHncC10WpBd2eOmGwpmQsWLDoK4cqsA/UT/GqNoaKOQnT8uzhtCbg3EoUDMvqpOSAI0S26mr0rkjzbOO6S3v1g=="
     },
+    "turndown@7.2.0": {
+      "integrity": "sha512-eCZGBN4nNNqM9Owkv9HAtWRYfLA4h909E/WGAWWBpmB275ehNhZyk87/Tpvjbp0jjNl9XwCsbe6bm6CqFsgD+A==",
+      "dependencies": [
+        "@mixmark-io/domino"
+      ]
+    },
     "type-fest@0.21.3": {
       "integrity": "sha512-t0rzBq87m3fVcduHDUFhKmyyX+9eo6WQjZvf51Ea/M0Q7+T374Jp1aUiyUl0GKxp8M/OETVHSDvmkyPgvX+X2w=="
     },
@@ -6995,6 +7006,7 @@
       "npm:merkle-reference@^2.0.1",
       "npm:multiformats@^13.3.2",
       "npm:react@^18.3.1",
+      "npm:turndown@^7.1.2",
       "npm:typescript@*",
       "npm:vite@^6.2.1",
       "npm:zod-to-json-schema@^3.24.1",

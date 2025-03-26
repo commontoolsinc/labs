@@ -2,6 +2,7 @@ import { fixRecipePrompt } from "@commontools/llm";
 import { Cell, getRecipe } from "@commontools/runner";
 import { Charm, CharmManager } from "./charm.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
+import { extractUserCode, injectUserCode } from "./iframe/static.ts";
 import { compileAndRunRecipe, generateNewRecipeVersion } from "./iterate.ts";
 import { NAME } from "@commontools/builder";
 
@@ -40,18 +41,27 @@ export async function fixItCharm(
     throw new Error("Fixit only works for iframe charms");
   }
 
-  const fixedCode = await fixRecipePrompt(
+  // Extract just the user code portion instead of using the full source
+  const userCode = extractUserCode(iframeRecipe.iframe.src);
+  if (!userCode) {
+    throw new Error("Could not extract user code from iframe source");
+  }
+
+  const fixedUserCode = await fixRecipePrompt(
     iframeRecipe.iframe.spec,
-    iframeRecipe.iframe.src,
+    userCode, // Send only the user code portion
     JSON.stringify(iframeRecipe.iframe.argumentSchema),
     error.message,
     model,
   );
 
+  // Inject the fixed user code back into the template
+  const fixedFullCode = injectUserCode(fixedUserCode);
+
   return generateNewRecipeVersion(
     charmManager,
     charm,
-    fixedCode,
+    fixedFullCode,
     iframeRecipe.iframe.spec,
   );
 }

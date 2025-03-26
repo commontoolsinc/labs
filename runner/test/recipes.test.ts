@@ -4,8 +4,9 @@ import { byRef, handler, JSONSchema, lift, recipe } from "@commontools/builder";
 import { run } from "../src/runner.ts";
 import { addModuleByRef } from "../src/module.ts";
 import { getDoc } from "../src/doc.ts";
-import { idle, onError } from "../src/scheduler.ts";
+import { type ErrorWithContext, idle, onError } from "../src/scheduler.ts";
 import { type Cell } from "../src/cell.ts";
+import { getRecipeId } from "../src/recipe-map.ts";
 
 describe("Recipe Runner", () => {
   it("should run a simple recipe", async () => {
@@ -674,8 +675,12 @@ describe("Recipe Runner", () => {
 
   it("failed handlers should be ignored", async () => {
     let errors = 0;
+    let lastError: ErrorWithContext | undefined;
 
-    onError(() => errors++);
+    onError((error: ErrorWithContext) => {
+      lastError = error;
+      errors++;
+    });
 
     const divHandler = handler<
       { divisor: number; dividend: number },
@@ -715,6 +720,12 @@ describe("Recipe Runner", () => {
     expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
 
+    expect(lastError?.recipeId).toBe(getRecipeId(divRecipe));
+    expect(lastError?.space).toBe("test");
+    expect(lastError?.charmId).toBe(
+      JSON.parse(JSON.stringify(charm.entityId))["/"],
+    );
+
     // NOTE(ja): this test is really important after a handler
     // fails the entire system crashes!!!!
     charm.asCell(["updater"]).send({ divisor: 10, dividend: 5 });
@@ -724,19 +735,21 @@ describe("Recipe Runner", () => {
 
   it("failed lifted functions should be ignored", async () => {
     let errors = 0;
+    let lastError: ErrorWithContext | undefined;
 
-    onError(() => errors++);
+    onError((error: ErrorWithContext) => {
+      lastError = error;
+      errors++;
+    });
 
     const divider = lift<
       { divisor: number; dividend: number },
       number
     >(
       ({ divisor, dividend }) => {
-        console.log("divider", divisor, dividend);
         if (dividend === 0) {
           throw new Error("division by zero");
         }
-        console.log("divider result", divisor / dividend);
         return divisor / dividend;
       },
     );
@@ -770,11 +783,160 @@ describe("Recipe Runner", () => {
     expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 10 });
 
+    expect(lastError?.recipeId).toBe(getRecipeId(divRecipe));
+    expect(lastError?.space).toBe("test");
+    expect(lastError?.charmId).toBe(
+      JSON.parse(JSON.stringify(charm.entityId))["/"],
+    );
+
     // Make sure it recovers:
     dividend.send(2);
     await idle();
-    console.log(charm.get());
     expect((charm.get() as any).result.$alias.cell).toBe(charm.sourceCell);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
+  });
+
+  it("idle should wait for slow async lifted functions", async () => {
+    let liftCalled = false;
+    let timeoutCalled = false;
+
+    const slowLift = lift<{ x: number }, number>(({ x }) => {
+      liftCalled = true;
+      return new Promise((resolve) =>
+        setTimeout(() => {
+          timeoutCalled = true;
+          resolve(x * 2);
+        }, 100)
+      ) as unknown as number;
+      // Cast is a hack, because we don't actually want lift to be async as API.
+      // This is just temporary support.
+    });
+
+    const slowRecipe = recipe<{ x: number }>(
+      "Slow Recipe",
+      ({ x }) => {
+        return { result: slowLift({ x }) };
+      },
+    );
+
+    const result = run(
+      slowRecipe,
+      { x: 1 },
+      getDoc(
+        undefined,
+        "idle should wait for slow async lifted functions",
+        "test",
+      ),
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(liftCalled).toBe(true);
+    expect(timeoutCalled).toBe(false);
+
+    await idle();
+    expect(timeoutCalled).toBe(true);
+    expect(result.asCell().get()).toMatchObject({ result: 2 });
+  });
+
+  it("idle should wait for slow async handlers", async () => {
+    let handlerCalled = false;
+    let timeoutCalled = false;
+
+    const slowHandler = handler<{ value: number }, { result: number }>(
+      ({ value }, state) => {
+        handlerCalled = true;
+        // Using Promise to simulate an async operation
+        return new Promise<void>((resolve) =>
+          setTimeout(() => {
+            timeoutCalled = true;
+            state.result = value * 2;
+            resolve();
+          }, 100)
+        );
+      },
+    );
+
+    const slowHandlerRecipe = recipe<{ result: number }>(
+      "Slow Handler Recipe",
+      ({ result }) => {
+        return { result, updater: slowHandler({ result }) };
+      },
+    );
+
+    const charm = run(
+      slowHandlerRecipe,
+      { result: 0 },
+      getDoc(
+        undefined,
+        "idle should wait for slow async handlers",
+        "test",
+      ),
+    );
+
+    await idle();
+
+    // Trigger the handler
+    charm.asCell(["updater"]).send({ value: 5 });
+
+    // Give a small delay to start the handler but not enough to complete
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(handlerCalled).toBe(true);
+    expect(timeoutCalled).toBe(false);
+
+    // Now idle should wait for the handler's promise to resolve
+    await idle();
+    expect(timeoutCalled).toBe(true);
+    expect(charm.asCell().get()).toMatchObject({ result: 10 });
+  });
+
+  it("idle should not wait for deliberately async handlers", async () => {
+    let handlerCalled = false;
+    let timeoutCalled = false;
+    let timeoutPromise: Promise<void> | undefined;
+
+    const slowHandler = handler<{ value: number }, { result: number }>(
+      ({ value }, state) => {
+        handlerCalled = true;
+        // Capturing the promise, but _not_ returning it.
+        timeoutPromise = new Promise<void>((resolve) =>
+          setTimeout(() => {
+            timeoutCalled = true;
+            state.result = value * 2;
+            resolve();
+          }, 10)
+        );
+      },
+    );
+
+    const slowHandlerRecipe = recipe<{ result: number }>(
+      "Slow Handler Recipe",
+      ({ result }) => {
+        return { result, updater: slowHandler({ result }) };
+      },
+    );
+
+    const charm = run(
+      slowHandlerRecipe,
+      { result: 0 },
+      getDoc(
+        undefined,
+        "idle should wait for slow async handlers",
+        "test",
+      ),
+    );
+
+    await idle();
+
+    // Trigger the handler
+    charm.asCell(["updater"]).send({ value: 5 });
+
+    await idle();
+    expect(handlerCalled).toBe(true);
+    expect(timeoutCalled).toBe(false);
+
+    // Now idle should wait for the handler's promise to resolve
+    await timeoutPromise;
+    expect(timeoutCalled).toBe(true);
+    expect(charm.asCell().get()).toMatchObject({ result: 10 });
   });
 });

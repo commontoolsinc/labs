@@ -15,8 +15,9 @@ export const entity = <T extends null | NonNullable<unknown>>(
   return { "@": refer(description).toJSON()["/"] };
 };
 
-export const toString = <T extends null | NonNullable<unknown>>(entity: Entity<T>): string =>
-  `@${entity["@"]}`;
+export const toString = <T extends null | NonNullable<unknown>>(
+  entity: Entity<T>,
+): string => `@${entity["@"]}`;
 
 export const fromString = <T extends null | NonNullable<unknown>>(
   source: string | ToString<Entity<T>>,

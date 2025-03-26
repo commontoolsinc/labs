@@ -3,7 +3,7 @@ import { AppType } from "@/app.ts";
 import { Consumer } from "@commontools/memory";
 import { Identity } from "@commontools/identity";
 import { Memory, memory } from "@/routes/storage/memory.ts";
-
+import env from "@/env.ts";
 // Create a spellbook consumer.
 const spellbook = Consumer.open({
   // Principal is currently derived from `sha256("spellbook")`
@@ -13,7 +13,7 @@ const spellbook = Consumer.open({
   session: memory.session(),
 });
 
-const client = hc<AppType>("http://localhost:8000/");
+const client = hc<AppType>(env.TOOLSHED_API_URL);
 export interface BlobOptions {
   allWithData?: boolean;
   prefix?: string;

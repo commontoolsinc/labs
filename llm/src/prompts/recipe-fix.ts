@@ -5,7 +5,7 @@ import { recipeGuidePrompt } from "./recipe-guide.ts";
 const SYSTEM_PROMPT = `
 You are a code debugging and fixing assistant. Your task is to analyze buggy code that has caused errors and crashes, and then generate fixed code based on the original specifications. The code runs inside an iframe, and errors bubble up from there.
 
-You must respond with the entire code, not just a partial fix. Do not be lazy, or leave comments about code you didn't include. Include all of the code.
+IMPORTANT: The code provided is ONLY THE USER CODE PORTION of a larger template. You must ONLY return the user code portion, NOT a complete HTML page or iframe template. Your fixed code should be a direct replacement for just the user code region.
 
 The code running inside the iframe is a "recipe", which must follow the following guide:
 
@@ -16,7 +16,7 @@ ${recipeGuidePrompt}
 You will be provided with the following information:
 
 1. SPEC: The original prompt or specifications for the code.
-2. CODE: The existing code that is causing errors.
+2. CODE: The existing user code that is causing errors (this is ONLY the user code portion, not the full template).
 3. SCHEMA: The current data schema related to the code.
 4. ERROR: The error stacktrace that resulted from running the code.
 
@@ -26,7 +26,7 @@ Here's the original SPEC (prompt) for the code:
 {{SPEC}}
 </spec>
 
-This is the existing CODE that's causing errors:
+This is the existing USER CODE that's causing errors:
 <code>
 {{CODE}}
 </code>
@@ -37,23 +37,28 @@ Here's the current SCHEMA:
 </schema>
 
 And this is the ERROR stacktrace:
-<error>
+<e>
 {{ERROR}}
-</error>
+</e>
 
 Your task is to:
 
 1. Carefully analyze the error stacktrace and the existing code.
 2. Identify the cause of the error and any potential issues in the code that don't align with the original SPEC.
-3. Generate new, fixed code that resolves the error and adheres to the original SPEC.
+3. Generate new, fixed user code that resolves the error and adheres to the original SPEC.
 
 When writing your response:
 
 1. First, provide a brief explanation of the error and its likely cause inside <error_analysis> tags.
-2. Then, write the new, fixed code inside <fixed_code> tags. Ensure that this code resolves the error and meets the requirements specified in the original SPEC. You must include ALL of the code, not just a partial fix.
+2. Then, write the new, fixed USER CODE inside <fixed_code> tags. Ensure that this code resolves the error and meets the requirements specified in the original SPEC. 
 
-Remember to consider the context of the code running inside an iframe and ensure your solution is compatible with this environment. Your goal is to provide a working solution that resolves the error while maintaining the intended functionality described in the SPEC.
-`;
+CRITICAL: 
+- Your fixed code should ONLY include the user code portion, NOT a complete HTML document or template.
+- Do NOT include any <html>, <head>, <body> tags or other template elements.
+- ONLY include the JavaScript code that defines onLoad, onReady, and title functions.
+- Your response will be injected into an existing template structure.
+
+Remember to consider the context of the code running inside an iframe and ensure your solution is compatible with this environment. Your goal is to provide a working solution that resolves the error while maintaining the intended functionality described in the SPEC.`;
 
 /**
  * Given a broken charm, an error, and a model, returns a recipe with the fixed code.
@@ -78,7 +83,7 @@ export async function fixRecipePrompt(
     ERROR: error,
   });
   const prompt =
-    `Please fix the code, do not be lazy, or leave comments about code you didn't include. Include all of the code.`;
+    `Please fix the code. Remember to only return the user code portion, not the full template. Do not include any HTML, head, or body tags - just the JavaScript functions.`;
   const response = await client.sendRequest({
     model,
     system,

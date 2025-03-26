@@ -4,6 +4,7 @@ import {
   bytesToDid,
   didToBytes,
   ED25519_ALG,
+  ed25519RawToPkcs8,
 } from "./utils.ts";
 import {
   AsBytes,
@@ -201,38 +202,10 @@ export class NativeEd25519Verifier<ID extends DIDKey> implements Verifier<ID> {
   }
 }
 
-// 0x302e020100300506032b657004220420
-// via https://stackoverflow.com/a/79135112
-const PKCS8_PREFIX = new Uint8Array([
-  48,
-  46,
-  2,
-  1,
-  0,
-  48,
-  5,
-  6,
-  3,
-  43,
-  101,
-  112,
-  4,
-  34,
-  4,
-  32,
-]);
-
-// Signer Ed25519 keys cannot be imported into Subtle Crypto in "raw" format.
-// Convert to "pkcs8" before doing so.
-//
-//
-// @AUDIT
-// via https://stackoverflow.com/a/79135112
-function ed25519RawToPkcs8(rawSignerKey: Uint8Array): Uint8Array {
-  return new Uint8Array([...PKCS8_PREFIX, ...rawSignerKey]);
-}
-
 async function didFromPublicKey(publicKey: CryptoKey): Promise<DIDKey> {
-  const rawPublicKey = await globalThis.crypto.subtle.exportKey("raw", publicKey);
+  const rawPublicKey = await globalThis.crypto.subtle.exportKey(
+    "raw",
+    publicKey,
+  );
   return bytesToDid(new Uint8Array(rawPublicKey));
 }
