@@ -211,7 +211,7 @@ const googleUpdater = handler(
 
     console.log("gmailFilterQuery", gmailFilterQuery);
 
-    fetchEmail(
+    return fetchEmail(
       state.auth,
       state.settings.limit,
       gmailFilterQuery,
@@ -493,7 +493,6 @@ export async function fetchEmail(
     allDetailedMessages.length,
     "messages total",
   );
-  return { messages: allDetailedMessages };
 }
 
 const updateGmailFilterQuery = handler<
