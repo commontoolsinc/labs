@@ -40,7 +40,6 @@ export function useStatusMonitor() {
   return { status, updateStatus };
 }
 
-
 // Example usage with dummy data
 export const DummyModelInspector: React.FC = () => {
   const { status, updateStatus } = useStatusMonitor();
@@ -50,7 +49,9 @@ export const DummyModelInspector: React.FC = () => {
   return <ModelInspector model={status.current} />;
 };
 
-export const ToggleableNetworkInspector: React.FC<{ visible: boolean }> = ({ visible }) => {
+export const ToggleableNetworkInspector: React.FC<{ visible: boolean }> = (
+  { visible },
+) => {
   const { status, updateStatus } = useStatusMonitor();
   useStorageBroadcast(updateStatus);
 
@@ -58,7 +59,9 @@ export const ToggleableNetworkInspector: React.FC<{ visible: boolean }> = ({ vis
 
   return <ModelInspector model={status.current} initiallyOpen />;
 };
-const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean }> = ({ model, initiallyOpen = false }) => {
+const ModelInspector: React.FC<
+  { model: Inspector.Model; initiallyOpen?: boolean }
+> = ({ model, initiallyOpen = false }) => {
   const [isOpen, setIsOpen] = useState(initiallyOpen);
   const [activeTab, setActiveTab] = useState<"actions" | "subscriptions">(
     "actions",
@@ -86,7 +89,7 @@ const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean
       const now = performance.now();
       // Limit to ~10 FPS when not actively receiving updates
       if (now - lastRenderTimeRef.current > 100) {
-        setRenderTrigger(prev => (prev + 1) % 1000); // Force re-render
+        setRenderTrigger((prev) => (prev + 1) % 1000); // Force re-render
         lastRenderTimeRef.current = now;
       }
       rafRef.current = requestAnimationFrame(renderLoop);
@@ -111,10 +114,15 @@ const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean
       }
 
       // Count calculations
-      const actualPushCount = Object.values(model.push).filter(v => v.ok).length;
-      const actualPullCount = Object.values(model.pull).filter(v => v.ok).length;
-      const pushErrorCount = Object.values(model.push).filter(v => v.error).length;
-      const pullErrorCount = Object.values(model.pull).filter(v => v.error).length;
+      const actualPushCount = Object.values(model.push).filter((v) =>
+        v.ok
+      ).length;
+      const actualPullCount =
+        Object.values(model.pull).filter((v) => v.ok).length;
+      const pushErrorCount =
+        Object.values(model.push).filter((v) => v.error).length;
+      const pullErrorCount =
+        Object.values(model.pull).filter((v) => v.error).length;
       const actualErrorCount = pushErrorCount + pullErrorCount;
 
       // Update values with easing
@@ -278,10 +286,14 @@ const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean
     } else {
       // If filter is applied, we need a quick filtered count
       const pushItems = Object.entries(model.push).map(([id, result]) => ({
-        id, type: "push", result
+        id,
+        type: "push",
+        result,
       }));
       const pullItems = Object.entries(model.pull).map(([id, result]) => ({
-        id, type: "pull", result
+        id,
+        type: "pull",
+        result,
       }));
       const allItems = [...pushItems, ...pullItems];
       return filterItems(allItems, filterText).length;
@@ -294,8 +306,12 @@ const ModelInspector: React.FC<{ model: Inspector.Model, initiallyOpen?: boolean
       return Object.keys(model.subscriptions).length;
     } else {
       // If filter is applied, we need to check filtered items
-      const subEntries = Object.entries(model.subscriptions).map(([id, sub]) => ({
-        id, sub, type: "subscription"
+      const subEntries = Object.entries(model.subscriptions).map((
+        [id, sub],
+      ) => ({
+        id,
+        sub,
+        type: "subscription",
       }));
       return filterItems(subEntries, filterText).length;
     }

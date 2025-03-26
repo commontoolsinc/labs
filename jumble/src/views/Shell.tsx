@@ -13,7 +13,6 @@ import { SyncStatusProvider } from "@/contexts/SyncStatusContext.tsx";
 import { ToggleableNetworkInspector } from "@/components/NetworkInspector.tsx";
 import { NetworkInspectorProvider } from "@/contexts/NetworkInspectorContext.tsx";
 
-
 export default function Shell() {
   const { charmId } = useParams<CharmRouteParams>();
   useGlobalActions();
@@ -37,7 +36,10 @@ export default function Shell() {
             <ActionBar />
             <CharmPublisher />
             <CommandCenter />
-            <ToggleableNetworkInspector visible={localStorage.getItem("networkInspectorVisible") === "true"} />
+            <ToggleableNetworkInspector
+              visible={localStorage.getItem("networkInspectorVisible") ===
+                "true"}
+            />
           </div>
         </NetworkInspectorProvider>
       </SyncStatusProvider>

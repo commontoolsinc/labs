@@ -170,7 +170,7 @@ export function User() {
   const bounceRef = useRef(0);
   const easedPushCountRef = useRef(0);
   const easedPullCountRef = useRef(0);
-  
+
   // Use our shared animation smoothing hook
   const { updateValue, getValue, rafRef } = useAnimationSmoothing();
 
@@ -218,24 +218,26 @@ export function User() {
       const pushResult = updateValue("push", actualPushCount);
       const pullResult = updateValue("pull", actualPullCount);
       const errorResult = updateValue("error", actualErrorCount);
-      
+
       // Update our refs with the eased values
       easedPushCountRef.current = pushResult.value;
       easedPullCountRef.current = pullResult.value;
-      
+
       // Use the more detailed states from our animation hook
       // hasActualValue = currently has a real value > 0
       // hadRecentActivity = had activity within the min animation duration window
-      const pushActive = pushResult.hasActualValue; 
+      const pushActive = pushResult.hasActualValue;
       const pullActive = pullResult.hasActualValue;
       const errorActive = errorResult.hasActualValue;
-      
+
       // If we have actual activity or recent activity with a positive value, animate
       const hasPushValues = pushResult.value > 0;
       const hasPullValues = pullResult.value > 0;
-      const animatingPush = pushActive || (pushResult.hadRecentActivity && hasPushValues && !pullActive);
-      const animatingPull = pullActive || (pullResult.hadRecentActivity && hasPullValues && !pushActive);
-      
+      const animatingPush = pushActive ||
+        (pushResult.hadRecentActivity && hasPushValues && !pullActive);
+      const animatingPull = pullActive ||
+        (pullResult.hadRecentActivity && hasPullValues && !pushActive);
+
       // Display counts (the hook now handles minimum values)
       const displayPushCount = pushResult.value;
       const displayPullCount = pullResult.value;
