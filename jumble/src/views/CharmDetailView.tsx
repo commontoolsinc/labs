@@ -262,7 +262,7 @@ function useCharmOperation() {
   const [expectedVariantCount, setExpectedVariantCount] = useState(0);
 
   // Preview model state
-  const [previewModel, setPreviewModel] = useState<SpecPreviewModel>("fast");
+  const [previewModel, setPreviewModel] = useState<SpecPreviewModel>("think");
 
   // Live preview generation
   const {
