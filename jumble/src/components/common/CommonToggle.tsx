@@ -5,21 +5,22 @@ type ToggleButtonOption = {
   label: string;
 };
 
-type ToggleButtonProps = {
-  options: ToggleButtonOption[];
-  value: string;
-  onChange: (value: string) => void;
-  size?: "small" | "medium" | "large";
-  className?: string;
-};
+type ToggleButtonProps<T extends readonly { value: string; label: string }[]> =
+  {
+    options: T;
+    value: T[number]["value"];
+    onChange: (value: T[number]["value"]) => void;
+    size?: "small" | "medium" | "large";
+    className?: string;
+  };
 
-export function ToggleButton({
+export function ToggleButton<T extends readonly { value: string; label: string }[]>({
   options,
   value,
   onChange,
   size = "medium",
   className = "",
-}: ToggleButtonProps) {
+}: ToggleButtonProps<T>) {
   const sizeClasses = {
     small: "px-2 py-1 text-xs",
     medium: "px-3 py-1 text-sm",
@@ -30,25 +31,34 @@ export function ToggleButton({
 
   return (
     <div className={containerClasses}>
-      {options.map((option, index) => (
-        <button
-          key={option.value}
-          type="button"
-          onClick={() => onChange(option.value)}
-          className={`
-            ${sizeClasses[size]}
-            flex-1 text-center border-2
-            ${index > 0 ? "border-l-0" : ""}
-            ${
-              value === option.value
+      {options.map((option: { value: string; label: string }, index: number) => {
+        const isSelected = value === option.value;
+        const isFirstItem = index === 0;
+        const isNextItemSelected = index < options.length - 1 &&
+          value === options[index + 1].value;
+
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            className={`
+              ${sizeClasses[size as keyof typeof sizeClasses]}
+              flex-1 text-center border-2
+              ${index > 0 ? "border-l-0" : ""}
+              ${
+              isSelected
                 ? "border-black bg-black text-white"
-                : "border-gray-300 bg-white hover:border-gray-400"
+                : `border-gray-300 bg-white hover:border-gray-400 ${
+                  isFirstItem && isNextItemSelected ? "border-r-0" : ""
+                }`
             }
-          `}
-        >
-          {option.label}
-        </button>
-      ))}
+            `}
+          >
+            {option.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -111,7 +121,13 @@ export function CommonCheckbox({
   };
 
   return (
-    <div className={`flex items-center border-2 ${checked ? "border-black bg-black text-white" : "border-gray-300 bg-white hover:border-gray-400"} ${sizeClasses[size]} ${className}`}>
+    <div
+      className={`flex items-center border-2 ${
+        checked
+          ? "border-black bg-black text-white"
+          : "border-gray-300 bg-white hover:border-gray-400"
+      } ${sizeClasses[size as keyof typeof sizeClasses]} ${className}`}
+    >
       <input
         type="checkbox"
         id={id}
@@ -147,7 +163,11 @@ export function CommonLabel({
   };
 
   return (
-    <span className={`inline-flex items-center border-2 border-gray-300 bg-white ${sizeClasses[size]} font-medium ${className}`}>
+    <span
+      className={`inline-flex items-center border-2 border-gray-300 bg-white ${
+        sizeClasses[size as keyof typeof sizeClasses]
+      } font-medium ${className}`}
+    >
       {children}
     </span>
   );

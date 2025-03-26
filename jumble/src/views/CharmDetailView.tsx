@@ -10,7 +10,12 @@ import {
 } from "@commontools/charm";
 import { isCell, isStream } from "@commontools/runner";
 import { isObj } from "@commontools/utils";
-import { ToggleButton, CheckboxToggle, CommonCheckbox, CommonLabel } from "../components/common";
+import {
+  CheckboxToggle,
+  CommonCheckbox,
+  CommonLabel,
+  ToggleButton,
+} from "../components/common/CommonToggle.tsx";
 import React, {
   createContext,
   useCallback,
@@ -783,10 +788,10 @@ const OperationTab = () => {
         <ToggleButton
           options={[
             { value: "iterate", label: "Iterate" },
-            { value: "extend", label: "Extend" }
+            { value: "extend", label: "Extend" },
           ]}
           value={operationType}
-          onChange={setOperationType}
+          onChange={(value) => setOperationType(value as OperationType)}
           size="large"
           className="mb-2"
         />
@@ -957,35 +962,31 @@ const CodeTab = () => {
             onChange={setShowFullCode}
             size="small"
           />
-          
-          {/* Editor type selector */}
+
           <ToggleButton
             options={[
               { value: "code", label: "Code" },
-              { value: "spec", label: "Specification" }
+              { value: "spec", label: "Specification" },
             ]}
             value={activeEditor}
-            onChange={setActiveEditor}
+            onChange={(value) => setActiveEditor(value as "code" | "spec")}
             size="small"
           />
         </div>
+        {hasUnsavedChanges && (
+          <button
+            type="button"
+            onClick={saveChanges}
+            className="px-2 py-1 text-xs bg-black text-white border-2 border-black disabled:opacity-50"
+          >
+            Save Changes
+          </button>
+        )}
       </div>
 
       <div className="px-4 flex-grow flex flex-col overflow-hidden">
-        {hasUnsavedChanges && (
-          <div className="mt-4 flex justify-end">
-            <button
-              type="button"
-              onClick={saveChanges}
-              className="px-4 py-2 bg-black text-white border-2 border-black disabled:opacity-50"
-            >
-              Save Changes
-            </button>
-          </div>
-        )}
-
         {activeEditor === "code" && (
-          <div className="flex-grow overflow-hidden border border-black h-full">
+          <div className="flex-grow overflow-hidden border-black border-2 h-full">
             <CodeMirror
               value={workingSrc || ""}
               theme="dark"

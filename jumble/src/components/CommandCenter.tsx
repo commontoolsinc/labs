@@ -30,7 +30,7 @@ import {
   useLiveSpecPreview,
 } from "@/hooks/use-live-spec-preview.ts";
 import { SpecPreview } from "@/components/SpecPreview.tsx";
-import { ToggleButton } from "./common";
+import { ToggleButton } from "@/components/common/CommonToggle.tsx";
 
 function CommandProcessor({
   mode,
@@ -124,10 +124,10 @@ function CommandProcessor({
                 <ToggleButton
                   options={[
                     { value: "fast", label: "Fast" },
-                    { value: "think", label: "Smart" }
+                    { value: "think", label: "Smart" },
                   ]}
                   value={previewModel}
-                  onChange={setPreviewModel}
+                  onChange={(value) => setPreviewModel(value as SpecPreviewModel)}
                   size="small"
                 />
               </div>
