@@ -85,13 +85,6 @@ function CommandProcessor({
 
   switch (mode.type) {
     case "input": {
-      console.log(
-        "Processing input command:",
-        mode.command?.id || "unknown",
-        "with placeholder:",
-        mode.placeholder,
-      );
-
       return (
         <div className="flex flex-col gap-2 mb-4">
           <div className="relative">
@@ -506,15 +499,12 @@ export function CommandCenter() {
               `Setting mode for input command: ${inputCommand.id}, placeholder: ${inputCommand.placeholder}`,
             );
 
-            // Add special 50ms delay for problem commands, otherwise use normal flow
-            setTimeout(() => {
-              setMode({
-                type: "input",
-                command: inputCommand,
-                placeholder: inputCommand.placeholder ||
-                  "Enter input",
-              });
-            }, 50);
+            setMode({
+              type: "input",
+              command: inputCommand,
+              placeholder: inputCommand.placeholder ||
+                "Enter input",
+            });
           }
           break;
         case "confirm":
