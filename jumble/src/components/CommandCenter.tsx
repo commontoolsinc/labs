@@ -22,7 +22,7 @@ import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext.tsx";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
 import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
-import { charmId } from "@/utils/charms.ts";
+import { charmId, getMentionableCharms } from "@/utils/charms.ts";
 import { formatPromptWithMentions } from "@/utils/format.ts";
 import { NAME } from "@commontools/builder";
 import {
@@ -199,13 +199,14 @@ export function useCharmMentions() {
   useEffect(() => {
     const fetchCharmMentions = async () => {
       try {
-        const charms = charmManager.getCharms();
-        await charmManager.sync(charms);
+        // Get mentionable charms - filtered to exclude trash and prioritize pinned
+        const mentionableCharms = await getMentionableCharms(charmManager);
 
-        const mentions = charms.get().map((charm: any) => {
+        // Convert to the format needed for mentions
+        const mentions = mentionableCharms.map((charm: any) => {
           const data = charm.get();
           const name = data?.[NAME] ?? "Untitled";
-          const id = charmId(charm.entityId!)!;
+          const id = charmId(charm)!;
           return {
             id,
             name: `${name} (#${id.slice(-4)})`,
