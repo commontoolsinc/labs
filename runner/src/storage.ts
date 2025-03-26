@@ -43,6 +43,12 @@ export function log(fn: () => any[]) {
 
 export interface Storage {
   /**
+   * Unique identifier that can be used as a name of the `BroadcastChannel` in
+   * order to monitor this storage instance.
+   */
+  readonly id: string;
+
+  /**
    * Set remote storage URL.
    *
    * @param url - URL to set.
@@ -156,16 +162,19 @@ type Job = {
  * is probably already further ahead.
  */
 class StorageImpl implements Storage {
-  constructor() {
+  constructor(id = crypto.randomUUID()) {
     const [cancel, addCancel] = useCancelGroup();
     this.cancel = cancel;
     this.addCancel = addCancel;
+    this.#id = id;
 
     // Check if we're in a browser environment before accessing location
     if (isBrowser()) {
       this.setRemoteStorage(new URL(globalThis.location.href));
     }
   }
+
+  #id: string;
 
   // Map from space to storage provider. TODO: Push spaces to storage providers.
   private storageProviders = new Map<string, StorageProvider>();
@@ -207,6 +216,10 @@ class StorageImpl implements Storage {
 
   private cancel: Cancel;
   private addCancel: AddCancel;
+
+  get id() {
+    return this.#id;
+  }
 
   setRemoteStorage(url: URL): void {
     this.remoteStorageUrl = url;
@@ -279,6 +292,7 @@ class StorageImpl implements Storage {
         }
 
         provider = new RemoteStorageProvider({
+          id: this.id,
           address: new URL("/api/storage/memory", this.remoteStorageUrl!),
           space: space as `did:${string}:${string}`,
           as: this.signer,
