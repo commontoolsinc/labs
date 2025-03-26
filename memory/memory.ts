@@ -34,7 +34,7 @@ interface Session {
 export class Memory implements Session, MemorySession {
   store: URL;
   ready: Promise<unknown>;
-  private _serviceDid: DID;
+  #serviceDid: DID;
 
   constructor(
     options: Options,
@@ -43,11 +43,11 @@ export class Memory implements Session, MemorySession {
   ) {
     this.store = options.store;
     this.ready = Promise.resolve();
-    this._serviceDid = options.serviceDid;
+    this.#serviceDid = options.serviceDid;
   }
 
   serviceDid(): DID {
-    return this._serviceDid;
+    return this.#serviceDid;
   }
 
   get memory() {
