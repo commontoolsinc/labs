@@ -203,15 +203,19 @@ export function useCharmMentions() {
         const mentionableCharms = await getMentionableCharms(charmManager);
 
         // Convert to the format needed for mentions
-        const mentions = mentionableCharms.map((charm: any) => {
+        const mentions = mentionableCharms.map((charm) => {
           const data = charm.get();
           const name = data?.[NAME] ?? "Untitled";
-          const id = charmId(charm)!;
+          const id = charmId(charm);
+          if (!id) {
+            console.warn(`Warning: Charm without ID found`, charm);
+            return null;
+          }
           return {
             id,
             name: `${name} (#${id.slice(-4)})`,
           };
-        });
+        }).filter((mention): mention is {id: string, name: string} => mention !== null);
 
         setCharmMentions(mentions);
       } catch (error) {
@@ -359,10 +363,15 @@ export function CommandCenter() {
     const handleEditRecipe = (e: KeyboardEvent) => {
       if (e.key === "i" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
+        const editRecipeCommand = allCommands.find((cmd) => cmd.id === "edit-recipe");
+        if (!editRecipeCommand) {
+          console.warn("Edit recipe command not found");
+          return;
+        }
         setOpen(true);
         setMode({
           type: "input",
-          command: allCommands.find((cmd) => cmd.id === "edit-recipe")!,
+          command: editRecipeCommand,
           placeholder: "What would you like to change?",
         });
       }
@@ -370,10 +379,15 @@ export function CommandCenter() {
 
     const handleEditRecipeEvent = () => {
       if (focusedCharmId) {
+        const editRecipeCommand = allCommands.find((cmd) => cmd.id === "edit-recipe");
+        if (!editRecipeCommand) {
+          console.warn("Edit recipe command not found");
+          return;
+        }
         setOpen(true);
         setMode({
           type: "input",
-          command: allCommands.find((cmd) => cmd.id === "edit-recipe")!,
+          command: editRecipeCommand,
           placeholder: "What would you like to change?",
         });
       }
@@ -503,10 +517,12 @@ export function CommandCenter() {
           });
           break;
         case "select":
+          // The select mode options should be provided by the command handler
+          // since the SelectCommandItem interface doesn't have an options property
           setMode({
             type: "select",
             command: cmd,
-            options: [], // You'll need to provide the actual options here
+            options: [], // Options will be provided when the command is executed
           });
           break;
         case "transcribe":
