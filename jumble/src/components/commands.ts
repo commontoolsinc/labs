@@ -867,7 +867,12 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       title: "Rename Charm",
       group: "Edit",
       predicate: !!deps.focusedCharmId,
-      handler: (input) => handleRenameCharm(deps, input),
+      handler: (input) => {
+        // Only process if we have input - this prevents early return when selecting from menu
+        if (input) {
+          return handleRenameCharm(deps, input);
+        }
+      },
     },
     {
       id: "edit-recipe",
@@ -876,7 +881,12 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       group: "Edit",
       predicate: !!deps.focusedCharmId,
       placeholder: "What would you like to change?",
-      handler: (input) => handleEditRecipe(deps, input),
+      handler: (input) => {
+        // Only process if we have input - this prevents early return when selecting from menu
+        if (input) {
+          return handleEditRecipe(deps, input);
+        }
+      },
     },
     {
       id: "extend-recipe",
@@ -884,8 +894,14 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       title: `Extend Recipe`,
       group: "Edit",
       predicate: !!deps.focusedCharmId,
-      placeholder: "What you like to see?",
-      handler: (input, data) => handleExtendRecipe(deps, input, data),
+      placeholder: "What would you like to see?",
+      handler: (input, data) => {
+        // Only process if we have input - this prevents early return when selecting from menu
+        if (input) {
+          console.log("Extend Recipe handler called with input:", input);
+          return handleExtendRecipe(deps, input, data);
+        }
+      },
     },
     {
       id: "delete-charm",

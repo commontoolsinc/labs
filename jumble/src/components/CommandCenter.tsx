@@ -33,6 +33,7 @@ import { SpecPreview } from "@/components/SpecPreview.tsx";
 
 function CommandProcessor({
   mode,
+  command,
   context,
   onComplete,
 }: {
@@ -44,6 +45,20 @@ function CommandProcessor({
   const { charmManager } = context;
   const [inputValue, setInputValue] = useState("");
   const charmMentions = useCharmMentions();
+
+  // State for preview model selection
+  const [previewModel, setPreviewModel] = useState<SpecPreviewModel>(
+    "think",
+  );
+
+  // Get spec preview as user types in command center
+  const { previewSpec, previewPlan, loading: isPreviewLoading } =
+    useLiveSpecPreview(
+      inputValue,
+      true,
+      1000,
+      previewModel,
+    );
 
   if (context.loading && mode.type !== "input") {
     return (
@@ -70,85 +85,76 @@ function CommandProcessor({
 
   switch (mode.type) {
     case "input": {
-      // State for preview model selection
-      const [previewModel, setPreviewModel] = useState<SpecPreviewModel>(
-        "fast",
+      console.log(
+        "Processing input command:",
+        mode.command?.id || "unknown",
+        "with placeholder:",
+        mode.placeholder,
       );
 
-      // Get spec preview as user types in command center
-      const { previewSpec, previewPlan, loading: isPreviewLoading } =
-        useLiveSpecPreview(
-          inputValue,
-          true,
-          1000,
-          previewModel,
-        );
-
       return (
-        <Command.Group>
-          <div className="flex flex-col gap-2 mb-4">
-            <div className="relative">
-              {/* The floating spec preview will be positioned above the composer */}
-              <SpecPreview
-                spec={previewSpec}
-                plan={previewPlan}
-                loading={isPreviewLoading}
-                visible
-                floating
-              />
+        <div className="flex flex-col gap-2 mb-4">
+          <div className="relative">
+            {/* The floating spec preview will be positioned above the composer */}
+            <SpecPreview
+              spec={previewSpec}
+              plan={previewPlan}
+              loading={isPreviewLoading}
+              visible
+              floating
+            />
 
-              <Composer
-                style={{
-                  width: "100%",
-                  height: "96px",
-                  border: "1px solid #ccc",
-                }}
-                placeholder={mode.placeholder || "Enter input"}
-                value={inputValue}
-                onValueChange={setInputValue}
-                mentions={charmMentions}
-                onSubmit={onSubmit}
-                disabled={context.loading}
-                autoFocus
-              />
-            </div>
-
-            <ComposerSubmitBar
-              loading={context.loading}
-              operation="Send"
+            <Composer
+              style={{
+                width: "100%",
+                height: "96px",
+                border: "1px solid #ccc",
+              }}
+              placeholder={mode.placeholder || "Enter input"}
+              value={inputValue}
+              onValueChange={setInputValue}
+              mentions={charmMentions}
               onSubmit={onSubmit}
-            >
-              <div className="flex items-center space-x-2">
-                <div className="flex items-center text-xs">
-                  <div className="flex border border-gray-300 rounded-full overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => setPreviewModel("fast")}
-                      className={`px-2 py-1 text-xs ${
-                        previewModel === "fast"
-                          ? "bg-black text-white"
-                          : "bg-gray-100"
-                      }`}
-                    >
-                      Fast
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPreviewModel("think")}
-                      className={`px-2 py-1 text-xs ${
-                        previewModel === "think"
-                          ? "bg-black text-white"
-                          : "bg-gray-100"
-                      }`}
-                    >
-                      Smart
-                    </button>
-                  </div>
+              disabled={context.loading}
+              autoFocus
+            />
+          </div>
+
+          <ComposerSubmitBar
+            loading={context.loading}
+            operation="Send"
+            onSubmit={onSubmit}
+          >
+            <div className="flex items-center space-x-2">
+              <div className="flex items-center text-xs">
+                <div className="flex border border-gray-300 rounded-full overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewModel("fast")}
+                    className={`px-2 py-1 text-xs ${
+                      previewModel === "fast"
+                        ? "bg-black text-white"
+                        : "bg-gray-100"
+                    }`}
+                  >
+                    Fast
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewModel("think")}
+                    className={`px-2 py-1 text-xs ${
+                      previewModel === "think"
+                        ? "bg-black text-white"
+                        : "bg-gray-100"
+                    }`}
+                  >
+                    Smart
+                  </button>
                 </div>
               </div>
-            </ComposerSubmitBar>
-          </div>
-        </Command.Group>
+            </div>
+          </ComposerSubmitBar>
+        </div>
       );
     }
 
@@ -459,6 +465,96 @@ export function CommandCenter() {
     return commands.filter((cmd: CommandItem) => cmd.predicate !== false); // Show command unless predicate is explicitly false
   };
 
+  const handleCommandSelect = useCallback((cmd: CommandItem, e: any) => {
+    console.log(
+      `Command selected: ${cmd.id}, type: ${cmd.type}`,
+      e,
+    );
+
+    if ((cmd as MenuCommandItem).children) {
+      console.log(
+        `Command has children - setting menu mode`,
+      );
+      setCommandPathIds((
+        prev: string[],
+      ) => [...prev, cmd.id]);
+      setMode({
+        type: "menu",
+        path: [...commandPathIds, cmd.id],
+        parent: cmd,
+      });
+    } else if (cmd.type === "action") {
+      // Only close if the handler doesn't return a Promise
+      // This allows async handlers that change mode to keep the palette open
+      const actionCmd = cmd as ActionCommandItem;
+      const result = actionCmd.handler?.();
+      if (
+        !actionCmd.handler ||
+        (!result &&
+          typeof actionCmd.handler === "function")
+      ) {
+        setOpen(false);
+      }
+    } else {
+      // Handle each command type explicitly
+      switch (cmd.type) {
+        case "input":
+          {
+            // Ensure all input commands have required properties
+            const inputCommand = cmd as InputCommandItem;
+            console.log(
+              `Setting mode for input command: ${inputCommand.id}, placeholder: ${inputCommand.placeholder}`,
+            );
+
+            // Add special 50ms delay for problem commands, otherwise use normal flow
+            setTimeout(() => {
+              setMode({
+                type: "input",
+                command: inputCommand,
+                placeholder: inputCommand.placeholder ||
+                  "Enter input",
+              });
+            }, 50);
+          }
+          break;
+        case "confirm":
+          setMode({
+            type: "confirm",
+            command: cmd,
+            message: (cmd as ConfirmCommandItem).message ||
+              "Are you sure?",
+          });
+          break;
+        case "select":
+          setMode({
+            type: "select",
+            command: cmd,
+            options: [], // You'll need to provide the actual options here
+          });
+          break;
+        case "transcribe":
+          setMode({
+            type: "transcribe",
+            command: cmd,
+            placeholder: (cmd as TranscribeCommandItem)
+              .placeholder ||
+              "Speak now...",
+          });
+          break;
+        case "placeholder":
+          setMode({
+            type: "placeholder",
+          });
+          break;
+        default:
+          console.warn(
+            `Unhandled command type: ${cmd.type}`,
+          );
+          break;
+      }
+    }
+  }, [commandPathIds, setMode, setCommandPathIds, setOpen]);
+
   return (
     <Command.Dialog
       title="Common"
@@ -537,78 +633,7 @@ export function CommandCenter() {
                     {commands.map((cmd) => (
                       <Command.Item
                         key={cmd.id}
-                        onSelect={() => {
-                          if ((cmd as MenuCommandItem).children) {
-                            setCommandPathIds((
-                              prev: string[],
-                            ) => [...prev, cmd.id]);
-                            setMode({
-                              type: "menu",
-                              path: [...commandPathIds, cmd.id],
-                              parent: cmd,
-                            });
-                          } else if (cmd.type === "action") {
-                            // Only close if the handler doesn't return a Promise
-                            // This allows async handlers that change mode to keep the palette open
-                            const actionCmd = cmd as ActionCommandItem;
-                            const result = actionCmd.handler?.();
-                            if (
-                              !actionCmd.handler ||
-                              (!result &&
-                                typeof actionCmd.handler === "function")
-                            ) {
-                              setOpen(false);
-                            }
-                          } else {
-                            // Handle each command type explicitly
-                            switch (cmd.type) {
-                              case "input":
-                                setMode({
-                                  type: "input",
-                                  command: cmd,
-                                  placeholder:
-                                    (cmd as InputCommandItem).placeholder ||
-                                    "Enter input",
-                                });
-                                break;
-                              case "confirm":
-                                setMode({
-                                  type: "confirm",
-                                  command: cmd,
-                                  message:
-                                    (cmd as ConfirmCommandItem).message ||
-                                    "Are you sure?",
-                                });
-                                break;
-                              case "select":
-                                setMode({
-                                  type: "select",
-                                  command: cmd,
-                                  options: [], // You'll need to provide the actual options here
-                                });
-                                break;
-                              case "transcribe":
-                                setMode({
-                                  type: "transcribe",
-                                  command: cmd,
-                                  placeholder: (cmd as TranscribeCommandItem)
-                                    .placeholder ||
-                                    "Speak now...",
-                                });
-                                break;
-                              case "placeholder":
-                                setMode({
-                                  type: "placeholder",
-                                });
-                                break;
-                              default:
-                                console.warn(
-                                  `Unhandled command type: ${cmd.type}`,
-                                );
-                                break;
-                            }
-                          }
-                        }}
+                        onSelect={(e) => handleCommandSelect(cmd, e)}
                       >
                         {cmd.title}
                         {(cmd as MenuCommandItem).children && " →"}
@@ -622,7 +647,9 @@ export function CommandCenter() {
           : (
             <CommandProcessor
               mode={mode}
-              command={currentCommandPath[currentCommandPath.length - 1]}
+              command={"command" in mode
+                ? mode.command
+                : currentCommandPath[currentCommandPath.length - 1]}
               context={context}
               onComplete={() => {
                 setMode({
