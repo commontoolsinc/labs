@@ -41,6 +41,11 @@ import { useCharmMentions } from "@/components/CommandCenter.tsx";
 import { formatPromptWithMentions } from "@/utils/format.ts";
 import { CharmLink } from "@/components/CharmLink.tsx";
 import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
+import { SpecPreview } from "@/components/SpecPreview.tsx";
+import {
+  SpecPreviewModel,
+  useLiveSpecPreview,
+} from "@/hooks/use-live-spec-preview.ts";
 
 type Tab = "iterate" | "code" | "data";
 type OperationType = "iterate" | "extend";
@@ -62,6 +67,8 @@ interface CharmOperationContextType {
   setOperationType: (type: OperationType) => void;
   showVariants: boolean;
   setShowVariants: (show: boolean) => void;
+  showPreview: boolean;
+  setShowPreview: (show: boolean) => void;
   loading: boolean;
   setLoading: (loading: boolean) => void;
   variants: Cell<Charm>[];
@@ -70,6 +77,11 @@ interface CharmOperationContextType {
   setSelectedVariant: (variant: Cell<Charm> | null) => void;
   expectedVariantCount: number;
   setExpectedVariantCount: (count: number) => void;
+  previewSpec: string;
+  previewPlan: string;
+  isPreviewLoading: boolean;
+  previewModel: SpecPreviewModel;
+  setPreviewModel: (model: SpecPreviewModel) => void;
   handlePerformOperation: () => void;
   handleCancelVariants: () => void;
   performOperation: (
@@ -238,6 +250,7 @@ function useCharmOperation() {
   );
   const [operationType, setOperationType] = useState<OperationType>("iterate");
   const [showVariants, setShowVariants] = useState(false);
+  const [showPreview, setShowPreview] = useState(true);
   const [loading, setLoading] = useState(false);
   const [variants, setVariants] = useState<Cell<Charm>[]>([]);
   const [variantModelsMap, setVariantModelsMap] = useState<
@@ -247,6 +260,17 @@ function useCharmOperation() {
     null,
   );
   const [expectedVariantCount, setExpectedVariantCount] = useState(0);
+
+  // Preview model state
+  const [previewModel, setPreviewModel] = useState<SpecPreviewModel>("think");
+
+  // Live preview generation
+  const {
+    previewSpec,
+    previewPlan,
+    loading: isPreviewLoading,
+    model,
+  } = useLiveSpecPreview(input, showPreview, 250, previewModel);
 
   // Function that performs the selected operation (iterate or extend)
   const performOperation = useCallback(
@@ -365,6 +389,8 @@ function useCharmOperation() {
     setOperationType,
     showVariants,
     setShowVariants,
+    showPreview,
+    setShowPreview,
     loading,
     setLoading,
     variants,
@@ -373,6 +399,11 @@ function useCharmOperation() {
     setSelectedVariant,
     expectedVariantCount,
     setExpectedVariantCount,
+    previewSpec,
+    previewPlan,
+    isPreviewLoading,
+    previewModel,
+    setPreviewModel,
     handlePerformOperation,
     handleCancelVariants,
     performOperation,
@@ -731,8 +762,15 @@ const OperationTab = () => {
     setOperationType,
     showVariants,
     setShowVariants,
+    showPreview,
+    setShowPreview,
     loading,
     handlePerformOperation,
+    previewSpec,
+    previewPlan,
+    isPreviewLoading,
+    previewModel,
+    setPreviewModel,
   } = useCharmOperationContext();
 
   const mentions = useCharmMentions();
@@ -787,6 +825,51 @@ const OperationTab = () => {
             operation={operationType === "iterate" ? "Iterate" : "Extend"}
             onSubmit={handlePerformOperation}
           >
+            {/* TODO(bf): restore in https://github.com/commontoolsinc/labs/issues/876 */}
+            {
+              /* <div className="flex items-center mr-2">
+              <input
+                type="checkbox"
+                id="preview"
+                checked={showPreview}
+                onChange={(e) => setShowPreview(e.target.checked)}
+                className="border-2 border-black mr-2"
+              />
+              <label htmlFor="preview" className="text-sm font-medium">
+                Live Preview
+              </label>
+            </div>
+
+            {showPreview && (
+              <div className="flex items-center mr-2">
+                <div className="flex border border-gray-300 rounded-full overflow-hidden text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewModel("fast")}
+                    className={`px-2 py-1 text-xs ${
+                      previewModel === "fast"
+                        ? "bg-black text-white"
+                        : "bg-gray-100"
+                    }`}
+                  >
+                    Fast
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewModel("think")}
+                    className={`px-2 py-1 text-xs ${
+                      previewModel === "think"
+                        ? "bg-black text-white"
+                        : "bg-gray-100"
+                    }`}
+                  >
+                    Precise
+                  </button>
+                </div>
+              </div>
+            )} */
+            }
+
             <div className="flex items-center">
               <input
                 type="checkbox"
@@ -827,6 +910,15 @@ const OperationTab = () => {
 
       {/* Content Container with single scrollbar */}
       <div className="flex-grow overflow-auto mt-3 -mx-4 px-4">
+        {/* TODO(bf): restore in https://github.com/commontoolsinc/labs/issues/876 */}
+        {
+          /* <SpecPreview
+          spec={previewSpec}
+          plan={previewPlan}
+          loading={isPreviewLoading}
+          visible={showPreview}
+        /> */
+        }
         <Variants />
         <Suggestions />
       </div>

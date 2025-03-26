@@ -1,4 +1,4 @@
-import React, { createContext, useContext, ReactNode } from "react";
+import React, { createContext, ReactNode, useContext } from "react";
 import { useNetworkInspector } from "@/hooks/use-network-inspector.ts";
 
 interface NetworkInspectorContextType {
@@ -8,9 +8,13 @@ interface NetworkInspectorContextType {
   hide: () => void;
 }
 
-const NetworkInspectorContext = createContext<NetworkInspectorContextType | null>(null);
+const NetworkInspectorContext = createContext<
+  NetworkInspectorContextType | null
+>(null);
 
-export function NetworkInspectorProvider({ children }: { children: ReactNode }) {
+export function NetworkInspectorProvider(
+  { children }: { children: ReactNode },
+) {
   const inspector = useNetworkInspector();
 
   return (
@@ -24,7 +28,7 @@ export function useNetworkInspectorContext() {
   const context = useContext(NetworkInspectorContext);
   if (!context) {
     throw new Error(
-      "useNetworkInspectorContext must be used within a NetworkInspectorProvider"
+      "useNetworkInspectorContext must be used within a NetworkInspectorProvider",
     );
   }
   return context;
