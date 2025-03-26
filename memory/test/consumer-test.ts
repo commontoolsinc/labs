@@ -288,8 +288,8 @@ test("list multiple facts using schema query", store, async (session) => {
   const doc2 = `of:${refer({ doc: 2 })}` as const;
 
   const facts = [
-    Fact.assert({ the, of: doc, is: { v: 1 } }),
-    Fact.assert({ the, of: doc2, is: { v: 2 } }),
+    Fact.assert({ the, of: doc, is: { value: { v: 1 } } }),
+    Fact.assert({ the, of: doc2, is: { value: { v: 2 } } }),
   ];
 
   // Create multiple facts

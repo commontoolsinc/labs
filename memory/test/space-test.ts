@@ -1163,7 +1163,7 @@ test("list excludes retracted facts", DB, async (session) => {
 });
 
 test("list single fact with schema query", DB, async (session) => {
-  const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
+  const v1 = Fact.assert({ the, of: doc, is: { value: { v: 1 } } });
   const tr = Transaction.create({
     issuer: alice.did(),
     subject: space.did(),
@@ -1214,15 +1214,17 @@ test(
       the,
       of: doc2,
       is: {
-        "home": {
-          "name": "Mr. Bob Hope",
-          "street": "2466 Southridge Drive",
-          "city": "Palm Springs",
-        },
-        "work": {
-          "name": "Mr. Bob Hope",
-          "street": "2627 N Hollywood Way",
-          "city": "Burbank",
+        "value": {
+          "home": {
+            "name": "Mr. Bob Hope",
+            "street": "2466 Southridge Drive",
+            "city": "Palm Springs",
+          },
+          "work": {
+            "name": "Mr. Bob Hope",
+            "street": "2627 N Hollywood Way",
+            "city": "Burbank",
+          },
         },
       },
     });
@@ -1231,15 +1233,17 @@ test(
       the,
       of: doc,
       is: {
-        "address": {
-          "$alias": {
-            "cell": {
-              "/": doc2.slice(3), // strip off 'of:'
+        "value": {
+          "address": {
+            "$alias": {
+              "cell": {
+                "/": doc2.slice(3), // strip off 'of:'
+              },
+              "path": ["home"],
             },
-            "path": ["home"],
           },
+          "name": "Bob",
         },
-        "name": "Bob",
       },
     });
 
@@ -1302,9 +1306,11 @@ test(
         [the]: {
           [cause.toString()]: {
             is: {
-              "address": {
-                "street": "2466 Southridge Drive",
-                "city": "Palm Springs",
+              "value": {
+                "address": {
+                  "street": "2466 Southridge Drive",
+                  "city": "Palm Springs",
+                },
               },
             },
           },
@@ -1326,23 +1332,25 @@ test(
       the,
       of: doc,
       is: {
-        "home": {
-          "name": {
-            "title": "Mr.",
-            "first": "Bob",
-            "last": "Hope",
+        "value": {
+          "home": {
+            "name": {
+              "title": "Mr.",
+              "first": "Bob",
+              "last": "Hope",
+            },
+            "street": "2466 Southridge Drive",
+            "city": "Palm Springs",
           },
-          "street": "2466 Southridge Drive",
-          "city": "Palm Springs",
-        },
-        "work": {
-          "name": {
-            "title": "Mr.",
-            "first": "Bob",
-            "last": "Hope",
+          "work": {
+            "name": {
+              "title": "Mr.",
+              "first": "Bob",
+              "last": "Hope",
+            },
+            "street": "2627 N Hollywood Way",
+            "city": "Burbank",
           },
-          "street": "2627 N Hollywood Way",
-          "city": "Burbank",
         },
       },
     });
@@ -1351,12 +1359,14 @@ test(
       the,
       of: doc2,
       is: {
-        "address": {
-          "$alias": {
-            "cell": {
-              "/": doc.slice(3), // strip off 'of:'
+        "value": {
+          "address": {
+            "$alias": {
+              "cell": {
+                "/": doc.slice(3), // strip off 'of:'
+              },
+              "path": ["home"],
             },
-            "path": ["home"],
           },
         },
       },
@@ -1366,16 +1376,18 @@ test(
       the,
       of: doc3,
       is: {
-        "emergency_contacts": [
-          {
-            "$alias": {
-              "cell": {
-                "/": doc2.slice(3), // strip off 'of:'
+        "value": {
+          "emergency_contacts": [
+            {
+              "$alias": {
+                "cell": {
+                  "/": doc2.slice(3), // strip off 'of:'
+                },
+                "path": ["address", "name"],
               },
-              "path": ["address", "name"],
             },
-          },
-        ],
+          ],
+        },
       },
     });
 
@@ -1436,9 +1448,11 @@ test(
         [the]: {
           [cause.toString()]: {
             is: {
-              "emergency_contacts": [{
-                "first": "Bob",
-              }],
+              "value": {
+                "emergency_contacts": [{
+                  "first": "Bob",
+                }],
+              },
             },
           },
         },
@@ -1459,9 +1473,11 @@ test(
       the,
       of: doc,
       is: {
-        "name": "Bob",
-        "left": { "name": "Alice" },
-        "right": { "name": "Charlie " },
+        "value": {
+          "name": "Bob",
+          "left": { "name": "Alice" },
+          "right": { "name": "Charlie " },
+        },
       },
     });
     const tr = Transaction.create({
@@ -1515,8 +1531,9 @@ test(
     const filteredFact = Fact.assert({
       the,
       of: doc,
-      is: { "left": { "name": "Alice" } },
+      is: { "value": { "left": { "name": "Alice" } } },
     });
+
     assertEquals(result, {
       ok: { [space.did()]: Changes.from([filteredFact]) },
     });
@@ -1532,18 +1549,20 @@ test(
       the,
       of: doc,
       is: {
-        "emails": [
-          {
-            "sender": "spamsender@sweepstakes.com",
-            "subject": "You may have won the sweepstakes",
-            "body": "This is your chance to claim your winnings",
-          },
-          {
-            "sender": "boss@job.com",
-            "subject": "You're fired!",
-            "body": "You've crashed the last delivery truck. Pack your bags!",
-          },
-        ],
+        "value": {
+          "emails": [
+            {
+              "sender": "spamsender@sweepstakes.com",
+              "subject": "You may have won the sweepstakes",
+              "body": "This is your chance to claim your winnings",
+            },
+            {
+              "sender": "boss@job.com",
+              "subject": "You're fired!",
+              "body": "You've crashed the last delivery truck. Pack your bags!",
+            },
+          ],
+        },
       },
     });
     const tr = Transaction.create({
@@ -1608,16 +1627,18 @@ test(
       the,
       of: doc,
       is: {
-        "emails": [
-          {
-            "sender": "spamsender@sweepstakes.com",
-            "subject": "You may have won the sweepstakes",
-          },
-          {
-            "sender": "boss@job.com",
-            "subject": "You're fired!",
-          },
-        ],
+        "value": {
+          "emails": [
+            {
+              "sender": "spamsender@sweepstakes.com",
+              "subject": "You may have won the sweepstakes",
+            },
+            {
+              "sender": "boss@job.com",
+              "subject": "You're fired!",
+            },
+          ],
+        },
       },
     });
     assertEquals(result, {
