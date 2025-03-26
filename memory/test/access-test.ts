@@ -4,6 +4,9 @@ import * as Access from "../access.ts";
 import { refer } from "../reference.ts";
 import { Invocation } from "../interface.ts";
 
+// Some generated service key.
+const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
+
 const test = (title: string, run: () => unknown) => {
   const unit = async () => {
     await run();
@@ -57,7 +60,7 @@ test("Access.authorize <-> Access.claim", async () => {
   assert(result.ok, "authorization was issued");
   const authorization = result.ok;
 
-  const claim = await Access.claim(invocation, authorization);
+  const claim = await Access.claim(invocation, authorization, serviceDid);
   assert(claim.ok, "authorization is valid");
 
   const unauthorized = await Access.claim(
@@ -69,6 +72,7 @@ test("Access.authorize <-> Access.claim", async () => {
       prf: [],
     },
     authorization,
+    serviceDid,
   );
 
   assertMatch(unauthorized?.error?.message ?? "", /Authorization does not/);
@@ -87,7 +91,7 @@ test("Fail authorization if issuer is not a subject", async () => {
   assert(result.ok, "authorization was issued");
   const authorization = result.ok;
 
-  const claim = await Access.claim(invocation, authorization);
+  const claim = await Access.claim(invocation, authorization, serviceDid);
   assertMatch(
     claim.error?.message ?? "",
     new RegExp(

@@ -4,7 +4,6 @@ import type {
   Await,
   CloseResult,
   ConnectionError,
-  ConsumerCommand,
   ConsumerCommandInvocation,
   ConsumerInvocationFor,
   ConsumerResultFor,
@@ -19,7 +18,6 @@ import type {
   ProviderSession,
   Query,
   QueryError,
-  QueryResult,
   Reference,
   Result,
   Selection,
@@ -91,7 +89,10 @@ class MemoryProvider<
     return fetch(this, request);
   }
   session(): ProviderSession<MemoryProtocol> {
-    const session = new MemoryProviderSession(this.memory, this.sessions);
+    const session = new MemoryProviderSession(
+      this.memory,
+      this.sessions,
+    );
     this.sessions.add(session);
     return session;
   }
@@ -173,7 +174,11 @@ class MemoryProviderSession<
   async invoke(
     { invocation, authorization }: UCAN<ConsumerCommandInvocation<Protocol>>,
   ) {
-    const { error } = await Access.claim(invocation, authorization);
+    const { error } = await Access.claim(
+      invocation,
+      authorization,
+      this.memory.serviceDid(),
+    );
 
     if (error) {
       return this.perform({
