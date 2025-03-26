@@ -23,7 +23,7 @@ import {
   syncRecipeBlobby,
 } from "@commontools/runner";
 import { storage } from "@commontools/runner";
-import { DID, Identity } from "@commontools/identity";
+import { DID, Identity, type Session } from "@commontools/identity";
 import { JSONSelector } from "../../memory/interface.ts";
 import { isObj } from "@commontools/utils";
 
