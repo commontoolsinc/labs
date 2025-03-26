@@ -24,17 +24,59 @@ const turndown = new TurndownService({
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const EmailProperties = {
-  id: { type: "string" },
-  threadId: { type: "string" },
-  labelIds: { type: "array", items: { type: "string" } },
-  snippet: { type: "string" },
-  subject: { type: "string" },
-  from: { type: "string" },
-  date: { type: "string" },
-  to: { type: "string" },
-  plainText: { type: "string" },
-  htmlContent: { type: "string" },
-  markdownContent: { type: "string" },
+  id: {
+    type: "string",
+    title: "Email ID",
+    description: "Unique identifier for the email",
+  },
+  threadId: {
+    type: "string",
+    title: "Thread ID",
+    description: "Identifier for the email thread",
+  },
+  labelIds: {
+    type: "array",
+    items: { type: "string" },
+    title: "Labels",
+    description: "Gmail labels assigned to the email",
+  },
+  snippet: {
+    type: "string",
+    title: "Snippet",
+    description: "Brief preview of the email content",
+  },
+  subject: {
+    type: "string",
+    title: "Subject",
+    description: "Email subject line",
+  },
+  from: {
+    type: "string",
+    title: "From",
+    description: "Sender's email address",
+  },
+  date: {
+    type: "string",
+    title: "Date",
+    description: "Date and time when the email was sent",
+  },
+  to: { type: "string", title: "To", description: "Recipient's email address" },
+  plainText: {
+    type: "string",
+    title: "Plain Text Content",
+    description: "Email content in plain text format (often empty)",
+  },
+  htmlContent: {
+    type: "string",
+    title: "HTML Content",
+    description: "Email content in HTML format",
+  },
+  markdownContent: {
+    type: "string",
+    title: "Markdown Content",
+    description:
+      "Email content converted to Markdown format. Often best for processing email contents.",
+  },
 } as const;
 
 const EmailSchema = {
