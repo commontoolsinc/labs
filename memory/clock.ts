@@ -13,9 +13,8 @@ class Clock {
    * Creates a clock with a differenc accuracy.
    */
   with(accuracy: number) {
-    return new Clock(accuracy)
+    return new Clock(accuracy);
   }
 }
 
-
-export default new Clock()
+export default new Clock();

@@ -9,19 +9,20 @@ import {
 } from "./interface.ts";
 import { refer } from "merkle-reference";
 import { unauthorized } from "./error.ts";
-import { VerifierIdentity } from "@commontools/identity";
+import { type DID } from "@commontools/identity";
 import { fromDID } from "./util.ts";
-
-// Derived from passphrase "implicit trust"
-const SERVICE_DID = "did:key:z6MksHnZGdHxNoCqcC3kPvBSo2goCzLSWheQ8LrVpAtQwgwW";
 
 /**
  * Claims access via provide authorization. Function either returns ok with
  * claimed access back or an error if authorization is invalid.
+ *
+ * Currently, we allow signing from `serviceDid`; in the future,
+ * we'll want to handle this via delegation.
  */
 export const claim = async <Access extends Invocation>(
   access: Access,
   authorization: Authorization<Invocation>,
+  serviceDid: DID,
 ): AsyncResult<Access, AuthorizationError> => {
   const claim = refer(access).toString();
   if (authorization.access[claim]) {
@@ -46,8 +47,7 @@ export const claim = async <Access extends Invocation>(
       const { ok: subject } = await fromDID(access.sub);
       if (
         !subject || subject.did() === issuer.did() ||
-        // At the moment allow invocations from SERVICE_DID
-        issuer.did() === SERVICE_DID
+        issuer.did() === serviceDid
       ) {
         return { ok: access };
       } else {

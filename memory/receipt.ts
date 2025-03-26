@@ -3,14 +3,22 @@ import { Receipt } from "./interface.ts";
 /**
  * Formats receipt to a string representation.
  */
-export const toString = <Command extends NonNullable<unknown>, Result extends NonNullable<unknown>, Effect>(
+export const toString = <
+  Command extends NonNullable<unknown>,
+  Result extends NonNullable<unknown>,
+  Effect,
+>(
   receipt: Receipt<Command, Result, Effect>,
 ) => JSON.stringify(receipt);
 
 /**
  * Parses receipt from a string representation.
  */
-export const fromString = <Command extends NonNullable<unknown>, Result extends NonNullable<unknown>, Effect>(
+export const fromString = <
+  Command extends NonNullable<unknown>,
+  Result extends NonNullable<unknown>,
+  Effect,
+>(
   source: string,
 ): Receipt<Command, Result, Effect> => JSON.parse(source);
 
