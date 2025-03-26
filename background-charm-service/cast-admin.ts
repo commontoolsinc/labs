@@ -7,7 +7,7 @@ import {
   storage,
 } from "@commontools/runner";
 import { type DID, Identity } from "@commontools/identity";
-import { Session } from "@commontools/identity";
+import { openSession } from "@commontools/identity";
 import {
   bgUpdaterCharmsSchema,
   CELL_CAUSE,
@@ -90,7 +90,7 @@ async function castRecipe() {
     console.log("Casting recipe...");
 
     // Create session and charm manager (matching main.ts pattern)
-    const session = await Session.open({
+    const session = await openSession({
       passphrase: OPERATOR_PASS,
       name: "recipe-caster",
       space: spaceId as DID,

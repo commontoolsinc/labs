@@ -23,7 +23,7 @@ import {
   syncRecipeBlobby,
 } from "@commontools/runner";
 import { storage } from "@commontools/runner";
-import { DID, Identity } from "@commontools/identity";
+import { DID, Identity, type Session } from "@commontools/identity";
 import { isObj } from "@commontools/utils";
 
 export type Charm = {
@@ -101,31 +101,6 @@ function filterOutEntity(
   if (!targetId) return list.get();
 
   return list.get().filter((charm) => !isSameEntity(charm, targetId));
-}
-
-/**
- * Representation authorization session.
- */
-export interface Session {
-  /**
-   * Whether session is for a private space vs public access space.
-   */
-  private: boolean;
-
-  /**
-   * Session name, which is pet name of the space session is for.
-   */
-  name: string;
-
-  /**
-   * DID identifier of the space this is a session for.
-   */
-  space: DID;
-
-  /**
-   * Identity used in this session.
-   */
-  as: Identity;
 }
 
 export class CharmManager {
