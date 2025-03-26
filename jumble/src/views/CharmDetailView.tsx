@@ -10,6 +10,7 @@ import {
 } from "@commontools/charm";
 import { isCell, isStream } from "@commontools/runner";
 import { isObj } from "@commontools/utils";
+import { ToggleButton, CheckboxToggle, CommonCheckbox, CommonLabel } from "../components/common";
 import React, {
   createContext,
   useCallback,
@@ -779,30 +780,16 @@ const OperationTab = () => {
   return (
     <div className="flex flex-col p-4">
       <div className="flex flex-col gap-3">
-        <div className="flex mb-2">
-          <button
-            type="button"
-            onClick={() => setOperationType("iterate")}
-            className={`flex-1 py-2 text-center border-2 ${
-              operationType === "iterate"
-                ? "border-black bg-black text-white"
-                : "border-gray-300 bg-white hover:border-gray-400"
-            }`}
-          >
-            Iterate
-          </button>
-          <button
-            type="button"
-            onClick={() => setOperationType("extend")}
-            className={`flex-1 py-2 text-center border-2 border-l-0 ${
-              operationType === "extend"
-                ? "border-black bg-black text-white"
-                : "border-gray-300 bg-white hover:border-gray-400"
-            }`}
-          >
-            Extend
-          </button>
-        </div>
+        <ToggleButton
+          options={[
+            { value: "iterate", label: "Iterate" },
+            { value: "extend", label: "Extend" }
+          ]}
+          value={operationType}
+          onChange={setOperationType}
+          size="large"
+          className="mb-2"
+        />
 
         <div className="flex flex-col gap-2">
           <div className="border border-gray-300">
@@ -870,18 +857,12 @@ const OperationTab = () => {
             )} */
             }
 
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="variants"
-                checked={showVariants}
-                onChange={(e) => setShowVariants(e.target.checked)}
-                className="border-2 border-black mr-2"
-              />
-              <label htmlFor="variants" className="text-sm font-medium">
-                Variants
-              </label>
-            </div>
+            <CheckboxToggle
+              id="variants"
+              label="Variants"
+              checked={showVariants}
+              onChange={setShowVariants}
+            />
 
             <select
               value={selectedModel}
@@ -965,45 +946,28 @@ const CodeTab = () => {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex items-center gap-4 p-4">
-        <span className="px-2 py-1 inline rounded-full text-xs bg-gray-100 border border-gray-300">
-          <span>Template Version: {templateVersion ?? "Missing"}</span>
-        </span>
-        <div className="flex items-center px-3 py-1 rounded-full bg-gray-100 border border-gray-300">
-          <input
-            type="checkbox"
+        <CommonLabel size="small">
+          Template Version: {templateVersion ?? "Missing"}
+        </CommonLabel>
+        <div className="flex items-center gap-4">
+          <CommonCheckbox
             id="fullCode"
+            label="Show Full Template"
             checked={showFullCode}
-            onChange={(e) => setShowFullCode(e.target.checked)}
-            className="border-2 border-black mr-2"
+            onChange={setShowFullCode}
+            size="small"
           />
-          <label
-            htmlFor="fullCode"
-            className="text-xs font-medium cursor-pointer"
-          >
-            Show Full Template
-          </label>
-        </div>
-
-        {/* Editor type selector */}
-        <div className="flex border border-gray-300 rounded-full overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setActiveEditor("code")}
-            className={`px-3 py-1 text-xs ${
-              activeEditor === "code" ? "bg-black text-white" : "bg-gray-100"
-            }`}
-          >
-            Code
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveEditor("spec")}
-            className={`px-3 py-1 text-xs ${
-              activeEditor === "spec" ? "bg-black text-white" : "bg-gray-100"
-            }`}
-          >
-            Specification
-          </button>
+          
+          {/* Editor type selector */}
+          <ToggleButton
+            options={[
+              { value: "code", label: "Code" },
+              { value: "spec", label: "Specification" }
+            ]}
+            value={activeEditor}
+            onChange={setActiveEditor}
+            size="small"
+          />
         </div>
       </div>
 
@@ -1078,9 +1042,9 @@ const DataTab = () => {
         charm={item.charm}
         showHash
       />&nbsp;
-      <span className="text-sm font-medium bg-gray-200 px-2 py-1 rounded">
+      <CommonLabel size="small">
         {item.relation} at {new Date(item.timestamp).toLocaleString()}
-      </span>
+      </CommonLabel>
       <div className="ml-4">
         {charmManager.getLineage(item.charm).map((item) => Lineage(item))}
       </div>
