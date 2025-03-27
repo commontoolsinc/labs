@@ -8,6 +8,11 @@ on:
     branches:
       - main
 
+# Define the list of binaries we're building
+# This makes it easy to add more binaries in the future
+env:
+  BINARIES: "toolshed bg-charm-service"
+
 jobs:
   workspace-tests:
     name: "Workspace Tests"
@@ -40,9 +45,9 @@ jobs:
       - name: Run tests
         run: deno task test-all
 
-  build-artifact:
-    name: "Build Artifact"
-    runs-on: ubuntu-latest
+  build-binaries:
+    name: "Build Binaries"
+    runs-on: ubuntu-24.04-32-core
     needs: ["workspace-tests"]
     environment: production
     permissions:
@@ -66,73 +71,101 @@ jobs:
             ~/.cache/deno
           key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
 
-      - name: Build artifact
-        run: deno task build-artifact
+      - name: Build binaries
+        run: deno task build-binaries
 
-      - name: Sign and package for main
+      # When on main branch, sign binaries, create attestations, and upload to GCS
+      - name: Process binaries for main branch
         if: github.ref == 'refs/heads/main'
         run: |
-          openssl dgst -sha256 -sign <(echo "${{ secrets.ARTIFACT_SIGNING_KEY }}") -out ./artifact.sig ./artifact
           mkdir -p release
-          tar -czf release/${{ github.sha }}.tar.gz ./artifact ./artifact.sig
+          mkdir -p signed
 
-      - name: Generate hashes for main
-        if: github.ref == 'refs/heads/main'
-        id: hash
-        run: |
-          sha256sum release/${{ github.sha }}.tar.gz > release/${{ github.sha }}.hash.txt
-          ARTIFACT_HASH=$(cat release/${{ github.sha }}.hash.txt | awk '{print $1}')
-          echo "Hash value: $ARTIFACT_HASH"
-          echo "hash=$ARTIFACT_HASH" >> $GITHUB_OUTPUT
+          # Process toolshed binary
+          echo "Processing binary: toolshed"
+          sha256sum ./dist/toolshed > ./dist/toolshed.hash.txt
+          TOOLSHED_HASH=$(cat ./dist/toolshed.hash.txt | awk '{print $1}')
+          echo "toolshed hash: $TOOLSHED_HASH"
+          echo "toolshed_hash=$TOOLSHED_HASH" >> $GITHUB_OUTPUT
 
-      - name: Generate binary hash for main
-        if: github.ref == 'refs/heads/main'
-        id: binary_hash
-        run: |
-          sha256sum ./artifact > binary.hash.txt
-          BINARY_HASH=$(cat binary.hash.txt | awk '{print $1}')
-          echo "Binary hash value: $BINARY_HASH"
-          echo "binary_hash=$BINARY_HASH" >> $GITHUB_OUTPUT
+          # Sign the toolshed binary
+          openssl dgst -sha256 -sign <(echo "${{ secrets.ARTIFACT_SIGNING_KEY }}") -out ./dist/toolshed.sig ./dist/toolshed
 
-      - name: Generate binary attestation for main
+          # Copy to signed directory
+          cp ./dist/toolshed ./signed/
+          cp ./dist/toolshed.sig ./signed/
+
+          # Process bg-charm-service binary
+          echo "Processing binary: bg-charm-service"
+          sha256sum ./dist/bg-charm-service > ./dist/bg-charm-service.hash.txt
+          BG_CHARM_SERVICE_HASH=$(cat ./dist/bg-charm-service.hash.txt | awk '{print $1}')
+          echo "bg-charm-service hash: $BG_CHARM_SERVICE_HASH"
+          echo "bg_charm_service_hash=$BG_CHARM_SERVICE_HASH" >> $GITHUB_OUTPUT
+
+          # Sign the bg-charm-service binary
+          openssl dgst -sha256 -sign <(echo "${{ secrets.ARTIFACT_SIGNING_KEY }}") -out ./dist/bg-charm-service.sig ./dist/bg-charm-service
+
+          # Copy to signed directory
+          cp ./dist/bg-charm-service ./signed/
+          cp ./dist/bg-charm-service.sig ./signed/
+
+          # Create a single tarball with all binaries and signatures
+          tar -czf release/labs-${{ github.sha }}.tar.gz -C signed .
+
+          # Generate hash for the tarball
+          sha256sum release/labs-${{ github.sha }}.tar.gz > release/labs-${{ github.sha }}.hash.txt
+          TARBALL_HASH=$(cat release/labs-${{ github.sha }}.hash.txt | awk '{print $1}')
+          echo "Tarball hash: $TARBALL_HASH"
+          echo "tarball_hash=$TARBALL_HASH" >> $GITHUB_OUTPUT
+        id: binary_processing
+
+      # Generate attestations for each binary
+      - name: Generate attestations for toolshed binary
         if: github.ref == 'refs/heads/main'
-        id: attest_binary
+        id: attest_toolshed
         uses: actions/attest-build-provenance@v1
         with:
-          subject-name: ./artifact
-          subject-digest: sha256:${{ steps.binary_hash.outputs.binary_hash }}
+          subject-name: ./dist/toolshed
+          subject-digest: sha256:${{ steps.binary_processing.outputs.toolshed_hash }}
 
-      - name: Upload binary attestation for main
+      - name: Generate attestations for bg-charm-service binary
         if: github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
+        id: attest_bg_charm_service
+        uses: actions/attest-build-provenance@v1
         with:
-          name: attest_binary
-          if-no-files-found: error
-          path: ${{ steps.attest_binary.outputs.bundle-path }}
+          subject-name: ./dist/bg-charm-service
+          subject-digest: sha256:${{ steps.binary_processing.outputs.bg_charm_service_hash }}
 
-      - name: Generate tarball attestation for main
+      # Generate attestation for the tarball
+      - name: Generate tarball attestation
         if: github.ref == 'refs/heads/main'
         id: attest_tarball
         uses: actions/attest-build-provenance@v1
         with:
-          subject-name: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/${{ github.sha }}.tar.gz
-          subject-digest: sha256:${{ steps.hash.outputs.hash }}
+          subject-name: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.tar.gz
+          subject-digest: sha256:${{ steps.binary_processing.outputs.tarball_hash }}
 
-      - name: Upload tarball attestation for main
+      # Upload all attestations
+      - name: Upload attestations
         if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
-          name: attest_tarball
+          name: binary_attestations
           if-no-files-found: error
-          path: ${{ steps.attest_tarball.outputs.bundle-path }}
+          path: |
+            ${{ steps.attest_toolshed.outputs.bundle-path }}
+            ${{ steps.attest_bg_charm_service.outputs.bundle-path }}
+            ${{ steps.attest_tarball.outputs.bundle-path }}
 
-      - name: Verify tarball attestation for main
+      # Verify attestations
+      - name: Verify attestations
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Verify tarball attestation
           echo "::group::Tarball attestation details"
-          gh attestation verify release/${{ github.sha }}.tar.gz -R ${{ github.repository }} --format json | jq
+          gh attestation verify release/labs-${{ github.sha }}.tar.gz -R ${{ github.repository }} --format json | jq
           echo "::endgroup::"
           if [ $? -eq 0 ]; then
             echo -e "\033[32m✓ Tarball attestation verified successfully\033[0m"
@@ -141,21 +174,29 @@ jobs:
             exit 1
           fi
 
-      - name: Verify binary attestation for main
-        if: github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "::group::Binary attestation details"
-          gh attestation verify ./artifact -R ${{ github.repository }} --format json | jq
+          # Verify toolshed binary attestation
+          echo "::group::toolshed attestation details"
+          gh attestation verify ./dist/toolshed -R ${{ github.repository }} --format json | jq
           echo "::endgroup::"
           if [ $? -eq 0 ]; then
-            echo -e "\033[32m✓ Binary attestation verified successfully\033[0m"
+            echo -e "\033[32m✓ toolshed attestation verified successfully\033[0m"
           else
-            echo -e "\033[31m✗ Binary attestation verification failed\033[0m"
+            echo -e "\033[31m✗ toolshed attestation verification failed\033[0m"
             exit 1
           fi
 
+          # Verify bg-charm-service binary attestation
+          echo "::group::bg-charm-service attestation details"
+          gh attestation verify ./dist/bg-charm-service -R ${{ github.repository }} --format json | jq
+          echo "::endgroup::"
+          if [ $? -eq 0 ]; then
+            echo -e "\033[32m✓ bg-charm-service attestation verified successfully\033[0m"
+          else
+            echo -e "\033[31m✗ bg-charm-service attestation verification failed\033[0m"
+            exit 1
+          fi
+
+      # Upload to GCS
       - name: Authenticate to Google Cloud for main
         if: github.ref == 'refs/heads/main'
         uses: google-github-actions/auth@v1
@@ -169,18 +210,27 @@ jobs:
       - name: Upload to GCS for main
         if: github.ref == 'refs/heads/main'
         run: |
-          gsutil cp release/${{ github.sha }}.tar.gz gs://commontools-build-artifacts/workspace-artifacts/
-          gsutil cp release/${{ github.sha }}.hash.txt gs://commontools-build-artifacts/workspace-artifacts/
+          gsutil cp release/labs-${{ github.sha }}.tar.gz gs://commontools-build-artifacts/workspace-artifacts/
+          gsutil cp release/labs-${{ github.sha }}.hash.txt gs://commontools-build-artifacts/workspace-artifacts/
 
+          # Print clickable links to the uploaded files
+          echo "::group::📦 Artifact Links"
+          echo "Tarball URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.tar.gz"
+          echo "Hash URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.hash.txt"
+          echo "::endgroup::"
+
+      # Upload binaries as artifacts for the integration tests
       - uses: actions/upload-artifact@v4
         with:
-          name: common-artifact
-          path: ./artifact
+          name: common-binaries
+          path: |
+            ./dist/toolshed
+            ./dist/bg-charm-service
 
   integration-test:
     name: "Integration Tests"
     runs-on: ubuntu-latest
-    needs: ["build-artifact"]
+    needs: ["build-binaries"]
     environment: production
     services:
       redis:
@@ -212,10 +262,10 @@ jobs:
 
       - name: Run Compiled Toolshed
         run: |
-          chmod +x ./common-artifact/artifact
+          chmod +x ./common-binaries/toolshed
           CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           CACHE_DIR=${GITHUB_WORKSPACE}/jumble/integration/cache \
-          ./common-artifact/artifact &
+          ./common-binaries/toolshed &
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled

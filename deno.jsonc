@@ -21,7 +21,7 @@
   "tasks": {
     "check": "./scripts/check-all.sh",
     "test-all": "./scripts/test-all.ts",
-    "build-artifact": "./scripts/build-artifact.ts"
+    "build-binaries": "./scripts/build-binaries.ts"
   },
   "compilerOptions": {
     "jsx": "react-jsxdev",
