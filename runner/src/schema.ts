@@ -8,7 +8,7 @@ import {
   isCellLink,
 } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { followLinks, resolvePath } from "./utils.ts";
+import { followLinks, resolveLinkToAlias } from "./utils.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -268,7 +268,7 @@ export function validateAndTransform(
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based of this value, as that
   // is what a setter would change when they update a value or reference.
-  const resolvedRef = resolvePath(doc, path, log);
+  const resolvedRef = resolveLinkToAlias(doc, path, log);
   doc = resolvedRef.cell;
   path = resolvedRef.path;
 

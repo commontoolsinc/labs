@@ -341,7 +341,22 @@ describe("followAliases", () => {
     cellA.send({ alias: { $alias: { cell: cellB, path: ["alias"] } } });
     cellB.send({ alias: { $alias: { cell: cellA, path: ["alias"] } } });
     const binding = { $alias: { path: ["alias"] } };
-    expect(() => followAliases(binding, cellA)).toThrow("Alias cycle detected");
+    expect(() => followAliases(binding, cellA)).toThrow("cycle detected");
+  });
+
+  it("should allow aliases in aliased paths", () => {
+    const testCell = getDoc(
+      {
+        a: { a: { $alias: { path: ["a", "b"] } }, b: { c: 1 } },
+      },
+      "should allow aliases in aliased paths 1",
+      "test",
+    );
+    const binding = { $alias: { path: ["a", "a", "c"] } };
+    const result = followAliases(binding, testCell);
+    expect(result.cell).toEqual(testCell);
+    expect(result.path).toEqual(["a", "b", "c"]);
+    expect(result.cell.getAtPath(result.path)).toBe(1);
   });
 });
 

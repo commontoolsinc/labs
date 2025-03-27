@@ -302,7 +302,17 @@ export function resolveLinkToValue(
   return followLinks(ref, seen, log);
 }
 
-export function resolvePath(
+export function resolveLinkToAlias(
+  doc: DocImpl<any>,
+  path: PropertyKey[],
+  log?: ReactivityLog,
+  seen: CellLink[] = [],
+): CellLink {
+  const ref = resolvePath(doc, path, log, seen);
+  return followLinks(ref, seen, log, true);
+}
+
+function resolvePath(
   doc: DocImpl<any>,
   path: PropertyKey[],
   log?: ReactivityLog,
@@ -351,25 +361,6 @@ export function resolvePath(
     };
   }
 
-  // Follow aliases on the last key, but no other kinds of links.
-  const targetValue = ref.cell.getAtPath(ref.path);
-  if (isAlias(targetValue)) {
-    log?.reads.push({ cell: ref.cell, path: ref.path });
-    const aliasResult = followAliases(targetValue, ref.cell, log);
-
-    // If the alias has schema info, it takes precedence
-    if (!aliasResult.schema && ref.schema) {
-      ref = {
-        cell: aliasResult.cell,
-        path: aliasResult.path,
-        schema: ref.schema,
-        ...(ref.rootSchema ? { rootSchema: ref.rootSchema } : {}),
-      };
-    } else {
-      ref = aliasResult;
-    }
-  }
-
   return ref;
 }
 
@@ -380,11 +371,17 @@ export function followLinks(
   ref: CellLink,
   seen: CellLink[] = [],
   log?: ReactivityLog,
+  onlyAliases = false,
 ): CellLink {
   let nextRef: CellLink | undefined;
 
   do {
-    const resolvedRef = resolvePath(ref.cell, ref.path, log, seen);
+    const resolvedRef = resolvePath(
+      ref.cell,
+      ref.path,
+      log,
+      seen,
+    );
 
     // Add schema back if we didn't get a new one
     if (!resolvedRef.schema && ref.schema) {
@@ -396,7 +393,9 @@ export function followLinks(
 
     const target = ref.cell.getAtPath(ref.path);
 
-    nextRef = maybeGetCellLink(target, ref.cell);
+    nextRef = !onlyAliases || isAlias(target)
+      ? maybeGetCellLink(target, ref.cell)
+      : undefined;
 
     if (nextRef) {
       // Add schema back if we didn't get a new one
@@ -420,7 +419,7 @@ export function followLinks(
         throw new Error(
           `Reference cycle detected ${
             JSON.stringify(ref.cell.entityId ?? "unknown")
-          } ${ref.path.join(".")}`,
+          }/[${ref.path.join(", ")}] ${JSON.stringify(seen)}`,
         );
       }
       seen.push(ref);
@@ -448,27 +447,11 @@ export function followAliases(
   alias: any,
   doc: DocImpl<any>,
   log?: ReactivityLog,
+  seen: CellLink[] = [],
 ): CellLink {
-  const seen = new Set<any>();
-  let result: CellLink;
+  if (!isAlias(alias)) throw new Error("Alias expected", alias);
 
-  while (isAlias(alias)) {
-    if (alias.$alias.cell) doc = alias.$alias.cell;
-    result = { ...alias.$alias, cell: doc } as CellLink;
-
-    if (seen.has(alias)) {
-      throw new Error(
-        `Alias cycle detected: ${JSON.stringify(alias)} in ${
-          JSON.stringify([...seen])
-        }`,
-      );
-    }
-    seen.add(alias);
-    alias = doc.getAtPath(alias.$alias.path);
-    if (isAlias(alias)) log?.reads.push({ cell: doc, path: alias.$alias.path });
-  }
-
-  return result!;
+  return followLinks({ cell: doc, ...alias.$alias }, seen, log, true);
 }
 
 /**
