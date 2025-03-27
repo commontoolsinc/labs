@@ -10,6 +10,7 @@ import {
 import {
   type DID,
   Identity,
+  KeyPairRaw,
   openSession,
   type Session,
 } from "@commontools/identity";
@@ -27,33 +28,34 @@ onError((e: Error) => {
 });
 
 async function setup(
-  data: { did: string; toolshed_url: string; operator_pass: string },
+  data: { did: string; toolshedUrl: string; rawIdentity: KeyPairRaw},
 ) {
   if (initialized) {
     console.log(`Worker: Already initialized, skipping setup`);
     return { setup: true, alreadyInitialized: true };
   }
 
-  const { did, toolshed_url, operator_pass } = data || {};
+  const { did, toolshedUrl, rawIdentity } = data || {};
   if (!did) {
     throw new Error("Worker missing did");
   }
-  if (!toolshed_url) {
-    throw new Error("Worker missing toolshed_url");
+  if (!toolshedUrl) {
+    throw new Error("Worker missing toolshedUrl");
   }
-  if (!operator_pass) {
-    throw new Error("Worker missing operator_pass");
+  if (!rawIdentity) {
+    throw new Error("Worker missing rawIdentity");
   }
 
+  const identity = await Identity.deserialize(rawIdentity); 
   // Initialize storage and remote connection
-  storage.setRemoteStorage(new URL(toolshed_url));
-  storage.setSigner(await Identity.fromPassphrase(operator_pass));
-  setBobbyServerUrl(toolshed_url);
+  storage.setRemoteStorage(new URL(toolshedUrl));
+  setBobbyServerUrl(toolshedUrl);
+  storage.setSigner(identity);
 
   // Initialize session
   spaceId = did as DID;
   currentSession = await openSession({
-    passphrase: operator_pass,
+    identity,
     name: "~background-service-worker",
     space: spaceId,
   });

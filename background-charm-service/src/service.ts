@@ -2,21 +2,29 @@ import { Identity } from "@commontools/identity";
 import { type Cell, storage } from "@commontools/runner";
 import { type BGCharmEntry, newGetFunc } from "@commontools/utils";
 import { log } from "./utils.ts";
-import { env } from "./env.ts";
 import { SpaceManager } from "./space-manager.ts";
 import { useCancelGroup } from "@commontools/runner";
+
+export interface BackgroundCharmServiceOptions {
+  identity: Identity,
+  toolshedUrl: string,
+}
 
 export class BackgroundCharmService {
   private charmsCell: Cell<Cell<BGCharmEntry>[]> | null = null;
   private isRunning = false;
   private charmSchedulers: Map<string, SpaceManager> = new Map();
+  private identity: Identity;
+  private toolshedUrl: string;
 
-  constructor() {
+  constructor(options: BackgroundCharmServiceOptions) {
+    this.identity = options.identity;
+    this.toolshedUrl = options.toolshedUrl;
   }
 
   async initialize() {
-    storage.setRemoteStorage(new URL(env.TOOLSHED_API_URL));
-    storage.setSigner(await Identity.fromPassphrase(env.OPERATOR_PASS));
+    storage.setRemoteStorage(new URL(this.toolshedUrl));
+    storage.setSigner(this.identity);
     this.charmsCell = await newGetFunc();
     await storage.syncCell(this.charmsCell, true);
     await storage.synced();
@@ -60,10 +68,12 @@ export class BackgroundCharmService {
     for (const did of dids) {
       let scheduler = this.charmSchedulers.get(did);
       if (!scheduler) {
+        // Should send a derived/non-top-level key
+        // to each space once delegation is working.
         scheduler = new SpaceManager({
           did,
-          toolshedUrl: env.TOOLSHED_API_URL,
-          operatorPass: env.OPERATOR_PASS,
+          toolshedUrl: this.toolshedUrl,
+          identity: this.identity,
         });
         this.charmSchedulers.set(did, scheduler);
         scheduler.start();
