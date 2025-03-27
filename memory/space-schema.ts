@@ -224,7 +224,7 @@ function loadPointer<Space extends MemorySpace>(
     }
     cellTarget = obj.$alias.cell["/"];
   } else if (isJSONCellLink(obj)) {
-    console.error("Source.cell: ", obj.cell);
+    //console.error("cell: ", obj.cell, "; path: ", obj.path);
     path = obj.path;
     cellTarget = obj.cell["/"];
   } else {
@@ -238,16 +238,16 @@ function loadPointer<Space extends MemorySpace>(
     of: `of:${cellTarget}`,
     cause: SelectAll,
   });
-  const lastFact = getFirstFact(selection);
-  if (lastFact === undefined) {
+  const fact = getFact(selection);
+  if (fact === undefined) {
     tracker.set(obj, [currentDoc, undefined]);
     tracker.exit(obj);
     return [currentDoc, undefined];
   } else {
-    const result = getAtPath(session, lastFact, lastFact, path, tracker);
-    tracker.set(obj, [lastFact, result]);
+    const result = getAtPath(session, fact, fact, path, tracker);
+    tracker.set(obj, [fact, result]);
     tracker.exit(obj);
-    return [lastFact, result];
+    return [fact, result];
   }
 }
 
@@ -270,8 +270,8 @@ function loadFacts<Space extends MemorySpace>(
 }
 
 // Gets the value of the first fact in the selection
-// TODO: should this be the last fact?
-function getFirstFact(
+// TODO(@ubik2) should this be the last fact?
+function getFact(
   selection: FactSelection,
 ): JSONValue | undefined {
   for (const [of, ofValue] of Object.entries(selection)) {
@@ -320,7 +320,7 @@ function resolveCells<Space extends MemorySpace>(
         tracker,
       );
       if (loadedObj === undefined) {
-        console.error("Got broken link");
+        console.error("Got broken link loading ", factIs);
         return null;
       }
       return resolveCells(session, loadedDoc, loadedObj, tracker);
