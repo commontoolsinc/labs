@@ -262,8 +262,8 @@ class StorageImpl implements Storage {
           : cellSchema,
       };
     }
+    // If we're not a cell, and no schema specified, fetch everything
     if (schemaContext === undefined) {
-      // default mode is to fetch everything
       schemaContext = { schema: true, rootSchema: true };
     }
     const entityCell = this._ensureSchemaIsSynced(

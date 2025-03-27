@@ -23,7 +23,6 @@ import type {
   Fact,
   JSONValue,
   MemorySpace,
-  Pointer,
   Query,
   QueryError,
   Reference,
@@ -469,12 +468,6 @@ export const selectFacts = function* <Space extends MemorySpace>(
       is: row.is ? JSON.parse(row.is) as JSONValue : undefined,
     };
   }
-};
-
-export const isPointer = (value: JSONValue): value is Pointer => {
-  const source = value as Partial<Pointer>;
-  return typeof source?.$alias?.cell?.["/"] === "string" ||
-    typeof source?.cell?.["/"] === "string";
 };
 
 /**

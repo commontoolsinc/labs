@@ -459,13 +459,8 @@ export class CharmManager {
 
   async syncSchema(
     entity: Cell<any>,
-    schema: JSONSelector,
     waitForStorage: boolean = false,
   ) {
-    await storage.syncSchemaCell(
-      entity,
-      { schema: schema, rootSchema: schema },
-      waitForStorage,
-    );
+    await storage.syncSchemaCell(entity, undefined, waitForStorage);
   }
 }

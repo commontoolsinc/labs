@@ -1646,3 +1646,120 @@ test(
     });
   },
 );
+
+test(
+  "list fact through alias without a cell value with schema query and schema filter",
+  DB,
+  async (session) => {
+    const v1 = Fact.assert({
+      the,
+      of: doc,
+      is: {
+        "value": {
+          "offices": {
+            "main": {
+              "name": "Bob Hope Airport",
+              "street": "2627 N Hollywood Way",
+              "city": "Burbank",
+            },
+          },
+          "employees": [
+            {
+              "name": "Bob",
+              "addresses": {
+                "home": {
+                  "name": "Mr. Bob Hope",
+                  "street": "2466 Southridge Drive",
+                  "city": "Palm Springs",
+                },
+                "work": {
+                  "$alias": {
+                    "path": ["offices", "main"],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const tr = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v1]),
+    });
+    const write = await session.transact(tr);
+    assert(write.ok);
+
+    // We'll use a schema selector to grab Bob's name and work address
+    const schemaSelector: SchemaSelector = {
+      [doc]: {
+        [the]: {
+          _: {
+            path: ["employees", "0"],
+            schemaContext: {
+              schema: {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "addresses": {
+                    "type": "object",
+                    "properties": {
+                      "work": {
+                        "type": "object",
+                        "additionalProperties": true,
+                      },
+                    },
+                  },
+                },
+              },
+              rootSchema: {}, // not bothering with this spec
+            },
+          },
+        },
+      },
+    };
+
+    const result = session.querySchema({
+      cmd: "/memory/graph/query",
+      iss: alice.did(),
+      sub: space.did(),
+      args: {
+        selectSchema: schemaSelector,
+      },
+      prf: [],
+    });
+
+    const cause = refer(Fact.unclaimed({ the, of: doc }));
+    // We should not have the name in the returned value, since our schema excludes it
+    const addressFact = {
+      [doc]: {
+        [the]: {
+          [cause.toString()]: {
+            is: {
+              "value": {
+                "employees": [
+                  {
+                    "name": "Bob",
+                    "addresses": {
+                      "work": {
+                        "name": "Bob Hope Airport",
+                        "street": "2627 N Hollywood Way",
+                        "city": "Burbank",
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    };
+
+    assertEquals(result, {
+      ok: { [space.did()]: addressFact },
+    });
+  },
+);

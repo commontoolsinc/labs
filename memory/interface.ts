@@ -765,27 +765,6 @@ export type SchemaContext = {
   rootSchema: JSONSchema | boolean;
 };
 
-export type Pointer =
-  | PointerV0
-  | PointerV1;
-
-export type PathEntry = string | number;
-export type PointerCell = { "/": string };
-
-export type PointerV0 = {
-  $alias?: void;
-  cell: PointerCell;
-  path: PathEntry[];
-};
-
-export type PointerV1 = {
-  cell?: void;
-  $alias: {
-    cell?: PointerCell;
-    path: PathEntry[];
-  };
-};
-
 export type Operation =
   | Transaction
   | Query

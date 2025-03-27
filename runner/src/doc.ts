@@ -1,5 +1,4 @@
 import {
-  $,
   cell as opaqueRef,
   deepEqual,
   type Frame,

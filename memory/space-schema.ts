@@ -5,8 +5,6 @@ import type {
   JSONObject,
   JSONValue,
   MemorySpace,
-  Pointer,
-  PointerV0,
   SchemaContext,
   SchemaPathSelector,
   SchemaSubscription,
@@ -17,6 +15,8 @@ import { isNumber, isObject, isString } from "./util.ts";
 import { arrayEqual } from "../runner/src/utils.ts";
 import { FactSelector, SelectAll, selectFacts } from "./space.ts";
 import { Database } from "@db/sqlite";
+import { isCell, isCellLink } from "../runner/src/cell.ts";
+import { isAlias } from "../builder/src/types.ts";
 export * from "./interface.ts";
 
 // This is the same structure as in space.ts, but there's also a different
@@ -43,11 +43,12 @@ class CycleTracker<K, V> {
     return true;
   }
 
-  exit(k: K, v: V | undefined = undefined) {
+  exit(k: K) {
     this.partial.delete(k);
-    if (v !== undefined) {
-      this.complete.set(k, v);
-    }
+  }
+
+  set(k: K, v: V) {
+    return this.complete.set(k, v);
   }
 
   has(k: K): boolean {
@@ -59,11 +60,10 @@ class CycleTracker<K, V> {
   }
 }
 
-export const isPointer = (value: JSONValue): value is Pointer => {
-  const source = value as Partial<Pointer>;
-  return typeof source?.$alias?.cell?.["/"] === "string" ||
-    typeof source?.cell?.["/"] === "string";
-};
+type PointerCycleTracker = CycleTracker<
+  JSONValue,
+  [JSONValue, JSONValue | undefined]
+>;
 
 export const selectSchema = <Space extends MemorySpace>(
   session: Session<Space>,
@@ -105,9 +105,10 @@ export const selectSchema = <Space extends MemorySpace>(
           result = checkFactMatch(
             session,
             factValue,
+            factValue,
             [],
             selector,
-            new CycleTracker<JSONValue, JSONValue | undefined>(),
+            new CycleTracker<JSONValue, [JSONValue, JSONValue | undefined]>(),
           );
         }
         set(selection, [of, the], cause, {
@@ -120,18 +121,31 @@ export const selectSchema = <Space extends MemorySpace>(
   return selection;
 };
 
+// Walk down the fact object along the path, loading/following any pointers we encounter along the way
 function getAtPath<Space extends MemorySpace>(
   session: Session<Space>,
+  currentDoc: JSONValue,
   fact: JSONValue | undefined,
   path: string[],
-  tracker: CycleTracker<JSONValue, JSONValue | undefined>,
-) {
+  tracker: PointerCycleTracker,
+): JSONValue | undefined {
   let cursor = fact;
   //console.log("Called getAtPath", fact, path);
   for (const [index, part] of path.entries()) {
-    if (cursor !== undefined && isPointer(cursor)) {
-      const loadedObj = loadPointer(session, cursor, tracker);
-      return getAtPath(session, loadedObj, path.slice(index), tracker);
+    if (isAlias(cursor) || isCellLink(cursor)) {
+      const [loadedDoc, loadedObj] = loadPointer(
+        session,
+        currentDoc,
+        cursor,
+        tracker,
+      );
+      return getAtPath(
+        session,
+        loadedDoc,
+        loadedObj,
+        path.slice(index),
+        tracker,
+      );
     }
     if (isObject(cursor) && part in (cursor as JSONObject)) {
       const cursorObj = cursor as JSONObject;
@@ -154,33 +168,55 @@ function getAtPath<Space extends MemorySpace>(
   return cursor;
 }
 
+// Load the pointer at the specified path
+// We will return both the full doc, and the path slice
+// Either of these documents may still contain pointers
+// The pointer may be local, in which case we don't actually load
 function loadPointer<Space extends MemorySpace>(
   session: Session<Space>,
+  currentDoc: JSONValue,
   obj: JSONValue,
-  tracker: CycleTracker<JSONValue, JSONValue | undefined>,
-): JSONValue | undefined {
+  tracker: CycleTracker<
+    JSONValue,
+    [JSONValue, JSONValue | undefined]
+  >,
+): [JSONValue, JSONValue | undefined] {
   if (tracker.has(obj)) {
-    return tracker.get(obj);
+    return tracker.get(obj)!;
   }
   //console.log("Cell Link: ", obj);
   if (!tracker.enter(obj)) {
     console.error("Cycle Detected!");
     // FIXME(@ubik2) Need to handle this
-    return null;
+    return [currentDoc, null];
   }
-  const source = obj as Partial<Pointer>;
   let cellTarget: string | undefined;
   let path: string[];
-  if (typeof source?.$alias?.cell?.["/"] === "string") {
-    cellTarget = source.$alias.cell["/"];
-    path = source.$alias.path.map((p) => p.toString());
-  } else if (typeof source?.cell?.["/"] === "string") {
-    cellTarget = source.cell["/"];
-    path = (source as PointerV0).path.map((p) => p.toString());
+  if (isAlias(obj)) {
+    path = obj.$alias.path.map((p) => p.toString());
+    if (obj.$alias.cell === undefined) {
+      // This is a local alias to part of our currentDoc,
+      // but it may need to load other pointers to get there
+      const localResult = getAtPath(
+        session,
+        currentDoc,
+        currentDoc,
+        path,
+        tracker,
+      );
+      tracker.set(obj, [currentDoc, localResult]);
+      tracker.exit(obj);
+      return [currentDoc, localResult];
+    }
+    cellTarget = obj.$alias.cell["/"];
+  } else if (isCellLink(obj) && isCell(obj.cell) && "/" in obj.cell) {
+    console.error("Source.cell: ", obj.cell);
+    path = obj.path.map((p) => p.toString());
+    cellTarget = obj.cell["/"] as string;
   } else {
-    console.error("Unable to load cell target");
+    console.error("Unable to load cell target", obj);
     tracker.exit(obj);
-    return undefined;
+    return [currentDoc, undefined];
   }
   const selection = {};
   loadFacts(selection, session, {
@@ -189,9 +225,16 @@ function loadPointer<Space extends MemorySpace>(
     cause: SelectAll,
   });
   const lastFact = getFirstFact(selection);
-  const result = getAtPath(session, lastFact, path, tracker);
-  tracker.exit(obj, result);
-  return result;
+  if (lastFact === undefined) {
+    tracker.set(obj, [currentDoc, undefined]);
+    tracker.exit(obj);
+    return [currentDoc, undefined];
+  } else {
+    const result = getAtPath(session, lastFact, lastFact, path, tracker);
+    tracker.set(obj, [lastFact, result]);
+    tracker.exit(obj);
+    return [lastFact, result];
+  }
 }
 
 function loadFacts<Space extends MemorySpace>(
@@ -212,12 +255,16 @@ function loadFacts<Space extends MemorySpace>(
   return selection;
 }
 
-// Gets the value of the last fact in the selection
+// Gets the value of the first fact in the selection
+// TODO: should this be the last fact?
 function getFirstFact(
   selection: FactSelection,
 ): JSONValue | undefined {
   for (const [of, ofValue] of Object.entries(selection)) {
     for (const [the, theValue] of Object.entries(ofValue)) {
+      if (isObject(theValue) && Object.entries(theValue).length > 1) {
+        console.warn("Got more than one fact");
+      }
       for (const [cause, causeValue] of Object.entries(theValue)) {
         if (causeValue.is === undefined) {
           return undefined;
@@ -230,11 +277,15 @@ function getFirstFact(
   return undefined;
 }
 
-// Recursively resolve the cells
+// Recursively resolve the cells. At this point, we know we want the whole thing.
 function resolveCells<Space extends MemorySpace>(
   session: Session<Space>,
+  currentDoc: JSONValue,
   factIs: JSONValue,
-  tracker: CycleTracker<JSONValue, JSONValue | undefined>,
+  tracker: CycleTracker<
+    JSONValue,
+    [JSONValue, JSONValue | undefined]
+  >,
 ): JSONValue {
   if (
     factIs === undefined || factIs === null || isString(factIs) ||
@@ -242,21 +293,28 @@ function resolveCells<Space extends MemorySpace>(
   ) {
     return factIs;
   } else if (Array.isArray(factIs)) {
-    return factIs.map((item) => resolveCells(session, item, tracker));
+    return factIs.map((item) =>
+      resolveCells(session, currentDoc, item, tracker)
+    );
   } else if (isObject(factIs)) {
     // First, see if we need special handling
-    if (isPointer(factIs)) {
-      const resolvedFactIs = loadPointer(session, factIs, tracker);
-      if (resolvedFactIs === undefined) {
+    if (isAlias(factIs) || isCellLink(factIs)) {
+      const [loadedDoc, loadedObj] = loadPointer(
+        session,
+        currentDoc,
+        factIs,
+        tracker,
+      );
+      if (loadedObj === undefined) {
         console.error("Got broken link");
         return null;
       }
-      return resolveCells(session, resolvedFactIs, tracker);
+      return resolveCells(session, loadedDoc, loadedObj, tracker);
     } else {
       // Regular object
       const resolvedObj: JSONObject = {};
       for (const [key, value] of Object.entries(factIs)) {
-        resolvedObj[key] = resolveCells(session, value, tracker);
+        resolvedObj[key] = resolveCells(session, currentDoc, value, tracker);
       }
       return resolvedObj;
     }
@@ -271,17 +329,19 @@ function resolveCells<Space extends MemorySpace>(
 // After this is complete, we may want to support cycles in our object
 function checkFactMatch<Space extends MemorySpace>(
   session: Session<Space>,
+  currentDoc: JSONValue,
   value: JSONValue | undefined,
   path: PropertyKey[],
   nodeSelector: SchemaPathSelector,
-  tracker: CycleTracker<JSONValue, JSONValue | undefined>,
+  tracker: PointerCycleTracker,
 ): JSONValue | undefined {
-  if (value !== undefined && isPointer(value)) {
-    value = loadPointer(session, value, tracker);
+  if (isAlias(value) || isCellLink(value)) {
+    [currentDoc, value] = loadPointer(session, currentDoc, value, tracker);
   }
   if (arrayEqual(nodeSelector.path, path)) {
     return (value === undefined) ? undefined : getSchemaIntersection(
       session,
+      currentDoc,
       value,
       nodeSelector.schemaContext,
       tracker,
@@ -310,6 +370,7 @@ function checkFactMatch<Space extends MemorySpace>(
         const rv = Array(value.length).fill(null);
         const subresult = checkFactMatch(
           session,
+          currentDoc,
           value[numericKeyValue],
           newPath,
           nodeSelector,
@@ -330,6 +391,7 @@ function checkFactMatch<Space extends MemorySpace>(
         newPath.push(nextSelectorPath);
         const subresult = checkFactMatch(
           session,
+          currentDoc,
           valueObj[nextSelectorPath],
           newPath,
           nodeSelector,
@@ -351,15 +413,16 @@ function checkFactMatch<Space extends MemorySpace>(
 // along the way.
 function getSchemaIntersection<Space extends MemorySpace>(
   session: Session<Space>,
+  currentDoc: JSONValue,
   object: JSONValue,
   { schema, rootSchema }: SchemaContext,
-  tracker: CycleTracker<JSONValue, JSONValue | undefined>,
+  tracker: PointerCycleTracker,
 ): JSONValue | undefined {
   if (
     schema === true || (isObject(schema) && Object.keys(schema).length == 0)
   ) {
     // These values in a schema match any object - resolve the rest of the cells, and return
-    return resolveCells(session, object, tracker);
+    return resolveCells(session, currentDoc, object, tracker);
   } else if (schema === false) {
     // This value rejects all objects - just return
     return undefined;
@@ -395,7 +458,7 @@ function getSchemaIntersection<Space extends MemorySpace>(
     if ("type" in schemaObj && schemaObj["type"] == "array") {
       const arrayObj = [];
       for (const item of object) {
-        const val = getSchemaIntersection(session, item, {
+        const val = getSchemaIntersection(session, currentDoc, item, {
           schema: schemaObj["items"],
           rootSchema,
         }, tracker);
@@ -409,10 +472,15 @@ function getSchemaIntersection<Space extends MemorySpace>(
     }
     return undefined;
   } else if (isObject(object)) {
-    if (isPointer(object)) {
-      const loaded = loadPointer(session, object, tracker);
-      if (loaded !== undefined) {
-        object = loaded;
+    if (isAlias(object) || isCellLink(object)) {
+      const [loadedDoc, loadedObj] = loadPointer(
+        session,
+        currentDoc,
+        object,
+        tracker,
+      );
+      if (loadedObj !== undefined) {
+        object = loadedObj;
       } else {
         // If we can't load the target, pretend it's an empty object
         console.error("Unable to load pointer");
@@ -421,6 +489,7 @@ function getSchemaIntersection<Space extends MemorySpace>(
       // Start over, since the object type may be different
       return getSchemaIntersection(
         session,
+        loadedDoc,
         object,
         { schema, rootSchema },
         tracker,
@@ -430,15 +499,18 @@ function getSchemaIntersection<Space extends MemorySpace>(
     if ("type" in schemaObj && schemaObj["type"] == "object") {
       for (const [propKey, propValue] of Object.entries(object)) {
         if (isObject(schemaObj.properties) && propKey in schemaObj.properties) {
-          const val = getSchemaIntersection(session, propValue, {
+          const val = getSchemaIntersection(session, currentDoc, propValue, {
             schema: schemaObj.properties[propKey],
             rootSchema,
           }, tracker);
           if (val !== undefined) {
             filteredObj[propKey] = val;
           }
-        } else if (isObject(schemaObj.additionalProperties)) {
-          const val = getSchemaIntersection(session, propValue, {
+        } else if (
+          isObject(schemaObj.additionalProperties) ||
+          schemaObj.additionalProperties === true
+        ) {
+          const val = getSchemaIntersection(session, currentDoc, propValue, {
             schema: schemaObj.additionalProperties,
             rootSchema,
           }, tracker);
