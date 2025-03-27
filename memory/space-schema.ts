@@ -15,7 +15,6 @@ import { isNumber, isObject, isString } from "./util.ts";
 import { arrayEqual } from "../runner/src/utils.ts";
 import { FactSelector, SelectAll, selectFacts } from "./space.ts";
 import { Database } from "@db/sqlite";
-import { isCell, isCellLink } from "../runner/src/cell.ts";
 import { isAlias } from "../builder/src/types.ts";
 export * from "./interface.ts";
 
@@ -64,6 +63,22 @@ type PointerCycleTracker = CycleTracker<
   JSONValue,
   [JSONValue, JSONValue | undefined]
 >;
+
+type JSONCellLink = { cell: { "/": string }; path: string[] };
+
+/**
+ * Check if value is a cell link. Unlike the isCellLink version, this does not check for a marker symbol, since that won't exist in the JSON object.
+ *
+ * @param {any} value - The value to check.
+ * @returns {boolean}
+ */
+function isJSONCellLink(value: any): value is JSONCellLink {
+  return (
+    typeof value === "object" && value !== null && isObject(value.cell) &&
+    "/" in value.cell &&
+    Array.isArray(value.path)
+  );
+}
 
 export const selectSchema = <Space extends MemorySpace>(
   session: Session<Space>,
@@ -130,9 +145,9 @@ function getAtPath<Space extends MemorySpace>(
   tracker: PointerCycleTracker,
 ): JSONValue | undefined {
   let cursor = fact;
-  //console.log("Called getAtPath", fact, path);
+  console.log("Called getAtPath", fact, path);
   for (const [index, part] of path.entries()) {
-    if (isAlias(cursor) || isCellLink(cursor)) {
+    if (isAlias(cursor) || isJSONCellLink(cursor)) {
       const [loadedDoc, loadedObj] = loadPointer(
         session,
         currentDoc,
@@ -209,10 +224,10 @@ function loadPointer<Space extends MemorySpace>(
       return [currentDoc, localResult];
     }
     cellTarget = obj.$alias.cell["/"];
-  } else if (isCellLink(obj) && isCell(obj.cell) && "/" in obj.cell) {
+  } else if (isJSONCellLink(obj)) {
     console.error("Source.cell: ", obj.cell);
-    path = obj.path.map((p) => p.toString());
-    cellTarget = obj.cell["/"] as string;
+    path = obj.path;
+    cellTarget = obj.cell["/"];
   } else {
     console.error("Unable to load cell target", obj);
     tracker.exit(obj);
@@ -298,7 +313,7 @@ function resolveCells<Space extends MemorySpace>(
     );
   } else if (isObject(factIs)) {
     // First, see if we need special handling
-    if (isAlias(factIs) || isCellLink(factIs)) {
+    if (isAlias(factIs) || isJSONCellLink(factIs)) {
       const [loadedDoc, loadedObj] = loadPointer(
         session,
         currentDoc,
@@ -335,7 +350,7 @@ function checkFactMatch<Space extends MemorySpace>(
   nodeSelector: SchemaPathSelector,
   tracker: PointerCycleTracker,
 ): JSONValue | undefined {
-  if (isAlias(value) || isCellLink(value)) {
+  if (isAlias(value) || isJSONCellLink(value)) {
     [currentDoc, value] = loadPointer(session, currentDoc, value, tracker);
   }
   if (arrayEqual(nodeSelector.path, path)) {
@@ -472,7 +487,7 @@ function getSchemaIntersection<Space extends MemorySpace>(
     }
     return undefined;
   } else if (isObject(object)) {
-    if (isAlias(object) || isCellLink(object)) {
+    if (isAlias(object) || isJSONCellLink(object)) {
       const [loadedDoc, loadedObj] = loadPointer(
         session,
         currentDoc,
