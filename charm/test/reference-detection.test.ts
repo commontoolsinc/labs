@@ -90,10 +90,10 @@ describe("Reference detection core functionality", () => {
 
   // Test recursive search for references
   it("should recursively search for references in deep structures", () => {
-    let foundReferences = [];
+    let foundReferences: string[] = [];
 
     // Mock a recursive search function similar to what we use in getReadingFrom
-    const recursiveSearch = (value) => {
+    const recursiveSearch = (value: any) => {
       if (!value) return;
 
       // Check for alias
@@ -162,10 +162,10 @@ describe("Reference detection core functionality", () => {
 
   // Test the behavior of our reference detection with mixed reference types
   it("should handle mixed reference types", () => {
-    const foundReferences = [];
+    const foundReferences: Array<{ type: string; id: string }> = [];
 
     // Mock a detection function that handles both cell links and aliases
-    const detectReferences = (value) => {
+    const detectReferences = (value: any) => {
       if (!value) return;
 
       // Check if value might be a cell link
