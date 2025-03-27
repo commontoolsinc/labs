@@ -145,7 +145,6 @@ function getAtPath<Space extends MemorySpace>(
   tracker: PointerCycleTracker,
 ): JSONValue | undefined {
   let cursor = fact;
-  console.log("Called getAtPath", fact, path);
   for (const [index, part] of path.entries()) {
     if (isAlias(cursor) || isJSONCellLink(cursor)) {
       const [loadedDoc, loadedObj] = loadPointer(
