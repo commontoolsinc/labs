@@ -5,7 +5,11 @@ import {
   createQueryResultProxy,
   type QueryResult,
 } from "./query-result-proxy.ts";
-import { diffAndUpdate, resolveLinkToValue, resolvePath } from "./utils.ts";
+import {
+  diffAndUpdate,
+  resolveLinkToAlias,
+  resolveLinkToValue,
+} from "./utils.ts";
 import { queueEvent, type ReactivityLog, subscribe } from "./scheduler.ts";
 import { type EntityId, getDocByEntityId, getEntityId } from "./doc-map.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
@@ -350,7 +354,7 @@ function createRegularCell<T>(
     get: () => validateAndTransform(doc, path, schema, log, rootSchema),
     set: (newValue: T) =>
       diffAndUpdate(
-        resolvePath(doc, path, log),
+        resolveLinkToAlias(doc, path, log),
         newValue,
         log,
         getTopFrame()?.cause,

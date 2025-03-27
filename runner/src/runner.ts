@@ -162,17 +162,13 @@ export function run<T, R = any>(
   const [cancel, addCancel] = useCancelGroup();
   cancels.set(resultCell, cancel);
 
-  // If the bindings are a cell, doc or doc link, convert them to an object
-  // where each property is a doc link.
-  // TODO(seefeld): If new keys are added after first load, this won't work.
-  // TODO(seefeld): Note why we need this. Is it still needed?
+  // If the bindings are a cell, doc or doc link, convert them to an alias
   if (
     isDoc(argument) ||
     isCellLink(argument) ||
     isCell(argument) ||
     isQueryResultForDereferencing(argument)
   ) {
-    // If it's a cell, turn it into a cell reference
     const ref = isCellLink(argument)
       ? argument
       : isCell(argument)
@@ -181,20 +177,7 @@ export function run<T, R = any>(
       ? getCellLinkOrThrow(argument)
       : ({ cell: argument, path: [] } satisfies CellLink);
 
-    // Get value, but just to get the keys. Throw if it isn't an object.
-    const value = ref.cell.getAsQueryResult(ref.path);
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-      // Create aliases for all the top level keys in the object
-      argument = Object.fromEntries(
-        Object.keys(value).map((key) => [
-          key,
-          { $alias: { cell: ref.cell, path: [...ref.path, key] } },
-        ]),
-      ) as T;
-    } else {
-      // Otherwise we just alias the whole thing
-      argument = { $alias: ref } as T;
-    }
+    argument = { $alias: ref } as T;
   }
 
   // Walk the recipe's schema and extract all default values
