@@ -170,9 +170,9 @@ const updateLimit = handler({
   state.limit.set(parseInt(detail?.value ?? "100") || 0);
 });
 
-const refreshAuthToken = async (auth: Auth) => {
+const refreshAuthToken = async (auth: Cell<Auth>) => {
   const body = {
-    refreshToken: auth.refreshToken,
+    refreshToken: auth.get().refreshToken,
   };
 
   console.log("refreshAuthToken", body);
