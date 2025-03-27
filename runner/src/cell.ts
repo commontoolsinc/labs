@@ -400,13 +400,6 @@ function createRegularCell<T>(
         }
       });
 
-      // Hacky retry logic for push only. See storage.ts for details on this
-      // retry approach and what we should really be doing instead.
-      if (!ref.cell.retry) ref.cell.retry = [];
-      ref.cell.retry.push((newBaseValue: any[]) =>
-        diffAndUpdate(ref, [...newBaseValue, ...valuesToWrite], log, cause)
-      );
-
       // If there is no array yet, create it first. We have to do this as a
       // separate operation, so that in the next steps [ID] is properly anchored
       // in the array.
@@ -417,6 +410,27 @@ function createRegularCell<T>(
 
       // Append the new values to the array.
       diffAndUpdate(ref, [...array, ...valuesToWrite], log, cause);
+
+      const appended = ref.cell.getAtPath(ref.path).slice(
+        -valuesToWrite.length,
+      );
+
+      // Hacky retry logic for push only. See storage.ts for details on this
+      // retry approach and what we should really be doing instead.
+      if (!ref.cell.retry) ref.cell.retry = [];
+      ref.cell.retry.push((newBaseValue: any[]) => {
+        // Unlikely, but maybe the conflict reset to undefined?
+        if (newBaseValue === undefined) {
+          newBaseValue = Array.isArray(schema?.default) ? schema.default : [];
+        }
+
+        // Serialize cell links that were appended during the push. This works
+        // because of the .toJSON() method on Cell.
+        const newValues = JSON.parse(JSON.stringify(appended));
+
+        // Reappend the new values.
+        return [...newBaseValue, ...newValues];
+      });
     },
     equals: (other: Cell<any>) =>
       JSON.stringify(self) === JSON.stringify(other),
