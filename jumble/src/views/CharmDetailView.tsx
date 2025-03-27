@@ -8,6 +8,7 @@ import {
   injectUserCode,
   iterate,
 } from "@commontools/charm";
+import { useCharmReferences } from "@/hooks/use-charm-references.ts";
 import { isCell, isStream } from "@commontools/runner";
 import { isObj } from "@commontools/utils";
 import {
@@ -1022,6 +1023,7 @@ const DataTab = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
   const { charmManager } = useCharmManager();
+  const { readingFrom, readBy, loading: loadingReferences } = useCharmReferences(charm);
   const [isArgumentExpanded, setIsArgumentExpanded] = useState(false);
   const [isResultExpanded, setIsResultExpanded] = useState(false);
   const [isArgumentSchemaExpanded, setIsArgumentSchemaExpanded] = useState(
@@ -1030,6 +1032,8 @@ const DataTab = () => {
   const [isResultSchemaExpanded, setIsResultSchemaExpanded] = useState(false);
   const [isSpecExpanded, setIsSpecExpanded] = useState(false);
   const [isLineageExpanded, setIsLineageExpanded] = useState(false);
+  const [isReadingFromExpanded, setIsReadingFromExpanded] = useState(false);
+  const [isReadByExpanded, setIsReadByExpanded] = useState(false);
 
   if (!charm) return null;
 
@@ -1197,6 +1201,78 @@ const DataTab = () => {
           )}
         </div>
       )}
+
+      {/* Reading From section */}
+      <div className="mt-4">
+        <button
+          type="button"
+          onClick={() => setIsReadingFromExpanded(!isReadingFromExpanded)}
+          className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+        >
+          <span className="text-md font-semibold">Reading From</span>
+          <span>{isReadingFromExpanded ? "▼" : "▶"}</span>
+        </button>
+
+        {isReadingFromExpanded && (
+          <div className="border border-gray-300 rounded p-2 bg-gray-50">
+            {loadingReferences ? (
+              <div className="text-sm p-2">Loading references...</div>
+            ) : readingFrom.length > 0 ? (
+              <div className="border border-gray-300 rounded bg-gray-50 p-2">
+                {/* @ts-expect-error JsonView is imported as any */}
+                <JsonView
+                  value={readingFrom.map((charm: Cell<Charm>) => ({
+                    id: charmId(charm),
+                    name: charm.get()?.$NAME || "Unnamed"
+                  }))}
+                  style={{
+                    background: "transparent",
+                    fontSize: "0.875rem",
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="text-sm p-2">This charm doesn't read from any other charms</div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Read By section */}
+      <div className="mt-4">
+        <button
+          type="button"
+          onClick={() => setIsReadByExpanded(!isReadByExpanded)}
+          className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+        >
+          <span className="text-md font-semibold">Being Read From</span>
+          <span>{isReadByExpanded ? "▼" : "▶"}</span>
+        </button>
+
+        {isReadByExpanded && (
+          <div className="border border-gray-300 rounded p-2 bg-gray-50">
+            {loadingReferences ? (
+              <div className="text-sm p-2">Loading references...</div>
+            ) : readBy.length > 0 ? (
+              <div className="border border-gray-300 rounded bg-gray-50 p-2">
+                {/* @ts-expect-error JsonView is imported as any */}
+                <JsonView
+                  value={readBy.map((charm: Cell<Charm>) => ({
+                    id: charmId(charm),
+                    name: charm.get()?.$NAME || "Unnamed"
+                  }))}
+                  style={{
+                    background: "transparent",
+                    fontSize: "0.875rem",
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="text-sm p-2">No charms are reading from this charm</div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

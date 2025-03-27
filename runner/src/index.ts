@@ -58,4 +58,8 @@ export {
   setBlobbyServerUrl,
 } from "./blobby-storage.ts";
 export { tsToExports } from "./local-build.ts";
-export { addCommonIDfromObjectID, maybeGetCellLink } from "./utils.ts";
+export { 
+  addCommonIDfromObjectID, 
+  maybeGetCellLink,
+  findAllAliasedDocs 
+} from "./utils.ts";
