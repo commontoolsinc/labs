@@ -621,9 +621,10 @@ class Subscription<Space extends MemorySpace> {
       });
     }
     const query = this.session.query(this.selector);
-    const reader = query.subscribe().getReader();
+    const subscription = query.subscribe();
     this.query = query;
-    this.reader = reader;
+    this.subscription = subscription;
+    this.reader = subscription.getReader();
 
     // TODO(gozala): Need to do this cleaner, but for now we just
     // broadcast when query returns so cell circuitry picks up changes.
