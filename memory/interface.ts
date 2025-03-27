@@ -1,4 +1,5 @@
 import type { Reference } from "merkle-reference";
+import { JSONSchema } from "../builder/src/types.ts";
 
 export type { Reference };
 
@@ -758,9 +759,10 @@ export type SchemaPathSelector = {
 };
 
 // This is a schema, together with its rootSchema for resolving $ref entries
+// In the future, we should include the boolean option in the JSONSchema type itself
 export type SchemaContext = {
-  schema: JSONSelector;
-  rootSchema: JSONSelector;
+  schema: JSONSchema | boolean;
+  rootSchema: JSONSchema | boolean;
 };
 
 export type Pointer =
@@ -782,40 +784,6 @@ export type PointerV1 = {
     cell?: PointerCell;
     path: PathEntry[];
   };
-};
-
-export type EmptyObject = Record<string | number | symbol, never>;
-/**
- * Simplification of JSONSchema only concerned with selection.
- */
-export type JSONSelector =
-  | ScalarSelector
-  | ObjectSelector
-  | ArraySelector
-  | { $ref: string }
-  | { anyOf: JSONSelector[] }
-  | boolean
-  | EmptyObject;
-
-export type ScalarSelector =
-  | { type: "null" }
-  | { type: "boolean" }
-  | { type: "string" }
-  | { type: "number" };
-
-export type ObjectSelector = {
-  type: "object";
-  // Full graph selection
-  properties?: Record<string, JSONSelector>;
-  // If some match it means subset.
-  additionalProperties?: boolean | JSONSelector;
-  required?: [string];
-};
-
-export type ArraySelector = {
-  type: "array";
-  // Match any full traversal
-  items?: JSONSelector;
 };
 
 export type Operation =

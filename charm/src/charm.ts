@@ -24,7 +24,6 @@ import {
 } from "@commontools/runner";
 import { storage } from "@commontools/runner";
 import { DID, Identity, type Session } from "@commontools/identity";
-import { JSONSelector } from "../../memory/interface.ts";
 import { isObj } from "@commontools/utils";
 
 export type Charm = {

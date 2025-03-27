@@ -355,10 +355,13 @@ function getSchemaIntersection<Space extends MemorySpace>(
   { schema, rootSchema }: SchemaContext,
   tracker: CycleTracker<JSONValue, JSONValue | undefined>,
 ): JSONValue | undefined {
-  if (schema == true || (isObject(schema) && Object.keys(schema).length == 0)) {
+  if (
+    schema === true || (isObject(schema) && Object.keys(schema).length == 0)
+  ) {
     // These values in a schema match any object - resolve the rest of the cells, and return
     return resolveCells(session, object, tracker);
-  } else if (schema == false) {
+  } else if (schema === false) {
+    // This value rejects all objects - just return
     return undefined;
   }
   if (!isObject(schema)) {
