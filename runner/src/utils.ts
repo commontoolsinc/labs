@@ -449,8 +449,7 @@ export function followAliases(
   log?: ReactivityLog,
   seen: CellLink[] = [],
 ): CellLink {
-  if (!isAlias(alias)) throw new Error("Alias expected", alias);
-
+  if (!isAlias(alias)) throw new Error(`Alias expected: ${JSON.stringify(alias)}`);
   return followLinks({ cell: doc, ...alias.$alias }, seen, log, true);
 }
 
