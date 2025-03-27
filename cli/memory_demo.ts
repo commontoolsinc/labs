@@ -35,6 +35,7 @@ async function main() {
   const authority = await Identity.fromPassphrase("ellyse5");
 
   const storageProvider: StorageProvider = new RemoteStorageProvider({
+    id: import.meta.url,
     address: new URL("/api/storage/memory", BASE_URL),
     space: authority.did(),
     as: authority,

@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
 import JsonViewImport from "@uiw/react-json-view";
 import { githubDarkTheme } from "@uiw/react-json-view/githubDark";
-
+import { storage } from "@commontools/runner";
 // Type assertion to help TypeScript understand this is a valid React component
 const JsonView: React.FC<{
   value: any;
@@ -20,7 +20,7 @@ const model = getDoc(Inspector.create(), "inspector", "").asCell();
 // Custom hooks
 export function useStorageBroadcast(callback: (data: any) => void) {
   useEffect(() => {
-    const messages = new BroadcastChannel("storage/remote");
+    const messages = new BroadcastChannel(storage.id);
     messages.onmessage = ({ data }) => callback(data);
     return () => messages.close();
   }, [callback]);
