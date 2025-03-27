@@ -248,9 +248,24 @@ class StorageImpl implements Storage {
 
   syncSchemaCell<T>(
     subject: DocImpl<T> | Cell<any>,
-    schemaContext: SchemaContext,
+    schemaContext?: SchemaContext,
     expectedInStorage: boolean = false,
   ): Promise<DocImpl<T>> | DocImpl<T> {
+    // If we aren't overriding the schema context, and we have context in the cell, use that
+    if (schemaContext === undefined && isCell(subject)) {
+      // An undefined schema in the cell means we should fetch everything
+      const cellSchema = (subject.schema !== undefined) ? subject.schema : true;
+      schemaContext = {
+        schema: cellSchema,
+        rootSchema: (subject.rootSchema !== undefined)
+          ? subject.rootSchema
+          : cellSchema,
+      };
+    }
+    if (schemaContext === undefined) {
+      // default mode is to fetch everything
+      schemaContext = { schema: true, rootSchema: true };
+    }
     const entityCell = this._ensureSchemaIsSynced(
       subject,
       schemaContext,
