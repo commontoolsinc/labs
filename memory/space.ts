@@ -437,7 +437,7 @@ export type FactSelector = {
   the: The | "_";
   of: Entity | "_";
   cause: Cause | "_";
-  is?: undefined | {};
+  is?: undefined | Record<string | number | symbol, never>;
   since?: number;
 };
 
