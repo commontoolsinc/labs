@@ -60,19 +60,35 @@ class BuildConfig {
     return this.path("toolshed", "index.ts");
   }
 
+  bgCharmServiceEntryPath() {
+    return this.path("background-charm-service", "src", "main.ts");
+  }
+
   toolshedEnvPath() {
     return this.path("toolshed", "COMPILED");
+  }
+
+  distDir() {
+    return this.path("dist");
+  }
+
+  distPath(binary: string) {
+    return this.path("dist", binary);
   }
 }
 
 async function build(config: BuildConfig): Promise<void> {
   let buildError: Error | void;
   try {
+    // Ensure dist directory exists
+    await ensureDistDir(config);
+
     // Build jumble first, do not remove deno.lock
     // until after this.
     await buildJumble(config);
     await prepareWorkspace(config);
     await buildToolshed(config);
+    await buildBgCharmService(config);
   } catch (e: unknown) {
     buildError = e as Error;
   }
@@ -80,6 +96,13 @@ async function build(config: BuildConfig): Promise<void> {
   // @ts-ignore This is used after being assigned.
   if (buildError) {
     throw buildError;
+  }
+}
+
+async function ensureDistDir(config: BuildConfig): Promise<void> {
+  const distDir = config.distDir();
+  if (!(await exists(distDir))) {
+    await Deno.mkdir(distDir, { recursive: true });
   }
 }
 
@@ -110,11 +133,12 @@ async function buildJumble(config: BuildConfig): Promise<void> {
 }
 
 async function buildToolshed(config: BuildConfig): Promise<void> {
+  console.log("Building toolshed binary...");
   const { success } = await new Deno.Command(Deno.execPath(), {
     args: [
       "compile",
       "--output",
-      "../artifact",
+      config.distPath("toolshed"),
       "--include",
       config.toolshedFrontendPath(),
       "--include",
@@ -127,8 +151,32 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
     stderr: "inherit",
   }).output();
   if (!success) {
+    console.error("Failed to build toolshed binary");
     Deno.exit(1);
   }
+  console.log("Toolshed binary built successfully");
+}
+
+async function buildBgCharmService(config: BuildConfig): Promise<void> {
+  console.log("Building background charm service binary...");
+  const { success } = await new Deno.Command(Deno.execPath(), {
+    args: [
+      "compile",
+      "--output",
+      config.distPath("bg-charm-service"),
+      "-A", // All permissions
+      "--unstable-worker-options", // Required by bg-charm-service
+      config.bgCharmServiceEntryPath(),
+    ],
+    cwd: config.root,
+    stdout: "inherit",
+    stderr: "inherit",
+  }).output();
+  if (!success) {
+    console.error("Failed to build background charm service binary");
+    Deno.exit(1);
+  }
+  console.log("Background charm service binary built successfully");
 }
 
 // `deno compile` appears to bundle *all* workspace
