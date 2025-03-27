@@ -262,7 +262,7 @@ export function unsafe_createParentBindings(
 }
 
 // Traverses binding and returns all docs reacheable through aliases.
-export function findAllAliasedDocs(
+export function findAllAliasedCells(
   binding: any,
   doc: DocImpl<any>,
 ): CellLink[] {
@@ -449,7 +449,9 @@ export function followAliases(
   log?: ReactivityLog,
   seen: CellLink[] = [],
 ): CellLink {
-  if (!isAlias(alias)) throw new Error(`Alias expected: ${JSON.stringify(alias)}`);
+  if (!isAlias(alias)) {
+    throw new Error(`Alias expected: ${JSON.stringify(alias)}`);
+  }
   return followLinks({ cell: doc, ...alias.$alias }, seen, log, true);
 }
 

@@ -232,27 +232,27 @@ export function getCellFromEntityId(
 }
 
 export function getCellFromLink<T>(
-  docLink: CellLink,
+  cellLink: CellLink,
   schema?: JSONSchema,
   log?: ReactivityLog,
 ): Cell<T>;
 export function getCellFromLink<S extends JSONSchema = JSONSchema>(
-  docLink: CellLink,
+  cellLink: CellLink,
   schema: S,
   log?: ReactivityLog,
 ): Cell<Schema<S>>;
 export function getCellFromLink(
-  docLink: CellLink,
+  cellLink: CellLink,
   schema?: JSONSchema,
   log?: ReactivityLog,
 ): Cell<any> {
-  if (!docLink.space) {
+  if (!cellLink.space) {
     throw new Error("Cell link has no space");
   }
-  const doc = isDoc(docLink.cell)
-    ? docLink.cell
-    : getDocByEntityId(docLink.space, getEntityId(docLink.cell)!, true)!;
-  return createCell(doc, docLink.path, log, schema);
+  const doc = isDoc(cellLink.cell)
+    ? cellLink.cell
+    : getDocByEntityId(cellLink.space, getEntityId(cellLink.cell)!, true)!;
+  return createCell(doc, cellLink.path, log, schema);
 }
 
 export function getImmutableCell<T>(
