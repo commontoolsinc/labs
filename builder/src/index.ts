@@ -10,6 +10,11 @@ export {
   render,
 } from "./module.ts";
 export {
+  getRecipeEnvironment,
+  type RecipeEnvironment,
+  setRecipeEnvironment,
+} from "./env.ts";
+export {
   getTopFrame,
   popFrame,
   pushFrame,

@@ -2,6 +2,7 @@ import { h } from "@commontools/html";
 import {
   cell,
   derive,
+  getRecipeEnvironment,
   handler,
   ID,
   JSONSchema,
@@ -20,6 +21,8 @@ const turndown = new TurndownService({
   codeBlockStyle: "fenced",
   emDelimiter: "*",
 });
+
+const env = getRecipeEnvironment();
 
 turndown.addRule("removeStyleTags", {
   filter: ["style"],
@@ -178,7 +181,7 @@ const refreshAuthToken = async (auth: Auth) => {
   console.log("refreshAuthToken", body);
 
   const refresh_response = await fetch(
-    "/api/integrations/google-oauth/refresh",
+    new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
     {
       method: "POST",
       body: JSON.stringify(body),

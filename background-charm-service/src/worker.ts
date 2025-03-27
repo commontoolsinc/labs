@@ -5,6 +5,7 @@ import {
   isStream,
   onError,
   setBobbyServerUrl,
+  setRecipeEnvironment,
   storage,
 } from "@commontools/runner";
 import {
@@ -12,7 +13,6 @@ import {
   Identity,
   KeyPairRaw,
   openSession,
-  type Session,
 } from "@commontools/identity";
 
 let initialized = false;
@@ -28,7 +28,7 @@ onError((e: Error) => {
 });
 
 async function setup(
-  data: { did: string; toolshedUrl: string; rawIdentity: KeyPairRaw},
+  data: { did: string; toolshedUrl: string; rawIdentity: KeyPairRaw },
 ) {
   if (initialized) {
     console.log(`Worker: Already initialized, skipping setup`);
@@ -46,11 +46,15 @@ async function setup(
     throw new Error("Worker missing rawIdentity");
   }
 
-  const identity = await Identity.deserialize(rawIdentity); 
+  const identity = await Identity.deserialize(rawIdentity);
+  const apiUrl = new URL(toolshedUrl);
   // Initialize storage and remote connection
-  storage.setRemoteStorage(new URL(toolshedUrl));
+  storage.setRemoteStorage(apiUrl);
   setBobbyServerUrl(toolshedUrl);
   storage.setSigner(identity);
+  setRecipeEnvironment({
+    apiUrl,
+  });
 
   // Initialize session
   spaceId = did as DID;
