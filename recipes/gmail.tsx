@@ -203,7 +203,7 @@ const googleUpdater = handler(
     console.log("googleUpdater!");
 
     if (!state.auth.get().token) {
-      console.warn("no token");
+      console.warn("no token found in auth cell");
       return;
     }
 
@@ -211,7 +211,7 @@ const googleUpdater = handler(
 
     console.log("gmailFilterQuery", gmailFilterQuery);
 
-    fetchEmail(
+    return fetchEmail(
       state.auth,
       state.settings.limit,
       gmailFilterQuery,
@@ -434,7 +434,7 @@ export async function fetchEmail(
 
   if (!listData.messages || !Array.isArray(listData.messages)) {
     console.log("No messages found in response");
-    return { messages: [] };
+    return;
   }
 
   // Filter out existing messages
@@ -444,7 +444,7 @@ export async function fetchEmail(
 
   if (newMessages.length === 0) {
     console.log("No new messages to fetch");
-    return { messages: [] };
+    return;
   }
 
   const batchSize = 100;
@@ -493,7 +493,6 @@ export async function fetchEmail(
     allDetailedMessages.length,
     "messages total",
   );
-  return { messages: allDetailedMessages };
 }
 
 const updateGmailFilterQuery = handler<
