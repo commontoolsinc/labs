@@ -64,6 +64,10 @@ class BuildConfig {
     return this.path("background-charm-service", "src", "main.ts");
   }
 
+  bgCharmServiceWorkerPath() {
+    return this.path("background-charm-service", "src", "worker.ts");
+  }
+
   toolshedEnvPath() {
     return this.path("toolshed", "COMPILED");
   }
@@ -164,6 +168,8 @@ async function buildBgCharmService(config: BuildConfig): Promise<void> {
       "compile",
       "--output",
       config.distPath("bg-charm-service"),
+      "--include",
+      config.bgCharmServiceWorkerPath(),
       "-A", // All permissions
       "--unstable-worker-options", // Required by bg-charm-service
       config.bgCharmServiceEntryPath(),
