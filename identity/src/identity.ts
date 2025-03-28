@@ -86,6 +86,17 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return new Identity(signer);
   }
 
+  // Like `fromPkcs8` but forces the usage of `@noble/ed25519`
+  // implementation, making private key material available to the context.
+  static async fromPkcs8FallbackImplementation<ID extends DIDKey>(
+    pkcs8: Uint8Array,
+  ): Promise<Identity<ID>> {
+    const signer = await Ed25519Signer.fromPkcs8FallbackImplementation<ID>(
+      pkcs8,
+    );
+    return new Identity(signer);
+  }
+
   static async fromMnemonic<ID extends DIDKey>(
     mnemonic: string,
   ): Promise<Identity<ID>> {
