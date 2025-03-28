@@ -13,9 +13,6 @@ import {
 } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// Replace the Zod CalendarEvent type with JSONSchema
 const CalendarEventSchema = {
   type: "object",
   properties: {
@@ -31,7 +28,6 @@ const CalendarEventSchema = {
 } as const satisfies JSONSchema;
 type CalendarEvent = Schema<typeof CalendarEventSchema>;
 
-// Replace the Zod Auth type with JSONSchema, matching gmail.tsx format
 const AuthSchema = {
   type: "object",
   properties: {
@@ -53,7 +49,6 @@ const AuthSchema = {
 } as const satisfies JSONSchema;
 type Auth = Schema<typeof AuthSchema>;
 
-// Replace the Zod Recipe type with JSONSchema, matching gmail.tsx format
 const GcalImporterInputs = {
   type: "object",
   properties: {
@@ -79,7 +74,6 @@ const GcalImporterInputs = {
   description: "GCal Importer",
 } as const satisfies JSONSchema;
 
-// Update ResultSchema to match JSONSchema format from gmail.tsx
 const ResultSchema = {
   type: "object",
   properties: {
@@ -94,7 +88,6 @@ const ResultSchema = {
   },
 } as const satisfies JSONSchema;
 
-// Handler to update the limit for events to import
 const updateLimit = handler({
   type: "object",
   properties: {
@@ -112,7 +105,6 @@ const updateLimit = handler({
   state.limit.set(parseInt(detail?.value ?? "250") || 0);
 });
 
-// Handler to update the calendar ID
 const updateCalendarId = handler({
   type: "object",
   properties: {
@@ -130,7 +122,6 @@ const updateCalendarId = handler({
   state.calendarId.set(detail?.value ?? "primary");
 });
 
-// Add token refresh function matching gmail.tsx
 const refreshAuthToken = async (auth: Cell<Auth>) => {
   const body = {
     refreshToken: auth.get().refreshToken,
@@ -149,7 +140,6 @@ const refreshAuthToken = async (auth: Cell<Auth>) => {
   return refresh_response as Auth;
 };
 
-// The updater now fetches calendar events using Fetch, updated to match gmail.tsx style
 const calendarUpdater = handler(
   {},
   {
@@ -183,7 +173,6 @@ const calendarUpdater = handler(
   },
 );
 
-// Helper function to fetch calendar events using the Google Calendar API
 export async function fetchCalendar(
   auth: Cell<Auth>,
   maxResults: number = 250,
@@ -265,7 +254,6 @@ export async function fetchCalendar(
   }
 }
 
-// Export the recipe, wiring up state cells, UI and the updater, matching gmail.tsx style
 export default recipe(
   GcalImporterInputs,
   ResultSchema,
