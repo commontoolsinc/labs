@@ -5,7 +5,6 @@ import {
   Cell,
   DocImpl,
   EntityId,
-  findAllAliasedDocs,
   getEntityId,
   maybeGetCellLink,
   run,

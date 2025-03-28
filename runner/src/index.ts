@@ -60,6 +60,5 @@ export {
 export { tsToExports } from "./local-build.ts";
 export { 
   addCommonIDfromObjectID, 
-  maybeGetCellLink,
-  findAllAliasedDocs 
+  maybeGetCellLink
 } from "./utils.ts";
