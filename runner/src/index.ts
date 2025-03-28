@@ -7,6 +7,7 @@ export {
   run as addAction,
   unschedule as removeAction,
 } from "./scheduler.ts";
+export { getRecipeEnvironment, setRecipeEnvironment } from "./env.ts";
 export type { DocImpl } from "./doc.ts";
 export type { Cell, CellLink, Stream } from "./cell.ts";
 export type { QueryResult } from "./query-result-proxy.ts";
