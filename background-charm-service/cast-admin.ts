@@ -14,6 +14,7 @@ import {
   SYSTEM_SPACE_ID,
 } from "@commontools/utils";
 import { getIdentity } from "./src/utils.ts";
+import { env } from "./src/env.ts";
 
 const { recipePath, name, quit } = parseArgs(
   Deno.args,
@@ -37,7 +38,10 @@ if (!recipePath) {
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
 
-const identity = await getIdentity(Deno.env.get("IDENTITY"), Deno.env.get("OPERATOR_PASS"));
+const identity = await getIdentity(
+  Deno.env.get("IDENTITY"),
+  Deno.env.get("OPERATOR_PASS"),
+);
 
 storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
@@ -58,6 +62,21 @@ async function castRecipe() {
   });
 
   try {
+    // Cast the recipe on the cell or with undefined if no cell
+    console.log("Casting recipe...");
+
+    const identity = await Identity.fromPkcs8(Deno.readFileSync("key.pem"));
+    // const identity = await Identity.fromPassphrase("common user");
+
+    const session = await openSession({
+      identity,
+      name: "toolshed-system",
+      space: spaceId as DID,
+    });
+
+    // Create charm manager for the specified space
+    const charmManager = new CharmManager(session);
+
     // Load and compile the recipe first
     console.log("Loading recipe...");
     const recipeSrc = await Deno.readTextFile(recipePath!);
@@ -82,21 +101,8 @@ async function castRecipe() {
     // Ensure the cell is synced
     storage.syncCell(targetCell, true);
     await storage.synced();
-
-    console.log("Getting cell...");
-
-    // Cast the recipe on the cell or with undefined if no cell
-    console.log("Casting recipe...");
-
-    // Create session and charm manager (matching main.ts pattern)
-    const session = await openSession({
-      identity,
-      name: "recipe-caster",
-      space: spaceId as DID,
-    });
-
-    // Create charm manager for the specified space
-    const charmManager = new CharmManager(session);
+    const charms = charmManager.getCharms();
+    console.log({ charms: charms.get() });
 
     const charm = await charmManager.runPersistent(
       recipe,
