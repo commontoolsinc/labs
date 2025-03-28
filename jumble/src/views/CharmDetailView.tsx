@@ -1245,7 +1245,7 @@ const DataTab = () => {
           onClick={() => setIsReadByExpanded(!isReadByExpanded)}
           className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
         >
-          <span className="text-md font-semibold">Being Read From</span>
+          <span className="text-md font-semibold">Read By</span>
           <span>{isReadByExpanded ? "▼" : "▶"}</span>
         </button>
 
