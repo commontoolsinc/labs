@@ -59,7 +59,12 @@ export async function getIdentity(identityPath?: string, operatorPass?: string):
     console.log(`Using identity at ${identityPath}`);
     try {
       const pkcs8Key = await Deno.readFile(identityPath);
-      return await Identity.fromPkcs8(pkcs8Key);
+      // Deno does not support serializing `CryptoKey`, safely
+      // passing keys to workers. Explicitly use the fallback implementation,
+      // which makes key material available to the JS context, in order
+      // to transfer key material to workers.
+      // https://github.com/denoland/deno/issues/12067#issuecomment-1975001079
+      return await Identity.fromPkcs8FallbackImplementation(pkcs8Key);
     } catch (e) {
       throw new Error(`Could not read key at ${identityPath}.`);
     }

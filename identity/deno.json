@@ -5,6 +5,7 @@
   },
   "exports": "./src/index.ts",
   "imports": {
+    "@noble/ed25519": "npm:@noble/ed25519@^2.2.3",
     "@scure/bip39": "npm:@scure/bip39@^1.5.4"
   }
 }

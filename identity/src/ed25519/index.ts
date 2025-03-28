@@ -61,6 +61,14 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
     );
   }
 
+  // Like `fromRaw` but forces the usage of `@noble/ed25519`
+  // implementation, making private key material available to the context.
+  static async fromRawFallbackImplementation<ID extends DIDKey>(
+    rawPrivateKey: Uint8Array,
+  ): Promise<Ed25519Signer<ID>> {
+    return new Ed25519Signer(await NobleEd25519Signer.fromRaw(rawPrivateKey));
+  }
+
   static async generate<ID extends DIDKey>(): Promise<Ed25519Signer<ID>> {
     return new Ed25519Signer(
       (await isNativeEd25519Supported())
@@ -85,6 +93,15 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
   ): Promise<Ed25519Signer<ID>> {
     const raw = pkcs8ToEd25519Raw(fromPEM(pkcs8));
     return await Ed25519Signer.fromRaw(raw);
+  }
+
+  // Like `fromPkcs8` but forces the usage of `@noble/ed25519`
+  // implementation, making private key material available to the context.
+  static async fromPkcs8FallbackImplementation<ID extends DIDKey>(
+    pkcs8: Uint8Array,
+  ): Promise<Ed25519Signer<ID>> {
+    const raw = pkcs8ToEd25519Raw(fromPEM(pkcs8));
+    return await Ed25519Signer.fromRawFallbackImplementation(raw);
   }
 
   static async fromMnemonic<ID extends DIDKey>(
