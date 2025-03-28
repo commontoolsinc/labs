@@ -7,7 +7,6 @@ import {
   storage,
 } from "@commontools/runner";
 import { type DID, Identity } from "@commontools/identity";
-import { openSession } from "@commontools/identity";
 import {
   bgUpdaterCharmsSchema,
   CELL_CAUSE,
@@ -68,11 +67,12 @@ async function castRecipe() {
     const identity = await Identity.fromPkcs8(Deno.readFileSync("key.pem"));
     // const identity = await Identity.fromPassphrase("common user");
 
-    const session = await openSession({
-      identity,
+    const session = {
+      private: false,
+      as: identity,
       name: "toolshed-system",
       space: spaceId as DID,
-    });
+    };
 
     // Create charm manager for the specified space
     const charmManager = new CharmManager(session);
