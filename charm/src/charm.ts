@@ -275,8 +275,12 @@ export class CharmManager {
       recipeId = await this.syncRecipe(charm);
       recipe = getRecipe(recipeId!)!;
     } catch (e) {
-      // Unable to get recipe for charm
-      // This typically means the charm isn't properly configured in toolshed
+      console.warn("recipeId", recipeId);
+      console.warn("recipe", recipe);
+      console.warn("charm", charm.get());
+      console.warn(
+        `Not a charm (check toolshed?): ${JSON.stringify(getEntityId(charm))}`,
+      );
       throw e;
     }
 
