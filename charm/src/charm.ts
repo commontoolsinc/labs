@@ -400,7 +400,7 @@ export class CharmManager {
         }
       }
 
-      // TODO: Implement recursive scan with proper depth limits to prevent stack overflow
+      // TODO(#758): Implement recursive scan with proper depth limits to prevent stack overflow
       // Currently using flat scan of top-level properties for stability
     } catch (error) {
       console.error("Error finding references in charm arguments:", error);
@@ -545,7 +545,7 @@ export class CharmManager {
               }
             }
 
-            // TODO: Implement recursive scan with proper depth limits to prevent stack overflow
+            // TODO(#758): Implement recursive scan with proper depth limits to prevent stack overflow
             // Currently using flat scan of top-level properties for stability
           }
         }
