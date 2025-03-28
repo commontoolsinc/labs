@@ -42,7 +42,7 @@ export class SpaceManager {
     this.maxRetries = options.maxRetries ?? 3;
     this.pollingIntervalMs = options.pollingIntervalMs ?? 100;
     this.deactivationTimeoutMs = options.deactivationTimeoutMs ?? 10000;
-    this.rerunIntervalMs = options.rerunIntervalMs ?? 6000;
+    this.rerunIntervalMs = options.rerunIntervalMs ?? 60000;
     this.workerController = new WorkerController(this.did);
     this.timeoutMs = options.timeoutMs ?? 10000;
     log(`Charm scheduler initialized`);
