@@ -12,6 +12,14 @@ import { sleep } from "@commontools/utils/sleep";
 
 let FRAME_IDS = 0;
 
+// Currently, recipes are expected to handle heavy processing,
+// and backgrounding the tab affects the timers. In the future,
+// we could handle this more dynamically.
+// As this will need to be influenced by heuristics, and currently,
+// usually wanting to wait for a recipe to finish processing,
+// we will not "crash tabs" yet until things settle.
+const HEALTH_CHECKING_ENABLED = false;
+
 // Delay, in ms, after starting page load before
 // health checks result in freezing content.
 const HEALTH_CHECK_LOAD_DELAY = 5000;
@@ -359,6 +367,10 @@ export class CommonIframeSandboxElement extends LitElement {
   private healthCheck?: HealthCheck;
 
   private async requestHealthCheck() {
+    if (!HEALTH_CHECKING_ENABLED) {
+      return;
+    }
+
     if (this.healthCheck) {
       this.healthCheck.abort();
       this.healthCheck = undefined;
