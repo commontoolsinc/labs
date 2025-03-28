@@ -90,7 +90,7 @@ describe("Reference detection core functionality", () => {
 
   // Test recursive search for references
   it("should recursively search for references in deep structures", () => {
-    let foundReferences: string[] = [];
+    const foundReferences: string[] = [];
 
     // Mock a recursive search function similar to what we use in getReadingFrom
     const recursiveSearch = (value: any) => {
