@@ -9,46 +9,22 @@ export type Session = {
   as: Identity;
 };
 
-export const openSessionFromPassphrase = async (
-  { passphrase, space, name }: {
-    passphrase: string;
-    space: DID;
-    name: string;
-  },
-) => ({
-  private: name.startsWith("~"),
-  name,
-  space,
-  as: await Identity.fromPassphrase(passphrase),
-});
-
-export const createSessionFromPassphrase = async (
-  { passphrase, name }: { passphrase: string; name: string },
-) => {
-  const account = await Identity.fromPassphrase(passphrase);
-  const space = await account.derive(name);
-
-  return {
-    private: name.startsWith("~"),
-    name,
-    space: space.did(),
-    as: space,
-  };
-};
-
-export const openSession = async (
+// Create a session where `Identity` is used directly and not derived.
+export const createAdminSession = async (
   { identity, space, name }: {
     identity: Identity;
     space: DID;
     name: string;
   },
-) => await ({
-  private: name.startsWith("~"),
-  name,
-  space,
-  as: identity,
-});
+) =>
+  await ({
+    private: name.startsWith("~"),
+    name,
+    space,
+    as: identity,
+  });
 
+// Create a session where `Identity` is used to derive a space key.
 export const createSession = async (
   { identity, name }: { identity: Identity; name: string },
 ) => {

@@ -9,10 +9,10 @@ import {
   storage,
 } from "@commontools/runner";
 import {
+  createAdminSession,
   type DID,
   Identity,
   KeyPairRaw,
-  openSession,
 } from "@commontools/identity";
 
 let initialized = false;
@@ -58,7 +58,7 @@ async function setup(
 
   // Initialize session
   spaceId = did as DID;
-  currentSession = await openSession({
+  currentSession = await createAdminSession({
     identity,
     name: "~background-service-worker",
     space: spaceId,
