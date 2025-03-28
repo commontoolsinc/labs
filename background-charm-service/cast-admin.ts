@@ -7,7 +7,7 @@ import {
   storage,
 } from "@commontools/runner";
 import { type DID, Identity } from "@commontools/identity";
-import { openSession } from "@commontools/identity";
+import { createAdminSession } from "@commontools/identity";
 import {
   bgUpdaterCharmsSchema,
   CELL_CAUSE,
@@ -37,7 +37,10 @@ if (!recipePath) {
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
 
-const identity = await getIdentity(Deno.env.get("IDENTITY"), Deno.env.get("OPERATOR_PASS"));
+const identity = await getIdentity(
+  Deno.env.get("IDENTITY"),
+  Deno.env.get("OPERATOR_PASS"),
+);
 
 storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
@@ -89,7 +92,7 @@ async function castRecipe() {
     console.log("Casting recipe...");
 
     // Create session and charm manager (matching main.ts pattern)
-    const session = await openSession({
+    const session = await createAdminSession({
       identity,
       name: "recipe-caster",
       space: spaceId as DID,

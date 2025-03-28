@@ -6,7 +6,7 @@ import {
   setBobbyServerUrl,
   storage,
 } from "@commontools/runner";
-import { type DID, Identity, openSessionFromPassphrase } from "@commontools/identity";
+import { createAdminSession, type DID, Identity } from "@commontools/identity";
 
 const { spaceId, targetCellCause, recipePath, cause, name, quit } = parseArgs(
   Deno.args,
@@ -64,8 +64,8 @@ async function castRecipe() {
     console.log("Recipe compiled successfully");
 
     // Create session and charm manager (matching main.ts pattern)
-    const session = await openSessionFromPassphrase({
-      passphrase: OPERATOR_PASS,
+    const session = await createAdminSession({
+      identity: signer,
       name: name!,
       space: spaceId as DID,
     });
