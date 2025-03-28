@@ -13,7 +13,6 @@ import {
   createRef,
   DocImpl,
   EntityId,
-  findAllAliasedDocs,
   getDoc,
   getEntityId,
   getRecipe,
@@ -397,10 +396,11 @@ export class CharmManager {
         }
       }
 
-      // Skip the findAllAliasedDocs call since it's causing runtime issues
-      // The flat scan of top-level properties should be sufficient for most cases
+      // TODO: Implement recursive scan with proper depth limits to prevent stack overflow
+      // Currently using flat scan of top-level properties for stability
     } catch (error) {
-      // Error finding references in charm arguments
+      console.error("Error finding references in charm arguments:", error);
+      throw error;
     }
 
     return result;
@@ -541,12 +541,13 @@ export class CharmManager {
               }
             }
 
-            // Skip findAllAliasedDocs check due to runtime issues
-            // The top-level property checks should be sufficient
+            // TODO: Implement recursive scan with proper depth limits to prevent stack overflow
+            // Currently using flat scan of top-level properties for stability
           }
         }
       } catch (error) {
-        // Error checking argument references for charm
+        console.error("Error checking argument references for charm:", error);
+        throw error;
       }
     }
 
