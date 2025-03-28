@@ -319,6 +319,245 @@ export class CharmManager {
       [];
   }
 
+  /**
+   * Find all charms that the given charm reads data from via aliases or links.
+   * This identifies dependencies that the charm has on other charms.
+   * @param charm The charm to check
+   * @returns Array of charms that are read from
+   */
+  getReadingFrom(charm: Cell<Charm>): Cell<Charm>[] {
+    // Get all charms that might be referenced
+    const allCharms = this.getCharms().get();
+    const result: Cell<Charm>[] = [];
+    const seenEntityIds = new Set<string>(); // Track entities we've already processed
+
+    if (!charm) return result;
+
+    try {
+      // Get the argument data - this is where references to other charms are stored
+      const argumentCell = this.getArgument(charm);
+      if (!argumentCell) return result;
+
+      // Get the raw argument value
+      const argumentLink = argumentCell.getAsCellLink();
+      if (!argumentLink || !argumentLink.cell) return result;
+
+      const argumentValue = argumentLink.cell.getAtPath(argumentLink.path);
+
+      // Helper function to add a matching charm to the result
+      const addMatchingCharm = (docId: EntityId) => {
+        if (!docId || !docId["/"]) return;
+
+        const entityIdStr = typeof docId["/"] === "string"
+          ? docId["/"]
+          : JSON.stringify(docId["/"]);
+
+        // Skip if we've already processed this entity
+        if (seenEntityIds.has(entityIdStr)) return;
+        seenEntityIds.add(entityIdStr);
+
+        // Find matching charm by entity ID
+        const matchingCharm = allCharms.find((c) => {
+          const cId = getEntityId(c);
+          return cId && docId["/"] === cId["/"];
+        });
+
+        if (
+          matchingCharm && !isSameEntity(matchingCharm, charm) &&
+          !result.some((c) => isSameEntity(c, matchingCharm))
+        ) {
+          result.push(matchingCharm);
+          // Reference added to result
+        }
+      };
+
+      // SIMPLEST APPROACH: Only scan the top-level properties for references
+      // This avoids any recursion and potential stack overflow issues
+      // Scan top-level properties for references
+      if (argumentValue && typeof argumentValue === "object") {
+        // Check each top-level property
+        for (const key in argumentValue) {
+          const value = argumentValue[key];
+          if (!value || typeof value !== "object") continue;
+
+          // Look for alias references ($alias property)
+          if (value.$alias && value.$alias.cell) {
+            const aliasId = getEntityId(value.$alias.cell);
+            if (aliasId && aliasId["/"]) {
+              // Found alias reference
+              addMatchingCharm(aliasId);
+            }
+          }
+
+          // Look for direct cell references (cell + path properties)
+          if (value.cell && value.path !== undefined) {
+            const cellId = getEntityId(value.cell);
+            if (cellId && cellId["/"]) {
+              // Found direct cell reference
+              addMatchingCharm(cellId);
+            }
+          }
+        }
+      }
+
+      // TODO(#758): Implement recursive scan with proper depth limits to prevent stack overflow
+      // Currently using flat scan of top-level properties for stability
+    } catch (error) {
+      console.error("Error finding references in charm arguments:", error);
+      throw error;
+    }
+
+    return result;
+  }
+
+  /**
+   * Find all charms that read data from the given charm via aliases or links.
+   * This identifies which charms depend on this charm.
+   * @param charm The charm to check
+   * @returns Array of charms that read from this charm
+   */
+  getReadByCharms(charm: Cell<Charm>): Cell<Charm>[] {
+    // Get all charms to check
+    const allCharms = this.getCharms().get();
+    const result: Cell<Charm>[] = [];
+    const seenEntityIds = new Set<string>(); // Track entities we've already processed
+
+    if (!charm) return result;
+
+    const charmId = getEntityId(charm);
+    if (!charmId) return result;
+
+    // Helper function to add a matching charm to the result
+    const addReadingCharm = (otherCharm: Cell<Charm>) => {
+      const otherCharmId = getEntityId(otherCharm);
+      if (!otherCharmId || !otherCharmId["/"]) return;
+
+      const entityIdStr = typeof otherCharmId["/"] === "string"
+        ? otherCharmId["/"]
+        : JSON.stringify(otherCharmId["/"]);
+
+      // Skip if we've already processed this entity
+      if (seenEntityIds.has(entityIdStr)) return;
+      seenEntityIds.add(entityIdStr);
+
+      if (!result.some((c) => isSameEntity(c, otherCharm))) {
+        result.push(otherCharm);
+        // Charm reading from target added to result
+      }
+    };
+
+    // Check each charm to see if it references this charm
+    for (const otherCharm of allCharms) {
+      if (isSameEntity(otherCharm, charm)) continue; // Skip self
+
+      // First check the charm document using findAllAliasedDocs
+      try {
+        // Check if charm references our target
+        const otherCellLink = otherCharm.getAsCellLink();
+        if (!otherCellLink.cell) continue;
+
+        // Skip findAllAliasedDocs due to runtime issues
+        // Just check top-level properties for references
+        const charmValue = otherCellLink.cell.get();
+        let references = false;
+
+        if (charmValue && typeof charmValue === "object") {
+          // Check each top-level property
+          for (const key in charmValue) {
+            const value = charmValue[key];
+            if (!value || typeof value !== "object") continue;
+
+            // Check for alias reference to our target charm
+            if (value.$alias && value.$alias.cell) {
+              const aliasId = getEntityId(value.$alias.cell);
+              if (aliasId && aliasId["/"] === charmId["/"]) {
+                references = true;
+                break;
+              }
+            }
+
+            // Check for direct cell reference to our target charm
+            if (value.cell && value.path !== undefined) {
+              const docId = getEntityId(value.cell);
+              if (docId && docId["/"] === charmId["/"]) {
+                references = true;
+                break;
+              }
+            }
+          }
+        }
+
+        if (references) {
+          // Found reference in charm document
+          addReadingCharm(otherCharm);
+          continue; // Skip additional checks for this charm since we already found a reference
+        }
+      } catch (err) {
+        console.error("Error checking charm references:", err);
+        throw err;
+      }
+
+      // Also specifically check the argument data where references are commonly found
+      try {
+        // Check charm's argument data for references
+        const argumentCell = this.getArgument(otherCharm);
+        if (argumentCell) {
+          const argumentLink = argumentCell.getAsCellLink();
+          if (argumentLink && argumentLink.cell) {
+            // Get raw argument value
+            const argumentValue = argumentLink.cell.getAtPath(
+              argumentLink.path,
+            );
+
+            // Flat check of top-level properties
+            if (argumentValue && typeof argumentValue === "object") {
+              let foundReference = false;
+
+              // Check each top-level property for references to our charm
+              for (const key in argumentValue) {
+                const value = argumentValue[key];
+                if (!value || typeof value !== "object") continue;
+
+                // Check for direct cell reference to our target charm
+                if (value.cell && value.path !== undefined) {
+                  const docId = getEntityId(value.cell);
+                  if (docId && docId["/"] === charmId["/"]) {
+                    // Found direct reference to our charm
+                    foundReference = true;
+                    break;
+                  }
+                }
+
+                // Check for alias reference to our target charm
+                if (value.$alias && value.$alias.cell) {
+                  const aliasId = getEntityId(value.$alias.cell);
+                  if (aliasId && aliasId["/"] === charmId["/"]) {
+                    // Found alias reference to our charm
+                    foundReference = true;
+                    break;
+                  }
+                }
+              }
+
+              if (foundReference) {
+                addReadingCharm(otherCharm);
+                continue;
+              }
+            }
+
+            // TODO(#758): Implement recursive scan with proper depth limits to prevent stack overflow
+            // Currently using flat scan of top-level properties for stability
+          }
+        }
+      } catch (error) {
+        console.error("Error checking argument references for charm:", error);
+        throw error;
+      }
+    }
+
+    return result;
+  }
+
   async getCellById<T>(
     id: EntityId | string,
     path: string[] = [],
