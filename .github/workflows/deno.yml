@@ -4,9 +4,10 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
+      - ci-redo
+  # pull_request:
+  #   branches:
+  #     - main
 
 # Define the list of binaries we're building
 # This makes it easy to add more binaries in the future
@@ -123,7 +124,7 @@ jobs:
 
       # Upload Jumble source maps to Sentry
       - name: Upload Jumble source maps to Sentry
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/ci-redo'
         run: |
           # Create a release with version based on commit SHA
           deno run --allow-all npm:@sentry/cli releases new ${{ github.sha }}
@@ -144,7 +145,7 @@ jobs:
 
       # When on main branch, sign binaries, create attestations, and upload to GCS
       - name: Process binaries for main branch
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/ci-redo'
         run: |
           mkdir -p release
           mkdir -p signed
@@ -189,7 +190,7 @@ jobs:
 
       # Generate attestations for each binary
       - name: Generate attestations for toolshed binary
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/ci-redo'
         id: attest_toolshed
         uses: actions/attest-build-provenance@v1
         with:
@@ -197,7 +198,7 @@ jobs:
           subject-digest: sha256:${{ steps.binary_processing.outputs.toolshed_hash }}
 
       - name: Generate attestations for bg-charm-service binary
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/ci-redo'
         id: attest_bg_charm_service
         uses: actions/attest-build-provenance@v1
         with:
@@ -206,7 +207,7 @@ jobs:
 
       # Generate attestation for the tarball
       - name: Generate tarball attestation
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/ci-redo'
         id: attest_tarball
         uses: actions/attest-build-provenance@v1
         with:
@@ -215,7 +216,7 @@ jobs:
 
       # Upload all attestations
       - name: Upload attestations
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/ci-redo'
         uses: actions/upload-artifact@v4
         with:
           name: binary_attestations
@@ -227,7 +228,7 @@ jobs:
 
       # Verify attestations
       - name: Verify attestations
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/ci-redo'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -266,17 +267,17 @@ jobs:
 
       # Upload to GCS
       - name: Authenticate to Google Cloud for main
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/ci-redo'
         uses: google-github-actions/auth@v1
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Setup Google Cloud SDK for main
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/ci-redo'
         uses: google-github-actions/setup-gcloud@v1
 
       - name: Upload to GCS for main
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/ci-redo'
         run: |
           gsutil cp release/labs-${{ github.sha }}.tar.gz gs://commontools-build-artifacts/workspace-artifacts/
           gsutil cp release/labs-${{ github.sha }}.hash.txt gs://commontools-build-artifacts/workspace-artifacts/
@@ -349,7 +350,7 @@ jobs:
 
   deploy-toolshed:
     name: "Deploy to Toolshed (Staging)"
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/ci-redo'
     needs: ["integration-test"]
     runs-on: ubuntu-latest
     environment: toolshed
@@ -371,9 +372,10 @@ jobs:
           SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
           SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
 
+  # This job requires manual approval in the GitHub Actions UI
   deploy-estuary:
     name: "Deploy to Estuary (Production)"
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/ci-redo'
     needs: ["integration-test"]
     runs-on: ubuntu-latest
     environment:
