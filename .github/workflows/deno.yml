@@ -14,8 +14,8 @@ env:
   BINARIES: "toolshed bg-charm-service"
 
 jobs:
-  workspace-tests:
-    name: "Workspace Tests"
+  workspace-checks-and-tests:
+    name: "Workspace Checks and Tests"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,10 +45,52 @@ jobs:
       - name: Run tests
         run: deno task test-all
 
+  toolshed-tests:
+    name: "Toolshed Tests"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: toolshed
+    services:
+      redis:
+        image: redis
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.2.2"
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.deno
+            ~/.cache/deno
+          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+      - name: Verify formatting
+        working-directory: toolshed
+        run: deno fmt --check
+      - name: Run tests
+        working-directory: toolshed
+        run: deno test -A --env-file=.env.test
+        env:
+          ENV: test
+          PORT: 8000
+          LOG_LEVEL: silent
+          REDIS_URL: redis://localhost:6379
+
   build-binaries:
     name: "Build Binaries"
     runs-on: ubuntu-24.04-32-core
-    needs: ["workspace-tests"]
+    needs: ["workspace-checks-and-tests", "toolshed-tests"]
     environment: production
     permissions:
       id-token: write
@@ -73,6 +115,32 @@ jobs:
 
       - name: Build binaries
         run: deno task build-binaries
+        env:
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+          VITE_ENVIRONMENT: ${{ secrets.VITE_ENVIRONMENT }}
+          VITE_COMMIT_SHA: ${{ github.sha }}
+          VITE_BUILD_SOURCEMAPS: "true"
+
+      # Upload Jumble source maps to Sentry
+      - name: Upload Jumble source maps to Sentry
+        if: github.ref == 'refs/heads/main'
+        run: |
+          # Create a release with version based on commit SHA
+          deno run --allow-all npm:@sentry/cli releases new ${{ github.sha }}
+
+          # Associate commits with the release
+          deno run --allow-all npm:@sentry/cli releases set-commits ${{ github.sha }} --auto
+
+          # Upload source maps from the toolshed/jumble-frontend directory
+          # (where build-binaries.ts moves the Jumble build output)
+          deno run --allow-all npm:@sentry/cli releases files ${{ github.sha }} upload-sourcemaps ./toolshed/jumble-frontend --rewrite
+
+          # Finalize the release
+          deno run --allow-all npm:@sentry/cli releases finalize ${{ github.sha }}
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: jumble
 
       # When on main branch, sign binaries, create attestations, and upload to GCS
       - name: Process binaries for main branch
@@ -278,3 +346,54 @@ jobs:
           TOOLSHED_API_URL=http://localhost:8000/ \
           FRONTEND_URL=http://localhost:8000/ \
           deno task integration
+
+  deploy-toolshed:
+    name: "Deploy to Toolshed (Staging)"
+    if: github.ref == 'refs/heads/main'
+    needs: ["integration-test"]
+    runs-on: ubuntu-latest
+    environment: toolshed
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.BASTION_HOST_IP }}
+          username: bastion
+          key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
+          script: /opt/ct/deploy.sh toolshed ${{ github.sha }}
+
+      - name: Mark Sentry Release
+        uses: getsentry/action-release@v1
+        with:
+          environment: toolshed
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+
+  deploy-estuary:
+    name: "Deploy to Estuary (Production)"
+    if: github.ref == 'refs/heads/main'
+    needs: ["integration-test"]
+    runs-on: ubuntu-latest
+    environment:
+      name: estuary
+      url: ${{ steps.deployment.outputs.deployment_url }}
+    steps:
+      - name: Deploy via SSH
+        id: deployment
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.BASTION_HOST_IP }}
+          username: bastion
+          key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
+          script: /opt/ct/deploy.sh estuary ${{ github.sha }}
+
+      - name: Mark Sentry Release
+        uses: getsentry/action-release@v1
+        with:
+          environment: estuary
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.ESTUARY_SENTRY_PROJECT }}
