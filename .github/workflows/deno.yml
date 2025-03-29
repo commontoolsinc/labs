@@ -119,26 +119,13 @@ jobs:
           VITE_COMMIT_SHA: ${{ github.sha }}
           VITE_BUILD_SOURCEMAPS: "true"
 
-      # Upload Jumble source maps to Sentry
-      - name: Upload Jumble source maps to Sentry
+      # Archive source maps for later use in deployments
+      - name: Archive Jumble artifacts
         if: github.ref == 'refs/heads/ci-redo'
-        run: |
-          # Create a release with version based on commit SHA
-          deno run --allow-all npm:@sentry/cli releases new ${{ github.sha }}
-
-          # Associate commits with the release
-          deno run --allow-all npm:@sentry/cli releases set-commits ${{ github.sha }} --auto
-
-          # Upload source maps from the toolshed/jumble-frontend directory
-          # (where build-binaries.ts moves the Jumble build output)
-          deno run --allow-all npm:@sentry/cli releases files ${{ github.sha }} upload-sourcemaps ./toolshed/jumble-frontend --rewrite
-
-          # Finalize the release
-          deno run --allow-all npm:@sentry/cli releases finalize ${{ github.sha }}
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
-          SENTRY_PROJECT: jumble
+        uses: actions/upload-artifact@v4
+        with:
+          name: jumble-artifacts
+          path: ./toolshed/jumble-frontend
 
       # When on ci-redo branch, sign binaries, create attestations, and upload to GCS
       - name: Process binaries for ci-redo branch
@@ -353,6 +340,34 @@ jobs:
     runs-on: ubuntu-latest
     environment: toolshed
     steps:
+      - uses: actions/checkout@v4
+
+      # Download source maps
+      - name: Download source maps
+        uses: actions/download-artifact@v4
+        with:
+          name: jumble-artifacts
+          path: ./jumble-artifacts
+
+      # Create Sentry release and upload source maps
+      - name: Create Sentry Release with Source Maps
+        run: |
+          # Create a release with version based on commit SHA
+          deno run --allow-all npm:@sentry/cli releases new ${{ github.sha }}
+
+          # Associate commits with the release
+          deno run --allow-all npm:@sentry/cli releases set-commits ${{ github.sha }} --auto
+
+          # Upload source maps
+          deno run --allow-all npm:@sentry/cli releases files ${{ github.sha }} upload-sourcemaps ./jumble-artifacts --rewrite
+
+          # Finalize the release
+          deno run --allow-all npm:@sentry/cli releases finalize ${{ github.sha }}
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@master
         with:
@@ -360,15 +375,6 @@ jobs:
           username: bastion
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
           script: /opt/ct/deploy.sh ${{ vars.DEPLOYMENT_ENVIRONMENT }} ${{ github.sha }}
-
-      - name: Mark Sentry Release
-        uses: getsentry/action-release@v1
-        with:
-          environment: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
 
   # Manual deployment to production (estuary)
   # Requires approval in the GitHub Actions UI
@@ -381,6 +387,34 @@ jobs:
       name: estuary
       url: ${{ steps.deployment.outputs.deployment_url }}
     steps:
+      - uses: actions/checkout@v4
+
+      # Download source maps
+      - name: Download source maps
+        uses: actions/download-artifact@v4
+        with:
+          name: jumble-artifacts
+          path: ./jumble-artifacts
+
+      # Create Sentry release and upload source maps
+      - name: Create Sentry Release with Source Maps
+        run: |
+          # Create a release with version based on commit SHA
+          deno run --allow-all npm:@sentry/cli releases new ${{ github.sha }}
+
+          # Associate commits with the release
+          deno run --allow-all npm:@sentry/cli releases set-commits ${{ github.sha }} --auto
+
+          # Upload source maps
+          deno run --allow-all npm:@sentry/cli releases files ${{ github.sha }} upload-sourcemaps ./jumble-artifacts --rewrite
+
+          # Finalize the release
+          deno run --allow-all npm:@sentry/cli releases finalize ${{ github.sha }}
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+
       - name: Deploy via SSH
         id: deployment
         uses: appleboy/ssh-action@master
@@ -389,12 +423,3 @@ jobs:
           username: bastion
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
           script: /opt/ct/deploy.sh ${{ vars.DEPLOYMENT_ENVIRONMENT }} ${{ github.sha }}
-
-      - name: Mark Sentry Release
-        uses: getsentry/action-release@v1
-        with:
-          environment: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
