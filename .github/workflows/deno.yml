@@ -119,8 +119,6 @@ jobs:
       - name: Build binaries
         run: deno task build-binaries
         env:
-          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
-          VITE_ENVIRONMENT: ${{ secrets.VITE_ENVIRONMENT }}
           VITE_COMMIT_SHA: ${{ github.sha }}
           VITE_BUILD_SOURCEMAPS: "true"
 
