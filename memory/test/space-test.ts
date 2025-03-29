@@ -10,6 +10,7 @@ import { refer } from "merkle-reference";
 import { alice, space } from "./principal.ts";
 import { SchemaSelector } from "../space.ts";
 import { AssertFact, SchemaContext } from "../interface.ts";
+import { Entity } from "../consumer.ts";
 const the = "application/json";
 const doc = `of:${refer({ hello: "world" })}` as const;
 const doc2 = `of:${refer({ goodbye: "world" })}` as const;
@@ -36,6 +37,16 @@ function getResultAtPath(
     assertEquals(current.length, 1);
     return current[0];
   }
+}
+
+function getResultForDoc(
+  result: Space.Result<Space.Selection<Space.DIDKey>, Space.QueryError>,
+  space: Space.DIDKey,
+  doc: Space.Entity | "_",
+) {
+  assertExists(result.ok);
+  assertExists(result.ok[space]);
+  return result.ok[space][doc as Space.Entity];
 }
 
 const test = (
@@ -1201,9 +1212,15 @@ test("list single fact with schema query", DB, async (session) => {
     prf: [],
   });
 
-  assertEquals(result, {
-    ok: { [space.did()]: Changes.from([v1]) },
-  });
+  const cause = refer(Fact.unclaimed({ the, of: doc }));
+  const filteredFact = {
+    [the]: {
+      [cause.toString()]: {
+        is: { "value": { "v": 1 } },
+      },
+    },
+  };
+  assertEquals(getResultForDoc(result, space.did(), "_"), filteredFact);
 });
 
 test(
@@ -1301,16 +1318,14 @@ test(
 
     const cause = refer(Fact.unclaimed({ the, of: doc }));
     // We should not have the name in the returned value, since our schema excludes it
-    const addressFact = {
-      [doc]: {
-        [the]: {
-          [cause.toString()]: {
-            is: {
-              "value": {
-                "address": {
-                  "street": "2466 Southridge Drive",
-                  "city": "Palm Springs",
-                },
+    const filteredFact = {
+      [the]: {
+        [cause.toString()]: {
+          is: {
+            "value": {
+              "address": {
+                "street": "2466 Southridge Drive",
+                "city": "Palm Springs",
               },
             },
           },
@@ -1318,9 +1333,7 @@ test(
       },
     };
 
-    assertEquals(result, {
-      ok: { [space.did()]: addressFact },
-    });
+    assertEquals(getResultForDoc(result, space.did(), "_"), filteredFact);
   },
 );
 
@@ -1444,24 +1457,23 @@ test(
     const cause = refer(Fact.unclaimed({ the, of: doc3 }));
     // Our aliases and schema query path mean that we just get the first name
     const addressFact = {
-      [doc3]: {
-        [the]: {
-          [cause.toString()]: {
-            is: {
-              "value": {
-                "emergency_contacts": [{
-                  "first": "Bob",
-                }],
-              },
+      [the]: {
+        [cause.toString()]: {
+          is: {
+            "value": {
+              "emergency_contacts": [{
+                "first": "Bob",
+              }],
             },
           },
         },
       },
     };
 
-    assertEquals(result, {
-      ok: { [space.did()]: addressFact },
-    });
+    assertEquals(getResultForDoc(result, space.did(), "_"), addressFact);
+    assertExists(getResultForDoc(result, space.did(), doc));
+    assertExists(getResultForDoc(result, space.did(), doc2));
+    assertExists(getResultForDoc(result, space.did(), doc3));
   },
 );
 
@@ -1528,15 +1540,19 @@ test(
       prf: [],
     });
 
-    const filteredFact = Fact.assert({
-      the,
-      of: doc,
-      is: { "value": { "left": { "name": "Alice" } } },
-    });
+    const cause = refer(Fact.unclaimed({ the, of: doc }));
+    // Our aliases and schema query path mean that we just get the first name
+    const filteredFact = {
+      [the]: {
+        [cause.toString()]: {
+          is: {
+            "value": { "left": { "name": "Alice" } },
+          },
+        },
+      },
+    };
 
-    assertEquals(result, {
-      ok: { [space.did()]: Changes.from([filteredFact]) },
-    });
+    assertEquals(getResultForDoc(result, space.did(), "_"), filteredFact);
   },
 );
 
@@ -1622,28 +1638,30 @@ test(
       prf: [],
     });
 
+    const cause = refer(Fact.unclaimed({ the, of: doc }));
     // We should be getting back the fact without the body
-    const filteredFact = Fact.assert({
-      the,
-      of: doc,
-      is: {
-        "value": {
-          "emails": [
-            {
-              "sender": "spamsender@sweepstakes.com",
-              "subject": "You may have won the sweepstakes",
+    const filteredFact = {
+      [the]: {
+        [cause.toString()]: {
+          is: {
+            "value": {
+              "emails": [
+                {
+                  "sender": "spamsender@sweepstakes.com",
+                  "subject": "You may have won the sweepstakes",
+                },
+                {
+                  "sender": "boss@job.com",
+                  "subject": "You're fired!",
+                },
+              ],
             },
-            {
-              "sender": "boss@job.com",
-              "subject": "You're fired!",
-            },
-          ],
+          },
         },
       },
-    });
-    assertEquals(result, {
-      ok: { [space.did()]: Changes.from([filteredFact]) },
-    });
+    };
+
+    assertEquals(getResultForDoc(result, space.did(), "_"), filteredFact);
   },
 );
 
@@ -1733,33 +1751,29 @@ test(
 
     const cause = refer(Fact.unclaimed({ the, of: doc }));
     // We should not have the name in the returned value, since our schema excludes it
-    const addressFact = {
-      [doc]: {
-        [the]: {
-          [cause.toString()]: {
-            is: {
-              "value": {
-                "employees": [
-                  {
-                    "name": "Bob",
-                    "addresses": {
-                      "work": {
-                        "name": "Bob Hope Airport",
-                        "street": "2627 N Hollywood Way",
-                        "city": "Burbank",
-                      },
+    const filteredFact = {
+      [the]: {
+        [cause.toString()]: {
+          is: {
+            "value": {
+              "employees": [
+                {
+                  "name": "Bob",
+                  "addresses": {
+                    "work": {
+                      "name": "Bob Hope Airport",
+                      "street": "2627 N Hollywood Way",
+                      "city": "Burbank",
                     },
                   },
-                ],
-              },
+                },
+              ],
             },
           },
         },
       },
     };
 
-    assertEquals(result, {
-      ok: { [space.did()]: addressFact },
-    });
+    assertEquals(getResultForDoc(result, space.did(), "_"), filteredFact);
   },
 );

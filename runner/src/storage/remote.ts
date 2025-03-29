@@ -165,7 +165,7 @@ export class RemoteStorageProvider implements StorageProvider {
     }
   }
 
-  subscribe(entityId: EntityId) {
+  subscribe(entityId: EntityId, schemaContext?: SchemaContext) {
     const { the, inspector } = this;
     const of = RemoteStorageProvider.toEntity(entityId);
     const local = this.mount(this.workspace);
@@ -173,45 +173,19 @@ export class RemoteStorageProvider implements StorageProvider {
 
     if (!subscription) {
       if (local.remote.size < this.settings.maxSubscriptionsPerSpace) {
-        // If we do not have a subscription yet we create a query and
-        // subscribe to it.
-        subscription = Subscription.spawn(
-          local.memory,
-          { select: { [of]: { [the]: {} } } },
-          undefined,
-          inspector,
-        );
-
-        // store subscription so it can be reused.
-        local.remote.set(of, subscription);
-      }
-    }
-
-    return subscription;
-  }
-
-  subscribeSchema(entityId: EntityId, schemaContext: SchemaContext) {
-    const { the, inspector } = this;
-    const of = RemoteStorageProvider.toEntity(entityId);
-    const local = this.mount(this.workspace);
-    let subscription = local.remote.get(of);
-
-    if (!subscription) {
-      if (local.remote.size < this.settings.maxSubscriptionsPerSpace) {
-        // If we do not have a subscription yet we create a query and
-        // subscribe to it.
-        subscription = Subscription.spawn(
-          local.memory,
-          { select: { [of]: { [the]: {} } } },
-          {
+        const selector = (schemaContext === undefined)
+          ? { select: { [of]: { [the]: {} } } }
+          : {
             selectSchema: {
               [of]: {
                 [the]: { "_": { path: [], schemaContext: schemaContext } },
               },
             },
-          },
-          inspector,
-        );
+          };
+
+        // If we do not have a subscription yet we create a query and
+        // subscribe to it.
+        subscription = Subscription.spawn(local.memory, selector, inspector);
 
         // store subscription so it can be reused.
         local.remote.set(of, subscription);
@@ -237,8 +211,12 @@ export class RemoteStorageProvider implements StorageProvider {
       return () => {};
     }
   }
-  async sync(entityId: EntityId): Promise<void> {
-    const subscription = this.subscribe(entityId);
+  async sync(
+    entityId: EntityId,
+    _expectedInStorage: boolean = false,
+    schemaContext?: SchemaContext,
+  ): Promise<void> {
+    const subscription = this.subscribe(entityId, schemaContext);
     if (subscription) {
       // We add noop subscriber just to keep subscription alive.
       subscription.subscribe(RemoteStorageProvider.sync);
@@ -253,24 +231,6 @@ export class RemoteStorageProvider implements StorageProvider {
     }
   }
 
-  async syncSchema(
-    entityId: EntityId,
-    schemaContext: SchemaContext,
-  ): Promise<void> {
-    const subscription = this.subscribeSchema(entityId, schemaContext);
-    if (subscription) {
-      // We add noop subscriber just to keep subscription alive.
-      subscription.subscribe(RemoteStorageProvider.sync);
-      // Then await for the query to be resolved because that is what
-      // caller will await on.
-      await subscription.schemaQuery;
-    } else {
-      console.warn(
-        `⚠️ Reached maximum subscription limit on ${this.workspace}. Call to .sync is ignored`,
-      );
-      return new Promise(() => {});
-    }
-  }
   /**
    * Subscriber used by the .sync. We use the same one so we'll have at most one
    * per `.sync` per query.
@@ -583,27 +543,23 @@ class Subscription<Space extends MemorySpace> {
   reader!: ReadableStreamDefaultReader;
   query!: Memory.QueryView<Space, Protocol<Space>>;
   subscription!: ReturnType<typeof this.query.subscribe>;
-  schemaQuery?: Memory.QueryView<Space, Protocol<Space>>;
 
   static spawn<Space extends MemorySpace>(
     session: Memory.MemorySpaceSession<Space>,
-    selector: Query["args"],
-    schemaSelector?: SchemaQuery["args"],
+    selector: Query["args"] | SchemaQuery["args"],
     inspector?: BroadcastChannel,
   ) {
     return new Subscription(
       session,
       selector,
       new Set(),
-      schemaSelector,
       inspector,
     );
   }
   constructor(
     public session: Memory.MemorySpaceSession<Space>,
-    public selector: Query["args"],
+    public selector: Query["args"] | SchemaQuery["args"],
     public subscribers: Set<Subscriber>,
-    public schemaSelector?: SchemaQuery["args"],
     public inspector?: BroadcastChannel,
   ) {
     this.connect();
@@ -614,12 +570,6 @@ class Subscription<Space extends MemorySpace> {
   // query with the schema selector, but subscribe to updates on the doc
   // with a standard selector.
   connect() {
-    if (this.schemaSelector !== undefined) {
-      this.schemaQuery = this.session.querySchema(this.schemaSelector);
-      this.schemaQuery.promise.then((result) => {
-        this.broadcast();
-      });
-    }
     const query = this.session.query(this.selector);
     const subscription = query.subscribe();
     this.query = query;

@@ -131,7 +131,10 @@ describe("Storage", () => {
 
   describe("doc updates", () => {
     it("should persist doc updates with schema", async () => {
-      await storage.syncSchemaCell(testDoc, { schema: true, rootSchema: true });
+      await storage.syncCell(testDoc, false, {
+        schema: true,
+        rootSchema: true,
+      });
 
       testDoc.send("value 1");
       testDoc.send("value 2");

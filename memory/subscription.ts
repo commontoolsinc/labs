@@ -31,7 +31,10 @@ export const match = (transaction: Transaction, watched: Set<string>) => {
   return false;
 };
 
-export const channels = function* (space: MemorySpace, selector: Selector) {
+export const channels = function* (
+  space: MemorySpace,
+  selector: Selector | SchemaSelector,
+) {
   const all = [["_", {}]] as const;
   const entities = Object.entries(selector);
   for (const [of, attributes] of entities.length > 0 ? entities : all) {

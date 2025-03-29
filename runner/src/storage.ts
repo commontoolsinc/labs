@@ -82,12 +82,14 @@ export interface Storage {
    *
    * @param cell - Document / Cell to load into.
    * @param expectedInStorage - Whether the cell is expected to be in storage.
+   * @param schemaContext - Schema Context to use for the cell to override cell default.
    * @returns Promise that resolves to the cell when it is loaded.
    * @throws Will throw if called on a cell without an entity ID.
    */
   syncCell<T = any>(
     cell: DocImpl<T> | Cell<any>,
     expectedInStorage?: boolean,
+    schemaContext?: SchemaContext,
   ): Promise<DocImpl<T>> | DocImpl<T>;
 
   /**
@@ -239,37 +241,25 @@ class StorageImpl implements Storage {
   syncCell<T>(
     subject: DocImpl<T> | Cell<any>,
     expectedInStorage: boolean = false,
-  ): Promise<DocImpl<T>> | DocImpl<T> {
-    const entityCell = this._ensureIsSynced(subject, expectedInStorage);
-
-    // If doc is loading, return the promise. Otherwise return immediately.
-    return this.docIsLoading.get(entityCell) ?? entityCell;
-  }
-
-  syncSchemaCell<T>(
-    subject: DocImpl<T> | Cell<any>,
     schemaContext?: SchemaContext,
-    expectedInStorage: boolean = false,
   ): Promise<DocImpl<T>> | DocImpl<T> {
-    // If we aren't overriding the schema context, and we have context in the cell, use that
-    if (schemaContext === undefined && isCell(subject)) {
-      // An undefined schema in the cell means we should fetch everything
-      const cellSchema = (subject.schema !== undefined) ? subject.schema : true;
+    // If we aren't overriding the schema context, and we have a schema in the cell, use that
+    if (
+      schemaContext === undefined && isCell(subject) &&
+      subject.schema !== undefined
+    ) {
       schemaContext = {
-        schema: cellSchema,
+        schema: subject.schema,
         rootSchema: (subject.rootSchema !== undefined)
           ? subject.rootSchema
-          : cellSchema,
+          : subject.schema,
       };
     }
-    // If we're not a cell, and no schema specified, fetch everything
-    if (schemaContext === undefined) {
-      schemaContext = { schema: true, rootSchema: true };
-    }
-    const entityCell = this._ensureSchemaIsSynced(
+
+    const entityCell = this._ensureIsSynced(
       subject,
-      schemaContext,
       expectedInStorage,
+      schemaContext,
     );
 
     // If doc is loading, return the promise. Otherwise return immediately.
@@ -338,6 +328,7 @@ class StorageImpl implements Storage {
   private _ensureIsSynced<T>(
     doc: DocImpl<T> | Cell<any>,
     expectedInStorage: boolean = false,
+    schemaContext?: SchemaContext,
   ): DocImpl<T> {
     if (isCell(doc)) doc = doc.getAsCellLink().cell;
     if (!isDoc(doc)) {
@@ -362,7 +353,7 @@ class StorageImpl implements Storage {
 
     // Start loading the doc and safe the promise for processBatch to await for
     const loadingPromise = this._getStorageProviderForSpace(doc.space)
-      .sync(doc.entityId!, expectedInStorage)
+      .sync(doc.entityId!, expectedInStorage, schemaContext)
       .then(() => doc);
     this.loadingPromises.set(doc, loadingPromise);
 
@@ -371,49 +362,6 @@ class StorageImpl implements Storage {
     const { promise, resolve } = defer<void, Error>();
     this.loadingResolves.set(doc, resolve);
     this.docIsLoading.set(doc, promise.then(() => doc));
-
-    this._addToBatch([{ doc: doc, type: "sync" }]);
-
-    // Return the doc, to make calls chainable.
-    return doc;
-  }
-
-  private _ensureSchemaIsSynced<T>(
-    doc: DocImpl<T> | Cell<any>,
-    schemaContext: SchemaContext,
-    expectedInStorage: boolean = false,
-  ): DocImpl<T> {
-    if (isCell(doc)) doc = doc.getAsCellLink().cell;
-    if (!isDoc(doc)) {
-      throw new Error("Invalid subject: " + JSON.stringify(doc));
-    }
-    if (!doc.entityId) throw new Error("Doc has no entity ID");
-
-    // If the doc is ephemeral, we don't need to load it from storage. We still
-    // add it to the map of known docs, so that we don't try to keep loading
-    // it.
-    if (doc.ephemeral) return doc;
-
-    // If the doc is already loaded or loading, return immediately.
-    if (this.docIsSyncing.has(doc)) return doc;
-
-    // Important that we set this _before_ the doc is loaded, as we can already
-    // populate the doc when loading dependencies and thus avoid circular
-    // references.
-    this.docIsSyncing.add(doc);
-
-    // Start loading the doc and safe the promise for processBatch to await for
-    const loadingPromise = this._getStorageProviderForSpace(doc.space)
-      .syncSchema(doc.entityId!, schemaContext, expectedInStorage)
-      .then(() => doc);
-    this.loadingPromises.set(doc, loadingPromise);
-
-    // Create a promise that gets resolved once the doc and all its
-    // dependencies are loaded. It'll return the doc when done.
-    const docIsLoadingPromise = new Promise<void>((r) =>
-      this.loadingResolves.set(doc, r)
-    ).then(() => doc);
-    this.docIsLoading.set(doc, docIsLoadingPromise);
 
     this._addToBatch([{ doc: doc, type: "sync" }]);
 

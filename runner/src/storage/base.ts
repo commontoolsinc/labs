@@ -28,23 +28,13 @@ export interface StorageProvider {
    * @param entityId - Entity ID to sync.
    * @param expectedInStorage - Wait for the value, it's assumed to be in
    *   storage eventually.
-   * @returns Promise that resolves when the value is synced.
-   */
-  sync(entityId: EntityId, expectedInStorage?: boolean): Promise<void>;
-
-  /**
-   * Sync a value from storage. Use `get()` to retrieve the value.
-   *
-   * @param entityId - Entity ID to sync.
    * @param schemaContext - The schemaContext that determines what to sync.
-   * @param expectedInStorage - Wait for the value, it's assumed to be in
-   *   storage eventually.
    * @returns Promise that resolves when the value is synced.
    */
-  syncSchema(
+  sync(
     entityId: EntityId,
-    schemaContext: SchemaContext,
     expectedInStorage?: boolean,
+    schemaContext?: SchemaContext,
   ): Promise<void>;
 
   /**
@@ -93,10 +83,10 @@ export abstract class BaseStorageProvider implements StorageProvider {
     { ok: object; error?: undefined } | { ok?: undefined; error: Error }
   >;
 
-  abstract sync(entityId: EntityId, expectedInStorage: boolean): Promise<void>;
-  abstract syncSchema(
+  abstract sync(
     entityId: EntityId,
-    schemaContext: SchemaContext,
+    expectedInStorage: boolean,
+    schemaContext?: SchemaContext,
   ): Promise<void>;
   abstract get<T = any>(entityId: EntityId): StorageValue<T> | undefined;
 

@@ -301,7 +301,7 @@ test("list multiple facts using schema query", store, async (session) => {
     changes: Changes.from(facts),
   });
 
-  const result = await memory.querySchema({
+  const result = await memory.query({
     selectSchema: {
       _: {
         [the]: {
@@ -310,9 +310,16 @@ test("list multiple facts using schema query", store, async (session) => {
       },
     },
   });
+
+  const expectedFacts: Record<string, any> = {};
+  for (const fact of facts) {
+    expectedFacts[fact.cause.toString()] = { is: fact.is };
+  }
+  const factChanges = Changes.from(facts);
+  const newObject = { ...factChanges, "_": { [the]: expectedFacts } };
   assertEquals(
     result.ok?.selection,
-    { [subject.did()]: Changes.from(facts) },
+    { [subject.did()]: newObject },
     "lists multiple facts",
   );
 });

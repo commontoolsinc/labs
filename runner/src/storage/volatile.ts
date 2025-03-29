@@ -107,24 +107,7 @@ export class VolatileStorageProvider extends BaseStorageProvider {
   sync(
     entityId: EntityId,
     expectedInStorage: boolean = false,
-  ): Promise<void> {
-    const spaceStorage = getOrCreateSpaceStorage(this.spaceName);
-    const key = JSON.stringify(entityId);
-    log(
-      () => ["sync volatile", this.spaceName, key, this.lastValues.get(key)],
-    );
-    if (spaceStorage.has(key)) {
-      this.lastValues.set(key, JSON.stringify(spaceStorage.get(key)!));
-    } else if (!expectedInStorage) {
-      this.lastValues.delete(key);
-    }
-    return Promise.resolve();
-  }
-
-  syncSchema(
-    entityId: EntityId,
-    _schemaContext: SchemaContext,
-    expectedInStorage: boolean = false,
+    _schemaContext?: SchemaContext,
   ): Promise<void> {
     const spaceStorage = getOrCreateSpaceStorage(this.spaceName);
     const key = JSON.stringify(entityId);

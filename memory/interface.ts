@@ -700,7 +700,8 @@ export type Query<Space extends MemorySpace = MemorySpace> = Invocation<
 export type Subscribe<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/query/subscribe",
   Space,
-  { select: Selector; since?: number }
+  | { select: Selector; since?: number }
+  | { selectSchema: SchemaSelector; since?: number }
 >;
 
 export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
@@ -708,13 +709,6 @@ export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
   Space,
   { source: InvocationURL<Reference<Subscribe<Space>>> }
 >;
-
-export type SchemaSubscription<Space extends MemorySpace = MemorySpace> =
-  Invocation<
-    "/memory/graph/subscribe",
-    Space,
-    { selectSchema: SchemaSelector; since?: number }
-  >;
 
 export type SchemaQuery<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/graph/query",

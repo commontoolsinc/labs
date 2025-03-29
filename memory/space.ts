@@ -723,23 +723,41 @@ export const querySchema = <Space extends MemorySpace>(
   session: Session<Space>,
   command: SchemaQuery<Space>,
 ): Result<Selection<Space>, QueryError> => {
-  try {
-    const result = session.store.transaction(selectSchema)(
-      session,
-      command.args,
-    );
-    return {
-      ok: {
-        [command.sub]: result,
-      } as Selection<Space>,
-    };
-  } catch (error) {
-    return {
-      error: Error.query(
-        command.sub,
-        command.args.selectSchema,
-        error as SqliteError,
-      ),
-    };
-  }
+  return traceSync("space.querySchema", (span) => {
+    addMemoryAttributes(span, {
+      operation: "querySchema",
+      space: session.subject,
+    });
+
+    if (command.args?.selectSchema) {
+      span.setAttribute("querySchema.has_selector", true);
+    }
+    if (command.args?.since !== undefined) {
+      span.setAttribute("querySchema.since", command.args.since);
+    }
+
+    try {
+      const result = session.store.transaction(selectSchema)(
+        session,
+        command.args,
+      );
+
+      const entities = Object.keys(result || {}).length;
+      span.setAttribute("querySchema.result_entity_count", entities);
+
+      return {
+        ok: {
+          [command.sub]: result,
+        } as Selection<Space>,
+      };
+    } catch (error) {
+      return {
+        error: Error.query(
+          command.sub,
+          command.args.selectSchema,
+          error as SqliteError,
+        ),
+      };
+    }
+  });
 };

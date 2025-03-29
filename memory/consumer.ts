@@ -225,8 +225,9 @@ export interface MemorySession<Space extends MemorySpace> {
 
 export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {
   transact(source: Transaction<Space>["args"]): TransactionResult<Space>;
-  query(source: Query["args"]): QueryView<Space, Protocol<Space>>;
-  querySchema(source: SchemaQuery["args"]): QueryView<Space, Protocol<Space>>;
+  query(
+    source: Query["args"] | SchemaQuery["args"],
+  ): QueryView<Space, Protocol<Space>>;
 }
 
 export type { QueryView };
@@ -244,21 +245,24 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
       args: source,
     });
   }
-  query(source: Query["args"]): QueryView<Space, Protocol<Space>> {
-    const query = this.session.invoke({
-      cmd: "/memory/query" as const,
-      sub: this.space,
-      args: source,
-    });
-    return QueryView.create(this.session, query);
-  }
-  querySchema(source: SchemaQuery["args"]): QueryView<Space, Protocol<Space>> {
-    const query = this.session.invoke({
-      cmd: "/memory/graph/query" as const,
-      sub: this.space,
-      args: source,
-    });
-    return QueryView.create(this.session, query);
+  query(
+    source: Query["args"] | SchemaQuery["args"],
+  ): QueryView<Space, Protocol<Space>> {
+    if ("select" in source) {
+      const query = this.session.invoke({
+        cmd: "/memory/query" as const,
+        sub: this.space,
+        args: source,
+      });
+      return QueryView.create(this.session, query);
+    } else {
+      const query = this.session.invoke({
+        cmd: "/memory/graph/query" as const,
+        sub: this.space,
+        args: source,
+      });
+      return QueryView.create(this.session, query);
+    }
   }
 }
 
