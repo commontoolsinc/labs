@@ -3,7 +3,6 @@ name: Deno Workflow
 on:
   push:
     branches:
-      - main
       - ci-redo
   # pull_request:
   #   branches:
@@ -18,7 +17,6 @@ jobs:
   workspace-checks-and-tests:
     name: "Workspace Checks and Tests"
     runs-on: ubuntu-24.04-32-core
-    environment: ci
     steps:
       - uses: actions/checkout@v4
       - name: Setup Deno
@@ -51,7 +49,6 @@ jobs:
     name: "Toolshed Tests"
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    environment: ci
     defaults:
       run:
         working-directory: toolshed
@@ -140,11 +137,11 @@ jobs:
           deno run --allow-all npm:@sentry/cli releases finalize ${{ github.sha }}
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
           SENTRY_PROJECT: jumble
 
-      # When on main branch, sign binaries, create attestations, and upload to GCS
-      - name: Process binaries for main branch
+      # When on ci-redo branch, sign binaries, create attestations, and upload to GCS
+      - name: Process binaries for ci-redo branch
         if: github.ref == 'refs/heads/ci-redo'
         run: |
           mkdir -p release
@@ -266,17 +263,17 @@ jobs:
           fi
 
       # Upload to GCS
-      - name: Authenticate to Google Cloud for main
+      - name: Authenticate to Google Cloud for ci-redo
         if: github.ref == 'refs/heads/ci-redo'
         uses: google-github-actions/auth@v1
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Setup Google Cloud SDK for main
+      - name: Setup Google Cloud SDK for ci-redo
         if: github.ref == 'refs/heads/ci-redo'
         uses: google-github-actions/setup-gcloud@v1
 
-      - name: Upload to GCS for main
+      - name: Upload to GCS for ci-redo
         if: github.ref == 'refs/heads/ci-redo'
         run: |
           gsutil cp release/labs-${{ github.sha }}.tar.gz gs://commontools-build-artifacts/workspace-artifacts/
@@ -366,10 +363,12 @@ jobs:
 
       - name: Mark Sentry Release
         uses: getsentry/action-release@v1
+        with:
+          environment: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
 
   # Manual deployment to production (estuary)
   # Requires approval in the GitHub Actions UI
@@ -378,7 +377,9 @@ jobs:
     if: github.ref == 'refs/heads/ci-redo'
     needs: ["integration-test"]
     runs-on: ubuntu-latest
-    environment: estuary
+    environment:
+      name: estuary
+      url: ${{ steps.deployment.outputs.deployment_url }}
     steps:
       - name: Deploy via SSH
         id: deployment
@@ -391,7 +392,9 @@ jobs:
 
       - name: Mark Sentry Release
         uses: getsentry/action-release@v1
+        with:
+          environment: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ secrets.ESTUARY_SENTRY_PROJECT }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
