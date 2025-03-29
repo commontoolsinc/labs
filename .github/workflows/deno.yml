@@ -134,6 +134,11 @@ jobs:
           mkdir -p release
           mkdir -p signed
 
+          # Create a temporary file for the signing key
+          KEY_FILE=$(mktemp)
+          echo "${{ secrets.ARTIFACT_SIGNING_KEY }}" > $KEY_FILE
+          chmod 600 $KEY_FILE
+
           # Process toolshed binary
           echo "Processing binary: toolshed"
           sha256sum ./dist/toolshed > ./dist/toolshed.hash.txt
@@ -142,7 +147,7 @@ jobs:
           echo "toolshed_hash=$TOOLSHED_HASH" >> $GITHUB_OUTPUT
 
           # Sign the toolshed binary
-          openssl dgst -sha256 -sign <(echo "${{ secrets.ARTIFACT_SIGNING_KEY }}") -out ./dist/toolshed.sig ./dist/toolshed
+          openssl dgst -sha256 -sign $KEY_FILE -out ./dist/toolshed.sig ./dist/toolshed
 
           # Copy to signed directory
           cp ./dist/toolshed ./signed/
@@ -156,7 +161,7 @@ jobs:
           echo "bg_charm_service_hash=$BG_CHARM_SERVICE_HASH" >> $GITHUB_OUTPUT
 
           # Sign the bg-charm-service binary
-          openssl dgst -sha256 -sign <(echo "${{ secrets.ARTIFACT_SIGNING_KEY }}") -out ./dist/bg-charm-service.sig ./dist/bg-charm-service
+          openssl dgst -sha256 -sign $KEY_FILE -out ./dist/bg-charm-service.sig ./dist/bg-charm-service
 
           # Copy to signed directory
           cp ./dist/bg-charm-service ./signed/
@@ -170,6 +175,9 @@ jobs:
           TARBALL_HASH=$(cat release/labs-${{ github.sha }}.hash.txt | awk '{print $1}')
           echo "Tarball hash: $TARBALL_HASH"
           echo "tarball_hash=$TARBALL_HASH" >> $GITHUB_OUTPUT
+
+          # Clean up the key file
+          rm $KEY_FILE
         id: binary_processing
 
       # Generate attestations for each binary
@@ -377,14 +385,15 @@ jobs:
           script: /opt/ct/deploy.sh ${{ vars.DEPLOYMENT_ENVIRONMENT }} ${{ github.sha }}
 
   # Manual deployment to production (estuary)
-  # Requires approval in the GitHub Actions UI
+  # This job will pause and require manual approval in the GitHub Actions UI
+  # Configure required reviewers in Settings > Environments > estuary
   deploy-estuary:
     name: "Deploy to Estuary (Production)"
     if: github.ref == 'refs/heads/ci-redo'
     needs: ["integration-test"]
     runs-on: ubuntu-latest
     environment:
-      name: estuary
+      name: estuary # Protection rules configured in GitHub repo settings
       url: ${{ steps.deployment.outputs.deployment_url }}
     steps:
       - uses: actions/checkout@v4
