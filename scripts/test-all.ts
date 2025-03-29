@@ -9,19 +9,7 @@ export const ALL_DISABLED = [
   "background-charm-service", // no tests yet
 ];
 
-// Packages that need exclusive server access and can't run in parallel with each other
-export const SERVER_PACKAGES = [
-  "deno-web-test",
-  "identity",
-  "iframe-sandbox",
-];
-
-export async function testPackage(
-  packagePath: string,
-  packageName: string,
-): Promise<boolean> {
-  console.log(`Testing ${packageName}...`);
-
+export async function testPackage(packagePath: string): Promise<boolean> {
   const result = await new Deno.Command(Deno.execPath(), {
     args: ["task", "test"],
     cwd: packagePath,
@@ -30,18 +18,12 @@ export async function testPackage(
 
   const stdout = decoder.decode(result.stdout);
   if (stdout) {
-    console.log(
-      `\n--- ${packageName} stdout ---\n${stdout}\n--- End ${packageName} stdout ---\n`,
-    );
+    console.log(stdout);
   }
   const stderr = decoder.decode(result.stderr);
   if (stderr) {
-    console.error(
-      `\n--- ${packageName} stderr ---\n${stderr}\n--- End ${packageName} stderr ---\n`,
-    );
+    console.error(stderr);
   }
-
-  console.log(`${packageName}: ${result.success ? "✅ PASSED" : "❌ FAILED"}`);
   return result.success;
 }
 
@@ -50,66 +32,29 @@ export async function runTests(disabledPackages: string[]): Promise<boolean> {
   const manifest = JSON.parse(await Deno.readTextFile("./deno.jsonc"));
   const members: string[] = manifest.workspace;
 
-  // Group packages by type
-  const parallelPackages = [];
-  const serverPackages = [];
-
+  let success = true;
   for (const memberPath of members) {
+    // Convert "./memory" to "memory"
     const packageName = memberPath.substring(2);
 
     if (disabledPackages.includes(packageName)) {
       continue;
     }
-
+    console.log(`Testing ${packageName}...`);
     const packagePath = path.join(workspaceCwd, packageName);
-
-    if (SERVER_PACKAGES.includes(packageName)) {
-      serverPackages.push({ packageName, packagePath });
-    } else {
-      parallelPackages.push({ packageName, packagePath });
+    if (!await testPackage(packagePath)) {
+      success = false;
     }
   }
 
-  // Run parallel-safe tests concurrently
-  console.log(`Running ${parallelPackages.length} packages in parallel...`);
-
-  const parallelPromises = parallelPackages.map((
-    { packageName, packagePath },
-  ) =>
-    testPackage(packagePath, packageName)
-      .then((success) => ({ packageName, success }))
-  );
-
-  const parallelResults = await Promise.all(parallelPromises);
-
-  // Run server-dependent tests sequentially
-  console.log(
-    `\nRunning ${serverPackages.length} server packages sequentially...`,
-  );
-
-  const serverResults = [];
-  for (const { packageName, packagePath } of serverPackages) {
-    const success = await testPackage(packagePath, packageName);
-    serverResults.push({ packageName, success });
-  }
-
-  // Combine all results
-  const results = [...parallelResults, ...serverResults];
-
-  // Check if any tests failed
-  const failedTests = results.filter((result) => !result.success);
-
-  if (failedTests.length === 0) {
-    console.log("\n✅ All tests passing!");
-    return true;
+  if (success) {
+    console.log("All tests passing!");
   } else {
-    console.error(`\n❌ ${failedTests.length} test(s) failed:`);
-    for (const fail of failedTests) {
-      console.error(`  - ${fail.packageName}`);
-    }
+    console.error("One or more tests failed.");
     Deno.exit(1);
-    return false;
   }
+
+  return success;
 }
 
 // Only run if this is the main module
