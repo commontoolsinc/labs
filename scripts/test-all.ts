@@ -9,7 +9,12 @@ export const ALL_DISABLED = [
   "background-charm-service", // no tests yet
 ];
 
-export async function testPackage(packagePath: string): Promise<boolean> {
+export async function testPackage(
+  packagePath: string,
+  packageName: string,
+): Promise<boolean> {
+  console.log(`Testing ${packageName}...`);
+
   const result = await new Deno.Command(Deno.execPath(), {
     args: ["task", "test"],
     cwd: packagePath,
@@ -18,12 +23,18 @@ export async function testPackage(packagePath: string): Promise<boolean> {
 
   const stdout = decoder.decode(result.stdout);
   if (stdout) {
-    console.log(stdout);
+    console.log(
+      `\n--- ${packageName} stdout ---\n${stdout}\n--- End ${packageName} stdout ---\n`,
+    );
   }
   const stderr = decoder.decode(result.stderr);
   if (stderr) {
-    console.error(stderr);
+    console.error(
+      `\n--- ${packageName} stderr ---\n${stderr}\n--- End ${packageName} stderr ---\n`,
+    );
   }
+
+  console.log(`${packageName}: ${result.success ? "✅ PASSED" : "❌ FAILED"}`);
   return result.success;
 }
 
@@ -32,29 +43,44 @@ export async function runTests(disabledPackages: string[]): Promise<boolean> {
   const manifest = JSON.parse(await Deno.readTextFile("./deno.jsonc"));
   const members: string[] = manifest.workspace;
 
-  let success = true;
-  for (const memberPath of members) {
-    // Convert "./memory" to "memory"
-    const packageName = memberPath.substring(2);
+  // Filter out disabled packages and prepare test promises
+  const testPromises = members
+    .filter((memberPath) => {
+      // Convert "./memory" to "memory"
+      const packageName = memberPath.substring(2);
+      return !disabledPackages.includes(packageName);
+    })
+    .map((memberPath) => {
+      const packageName = memberPath.substring(2);
+      const packagePath = path.join(workspaceCwd, packageName);
+      return { packageName, packagePath };
+    })
+    .map(({ packageName, packagePath }) =>
+      testPackage(packagePath, packageName)
+        .then((success) => ({ packageName, success }))
+    );
 
-    if (disabledPackages.includes(packageName)) {
-      continue;
-    }
-    console.log(`Testing ${packageName}...`);
-    const packagePath = path.join(workspaceCwd, packageName);
-    if (!await testPackage(packagePath)) {
-      success = false;
-    }
-  }
+  console.log(
+    `Running tests concurrently for ${testPromises.length} packages...`,
+  );
 
-  if (success) {
-    console.log("All tests passing!");
+  // Run all tests concurrently
+  const results = await Promise.all(testPromises);
+
+  // Check if any tests failed
+  const failedTests = results.filter((result) => !result.success);
+
+  if (failedTests.length === 0) {
+    console.log("\n✅ All tests passing!");
+    return true;
   } else {
-    console.error("One or more tests failed.");
+    console.error(`\n❌ ${failedTests.length} test(s) failed:`);
+    for (const fail of failedTests) {
+      console.error(`  - ${fail.packageName}`);
+    }
     Deno.exit(1);
+    return false;
   }
-
-  return success;
 }
 
 // Only run if this is the main module
