@@ -349,6 +349,11 @@ jobs:
           name: jumble-artifacts
           path: ./jumble-artifacts
 
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.2.2"
+
       # Create Sentry release and upload source maps
       - name: Create Sentry Release with Source Maps
         run: |
@@ -384,9 +389,8 @@ jobs:
     if: github.ref == 'refs/heads/ci-redo'
     needs: ["integration-test"]
     runs-on: ubuntu-latest
-    environment:
-      name: estuary # Protection rules configured in GitHub repo settings
-      url: ${{ steps.deployment.outputs.deployment_url }}
+    environment: estuary
+
     steps:
       - uses: actions/checkout@v4
 
@@ -396,6 +400,11 @@ jobs:
         with:
           name: jumble-artifacts
           path: ./jumble-artifacts
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.2.2"
 
       # Create Sentry release and upload source maps
       - name: Create Sentry Release with Source Maps
