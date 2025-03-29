@@ -9,6 +9,13 @@ export const ALL_DISABLED = [
   "background-charm-service", // no tests yet
 ];
 
+// Packages that need exclusive server access and can't run in parallel with each other
+export const SERVER_PACKAGES = [
+  "deno-web-test",
+  "identity",
+  "iframe-sandbox",
+];
+
 export async function testPackage(
   packagePath: string,
   packageName: string,
@@ -43,29 +50,51 @@ export async function runTests(disabledPackages: string[]): Promise<boolean> {
   const manifest = JSON.parse(await Deno.readTextFile("./deno.jsonc"));
   const members: string[] = manifest.workspace;
 
-  // Filter out disabled packages and prepare test promises
-  const testPromises = members
-    .filter((memberPath) => {
-      // Convert "./memory" to "memory"
-      const packageName = memberPath.substring(2);
-      return !disabledPackages.includes(packageName);
-    })
-    .map((memberPath) => {
-      const packageName = memberPath.substring(2);
-      const packagePath = path.join(workspaceCwd, packageName);
-      return { packageName, packagePath };
-    })
-    .map(({ packageName, packagePath }) =>
-      testPackage(packagePath, packageName)
-        .then((success) => ({ packageName, success }))
-    );
+  // Group packages by type
+  const parallelPackages = [];
+  const serverPackages = [];
 
-  console.log(
-    `Running tests concurrently for ${testPromises.length} packages...`,
+  for (const memberPath of members) {
+    const packageName = memberPath.substring(2);
+
+    if (disabledPackages.includes(packageName)) {
+      continue;
+    }
+
+    const packagePath = path.join(workspaceCwd, packageName);
+
+    if (SERVER_PACKAGES.includes(packageName)) {
+      serverPackages.push({ packageName, packagePath });
+    } else {
+      parallelPackages.push({ packageName, packagePath });
+    }
+  }
+
+  // Run parallel-safe tests concurrently
+  console.log(`Running ${parallelPackages.length} packages in parallel...`);
+
+  const parallelPromises = parallelPackages.map((
+    { packageName, packagePath },
+  ) =>
+    testPackage(packagePath, packageName)
+      .then((success) => ({ packageName, success }))
   );
 
-  // Run all tests concurrently
-  const results = await Promise.all(testPromises);
+  const parallelResults = await Promise.all(parallelPromises);
+
+  // Run server-dependent tests sequentially
+  console.log(
+    `\nRunning ${serverPackages.length} server packages sequentially...`,
+  );
+
+  const serverResults = [];
+  for (const { packageName, packagePath } of serverPackages) {
+    const success = await testPackage(packagePath, packageName);
+    serverResults.push({ packageName, success });
+  }
+
+  // Combine all results
+  const results = [...parallelResults, ...serverResults];
 
   // Check if any tests failed
   const failedTests = results.filter((result) => !result.success);
