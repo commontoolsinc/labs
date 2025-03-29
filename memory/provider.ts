@@ -126,7 +126,7 @@ class MemoryProviderSession<
   ) {
     this.readable = new ReadableStream<ProviderCommand<MemoryProtocol>>({
       start: (controller) => this.open(controller),
-      cancel: () => this.cancel(),
+      cancel: (_reason?) => this.cancel(),
     });
     this.writable = new WritableStream<
       UCAN<ConsumerCommandInvocation<MemoryProtocol>>
@@ -205,6 +205,16 @@ class MemoryProviderSession<
           >,
         });
       }
+      case "/memory/graph/query": {
+        return this.perform({
+          the: "task/return",
+          of,
+          is: (await this.memory.querySchema(invocation)) as Result<
+            Selection<Space>,
+            QueryError
+          >,
+        });
+      }
       case "/memory/transact": {
         return this.perform({
           the: "task/return",
@@ -213,10 +223,13 @@ class MemoryProviderSession<
         });
       }
       case "/memory/query/subscribe": {
+        const selector = ("select") in invocation.args
+          ? invocation.args.select
+          : invocation.args.selectSchema;
         this.channels.set(
           of,
           new Set(
-            Subscription.channels(invocation.sub, invocation.args.select),
+            Subscription.channels(invocation.sub, selector),
           ),
         );
         return this.memory.subscribe(this);

@@ -128,4 +128,22 @@ describe("Storage", () => {
       expect(value).toBeUndefined();
     });
   });
+
+  describe("doc updates", () => {
+    it("should persist doc updates with schema", async () => {
+      await storage.syncCell(testDoc, false, {
+        schema: true,
+        rootSchema: true,
+      });
+
+      testDoc.send("value 1");
+      testDoc.send("value 2");
+
+      await storage.synced();
+
+      await storage2.sync(testDoc.entityId!);
+      const value = storage2.get(testDoc.entityId!);
+      expect(value?.value).toBe("value 2");
+    });
+  });
 });

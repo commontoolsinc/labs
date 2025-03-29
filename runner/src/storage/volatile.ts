@@ -1,6 +1,7 @@
 import type { EntityId } from "@commontools/runner";
 import { log } from "../storage.ts";
 import { BaseStorageProvider, type StorageValue } from "./base.ts";
+import { SchemaContext } from "@commontools/memory/interface";
 import { RemoteStorageProvider } from "./remote.ts";
 
 /**
@@ -106,6 +107,7 @@ export class VolatileStorageProvider extends BaseStorageProvider {
   sync(
     entityId: EntityId,
     expectedInStorage: boolean = false,
+    _schemaContext?: SchemaContext,
   ): Promise<void> {
     const spaceStorage = getOrCreateSpaceStorage(this.spaceName);
     const key = JSON.stringify(entityId);

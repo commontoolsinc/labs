@@ -26,6 +26,8 @@ import {
   QueryError,
   Reference,
   Result,
+  SchemaQuery,
+  SchemaSelector,
   Seconds,
   Selection,
   Selector,
@@ -223,7 +225,9 @@ export interface MemorySession<Space extends MemorySpace> {
 
 export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {
   transact(source: Transaction<Space>["args"]): TransactionResult<Space>;
-  query(source: Query["args"]): QueryView<Space, Protocol<Space>>;
+  query(
+    source: Query["args"] | SchemaQuery["args"],
+  ): QueryView<Space, Protocol<Space>>;
 }
 
 export type { QueryView };
@@ -238,16 +242,27 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
     return this.session.invoke({
       cmd: "/memory/transact",
       sub: this.space,
-      args: source as Transaction["args"],
+      args: source,
     });
   }
-  query(source: Query["args"]): QueryView<Space, Protocol<Space>> {
-    const query = this.session.invoke({
-      cmd: "/memory/query" as const,
-      sub: this.space,
-      args: source as Query["args"],
-    });
-    return QueryView.create(this.session, query);
+  query(
+    source: Query["args"] | SchemaQuery["args"],
+  ): QueryView<Space, Protocol<Space>> {
+    if ("select" in source) {
+      const query = this.session.invoke({
+        cmd: "/memory/query" as const,
+        sub: this.space,
+        args: source,
+      });
+      return QueryView.create(this.session, query);
+    } else {
+      const query = this.session.invoke({
+        cmd: "/memory/graph/query" as const,
+        sub: this.space,
+        args: source,
+      });
+      return QueryView.create(this.session, query);
+    }
   }
 }
 
@@ -335,7 +350,9 @@ class QueryView<
     MemoryProtocol extends Protocol<Space>,
   >(
     session: MemoryConsumerSession<Space, MemoryProtocol>,
-    invocation: ConsumerInvocation<"/memory/query", MemoryProtocol>,
+    invocation:
+      | ConsumerInvocation<"/memory/query", MemoryProtocol>
+      | ConsumerInvocation<"/memory/graph/query", MemoryProtocol>,
   ): QueryView<Space, MemoryProtocol> {
     const view: QueryView<Space, MemoryProtocol> = new QueryView(
       session,
@@ -356,7 +373,9 @@ class QueryView<
 
   constructor(
     public session: MemoryConsumerSession<Space, MemoryProtocol>,
-    public invocation: ConsumerInvocation<"/memory/query", MemoryProtocol>,
+    public invocation:
+      | ConsumerInvocation<"/memory/query", MemoryProtocol>
+      | ConsumerInvocation<"/memory/graph/query", MemoryProtocol>,
     public promise: Promise<
       Result<QueryView<Space, MemoryProtocol>, QueryError | ConnectionError>
     >,
@@ -365,7 +384,12 @@ class QueryView<
   }
 
   get selector() {
-    return (this.invocation.args as { select?: Selector }).select as Selector;
+    if ("select" in this.invocation.args) {
+      return (this.invocation.args as { select?: Selector }).select as Selector;
+    } else {
+      return (this.invocation.args as { selectSchema?: Selector })
+        .selectSchema as SchemaSelector;
+    }
   }
 
   return(selection: Selection<InferOf<Protocol>>) {

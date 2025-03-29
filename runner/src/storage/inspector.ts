@@ -7,6 +7,7 @@ import {
   Query,
   QueryError,
   Result,
+  SchemaQuery,
   Subscribe,
   Transaction,
   TransactionError,
@@ -39,7 +40,7 @@ export type PushState = Record<
 
 export type PullState = Record<
   string,
-  Result<UCAN<Query>, PullError & { time: Time }>
+  Result<UCAN<Query | SchemaQuery>, PullError & { time: Time }>
 >;
 
 export type SubscriptionState = Record<string, {
@@ -197,6 +198,10 @@ const send = (
       return state;
     }
     case "/memory/query": {
+      state.pull[url] = { ok: { invocation, authorization } };
+      return state;
+    }
+    case "/memory/graph/query": {
       state.pull[url] = { ok: { invocation, authorization } };
       return state;
     }

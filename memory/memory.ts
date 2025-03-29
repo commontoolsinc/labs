@@ -15,6 +15,7 @@ import {
   Query,
   QueryResult,
   Result,
+  SchemaQuery,
   SpaceSession,
   Subscriber,
   SubscribeResult,
@@ -83,6 +84,10 @@ export class Memory implements Session, MemorySession {
     return this.perform(() => query(this, source));
   }
 
+  querySchema(source: SchemaQuery): QueryResult {
+    return this.perform(() => querySchema(this, source));
+  }
+
   close() {
     return this.perform(() => close(this));
   }
@@ -121,6 +126,24 @@ export const query = async (session: Session, query: Query) => {
 
     span.setAttribute("mount.status", "success");
     return space.query(query);
+  });
+};
+
+export const querySchema = async (session: Session, query: SchemaQuery) => {
+  return await traceAsync("memory.querySchema", async (span) => {
+    addMemoryAttributes(span, {
+      operation: "querySchema",
+      space: query.sub,
+    });
+
+    const { ok: space, error } = await mount(session, query.sub);
+    if (error) {
+      span.setAttribute("mount.status", "error");
+      return { error };
+    }
+
+    span.setAttribute("mount.status", "success");
+    return space.querySchema(query);
   });
 };
 

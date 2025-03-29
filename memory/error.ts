@@ -5,6 +5,7 @@ import type {
   ConnectionError,
   Fact,
   QueryError,
+  SchemaSelector,
   Selector,
   SystemError,
   ToJSON,
@@ -30,7 +31,7 @@ export const transaction = (
 
 export const query = (
   space: MemorySpace,
-  selector: Selector,
+  selector: Selector | SchemaSelector,
   cause: SystemError,
 ): ToJSON<QueryError> => new TheQueryError(space, selector, cause);
 
@@ -101,7 +102,7 @@ export class TheQueryError extends Error implements QueryError {
   override name = "QueryError" as const;
   constructor(
     public space: MemorySpace,
-    public selector: Selector,
+    public selector: Selector | SchemaSelector,
     public override cause: SystemError,
   ) {
     super(
