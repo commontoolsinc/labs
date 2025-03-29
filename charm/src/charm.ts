@@ -456,11 +456,4 @@ export class CharmManager {
   async sync(entity: Cell<any>, waitForStorage: boolean = false) {
     await storage.syncCell(entity, waitForStorage);
   }
-
-  async syncSchema(
-    entity: Cell<any>,
-    waitForStorage: boolean = false,
-  ) {
-    await storage.syncSchemaCell(entity, undefined, waitForStorage);
-  }
 }
