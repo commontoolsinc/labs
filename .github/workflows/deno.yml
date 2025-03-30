@@ -14,56 +14,111 @@ env:
   BINARIES: "toolshed bg-charm-service"
 
 jobs:
-  workspace-tests:
-    name: "Workspace Tests"
-    runs-on: ubuntu-latest
+  workspace-checks-and-tests:
+    name: "Workspace Checks and Tests"
+    runs-on: ubuntu-24.04-32-core
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup Deno
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno 2.2.2
         uses: denoland/setup-deno@v2
         with:
           deno-version: "2.2.2"
-      - name: Cache dependencies
+
+      - name: 📦 Cache Deno dependencies
         uses: actions/cache@v3
         with:
           path: |
             ~/.deno
             ~/.cache/deno
           key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
-      - name: Install dependencies
-        # Errors if `deno.lock` file was not
-        # committed with the current change.
+
+      # Errors if `deno.lock` file was not committed with the current change
+      - name: 🔍 Verify lock file & install dependencies
         run: deno install --frozen=true
-      - name: Check
+
+      - name: 🔎 Type check codebase
         run: deno task check
-      - name: Lint
+
+      - name: 🧹 Lint codebase
         run: deno lint
+
       # For deno-web-test browser tests
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
-      - name: Disable AppArmor
+      - name: 🛡️ Disable AppArmor for browser tests
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
-      - name: Run tests
+
+      - name: 🧪 Run parallel workspace tests
         run: deno task test-all
+
+  toolshed-tests:
+    name: "Toolshed Tests"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: toolshed
+    services:
+      redis:
+        image: redis
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno 2.2.2
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.2.2"
+
+      - name: 📦 Cache Deno dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.deno
+            ~/.cache/deno
+          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+
+      - name: 📝 Verify code formatting
+        working-directory: toolshed
+        run: deno fmt --check
+
+      - name: 🧪 Run Toolshed integration tests
+        working-directory: toolshed
+        run: deno test -A --env-file=.env.test
+        env:
+          ENV: test
+          PORT: 8000
+          LOG_LEVEL: silent
+          REDIS_URL: redis://localhost:6379
 
   build-binaries:
     name: "Build Binaries"
     runs-on: ubuntu-24.04-32-core
-    needs: ["workspace-tests"]
-    environment: production
+    needs: ["workspace-checks-and-tests", "toolshed-tests"]
+    environment: ci
     permissions:
       id-token: write
       contents: read
       actions: read
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Setup Deno
+      - name: 🦕 Setup Deno 2.2.2
         uses: denoland/setup-deno@v2
         with:
           deno-version: "2.2.2"
 
-      - name: Cache dependencies
+      - name: 📦 Cache Deno dependencies
         uses: actions/cache@v3
         with:
           path: |
@@ -71,11 +126,21 @@ jobs:
             ~/.cache/deno
           key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
 
-      - name: Build binaries
+      - name: 🏗️ Build application binaries
         run: deno task build-binaries
+        env:
+          VITE_COMMIT_SHA: ${{ github.sha }}
+          VITE_BUILD_SOURCEMAPS: "true"
 
-      # When on main branch, sign binaries, create attestations, and upload to GCS
-      - name: Process binaries for main branch
+      # Archive source maps for later use in deployments
+      - name: 📤 Archive Jumble frontend artifacts
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: jumble-artifacts
+          path: ./toolshed/jumble-frontend
+
+      - name: 🔐 Process & sign binaries
         if: github.ref == 'refs/heads/main'
         run: |
           mkdir -p release
@@ -119,8 +184,7 @@ jobs:
           echo "tarball_hash=$TARBALL_HASH" >> $GITHUB_OUTPUT
         id: binary_processing
 
-      # Generate attestations for each binary
-      - name: Generate attestations for toolshed binary
+      - name: 📝 Generate attestation for toolshed binary
         if: github.ref == 'refs/heads/main'
         id: attest_toolshed
         uses: actions/attest-build-provenance@v1
@@ -128,7 +192,7 @@ jobs:
           subject-name: ./dist/toolshed
           subject-digest: sha256:${{ steps.binary_processing.outputs.toolshed_hash }}
 
-      - name: Generate attestations for bg-charm-service binary
+      - name: 📝 Generate attestation for bg-charm-service binary
         if: github.ref == 'refs/heads/main'
         id: attest_bg_charm_service
         uses: actions/attest-build-provenance@v1
@@ -136,8 +200,7 @@ jobs:
           subject-name: ./dist/bg-charm-service
           subject-digest: sha256:${{ steps.binary_processing.outputs.bg_charm_service_hash }}
 
-      # Generate attestation for the tarball
-      - name: Generate tarball attestation
+      - name: 📝 Generate attestation for tarball
         if: github.ref == 'refs/heads/main'
         id: attest_tarball
         uses: actions/attest-build-provenance@v1
@@ -145,8 +208,7 @@ jobs:
           subject-name: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.tar.gz
           subject-digest: sha256:${{ steps.binary_processing.outputs.tarball_hash }}
 
-      # Upload all attestations
-      - name: Upload attestations
+      - name: 📤 Upload attestations as artifacts
         if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
@@ -157,8 +219,7 @@ jobs:
             ${{ steps.attest_bg_charm_service.outputs.bundle-path }}
             ${{ steps.attest_tarball.outputs.bundle-path }}
 
-      # Verify attestations
-      - name: Verify attestations
+      - name: 🔍 Verify binary attestations
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -196,18 +257,17 @@ jobs:
             exit 1
           fi
 
-      # Upload to GCS
-      - name: Authenticate to Google Cloud for main
+      - name: 🔑 Authenticate to Google Cloud
         if: github.ref == 'refs/heads/main'
         uses: google-github-actions/auth@v1
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Setup Google Cloud SDK for main
+      - name: ⚙️ Setup Google Cloud SDK
         if: github.ref == 'refs/heads/main'
         uses: google-github-actions/setup-gcloud@v1
 
-      - name: Upload to GCS for main
+      - name: 🚀 Upload artifacts to Google Cloud Storage
         if: github.ref == 'refs/heads/main'
         run: |
           gsutil cp release/labs-${{ github.sha }}.tar.gz gs://commontools-build-artifacts/workspace-artifacts/
@@ -220,7 +280,8 @@ jobs:
           echo "::endgroup::"
 
       # Upload binaries as artifacts for the integration tests
-      - uses: actions/upload-artifact@v4
+      - name: 📤 Upload binaries for integration tests
+        uses: actions/upload-artifact@v4
         with:
           name: common-binaries
           path: |
@@ -231,7 +292,7 @@ jobs:
     name: "Integration Tests"
     runs-on: ubuntu-latest
     needs: ["build-binaries"]
-    environment: production
+    environment: ci
     services:
       redis:
         image: redis
@@ -243,14 +304,15 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v4
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Setup Deno
+      - name: 🦕 Setup Deno 2.2.2
         uses: denoland/setup-deno@v2
         with:
           deno-version: "2.2.2"
 
-      - name: Cache dependencies
+      - name: 📦 Cache Deno dependencies
         uses: actions/cache@v3
         with:
           path: |
@@ -258,9 +320,10 @@ jobs:
             ~/.cache/deno
           key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
 
-      - uses: actions/download-artifact@v4
+      - name: 📥 Download built binaries
+        uses: actions/download-artifact@v4
 
-      - name: Run Compiled Toolshed
+      - name: 🚀 Start Toolshed server for testing
         run: |
           chmod +x ./common-binaries/toolshed
           CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
@@ -269,12 +332,154 @@ jobs:
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
-      - name: Disable AppArmor
+      - name: 🛡️ Disable AppArmor for browser tests
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
-      - name: Run Integration
+      - name: 🧪 Run end-to-end integration tests
         working-directory: jumble
         run: |
           TOOLSHED_API_URL=http://localhost:8000/ \
           FRONTEND_URL=http://localhost:8000/ \
           deno task integration
+
+  # Automatic deployment to staging (toolshed)
+  deploy-toolshed:
+    name: "Deploy to Toolshed (Staging)"
+    if: github.ref == 'refs/heads/main'
+    needs: ["integration-test"]
+    runs-on: ubuntu-latest
+    environment: toolshed
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 📥 Download frontend artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: jumble-artifacts
+          path: ./jumble-artifacts
+
+      - name: 🦕 Setup Deno 2.2.2
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.2.2"
+
+      - name: 🔽 Pre-download Sentry CLI
+        run: |
+          echo "::group::Downloading Sentry CLI"
+          deno run --allow-all npm:@sentry/cli --version
+          echo "::endgroup::"
+
+      - name: 📊 Create Jumble Sentry release & upload source maps
+        run: |
+          # Create a release with version based on commit SHA
+          deno run --allow-all npm:@sentry/cli releases new ${{ github.sha }}
+
+          # Associate commits with the release
+          deno run --allow-all npm:@sentry/cli releases set-commits ${{ github.sha }} --auto
+
+          # Upload source maps
+          deno run --allow-all npm:@sentry/cli releases files ${{ github.sha }} upload-sourcemaps ./jumble-artifacts --rewrite
+
+          # Finalize the release
+          deno run --allow-all npm:@sentry/cli releases finalize ${{ github.sha }}
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_JUMBLE_PROJECT }}
+
+      - name: 📊 Create Toolshed server Sentry release
+        run: |
+          # Create a release with version based on commit SHA
+          deno run --allow-all npm:@sentry/cli releases new ${{ github.sha }}
+
+          # Associate commits with the release
+          deno run --allow-all npm:@sentry/cli releases set-commits ${{ github.sha }} --auto
+
+          # Finalize the release
+          deno run --allow-all npm:@sentry/cli releases finalize ${{ github.sha }}
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_TOOLSHED_PROJECT }}
+
+      - name: 🚀 Deploy application to Toolshed (Staging)
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.BASTION_HOST }}
+          username: bastion
+          key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
+          script: /opt/ct/deploy.sh ${{ vars.DEPLOYMENT_ENVIRONMENT }} ${{ github.sha }}
+
+  # Manual deployment to production (estuary)
+  # This job will pause and require manual approval in the GitHub Actions UI
+  # Configure required reviewers in Settings > Environments > estuary
+  deploy-estuary:
+    name: "Deploy to Estuary (Production)"
+    if: github.ref == 'refs/heads/main'
+    needs: ["integration-test"]
+    runs-on: ubuntu-latest
+    environment: estuary # Protection rules configured in GitHub repo settings
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 📥 Download frontend artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: jumble-artifacts
+          path: ./jumble-artifacts
+
+      - name: 🦕 Setup Deno 2.2.2
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.2.2"
+
+      - name: 🔽 Pre-download Sentry CLI
+        run: |
+          echo "::group::Downloading Sentry CLI"
+          deno run --allow-all npm:@sentry/cli --version
+          echo "::endgroup::"
+
+      - name: 📊 Create Jumble Sentry release & upload source maps
+        run: |
+          # Create a release with version based on commit SHA
+          deno run --allow-all npm:@sentry/cli releases new ${{ github.sha }}
+
+          # Associate commits with the release
+          deno run --allow-all npm:@sentry/cli releases set-commits ${{ github.sha }} --auto
+
+          # Upload source maps
+          deno run --allow-all npm:@sentry/cli releases files ${{ github.sha }} upload-sourcemaps ./jumble-artifacts --rewrite
+
+          # Finalize the release
+          deno run --allow-all npm:@sentry/cli releases finalize ${{ github.sha }}
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_JUMBLE_PROJECT }}
+
+      - name: 📊 Create Toolshed server Sentry release
+        run: |
+          # Create a release with version based on commit SHA
+          deno run --allow-all npm:@sentry/cli releases new ${{ github.sha }}
+
+          # Associate commits with the release
+          deno run --allow-all npm:@sentry/cli releases set-commits ${{ github.sha }} --auto
+
+          # Finalize the release
+          deno run --allow-all npm:@sentry/cli releases finalize ${{ github.sha }}
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_TOOLSHED_PROJECT }}
+
+      - name: 🚀 Deploy application to Estuary (Production)
+        id: deployment
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.BASTION_HOST }}
+          username: bastion
+          key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
+          script: /opt/ct/deploy.sh ${{ vars.DEPLOYMENT_ENVIRONMENT }} ${{ github.sha }}

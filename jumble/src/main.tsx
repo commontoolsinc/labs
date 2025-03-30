@@ -31,22 +31,48 @@ import SpellbookLaunchView from "@/views/spellbook/SpellbookLaunchView.tsx";
 import { ActionManagerProvider } from "@/contexts/ActionManagerContext.tsx";
 import { ROUTES } from "@/routes.ts";
 
-// Initialize Sentry
-Sentry.init({
-  dsn: import.meta.env.VITE_SENTRY_DSN,
-  environment: import.meta.env.VITE_ENVIRONMENT || "development",
-  release: import.meta.env.VITE_COMMIT_SHA || "development",
-  tracesSampleRate: 1.0,
-  integrations: [
-    Sentry.reactRouterV7BrowserTracingIntegration({
-      useEffect,
-      useLocation,
-      useNavigationType,
-      createRoutesFromChildren,
-      matchRoutes,
-    }),
-  ],
-});
+// Determine environment based on hostname
+const determineEnvironment = () => {
+  const hostname = globalThis.location.hostname;
+
+  // Map hostnames to environments
+  if (hostname.startsWith("estuary")) {
+    return {
+      environment: "production",
+      dsn:
+        "https://09abf88225ffaad4bca353395ed943f5@o4508230766100480.ingest.us.sentry.io/4509062092423168",
+    };
+  } else if (hostname.startsWith("toolshed")) {
+    return {
+      environment: "staging",
+      dsn:
+        "https://839a9ee7738bb34a87fc8c73edc61c26@o4508230766100480.ingest.us.sentry.io/4509012183875584",
+    };
+  }
+  return null;
+};
+
+// Get environment config
+const envConfig = determineEnvironment();
+
+if (envConfig) {
+  // Initialize Sentry
+  Sentry.init({
+    dsn: envConfig.dsn,
+    environment: envConfig.environment,
+    release: import.meta.env.VITE_COMMIT_SHA || "development",
+    tracesSampleRate: 1.0,
+    integrations: [
+      Sentry.reactRouterV7BrowserTracingIntegration({
+        useEffect,
+        useLocation,
+        useNavigationType,
+        createRoutesFromChildren,
+        matchRoutes,
+      }),
+    ],
+  });
+}
 
 const SentryRoutes = Sentry.withSentryReactRouterV7Routing(Routes);
 
