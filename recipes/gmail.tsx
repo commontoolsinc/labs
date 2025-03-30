@@ -188,7 +188,7 @@ const refreshAuthToken = async (auth: Cell<Auth>) => {
     },
   ).then((res) => res.json());
 
-  return refresh_response as Auth;
+  return refresh_response.tokenInfo as Auth;
 };
 
 const googleUpdater = handler(
@@ -407,7 +407,7 @@ export async function fetchEmail(
 
   if (cur.expiresAt && Date.now() > cur.expiresAt) {
     const resp = await refreshAuthToken(auth);
-    auth.set(resp);
+    auth.update(resp);
     console.log("refresh_data", resp);
   }
 
