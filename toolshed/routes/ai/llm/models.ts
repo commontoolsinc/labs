@@ -470,6 +470,21 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
       streaming: true,
     },
   });
+
+  addModel({
+    provider: vertexProvider,
+    name: "google:gemini-2.5-pro-exp-03-25",
+    aliases: ["google:gemini-2.5-pro", "gemini-2.5-pro"],
+    capabilities: {
+      contextWindow: 1_048_576,
+      maxOutputTokens: 65_536,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
 }
 
 if (env.CTTS_AI_LLM_CEREBRAS_API_KEY) {
