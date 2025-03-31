@@ -259,26 +259,11 @@ async function handleNewCharm(
   deps.setLoading(true);
 
   try {
-    // Extract preview spec and plan if available from sources
-    const previewSpec = sources?.__previewSpec as string | undefined;
-    const previewPlan = sources?.__previewPlan as string | undefined;
-
-    console.log("handleNewCharm with:", {
-      hasInput: !!input,
-      hasPreviewSpec: !!previewSpec,
-      hasPreviewPlan: !!previewPlan,
-      previewSpecLength: previewSpec?.length,
-      previewPlanLength: previewPlan?.length,
-      sources: Object.keys(sources || {})
-    });
-
-    // Pass the goal and preview spec/plan to castNewRecipe to avoid regenerating
+    // Pass the goal to castNewRecipe
     const newCharm = await castNewRecipe(
       deps.charmManager,
       input,
-      grabCells(sources),
-      previewSpec,
-      previewPlan,
+      grabCells(sources)
     );
     if (!newCharm) {
       throw new Error("Failed to cast charm");
@@ -349,33 +334,13 @@ async function handleEditRecipe(
   if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
   deps.setLoading(true);
 
-  // Extract preview spec and plan if available
-  const previewSpec = sources?.__previewSpec as string | undefined;
-  const previewPlan = sources?.__previewPlan as string | undefined;
-
-  console.log("handleEditRecipe with:", {
-    hasPreviewSpec: !!previewSpec,
-    hasPreviewPlan: !!previewPlan
-  });
-
   const charm = (await deps.charmManager.get(deps.focusedCharmId, false))!;
   try {
-    // We can now pass previewSpec directly to iterate
-    const shiftKeyPressed = sources?.__shiftKeyPressed === true;
-    
-    console.log("handleEditRecipe with:", {
-      hasShiftKey: shiftKeyPressed,
-      inputLength: input.length,
-      hasPreviewSpec: !!previewSpec
-    });
-    
     const newCharm = await iterate(
       deps.charmManager,
       charm,
       input,
-      shiftKeyPressed,
-      deps.preferredModel,
-      previewSpec // Pass the preview spec when available
+      deps.preferredModel
     );
     
     deps.navigate(createPath("charmShow", {
@@ -398,17 +363,11 @@ async function handleExtendRecipe(
   if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
   deps.setLoading(true);
 
-  // Extract preview spec and plan if available from sources
-  const previewSpec = sources?.__previewSpec as string | undefined;
-  const previewPlan = sources?.__previewPlan as string | undefined;
-
   const newCharm = await extendCharm(
     deps.charmManager,
     deps.focusedCharmId,
     input,
-    grabCells(sources),
-    previewSpec,
-    previewPlan,
+    grabCells(sources)
   );
   deps.navigate(createPath("charmShow", {
     charmId: charmId(newCharm)!,

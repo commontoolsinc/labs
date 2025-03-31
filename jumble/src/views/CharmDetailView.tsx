@@ -286,7 +286,7 @@ function useCharmOperation() {
     return iframeRecipe?.iframe?.spec;
   }, [charm]);
 
-  // Live preview generation with shift key awareness
+  // Live preview generation
   const {
     previewSpec,
     previewPlan,
@@ -299,7 +299,7 @@ function useCharmOperation() {
     showPreview,
     250,
     previewModel,
-    existingSpec,
+    existingSpec
   );
 
   // Function that performs the selected operation (iterate or extend)

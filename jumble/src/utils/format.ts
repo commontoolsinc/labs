@@ -132,18 +132,13 @@ function toCamelCase(input: string): string {
 }
 
 // Use Record for the dynamic properties and intersection for the fixed properties
-export type SourceSet = Record<string, { name: string; cell: Cell<any> } | string | undefined> & {
-  __previewSpec?: string;
-  __previewPlan?: string;
-  __shiftKeyPressed?: boolean;
-};
+export type SourceSet = Record<string, { name: string; cell: Cell<any> } | string | undefined>;
 
 export function grabCells(sources?: SourceSet) {
   const cells: { [id: string]: Cell<any> } = sources
     ? Object.entries(sources).reduce((acc, [id, source]) => {
-      // Skip special fields like __previewSpec and __previewPlan
-      // Also skip string values which are not source cells
-      if (id.startsWith("__") || typeof source === "string") {
+      // Skip string values which are not source cells
+      if (typeof source === "string") {
         return acc;
       }
       acc[id] = (source as { name: string; cell: Cell<any> }).cell;

@@ -51,9 +51,7 @@ const genSrc = async ({
  * @param charmManager The CharmManager to use
  * @param charm The charm to iterate on
  * @param promptSpec The user's input prompt/spec
- * @param shiftKey Whether shift was held during submission
  * @param model Optional language model to use
- * @param existingSpec Optional pre-generated specification to use (avoids duplicate LLM calls)
  * @returns A new charm cell
  */
 export async function iterate(

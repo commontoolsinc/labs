@@ -114,42 +114,15 @@ function CommandProcessor({
       return;
     }
     
-    // If we're in the middle of loading the preview, wait for it to finish
-    if (isPreviewLoading) {
-      console.log("Preview is still loading, waiting...");
-      return;
-    }
-    
-    // If for some reason we don't have a preview yet, regenerate it and wait
-    if (!previewSpec && !isPreviewLoading) {
-      console.log("No preview available, regenerating...");
-      await regenerate();
-      return; // Function will exit and get called again when Enter is pressed again
-    }
-    
     const { text, sources } = await formatPromptWithMentions(
       inputValue,
       charmManager,
     );
     
     if ((mode.command as InputCommandItem).handler) {
-      // Add preview spec and plan to sources so they can be used in the handler
-      const sourcesWithPreview = {
-        ...sources,
-        __previewSpec: previewSpec,
-        __previewPlan: previewPlan,
-        __shiftKeyPressed: shiftKeyPressed,
-      };
-      
-      console.log("Command Center submitting with preview:", {
-        hasPreviewSpec: !!previewSpec,
-        hasPreviewPlan: !!previewPlan,
-        previewSpecLength: previewSpec?.length
-      });
-      
-      (mode.command as InputCommandItem).handler(text, sourcesWithPreview);
+      (mode.command as InputCommandItem).handler(text, sources);
     }
-  }, [mode, inputValue, charmManager, previewSpec, previewPlan, isPreviewLoading, regenerate]);
+  }, [mode, inputValue, charmManager]);
 
   switch (mode.type) {
     case "input": {
