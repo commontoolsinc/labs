@@ -1216,7 +1216,7 @@ const DataTab = () => {
                             >
                               <CharmLink
                                 charm={charm}
-                                showHash={true}
+                                showHash
                                 className="text-sm"
                               />
                             </div>
@@ -1246,7 +1246,7 @@ const DataTab = () => {
                             >
                               <CharmLink
                                 charm={charm}
-                                showHash={true}
+                                showHash
                                 className="text-sm"
                               />
                             </div>
