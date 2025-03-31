@@ -275,6 +275,8 @@ function useCharmOperation() {
   const {
     previewSpec,
     previewPlan,
+    processedText,
+    sources,
     loading: isPreviewLoading,
     model,
   } = useLiveSpecPreview(input, showPreview, 250, previewModel);
@@ -288,38 +290,88 @@ function useCharmOperation() {
       data: any,
     ) => {
       if (operationType === "iterate") {
-        // TODO(bf): do we use @-ref data for iterate?
-        return charmManager.get(charmId, false).then((fetched) => {
-          const charm = fetched!;
-          return iterate(
-            charmManager,
-            charm,
-            input,
-            false,
-            model,
-          );
+        console.log("performOperation for iterate mode:", {
+          hasPreview: showPreview,
+          hasPreviewSpec: !!previewSpec,
+          hasPreviewPlan: !!previewPlan
         });
+        
+        // For iterate mode, we have to handle the preview spec differently
+        // since iterate() doesn't directly support passing a preexisting spec
+        if (showPreview && previewSpec) {
+          return charmManager.get(charmId, false).then((fetched) => {
+            const charm = fetched!;
+            const { recipeId, iframe } = getIframeRecipe(charm);
+            if (!recipeId || !iframe) {
+              throw new Error("Cannot iterate on a non-iframe charm");
+            }
+            // Use generateNewRecipeVersion directly with the preview spec
+            return generateNewRecipeVersion(
+              charmManager,
+              charm,
+              iframe.src,
+              previewSpec
+            );
+          });
+        } else {
+          // Fall back to regular iterate if no preview available
+          return charmManager.get(charmId, false).then((fetched) => {
+            const charm = fetched!;
+            return iterate(
+              charmManager,
+              charm,
+              input,
+              false,
+              model,
+            );
+          });
+        }
       } else {
+        // For extend mode, we can pass the preview spec/plan directly
+        console.log("performOperation for extend mode:", {
+          hasPreview: showPreview,
+          hasPreviewSpec: !!previewSpec,
+          hasPreviewPlan: !!previewPlan
+        });
+        
         return extendCharm(
           charmManager,
           charmId,
           input,
           data,
+          showPreview ? previewSpec : undefined,
+          showPreview ? previewPlan : undefined,
         );
       }
     },
-    [operationType, charmManager],
+    [operationType, charmManager, showPreview, previewSpec, previewPlan],
   );
 
   // Handle performing the operation
   const handlePerformOperation = useCallback(async () => {
-    if (!input || !charm || !paramCharmId || !replicaName) return;
+    // Validate that we have required data and input is not empty/whitespace
+    if (!input.trim() || !charm || !paramCharmId || !replicaName) return;
+    
+    // If preview is still loading, return without doing anything
+    if (showPreview && isPreviewLoading) {
+      console.log("Preview is still loading, please wait...");
+      return;
+    }
+    
+    // If preview is enabled but we don't have a spec yet, we need to wait for it
+    if (showPreview && !previewSpec && !isPreviewLoading) {
+      console.log("No preview available but preview is enabled, this shouldn't happen");
+      return;
+    }
+    
     setLoading(true);
 
-    const { text, sources } = await formatPromptWithMentions(
-      input,
-      charmManager,
-    );
+    // If we have a preview with processed text and sources, use that to avoid reprocessing
+    // Otherwise, process the mentions now
+    const { text, sources: sourcesData } =
+      showPreview && processedText && sources
+        ? { text: processedText, sources }
+        : await formatPromptWithMentions(input, charmManager);
 
     const handleVariants = async () => {
       setVariants([]);
@@ -330,7 +382,7 @@ function useCharmOperation() {
           charmId(charm)!,
           text,
           model,
-          sources,
+          sourcesData,
         );
         // Store the variant and keep track of which model was used
         setVariants((prev) => [...prev, newCharm]);
@@ -356,7 +408,7 @@ function useCharmOperation() {
           charmId(charm)!,
           text,
           selectedModel,
-          sources,
+          sourcesData,
         );
         navigate(createPath("charmShow", {
           charmId: charmId(newCharm)!,
@@ -379,6 +431,9 @@ function useCharmOperation() {
     charmManager,
     navigate,
     operationType,
+    showPreview,
+    processedText,
+    sources,
   ]);
 
   const handleCancelVariants = useCallback(() => {
@@ -808,7 +863,7 @@ const OperationTab = () => {
               value={input}
               onValueChange={setInput}
               onSubmit={handlePerformOperation}
-              disabled={loading}
+              disabled={loading || !input.trim()}
               style={{ width: "100%", height: "96px" }}
             />
           </div>
@@ -817,10 +872,9 @@ const OperationTab = () => {
             loading={loading}
             operation={operationType === "iterate" ? "Iterate" : "Extend"}
             onSubmit={handlePerformOperation}
+            disabled={!input.trim()}
           >
-            {/* TODO(bf): restore in https://github.com/commontoolsinc/labs/issues/876 */}
-            {
-              /* <div className="flex items-center mr-2">
+            <div className="flex items-center mr-2">
               <input
                 type="checkbox"
                 id="preview"
@@ -860,8 +914,7 @@ const OperationTab = () => {
                   </button>
                 </div>
               </div>
-            )} */
-            }
+            )}
 
             <CheckboxToggle
               id="variants"
@@ -897,15 +950,12 @@ const OperationTab = () => {
 
       {/* Content Container with single scrollbar */}
       <div className="flex-grow overflow-auto mt-3 -mx-4 px-4">
-        {/* TODO(bf): restore in https://github.com/commontoolsinc/labs/issues/876 */}
-        {
-          /* <SpecPreview
+        <SpecPreview
           spec={previewSpec}
           plan={previewPlan}
           loading={isPreviewLoading}
           visible={showPreview}
-        /> */
-        }
+        />
         <Variants />
         <Suggestions />
       </div>

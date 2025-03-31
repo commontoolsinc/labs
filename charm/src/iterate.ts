@@ -5,7 +5,7 @@ import {
   registerNewRecipe,
   tsToExports,
 } from "@commontools/runner";
-import { client as llm } from "@commontools/llm";
+import { client as llm, generateSpecAndSchema } from "@commontools/llm";
 import { isObj } from "@commontools/utils";
 import {
   createJsonSchema,
@@ -16,7 +16,6 @@ import {
 import { Charm, CharmManager, charmSourceCellSchema } from "./charm.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
-import { generateSpecAndSchema } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
 
 const genSrc = async ({
@@ -192,12 +191,16 @@ function turnCellsIntoAliases(data: any): any {
  * @param charmManager Charm manager representing the space this will be generated in
  * @param goal A user level goal for the new recipe, can reference specific data via `key`
  * @param data Data passed to the recipe, can be a combination of data and cells
+ * @param existingSpec Optional existing spec to use instead of generating a new one
+ * @param existingPlan Optional existing plan to use instead of generating a new one
  * @returns A new recipe cell
  */
 export async function castNewRecipe(
   charmManager: CharmManager,
   goal: string,
   cells?: any,
+  existingSpec?: string,
+  existingPlan?: string,
 ): Promise<Cell<Charm>> {
   console.log("Processing goal:", goal, cells);
 
@@ -207,14 +210,54 @@ export async function castNewRecipe(
   // First, extract any existing schema if we have data
   const existingSchema = createJsonSchema(scrubbed);
 
-  // Phase 1: Generate spec/plan and schema based on goal and possibly existing schema
-  const {
-    spec,
-    resultSchema,
-    title,
-    description,
-    plan,
-  } = await generateSpecAndSchema(goal, existingSchema);
+  let spec: string;
+  let resultSchema: JSONSchema;
+  let title: string;
+  let description: string;
+  let plan: string;
+
+  if (existingSpec && existingPlan) {
+    // If we have an existing spec and plan, use those instead of regenerating
+    console.log("castNewRecipe: Using EXISTING spec and plan", {
+      specLength: existingSpec.length,
+      planLength: existingPlan.length
+    });
+    spec = existingSpec;
+    plan = existingPlan;
+
+    // Still need to get title and description
+    // Use a simpler prompt to just get these from the existing spec
+    const result = await llm.sendRequest({
+      model: "anthropic:claude-3-7-sonnet-latest",
+      system:
+        "Extract a short title and brief description from the given specification.",
+      messages: [{
+        role: "user",
+        content:
+          `Based on this specification, provide a short title (2-5 words) and a brief one-sentence description:\n\n${existingSpec}\n\nRespond with only:\n<title>Short title</title>\n<description>Brief description</description>`,
+      }],
+      stream: false,
+    });
+
+    // Extract title and description using the same parsing approach as in generateSpecAndSchema
+    const titleMatch = result.match(/<title>(.*?)<\/title>/s);
+    const descriptionMatch = result.match(/<description>(.*?)<\/description>/s);
+
+    title = titleMatch?.[1]?.trim() || "New Charm";
+    description = descriptionMatch?.[1]?.trim() || `A tool based on: ${goal}`;
+
+    // Create a minimal result schema
+    resultSchema = {};
+  } else {
+    // Phase 1: Generate spec/plan and schema based on goal and possibly existing schema
+    console.log("castNewRecipe: GENERATING NEW spec and plan (no existing ones provided)");
+    const result = await generateSpecAndSchema(goal, existingSchema);
+    spec = result.spec;
+    resultSchema = result.resultSchema;
+    title = result.title;
+    description = result.description;
+    plan = result.plan;
+  }
 
   console.log("resultSchema", resultSchema);
 

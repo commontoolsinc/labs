@@ -171,6 +171,11 @@ IMPORTANT:
 - The user can always iterate and improve the solution later
 `;
 
+// Simple debug logger
+function logInfo(message: string, ...args: any[]) {
+  console.log(`[llm:spec] ${message}`, ...args);
+}
+
 /**
  * Generates a complete specification, schema, and plan from a goal.
  * @param goal The user's goal or request
@@ -190,6 +195,12 @@ export async function generateSpecAndSchema(
   resultSchema: JSONSchema;
   argumentSchema: JSONSchema;
 }> {
+  logInfo(`generateSpecAndSchema called with goal: "${goal.slice(0, 30)}..."`, {
+    hasExistingSchema: !!existingSchema && Object.keys(existingSchema || {}).length > 0,
+    model
+  });
+
+  // Generate new response
   let systemPrompt, userContent;
 
   if (existingSchema && Object.keys(existingSchema).length > 0) {
@@ -211,6 +222,8 @@ Based on this goal and the existing schema, please provide a title, description,
     userContent = goal;
   }
 
+  logInfo(`Sending LLM request for goal: "${goal.slice(0, 30)}..." with model ${model}`);
+  
   // Send the request to the LLM using the specified model or default
   const response = await client.sendRequest({
     model: model,
@@ -223,6 +236,8 @@ Based on this goal and the existing schema, please provide a title, description,
       },
     ],
   });
+
+  logInfo(`Received LLM response for goal: "${goal.slice(0, 30)}..."`);
 
   // Extract sections from the response
   const title = parseTagFromResponse(response, "title") || "New Charm";
@@ -260,7 +275,8 @@ Based on this goal and the existing schema, please provide a title, description,
   argumentSchema.title = title;
   argumentSchema.description = description;
 
-  return {
+  // Create result object
+  const result = {
     spec,
     resultSchema,
     title,
@@ -268,4 +284,6 @@ Based on this goal and the existing schema, please provide a title, description,
     argumentSchema,
     plan,
   };
+
+  return result;
 }

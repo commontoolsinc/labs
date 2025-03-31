@@ -7,7 +7,12 @@ export async function extendCharm(
   focusedCharmId: string,
   goal: string,
   cells?: Record<string, Cell<any>>,
+  existingSpec?: string,
+  existingPlan?: string,
 ): Promise<Cell<Charm>> {
+  console.log("extendCharm called with existingSpec and existingPlan:", 
+    { hasExistingSpec: !!existingSpec, hasExistingPlan: !!existingPlan });
+  
   const charm = (await charmManager.get(focusedCharmId, false))!;
 
   const shadowId = getCharmNameAsCamelCase(charm, cells ?? {});
@@ -16,5 +21,7 @@ export async function extendCharm(
     charmManager,
     goal,
     { ...cells, [shadowId]: charm },
+    existingSpec,
+    existingPlan,
   );
 }

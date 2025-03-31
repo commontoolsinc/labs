@@ -6,6 +6,8 @@ import {
   Charm,
   CharmManager,
   compileAndRunRecipe,
+  getIframeRecipe,
+  generateNewRecipeVersion,
   iterate,
   renameCharm,
 } from "@commontools/charm";
@@ -257,11 +259,26 @@ async function handleNewCharm(
   deps.setLoading(true);
 
   try {
-    // Pass the goal directly to castNewRecipe, which will handle the two-phase process
+    // Extract preview spec and plan if available from sources
+    const previewSpec = sources?.__previewSpec as string | undefined;
+    const previewPlan = sources?.__previewPlan as string | undefined;
+
+    console.log("handleNewCharm with:", {
+      hasInput: !!input,
+      hasPreviewSpec: !!previewSpec,
+      hasPreviewPlan: !!previewPlan,
+      previewSpecLength: previewSpec?.length,
+      previewPlanLength: previewPlan?.length,
+      sources: Object.keys(sources || {})
+    });
+
+    // Pass the goal and preview spec/plan to castNewRecipe to avoid regenerating
     const newCharm = await castNewRecipe(
       deps.charmManager,
       input,
       grabCells(sources),
+      previewSpec,
+      previewPlan,
     );
     if (!newCharm) {
       throw new Error("Failed to cast charm");
@@ -327,19 +344,48 @@ async function handleSearchCharms(deps: CommandContext) {
 async function handleEditRecipe(
   deps: CommandContext,
   input: string | undefined,
+  sources?: SourceSet,
 ) {
   if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
   deps.setLoading(true);
 
+  // Extract preview spec and plan if available
+  const previewSpec = sources?.__previewSpec as string | undefined;
+  const previewPlan = sources?.__previewPlan as string | undefined;
+
+  console.log("handleEditRecipe with:", {
+    hasPreviewSpec: !!previewSpec,
+    hasPreviewPlan: !!previewPlan
+  });
+
   const charm = (await deps.charmManager.get(deps.focusedCharmId, false))!;
   try {
-    const newCharm = await iterate(
-      deps.charmManager,
-      charm,
-      input,
-      false,
-      deps.preferredModel,
-    );
+    // When using the iterate function directly, we can't pass previewSpec/previewPlan
+    // Instead let's use the generateNewRecipeVersion function in cases where we have a preview
+    let newCharm;
+    if (previewSpec && previewPlan) {
+      // Use the existing recipe but with the new spec
+      const { recipeId, iframe } = getIframeRecipe(charm);
+      if (!recipeId || !iframe) {
+        throw new Error("Cannot iterate on a non-iframe charm");
+      }
+      newCharm = await generateNewRecipeVersion(
+        deps.charmManager,
+        charm,
+        iframe.src,
+        previewSpec
+      );
+    } else {
+      // Fallback to regular iterate if we don't have a preview
+      newCharm = await iterate(
+        deps.charmManager,
+        charm,
+        input,
+        false,
+        deps.preferredModel,
+      );
+    }
+    
     deps.navigate(createPath("charmShow", {
       charmId: charmId(newCharm)!,
       replicaName: deps.focusedReplicaId!,
@@ -359,11 +405,18 @@ async function handleExtendRecipe(
 ) {
   if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
   deps.setLoading(true);
+
+  // Extract preview spec and plan if available from sources
+  const previewSpec = sources?.__previewSpec as string | undefined;
+  const previewPlan = sources?.__previewPlan as string | undefined;
+
   const newCharm = await extendCharm(
     deps.charmManager,
     deps.focusedCharmId,
     input,
     grabCells(sources),
+    previewSpec,
+    previewPlan,
   );
   deps.navigate(createPath("charmShow", {
     charmId: charmId(newCharm)!,
@@ -876,7 +929,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       group: "Edit",
       predicate: !!deps.focusedCharmId,
       placeholder: "What would you like to change?",
-      handler: (input) => handleEditRecipe(deps, input),
+      handler: (input, sources) => handleEditRecipe(deps, input, sources),
     },
     {
       id: "extend-recipe",
