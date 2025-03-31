@@ -768,6 +768,9 @@ class StorageImpl implements Storage {
             updatesFromRetry.forEach(([doc, value]) =>
               this._batchForDoc(doc, value.value, value.source)
             );
+          } else if (result.error) {
+            log(() => ["storage error", result.error]);
+            console.error("storage error", result.error);
           }
           return result;
         });
