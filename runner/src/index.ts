@@ -60,6 +60,7 @@ export {
 } from "./blobby-storage.ts";
 export { tsToExports } from "./local-build.ts";
 export { 
-  addCommonIDfromObjectID, 
+  addCommonIDfromObjectID,
+  followAliases,
   maybeGetCellLink
 } from "./utils.ts";

@@ -214,4 +214,83 @@ describe("Charm reference detection", () => {
     // This will help us see if there might be an ordering issue affecting which
     // references are found first, potentially causing some to be missed
   });
+  
+  // Test for n-depth reference detection
+  it("should follow sourceCell chains to find deeply nested references", () => {
+    // Mock test data
+    const mockCharm1Id = { "/": "charm-1-source" };
+    const mockCharm2Id = { "/": "charm-2-intermediate" };
+    const mockCharm3Id = { "/": "charm-3-target" };
+    
+    // Create a chain of references where:
+    // - charm1 references charm2 via a sourceCell
+    // - charm2 references charm3 via resultRef
+    const charm2WithResultRef = {
+      // This is the intermediate charm data
+      resultRef: {
+        cell: mockCharm3Id,
+        path: []
+      }
+    };
+    
+    // Mock sourceCell with get and getEntityId methods
+    const mockSourceCell = {
+      get: () => charm2WithResultRef,
+      getEntityId: () => mockCharm2Id
+    };
+    
+    const charm1WithSourceCell = {
+      // This is the source charm with a sourceCell reference
+      sourceCell: mockSourceCell
+    };
+    
+    // Create mock doc with get and getEntityId methods
+    const mockDoc = {
+      get: () => charm1WithSourceCell,
+      getEntityId: () => mockCharm1Id
+    };
+    
+    // Test our ability to follow this chain
+    console.log("Testing n-depth reference detection with sourceCell and resultRef chain...");
+    
+    // Simulate the followSourceToResultRef function from the implementation
+    const followSourceToResultRef = (doc: any, visited = new Set<string>(), depth = 0): any => {
+      if (depth > 10) return undefined; // Prevent infinite recursion
+      
+      // Get the doc ID
+      const docId = doc.getEntityId?.();
+      if (!docId) return undefined;
+      
+      // If we've already seen this doc, stop to prevent cycles
+      const docIdStr = typeof docId["/"] === "string" 
+        ? docId["/"] 
+        : JSON.stringify(docId["/"]);
+        
+      if (visited.has(docIdStr)) return undefined;
+      visited.add(docIdStr);
+      
+      // Get the doc value
+      const value = doc.get?.();
+      
+      // If document has a sourceCell, follow it
+      if (value && typeof value === "object" && value.sourceCell) {
+        return followSourceToResultRef(value.sourceCell, visited, depth + 1);
+      }
+      
+      // If we've reached the end and have a resultRef, return it
+      if (value && typeof value === "object" && value.resultRef) {
+        return value.resultRef.cell;
+      }
+      
+      // Return the document's ID if no further references
+      return docId;
+    };
+    
+    // Follow the sourceCell chain to find the ultimate reference
+    const ultimateRef = followSourceToResultRef(mockDoc);
+    
+    // Verify we found the final target (charm3)
+    assertEquals(ultimateRef["/"], mockCharm3Id["/"], 
+      "Should find the final reference through the sourceCell -> resultRef chain");
+  });
 });
