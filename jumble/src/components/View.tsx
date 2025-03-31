@@ -17,10 +17,16 @@ export type FX<Command> =
   | Send<Command>
   | Spawn<Send<Command> | Perform<Command> | Wait>;
 
-export interface Behavior<Model, Command> {
-  init(): Task<FX<Command>, Model>;
+export type InferCommand<Effect extends FX<unknown>> = Effect extends
+  Send<infer Command> ? Command
+  : Effect extends Spawn<infer Inner>
+    ? (Inner extends Send<infer Command> ? Command : never)
+  : never;
 
-  update: (model: Model, command: Command) => Task<FX<Command>, Model>;
+export interface Behavior<Model, Effect extends FX<unknown>> {
+  init(): Task<Effect, Model>;
+
+  update: (model: Model, command: InferCommand<Effect>) => Task<Effect, Model>;
 }
 
 export interface Effect<Command> {
@@ -31,8 +37,8 @@ export interface Controller<Command> {
   dispatch(command: Command): () => void;
 }
 
-export interface Subscriber<Model, Command, View> {
-  (self: Service<Model, Command>): View;
+export interface Subscriber<Model, Effect extends FX<unknown>, View> {
+  (self: Service<Model, Effect>): View;
 }
 
 function* test() {
@@ -116,16 +122,21 @@ export interface Execution<
   [Symbol.iterator](): Execution<Ok, Command>;
 }
 
-export const service = <Model, Command>(behavior: Behavior<Model, Command>) =>
-  new Service(behavior);
+export const service = <Model, Effect extends FX<unknown>>(
+  behavior: Behavior<Model, Effect>,
+) => new Service(behavior);
 
 export type InferSend<Effect> = Effect extends Send<infer Command> ? Command
   : never;
 
-class Service<Model, Command> {
+class Service<
+  Model,
+  Effect extends FX<unknown>,
+  Command extends InferCommand<Effect> = InferCommand<Effect>,
+> {
   state!: Model;
 
-  subscribers: Set<Subscriber<Model, Command, unknown>> | undefined;
+  subscribers: Set<Subscriber<Model, FX<unknown>, unknown>> | undefined;
   inbox: Command[] = [];
   queue: FX<Command>[] = [];
 
@@ -133,7 +144,7 @@ class Service<Model, Command> {
   idle: boolean = true;
 
   constructor(
-    public behavior: Behavior<Model, Command>,
+    public behavior: Behavior<Model, Effect>,
   ) {
   }
 
@@ -184,7 +195,7 @@ class Service<Model, Command> {
     }
   }
 
-  advance(task: Task<FX<Command>, Model>) {
+  advance(task: Task<Effect, Model>) {
     const work = task[Symbol.iterator]();
     while (true) {
       const step = work.next();
@@ -192,7 +203,7 @@ class Service<Model, Command> {
         this.state = step.value;
         return this.state;
       } else {
-        this.queue.push(step.value);
+        this.queue.push(step.value as FX<Command>);
       }
     }
   }
@@ -210,7 +221,7 @@ class Service<Model, Command> {
   terminate() {
   }
 
-  subscribe<View>(subscriber: Subscriber<Model, Command, View>) {
+  subscribe<View>(subscriber: Subscriber<Model, Effect, View>) {
     if (!this.subscribers) {
       this.subscribers = new Set([subscriber]);
       this.advance(this.behavior.init());
@@ -220,7 +231,7 @@ class Service<Model, Command> {
     }
   }
   render<View>(view: (state: Model, controller: Controller<Command>) => View) {
-    const [process, advance] = useState<[Service<Model, Command>]>();
+    const [process, advance] = useState<[Service<Model, Effect>]>();
     const [ui, setUI] = useState<View | null>(null);
 
     useEffect(
@@ -255,6 +266,7 @@ class Service<Model, Command> {
 //  * ```js
 //  * const Counter = View({
 //  *   init() {
+//  *     yield
 //  *    return { state: { count: 0 } };
 //  *   },
 //  *   update({ count }: { count: number }, command: "inc" | "dec") {
@@ -296,3 +308,23 @@ class Service<Model, Command> {
 
 export { Service as Process };
 export default Service;
+
+const initialize = function* () {
+  const response = yield* wait(fetch("https://help.me"));
+
+  // yield 1;
+
+  yield* send({ hello: "world" } as const);
+
+  yield* send({ test: "hello", body: response } as const);
+};
+
+export const example = new Service({
+  *init() {
+    yield* spawn(initialize);
+    return { status: "init" };
+  },
+  *update(state, message) {
+    return state;
+  },
+});
