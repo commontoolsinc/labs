@@ -1,4 +1,4 @@
-export { run, stop } from "./runner.ts";
+export { run, runSynced, stop } from "./runner.ts";
 export { addModuleByRef, raw } from "./module.ts";
 export {
   idle,
