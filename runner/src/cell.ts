@@ -252,6 +252,7 @@ export function getCellFromLink(
     doc = cellLink.cell;
   } else if (cellLink.space) {
     doc = getDocByEntityId(cellLink.space, getEntityId(cellLink.cell)!, true)!;
+    if (!doc) throw new Error(`Can't find ${cellLink.space}/${cellLink.cell}!`);
   } else {
     throw new Error("Cell link has no space");
   }
