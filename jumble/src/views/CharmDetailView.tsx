@@ -878,8 +878,9 @@ const OperationTab = () => {
               <option value="anthropic:claude-3-7-sonnet-latest">
                 Claude 3.7 ✨
               </option>
+              <option value="google:gemini-2.5-pro">Gemini 2.5 ✨</option>
               <option value="anthropic:claude-3-5-sonnet-latest">
-                Claude 3.5 ✨
+                Claude 3.5
               </option>
               <option value="groq:qwen-qwq-32b">Qwen QwQ 32B 🧠</option>
               <option value="groq:llama-3.3-70b-versatile">Llama 3.3 🔥</option>
