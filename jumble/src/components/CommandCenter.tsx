@@ -18,6 +18,8 @@ import {
   SelectCommandItem,
   TranscribeCommandItem,
 } from "./commands.ts";
+import { useCharm } from "@/hooks/use-charm.ts";
+import { getIframeRecipe } from "@commontools/charm";
 import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext.tsx";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
@@ -51,6 +53,40 @@ function CommandProcessor({
   const [previewModel, setPreviewModel] = useState<SpecPreviewModel>(
     "think",
   );
+  
+  // Track shift key state for combining with previous spec
+  const [shiftKeyPressed, setShiftKeyPressed] = useState(false);
+  
+  // If we have a focused charm, get its spec
+  const { currentFocus: focusedCharm } = useCharm(context.focusedCharmId || '');
+  const previousSpec = useMemo(() => {
+    if (!focusedCharm) return undefined;
+    const iframeRecipe = getIframeRecipe(focusedCharm);
+    return iframeRecipe?.iframe?.spec;
+  }, [focusedCharm]);
+  
+  // Add event listeners to track shift key state
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') {
+        setShiftKeyPressed(true);
+      }
+    };
+    
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') {
+        setShiftKeyPressed(false);
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
 
   // Get spec preview as user types in command center
   const { previewSpec, previewPlan, loading: isPreviewLoading, regenerate } =
@@ -59,6 +95,8 @@ function CommandProcessor({
       true,
       1000,
       previewModel,
+      previousSpec,
+      shiftKeyPressed,
     );
 
   if (context.loading && mode.type !== "input") {
@@ -100,6 +138,7 @@ function CommandProcessor({
         ...sources,
         __previewSpec: previewSpec,
         __previewPlan: previewPlan,
+        __shiftKeyPressed: shiftKeyPressed,
       };
       
       console.log("Command Center submitting with preview:", {

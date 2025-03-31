@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useDebounce } from "./use-debounce.ts";
 import { formatPromptWithMentions } from "@/utils/format.ts";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { combineSpecs } from "@/views/CharmDetailView.tsx";
 
 export type SpecPreviewModel = "fast" | "think";
 
@@ -12,12 +13,15 @@ export type SpecPreviewModel = "fast" | "think";
  * @param enabled Whether the preview is enabled
  * @param debounceTime The debounce time in ms
  * @param model The model to use ("fast" or "think")
+ * @param previousSpec Optional previous specification to combine with new input (for shift key scenario)
+ * @param shiftKeyPressed Whether the shift key is pressed (to combine with previous spec)
  */
 export function useLiveSpecPreview(
   input: string,
   enabled: boolean = true,
   debounceTime: number = 250,
   model: SpecPreviewModel = "think",
+  previousSpec?: string,
 ) {
   const { charmManager } = useCharmManager();
   const [loading, setLoading] = useState(false);
@@ -50,26 +54,31 @@ export function useLiveSpecPreview(
       // Process mentions in the input text
       const { text: formattedText, sources: mentionSources } =
         await formatPromptWithMentions(
-          text,
+          text, // Use original input for processing mentions
           charmManager,
         );
 
-      const trimmedText = formattedText.trim();
+      const fullSpec = previousSpec
+        ? combineSpecs(previousSpec, formattedText)
+        : formattedText;
+
+      const trimmedText = fullSpec.trim();
       if (!trimmedText) {
         return;
       }
 
       // Store processed text and sources for later use
-      setProcessedText(formattedText);
+      setProcessedText(trimmedText);
       setSources(mentionSources);
 
       // Generate spec and plan from formatted input using the selected model
       const modelId = getModelId(model);
       const result = await generateSpecAndSchema(
-        formattedText,
+        fullSpec,
         undefined,
         modelId,
       );
+
       setPreviewSpec(result.spec);
       setPreviewPlan(result.plan);
     } catch (error) {
@@ -77,7 +86,7 @@ export function useLiveSpecPreview(
     } finally {
       setLoading(false);
     }
-  }, [enabled, model, getModelId, charmManager]);
+  }, [enabled, model, getModelId, charmManager, previousSpec]);
 
   useEffect(() => {
     generatePreview(debouncedInput);

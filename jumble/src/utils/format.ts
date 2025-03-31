@@ -135,6 +135,7 @@ function toCamelCase(input: string): string {
 export type SourceSet = Record<string, { name: string; cell: Cell<any> } | string | undefined> & {
   __previewSpec?: string;
   __previewPlan?: string;
+  __shiftKeyPressed?: boolean;
 };
 
 export function grabCells(sources?: SourceSet) {

@@ -46,19 +46,47 @@ const genSrc = async ({
   return source;
 };
 
+/**
+ * Iterate on a charm by generating a new recipe based on the user's input
+ * @param charmManager The CharmManager to use
+ * @param charm The charm to iterate on
+ * @param promptSpec The user's input prompt/spec
+ * @param shiftKey Whether shift was held during submission
+ * @param model Optional language model to use
+ * @param existingSpec Optional pre-generated specification to use (avoids duplicate LLM calls)
+ * @returns A new charm cell
+ */
 export async function iterate(
   charmManager: CharmManager,
   charm: Cell<Charm>,
-  spec: string,
+  promptSpec: string,
   shiftKey: boolean,
   model?: string,
+  existingSpec?: string,
 ): Promise<Cell<Charm>> {
   const { iframe } = getIframeRecipe(charm);
   if (!iframe) {
     throw new Error("Cannot iterate on a non-iframe. Must extend instead.");
   }
 
-  const newSpec = shiftKey ? iframe.spec + "\n" + spec : spec;
+  // If shift key is pressed, we want to append to the existing spec
+  const combinedInputSpec = shiftKey ? iframe.spec + "\n" + promptSpec : promptSpec;
+  
+  // If we already have a generated specification from the preview, use it directly
+  if (existingSpec) {
+    console.log("iterate: Using provided existingSpec directly instead of generating from prompt");
+    // The existingSpec is the complete, already-generated spec from the preview
+    return generateNewRecipeVersion(charmManager, charm, iframe.src, existingSpec);
+  }
+
+  // Otherwise, generate a new specification based on the prompt
+  console.log("iterate: No existingSpec provided, will generate from combinedInputSpec");
+  const newSpec = combinedInputSpec;
+
+  console.log("iterate: Generating new src from prompt:", {
+    promptLength: promptSpec.length,
+    newSpecLength: newSpec.length
+  });
 
   const newIFrameSrc = await genSrc({
     src: iframe.src,

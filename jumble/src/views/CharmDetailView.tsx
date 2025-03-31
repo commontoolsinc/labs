@@ -22,6 +22,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -243,6 +244,13 @@ function useCodeEditor(
   };
 }
 
+export function combineSpecs(existingSpec: string | undefined, input: string) {
+  if (!existingSpec) {
+    return input;
+  }
+  return `Current Specification:\n${existingSpec}\n\nUser Request:\n${input}`;
+}
+
 // Hook for charm operations (iterate or extend)
 function useCharmOperation() {
   const { charmId: paramCharmId, replicaName } = useParams<CharmRouteParams>();
@@ -271,7 +279,40 @@ function useCharmOperation() {
   // Preview model state
   const [previewModel, setPreviewModel] = useState<SpecPreviewModel>("think");
 
-  // Live preview generation
+  // Track shift key state for combined previews
+  const [shiftKeyPressed, setShiftKeyPressed] = useState(false);
+
+  // Add event listeners to track shift key state
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Shift") {
+        setShiftKeyPressed(true);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Shift") {
+        setShiftKeyPressed(false);
+      }
+    };
+
+    globalThis.addEventListener("keydown", handleKeyDown);
+    globalThis.addEventListener("keyup", handleKeyUp);
+
+    return () => {
+      globalThis.removeEventListener("keydown", handleKeyDown);
+      globalThis.removeEventListener("keyup", handleKeyUp);
+    };
+  }, []);
+
+  // Get the existing spec from the current charm
+  const existingSpec = useMemo(() => {
+    if (!charm) return undefined;
+    const iframeRecipe = getIframeRecipe(charm);
+    return iframeRecipe?.iframe?.spec;
+  }, [charm]);
+
+  // Live preview generation with shift key awareness
   const {
     previewSpec,
     previewPlan,
@@ -279,11 +320,18 @@ function useCharmOperation() {
     sources,
     loading: isPreviewLoading,
     model,
-  } = useLiveSpecPreview(input, showPreview, 250, previewModel);
+  } = useLiveSpecPreview(
+    input,
+    showPreview,
+    250,
+    previewModel,
+    existingSpec,
+    shiftKeyPressed,
+  );
 
   // Function that performs the selected operation (iterate or extend)
   const performOperation = useCallback(
-    (
+    async (
       charmId: string,
       input: string,
       model: string,
@@ -293,77 +341,84 @@ function useCharmOperation() {
         console.log("performOperation for iterate mode:", {
           hasPreview: showPreview,
           hasPreviewSpec: !!previewSpec,
-          hasPreviewPlan: !!previewPlan
+          hasPreviewPlan: !!previewPlan,
         });
-        
-        // For iterate mode, we have to handle the preview spec differently
-        // since iterate() doesn't directly support passing a preexisting spec
-        if (showPreview && previewSpec) {
-          return charmManager.get(charmId, false).then((fetched) => {
-            const charm = fetched!;
-            const { recipeId, iframe } = getIframeRecipe(charm);
-            if (!recipeId || !iframe) {
-              throw new Error("Cannot iterate on a non-iframe charm");
-            }
-            // Use generateNewRecipeVersion directly with the preview spec
-            return generateNewRecipeVersion(
-              charmManager,
-              charm,
-              iframe.src,
-              previewSpec
-            );
-          });
-        } else {
-          // Fall back to regular iterate if no preview available
-          return charmManager.get(charmId, false).then((fetched) => {
-            const charm = fetched!;
-            return iterate(
-              charmManager,
-              charm,
-              input,
-              false,
-              model,
-            );
-          });
+
+        // For iterate mode, we need to combine the input with existing spec if available
+        // to create a complete input that includes the context of the existing charm
+        let finalInput = input;
+        debugger;
+        if (existingSpec) {
+          finalInput =
+            `Current Specification:\n${existingSpec}\n\nUser Request:\n${input}`;
         }
+
+        // Now pass finalInput to iterate
+        return charmManager.get(charmId, false).then((fetched) => {
+          const charm = fetched!;
+          return iterate(
+            charmManager,
+            charm,
+            finalInput,
+            shiftKeyPressed,
+            model,
+            showPreview ? previewSpec : undefined,
+          );
+        });
       } else {
-        // For extend mode, we can pass the preview spec/plan directly
+        // For extend mode, also combine input with existing spec if available
+        let finalInput = input;
+        if (existingSpec) {
+          finalInput = combineSpecs(existingSpec, input);
+        }
+
+        // Pass combined input for extend as well
         console.log("performOperation for extend mode:", {
           hasPreview: showPreview,
           hasPreviewSpec: !!previewSpec,
-          hasPreviewPlan: !!previewPlan
+          hasPreviewPlan: !!previewPlan,
         });
-        
+
         return extendCharm(
           charmManager,
           charmId,
-          input,
+          finalInput,
           data,
           showPreview ? previewSpec : undefined,
           showPreview ? previewPlan : undefined,
         );
       }
     },
-    [operationType, charmManager, showPreview, previewSpec, previewPlan],
+    [
+      operationType,
+      charmManager,
+      showPreview,
+      previewSpec,
+      previewPlan,
+      existingSpec,
+      shiftKeyPressed,
+    ],
   );
 
   // Handle performing the operation
   const handlePerformOperation = useCallback(async () => {
     // Validate that we have required data and input is not empty/whitespace
     if (!input.trim() || !charm || !paramCharmId || !replicaName) return;
-    
+
     // If preview is still loading, return without doing anything
     if (showPreview && isPreviewLoading) {
       console.log("Preview is still loading, please wait...");
       return;
     }
-    
+
     // If preview is enabled but we don't have a spec yet, we need to wait for it
     if (showPreview && !previewSpec && !isPreviewLoading) {
-      console.log("No preview available but preview is enabled, this shouldn't happen");
+      console.log(
+        "No preview available but preview is enabled, this shouldn't happen",
+      );
       return;
     }
-    
+
     setLoading(true);
 
     // If we have a preview with processed text and sources, use that to avoid reprocessing

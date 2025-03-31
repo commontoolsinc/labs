@@ -360,31 +360,23 @@ async function handleEditRecipe(
 
   const charm = (await deps.charmManager.get(deps.focusedCharmId, false))!;
   try {
-    // When using the iterate function directly, we can't pass previewSpec/previewPlan
-    // Instead let's use the generateNewRecipeVersion function in cases where we have a preview
-    let newCharm;
-    if (previewSpec && previewPlan) {
-      // Use the existing recipe but with the new spec
-      const { recipeId, iframe } = getIframeRecipe(charm);
-      if (!recipeId || !iframe) {
-        throw new Error("Cannot iterate on a non-iframe charm");
-      }
-      newCharm = await generateNewRecipeVersion(
-        deps.charmManager,
-        charm,
-        iframe.src,
-        previewSpec
-      );
-    } else {
-      // Fallback to regular iterate if we don't have a preview
-      newCharm = await iterate(
-        deps.charmManager,
-        charm,
-        input,
-        false,
-        deps.preferredModel,
-      );
-    }
+    // We can now pass previewSpec directly to iterate
+    const shiftKeyPressed = sources?.__shiftKeyPressed === true;
+    
+    console.log("handleEditRecipe with:", {
+      hasShiftKey: shiftKeyPressed,
+      inputLength: input.length,
+      hasPreviewSpec: !!previewSpec
+    });
+    
+    const newCharm = await iterate(
+      deps.charmManager,
+      charm,
+      input,
+      shiftKeyPressed,
+      deps.preferredModel,
+      previewSpec // Pass the preview spec when available
+    );
     
     deps.navigate(createPath("charmShow", {
       charmId: charmId(newCharm)!,
