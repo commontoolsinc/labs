@@ -675,12 +675,16 @@ async function syncCellsForRunningRecipe(
 
     // TODO(seefeld): This ignores schemas provided by modules, so it might
     // still fetch a lot.
-    cells.push(...[...inputs, ...outputs].map((c) => getCellFromLink(c)));
+    [...inputs, ...outputs].forEach((c) => {
+      const cell = getCellFromLink(c);
+      cells.push(cell);
+    });
   }
 
   if (recipe.resultSchema) cells.push(resultCell.asSchema(recipe.resultSchema));
 
-  await Promise.all(cells.map((c) => storage.syncCell(c)));
+  // The `isCell` filter removes streams, which we don't need to sync.
+  await Promise.all(cells.filter(isCell).map((c) => storage.syncCell(c)));
 
   return true;
 }
