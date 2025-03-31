@@ -2,6 +2,7 @@ import { type Charm, CharmManager } from "@commontools/charm";
 import {
   Cell,
   idle,
+  isErrorWithContext,
   isStream,
   onError,
   setBobbyServerUrl,
@@ -144,7 +145,9 @@ async function runCharm(data: { charmId: string }) {
     console.log(`Worker: Successfully executed charm ${spaceId}/${charmId}`);
     return { success: true, charmId };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = isErrorWithContext(error)
+      ? `${error.message} @ ${error.space}:${error.charmId} running ${error.recipeId}`
+      : String(error);
     console.error(
       `Worker error executing charm ${spaceId}/${charmId}: ${errorMessage}`,
     );
