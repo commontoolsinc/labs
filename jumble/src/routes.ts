@@ -12,6 +12,7 @@ export const ROUTES = {
   spellbookDetail: "/spellbook/:spellId",
   spellbookLaunch: "/spellbook/launch/:replicaName/:spellId",
   utilityJsonGen: "/utility/json-gen",
+  inspector: "/inspector",
 } as const;
 
 // Infer parameter types from route patterns
