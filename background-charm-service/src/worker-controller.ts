@@ -75,9 +75,9 @@ export class WorkerController {
     // FIXME(ja): what should we do if the worker is erroring?
     // perhaps restart the worker?
     this.worker.onerror = (err) => {
-      log(`${this.did}: Worker error:`, err, {
-        error: true,
-      });
+      log(`${this.did}: Worker error:`, { error: true }, err);
+      // If not prevented, error is rethrown in this context.
+      err.preventDefault();
     };
   }
 
@@ -87,9 +87,11 @@ export class WorkerController {
       toolshedUrl,
       rawIdentity: identity.serialize(),
     }).catch((err) => {
-      log(`Worker controller ${this.did} worker setup failed:`, err, {
-        error: true,
-      });
+      log(
+        `Worker controller ${this.did} worker setup failed:`,
+        { error: true },
+        err,
+      );
     }).then(() => {
       this.ready = true;
       log(`Worker controller ${this.did} ready for work`);

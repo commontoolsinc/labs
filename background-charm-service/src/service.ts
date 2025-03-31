@@ -6,8 +6,8 @@ import { SpaceManager } from "./space-manager.ts";
 import { useCancelGroup } from "@commontools/runner";
 
 export interface BackgroundCharmServiceOptions {
-  identity: Identity,
-  toolshedUrl: string,
+  identity: Identity;
+  toolshedUrl: string;
 }
 
 export class BackgroundCharmService {
