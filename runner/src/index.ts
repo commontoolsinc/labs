@@ -1,8 +1,8 @@
 export { run, stop } from "./runner.ts";
 export { addModuleByRef, raw } from "./module.ts";
 export {
-  type Action,
   idle,
+  isErrorWithContext,
   onError,
   run as addAction,
   unschedule as removeAction,
@@ -11,7 +11,7 @@ export { getRecipeEnvironment, setRecipeEnvironment } from "./env.ts";
 export type { DocImpl } from "./doc.ts";
 export type { Cell, CellLink, Stream } from "./cell.ts";
 export type { QueryResult } from "./query-result-proxy.ts";
-export type { ReactivityLog } from "./scheduler.ts";
+export type { Action, ErrorWithContext, ReactivityLog } from "./scheduler.ts";
 export * as StorageInspector from "./storage/inspector.ts";
 export { getDoc, isDoc } from "./doc.ts";
 export {
@@ -59,8 +59,8 @@ export {
   setBlobbyServerUrl,
 } from "./blobby-storage.ts";
 export { tsToExports } from "./local-build.ts";
-export { 
+export {
   addCommonIDfromObjectID,
   followAliases,
-  maybeGetCellLink
+  maybeGetCellLink,
 } from "./utils.ts";
