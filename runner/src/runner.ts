@@ -683,8 +683,7 @@ async function syncCellsForRunningRecipe(
 
   if (recipe.resultSchema) cells.push(resultCell.asSchema(recipe.resultSchema));
 
-  // The `isCell` filter removes streams, which we don't need to sync.
-  await Promise.all(cells.filter(isCell).map((c) => storage.syncCell(c)));
+  await Promise.all(cells.map((c) => storage.syncCell(c)));
 
   return true;
 }

@@ -167,6 +167,7 @@ export interface Cell<T> {
 export interface Stream<T> {
   send(event: T): void;
   sink(callback: (event: T) => Cancel | undefined | void): Cancel;
+  getDoc(): DocImpl<any>;
   schema?: JSONSchema;
   rootSchema?: JSONSchema;
   [isStreamMarker]: true;
@@ -338,6 +339,7 @@ function createStreamCell<T>(
       listeners.add(callback);
       return () => listeners.delete(callback);
     },
+    getDoc: () => doc,
     schema,
     rootSchema,
     [isStreamMarker]: true,
