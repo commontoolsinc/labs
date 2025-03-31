@@ -279,32 +279,6 @@ function useCharmOperation() {
   // Preview model state
   const [previewModel, setPreviewModel] = useState<SpecPreviewModel>("think");
 
-  // Track shift key state for combined previews
-  const [shiftKeyPressed, setShiftKeyPressed] = useState(false);
-
-  // Add event listeners to track shift key state
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Shift") {
-        setShiftKeyPressed(true);
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === "Shift") {
-        setShiftKeyPressed(false);
-      }
-    };
-
-    globalThis.addEventListener("keydown", handleKeyDown);
-    globalThis.addEventListener("keyup", handleKeyUp);
-
-    return () => {
-      globalThis.removeEventListener("keydown", handleKeyDown);
-      globalThis.removeEventListener("keyup", handleKeyUp);
-    };
-  }, []);
-
   // Get the existing spec from the current charm
   const existingSpec = useMemo(() => {
     if (!charm) return undefined;
@@ -326,7 +300,6 @@ function useCharmOperation() {
     250,
     previewModel,
     existingSpec,
-    shiftKeyPressed,
   );
 
   // Function that performs the selected operation (iterate or extend)
@@ -347,10 +320,8 @@ function useCharmOperation() {
         // For iterate mode, we need to combine the input with existing spec if available
         // to create a complete input that includes the context of the existing charm
         let finalInput = input;
-        debugger;
         if (existingSpec) {
-          finalInput =
-            `Current Specification:\n${existingSpec}\n\nUser Request:\n${input}`;
+          finalInput = combineSpecs(existingSpec, input);
         }
 
         // Now pass finalInput to iterate
@@ -360,9 +331,7 @@ function useCharmOperation() {
             charmManager,
             charm,
             finalInput,
-            shiftKeyPressed,
             model,
-            showPreview ? previewSpec : undefined,
           );
         });
       } else {
@@ -396,7 +365,6 @@ function useCharmOperation() {
       previewSpec,
       previewPlan,
       existingSpec,
-      shiftKeyPressed,
     ],
   );
 
@@ -929,54 +897,38 @@ const OperationTab = () => {
             onSubmit={handlePerformOperation}
             disabled={!input.trim()}
           >
-            <div className="flex items-center mr-2">
-              <input
-                type="checkbox"
-                id="preview"
-                checked={showPreview}
-                onChange={(e) => setShowPreview(e.target.checked)}
-                className="border-2 border-black mr-2"
-              />
-              <label htmlFor="preview" className="text-sm font-medium">
-                Live Preview
-              </label>
-            </div>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <CheckboxToggle
+                  id="preview"
+                  label="Live Preview"
+                  checked={showPreview}
+                  onChange={setShowPreview}
+                />
 
-            {showPreview && (
-              <div className="flex items-center mr-2">
-                <div className="flex border border-gray-300 rounded-full overflow-hidden text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setPreviewModel("fast")}
-                    className={`px-2 py-1 text-xs ${
-                      previewModel === "fast"
-                        ? "bg-black text-white"
-                        : "bg-gray-100"
-                    }`}
-                  >
-                    Fast
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewModel("think")}
-                    className={`px-2 py-1 text-xs ${
-                      previewModel === "think"
-                        ? "bg-black text-white"
-                        : "bg-gray-100"
-                    }`}
-                  >
-                    Precise
-                  </button>
-                </div>
+                <CheckboxToggle
+                  id="variants"
+                  label="Variants"
+                  checked={showVariants}
+                  onChange={setShowVariants}
+                />
               </div>
-            )}
 
-            <CheckboxToggle
-              id="variants"
-              label="Variants"
-              checked={showVariants}
-              onChange={setShowVariants}
-            />
+              <div className="flex items-center gap-2">
+                {showPreview && (
+                  <ToggleButton
+                    options={[
+                      { value: "fast", label: "Fast" },
+                      { value: "think", label: "Smart" },
+                    ]}
+                    value={previewModel}
+                    onChange={(value) =>
+                      setPreviewModel(value as SpecPreviewModel)}
+                    size="small"
+                  />
+                )}
+              </div>
+            </div>
 
             <select
               value={selectedModel}

@@ -60,43 +60,27 @@ export async function iterate(
   charmManager: CharmManager,
   charm: Cell<Charm>,
   promptSpec: string,
-  shiftKey: boolean,
   model?: string,
-  existingSpec?: string,
 ): Promise<Cell<Charm>> {
   const { iframe } = getIframeRecipe(charm);
   if (!iframe) {
     throw new Error("Cannot iterate on a non-iframe. Must extend instead.");
   }
 
-  // If shift key is pressed, we want to append to the existing spec
-  const combinedInputSpec = shiftKey ? iframe.spec + "\n" + promptSpec : promptSpec;
-  
-  // If we already have a generated specification from the preview, use it directly
-  if (existingSpec) {
-    console.log("iterate: Using provided existingSpec directly instead of generating from prompt");
-    // The existingSpec is the complete, already-generated spec from the preview
-    return generateNewRecipeVersion(charmManager, charm, iframe.src, existingSpec);
-  }
-
-  // Otherwise, generate a new specification based on the prompt
-  console.log("iterate: No existingSpec provided, will generate from combinedInputSpec");
-  const newSpec = combinedInputSpec;
-
-  console.log("iterate: Generating new src from prompt:", {
-    promptLength: promptSpec.length,
-    newSpecLength: newSpec.length
-  });
-
   const newIFrameSrc = await genSrc({
     src: iframe.src,
     spec: iframe.spec,
-    newSpec,
+    newSpec: promptSpec,
     schema: iframe.argumentSchema,
     model: model,
   });
 
-  return generateNewRecipeVersion(charmManager, charm, newIFrameSrc, newSpec);
+  return generateNewRecipeVersion(
+    charmManager,
+    charm,
+    newIFrameSrc,
+    promptSpec,
+  );
 }
 
 export function extractTitle(src: string, defaultTitle: string): string {
@@ -248,7 +232,7 @@ export async function castNewRecipe(
     // If we have an existing spec and plan, use those instead of regenerating
     console.log("castNewRecipe: Using EXISTING spec and plan", {
       specLength: existingSpec.length,
-      planLength: existingPlan.length
+      planLength: existingPlan.length,
     });
     spec = existingSpec;
     plan = existingPlan;
@@ -278,7 +262,9 @@ export async function castNewRecipe(
     resultSchema = {};
   } else {
     // Phase 1: Generate spec/plan and schema based on goal and possibly existing schema
-    console.log("castNewRecipe: GENERATING NEW spec and plan (no existing ones provided)");
+    console.log(
+      "castNewRecipe: GENERATING NEW spec and plan (no existing ones provided)",
+    );
     const result = await generateSpecAndSchema(goal, existingSchema);
     spec = result.spec;
     resultSchema = result.resultSchema;
