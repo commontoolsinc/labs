@@ -18,6 +18,8 @@ import {
   SelectCommandItem,
   TranscribeCommandItem,
 } from "./commands.ts";
+import { useCharm } from "@/hooks/use-charm.ts";
+import { getIframeRecipe } from "@commontools/charm";
 import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext.tsx";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
@@ -51,14 +53,49 @@ function CommandProcessor({
   const [previewModel, setPreviewModel] = useState<SpecPreviewModel>(
     "think",
   );
+  
+  // Track shift key state for combining with previous spec
+  const [shiftKeyPressed, setShiftKeyPressed] = useState(false);
+  
+  // If we have a focused charm, get its spec
+  const { currentFocus: focusedCharm } = useCharm(context.focusedCharmId || '');
+  const previousSpec = useMemo(() => {
+    if (!focusedCharm) return undefined;
+    const iframeRecipe = getIframeRecipe(focusedCharm);
+    return iframeRecipe?.iframe?.spec;
+  }, [focusedCharm]);
+  
+  // Add event listeners to track shift key state
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') {
+        setShiftKeyPressed(true);
+      }
+    };
+    
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') {
+        setShiftKeyPressed(false);
+      }
+    };
+    
+    globalThis.addEventListener('keydown', handleKeyDown);
+    globalThis.addEventListener('keyup', handleKeyUp);
+    
+    return () => {
+      globalThis.removeEventListener('keydown', handleKeyDown);
+      globalThis.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
 
   // Get spec preview as user types in command center
-  const { previewSpec, previewPlan, loading: isPreviewLoading } =
+  const { previewSpec, previewPlan, loading: isPreviewLoading, regenerate } =
     useLiveSpecPreview(
       inputValue,
       true,
       1000,
       previewModel,
+      previousSpec
     );
 
   if (context.loading && mode.type !== "input") {
@@ -75,10 +112,12 @@ function CommandProcessor({
     if (mode.type !== "input") {
       return;
     }
+    
     const { text, sources } = await formatPromptWithMentions(
       inputValue,
       charmManager,
     );
+    
     if ((mode.command as InputCommandItem).handler) {
       (mode.command as InputCommandItem).handler(text, sources);
     }
@@ -127,7 +166,8 @@ function CommandProcessor({
                     { value: "think", label: "Smart" },
                   ]}
                   value={previewModel}
-                  onChange={(value) => setPreviewModel(value as SpecPreviewModel)}
+                  onChange={(value) =>
+                    setPreviewModel(value as SpecPreviewModel)}
                   size="small"
                 />
               </div>

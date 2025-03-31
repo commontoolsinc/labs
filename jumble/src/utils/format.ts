@@ -131,12 +131,17 @@ function toCamelCase(input: string): string {
     .join("");
 }
 
-export type SourceSet = { [id: string]: { name: string; cell: Cell<any> } };
+// Use Record for the dynamic properties and intersection for the fixed properties
+export type SourceSet = Record<string, { name: string; cell: Cell<any> } | string | undefined>;
 
 export function grabCells(sources?: SourceSet) {
   const cells: { [id: string]: Cell<any> } = sources
     ? Object.entries(sources).reduce((acc, [id, source]) => {
-      acc[id] = source.cell;
+      // Skip string values which are not source cells
+      if (typeof source === "string") {
+        return acc;
+      }
+      acc[id] = (source as { name: string; cell: Cell<any> }).cell;
       return acc;
     }, {} as { [id: string]: Cell<any> })
     : {};

@@ -6,7 +6,7 @@ export async function extendCharm(
   charmManager: CharmManager,
   focusedCharmId: string,
   goal: string,
-  cells?: Record<string, Cell<any>>,
+  cells?: Record<string, Cell<any>>
 ): Promise<Cell<Charm>> {
   const charm = (await charmManager.get(focusedCharmId, false))!;
 
@@ -15,6 +15,6 @@ export async function extendCharm(
   return castNewRecipe(
     charmManager,
     goal,
-    { ...cells, [shadowId]: charm },
+    { ...cells, [shadowId]: charm }
   );
 }

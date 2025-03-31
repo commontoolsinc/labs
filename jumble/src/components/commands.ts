@@ -6,6 +6,8 @@ import {
   Charm,
   CharmManager,
   compileAndRunRecipe,
+  getIframeRecipe,
+  generateNewRecipeVersion,
   iterate,
   renameCharm,
 } from "@commontools/charm";
@@ -257,11 +259,11 @@ async function handleNewCharm(
   deps.setLoading(true);
 
   try {
-    // Pass the goal directly to castNewRecipe, which will handle the two-phase process
+    // Pass the goal to castNewRecipe
     const newCharm = await castNewRecipe(
       deps.charmManager,
       input,
-      grabCells(sources),
+      grabCells(sources)
     );
     if (!newCharm) {
       throw new Error("Failed to cast charm");
@@ -327,6 +329,7 @@ async function handleSearchCharms(deps: CommandContext) {
 async function handleEditRecipe(
   deps: CommandContext,
   input: string | undefined,
+  sources?: SourceSet,
 ) {
   if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
   deps.setLoading(true);
@@ -337,9 +340,9 @@ async function handleEditRecipe(
       deps.charmManager,
       charm,
       input,
-      false,
-      deps.preferredModel,
+      deps.preferredModel
     );
+    
     deps.navigate(createPath("charmShow", {
       charmId: charmId(newCharm)!,
       replicaName: deps.focusedReplicaId!,
@@ -359,11 +362,12 @@ async function handleExtendRecipe(
 ) {
   if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
   deps.setLoading(true);
+
   const newCharm = await extendCharm(
     deps.charmManager,
     deps.focusedCharmId,
     input,
-    grabCells(sources),
+    grabCells(sources)
   );
   deps.navigate(createPath("charmShow", {
     charmId: charmId(newCharm)!,
@@ -876,7 +880,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       group: "Edit",
       predicate: !!deps.focusedCharmId,
       placeholder: "What would you like to change?",
-      handler: (input) => handleEditRecipe(deps, input),
+      handler: (input, sources) => handleEditRecipe(deps, input, sources),
     },
     {
       id: "extend-recipe",

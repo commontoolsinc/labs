@@ -22,6 +22,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -243,6 +244,13 @@ function useCodeEditor(
   };
 }
 
+export function combineSpecs(existingSpec: string | undefined, input: string) {
+  if (!existingSpec) {
+    return input;
+  }
+  return `Current Specification:\n${existingSpec}\n\nUser Request:\n${input}`;
+}
+
 // Hook for charm operations (iterate or extend)
 function useCharmOperation() {
   const { charmId: paramCharmId, replicaName } = useParams<CharmRouteParams>();
@@ -271,13 +279,28 @@ function useCharmOperation() {
   // Preview model state
   const [previewModel, setPreviewModel] = useState<SpecPreviewModel>("think");
 
+  // Get the existing spec from the current charm
+  const existingSpec = useMemo(() => {
+    if (!charm) return undefined;
+    const iframeRecipe = getIframeRecipe(charm);
+    return iframeRecipe?.iframe?.spec;
+  }, [charm]);
+
   // Live preview generation
   const {
     previewSpec,
     previewPlan,
+    processedText,
+    sources,
     loading: isPreviewLoading,
     model,
-  } = useLiveSpecPreview(input, showPreview, 250, previewModel);
+  } = useLiveSpecPreview(
+    input,
+    showPreview,
+    250,
+    previewModel,
+    existingSpec
+  );
 
   // Function that performs the selected operation (iterate or extend)
   const performOperation = useCallback(
@@ -288,38 +311,88 @@ function useCharmOperation() {
       data: any,
     ) => {
       if (operationType === "iterate") {
-        // TODO(bf): do we use @-ref data for iterate?
+        console.log("performOperation for iterate mode:", {
+          hasPreview: showPreview,
+          hasPreviewSpec: !!previewSpec,
+          hasPreviewPlan: !!previewPlan,
+        });
+
+        // For iterate mode, we need to combine the input with existing spec if available
+        // to create a complete input that includes the context of the existing charm
+        let finalInput = input;
+        if (existingSpec) {
+          finalInput = combineSpecs(existingSpec, input);
+        }
+
+        // Now pass finalInput to iterate
         return charmManager.get(charmId, false).then((fetched) => {
           const charm = fetched!;
           return iterate(
             charmManager,
             charm,
-            input,
-            false,
+            finalInput,
             model,
           );
         });
       } else {
+        // For extend mode, also combine input with existing spec if available
+        let finalInput = input;
+        if (existingSpec) {
+          finalInput = combineSpecs(existingSpec, input);
+        }
+
+        // Pass combined input for extend as well
+        console.log("performOperation for extend mode:", {
+          hasPreview: showPreview,
+          hasPreviewSpec: !!previewSpec,
+          hasPreviewPlan: !!previewPlan,
+        });
+
         return extendCharm(
           charmManager,
           charmId,
-          input,
-          data,
+          finalInput,
+          data
         );
       }
     },
-    [operationType, charmManager],
+    [
+      operationType,
+      charmManager,
+      showPreview,
+      previewSpec,
+      previewPlan,
+      existingSpec,
+    ],
   );
 
   // Handle performing the operation
   const handlePerformOperation = useCallback(async () => {
-    if (!input || !charm || !paramCharmId || !replicaName) return;
+    // Validate that we have required data and input is not empty/whitespace
+    if (!input.trim() || !charm || !paramCharmId || !replicaName) return;
+
+    // If preview is still loading, return without doing anything
+    if (showPreview && isPreviewLoading) {
+      console.log("Preview is still loading, please wait...");
+      return;
+    }
+
+    // If preview is enabled but we don't have a spec yet, we need to wait for it
+    if (showPreview && !previewSpec && !isPreviewLoading) {
+      console.log(
+        "No preview available but preview is enabled, this shouldn't happen",
+      );
+      return;
+    }
+
     setLoading(true);
 
-    const { text, sources } = await formatPromptWithMentions(
-      input,
-      charmManager,
-    );
+    // If we have a preview with processed text and sources, use that to avoid reprocessing
+    // Otherwise, process the mentions now
+    const { text, sources: sourcesData } =
+      showPreview && processedText && sources
+        ? { text: processedText, sources }
+        : await formatPromptWithMentions(input, charmManager);
 
     const handleVariants = async () => {
       setVariants([]);
@@ -330,7 +403,7 @@ function useCharmOperation() {
           charmId(charm)!,
           text,
           model,
-          sources,
+          sourcesData,
         );
         // Store the variant and keep track of which model was used
         setVariants((prev) => [...prev, newCharm]);
@@ -356,7 +429,7 @@ function useCharmOperation() {
           charmId(charm)!,
           text,
           selectedModel,
-          sources,
+          sourcesData,
         );
         navigate(createPath("charmShow", {
           charmId: charmId(newCharm)!,
@@ -379,6 +452,9 @@ function useCharmOperation() {
     charmManager,
     navigate,
     operationType,
+    showPreview,
+    processedText,
+    sources,
   ]);
 
   const handleCancelVariants = useCallback(() => {
@@ -808,7 +884,7 @@ const OperationTab = () => {
               value={input}
               onValueChange={setInput}
               onSubmit={handlePerformOperation}
-              disabled={loading}
+              disabled={loading || !input.trim()}
               style={{ width: "100%", height: "96px" }}
             />
           </div>
@@ -817,58 +893,40 @@ const OperationTab = () => {
             loading={loading}
             operation={operationType === "iterate" ? "Iterate" : "Extend"}
             onSubmit={handlePerformOperation}
+            disabled={!input.trim()}
           >
-            {/* TODO(bf): restore in https://github.com/commontoolsinc/labs/issues/876 */}
-            {
-              /* <div className="flex items-center mr-2">
-              <input
-                type="checkbox"
-                id="preview"
-                checked={showPreview}
-                onChange={(e) => setShowPreview(e.target.checked)}
-                className="border-2 border-black mr-2"
-              />
-              <label htmlFor="preview" className="text-sm font-medium">
-                Live Preview
-              </label>
-            </div>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <CheckboxToggle
+                  id="preview"
+                  label="Live Preview"
+                  checked={showPreview}
+                  onChange={setShowPreview}
+                />
 
-            {showPreview && (
-              <div className="flex items-center mr-2">
-                <div className="flex border border-gray-300 rounded-full overflow-hidden text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setPreviewModel("fast")}
-                    className={`px-2 py-1 text-xs ${
-                      previewModel === "fast"
-                        ? "bg-black text-white"
-                        : "bg-gray-100"
-                    }`}
-                  >
-                    Fast
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewModel("think")}
-                    className={`px-2 py-1 text-xs ${
-                      previewModel === "think"
-                        ? "bg-black text-white"
-                        : "bg-gray-100"
-                    }`}
-                  >
-                    Precise
-                  </button>
-                </div>
+                <CheckboxToggle
+                  id="variants"
+                  label="Variants"
+                  checked={showVariants}
+                  onChange={setShowVariants}
+                />
               </div>
-            )} */
-            }
 
-            <CheckboxToggle
-              id="variants"
-              label="Variants"
-              checked={showVariants}
-              onChange={setShowVariants}
-            />
+              <div className="flex items-center gap-2">
+                {showPreview && (
+                  <ToggleButton
+                    options={[
+                      { value: "fast", label: "Fast" },
+                      { value: "think", label: "Smart" },
+                    ]}
+                    value={previewModel}
+                    onChange={(value) =>
+                      setPreviewModel(value as SpecPreviewModel)}
+                    size="small"
+                  />
+                )}
+              </div>
+            </div>
 
             <select
               value={selectedModel}
@@ -897,15 +955,12 @@ const OperationTab = () => {
 
       {/* Content Container with single scrollbar */}
       <div className="flex-grow overflow-auto mt-3 -mx-4 px-4">
-        {/* TODO(bf): restore in https://github.com/commontoolsinc/labs/issues/876 */}
-        {
-          /* <SpecPreview
+        <SpecPreview
           spec={previewSpec}
           plan={previewPlan}
           loading={isPreviewLoading}
           visible={showPreview}
-        /> */
-        }
+        />
         <Variants />
         <Suggestions />
       </div>

@@ -39,11 +39,12 @@ import { LuSend } from "react-icons/lu";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 
 export function ComposerSubmitBar(
-  { loading, onSubmit, operation = "Go", children }: {
+  { loading, onSubmit, operation = "Go", children, disabled = false }: {
     loading: boolean;
     onSubmit: () => void;
     operation?: string;
     children?: React.ReactNode;
+    disabled?: boolean;
   },
 ): JSX.Element {
   return (
@@ -59,7 +60,7 @@ export function ComposerSubmitBar(
         <button
           type="button"
           onClick={onSubmit}
-          disabled={loading}
+          disabled={loading || disabled}
           className="px-4 py-2 text-sm bg-black text-white flex items-center gap-2 disabled:opacity-50"
         >
           {loading
