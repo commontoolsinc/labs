@@ -168,7 +168,7 @@ ${JSON.stringify(libraries)}
   window.grabJson = (gstr) => {
       // Function to extract and parse JSON from a string
       // This handles both raw JSON strings and code blocks with JSON
-      const jsonRegex = /\`\`\`(?:json)?[\\s\\n]*([\\s\\S]*?)[\\s\\n]*\`\`\`|(\\{[\\s\\S]*?\\})/;
+      const jsonRegex = /\`\`\`(?:json)?\s*([\s\S]*?)\s*\`\`\`|({[\s\S]*})/;
       const match = gstr.match(jsonRegex);
 
       if (match) {
