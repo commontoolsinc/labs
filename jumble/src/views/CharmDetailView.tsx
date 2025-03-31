@@ -304,7 +304,7 @@ function useCharmOperation() {
 
   // Function that performs the selected operation (iterate or extend)
   const performOperation = useCallback(
-    async (
+    (
       charmId: string,
       input: string,
       model: string,
@@ -352,9 +352,7 @@ function useCharmOperation() {
           charmManager,
           charmId,
           finalInput,
-          data,
-          showPreview ? previewSpec : undefined,
-          showPreview ? previewPlan : undefined,
+          data
         );
       }
     },

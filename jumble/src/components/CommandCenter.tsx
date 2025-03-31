@@ -79,12 +79,12 @@ function CommandProcessor({
       }
     };
     
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
+    globalThis.addEventListener('keydown', handleKeyDown);
+    globalThis.addEventListener('keyup', handleKeyUp);
     
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
+      globalThis.removeEventListener('keydown', handleKeyDown);
+      globalThis.removeEventListener('keyup', handleKeyUp);
     };
   }, []);
 
@@ -95,8 +95,7 @@ function CommandProcessor({
       true,
       1000,
       previewModel,
-      previousSpec,
-      shiftKeyPressed,
+      previousSpec
     );
 
   if (context.loading && mode.type !== "input") {
