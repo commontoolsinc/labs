@@ -623,7 +623,7 @@ export async function runSynced(
 
   const synced = await syncCellsForRunningRecipe(resultCell);
 
-  run(recipe, inputs, resultCell.getAsCellLink().cell);
+  run(recipe, inputs, resultCell.getDoc());
 
   // If a new recipe was specified, make sure to sync any new cells
   // TODO(seefeld): Possible race condition here with lifted functions running
@@ -669,14 +669,9 @@ async function syncCellsForRunningRecipe(
   const cells: Cell<any>[] = [];
 
   for (const node of recipe.nodes) {
-    const inputs = findAllAliasedCells(
-      node.inputs,
-      sourceCell.getAsCellLink().cell,
-    );
-    const outputs = findAllAliasedCells(
-      node.inputs,
-      sourceCell.getAsCellLink().cell,
-    );
+    const sourceDoc = sourceCell.getDoc();
+    const inputs = findAllAliasedCells(node.inputs, sourceDoc);
+    const outputs = findAllAliasedCells(node.outputs, sourceDoc);
 
     // TODO(seefeld): This ignores schemas provided by modules, so it might
     // still fetch a lot.

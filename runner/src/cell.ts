@@ -134,6 +134,7 @@ export interface Cell<T> {
     log?: ReactivityLog,
   ): QueryResult<DeepKeyLookup<T, Path>>;
   getAsCellLink(): CellLink;
+  getDoc(): DocImpl<any>;
   getSourceCell<T>(
     schema?: JSONSchema,
   ): Cell<
@@ -473,6 +474,7 @@ function createRegularCell<T>(
     getAsCellLink: () =>
       // Add space here, so that JSON.stringify() of this retains the space.
       ({ space: doc.space, cell: doc, path }) satisfies CellLink,
+    getDoc: () => doc,
     getSourceCell: (schema?: JSONSchema) =>
       doc.sourceCell?.asCell([], log, schema) as Cell<any>,
     toJSON: () =>

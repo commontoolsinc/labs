@@ -322,7 +322,7 @@ class StorageImpl implements Storage {
     doc: DocImpl<T> | Cell<any>,
     expectedInStorage: boolean = false,
   ): DocImpl<T> {
-    if (isCell(doc)) doc = doc.getAsCellLink().cell;
+    if (isCell(doc)) doc = doc.getDoc();
     if (!isDoc(doc)) {
       throw new Error("Invalid subject: " + JSON.stringify(doc));
     }
