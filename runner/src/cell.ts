@@ -246,12 +246,15 @@ export function getCellFromLink(
   schema?: JSONSchema,
   log?: ReactivityLog,
 ): Cell<any> {
-  if (!cellLink.space) {
+  let doc;
+
+  if (isDoc(cellLink.cell)) {
+    doc = cellLink.cell;
+  } else if (cellLink.space) {
+    doc = getDocByEntityId(cellLink.space, getEntityId(cellLink.cell)!, true)!;
+  } else {
     throw new Error("Cell link has no space");
   }
-  const doc = isDoc(cellLink.cell)
-    ? cellLink.cell
-    : getDocByEntityId(cellLink.space, getEntityId(cellLink.cell)!, true)!;
   return createCell(doc, cellLink.path, log, schema);
 }
 
