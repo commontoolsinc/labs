@@ -24,3 +24,14 @@ export {
   renameCharm,
 } from "./commands.ts";
 export { getIframeRecipe, type IFrameRecipe } from "./iframe/recipe.ts";
+export {
+  type WorkflowType,
+  type WorkflowConfig,
+  type IntentClassificationResult,
+  type ExecutionPlan,
+  WORKFLOWS,
+  classifyIntent,
+  generatePlan,
+  imagine,
+  generateWorkflowPreview,
+} from "./imagine.ts";

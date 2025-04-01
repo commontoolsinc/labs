@@ -18,11 +18,18 @@ import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import { generateSpecAndSchema } from "@commontools/llm";
 import { injectUserCode, extractUserCode } from "./iframe/static.ts";
-import { iterate, generateNewRecipeVersion, compileAndRunRecipe } from "./iterate.ts";
+import { 
+  iterate, 
+  generateNewRecipeVersion, 
+  compileAndRunRecipe,
+  castNewRecipe
+} from "./iterate.ts";
+// Import workflow classification functions directly from llm package
+// These are re-exported in the main index.ts
 import { 
   classifyWorkflow, 
   generateWorkflowPlan 
-} from "@commontools/llm/prompts/workflow-classification.ts";
+} from "@commontools/llm";
 
 // Types for the workflow classification
 export type WorkflowType = "fix" | "edit" | "rework";
@@ -257,9 +264,9 @@ export async function imagine(
     // TODO: Implement proper edit workflow
     return iterate(charmManager, context.currentCharm, input, true, model);
   } else { // rework
-    // For rework, we use the existing castNewRecipe functionality
+    // For rework, we use the existing castNewRecipe functionality from iterate.ts
     // TODO: Implement proper rework workflow that handles data references better
-    return charmManager.castNewRecipe(input, context.dataReferences);
+    return castNewRecipe(charmManager, input, context.dataReferences);
   }
 }
 
