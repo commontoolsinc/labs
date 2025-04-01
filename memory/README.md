@@ -218,15 +218,6 @@ datum {
   source  JSON    "Source for this JSON"
 }
 
-maybe_datum {
-  this    U
-  source  U
-}
-
-null_datum {
-  this   NULL PK  "Represents undefined"
-  source NULL     "Null is used to represent undefined JSON"
-}
 
 fact {
   this    TEXT PK "Merkle reference for { the, of, is, cause }"
@@ -244,9 +235,7 @@ memory {
 
 
 
-fact }|--|| maybe_datum: is-this
+fact }|--|| datum: is-this
 fact ||--|| fact: cause-this
 memory ||--|| fact: fact-this
-datum ||--|| maybe_datum: union
-null_datum ||--|| maybe_datum: union
 ```
