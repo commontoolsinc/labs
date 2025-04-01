@@ -104,6 +104,8 @@ export async function addGithubRecipe(
  * @param promptText The user's input describing what they want to do
  * @param currentCharm The charm being modified
  * @param model Optional LLM model to use
+ * @param workflowType Optional: Allow specifying workflow type (will be overridden to "rework" if references exist)
+ * @param previewPlan Optional: Pass through a pre-generated plan
  * @returns A new or modified charm
  */
 export async function modifyCharm(
@@ -111,11 +113,23 @@ export async function modifyCharm(
   promptText: string,
   currentCharm: Cell<Charm>,
   model?: string,
-  workflowType?: WorkflowType, // Optional: Allow specifying workflow type
-  previewPlan?: string[], // Optional: Pass through a pre-generated plan
+  workflowType?: WorkflowType,
+  previewPlan?: string[],
 ): Promise<Cell<Charm>> {
   // Process the prompt to handle @mentions
   const { text, mentions } = await formatPromptWithMentions(promptText, charmManager);
+  
+  // Check if we have references to other charms (except the current charm)
+  const hasOtherCharmReferences = mentions && Object.keys(mentions).length > 0;
+  
+  // If we have references to other charms, force "rework" workflow
+  // This is crucial because we need to build a combined schema and create a new argument cell
+  const effectiveWorkflowType = hasOtherCharmReferences ? "rework" : workflowType;
+  
+  // Log workflow determination for debugging
+  if (hasOtherCharmReferences && workflowType && workflowType !== "rework") {
+    console.log(`Overriding workflow type from "${workflowType}" to "rework" due to charm references`);
+  }
   
   // Include the current charm in the context
   const context = {
@@ -125,8 +139,46 @@ export async function modifyCharm(
   };
   
   // Use the imagine workflow which will classify and handle the operation
-  // Pass the workflow type if specified (overrides classification)
-  return imagine(charmManager, text, context, workflowType, model);
+  // Pass the effective workflow type which may override the user's selection if references exist
+  return imagine(charmManager, text, context, effectiveWorkflowType, model);
+}
+
+/**
+ * This function is equivalent to calling modifyCharm with workflowType="rework"
+ * It exists for backward compatibility and clarity in code
+ * 
+ * @param charmManager CharmManager instance
+ * @param currentCharmId ID of the charm to extend from
+ * @param goal The prompt text describing what to create
+ * @param cells Optional additional data references to include
+ * @returns A new charm that extends from the current charm
+ */
+export async function extendCharm(
+  charmManager: CharmManager,
+  currentCharmId: string,
+  goal: string,
+  cells?: Record<string, Cell<any>>,
+): Promise<Cell<Charm>> {
+  const charm = (await charmManager.get(currentCharmId, false))!;
+  
+  // Process any cells to include as references
+  const additionalReferences: Record<string, Cell<any>> = {};
+  
+  if (cells && Object.keys(cells).length > 0) {
+    // Add cells to additionalReferences
+    for (const [id, cell] of Object.entries(cells)) {
+      additionalReferences[id] = cell;
+    }
+  }
+  
+  // Create context with additional references
+  const context = {
+    currentCharm: charm,
+    dataReferences: additionalReferences,
+  };
+  
+  // Use imagine with forced "rework" workflow
+  return imagine(charmManager, goal, context, "rework");
 }
 
 /**

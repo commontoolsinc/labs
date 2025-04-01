@@ -102,19 +102,36 @@ export async function formatPromptWithMentions(
       }
       
       if (matchingCharm) {
-        const charmName = matchingCharm.get()["NAME"] || "Untitled";
-        
-        parsedMentions.push({
-          id: mentionId,
-          name: charmName,
-          originalText: mentionText,
-          startIndex,
-          endIndex,
-          charm: matchingCharm
-        });
-        
-        // Store the mention mapping
-        mentions[mentionId] = matchingCharm;
+        try {
+          // Verify we can actually access the charm data
+          const charmData = matchingCharm.get();
+          const charmName = charmData["NAME"] || "Untitled";
+          
+          // Additional logging for debugging 
+          console.log(`Found matching charm for @${mentionId}: ${charmName} (entity ID: ${getEntityId(matchingCharm)?.["/"] || "unknown"})`);
+          
+          // Store and validate the parsed mention
+          parsedMentions.push({
+            id: mentionId,
+            name: charmName,
+            originalText: mentionText,
+            startIndex,
+            endIndex,
+            charm: matchingCharm
+          });
+          
+          // Store the mention mapping with validation
+          if (isCell(matchingCharm)) {
+            mentions[mentionId] = matchingCharm;
+            console.log(`Successfully mapped mention @${mentionId} to charm ${charmName}`);
+          } else {
+            console.warn(`Found matching charm for @${mentionId} but it's not a valid Cell object`);
+          }
+        } catch (err) {
+          console.error(`Error processing matching charm for @${mentionId}:`, err);
+        }
+      } else {
+        console.warn(`No matching charm found for mention @${mentionId}`);
       }
     } catch (error) {
       console.warn(`Failed to resolve mention ${mentionText}:`, error);
@@ -259,22 +276,185 @@ export async function classifyIntent(
       if (refId === "currentCharm") continue; // Skip current charm as it's already included
       
       try {
-        // Get spec and schema from the charm
-        const iframeRecipe = getIframeRecipe(charm as Cell<Charm>);
+        // Validate the charm is a cell with improved error handling
+        if (!charm) {
+          console.warn(`Reference '${refId}' is undefined or null, skipping in planning context`);
+          continue;
+        }
+        
+        if (!isCell(charm)) {
+          console.warn(`Reference '${refId}' is not a valid cell object, skipping in planning context`);
+          console.warn(`Type of reference: ${typeof charm}, isObj: ${isObj(charm)}`);
+          continue;
+        }
+        
+        // Verify we can access cell data before proceeding
+        try {
+          // This will throw if the cell cannot be accessed properly
+          const testAccess = charm.get();
+          if (!testAccess) {
+            console.warn(`Reference '${refId}' returned empty data, but continuing as the cell is valid`);
+          }
+        } catch (accessError) {
+          console.error(`Cannot access data for reference '${refId}':`, accessError);
+          referencesContext += `\n- Reference '${refId}': Error accessing data - ${accessError instanceof Error ? accessError.message : String(accessError)}\n`;
+          continue;
+        }
+        
+        // Get spec and schema from the charm with improved error handling
+        let iframeRecipe;
+        try {
+          iframeRecipe = getIframeRecipe(charm as Cell<Charm>);
+        } catch (recipeError) {
+          console.error(`Failed to get iframe recipe for reference '${refId}':`, recipeError);
+          referencesContext += `\n- Reference '${refId}': Error getting recipe - ${recipeError instanceof Error ? recipeError.message : String(recipeError)}\n`;
+          continue;
+        }
+        
+        // Check if we have recipe information
         if (iframeRecipe && iframeRecipe.iframe) {
-          const name = charm.get()["NAME"] || "Untitled";
+          // Get charm data for more context
+          let charmData;
+          let name = "Untitled";
+          
+          try {
+            charmData = charm.get();
+            name = charmData["NAME"] || "Untitled";
+            console.log(`Successfully retrieved data for reference '${refId}' (${name})`);
+          } catch (dataError) {
+            console.warn(`Error getting data for reference '${refId}':`, dataError);
+            // Continue with default name since we already know the cell is valid
+          }
+          
+          // Add detailed information about this reference with clear structure
           referencesContext += `\n- Reference '${refId}' (${name}):\n`;
           
+          // Include spec if available
           if (iframeRecipe.iframe.spec) {
-            referencesContext += `  Spec: ${iframeRecipe.iframe.spec.substring(0, 200)}...\n`;
+            // Provide a clean spec summary
+            const specSummary = iframeRecipe.iframe.spec
+              .split('\n')
+              .map(line => line.trim())
+              .filter(line => line.length > 0)
+              .join(' ')
+              .substring(0, 300);
+            
+            referencesContext += `  Spec: ${specSummary}...\n`;
           }
           
+          // Include schema details with enhanced formatting
           if (iframeRecipe.iframe.argumentSchema) {
-            referencesContext += `  Schema: ${JSON.stringify(iframeRecipe.iframe.argumentSchema).substring(0, 200)}...\n`;
+            // Format the schema in a more readable way with additional information
+            const schema = iframeRecipe.iframe.argumentSchema;
+            referencesContext += `  Schema Title: ${schema.title || "Untitled"}\n`;
+            referencesContext += `  Schema Type: ${schema.type || "unknown"}\n`;
+            
+            if (schema.description) {
+              referencesContext += `  Description: ${schema.description}\n`;
+            }
+            
+            // List schema properties with more detailed type information
+            if (schema.type === "object" && schema.properties) {
+              referencesContext += `  Properties:\n`;
+              
+              for (const [propName, propDef] of Object.entries(schema.properties)) {
+                // Skip internal properties
+                if (propName.startsWith("$")) continue;
+                
+                // Extract property type with more detail
+                let propType = "any";
+                let propDescription = "";
+                let propFormat = "";
+                let propRequired = false;
+                
+                if (typeof propDef === "object") {
+                  propType = propDef.type || "any";
+                  
+                  // Add array item types if applicable
+                  if (propType === "array" && propDef.items) {
+                    const itemType = typeof propDef.items === "object" && propDef.items.type 
+                      ? propDef.items.type 
+                      : "any";
+                    propType = `array<${itemType}>`;
+                  }
+                  
+                  // Add property description if available
+                  if (propDef.description) {
+                    propDescription = propDef.description;
+                  }
+                  
+                  // Check for format property which may exist in some JSON schema implementations
+                  if (typeof propDef === 'object' && 'format' in propDef) {
+                    propFormat = (propDef as any).format;
+                  }
+                }
+                
+                // Check if property is required
+                if (schema.required && Array.isArray(schema.required)) {
+                  propRequired = schema.required.includes(propName);
+                }
+                
+                // Format the property information
+                let propInfo = `    - ${propName}: ${propType}`;
+                if (propRequired) propInfo += " (required)";
+                if (propFormat) propInfo += ` (format: ${propFormat})`;
+                
+                referencesContext += propInfo + "\n";
+                
+                // Add description on a new line if available
+                if (propDescription) {
+                  referencesContext += `      Description: ${propDescription}\n`;
+                }
+              }
+            }
           }
+          
+          // Include sample data from the charm to help with planning
+          if (charmData) {
+            try {
+              // Format the data for better readability
+              // Remove any internal properties starting with $ and any functions
+              const cleanedData = Object.fromEntries(
+                Object.entries(charmData)
+                  .filter(([key]) => !key.startsWith('$'))
+                  .map(([key, value]) => {
+                    // Handle functions or complex objects
+                    if (typeof value === 'function') {
+                      return [key, '[Function]'];
+                    } else if (isStream(value)) {
+                      return [key, '[Stream]'];
+                    } else if (isCell(value)) {
+                      return [key, '[Cell]'];
+                    } else {
+                      return [key, value];
+                    }
+                  })
+              );
+              
+              const sampleData = JSON.stringify(cleanedData, null, 2);
+              if (sampleData && sampleData.length > 2) { // Not empty object
+                // For large objects, just show the keys
+                if (sampleData.length > 500) {
+                  referencesContext += `  Data Keys: ${Object.keys(cleanedData).join(', ')}\n`;
+                  // Include a small data preview with the first few values
+                  const previewObject = Object.fromEntries(
+                    Object.entries(cleanedData).slice(0, 3)
+                  );
+                  referencesContext += `  Data Preview: ${JSON.stringify(previewObject)}\n`;
+                } else {
+                  referencesContext += `  Sample Data: ${sampleData}\n`;
+                }
+              }
+            } catch (err) {
+              console.warn(`Could not format sample data for reference '${refId}':`, err);
+            }
+          }
+        } else {
+          referencesContext += `\n- Reference '${refId}': Could not get recipe information. This charm may not be an iframe charm.\n`;
         }
       } catch (e) {
         console.warn(`Failed to process reference ${refId}:`, e);
+        referencesContext += `\n- Reference '${refId}': Error processing - ${e instanceof Error ? e.message : String(e)}\n`;
       }
     }
   }
@@ -418,6 +598,7 @@ export async function generatePlan(
   }
   
   // Process any referenced charms to include their context
+  // This information is crucial for planning how to use the referenced data
   if (dataReferences && Object.keys(dataReferences).length > 0) {
     referencesContext = "Referenced Charms:\n";
     
@@ -425,22 +606,185 @@ export async function generatePlan(
       if (refId === "currentCharm") continue; // Skip current charm as it's already included
       
       try {
-        // Get spec and schema from the charm
-        const iframeRecipe = getIframeRecipe(charm as Cell<Charm>);
+        // Validate the charm is a cell with improved error handling
+        if (!charm) {
+          console.warn(`Reference '${refId}' is undefined or null, skipping in planning context`);
+          continue;
+        }
+        
+        if (!isCell(charm)) {
+          console.warn(`Reference '${refId}' is not a valid cell object, skipping in planning context`);
+          console.warn(`Type of reference: ${typeof charm}, isObj: ${isObj(charm)}`);
+          continue;
+        }
+        
+        // Verify we can access cell data before proceeding
+        try {
+          // This will throw if the cell cannot be accessed properly
+          const testAccess = charm.get();
+          if (!testAccess) {
+            console.warn(`Reference '${refId}' returned empty data, but continuing as the cell is valid`);
+          }
+        } catch (accessError) {
+          console.error(`Cannot access data for reference '${refId}':`, accessError);
+          referencesContext += `\n- Reference '${refId}': Error accessing data - ${accessError instanceof Error ? accessError.message : String(accessError)}\n`;
+          continue;
+        }
+        
+        // Get spec and schema from the charm with improved error handling
+        let iframeRecipe;
+        try {
+          iframeRecipe = getIframeRecipe(charm as Cell<Charm>);
+        } catch (recipeError) {
+          console.error(`Failed to get iframe recipe for reference '${refId}':`, recipeError);
+          referencesContext += `\n- Reference '${refId}': Error getting recipe - ${recipeError instanceof Error ? recipeError.message : String(recipeError)}\n`;
+          continue;
+        }
+        
+        // Check if we have recipe information
         if (iframeRecipe && iframeRecipe.iframe) {
-          const name = charm.get()["NAME"] || "Untitled";
+          // Get charm data for more context
+          let charmData;
+          let name = "Untitled";
+          
+          try {
+            charmData = charm.get();
+            name = charmData["NAME"] || "Untitled";
+            console.log(`Successfully retrieved data for reference '${refId}' (${name})`);
+          } catch (dataError) {
+            console.warn(`Error getting data for reference '${refId}':`, dataError);
+            // Continue with default name since we already know the cell is valid
+          }
+          
+          // Add detailed information about this reference with clear structure
           referencesContext += `\n- Reference '${refId}' (${name}):\n`;
           
+          // Include spec if available
           if (iframeRecipe.iframe.spec) {
-            referencesContext += `  Spec: ${iframeRecipe.iframe.spec.substring(0, 200)}...\n`;
+            // Provide a clean spec summary
+            const specSummary = iframeRecipe.iframe.spec
+              .split('\n')
+              .map(line => line.trim())
+              .filter(line => line.length > 0)
+              .join(' ')
+              .substring(0, 300);
+            
+            referencesContext += `  Spec: ${specSummary}...\n`;
           }
           
+          // Include schema details with enhanced formatting
           if (iframeRecipe.iframe.argumentSchema) {
-            referencesContext += `  Schema: ${JSON.stringify(iframeRecipe.iframe.argumentSchema).substring(0, 200)}...\n`;
+            // Format the schema in a more readable way with additional information
+            const schema = iframeRecipe.iframe.argumentSchema;
+            referencesContext += `  Schema Title: ${schema.title || "Untitled"}\n`;
+            referencesContext += `  Schema Type: ${schema.type || "unknown"}\n`;
+            
+            if (schema.description) {
+              referencesContext += `  Description: ${schema.description}\n`;
+            }
+            
+            // List schema properties with more detailed type information
+            if (schema.type === "object" && schema.properties) {
+              referencesContext += `  Properties:\n`;
+              
+              for (const [propName, propDef] of Object.entries(schema.properties)) {
+                // Skip internal properties
+                if (propName.startsWith("$")) continue;
+                
+                // Extract property type with more detail
+                let propType = "any";
+                let propDescription = "";
+                let propFormat = "";
+                let propRequired = false;
+                
+                if (typeof propDef === "object") {
+                  propType = propDef.type || "any";
+                  
+                  // Add array item types if applicable
+                  if (propType === "array" && propDef.items) {
+                    const itemType = typeof propDef.items === "object" && propDef.items.type 
+                      ? propDef.items.type 
+                      : "any";
+                    propType = `array<${itemType}>`;
+                  }
+                  
+                  // Add property description if available
+                  if (propDef.description) {
+                    propDescription = propDef.description;
+                  }
+                  
+                  // Check for format property which may exist in some JSON schema implementations
+                  if (typeof propDef === 'object' && 'format' in propDef) {
+                    propFormat = (propDef as any).format;
+                  }
+                }
+                
+                // Check if property is required
+                if (schema.required && Array.isArray(schema.required)) {
+                  propRequired = schema.required.includes(propName);
+                }
+                
+                // Format the property information
+                let propInfo = `    - ${propName}: ${propType}`;
+                if (propRequired) propInfo += " (required)";
+                if (propFormat) propInfo += ` (format: ${propFormat})`;
+                
+                referencesContext += propInfo + "\n";
+                
+                // Add description on a new line if available
+                if (propDescription) {
+                  referencesContext += `      Description: ${propDescription}\n`;
+                }
+              }
+            }
           }
+          
+          // Include sample data from the charm to help with planning
+          if (charmData) {
+            try {
+              // Format the data for better readability
+              // Remove any internal properties starting with $ and any functions
+              const cleanedData = Object.fromEntries(
+                Object.entries(charmData)
+                  .filter(([key]) => !key.startsWith('$'))
+                  .map(([key, value]) => {
+                    // Handle functions or complex objects
+                    if (typeof value === 'function') {
+                      return [key, '[Function]'];
+                    } else if (isStream(value)) {
+                      return [key, '[Stream]'];
+                    } else if (isCell(value)) {
+                      return [key, '[Cell]'];
+                    } else {
+                      return [key, value];
+                    }
+                  })
+              );
+              
+              const sampleData = JSON.stringify(cleanedData, null, 2);
+              if (sampleData && sampleData.length > 2) { // Not empty object
+                // For large objects, just show the keys
+                if (sampleData.length > 500) {
+                  referencesContext += `  Data Keys: ${Object.keys(cleanedData).join(', ')}\n`;
+                  // Include a small data preview with the first few values
+                  const previewObject = Object.fromEntries(
+                    Object.entries(cleanedData).slice(0, 3)
+                  );
+                  referencesContext += `  Data Preview: ${JSON.stringify(previewObject)}\n`;
+                } else {
+                  referencesContext += `  Sample Data: ${sampleData}\n`;
+                }
+              }
+            } catch (err) {
+              console.warn(`Could not format sample data for reference '${refId}':`, err);
+            }
+          }
+        } else {
+          referencesContext += `\n- Reference '${refId}': Could not get recipe information. This charm may not be an iframe charm.\n`;
         }
       } catch (e) {
         console.warn(`Failed to process reference ${refId}:`, e);
+        referencesContext += `\n- Reference '${refId}': Error processing - ${e instanceof Error ? e.message : String(e)}\n`;
       }
     }
   }
@@ -659,14 +1003,229 @@ export async function imagine(
       );
     }
     
+    // Process references to ensure consistent naming and proper cell handling
+    // This is crucial for properly accessing data from referenced charms
+    let allReferences: Record<string, Cell<any>> = {};
+    
+    // Add all external references first with improved validation and logging
+    if (dataReferences && Object.keys(dataReferences).length > 0) {
+      // Process each reference to ensure consistent naming
+      for (const [id, cell] of Object.entries(dataReferences)) {
+        // Skip the special "currentCharm" key if it exists
+        if (id === 'currentCharm') continue;
+        
+        // Basic validation with detailed logging
+        if (!cell) {
+          console.warn(`Reference "${id}" is undefined or null, skipping`);
+          continue;
+        }
+        
+        if (typeof cell !== 'object') {
+          console.warn(`Reference "${id}" is not an object (type: ${typeof cell}), skipping`);
+          continue;
+        }
+        
+        // Verify this is actually a Cell object
+        if (!isCell(cell)) {
+          console.warn(`Reference "${id}" is not a valid cell object, skipping`);
+          console.warn(`Type of reference: ${typeof cell}, isObj: ${isObj(cell)}`);
+          console.warn(`Keys on reference: ${Object.keys(cell).join(', ')}`);
+          continue;
+        }
+        
+        // Verify cell can be accessed properly
+        let charmData;
+        let charmName = id;
+        let camelCaseId;
+        
+        try {
+          // Attempt to get cell data and validate
+          try {
+            charmData = cell.get();
+            if (!charmData) {
+              console.warn(`Reference "${id}" returned empty data, but continuing as the cell is valid`);
+            }
+          } catch (getError) {
+            console.error(`Cannot access data for reference "${id}":`, getError);
+            console.warn(`Skipping reference "${id}" due to data access error`);
+            continue;
+          }
+          
+          // Extract a proper name with fallbacks
+          try {
+            charmName = charmData && charmData["NAME"] ? charmData["NAME"] : id;
+          } catch (nameError) {
+            console.warn(`Error getting name for reference "${id}":`, nameError);
+            charmName = id; // Fallback to the reference ID
+          }
+          
+          // Create a valid camelCase identifier
+          camelCaseId = toCamelCase(charmName);
+          if (!camelCaseId || camelCaseId.length === 0) {
+            camelCaseId = toCamelCase(id) || `reference${Object.keys(allReferences).length + 1}`;
+          }
+          
+          // Make sure the ID is unique with counter suffix if needed
+          let uniqueId = camelCaseId;
+          let counter = 1;
+          while (uniqueId in allReferences) {
+            uniqueId = `${camelCaseId}${counter++}`;
+          }
+          
+          // Verify cell has required methods before adding
+          if (typeof cell.getAsCellLink !== 'function') {
+            console.warn(`Reference "${id}" (${charmName}) is missing required cell methods, skipping`);
+            continue;
+          }
+          
+          // Add to processed references with consistent naming
+          allReferences[uniqueId] = cell;
+          console.log(`Added reference "${id}" as "${uniqueId}" (${charmName})`);
+          
+          // Debug logging for reference data
+          try {
+            const cellSchema = cell.schema;
+            if (cellSchema) {
+              console.log(`Reference "${uniqueId}" schema type: ${cellSchema.type || 'unknown'}`);
+              if (cellSchema.properties) {
+                const propertyNames = Object.keys(cellSchema.properties).filter(k => !k.startsWith('$'));
+                console.log(`Reference "${uniqueId}" schema properties: ${propertyNames.join(', ')}`);
+              }
+            } else {
+              console.log(`Reference "${uniqueId}" has no schema`);
+            }
+          } catch (schemaErr) {
+            console.warn(`Could not get schema for reference "${id}":`, schemaErr);
+          }
+          
+          // Try to get entity ID for additional logging
+          try {
+            const entityId = getEntityId(cell);
+            if (entityId) {
+              console.log(`Reference "${uniqueId}" entity ID: ${entityId["/"] || "unknown"}`);
+            }
+          } catch (idErr) {
+            console.warn(`Could not get entity ID for reference "${id}":`, idErr);
+          }
+        } catch (error) {
+          console.error(`Error processing reference "${id}":`, error);
+          continue;
+        }
+      }
+    }
+    
+    // Always add the current charm with a consistent name if available
+    if (context.currentCharm) {
+      try {
+        // Verify current charm is a valid cell
+        if (!isCell(context.currentCharm)) {
+          console.warn('Current charm is not a valid cell object, skipping in references');
+        } else {
+          // Get data with error handling
+          let charmData;
+          let charmName = "currentCharm";
+          
+          try {
+            charmData = context.currentCharm.get();
+            charmName = charmData && charmData["NAME"] ? charmData["NAME"] : "currentCharm";
+          } catch (dataError) {
+            console.warn(`Error getting data for current charm:`, dataError);
+            // Continue with default name
+          }
+          
+          // Create a proper camelCase identifier
+          const camelCaseId = toCamelCase(charmName);
+          
+          // Make sure the ID is unique
+          let uniqueId = camelCaseId;
+          let counter = 1;
+          while (uniqueId in allReferences) {
+            uniqueId = `${camelCaseId}${counter++}`;
+          }
+          
+          // Add current charm to references
+          allReferences[uniqueId] = context.currentCharm;
+          console.log(`Added current charm as "${uniqueId}" (${charmName})`);
+          
+          // Debug logging for current charm data
+          try {
+            const cellSchema = context.currentCharm.schema;
+            if (cellSchema) {
+              console.log(`Current charm schema type: ${cellSchema.type || 'unknown'}`);
+              if (cellSchema.properties) {
+                const propertyNames = Object.keys(cellSchema.properties).filter(k => !k.startsWith('$'));
+                console.log(`Current charm schema properties: ${propertyNames.join(', ')}`);
+              }
+            } else {
+              console.log(`Current charm has no schema`);
+            }
+          } catch (err) {
+            console.warn(`Could not get schema for current charm:`, err);
+          }
+          
+          // Try to get entity ID for additional logging
+          try {
+            const entityId = getEntityId(context.currentCharm);
+            if (entityId) {
+              console.log(`Current charm entity ID: ${entityId["/"] || "unknown"}`);
+            }
+          } catch (idErr) {
+            console.warn(`Could not get entity ID for current charm:`, idErr);
+          }
+        }
+      } catch (error) {
+        console.error(`Error processing current charm:`, error);
+      }
+    }
+    
+    // Use debug logging to see what's actually being passed to castNewRecipe
+    console.log(`Passing ${Object.keys(allReferences).length} references to castNewRecipe`);
+    for (const [id, cell] of Object.entries(allReferences)) {
+      // Additional validation before passing references
+      if (!isCell(cell)) {
+        console.error(`CRITICAL: Reference "${id}" is not a valid cell just before being passed to castNewRecipe!`);
+        delete allReferences[id]; // Remove invalid references
+      } else {
+        console.log(`  - ${id}: Valid Cell (${typeof cell.get === 'function' ? 'has get()' : 'MISSING get()!'})`);
+      }
+    }
+    
+    // Final verification that we have valid references
+    if (Object.keys(allReferences).length === 0) {
+      console.warn('No valid references to pass to castNewRecipe');
+    }
+    
     return castNewRecipe(
       charmManager, 
       processedInput, // Already processed for mentions
-      dataReferences,
-      formattedSpec, // Use the formatted spec with plan and prompt
+      allReferences,  // Pass all references including current charm
+      formattedSpec,  // Use the formatted spec with plan and prompt
       executionPlan.updatedSchema
     );
   }
+}
+
+/**
+ * Converts a string of multiple words into camelCase format
+ * Similar to the function in jumble/src/utils/format.ts
+ */
+function toCamelCase(input: string): string {
+  // Handle empty string case
+  if (!input) return "currentCharm";
+
+  // Split the input string by non-alphanumeric characters
+  return input
+    .split(/[^a-zA-Z0-9]/)
+    .filter((word) => word.length > 0) // Remove empty strings
+    .map((word, index) => {
+      // First word should be all lowercase
+      if (index === 0) {
+        return word.toLowerCase();
+      }
+      // Other words should have their first letter capitalized and the rest lowercase
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join("");
 }
 
 /**

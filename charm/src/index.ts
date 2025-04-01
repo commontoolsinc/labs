@@ -23,6 +23,7 @@ export {
   fixItCharm,
   renameCharm,
   modifyCharm,
+  extendCharm,
   previewModifyCharm,
   createCharm,
 } from "./commands.ts";

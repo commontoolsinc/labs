@@ -171,7 +171,7 @@ export function scrub(data: any): any {
       // If there are properties, remove $UI and $NAME and any streams
       const scrubbed = Object.fromEntries(
         Object.entries(data.schema.properties).filter(([key, value]) =>
-          !key.startsWith("$") && (!isObj(value) || !value.asStream)
+          !key.startsWith("$") && (!isObj(value) || !('asStream' in value))
         ),
       );
       console.log("scrubbed modified schema", scrubbed, data.schema);
@@ -188,8 +188,8 @@ export function scrub(data: any): any {
         const scrubbed = {
           type: "object",
           properties: Object.fromEntries(
-            Object.keys(value).filter(([key, value]) =>
-              !key.startsWith("$") && !isStream(value)
+            Object.keys(value).filter(key =>
+              !key.startsWith("$") && !isStream(value[key])
             ).map(
               (key) => [key, {}],
             ),
@@ -197,7 +197,7 @@ export function scrub(data: any): any {
         } as JSONSchema;
         console.log("scrubbed generated schema", scrubbed);
         // Only if we found any properties, return the scrubbed schema
-        return Object.keys(scrubbed).length > 0
+        return scrubbed.properties && Object.keys(scrubbed.properties).length > 0
           ? data.asSchema(scrubbed)
           : data;
       } else return data;

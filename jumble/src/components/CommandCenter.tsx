@@ -82,7 +82,8 @@ function CommandProcessor({
     planLoading,
     workflowType,
     workflowConfidence,
-    workflowReasoning
+    workflowReasoning,
+    setWorkflow // Add the setter function to allow changing workflow type manually
   } = useLiveSpecPreview(
       inputValue,
       charmManager, // Explicitly pass CharmManager instance
@@ -111,14 +112,18 @@ function CommandProcessor({
       charmManager,
     );
     if ((mode.command as InputCommandItem).handler) {
-      // Pass the classified workflow type and plan to the handler
-      // This ensures the command can use the precomputed classification and plan
+      // Pass the current workflow type and plan to the handler 
+      // This ensures the command uses the latest workflow selection
+      // (which may have been manually changed by the user)
       const commandData = {
         ...sources,
         _workflowType: workflowType,
-        _workflowConfidence: workflowConfidence,
+        _workflowConfidence: workflowConfidence, 
         _previewPlan: previewPlan
       };
+      
+      // Log the workflow information at submission time
+      console.log(`Submitting with workflow: ${workflowType}, confidence: ${Math.round(workflowConfidence * 100)}%, plan steps: ${typeof previewPlan === 'string' ? 1 : (Array.isArray(previewPlan) ? previewPlan.length : 0)}`);
       
       (mode.command as InputCommandItem).handler(text, commandData);
     }
@@ -141,6 +146,7 @@ function CommandProcessor({
               workflowType={workflowType}
               workflowConfidence={workflowConfidence}
               workflowReasoning={workflowReasoning}
+              onWorkflowChange={setWorkflow} // Add workflow change handler to enable manual selection
             />
 
             <Composer
