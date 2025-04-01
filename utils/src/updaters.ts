@@ -2,9 +2,9 @@ import { Cell, getCell, storage } from "@commontools/runner";
 import { JSONSchema, Schema } from "@commontools/builder";
 
 // This is the derived space id for toolshed-system
-export const SYSTEM_SPACE_ID =
+export const BG_SYSTEM_SPACE_ID =
   "did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88";
-export const CELL_CAUSE = "bgUpdater-2025-03-18";
+export const BG_CELL_CAUSE = "bgUpdater-2025-03-18";
 
 export const CharmEntrySchema = {
   type: "object",
@@ -13,10 +13,10 @@ export const CharmEntrySchema = {
     charmId: { type: "string" },
     integration: { type: "string" },
     createdAt: { type: "number" },
-    lastRun: { type: "number", default: null },
     updatedAt: { type: "number" },
-    disabledAt: { type: "number", default: null },
-    runs: { type: "number", default: 0 },
+    disabledAt: { type: "number", default: 0 },
+    lastRun: { type: "number", default: 0 },
+    status: { type: "string", default: "" },
   },
   required: [
     "space",
@@ -24,27 +24,21 @@ export const CharmEntrySchema = {
     "integration",
     "createdAt",
     "updatedAt",
-    "enabled",
-    "runs",
+    "lastRun",
+    "status",
   ],
 } as const satisfies JSONSchema;
 export type BGCharmEntry = Schema<typeof CharmEntrySchema>;
 
-// Define schema for the cell with correct type literals
 export const bgUpdaterCharmsSchema = {
-  type: "object",
-  properties: {
-    charms: {
-      type: "array",
-      items: CharmEntrySchema,
-      default: [],
-    },
-  },
-  required: ["charms"],
+  type: "array",
+  items: CharmEntrySchema,
+  default: [],
 } as const satisfies JSONSchema;
+
 export type BGUpdaterCharmsSchema = Schema<typeof bgUpdaterCharmsSchema>;
 
-export async function addCharmToBG({
+export async function addOrUpdateBGCharm({
   space,
   charmId,
   integration,
@@ -65,54 +59,43 @@ export async function addCharmToBG({
   const charms = charmsCell.get() || [];
 
   // Check if this charm is already in the list to avoid duplicates
-  const exists = charms.some(
-    (charm: BGCharmEntry) => charm.space === space && charm.charmId === charmId,
+  const existingCharm = charms.find(
+    (charm: Cell<BGCharmEntry>) =>
+      charm.get().space === space && charm.get().charmId === charmId,
   );
 
-  if (!exists) {
+  if (!existingCharm) {
     console.log("Adding charm to BGUpdater charms cell");
-    charmsCell.push({
+    const newBG = getCell(BG_SYSTEM_SPACE_ID, undefined, CharmEntrySchema);
+    newBG.set({
       space,
       charmId,
       integration,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       disabledAt: undefined,
-      runs: 0,
+      lastRun: 0,
+      status: "created",
     });
+    charmsCell.push(newBG);
 
     // Ensure changes are synced
     await storage.synced();
     return true;
+  } else {
+    console.log("Charm already exists in BGUpdater charms cell, re-enabling");
+    existingCharm.update({
+      disabledAt: undefined,
+      updatedAt: Date.now(),
+      status: "re-added",
+    });
+    return false;
   }
-
-  console.log("Charm already exists in BGUpdater charms cell");
-  return false;
 }
 
-/**
- * Get the BGUpdater charms cell
- */
-export async function getBGUpdaterCharmsCell() {
-  if (!storage.hasSigner()) {
-    throw new Error("Storage has no signer");
-  }
-
-  if (!storage.hasRemoteStorage()) {
-    throw new Error("Storage has no remote storage");
-  }
-  const schema = bgUpdaterCharmsSchema.properties.charms;
-
-  const charmsCell = getCell(SYSTEM_SPACE_ID, CELL_CAUSE, schema);
-
-  // Ensure the cell is synced
-  await storage.syncCell(charmsCell, true);
-  await storage.synced();
-
-  return charmsCell;
-}
-
-export async function newGetFunc(): Promise<Cell<Cell<BGCharmEntry>[]>> {
+export async function getBGUpdaterCharmsCell(): Promise<
+  Cell<Cell<BGCharmEntry>[]>
+> {
   if (!storage.hasSigner()) {
     throw new Error("Storage has no signer");
   }
@@ -129,7 +112,7 @@ export async function newGetFunc(): Promise<Cell<Cell<BGCharmEntry>[]>> {
     default: [],
   } as const satisfies JSONSchema;
 
-  const charmsCell = getCell(SYSTEM_SPACE_ID, CELL_CAUSE, schema);
+  const charmsCell = getCell(BG_SYSTEM_SPACE_ID, BG_CELL_CAUSE, schema);
 
   // Ensure the cell is synced
   // FIXME(ja): does True do the right thing here? Does this mean: I REALLY REALLY

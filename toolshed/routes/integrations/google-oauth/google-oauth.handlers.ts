@@ -25,7 +25,7 @@ import {
   getBaseUrl,
   persistTokens,
 } from "./google-oauth.utils.ts";
-import { addCharmToBG } from "@commontools/utils";
+import { addOrUpdateBGCharm } from "@commontools/utils";
 
 import { type CellLink } from "@commontools/runner";
 
@@ -195,17 +195,11 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
           "Adding Google integration charm to Gmail integrations",
         );
 
-        const added = await addCharmToBG({
+        await addOrUpdateBGCharm({
           space,
           charmId: integrationCharmId,
-          integration: "gmail",
+          integration: "google",
         });
-
-        if (added) {
-          logger.info("Added charm to Gmail integrations");
-        } else {
-          logger.info("Charm already exists in Gmail integrations");
-        }
       } else {
         logger.warn(
           { decodedState },
@@ -363,7 +357,7 @@ export const backgroundIntegration: AppRouteHandler<
   try {
     const payload = await c.req.json();
 
-    await addCharmToBG({
+    await addOrUpdateBGCharm({
       space: payload.space,
       charmId: payload.charmId,
       integration: payload.integration,

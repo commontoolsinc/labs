@@ -9,13 +9,13 @@ import {
 import { type DID, Identity } from "@commontools/identity";
 import { createAdminSession } from "@commontools/identity";
 import {
+  BG_CELL_CAUSE,
+  BG_SYSTEM_SPACE_ID,
   bgUpdaterCharmsSchema,
-  CELL_CAUSE,
-  SYSTEM_SPACE_ID,
 } from "@commontools/utils";
 import { getIdentity } from "./src/utils.ts";
 
-const { recipePath, name, quit } = parseArgs(
+const { recipePath, quit } = parseArgs(
   Deno.args,
   {
     string: ["recipePath"],
@@ -46,8 +46,8 @@ storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
 
 async function castRecipe() {
-  const spaceId = SYSTEM_SPACE_ID;
-  const cause = CELL_CAUSE;
+  const spaceId = BG_SYSTEM_SPACE_ID;
+  const cause = BG_CELL_CAUSE;
   console.log(`Casting recipe from ${recipePath} in space ${spaceId}`);
 
   storage.setSigner(identity);
@@ -79,11 +79,11 @@ async function castRecipe() {
     const targetCell = getCell(
       spaceId as DID,
       cause,
-      bgUpdaterCharmsSchema.properties.charms,
+      bgUpdaterCharmsSchema,
     );
 
     // Ensure the cell is synced
-    storage.syncCell(targetCell, true);
+    await storage.syncCell(targetCell, true);
     await storage.synced();
 
     console.log("Getting cell...");
