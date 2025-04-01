@@ -1,5 +1,10 @@
 import { isStreamAlias, TYPE } from "@commontools/builder";
-import { getTopFrame, ID, type JSONSchema } from "@commontools/builder";
+import {
+  getTopFrame,
+  ID,
+  ID_FIELD,
+  type JSONSchema,
+} from "@commontools/builder";
 import { type DeepKeyLookup, type DocImpl, getDoc, isDoc } from "./doc.ts";
 import {
   createQueryResultProxy,
@@ -103,15 +108,15 @@ import { type Schema } from "@commontools/builder";
  */
 export interface Cell<T> {
   get(): T;
-  set(value: T): void;
-  send(value: T): void;
-  update(values: Partial<T>): void;
+  set(value: Cellify<T> | T): void;
+  send(value: Cellify<T> | T): void;
+  update<V extends Cellify<Partial<T> | Partial<T>>>(
+    values: V extends object ? V : never,
+  ): void;
   push(
     ...value: Array<
-      | (T extends Array<infer U> ? U : any)
-      | DocImpl<T extends Array<infer U> ? U : any>
+      | (T extends Array<infer U> ? (Cellify<U> | U | DocImpl<U>) : any)
       | CellLink
-      | Cell<T extends Array<infer U> ? U : any>
     >
   ): void;
   equals(other: Cell<any>): boolean;
@@ -163,6 +168,26 @@ export interface Cell<T> {
   [isCellMarker]: true;
   copyTrap: boolean;
 }
+
+/**
+ * Cellify is a type utility that allows any part of type T to be wrapped in
+ * Cell<>, and allow any part of T that is currently wrapped in Cell<> to be
+ * used unwrapped. This is designed for use with Cell<T> method parameters,
+ * allowing flexibility in how values are passed.
+ */
+export type Cellify<T> =
+  // Handle existing Cell<> types, allowing unwrapping
+  T extends Cell<infer U> ? Cellify<U> | Cell<Cellify<U>>
+    // Handle arrays
+    : T extends Array<infer U> ? Array<Cellify<U>> | Cell<Array<Cellify<U>>>
+    // Handle objects (excluding null), adding optional ID fields
+    : T extends object ?
+        | ({ [K in keyof T]: Cellify<T[K]> } & { [ID]?: any; [ID_FIELD]?: any })
+        | Cell<
+          { [K in keyof T]: Cellify<T[K]> } & { [ID]?: any; [ID_FIELD]?: any }
+        >
+    // Handle primitives
+    : T | Cell<T>;
 
 export interface Stream<T> {
   send(event: T): void;
@@ -359,15 +384,15 @@ function createRegularCell<T>(
 
   const self = {
     get: () => validateAndTransform(doc, path, schema, log, rootSchema),
-    set: (newValue: T) =>
+    set: (newValue: Cellify<T>) =>
       diffAndUpdate(
         resolveLinkToAlias(doc, path, log),
         newValue,
         log,
         getTopFrame()?.cause,
       ),
-    send: (newValue: T) => self.set(newValue),
-    update: (values: Partial<T>) => {
+    send: (newValue: Cellify<T>) => self.set(newValue),
+    update: (values: Cellify<Partial<T>>) => {
       if (typeof values !== "object" || values === null) {
         throw new Error("Can't update with non-object value");
       }
@@ -378,10 +403,8 @@ function createRegularCell<T>(
     },
     push: (
       ...values: Array<
-        | (T extends Array<infer U> ? U : any)
-        | DocImpl<T extends Array<infer U> ? U : any>
+        | (T extends Array<infer U> ? (Cellify<U> | U | DocImpl<U>) : any)
         | CellLink
-        | Cell<T extends Array<infer U> ? U : any>
       >
     ) => {
       // Follow aliases and references, since we want to get to an assumed
