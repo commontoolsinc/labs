@@ -85,10 +85,14 @@ export async function addOrUpdateBGCharm({
   } else {
     console.log("Charm already exists in BGUpdater charms cell, re-enabling");
     existingCharm.update({
-      disabledAt: undefined,
+      disabledAt: 0,
       updatedAt: Date.now(),
       status: "re-added",
     });
+
+    await storage.synced();
+
+    console.log("Charms cell", JSON.stringify(charmsCell.get(), null, 2));
     return false;
   }
 }
