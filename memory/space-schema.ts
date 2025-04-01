@@ -306,9 +306,14 @@ function getFact(
   return undefined;
 }
 
-function isUnavailableAlias(aliasObj: Alias) {
-  if (aliasObj.$alias.path.length >= 0) {
-    const firstPath = aliasObj.$alias.path[0];
+function isUnavailableLink(obj: JSONCellLink | Alias) {
+  const path = isAlias(obj)
+    ? obj.$alias.path
+    : isJSONCellLink(obj)
+    ? obj.path
+    : undefined;
+  if (Array.isArray(path) && path.length > 0) {
+    const firstPath = path[0];
     if (firstPath === "argument" || firstPath === "internal") {
       return true;
     }
@@ -349,8 +354,9 @@ function resolveCells<Space extends MemorySpace>(
         tracker,
       );
       if (loadedObj === undefined) {
-        // If it's an alias to argument or internal, it will only be available on the client
-        if (!isAlias(factIs) || !isUnavailableAlias(factIs)) {
+        // If it's a broken link to something other than argument or internal
+        // (which are only available on the client), complain
+        if (!isUnavailableLink(factIs)) {
           console.error("Got broken link loading ", factIs, " in ", currentDoc);
         }
         return null;
