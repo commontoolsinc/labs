@@ -1,6 +1,6 @@
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
-import { Cell, type CellLink, isCell, isCellLink } from "./cell.ts";
+import { Cell, type CellLink, isCell, isCellLink, isStream } from "./cell.ts";
 import { type EntityId, getDocByEntityId } from "./doc-map.ts";
 import {
   getCellLinkOrThrow,
@@ -322,7 +322,7 @@ class StorageImpl implements Storage {
     doc: DocImpl<T> | Cell<any>,
     expectedInStorage: boolean = false,
   ): DocImpl<T> {
-    if (isCell(doc)) doc = doc.getAsCellLink().cell;
+    if (isCell(doc) || isStream(doc)) doc = doc.getDoc();
     if (!isDoc(doc)) {
       throw new Error("Invalid subject: " + JSON.stringify(doc));
     }
