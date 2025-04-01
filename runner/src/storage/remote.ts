@@ -546,21 +546,20 @@ export class RemoteStorageProvider implements StorageProvider {
     const unsubscribe = subscription.subscribe((_value) => {
       // we only want this event once
       unsubscribe();
-      const includedQueryViews = initialSubscription.query
-        .includedQueryViews();
-      for (const view of includedQueryViews) {
-        const viewSelector = view.selector as Memory.Selector;
+      const includedQueryView = initialSubscription.query.includedQueryView();
+      if (includedQueryView !== undefined) {
+        const viewSelector = includedQueryView.selector as Memory.Selector;
+        const newSubscription = new Subscription(
+          local.memory,
+          { select: viewSelector },
+          new Set(),
+          includedQueryView,
+          inspector,
+        );
         for (const [of, _rest] of Object.entries(viewSelector)) {
           if (
             of !== "_" && local.remote.get(of as Entity) === undefined
           ) {
-            const newSubscription = new Subscription(
-              local.memory,
-              { select: viewSelector },
-              new Set(),
-              view,
-              inspector,
-            );
             local.remote.set(of as Entity, newSubscription);
           }
         }

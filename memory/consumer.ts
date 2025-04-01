@@ -430,27 +430,40 @@ class QueryView<
     return subscription;
   }
 
-  includedQueryViews() {
+  // A SchemaSelector query will include results that aren't in the selector
+  // Since we already have these results, we don't want to re-fetch them, so
+  // make a QueryView available for subscriptions to use that lets us skip
+  // that step when we subscribe.
+  includedQueryView(): QueryView<Space, MemoryProtocol> | undefined {
     const factSelection = this.selection[this.space];
-    const subQueryViews = [];
+    const subSelector: Selector = {};
     for (const [of, attributes] of Object.entries(factSelection)) {
       if (of === "_" || of in this.selector) {
         continue;
       }
+      const entityEntry: Record<The, Record<Cause, any>> = {};
       for (const [the, _causes] of Object.entries(attributes)) {
-        const subSelector = { [of]: { [the]: { _: {} } } };
-        const subQueryView = new QueryView(
-          this.session,
-          this.invocation,
-          Promise.resolve({ ok: this }),
-        );
-        subQueryView.selection = this.selection;
-        subQueryView.selector = subSelector;
-        subQueryView.promise = Promise.resolve({ ok: subQueryView });
-        subQueryViews.push(subQueryView);
+        entityEntry[the as Entity] = { _: {} };
       }
+      subSelector[of as Entity] = entityEntry;
     }
-    return subQueryViews;
+    if (Object.entries(subSelector).length == 0) {
+      // Nothing new
+      return undefined;
+    }
+    // If we included any entries in our selection that were not in our
+    // selector, create a new QueryView for them, and subscribe to that
+    // We pre-populate the query view with the results
+    const subQueryView = new QueryView(
+      this.session,
+      this.invocation,
+      Promise.resolve({ ok: this }),
+    );
+
+    subQueryView.selection = this.selection;
+    subQueryView.selector = subSelector;
+    subQueryView.promise = Promise.resolve({ ok: subQueryView });
+    return subQueryView;
   }
 }
 
