@@ -110,7 +110,9 @@ export interface Cell<T> {
   get(): T;
   set(value: Cellify<T> | T): void;
   send(value: Cellify<T> | T): void;
-  update(values: Cellify<Partial<T> | T>): void;
+  update<V extends Cellify<Partial<T> | Partial<T>>>(
+    values: V extends object ? V : never,
+  ): void;
   push(
     ...value: Array<
       | (T extends Array<infer U> ? (Cellify<U> | U | DocImpl<U>) : any)
@@ -401,8 +403,7 @@ function createRegularCell<T>(
     },
     push: (
       ...values: Array<
-        | (T extends Array<infer U> ? Cellify<U> : any)
-        | DocImpl<T extends Array<infer U> ? Cellify<U> : any>
+        | (T extends Array<infer U> ? (Cellify<U> | U | DocImpl<U>) : any)
         | CellLink
       >
     ) => {
