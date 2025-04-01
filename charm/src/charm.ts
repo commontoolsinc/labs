@@ -11,10 +11,11 @@ import {
 import {
   type Cell,
   type CellLink,
+  createRef,
   DocImpl,
   EntityId,
   followAliases,
-  getCell,
+  getCellFromEntityId,
   getDoc,
   getEntityId,
   getRecipe,
@@ -1179,7 +1180,12 @@ export class CharmManager {
     syncAllMentionedCells(inputs);
     await Promise.all(promises);
 
-    const charm = getCell(this.space, cause, charmSchema);
+    const charm = getCellFromEntityId(
+      this.space,
+      createRef({ recipe, inputs }, cause),
+      [],
+      charmSchema,
+    );
     await runSynced(charm, recipe, inputs);
     await this.syncRecipe(charm);
     await this.add([charm]);
