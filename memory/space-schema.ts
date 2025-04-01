@@ -11,17 +11,12 @@ import type {
 } from "./interface.ts";
 import { isNumber, isObject, isString } from "./util.ts";
 import { arrayEqual } from "../runner/src/utils.ts";
-import { FactSelector, SelectAll, selectFacts } from "./space.ts";
-import { Database } from "@db/sqlite";
+import { FactSelector, SelectAll, selectFacts, Session } from "./space.ts";
 import { Alias, isAlias } from "../builder/src/types.ts";
 export * from "./interface.ts";
 
 // This is the same structure as in space.ts, but there's also a different
 // Session interface in memory/interface, so the space version isn't exported.
-interface Session<Space extends MemorySpace> {
-  subject: Space;
-  store: Database;
-}
 
 class CycleTracker<K, V> {
   private partial: Set<K>;

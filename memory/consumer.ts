@@ -370,6 +370,7 @@ class QueryView<
     return view;
   }
   selection: Selection<Space>;
+  selector: Selector | SchemaSelector;
 
   constructor(
     public session: MemoryConsumerSession<Space, MemoryProtocol>,
@@ -381,15 +382,10 @@ class QueryView<
     >,
   ) {
     this.selection = { [this.space]: {} } as Selection<InferOf<Protocol>>;
-  }
-
-  get selector() {
-    if ("select" in this.invocation.args) {
-      return (this.invocation.args as { select?: Selector }).select as Selector;
-    } else {
-      return (this.invocation.args as { selectSchema?: Selector })
+    this.selector = ("select" in this.invocation.args)
+      ? (this.invocation.args as { select?: Selector }).select as Selector
+      : (this.invocation.args as { selectSchema?: Selector })
         .selectSchema as SchemaSelector;
-    }
   }
 
   return(selection: Selection<InferOf<Protocol>>) {
@@ -432,6 +428,29 @@ class QueryView<
     this.session.execute(subscription);
 
     return subscription;
+  }
+
+  includedQueryViews() {
+    const factSelection = this.selection[this.space];
+    const subQueryViews = [];
+    for (const [of, attributes] of Object.entries(factSelection)) {
+      if (of === "_" || of in this.selector) {
+        continue;
+      }
+      for (const [the, _causes] of Object.entries(attributes)) {
+        const subSelector = { [of]: { [the]: { _: {} } } };
+        const subQueryView = new QueryView(
+          this.session,
+          this.invocation,
+          Promise.resolve({ ok: this }),
+        );
+        subQueryView.selection = this.selection;
+        subQueryView.selector = subSelector;
+        subQueryView.promise = Promise.resolve({ ok: subQueryView });
+        subQueryViews.push(subQueryView);
+      }
+    }
+    return subQueryViews;
   }
 }
 

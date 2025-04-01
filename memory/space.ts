@@ -155,7 +155,7 @@ export type Options = {
   url: URL;
 };
 
-interface Session<Space extends MemorySpace> {
+export interface Session<Space extends MemorySpace> {
   subject: Space;
   store: Database;
 }

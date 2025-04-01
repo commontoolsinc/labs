@@ -189,6 +189,11 @@ export class RemoteStorageProvider implements StorageProvider {
 
         // store subscription so it can be reused.
         local.remote.set(of, subscription);
+
+        // We also want to add any subscriptions that should follow from that query
+        if (schemaContext) {
+          this.subscribeToContents(subscription);
+        }
       }
     }
 
@@ -533,6 +538,35 @@ export class RemoteStorageProvider implements StorageProvider {
   getReplica(): string {
     return this.workspace;
   }
+
+  subscribeToContents(subscription: Subscription<MemorySpace>): void {
+    const { inspector } = this;
+    const local = this.mount(this.workspace);
+    const initialSubscription = subscription;
+    const unsubscribe = subscription.subscribe((_value) => {
+      // we only want this event once
+      unsubscribe();
+      const includedQueryViews = initialSubscription.query
+        .includedQueryViews();
+      for (const view of includedQueryViews) {
+        const viewSelector = view.selector as Memory.Selector;
+        for (const [of, _rest] of Object.entries(viewSelector)) {
+          if (
+            of !== "_" && local.remote.get(of as Entity) === undefined
+          ) {
+            const newSubscription = new Subscription(
+              local.memory,
+              { select: viewSelector },
+              new Set(),
+              view,
+              inspector,
+            );
+            local.remote.set(of as Entity, newSubscription);
+          }
+        }
+      }
+    });
+  }
 }
 
 export interface Subscriber {
@@ -553,6 +587,7 @@ class Subscription<Space extends MemorySpace> {
       session,
       selector,
       new Set(),
+      undefined,
       inspector,
     );
   }
@@ -560,17 +595,20 @@ class Subscription<Space extends MemorySpace> {
     public session: Memory.MemorySpaceSession<Space>,
     public selector: Query["args"] | SchemaQuery["args"],
     public subscribers: Set<Subscriber>,
+    public queryView?: Memory.QueryView<Space, Protocol<Space>>,
     public inspector?: BroadcastChannel,
   ) {
-    this.connect();
+    this.connect(queryView);
   }
 
   // Run an initial query to get the data, then subscribe to get updates
   // In the case of a selector that is a SchemaSelector, we will run the
   // query with the schema selector, but subscribe to updates on the doc
   // with a standard selector.
-  connect() {
-    const query = this.session.query(this.selector);
+  connect(queryView?: Memory.QueryView<Space, Protocol<Space>>) {
+    const query = (queryView === undefined)
+      ? this.session.query(this.selector)
+      : queryView;
     const subscription = query.subscribe();
     this.query = query;
     this.subscription = subscription;
