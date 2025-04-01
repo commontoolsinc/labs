@@ -1181,6 +1181,7 @@ export class CharmManager {
 
     const charm = getCell(this.space, cause, charmSchema);
     await runSynced(charm, recipe, inputs);
+    await this.syncRecipe(charm);
     await this.add([charm]);
 
     return charm;
