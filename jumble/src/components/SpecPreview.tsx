@@ -2,6 +2,14 @@ import React, { useRef } from "react";
 import { DitheredCube } from "./DitherCube.tsx";
 import { animated, useSpring, useTransition } from "@react-spring/web";
 
+interface SpecPreviewProps {
+  spec?: string;
+  plan?: string;
+  loading: boolean;
+  visible: boolean;
+  floating?: boolean;
+}
+
 export function SpecPreview({
   spec,
   plan,
