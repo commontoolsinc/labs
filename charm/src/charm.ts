@@ -1188,7 +1188,14 @@ export class CharmManager {
 
   // FIXME(JA): this really really really needs to be revisited
   async syncRecipe(charm: Cell<Charm>): Promise<string> {
-    const recipeId = charm.getSourceCell()?.get()?.[TYPE];
+    await storage.syncCell(charm);
+
+    const sourceCell = charm.getSourceCell();
+    if (!sourceCell) throw new Error("charm missing source cell");
+
+    await storage.syncCell(sourceCell);
+
+    const recipeId = sourceCell.get()?.[TYPE];
     if (!recipeId) throw new Error("charm missing recipe ID");
 
     await Promise.all([
