@@ -1,7 +1,7 @@
 import { isObj } from "@commontools/utils";
 
-export const ID: symbol = Symbol("ID, unique to the context");
-export const ID_FIELD: symbol = Symbol(
+export const ID: unique symbol = Symbol("ID, unique to the context");
+export const ID_FIELD: unique symbol = Symbol(
   "ID_FIELD, name of sibling that contains id",
 );
 
@@ -108,9 +108,11 @@ export type JSONValue =
   | boolean
   | null
   | JSONValue[]
-  | { [key: string]: JSONValue };
+  | { [key: string]: JSONValue } & { [ID]?: any; [ID_FIELD]?: any };
 
 export type JSONSchema = {
+  readonly [ID]?: any;
+  readonly [ID_FIELD]?: any;
   readonly type?:
     | "object"
     | "array"
