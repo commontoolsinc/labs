@@ -149,7 +149,7 @@ export type Protocol<Space extends MemorySpace = MemorySpace> = {
           source: Subscribe<Space>["args"],
         ): Task<
           Result<Unit, SystemError | AuthorizationError>,
-          Transaction<Space>
+          Commit<Space>
         >;
         unsubscribe(
           source: Unsubscribe<Space>["args"],
@@ -230,9 +230,6 @@ export type Method<
     perform(effect: Effect): void;
   };
 };
-
-type PC = ProviderCommand<Protocol>;
-type CCI = ConsumerCommandInvocation<Protocol>;
 
 export type InferOf<T> = keyof T extends DID ? keyof T : never;
 
@@ -460,7 +457,7 @@ export interface MemorySession<Space extends MemorySpace = MemorySpace>
 }
 
 export interface Subscriber<Space extends MemorySpace = MemorySpace> {
-  transact(transaction: Transaction<Space>): AwaitResult<Unit, SystemError>;
+  commit(commit: Commit<Space>): AwaitResult<Unit, SystemError>;
   close(): AwaitResult<Unit, SystemError>;
 }
 
