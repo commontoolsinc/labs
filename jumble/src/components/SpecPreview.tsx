@@ -1,6 +1,9 @@
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import { DitheredCube } from "./DitherCube.tsx";
 import { animated, useSpring, useTransition } from "@react-spring/web";
+import { ToggleButton } from "./common/CommonToggle.tsx";
+
+export type WorkflowType = "fix" | "edit" | "rework";
 
 interface SpecPreviewProps {
   spec?: string;
@@ -8,6 +11,10 @@ interface SpecPreviewProps {
   loading: boolean;
   visible: boolean;
   floating?: boolean;
+  workflowType?: WorkflowType;
+  workflowConfidence?: number;
+  workflowReasoning?: string;
+  onWorkflowChange?: (workflow: WorkflowType) => void;
 }
 
 export function SpecPreview({
@@ -16,6 +23,10 @@ export function SpecPreview({
   loading,
   visible,
   floating = false,
+  workflowType = "edit",
+  workflowConfidence = 0,
+  workflowReasoning,
+  onWorkflowChange,
 }: SpecPreviewProps) {
   const hasContent = loading || plan || spec;
 
@@ -79,6 +90,9 @@ export function SpecPreview({
     ? "preview-container border border-2 fixed z-50 bg-gray-200"
     : "preview-container border-t-2 border-black pt-2 bg-gray-200 ";
 
+  // Format the confidence as a percentage
+  const confidencePercentage = Math.round(workflowConfidence * 100);
+
   return (
     <animated.div
       className={containerClasses}
@@ -130,6 +144,38 @@ export function SpecPreview({
               )
               : (
                 <animated.div className="space-y-4 w-full" style={style}>
+                  {/* Workflow selector */}
+                  {onWorkflowChange && (
+                    <div className="mb-3">
+                      <div className="flex flex-col gap-2">
+                        <div className="text-xs font-bold mb-1 flex items-center justify-between">
+                          <span>WORKFLOW</span>
+                          {workflowConfidence > 0 && (
+                            <span className="text-gray-500 text-xs">
+                              {confidencePercentage}% confidence
+                            </span>
+                          )}
+                        </div>
+                        <ToggleButton
+                          options={[
+                            { value: "fix", label: "FIX" },
+                            { value: "edit", label: "EDIT" },
+                            { value: "rework", label: "REWORK" },
+                          ]}
+                          value={workflowType}
+                          onChange={(value) =>
+                            onWorkflowChange(value as WorkflowType)}
+                          size="small"
+                        />
+                        {workflowReasoning && (
+                          <div className="text-xs text-gray-600 italic mt-1">
+                            {workflowReasoning}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {plan && (
                     <div>
                       <div className="text-xs font-bold mb-1">PLAN</div>
@@ -141,7 +187,8 @@ export function SpecPreview({
                       </animated.div>
                     </div>
                   )}
-                  {spec && (
+
+                  {spec && workflowType !== "fix" && (
                     <div>
                       <div className="text-xs font-bold mb-1">SPEC</div>
                       <animated.div
@@ -152,12 +199,13 @@ export function SpecPreview({
                       </animated.div>
                     </div>
                   )}
-                  {!spec && !plan && (
+
+                  {!spec && !plan && !isLoading && (
                     <animated.div
                       className="text-xs text-gray-500 italic"
                       style={textSpring}
                     >
-                      Your specification preview will appear here as you type...
+                      Your preview will appear here as you type...
                     </animated.div>
                   )}
                 </animated.div>

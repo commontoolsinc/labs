@@ -48,7 +48,7 @@ import { useCharmMentions } from "@/components/CommandCenter.tsx";
 import { formatPromptWithMentions } from "@/utils/format.ts";
 import { CharmLink } from "@/components/CharmLink.tsx";
 import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
-import { SpecPreview } from "@/components/SpecPreview.tsx";
+import { SpecPreview, WorkflowType } from "@/components/SpecPreview.tsx";
 import {
   SpecPreviewModel,
   useLiveSpecPreview,
@@ -72,6 +72,10 @@ interface CharmOperationContextType {
   setSelectedModel: (model: string) => void;
   operationType: OperationType;
   setOperationType: (type: OperationType) => void;
+  workflowType: WorkflowType;
+  setWorkflow: (type: WorkflowType) => void;
+  workflowConfidence: number;
+  workflowReasoning?: string;
   showVariants: boolean;
   setShowVariants: (show: boolean) => void;
   showPreview: boolean;
@@ -270,14 +274,28 @@ function useCharmOperation() {
 
   // Preview model state
   const [previewModel, setPreviewModel] = useState<SpecPreviewModel>("think");
+  
+  // Workflow state for the new classification system
+  const [workflowType, setWorkflowType] = useState<WorkflowType>("edit");
 
-  // Live preview generation
+  // Live preview generation with workflow classification
   const {
     previewSpec,
     previewPlan,
     loading: isPreviewLoading,
     model,
-  } = useLiveSpecPreview(input, showPreview, 250, previewModel);
+    workflowType: classifiedWorkflowType,
+    workflowConfidence,
+    workflowReasoning,
+    setWorkflow,
+  } = useLiveSpecPreview(input, showPreview, 250, previewModel, charm);
+  
+  // Keep local workflow type in sync with classified type
+  useEffect(() => {
+    if (classifiedWorkflowType && classifiedWorkflowType !== workflowType) {
+      setWorkflowType(classifiedWorkflowType);
+    }
+  }, [classifiedWorkflowType]);
 
   // Function that performs the selected operation (iterate or extend)
   const performOperation = useCallback(
@@ -394,6 +412,10 @@ function useCharmOperation() {
     setSelectedModel,
     operationType,
     setOperationType,
+    workflowType,
+    setWorkflow,
+    workflowConfidence,
+    workflowReasoning,
     showVariants,
     setShowVariants,
     showPreview,
@@ -898,15 +920,16 @@ const OperationTab = () => {
 
       {/* Content Container with single scrollbar */}
       <div className="flex-grow overflow-auto mt-3 -mx-4 px-4">
-        {/* TODO(bf): restore in https://github.com/commontoolsinc/labs/issues/876 */}
-        {
-          /* <SpecPreview
+        <SpecPreview
           spec={previewSpec}
           plan={previewPlan}
           loading={isPreviewLoading}
           visible={showPreview}
-        /> */
-        }
+          workflowType={workflowType}
+          workflowConfidence={workflowConfidence}
+          workflowReasoning={workflowReasoning}
+          onWorkflowChange={setWorkflow}
+        />
         <Variants />
         <Suggestions />
       </div>
