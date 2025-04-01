@@ -9,6 +9,7 @@ import {
   UI,
 } from "@commontools/builder";
 
+// NOTE(ja): this must be the same as the schema in utils/src/updaters.ts
 const BGCharmEntrySchema = {
   type: "object",
   properties: {
