@@ -54,17 +54,14 @@ export async function addOrUpdateBGCharm({
     JSON.stringify(charmsCell.getAsCellLink(), null, 2),
   );
 
-  // FIXME(ja): if we use IDs might might not need to do this?
-  // Get current charms data
   const charms = charmsCell.get() || [];
 
-  // Check if this charm is already in the list to avoid duplicates
-  const existingCharm = charms.find(
+  const existingCharmIndex = charms.findIndex(
     (charm: Cell<BGCharmEntry>) =>
       charm.get().space === space && charm.get().charmId === charmId,
   );
 
-  if (!existingCharm) {
+  if (existingCharmIndex === -1) {
     console.log("Adding charm to BGUpdater charms cell");
     const newBG = getCell(BG_SYSTEM_SPACE_ID, undefined, CharmEntrySchema);
     newBG.set({
@@ -75,24 +72,25 @@ export async function addOrUpdateBGCharm({
       updatedAt: Date.now(),
       disabledAt: undefined,
       lastRun: 0,
-      status: "created",
+      status: "Initializing",
     });
     charmsCell.push(newBG);
 
     // Ensure changes are synced
     await storage.synced();
+
     return true;
   } else {
     console.log("Charm already exists in BGUpdater charms cell, re-enabling");
+    const existingCharm = charms[existingCharmIndex];
     existingCharm.update({
       disabledAt: 0,
       updatedAt: Date.now(),
-      status: "re-added",
+      status: "Re-initializing",
     });
 
     await storage.synced();
 
-    console.log("Charms cell", JSON.stringify(charmsCell.get(), null, 2));
     return false;
   }
 }
