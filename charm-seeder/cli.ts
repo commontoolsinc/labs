@@ -10,7 +10,7 @@ import {
   setBobbyServerUrl,
   storage,
 } from "@commontools/runner";
-import { Session } from "@commontools/identity";
+import { createSession, Identity } from "@commontools/identity";
 import { client as llm } from "@commontools/llm";
 import { prompts } from "./prompts.ts";
 import { Command, CommandType } from "./commands.ts";
@@ -40,8 +40,8 @@ async function processPrompts(
   setBobbyServerUrl(apiUrl);
 
   const charmManager = new CharmManager(
-    await Session.create({
-      passphrase: userPassphrase,
+    await createSession({
+      identity: await Identity.fromPassphrase(userPassphrase),
       name: spaceName,
     }),
   );
