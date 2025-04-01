@@ -25,6 +25,7 @@ The system currently supports three primary workflows, with a design that allows
    - **Schema**: Preserved
    - **Example**: "Fix the alignment of the buttons" or "Correct the calculation bug"
    - **Current Implementation**: Uses the existing iterate function with spec preservation
+   - **References**: Can only reference the current charm, not other charms
 
 2. **Edit**
    - **Purpose**: Add features or modify functionality while preserving core data structure
@@ -32,6 +33,7 @@ The system currently supports three primary workflows, with a design that allows
    - **Schema**: Core structure preserved (may add properties but not completely change it)
    - **Example**: "Add dark mode support" or "Include a search feature"
    - **Current Implementation**: Uses the existing iterate function with spec updates
+   - **References**: Can only reference the current charm, not other charms
 
 3. **Rework**
    - **Purpose**: Create something new, potentially combining multiple data sources
@@ -39,8 +41,17 @@ The system currently supports three primary workflows, with a design that allows
    - **Schema**: Can be completely different
    - **Example**: "Create a dashboard combining my tasks and calendar" or "Build a visualization tool for my expense data"
    - **Current Implementation**: Uses the existing castNewRecipe function
+   - **References**: Can reference multiple charms to build a combined schema
 
-All workflows support data references, which are interpreted according to the active workflow's context.
+### Important Note on Charm References
+
+When a user mentions any charm in their prompt (using @mentions) other than the current charm being modified, the system automatically classifies the operation as a "rework" workflow. This is necessary because:
+
+1. Referencing other charms requires building a combined schema that can access data from all referenced charms
+2. A new argument cell must be constructed that points to pieces of result cells from all referenced charms
+3. The "rework" workflow uses `castNewRecipe` which properly handles references through the `turnCellsIntoAliases` function
+
+This behavior cannot be overridden, even with manual workflow selection, as the underlying implementation requires the "rework" workflow to properly handle charm references.
 
 ## System Architecture
 

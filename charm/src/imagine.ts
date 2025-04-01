@@ -280,8 +280,25 @@ export async function classifyIntent(
   }
   
   try {
-    // Use our LLM-based classification function with the processed input
-    // Include references context in the input
+    // Check if we have any mentions of other charms (except the current charm)
+    // If so, we should automatically classify as "rework" since we need to build
+    // a combined schema and create a new argument cell that can access all referenced data
+    const hasOtherCharmReferences = dataReferences && 
+      Object.keys(dataReferences).filter(key => key !== 'currentCharm').length > 0;
+    
+    if (hasOtherCharmReferences) {
+      // Auto-classify as rework when referencing other charms
+      return {
+        workflowType: "rework",
+        confidence: 1.0,
+        reasoning: "Automatically classified as 'rework' because the prompt references other charms. " +
+                   "When referencing other charms, we need to construct a new argument cell that can " +
+                   "access data from all references with a combined schema.",
+        enhancedPrompt: processedInput,
+      };
+    }
+    
+    // If no other charm references, use our LLM-based classification function
     const enhancedInput = referencesContext ? 
       `${processedInput}\n\n${referencesContext}` : processedInput;
     
@@ -302,7 +319,19 @@ export async function classifyIntent(
   } catch (error) {
     console.error("Error during workflow classification:", error);
     
-    // Fallback to a simple heuristic if the LLM classification fails
+    // First check if we have any charm references, as this should force "rework" workflow
+    const hasOtherCharmReferences = dataReferences && 
+      Object.keys(dataReferences).filter(key => key !== 'currentCharm').length > 0;
+    
+    if (hasOtherCharmReferences) {
+      return {
+        workflowType: "rework",
+        confidence: 0.9,
+        reasoning: "Fallback classification: Input references other charms, which requires rework workflow",
+      };
+    }
+    
+    // If no references, fallback to a simple heuristic based on keywords
     const lowerInput = input.toLowerCase();
     
     if (lowerInput.includes("fix") || lowerInput.includes("bug") || lowerInput.includes("issue")) {
@@ -731,6 +760,11 @@ export async function generateWorkflowPreview(
     dataReferences = { ...dataReferences, "currentCharm": existingCharm };
   }
   
+  // Check if we have any mentions of other charms (except the current charm)
+  // which would force the workflow to be "rework"
+  const hasOtherCharmReferences = dataReferences && 
+    Object.keys(dataReferences).filter(key => key !== 'currentCharm').length > 0;
+    
   // 1. Classify intent (or use the forced workflow type if provided)
   let classification;
   if (forcedWorkflowType) {
@@ -749,15 +783,35 @@ export async function generateWorkflowPreview(
       confidence: 1.0, // Max confidence since it's explicitly chosen
       reasoning: `User explicitly selected ${forcedWorkflowType} workflow. Original classification: ${tempClassification.workflowType} (${Math.round(tempClassification.confidence * 100)}%). ${tempClassification.reasoning}`,
     };
+    
+    // However, if we have other charm references and the user is trying to force "fix" or "edit"
+    // we need to warn them and stick with "rework"
+    if (hasOtherCharmReferences && (forcedWorkflowType === "fix" || forcedWorkflowType === "edit")) {
+      classification = {
+        workflowType: "rework",
+        confidence: 1.0,
+        reasoning: `The workflow must be "rework" when referencing other charms. You selected "${forcedWorkflowType}" ` +
+                   `but this is not possible when using references to other charms as it requires creating a new argument cell ` +
+                   `that can access data from all references with a combined schema.`,
+      };
+    }
   } else {
     // Otherwise run normal classification
-    classification = await classifyIntent(
+    const result = await classifyIntent(
       processedInput, // Use the processed input with mentions replaced
       existingCharm, 
       model, 
       dataReferences,
       charmManager // Pass CharmManager to handle nested mentions
     );
+    
+    // Ensure workflowType is a valid WorkflowType before assigning
+    classification = {
+      workflowType: result.workflowType as WorkflowType,
+      confidence: result.confidence,
+      reasoning: result.reasoning,
+      enhancedPrompt: result.enhancedPrompt
+    };
   }
   
   // 2. Generate plan (and spec if needed)
@@ -790,9 +844,11 @@ export async function generateWorkflowPreview(
     // In this case, updatedSpec should be undefined since we're keeping the existing spec
   } else {
     // For edit/rework, generate both plan and spec
+    // Ensure we pass a valid WorkflowType to generatePlan
+    const typedWorkflowType = classification.workflowType as WorkflowType;
     const executionPlan = await generatePlan(
       processedInput, // Use the processed input with mentions replaced
-      classification.workflowType,
+      typedWorkflowType,
       existingCharm,
       model,
       dataReferences,
@@ -823,8 +879,11 @@ export async function generateWorkflowPreview(
     }
   }
   
+  // Ensure we return a valid WorkflowType
+  const workflowType = classification.workflowType as WorkflowType;
+  
   return {
-    workflowType: classification.workflowType,
+    workflowType,
     confidence: classification.confidence,
     plan: steps,
     spec,
