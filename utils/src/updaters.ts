@@ -1,5 +1,5 @@
 import { Cell, getCell, storage } from "@commontools/runner";
-import { JSONSchema, Schema } from "@commontools/builder";
+import { ID, JSONSchema, Schema } from "@commontools/builder";
 
 // This is the derived space id for toolshed-system
 export const BG_SYSTEM_SPACE_ID =
@@ -63,8 +63,8 @@ export async function addOrUpdateBGCharm({
 
   if (existingCharmIndex === -1) {
     console.log("Adding charm to BGUpdater charms cell");
-    const newBG = getCell(BG_SYSTEM_SPACE_ID, undefined, CharmEntrySchema);
-    newBG.set({
+    charmsCell.push({
+      [ID]: `${space}/${charmId}`,
       space,
       charmId,
       integration,
@@ -73,8 +73,7 @@ export async function addOrUpdateBGCharm({
       disabledAt: undefined,
       lastRun: 0,
       status: "Initializing",
-    });
-    charmsCell.push(newBG);
+    } as unknown as Cell<BGCharmEntry>);
 
     // Ensure changes are synced
     await storage.synced();
