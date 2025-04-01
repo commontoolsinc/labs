@@ -3,8 +3,9 @@ import { Cell, getRecipe } from "@commontools/runner";
 import { Charm, CharmManager } from "./charm.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode, injectUserCode } from "./iframe/static.ts";
-import { compileAndRunRecipe, generateNewRecipeVersion } from "./iterate.ts";
+import { compileAndRunRecipe, generateNewRecipeVersion, castNewRecipe } from "./iterate.ts";
 import { NAME } from "@commontools/builder";
+import { imagine, formatPromptWithMentions, generateWorkflowPreview, WorkflowType } from "./imagine.ts";
 
 export const castSpellAsCharm = async (
   charmManager: CharmManager,
@@ -92,4 +93,86 @@ export async function addGithubRecipe(
     spec,
     runOptions,
   );
+}
+
+/**
+ * Modify a charm with the given prompt. This replaces the separate Etherate/Extend functionality.
+ * The prompt will be processed for mentions and the current charm will be included in the context.
+ * The workflow (edit, rework, fix) will be automatically determined based on the prompt.
+ * 
+ * @param charmManager The CharmManager instance
+ * @param promptText The user's input describing what they want to do
+ * @param currentCharm The charm being modified
+ * @param model Optional LLM model to use
+ * @returns A new or modified charm
+ */
+export async function modifyCharm(
+  charmManager: CharmManager,
+  promptText: string,
+  currentCharm: Cell<Charm>,
+  model?: string,
+  workflowType?: WorkflowType, // Optional: Allow specifying workflow type
+  previewPlan?: string[], // Optional: Pass through a pre-generated plan
+): Promise<Cell<Charm>> {
+  // Process the prompt to handle @mentions
+  const { text, mentions } = await formatPromptWithMentions(promptText, charmManager);
+  
+  // Include the current charm in the context
+  const context = {
+    currentCharm: currentCharm,
+    dataReferences: mentions,
+    previewPlan: previewPlan, // Pass through the pre-generated plan if available
+  };
+  
+  // Use the imagine workflow which will classify and handle the operation
+  // Pass the workflow type if specified (overrides classification)
+  return imagine(charmManager, text, context, workflowType, model);
+}
+
+/**
+ * Generate a preview for modifying a charm showing the workflow type and plan
+ * 
+ * @param charmManager The CharmManager instance
+ * @param promptText The user's prompt text describing the desired changes
+ * @param currentCharm The charm to be modified
+ * @param model Optional LLM model to use
+ * @returns Preview with classified workflow, plan, and spec
+ */
+export async function previewModifyCharm(
+  charmManager: CharmManager,
+  promptText: string,
+  currentCharm: Cell<Charm>,
+  model?: string,
+) {
+  // Process the prompt to handle @mentions
+  const { text, mentions } = await formatPromptWithMentions(promptText, charmManager);
+
+  // Generate a workflow preview
+  return generateWorkflowPreview(
+    text,          // Use the processed text with mentions replaced
+    currentCharm,  // The current charm being modified
+    model,         // The model to use
+    mentions,      // All mentions found in the text
+    charmManager   // Pass CharmManager to handle any nested mentions
+  );
+}
+
+/**
+ * Create a fresh charm with the given prompt text
+ * 
+ * @param charmManager The CharmManager instance
+ * @param promptText The user's prompt text describing the charm to create
+ * @param model Optional LLM model to use
+ * @returns A new charm
+ */
+export async function createCharm(
+  charmManager: CharmManager,
+  promptText: string,
+  model?: string,
+): Promise<Cell<Charm>> {
+  // Process the prompt to handle @mentions
+  const { text, mentions } = await formatPromptWithMentions(promptText, charmManager);
+  
+  // Use castNewRecipe directly, passing the processed text and mentions
+  return castNewRecipe(charmManager, text, mentions);
 }

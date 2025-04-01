@@ -22,6 +22,9 @@ export {
   castSpellAsCharm,
   fixItCharm,
   renameCharm,
+  modifyCharm,
+  previewModifyCharm,
+  createCharm,
 } from "./commands.ts";
 export { getIframeRecipe, type IFrameRecipe } from "./iframe/recipe.ts";
 export {
@@ -29,9 +32,12 @@ export {
   type WorkflowConfig,
   type IntentClassificationResult,
   type ExecutionPlan,
+  type ParsedMention,
+  type ProcessedPrompt,
   WORKFLOWS,
   classifyIntent,
   generatePlan,
   imagine,
   generateWorkflowPreview,
+  formatPromptWithMentions,
 } from "./imagine.ts";

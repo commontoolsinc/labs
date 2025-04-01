@@ -7,6 +7,7 @@ import {
   IFrameRecipe,
   injectUserCode,
   iterate,
+  modifyCharm,
 } from "@commontools/charm";
 import { useCharmReferences } from "@/hooks/use-charm-references.ts";
 import { isCell, isStream } from "@commontools/runner";
@@ -76,6 +77,8 @@ interface CharmOperationContextType {
   setWorkflow: (type: WorkflowType) => void;
   workflowConfidence: number;
   workflowReasoning?: string;
+  classificationLoading: boolean; // Loading state for workflow classification
+  planLoading: boolean; // Loading state for plan generation
   showVariants: boolean;
   setShowVariants: (show: boolean) => void;
   showPreview: boolean;
@@ -89,7 +92,7 @@ interface CharmOperationContextType {
   expectedVariantCount: number;
   setExpectedVariantCount: (count: number) => void;
   previewSpec: string;
-  previewPlan: string;
+  previewPlan: string[] | string;
   isPreviewLoading: boolean;
   previewModel: SpecPreviewModel;
   setPreviewModel: (model: SpecPreviewModel) => void;
@@ -274,30 +277,43 @@ function useCharmOperation() {
 
   // Preview model state
   const [previewModel, setPreviewModel] = useState<SpecPreviewModel>("think");
-  
-  // Workflow state for the new classification system
-  const [workflowType, setWorkflowType] = useState<WorkflowType>("edit");
 
   // Live preview generation with workflow classification
   const {
     previewSpec,
     previewPlan,
     loading: isPreviewLoading,
+    classificationLoading,
+    planLoading,
     model,
     workflowType: classifiedWorkflowType,
     workflowConfidence,
     workflowReasoning,
     setWorkflow,
-  } = useLiveSpecPreview(input, showPreview, 250, previewModel, charm);
-  
-  // Keep local workflow type in sync with classified type
-  useEffect(() => {
-    if (classifiedWorkflowType && classifiedWorkflowType !== workflowType) {
-      setWorkflowType(classifiedWorkflowType);
-    }
-  }, [classifiedWorkflowType]);
+  } = useLiveSpecPreview(
+    input,
+    charmManager, // Explicitly pass CharmManager instance
+    showPreview,
+    250,
+    previewModel,
+    charm || undefined,
+  );
 
-  // Function that performs the selected operation (iterate or extend)
+  // Automatically update operationType based on workflow classification
+  useEffect(() => {
+    if (!classifiedWorkflowType || workflowConfidence < 0.3) return;
+
+    // Map the workflow type to operation type
+    if (classifiedWorkflowType === "rework") {
+      // For rework workflows, use extend operation
+      setOperationType("extend");
+    } else {
+      // For fix and edit workflows, use iterate operation
+      setOperationType("iterate");
+    }
+  }, [classifiedWorkflowType, workflowConfidence, setOperationType]);
+
+  // Function that performs the selected operation using modifyCharm
   const performOperation = useCallback(
     (
       charmId: string,
@@ -305,28 +321,30 @@ function useCharmOperation() {
       model: string,
       data: any,
     ) => {
-      if (operationType === "iterate") {
-        // TODO(bf): do we use @-ref data for iterate?
-        return charmManager.get(charmId, false).then((fetched) => {
-          const charm = fetched!;
-          return iterate(
-            charmManager,
-            charm,
-            input,
-            false,
-            model,
-          );
-        });
-      } else {
-        return extendCharm(
+      // First get the charm by ID
+      return charmManager.get(charmId, false).then((fetched) => {
+        if (!fetched) {
+          throw new Error(`Charm with ID ${charmId} not found`);
+        }
+
+        // Get the current plan and workflow type from the spec preview
+        // Convert previewPlan to array if it's a string
+        const planArray = typeof previewPlan === 'string' 
+          ? [previewPlan] 
+          : (Array.isArray(previewPlan) ? previewPlan : []);
+        
+        // Use modifyCharm which supports all workflow types
+        return modifyCharm(
           charmManager,
-          charmId,
           input,
-          data,
+          fetched,
+          model,
+          classifiedWorkflowType,  // Pass the current workflow type
+          planArray                // Pass the current plan
         );
-      }
+      });
     },
-    [operationType, charmManager],
+    [charmManager, previewPlan, classifiedWorkflowType],
   );
 
   // Handle performing the operation
@@ -412,10 +430,12 @@ function useCharmOperation() {
     setSelectedModel,
     operationType,
     setOperationType,
-    workflowType,
+    workflowType: classifiedWorkflowType, // Use the classified workflow type from the preview
     setWorkflow,
     workflowConfidence,
     workflowReasoning,
+    classificationLoading, // Add the classification loading state
+    planLoading, // Add the plan loading state
     showVariants,
     setShowVariants,
     showPreview,
@@ -798,8 +818,14 @@ const OperationTab = () => {
     previewSpec,
     previewPlan,
     isPreviewLoading,
+    classificationLoading,
+    planLoading,
     previewModel,
     setPreviewModel,
+    workflowType: classifiedWorkflowType,
+    workflowConfidence,
+    workflowReasoning,
+    setWorkflow, // Add this to access from context
   } = useCharmOperationContext();
 
   const mentions = useCharmMentions();
@@ -808,23 +834,14 @@ const OperationTab = () => {
   return (
     <div className="flex flex-col p-4">
       <div className="flex flex-col gap-3">
-        <ToggleButton
-          options={[
-            { value: "iterate", label: "Iterate" },
-            { value: "extend", label: "Extend" },
-          ]}
-          value={operationType}
-          onChange={(value) => setOperationType(value as OperationType)}
-          size="large"
-          className="mb-2"
-        />
-
         <div className="flex flex-col gap-2">
           <div className="border border-gray-300">
             <Composer
-              placeholder={operationType === "iterate"
-                ? "Tweak your charm"
-                : "Add new features to your charm"}
+              placeholder={classifiedWorkflowType === "fix"
+                ? "Fix issues in your charm..."
+                : classifiedWorkflowType === "edit"
+                ? "Tweak your charm..."
+                : "Create a new charm based on this data..."}
               readOnly={false}
               mentions={mentions}
               value={input}
@@ -924,8 +941,10 @@ const OperationTab = () => {
           spec={previewSpec}
           plan={previewPlan}
           loading={isPreviewLoading}
+          classificationLoading={classificationLoading}
+          planLoading={planLoading}
           visible={showPreview}
-          workflowType={workflowType}
+          workflowType={classifiedWorkflowType}
           workflowConfidence={workflowConfidence}
           workflowReasoning={workflowReasoning}
           onWorkflowChange={setWorkflow}
