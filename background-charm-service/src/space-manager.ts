@@ -230,7 +230,8 @@ export class SpaceManager {
       })),
     ]).then((result) => {
       if (!result.success) {
-        this.disableCharm(charmId, bg);
+        const error = "error" in result ? result.error : "Unknown error";
+        this.disableCharm(charmId, bg, error);
       } else {
         this.recordSuccess(charmId, bg);
       }
@@ -242,16 +243,22 @@ export class SpaceManager {
   private recordSuccess(charmId: string, bg: Cell<BGCharmEntry>) {
     bg.update({
       lastRun: Date.now(),
+      status: "Success",
     });
     if (this.schedulableBgs.has(charmId)) {
       this.addPendingRun(charmId, bg, this.rerunIntervalMs / 1000);
     }
   }
 
-  private disableCharm(charmId: string, bg: Cell<BGCharmEntry>) {
+  private disableCharm(
+    charmId: string,
+    bg: Cell<BGCharmEntry>,
+    error?: string,
+  ) {
     bg.update({
       disabledAt: Date.now(),
       lastRun: Date.now(),
+      status: error ? error : "Disabled",
     });
     this.schedulableBgs.delete(charmId);
     this.pendingRuns = this.pendingRuns.filter((r) => r.charmId !== charmId);
