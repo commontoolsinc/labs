@@ -4,6 +4,17 @@
 
 Imagine is a new workflow-based approach to LLM-powered charm generation that focuses on intent classification, structured planning, and specialized execution paths. It aims to provide a more predictable, maintainable, and extensible system for charm creation and modification.
 
+## Current Implementation Status
+
+The system has been implemented with the following components:
+
+- Core workflow types defined with configuration properties
+- Intent classification using LLM with fallback mechanisms
+- Plan generation with workflow-specific steps
+- Integration with existing iterate/extend functionality
+- UI components for workflow selection and preview
+- Preview generation with live updates
+
 ## Core Workflows
 
 The system currently supports three primary workflows, with a design that allows for extending with additional workflows in the future:
@@ -13,18 +24,21 @@ The system currently supports three primary workflows, with a design that allows
    - **Updates**: Code only
    - **Schema**: Preserved
    - **Example**: "Fix the alignment of the buttons" or "Correct the calculation bug"
+   - **Current Implementation**: Uses the existing iterate function with spec preservation
 
 2. **Edit**
    - **Purpose**: Add features or modify functionality while preserving core data structure
    - **Updates**: Code and specification
    - **Schema**: Core structure preserved (may add properties but not completely change it)
    - **Example**: "Add dark mode support" or "Include a search feature"
+   - **Current Implementation**: Uses the existing iterate function with spec updates
 
 3. **Rework**
    - **Purpose**: Create something new, potentially combining multiple data sources
    - **Updates**: Code, specification, and schema
    - **Schema**: Can be completely different
    - **Example**: "Create a dashboard combining my tasks and calendar" or "Build a visualization tool for my expense data"
+   - **Current Implementation**: Uses the existing castNewRecipe function
 
 All workflows support data references, which are interpreted according to the active workflow's context.
 
@@ -38,6 +52,7 @@ The first step is to classify the user's intent into one of the supported workfl
 - Returns a workflow type, confidence score, and reasoning
 - Optionally enhances the user's prompt for better results
 - Users can override the automatically selected workflow
+- Implemented in `classifyIntent` and `classifyWorkflow` functions
 
 ### Plan Generation
 
@@ -47,6 +62,7 @@ Once the workflow is determined, a structured execution plan is generated:
 - Plans are customized based on the workflow type
 - For "edit" and "rework" workflows, may include specification updates
 - For "rework" workflows, may include schema updates
+- Implemented in `generatePlan` and `generateWorkflowPlan` functions
 
 ### Execution
 
@@ -55,6 +71,7 @@ The system executes the plan according to the workflow type:
 - **Fix**: Direct code modification while preserving spec and schema
 - **Edit**: Updates both code and spec while maintaining schema compatibility
 - **Rework**: Creates new code, spec, and schema with potential data integration
+- Main entry point is the `imagine` function which routes to appropriate implementation
 
 ### Preview
 
@@ -64,23 +81,52 @@ A preview system shows the user what to expect before execution:
 - Shows the execution plan steps
 - For "edit" and "rework", may show spec/schema changes
 - Allows users to adjust the workflow if needed
+- Implemented in `SpecPreview` component and `useLiveSpecPreview` hook
 
-## Implementation Strategy
+## Implementation Details
 
-1. **Side-by-side with existing system**
-   - Implement `imagine.ts` alongside the current `iterate.ts`
-   - Gradually migrate functionality while maintaining backward compatibility
-   - Use existing components where appropriate
+### LLM Prompting
 
-2. **Focus on abstraction**
-   - Clear separation between classification, planning, and execution
-   - Well-defined interfaces between components
-   - Consistent configuration management for LLM calls
+- Prompts are defined in `workflow-classification.ts`
+- System uses context from existing charms when available
+- Customized prompts based on workflow type
+- Structured output format with XML tags
 
-3. **Testing approach**
-   - Unit tests for classification logic and workflow selection
-   - Integration tests for the whole pipeline
-   - Test fixtures for predictable LLM responses
+### UI Integration
+
+- Enhanced `SpecPreview` component shows workflow type and confidence
+- Toggle control allows users to override the automatic classification
+- Plan is displayed as numbered steps
+- Spec is hidden for "fix" workflows since they don't modify it
+
+### Fallback Mechanisms
+
+- Heuristic-based classification when LLM fails
+- Default plans for each workflow type
+- Error handling throughout the pipeline
+- Unit tests verify fallback behavior
+
+## Next Steps
+
+1. **Enhance LLM Integration**
+   - Refine prompts for better classification accuracy
+   - Implement more specialized generation paths for each workflow
+   - Add result validation and refinement
+
+2. **UI Improvements**
+   - Create specialized views for each workflow type
+   - Add more context and guidance for users
+   - Include examples and templates
+
+3. **Performance Optimization**
+   - Implement caching for common classifications
+   - Explore parallel generation for variants
+   - Optimize LLM usage with smaller models for simpler tasks
+
+4. **Validation and Feedback**
+   - Add validation stage to check generated code
+   - Implement feedback mechanism for refinement
+   - Track success metrics for each workflow
 
 ## Future Extensions
 
