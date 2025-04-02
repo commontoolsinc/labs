@@ -22,7 +22,7 @@ import {
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
   "http://localhost:8000/";
 const FRONTEND_URL = Deno.env.get("FRONTEND_URL") ?? "http://localhost:5173/";
-const HEADLESS = true;
+const HEADLESS = false;
 const ASTRAL_TIMEOUT = 60_000;
 
 console.log(`TOOLSHED_API_URL=${TOOLSHED_API_URL}`);
@@ -216,7 +216,7 @@ Deno.test({
           await sleep(1000);
           await page.keyboard.press("Enter");
 
-          await sleep(1000);
+          await sleep(300);
           await page.keyboard.type("count of values");
           await sleep(1000);
           await page.keyboard.press("Enter");

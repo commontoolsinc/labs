@@ -92,6 +92,9 @@ export const getModels: AppRouteHandler<GetModelsRoute> = (c) => {
 export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   const payload = await c.req.json();
 
+  console.log("LLM HASH", await cache.hashKey(JSON.stringify(payload)));
+  console.log("LLM PAYLOAD", JSON.stringify(payload, null, 2));
+
   const modelString = payload.model;
 
   // Validate model and JSON mode compatibility
