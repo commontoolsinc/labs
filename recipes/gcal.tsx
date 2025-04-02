@@ -254,11 +254,65 @@ export async function fetchCalendar(
   }
 }
 
+const CalendarSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    summary: { type: "string" },
+  },
+} as const satisfies JSONSchema;
+type Calendar = Schema<typeof CalendarSchema>;
+
+const getCalendars = handler(
+  {},
+  {
+    type: "object",
+    properties: {
+      auth: { ...AuthSchema, asCell: true },
+      calendars: {
+        type: "array",
+        items: CalendarSchema,
+        default: [],
+        asCell: true,
+      },
+    },
+    required: ["auth", "calendars"],
+  },
+  (_event, state) => {
+    const auth = state.auth.get();
+    if (!auth.token) {
+      console.warn("No auth token available");
+      return;
+    }
+
+    fetch(
+      `https://www.googleapis.com/calendar/v3/users/me/calendarList`,
+      {
+        headers: { Authorization: `Bearer ${auth.token}` },
+      },
+    )
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.items && Array.isArray(data.items)) {
+          const calendarList = data.items.map((item: any) => ({
+            id: item.id,
+            summary: item.summary,
+          }));
+          state.calendars.set(calendarList);
+        }
+      })
+      .catch((error) => {
+        console.error("Error fetching calendars:", error);
+      });
+  },
+);
+
 export default recipe(
   GcalImporterInputs,
   ResultSchema,
   ({ settings, auth }) => {
     const events = cell<CalendarEvent[]>([]);
+    const calendars = cell<Calendar[]>([]);
 
     derive(events, (events) => {
       console.log("events", events.length);
@@ -290,6 +344,38 @@ export default recipe(
               </div>
 
               <div>
+                <label>
+                  Calendars
+                  <button
+                    type="button"
+                    onClick={getCalendars({ auth, calendars })}
+                  >
+                    Fetch Calendar List
+                  </button>
+                </label>
+                <table>
+                  <thead>
+                    <tr>
+                      <th style="padding: 10px;">ID</th>
+                      <th style="padding: 10px;">Summary</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {calendars.map((c) => (
+                      <tr>
+                        <td style="border: 1px solid black; padding: 10px;">
+                          {c.id}
+                        </td>
+                        <td style="border: 1px solid black; padding: 10px;">
+                          {c.summary}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div>
                 <label>Calendar ID</label>
                 <common-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
@@ -309,6 +395,12 @@ export default recipe(
                 })}
               >
                 Fetch Events
+              </button>
+              <button
+                type="button"
+                onClick={getCalendars({ auth, calendars })}
+              >
+                Fetch Calendar List
               </button>
             </common-vstack>
           </common-hstack>
