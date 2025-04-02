@@ -19,6 +19,9 @@ function getMimeType(reqPath: string): string {
   if (reqPath.endsWith(".ttf")) {
     return "font/ttf";
   }
+  if (reqPath.endsWith(".map")) {
+    return "application/json";
+  }
   throw new Error("Unknown mimetype");
 }
 
