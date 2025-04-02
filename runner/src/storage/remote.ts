@@ -206,9 +206,10 @@ export class RemoteStorageProvider implements StorageProvider {
   ): Cancel {
     const subscription = this.subscribe(entityId);
     if (subscription) {
+      const of = RemoteStorageProvider.toEntity(entityId);
       // ⚠️ Types are incorrect because when there is no value we still want to
       // notify the subscriber.
-      return subscription.subscribe(callback as unknown as Subscriber);
+      return subscription.subscribe(of, callback as unknown as Subscriber);
     } else {
       console.warn(
         `⚠️ Reached maximum subscription limit on ${this.workspace}. Call to .sink is ignored`,
@@ -223,8 +224,9 @@ export class RemoteStorageProvider implements StorageProvider {
   ): Promise<void> {
     const subscription = this.subscribe(entityId, schemaContext);
     if (subscription) {
+      const of = RemoteStorageProvider.toEntity(entityId);
       // We add noop subscriber just to keep subscription alive.
-      subscription.subscribe(RemoteStorageProvider.sync);
+      subscription.subscribe(of, RemoteStorageProvider.sync);
       // Then await for the query to be resolved because that is what
       // caller will await on.
       await subscription.query;
@@ -247,7 +249,7 @@ export class RemoteStorageProvider implements StorageProvider {
     const local = this.mount(this.workspace);
     const query = local.remote.get(of);
 
-    return query?.value as StorageValue<T> | undefined;
+    return query?.getValue(of) as StorageValue<T> | undefined;
   }
   async send<T = any>(
     changes: { entityId: EntityId; value: StorageValue<T> }[],
@@ -262,7 +264,7 @@ export class RemoteStorageProvider implements StorageProvider {
       // Cause is last fact for the the given `{ the, of }` pair. If we have a
       // a local fact we use that as it may be ahead, otherwise we use a remote
       // fact.
-      const cause = local.get(of) ?? remote.get(of)?.fact;
+      const cause = local.get(of) ?? remote.get(of)?.getFact(of);
 
       // If desired state is same as current state this is redundant and we skip
       if (cause && JSON.stringify(cause.is) === content) {
@@ -543,7 +545,7 @@ export class RemoteStorageProvider implements StorageProvider {
     const { inspector } = this;
     const local = this.mount(this.workspace);
     const initialSubscription = subscription;
-    const unsubscribe = subscription.subscribe((_value) => {
+    const unsubscribe = subscription.subscribe("_", (_value) => {
       // we only want this event once
       unsubscribe();
       const includedQueryView = initialSubscription.query.includedQueryView();
@@ -552,7 +554,7 @@ export class RemoteStorageProvider implements StorageProvider {
         const newSubscription = new Subscription(
           local.memory,
           { select: viewSelector },
-          new Set(),
+          new Map<Entity, Set<Subscriber>>(),
           includedQueryView,
           inspector,
         );
@@ -585,7 +587,7 @@ class Subscription<Space extends MemorySpace> {
     return new Subscription(
       session,
       selector,
-      new Set(),
+      new Map<Entity | "_", Set<Subscriber>>(),
       undefined,
       inspector,
     );
@@ -593,7 +595,7 @@ class Subscription<Space extends MemorySpace> {
   constructor(
     public session: Memory.MemorySpaceSession<Space>,
     public selector: Query["args"] | SchemaQuery["args"],
-    public subscribers: Set<Subscriber>,
+    public subscribers: Map<Entity | "_", Set<Subscriber>>,
     public queryView?: Memory.QueryView<Space, Protocol<Space>>,
     public inspector?: BroadcastChannel,
   ) {
@@ -619,11 +621,13 @@ class Subscription<Space extends MemorySpace> {
     this.poll();
     return this;
   }
-  get value(): JSONValue | undefined {
-    return this.query.facts?.[0]?.is;
+
+  getValue(of: Entity) {
+    return this.getFact(of)?.is;
   }
-  get fact() {
-    return this.query.facts[0];
+
+  getFact(of: Entity) {
+    return this.query.facts.find((fact) => fact.of == of);
   }
 
   inspect<T>(
@@ -637,18 +641,30 @@ class Subscription<Space extends MemorySpace> {
   }
 
   broadcast() {
-    const { value } = this;
-    this.inspector?.postMessage({
-      integrate: {
-        url: this.subscription.toURL(),
-        value,
-      },
-    });
+    const fullSubscribers = this.subscribers.get("_");
+    for (const fact of this.query.facts) {
+      const value = fact.is;
+      this.inspector?.postMessage({
+        integrate: {
+          url: this.subscription.toURL(),
+          value,
+        },
+      });
 
-    for (const subscriber of this.subscribers) {
-      subscriber(value);
+      const currentSubscribers = this.subscribers.get(fact.of);
+      if (currentSubscribers !== undefined) {
+        for (const subscriber of currentSubscribers) {
+          subscriber(fact.is);
+        }
+      }
+      if (fullSubscribers !== undefined) {
+        for (const subscriber of fullSubscribers) {
+          subscriber(fact.is);
+        }
+      }
     }
   }
+
   async poll() {
     const { reader } = this;
     while (true) {
@@ -667,11 +683,18 @@ class Subscription<Space extends MemorySpace> {
     this.connect();
   }
 
-  subscribe(subscriber: Subscriber): Cancel {
-    this.subscribers.add(subscriber);
-    return () => this.unsubscribe.bind(this, subscriber);
+  subscribe(of: Entity | "_", subscriber: Subscriber): Cancel {
+    const currentSubscribers = this.subscribers.get(of) ?? new Set();
+    currentSubscribers.add(subscriber);
+    this.subscribers.set(of, currentSubscribers);
+    return () => this.unsubscribe(of, subscriber);
   }
-  unsubscribe(subscriber: Subscriber) {
-    this.subscribers.delete(subscriber);
+
+  unsubscribe(of: Entity | "_", subscriber: Subscriber) {
+    const currentSubscribers = this.subscribers.get(of);
+    if (currentSubscribers !== undefined) {
+      currentSubscribers.delete(subscriber);
+      this.subscribers.set(of, currentSubscribers);
+    }
   }
 }
