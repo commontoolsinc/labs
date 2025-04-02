@@ -396,12 +396,6 @@ export default recipe(
               >
                 Fetch Events
               </button>
-              <button
-                type="button"
-                onClick={getCalendars({ auth, calendars })}
-              >
-                Fetch Calendar List
-              </button>
             </common-vstack>
           </common-hstack>
           <common-google-oauth $auth={auth} />
