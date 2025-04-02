@@ -22,7 +22,7 @@ export interface GenerateTextParams {
   stop_token?: string;
   abortSignal?: AbortSignal;
   max_tokens?: number;
-  jsonMode?: boolean;
+  mode?: "json";
 }
 
 export interface GenerateTextResult {
@@ -147,13 +147,8 @@ export async function generateText(
     throw new Error(`Unsupported model: ${modelName}`);
   }
 
-  // Check if jsonMode is requested but not supported
-  if (params.jsonMode && !modelConfig.capabilities.jsonMode) {
-    throw new Error(`Model ${modelName} does not support jsonMode.`);
-  }
-
   // Groq models don't support streaming in JSON mode
-  if (params.jsonMode && params.stream && modelName?.startsWith("groq:")) {
+  if (params.mode && params.stream && modelName?.startsWith("groq:")) {
     throw new Error("Groq models don't support streaming in JSON mode");
   }
 
@@ -169,8 +164,8 @@ export async function generateText(
     maxTokens: params.max_tokens,
   };
 
-  // Apply JSON mode configuration if requested and supported
-  if (params.jsonMode && modelConfig.capabilities.jsonMode) {
+  // Apply JSON mode configuration if requested
+  if (params.mode) {
     configureJsonMode(
       streamParams,
       modelName!,
@@ -206,15 +201,15 @@ export async function generateText(
       throw new Error("No response from LLM");
     }
 
-    // Clean up JSON responses when jsonMode is enabled
-    if (params.jsonMode) {
+    // Clean up JSON responses when mode is enabled
+    if (params.mode) {
       result = cleanJsonResponse(result);
     }
 
     // Only add stop token if not in JSON mode to avoid breaking JSON structure
     if (
       (await llmStream.finishReason) === "stop" && params.stop_token &&
-      !params.jsonMode
+      !params.mode
     ) {
       result += params.stop_token;
     }
@@ -251,7 +246,7 @@ export async function generateText(
       // Only add stop token if not in JSON mode to avoid breaking JSON structure
       if (
         (await llmStream.finishReason) === "stop" && params.stop_token &&
-        !params.jsonMode
+        !params.mode
       ) {
         result += params.stop_token;
         controller.enqueue(
@@ -260,7 +255,7 @@ export async function generateText(
       }
 
       // For JSON mode, clean the result to strip any markdown code blocks
-      if (params.jsonMode) {
+      if (params.mode) {
         result = cleanJsonResponse(result);
       }
 

@@ -15,7 +15,6 @@ export type Capabilities = {
   stopSequences: boolean;
   prefill: boolean;
   images: boolean;
-  jsonMode?: boolean;
 };
 
 type ModelConfig = {
@@ -104,7 +103,6 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
-      jsonMode: true,
     },
   });
   addModel({
@@ -119,7 +117,6 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
-      jsonMode: true,
     },
   });
 
@@ -138,7 +135,6 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
-      jsonMode: true,
     },
     providerOptions: {
       anthropic: {
@@ -164,7 +160,6 @@ if (env.CTTS_AI_LLM_GROQ_API_KEY) {
       systemPrompt: false,
       stopSequences: false,
       streaming: true,
-      jsonMode: true,
     },
   });
 
@@ -180,7 +175,6 @@ if (env.CTTS_AI_LLM_GROQ_API_KEY) {
       systemPrompt: false,
       stopSequences: false,
       streaming: true,
-      jsonMode: true,
     },
   });
 
@@ -196,7 +190,6 @@ if (env.CTTS_AI_LLM_GROQ_API_KEY) {
       systemPrompt: false,
       stopSequences: false,
       streaming: true,
-      jsonMode: true,
     },
   });
 
@@ -212,7 +205,6 @@ if (env.CTTS_AI_LLM_GROQ_API_KEY) {
       systemPrompt: true,
       stopSequences: true,
       streaming: false,
-      jsonMode: true,
     },
   });
 
@@ -228,7 +220,6 @@ if (env.CTTS_AI_LLM_GROQ_API_KEY) {
       systemPrompt: true,
       stopSequences: true,
       streaming: false,
-      jsonMode: true,
     },
   });
 }
@@ -249,7 +240,6 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
-      jsonMode: true,
     },
   });
 
@@ -265,7 +255,6 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       systemPrompt: false,
       stopSequences: false,
       streaming: true,
-      jsonMode: true,
     },
     providerOptions: {
       reasoningEffort: "low",
@@ -284,7 +273,6 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       systemPrompt: false,
       stopSequences: false,
       streaming: true,
-      jsonMode: true,
     },
     providerOptions: {
       reasoningEffort: "medium",
@@ -303,7 +291,6 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       systemPrompt: false,
       stopSequences: false,
       streaming: true,
-      jsonMode: true,
     },
     providerOptions: {
       reasoningEffort: "high",
@@ -322,7 +309,6 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       systemPrompt: false,
       stopSequences: false,
       streaming: true,
-      jsonMode: true,
     },
     providerOptions: {
       reasoningEffort: "low",
@@ -341,7 +327,6 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       systemPrompt: false,
       stopSequences: false,
       streaming: true,
-      jsonMode: true,
     },
     providerOptions: {
       reasoningEffort: "medium",
@@ -360,7 +345,6 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       systemPrompt: false,
       stopSequences: false,
       streaming: true,
-      jsonMode: true,
     },
     providerOptions: {
       reasoningEffort: "high",
@@ -393,7 +377,6 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
-      jsonMode: true,
     },
   });
 }
@@ -417,7 +400,6 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
       systemPrompt: false,
       stopSequences: true,
       streaming: true,
-      jsonMode: false,
     },
   });
 
@@ -433,7 +415,6 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
       systemPrompt: false,
       stopSequences: true,
       streaming: true,
-      jsonMode: false,
     },
   });
 }

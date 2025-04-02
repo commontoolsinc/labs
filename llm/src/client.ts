@@ -27,7 +27,7 @@ export type LLMRequest = {
   max_tokens?: number;
   stream?: boolean;
   stop?: string;
-  jsonMode?: boolean;
+  mode?: "json";
 };
 
 export class LLMClient {

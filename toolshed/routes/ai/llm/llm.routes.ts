@@ -23,7 +23,7 @@ export const LLMRequestSchema = z.object({
   stop_token: z.string().optional(),
   max_completion_tokens: z.number().optional(),
   stream: z.boolean().default(false),
-  jsonMode: z.boolean().optional().default(false),
+  mode: z.enum(["json"]).optional(),
 });
 
 export const ModelInfoSchema = z.object({

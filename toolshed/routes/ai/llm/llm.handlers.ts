@@ -14,7 +14,7 @@ import { findModel } from "./models.ts";
 function validateModelAndJsonMode(
   c: Context,
   modelString: string | undefined,
-  jsonMode: boolean | undefined,
+  mode: string | undefined,
 ) {
   const model = modelString ? findModel(modelString) : null;
 
@@ -22,17 +22,12 @@ function validateModelAndJsonMode(
     return c.json({ error: "Invalid model" }, HttpStatusCodes.BAD_REQUEST);
   }
 
-  // Validate jsonMode support if requested
-  if (jsonMode && !model.capabilities.jsonMode) {
-    return c.json(
-      { error: `Model ${modelString} does not support jsonMode.` },
-      HttpStatusCodes.BAD_REQUEST,
-    );
-  }
+  // Validate JSON mode support if requested
+  const isJsonMode = mode === "json";
 
   // Groq models don't support streaming with JSON mode
   if (
-    jsonMode && c.req.query("stream") === "true" &&
+    isJsonMode && c.req.query("stream") === "true" &&
     modelString?.startsWith("groq:")
   ) {
     return c.json(
@@ -103,7 +98,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   const validationError = validateModelAndJsonMode(
     c,
     modelString,
-    payload.jsonMode,
+    payload.mode,
   );
   if (validationError) {
     return validationError;
@@ -113,8 +108,8 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   const modelDefaultMaxTokens = model?.capabilities.maxOutputTokens || 8000;
 
   try {
-    // Check cache for existing response - skip caching for jsonMode requests
-    if (!payload.jsonMode) {
+    // Check cache for existing response - skip caching for JSON mode requests
+    if (!payload.mode) {
       const cacheKey = await cache.hashKey(JSON.stringify(payload));
       const cachedResult = await cache.loadItem(cacheKey);
       if (cachedResult) {
@@ -131,8 +126,8 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
     });
 
     if (!payload.stream) {
-      // Save to cache only if not jsonMode
-      if (!payload.jsonMode) {
+      // Save to cache only if not in JSON mode
+      if (!payload.mode) {
         const cacheKey = await cache.hashKey(JSON.stringify(payload));
         await cache.saveItem(cacheKey, {
           ...payload,

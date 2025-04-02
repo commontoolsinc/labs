@@ -652,13 +652,13 @@ async function fetchLLMResponse() {
 }
 \`\`\`
 
-If you need JSON to be returned from the LLM, you can enable the \`jsonMode\` flag in the \`promptPayload\`.
+If you need JSON to be returned from the LLM, you can enable the \`mode: 'json'\` in the \`promptPayload\`.
 
 \`\`\`jsx
 const promptPayload = {
   system: 'Translate all the messages to emojis, reply in JSON.',
   messages: ['Hi', 'How can I help you today?', 'tell me a joke'],
-  jsonMode: true
+  mode: 'json'
 };
 const result = await llm(promptPayload);
 console.log('JSON response from llm:', result);
