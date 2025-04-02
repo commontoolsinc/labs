@@ -208,7 +208,7 @@ export async function fetchCalendar(
   const listResponse = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/${
       encodeURIComponent(
-        calendarId,
+        calendarId.trim(),
       )
     }/events?maxResults=${maxResults}&timeMin=${
       encodeURIComponent(now)
