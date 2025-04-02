@@ -9,6 +9,7 @@ export * as Consumer from "./consumer.ts";
 export * as Socket from "./socket.ts";
 export * as Fact from "./fact.ts";
 export * as ChangesBuilder from "./changes.ts";
+export * as SelectionBuilder from "./selection.ts";
 export * as TransactionBuilder from "./transaction.ts";
 export * as CommitBuilder from "./commit.ts";
 export * as Telemetry from "./telemetry.ts";

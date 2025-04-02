@@ -5,7 +5,6 @@ import {
   Changes,
   ClaimFact,
   Fact,
-  FactSelection,
   RetractFact,
   Statement,
 } from "./interface.ts";
@@ -24,7 +23,7 @@ export const from = <T extends Statement>(statements: Iterable<T>) => {
 
   return changes as T extends Assertion<infer The, infer Of, infer Is>
     ? { [of in Of]: { [the in The]: { [cause: Cause]: { is: Is } } } }
-    : T extends Fact<infer The, infer Of, infer Is> ? FactSelection<The, Of, Is>
+    : T extends Fact<infer The, infer Of, infer Is> ? Changes<The, Of, Is>
     : T extends Statement<infer The, infer Of, infer Is> ? Changes<The, Of, Is>
     : never;
 };
