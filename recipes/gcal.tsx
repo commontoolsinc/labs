@@ -306,6 +306,24 @@ const getCalendars = handler(
       });
   },
 );
+const clearEvents = handler(
+  {},
+  {
+    type: "object",
+    properties: {
+      events: {
+        type: "array",
+        items: CalendarEventSchema,
+        default: [],
+        asCell: true,
+      },
+    },
+    required: ["events"],
+  },
+  (_event, state) => {
+    state.events.set([]);
+  },
+);
 
 export default recipe(
   GcalImporterInputs,
@@ -346,12 +364,11 @@ export default recipe(
               <div>
                 <label>
                   Calendars
-                  <button
-                    type="button"
+                  <common-button
                     onClick={getCalendars({ auth, calendars })}
                   >
                     Fetch Calendar List
-                  </button>
+                  </common-button>
                 </label>
                 <table>
                   <thead>
@@ -386,8 +403,7 @@ export default recipe(
                   })}
                 />
               </div>
-              <button
-                type="button"
+              <common-button
                 onClick={calendarUpdater({
                   events,
                   auth,
@@ -395,7 +411,12 @@ export default recipe(
                 })}
               >
                 Fetch Events
-              </button>
+              </common-button>
+              <common-button
+                onClick={clearEvents({ events })}
+              >
+                Clear Events
+              </common-button>
             </common-vstack>
           </common-hstack>
           <common-google-oauth $auth={auth} />
