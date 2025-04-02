@@ -604,13 +604,6 @@ export type Claim = {
   retract?: undefined;
 };
 
-// export interface Commit extends Assertion {
-//   the: "application/commit+json";
-//   is: {
-//     since: number;
-//     transaction: Transaction;
-//   };
-// }
 export type Commit<Subject extends string = MemorySpace> = {
   [of in Subject]: {
     ["application/commit+json"]: {
@@ -652,7 +645,10 @@ export type FactSelection<
 > = {
   [of in Of]: {
     [the in T]: {
-      [cause: Cause]: RetractFact | AssertFact<Is>;
+      [cause: Cause]: {
+        is?: Is;
+        since: number;
+      };
     };
   };
 };

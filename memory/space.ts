@@ -414,7 +414,9 @@ const select = <Space extends MemorySpace>(
             selection,
             [row.of, row.the],
             row.cause ?? refer(unclaimed(row)).toString(),
-            row.is ? { is: JSON.parse(row.is) } : {},
+            row.is
+              ? { is: JSON.parse(row.is), since: row.since }
+              : { since: row.since },
           );
         }
       }

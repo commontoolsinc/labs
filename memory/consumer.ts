@@ -46,7 +46,7 @@ import { toStringStream } from "./ucan.ts";
 import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
 export * from "./interface.ts";
-import { the as commitType } from "./commit.ts";
+import { the as commitType, toFact } from "./commit.ts";
 export { ChangesBuilder };
 
 export const connect = ({
@@ -462,23 +462,24 @@ class QuerySubscriptionInvocation<
     // Here we will collect subset of changes that match the query.
     let differential = null;
 
-    const at = this.space;
-    const the = commitType;
-    const revisions = Object.entries(commit[at][the] ?? {});
+    const fact = toFact(commit);
 
-    for (const [cause, change] of revisions) {
-      const { is: { transaction, since } } = change;
-      for (const pattern of this.patterns) {
-        const match = (!pattern.of || pattern.of === at) &&
-          (!pattern.the || pattern.the === the) &&
-          (!pattern.cause || pattern.cause === cause);
+    const { the, of, is } = fact;
+    const cause = fact.cause.toString();
+    const { transaction, since } = is;
+    for (const pattern of this.patterns) {
+      const match = (!pattern.of || pattern.of === of) &&
+        (!pattern.the || pattern.the === the) &&
+        (!pattern.cause || pattern.cause === cause);
 
-        if (match) {
-          differential = differential ?? {};
-          ChangesBuilder.set(differential, [at], the, {
-            [cause]: change,
-          });
-        }
+      if (match) {
+        differential = differential ?? {};
+        ChangesBuilder.set(differential, [of], the, {
+          [cause]: {
+            is,
+            since: since - 1,
+          },
+        });
       }
 
       for (const [of, attributes] of Object.entries(transaction.args.changes)) {
@@ -498,7 +499,7 @@ class QuerySubscriptionInvocation<
                 if (match) {
                   differential = differential ?? {};
                   ChangesBuilder.set(differential, [of], the, {
-                    [cause]: change,
+                    [cause]: { ...change, since },
                   });
                 }
               }

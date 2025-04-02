@@ -1,11 +1,14 @@
 import type {
   Assertion,
+  Commit,
   CommitData,
+  Fact,
   MemorySpace,
   Reference,
   Transaction,
 } from "./interface.ts";
 import { assert } from "./fact.ts";
+import { fromString } from "merkle-reference";
 
 export const the = "application/commit+json" as const;
 export const create = <Space extends MemorySpace>({
@@ -28,3 +31,15 @@ export const create = <Space extends MemorySpace>({
     },
     cause,
   });
+
+export const toFact = (commit: Commit) => {
+  const [[space, attributes]] = Object.entries(commit);
+  const [[cause, { is }]] = Object.entries(attributes[the]);
+
+  return assert({
+    the,
+    of: space as MemorySpace,
+    is,
+    cause: fromString(cause) as Reference<Fact>,
+  });
+};
