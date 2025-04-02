@@ -31,7 +31,7 @@ export interface GenerateTextResult {
 }
 
 // Configure the model parameters for JSON mode based on provider
-function configureJsonMode(
+export function configureJsonMode(
   streamParams: Record<string, any>,
   modelName: string,
   messages: { role: "user" | "assistant"; content: string }[],
@@ -101,14 +101,15 @@ function configureJsonMode(
     // For other providers, set a standard system prompt if one isn't provided
     if (!streamParams.system) {
       streamParams.system = JSON_SYSTEM_PROMPTS.DEFAULT;
-    } else if (!streamParams.system.toLowerCase().includes("json")) {
+    } else {
+      // Always append JSON instructions, even if the prompt already mentions JSON
       streamParams.system += "\n" + JSON_SYSTEM_PROMPTS.DEFAULT;
     }
   }
 }
 
 // Add a helper function to clean up JSON responses from markdown code blocks
-function cleanJsonResponse(text: string): string {
+export function cleanJsonResponse(text: string): string {
   // Check if the response is wrapped in markdown code blocks
   const jsonCodeBlockRegex = /```(json)?\s*\n([\s\S]*?)\n```/;
   const match = text.match(jsonCodeBlockRegex);
