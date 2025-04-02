@@ -618,7 +618,7 @@ class Subscription<Space extends MemorySpace> {
 
   subscribe(subscriber: Subscriber): Cancel {
     this.subscribers.add(subscriber);
-    return () => this.unsubscribe.bind(this, subscriber);
+    return () => this.unsubscribe(subscriber);
   }
   unsubscribe(subscriber: Subscriber) {
     this.subscribers.delete(subscriber);
