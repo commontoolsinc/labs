@@ -1,7 +1,6 @@
-import { Charm, CharmManager } from "@commontools/charm";
+import { Charm } from "@commontools/charm";
 import { Cell, getEntityId } from "@commontools/runner";
-import { DID, Identity, type Session } from "@commontools/identity";
-import { env } from "./env.ts";
+import { Identity, type IdentityCreateConfig } from "@commontools/identity";
 
 /**
  * Custom logger that includes timestamp and optionally charm ID
@@ -65,22 +64,26 @@ export async function getIdentity(
   identityPath?: string,
   operatorPass?: string,
 ): Promise<Identity> {
+  // Deno does not support serializing `CryptoKey`, safely
+  // passing keys to workers. Explicitly use the fallback implementation,
+  // which makes key material available to the JS context, in order
+  // to transfer key material to workers.
+  // https://github.com/denoland/deno/issues/12067#issuecomment-1975001079
+  const keyConfig: IdentityCreateConfig = {
+    implementation: "noble",
+  };
+
   if (identityPath) {
     console.log(`Using identity at ${identityPath}`);
     try {
       const pkcs8Key = await Deno.readFile(identityPath);
-      // Deno does not support serializing `CryptoKey`, safely
-      // passing keys to workers. Explicitly use the fallback implementation,
-      // which makes key material available to the JS context, in order
-      // to transfer key material to workers.
-      // https://github.com/denoland/deno/issues/12067#issuecomment-1975001079
-      return await Identity.fromPkcs8FallbackImplementation(pkcs8Key);
+      return await Identity.fromPkcs8(pkcs8Key, keyConfig);
     } catch (e) {
       throw new Error(`Could not read key at ${identityPath}.`);
     }
   } else if (operatorPass) {
     console.warn("Using insecure passphrase identity.");
-    return await Identity.fromPassphrase(operatorPass);
+    return await Identity.fromPassphrase(operatorPass, keyConfig);
   }
   throw new Error("No IDENTITY or OPERATOR_PASS environemnt set.");
 }

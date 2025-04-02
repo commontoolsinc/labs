@@ -18,8 +18,7 @@ const envSchema = z.object({
   OPERATOR_PASS: z.string().default("implicit trust"),
   // Path to the identity keyfile that the service
   // runs as.
-  IDENTITY: z.string(),
-
+  IDENTITY: z.string().optional(),
   // Toolshed configuration
   TOOLSHED_API_URL: z.string().default("http://localhost:8000"),
   // Background Charm Service: default is public space "toolshed-system"
