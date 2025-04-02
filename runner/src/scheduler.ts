@@ -169,6 +169,11 @@ export type ErrorWithContext = Error & {
   recipeId: string;
 };
 
+export function isErrorWithContext(error: unknown): error is ErrorWithContext {
+  return error instanceof Error && "action" in error && "charmId" in error &&
+    "space" in error && "recipeId" in error;
+}
+
 function handleError(error: Error, action: any) {
   // TODO(seefeld): This is a rather hacky way to get the context, based on the
   // unsafe_binding pattern. Once we replace that mechanism, let's add nicer

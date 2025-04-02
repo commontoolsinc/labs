@@ -1,6 +1,6 @@
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
-import { Cell, type CellLink, isCell, isCellLink } from "./cell.ts";
+import { Cell, type CellLink, isCell, isCellLink, isStream } from "./cell.ts";
 import { type EntityId, getDocByEntityId } from "./doc-map.ts";
 import {
   getCellLinkOrThrow,
@@ -43,6 +43,12 @@ export function log(fn: () => any[]) {
 }
 
 export interface Storage {
+  /**
+   * Unique identifier that can be used as a name of the `BroadcastChannel` in
+   * order to monitor this storage instance.
+   */
+  readonly id: string;
+
   /**
    * Set remote storage URL.
    *
@@ -159,16 +165,19 @@ type Job = {
  * is probably already further ahead.
  */
 class StorageImpl implements Storage {
-  constructor() {
+  constructor(id = crypto.randomUUID()) {
     const [cancel, addCancel] = useCancelGroup();
     this.cancel = cancel;
     this.addCancel = addCancel;
+    this.#id = id;
 
     // Check if we're in a browser environment before accessing location
     if (isBrowser()) {
       this.setRemoteStorage(new URL(globalThis.location.href));
     }
   }
+
+  #id: string;
 
   // Map from space to storage provider. TODO: Push spaces to storage providers.
   private storageProviders = new Map<string, StorageProvider>();
@@ -210,6 +219,10 @@ class StorageImpl implements Storage {
 
   private cancel: Cancel;
   private addCancel: AddCancel;
+
+  get id() {
+    return this.#id;
+  }
 
   setRemoteStorage(url: URL): void {
     this.remoteStorageUrl = url;
@@ -300,6 +313,7 @@ class StorageImpl implements Storage {
         }
 
         provider = new RemoteStorageProvider({
+          id: this.id,
           address: new URL("/api/storage/memory", this.remoteStorageUrl!),
           space: space as `did:${string}:${string}`,
           as: this.signer,
@@ -330,7 +344,7 @@ class StorageImpl implements Storage {
     expectedInStorage: boolean = false,
     schemaContext?: SchemaContext,
   ): DocImpl<T> {
-    if (isCell(doc)) doc = doc.getAsCellLink().cell;
+    if (isCell(doc) || isStream(doc)) doc = doc.getDoc();
     if (!isDoc(doc)) {
       throw new Error("Invalid subject: " + JSON.stringify(doc));
     }
@@ -778,6 +792,9 @@ class StorageImpl implements Storage {
             updatesFromRetry.forEach(([doc, value]) =>
               this._batchForDoc(doc, value.value, value.source)
             );
+          } else if (result.error) {
+            log(() => ["storage error", result.error]);
+            console.error("storage error", result.error);
           }
           return result;
         });

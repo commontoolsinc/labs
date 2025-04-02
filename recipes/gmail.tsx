@@ -2,6 +2,7 @@ import { h } from "@commontools/html";
 import {
   cell,
   derive,
+  getRecipeEnvironment,
   handler,
   ID,
   JSONSchema,
@@ -20,6 +21,8 @@ const turndown = new TurndownService({
   codeBlockStyle: "fenced",
   emDelimiter: "*",
 });
+
+const env = getRecipeEnvironment();
 
 turndown.addRule("removeStyleTags", {
   filter: ["style"],
@@ -170,22 +173,22 @@ const updateLimit = handler({
   state.limit.set(parseInt(detail?.value ?? "100") || 0);
 });
 
-const refreshAuthToken = async (auth: Auth) => {
+const refreshAuthToken = async (auth: Cell<Auth>) => {
   const body = {
-    refreshToken: auth.refreshToken,
+    refreshToken: auth.get().refreshToken,
   };
 
   console.log("refreshAuthToken", body);
 
   const refresh_response = await fetch(
-    "/api/integrations/google-oauth/refresh",
+    new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
     {
       method: "POST",
       body: JSON.stringify(body),
     },
   ).then((res) => res.json());
 
-  return refresh_response as Auth;
+  return refresh_response.tokenInfo as Auth;
 };
 
 const googleUpdater = handler(
@@ -203,7 +206,7 @@ const googleUpdater = handler(
     console.log("googleUpdater!");
 
     if (!state.auth.get().token) {
-      console.warn("no token");
+      console.warn("no token found in auth cell");
       return;
     }
 
@@ -211,7 +214,7 @@ const googleUpdater = handler(
 
     console.log("gmailFilterQuery", gmailFilterQuery);
 
-    fetchEmail(
+    return fetchEmail(
       state.auth,
       state.settings.limit,
       gmailFilterQuery,
@@ -404,7 +407,7 @@ export async function fetchEmail(
 
   if (cur.expiresAt && Date.now() > cur.expiresAt) {
     const resp = await refreshAuthToken(auth);
-    auth.set(resp);
+    auth.update(resp);
     console.log("refresh_data", resp);
   }
 
@@ -434,7 +437,7 @@ export async function fetchEmail(
 
   if (!listData.messages || !Array.isArray(listData.messages)) {
     console.log("No messages found in response");
-    return { messages: [] };
+    return;
   }
 
   // Filter out existing messages
@@ -444,7 +447,7 @@ export async function fetchEmail(
 
   if (newMessages.length === 0) {
     console.log("No new messages to fetch");
-    return { messages: [] };
+    return;
   }
 
   const batchSize = 100;
@@ -493,7 +496,6 @@ export async function fetchEmail(
     allDetailedMessages.length,
     "messages total",
   );
-  return { messages: allDetailedMessages };
 }
 
 const updateGmailFilterQuery = handler<

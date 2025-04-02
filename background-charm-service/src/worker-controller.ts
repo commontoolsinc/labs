@@ -2,6 +2,7 @@ import { BGCharmEntry, sleep } from "@commontools/utils";
 import { Cell } from "@commontools/runner";
 import { defer } from "@commontools/utils";
 import { log } from "./utils.ts";
+import { Identity } from "@commontools/identity";
 
 type PendingResponse = {
   resolve: (result: any) => void;
@@ -74,21 +75,23 @@ export class WorkerController {
     // FIXME(ja): what should we do if the worker is erroring?
     // perhaps restart the worker?
     this.worker.onerror = (err) => {
-      log(`${this.did}: Worker error:`, err, {
-        error: true,
-      });
+      log(`${this.did}: Worker error:`, { error: true }, err);
+      // If not prevented, error is rethrown in this context.
+      err.preventDefault();
     };
   }
 
-  public setupWorker(toolshedUrl: string, operatorPass: string) {
-    return this.call("setup", {
+  public setupWorker(toolshedUrl: string, identity: Identity) {
+    return this.exec("setup", {
       did: this.did,
-      toolshed_url: toolshedUrl,
-      operator_pass: operatorPass,
+      toolshedUrl,
+      rawIdentity: identity.serialize(),
     }).catch((err) => {
-      log(`Worker controller ${this.did} worker setup failed:`, err, {
-        error: true,
-      });
+      log(
+        `Worker controller ${this.did} worker setup failed:`,
+        { error: true },
+        err,
+      );
     }).then(() => {
       this.ready = true;
       log(`Worker controller ${this.did} ready for work`);
@@ -96,7 +99,7 @@ export class WorkerController {
   }
 
   // send a message and return a promise that resolves with the response
-  private call(type: string, data?: any): Promise<any> {
+  private exec(type: string, data?: any): Promise<any> {
     // Only allow "setup" calls when not ready
     if (type !== "setup" && !this.ready) {
       return Promise.reject(new Error("Worker not initialized"));
@@ -122,11 +125,11 @@ export class WorkerController {
   public runCharm(
     bg: Cell<BGCharmEntry>,
   ): Promise<{ success: boolean; data?: any; charmId: string }> {
-    return this.call("runCharm", { charmId: bg.get().charmId });
+    return this.exec("runCharm", { charmId: bg.get().charmId });
   }
 
   public shutdown() {
-    return this.call("shutdown").catch(() => {
+    return this.exec("shutdown").catch(() => {
       log(
         "Failed to shutdown worker gracefully, terminating with unknown status.",
       );

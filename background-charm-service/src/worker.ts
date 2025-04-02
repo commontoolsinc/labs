@@ -2,16 +2,18 @@ import { type Charm, CharmManager } from "@commontools/charm";
 import {
   Cell,
   idle,
+  isErrorWithContext,
   isStream,
   onError,
   setBobbyServerUrl,
+  setRecipeEnvironment,
   storage,
 } from "@commontools/runner";
 import {
+  createAdminSession,
   type DID,
   Identity,
-  openSession,
-  type Session,
+  KeyPairRaw,
 } from "@commontools/identity";
 
 let initialized = false;
@@ -27,33 +29,38 @@ onError((e: Error) => {
 });
 
 async function setup(
-  data: { did: string; toolshed_url: string; operator_pass: string },
+  data: { did: string; toolshedUrl: string; rawIdentity: KeyPairRaw },
 ) {
   if (initialized) {
     console.log(`Worker: Already initialized, skipping setup`);
     return { setup: true, alreadyInitialized: true };
   }
 
-  const { did, toolshed_url, operator_pass } = data || {};
+  const { did, toolshedUrl, rawIdentity } = data || {};
   if (!did) {
     throw new Error("Worker missing did");
   }
-  if (!toolshed_url) {
-    throw new Error("Worker missing toolshed_url");
+  if (!toolshedUrl) {
+    throw new Error("Worker missing toolshedUrl");
   }
-  if (!operator_pass) {
-    throw new Error("Worker missing operator_pass");
+  if (!rawIdentity) {
+    throw new Error("Worker missing rawIdentity");
   }
 
+  const identity = await Identity.deserialize(rawIdentity);
+  const apiUrl = new URL(toolshedUrl);
   // Initialize storage and remote connection
-  storage.setRemoteStorage(new URL(toolshed_url));
-  storage.setSigner(await Identity.fromPassphrase(operator_pass));
-  setBobbyServerUrl(toolshed_url);
+  storage.setRemoteStorage(apiUrl);
+  setBobbyServerUrl(toolshedUrl);
+  storage.setSigner(identity);
+  setRecipeEnvironment({
+    apiUrl,
+  });
 
   // Initialize session
   spaceId = did as DID;
-  currentSession = await openSession({
-    passphrase: operator_pass,
+  currentSession = await createAdminSession({
+    identity,
     name: "~background-service-worker",
     space: spaceId,
   });
@@ -138,7 +145,9 @@ async function runCharm(data: { charmId: string }) {
     console.log(`Worker: Successfully executed charm ${spaceId}/${charmId}`);
     return { success: true, charmId };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = isErrorWithContext(error)
+      ? `${error.message} @ ${error.space}:${error.charmId} running ${error.recipeId}`
+      : String(error);
     console.error(
       `Worker error executing charm ${spaceId}/${charmId}: ${errorMessage}`,
     );

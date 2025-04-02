@@ -8,6 +8,7 @@ import {
   injectUserCode,
   iterate,
 } from "@commontools/charm";
+import { useCharmReferences } from "@/hooks/use-charm-references.ts";
 import { isCell, isStream } from "@commontools/runner";
 import { isObj } from "@commontools/utils";
 import {
@@ -877,8 +878,9 @@ const OperationTab = () => {
               <option value="anthropic:claude-3-7-sonnet-latest">
                 Claude 3.7 ✨
               </option>
+              <option value="google:gemini-2.5-pro">Gemini 2.5 ✨</option>
               <option value="anthropic:claude-3-5-sonnet-latest">
-                Claude 3.5 ✨
+                Claude 3.5
               </option>
               <option value="groq:qwen-qwq-32b">Qwen QwQ 32B 🧠</option>
               <option value="groq:llama-3.3-70b-versatile">Llama 3.3 🔥</option>
@@ -1022,6 +1024,8 @@ const DataTab = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
   const { charmManager } = useCharmManager();
+  const { readingFrom, readBy, loading: loadingReferences } =
+    useCharmReferences(charm);
   const [isArgumentExpanded, setIsArgumentExpanded] = useState(false);
   const [isResultExpanded, setIsResultExpanded] = useState(false);
   const [isArgumentSchemaExpanded, setIsArgumentSchemaExpanded] = useState(
@@ -1030,6 +1034,7 @@ const DataTab = () => {
   const [isResultSchemaExpanded, setIsResultSchemaExpanded] = useState(false);
   const [isSpecExpanded, setIsSpecExpanded] = useState(false);
   const [isLineageExpanded, setIsLineageExpanded] = useState(false);
+  const [isReferencesExpanded, setIsReferencesExpanded] = useState(false);
 
   if (!charm) return null;
 
@@ -1108,6 +1113,26 @@ const DataTab = () => {
 
       {iframeRecipe && (
         <>
+          {/* Added Specification section */}
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={() => setIsSpecExpanded(!isSpecExpanded)}
+              className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+            >
+              <span className="text-md font-semibold">Specification</span>
+              <span>{isSpecExpanded ? "▼" : "▶"}</span>
+            </button>
+
+            {isSpecExpanded && (
+              <div className="border border-gray-300 rounded p-2 bg-gray-50">
+                <div className="whitespace-pre-wrap font-mono text-sm p-2">
+                  {iframeRecipe.spec || "No specification available"}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="mb-4">
             <button
               type="button"
@@ -1156,28 +1181,90 @@ const DataTab = () => {
               </div>
             )}
           </div>
-
-          {/* Added Specification section */}
-          <div className="mb-4">
-            <button
-              type="button"
-              onClick={() => setIsSpecExpanded(!isSpecExpanded)}
-              className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
-            >
-              <span className="text-md font-semibold">Specification</span>
-              <span>{isSpecExpanded ? "▼" : "▶"}</span>
-            </button>
-
-            {isSpecExpanded && (
-              <div className="border border-gray-300 rounded p-2 bg-gray-50">
-                <div className="whitespace-pre-wrap font-mono text-sm p-2">
-                  {iframeRecipe.spec || "No specification available"}
-                </div>
-              </div>
-            )}
-          </div>
         </>
       )}
+
+      {/* Combined References section */}
+      <div className="mt-4">
+        <button
+          type="button"
+          onClick={() => setIsReferencesExpanded(!isReferencesExpanded)}
+          className="w-full flex items-center justify-between p-2 bg-gray-100 border border-gray-300 mb-2"
+        >
+          <span className="text-md font-semibold">Charm References</span>
+          <span>{isReferencesExpanded ? "▼" : "▶"}</span>
+        </button>
+
+        {isReferencesExpanded && (
+          <div className="border border-gray-300 rounded p-2 bg-gray-50">
+            {loadingReferences
+              ? <div className="text-sm p-2">Loading references...</div>
+              : (
+                <div className="flex items-center justify-between gap-4">
+                  {/* Inputs section */}
+                  <div className="flex-1">
+                    <h4 className="text-sm font-semibold mb-2">Reading From</h4>
+                    {readingFrom.length > 0
+                      ? (
+                        <div className="flex flex-wrap gap-1">
+                          {readingFrom.map((
+                            charm: Cell<Charm>,
+                            index: number,
+                          ) => (
+                            <div
+                              key={`read-from-${charmId(charm)}`}
+                              className="bg-blue-100 border border-blue-300 px-2 py-1"
+                            >
+                              <CharmLink
+                                charm={charm}
+                                showHash
+                                className="text-sm"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )
+                      : (
+                        <div className="text-sm text-gray-500 italic">
+                          This charm doesn't read from any other charms
+                        </div>
+                      )}
+                  </div>
+
+                  {/* Arrow divider */}
+                  <div className="text-2xl font-bold text-gray-500 px-2">→</div>
+
+                  {/* Outputs section */}
+                  <div className="flex-1">
+                    <h4 className="text-sm font-semibold mb-2">Read By</h4>
+                    {readBy.length > 0
+                      ? (
+                        <div className="flex flex-wrap gap-1">
+                          {readBy.map((charm: Cell<Charm>, index: number) => (
+                            <div
+                              key={`read-by-${charmId(charm)}`}
+                              className="bg-green-100 border border-green-300 px-2 py-1"
+                            >
+                              <CharmLink
+                                charm={charm}
+                                showHash
+                                className="text-sm"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )
+                      : (
+                        <div className="text-sm text-gray-500 italic">
+                          No charms are reading from this charm
+                        </div>
+                      )}
+                  </div>
+                </div>
+              )}
+          </div>
+        )}
+      </div>
 
       {lineage.length > 0 && (
         <div className="mt-4">

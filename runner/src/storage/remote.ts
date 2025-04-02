@@ -66,6 +66,12 @@ export interface RemoteStorageProviderSettings {
 }
 
 export interface RemoteStorageProviderOptions {
+  /**
+   * Unique identifier of the storage. Used as name of the `BroadcastChannel`
+   * in order to allow inspection of the storage.
+   */
+  id: string;
+
   address: URL;
   as: Memory.Signer;
   space?: MemorySpace;
@@ -106,13 +112,14 @@ export class RemoteStorageProvider implements StorageProvider {
   timeoutID = 0;
 
   constructor({
+    id,
     address,
     as,
     space = HOME,
     the = "application/json",
     settings = defaultSettings,
     inspector = globalThis.BroadcastChannel
-      ? new BroadcastChannel("storage/remote")
+      ? new BroadcastChannel(id)
       : undefined,
   }: RemoteStorageProviderOptions) {
     this.address = address;

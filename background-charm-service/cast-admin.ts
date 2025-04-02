@@ -7,14 +7,15 @@ import {
   storage,
 } from "@commontools/runner";
 import { type DID, Identity } from "@commontools/identity";
-import { openSession } from "@commontools/identity";
+import { createAdminSession } from "@commontools/identity";
 import {
+  BG_CELL_CAUSE,
+  BG_SYSTEM_SPACE_ID,
   bgUpdaterCharmsSchema,
-  CELL_CAUSE,
-  SYSTEM_SPACE_ID,
 } from "@commontools/utils";
+import { getIdentity } from "./src/utils.ts";
 
-const { recipePath, name, quit } = parseArgs(
+const { recipePath, quit } = parseArgs(
   Deno.args,
   {
     string: ["recipePath"],
@@ -36,19 +37,20 @@ if (!recipePath) {
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
 
-const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
+const identity = await getIdentity(
+  Deno.env.get("IDENTITY"),
+  Deno.env.get("OPERATOR_PASS"),
+);
 
 storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
 
 async function castRecipe() {
-  const spaceId = SYSTEM_SPACE_ID;
-  const cause = CELL_CAUSE;
+  const spaceId = BG_SYSTEM_SPACE_ID;
+  const cause = BG_CELL_CAUSE;
   console.log(`Casting recipe from ${recipePath} in space ${spaceId}`);
 
-  console.log("OPERATOR_PASS", OPERATOR_PASS);
-  const signer = await Identity.fromPassphrase(OPERATOR_PASS);
-  storage.setSigner(signer);
+  storage.setSigner(identity);
 
   console.log("params:", {
     spaceId,
@@ -77,11 +79,11 @@ async function castRecipe() {
     const targetCell = getCell(
       spaceId as DID,
       cause,
-      bgUpdaterCharmsSchema.properties.charms,
+      bgUpdaterCharmsSchema,
     );
 
     // Ensure the cell is synced
-    storage.syncCell(targetCell, true);
+    await storage.syncCell(targetCell, true);
     await storage.synced();
 
     console.log("Getting cell...");
@@ -90,8 +92,8 @@ async function castRecipe() {
     console.log("Casting recipe...");
 
     // Create session and charm manager (matching main.ts pattern)
-    const session = await openSession({
-      passphrase: OPERATOR_PASS,
+    const session = await createAdminSession({
+      identity,
       name: "recipe-caster",
       space: spaceId as DID,
     });

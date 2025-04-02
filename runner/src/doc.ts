@@ -422,6 +422,9 @@ export function createDoc<T>(
         );
       }
       sourceCell = cell;
+
+      // Notify callbacks that there was a change.
+      for (const callback of [...callbacks]) callback(value as T, []);
     },
     get ephemeral(): boolean {
       return ephemeral;

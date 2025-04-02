@@ -4,6 +4,7 @@ import {
   isModule,
   isRecipe,
   isStreamAlias,
+  type JSONSchema,
   type JSONValue,
   type Module,
   type NodeFactory,
@@ -17,6 +18,7 @@ import {
   type UnsafeBinding,
 } from "@commontools/builder";
 import { type DocImpl, getDoc, isDoc } from "./doc.ts";
+import { type Cell, getCellFromLink } from "./cell.ts";
 import {
   Action,
   addEventHandler,
@@ -28,7 +30,7 @@ import {
   deepCopy,
   diffAndUpdate,
   extractDefaultValues,
-  findAllAliasedDocs,
+  findAllAliasedCells,
   followAliases,
   maybeUnwrapProxy,
   mergeObjects,
@@ -39,15 +41,12 @@ import {
 import { getModuleByRef } from "./module.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
-import {
-  getRecipe,
-  getRecipeId,
-  registerNewRecipe,
-  registerRecipe,
-} from "./recipe-map.ts";
+import { getRecipe, getRecipeId, registerNewRecipe } from "./recipe-map.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import { getCellLinkOrThrow } from "./query-result-proxy.ts";
+import { storage } from "./storage.ts";
+import { syncRecipeBlobby } from "./recipe-sync.ts";
 
 export const cancels = new WeakMap<DocImpl<any>, Cancel>();
 
@@ -162,17 +161,13 @@ export function run<T, R = any>(
   const [cancel, addCancel] = useCancelGroup();
   cancels.set(resultCell, cancel);
 
-  // If the bindings are a cell, doc or doc link, convert them to an object
-  // where each property is a doc link.
-  // TODO(seefeld): If new keys are added after first load, this won't work.
-  // TODO(seefeld): Note why we need this. Is it still needed?
+  // If the bindings are a cell, doc or doc link, convert them to an alias
   if (
     isDoc(argument) ||
     isCellLink(argument) ||
     isCell(argument) ||
     isQueryResultForDereferencing(argument)
   ) {
-    // If it's a cell, turn it into a cell reference
     const ref = isCellLink(argument)
       ? argument
       : isCell(argument)
@@ -181,20 +176,7 @@ export function run<T, R = any>(
       ? getCellLinkOrThrow(argument)
       : ({ cell: argument, path: [] } satisfies CellLink);
 
-    // Get value, but just to get the keys. Throw if it isn't an object.
-    const value = ref.cell.getAsQueryResult(ref.path);
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-      // Create aliases for all the top level keys in the object
-      argument = Object.fromEntries(
-        Object.keys(value).map((key) => [
-          key,
-          { $alias: { cell: ref.cell, path: [...ref.path, key] } },
-        ]),
-      ) as T;
-    } else {
-      // Otherwise we just alias the whole thing
-      argument = { $alias: ref } as T;
-    }
+    argument = { $alias: ref } as T;
   }
 
   // Walk the recipe's schema and extract all default values
@@ -358,10 +340,10 @@ function instantiateJavaScriptNode(
   // TODO(seefeld): This isn't correct, as module can write into passed docs. We
   // should look at the schema to find out what docs are read and
   // written.
-  const reads = findAllAliasedDocs(inputs, processCell);
+  const reads = findAllAliasedCells(inputs, processCell);
 
   const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
-  const writes = findAllAliasedDocs(outputs, processCell);
+  const writes = findAllAliasedCells(outputs, processCell);
 
   let fn = (
     typeof module.implementation === "string"
@@ -558,8 +540,8 @@ function instantiateRawNode(
   // note the parent recipe on the closure recipes.
   unsafe_noteParentOnRecipes(recipe, mappedInputBindings);
 
-  const inputCells = findAllAliasedDocs(mappedInputBindings, processCell);
-  const outputCells = findAllAliasedDocs(mappedOutputBindings, processCell);
+  const inputCells = findAllAliasedCells(mappedInputBindings, processCell);
+  const outputCells = findAllAliasedCells(mappedOutputBindings, processCell);
 
   const action = module.implementation(
     getDoc(
@@ -586,10 +568,10 @@ function instantiatePassthroughNode(
 ) {
   const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
   const inputsCell = getDoc(inputs, { immutable: inputs }, processCell.space);
-  const reads = findAllAliasedDocs(inputs, processCell);
+  const reads = findAllAliasedCells(inputs, processCell);
 
   const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
-  const writes = findAllAliasedDocs(outputs, processCell);
+  const writes = findAllAliasedCells(outputs, processCell);
 
   const action: Action = (log: ReactivityLog) => {
     const inputsProxy = inputsCell.getAsQueryResult([], log);
@@ -630,6 +612,80 @@ function instantiateRecipeNode(
   // TODO(seefeld): Make sure to not cancel after a recipe is elevated to a charm, e.g.
   // via navigateTo. Nothing is cancelling right now, so leaving this as TODO.
   addCancel(cancels.get(resultCell.sourceCell!));
+}
+
+export async function runSynced(
+  resultCell: Cell<any>,
+  recipe?: Recipe | Module,
+  inputs?: any,
+) {
+  await storage.syncCell(resultCell);
+
+  const synced = await syncCellsForRunningRecipe(resultCell);
+
+  run(recipe, inputs, resultCell.getDoc());
+
+  // If a new recipe was specified, make sure to sync any new cells
+  // TODO(seefeld): Possible race condition here with lifted functions running
+  // and using old data to update a value that arrives just between starting and
+  // finishing the computation. Should be fixed by changing conflict resolution
+  // for derived values to be based on what they are derived from.
+  if (recipe || !synced) {
+    await syncCellsForRunningRecipe(resultCell.getSourceCell());
+  }
+
+  // Now get used recipe to extract schema
+  recipe = getRecipe(resultCell.getSourceCell().get()[TYPE]!);
+
+  return recipe?.resultSchema
+    ? resultCell.asSchema(recipe.resultSchema)
+    : resultCell;
+}
+
+async function syncCellsForRunningRecipe(
+  resultCell: Cell<any>,
+): Promise<boolean> {
+  const sourceCell = resultCell.getSourceCell({
+    type: "object",
+    properties: { [TYPE]: { type: "string" } },
+    required: [TYPE],
+  });
+  if (!sourceCell) return false;
+
+  await storage.syncCell(sourceCell);
+
+  const recipeId = sourceCell.get()[TYPE];
+  if (!recipeId) throw new Error(`No recipe ID found in source cell`);
+
+  await syncRecipeBlobby(recipeId);
+
+  const recipe = getRecipe(recipeId);
+  if (!recipe) throw new Error(`Unknown recipe: ${recipeId}`);
+
+  // We could support this by replicating what happens in runner, but since
+  // we're calling this again when returning false, this is good enough for now.
+  if (isModule(recipe)) return false;
+
+  const cells: Cell<any>[] = [];
+
+  for (const node of recipe.nodes) {
+    const sourceDoc = sourceCell.getDoc();
+    const inputs = findAllAliasedCells(node.inputs, sourceDoc);
+    const outputs = findAllAliasedCells(node.outputs, sourceDoc);
+
+    // TODO(seefeld): This ignores schemas provided by modules, so it might
+    // still fetch a lot.
+    [...inputs, ...outputs].forEach((c) => {
+      const cell = getCellFromLink(c);
+      cells.push(cell);
+    });
+  }
+
+  if (recipe.resultSchema) cells.push(resultCell.asSchema(recipe.resultSchema));
+
+  await Promise.all(cells.map((c) => storage.syncCell(c)));
+
+  return true;
 }
 
 const moduleWrappers = {
