@@ -130,6 +130,33 @@ export const selectSchema = <Space extends MemorySpace>(
       }
     }
   }
+  for (const [ofKey, ofValues] of Object.entries(selectSchema)) {
+    for (const [the, theValues] of Object.entries(ofValues)) {
+      // We'll use an object for each [of,the] combination
+      for (const [cause, selector] of Object.entries(theValues)) {
+        const of = ofKey as (Entity | "_");
+        loadFacts(factSelection, session, { the, of, cause, since });
+      }
+    }
+  }
+
+  // Any entities referenced in our selectSchema must be returned in the response
+  // I'm not sure this is the best behavior, but it matches the schema-free query code.
+  // Our returned stub objects will not have a cause.
+  for (const [ofKey, ofValues] of Object.entries(selectSchema)) {
+    if (ofKey === "_") { // we don't need to return a stub for wildcard `of`
+      continue;
+    }
+    const ofFacts = includedFacts[ofKey as Entity] ?? {};
+    for (const [the, _value] of Object.entries(ofValues)) {
+      if (the in ofFacts) { // we already have a `the` fact for this entity
+        continue;
+      } else {
+        ofFacts[the] = {};
+      }
+    }
+    includedFacts[ofKey as Entity] = ofFacts;
+  }
   return includedFacts;
 };
 

@@ -1777,3 +1777,46 @@ test(
     assertEquals(getResultForDoc(result, space.did(), "_"), filteredFact);
   },
 );
+
+// For compatibility with existing query path, return {} without cause when we find nothing
+test(
+  "schema querying non existing memory returns no facts, but does return an entry",
+  new URL(`memory:${space.did()}`),
+  async (session) => {
+    const result = await Space.querySchema(session, {
+      cmd: "/memory/graph/query",
+      iss: alice.did(),
+      sub: space.did(),
+      args: {
+        selectSchema: {
+          [doc]: {
+            [the]: {
+              _: {
+                path: [],
+                schemaContext: {
+                  schema: {},
+                  rootSchema: {},
+                },
+              },
+            },
+          },
+        },
+      },
+      prf: [],
+    });
+
+    assertEquals(
+      result,
+      {
+        ok: {
+          [space.did()]: {
+            [doc]: {
+              ["application/json"]: {},
+            },
+          },
+        },
+      },
+      "finds no facts",
+    );
+  },
+);
