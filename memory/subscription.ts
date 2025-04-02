@@ -50,14 +50,14 @@ export const fromSelector = function* (selector: Selector | SchemaSelector) {
   const entities = Object.entries(selector);
   for (const [of, attributes] of entities.length > 0 ? entities : all) {
     const selector = Object.entries(attributes);
-    for (const [the, members] of selector.length > 0 ? selector : all) {
-      // type checking is confused here
+    for (const [the, members] of selector.length > 0 ? selector : all) { // type checking is confused here
+      // type checking is confused here, so we double test
       if (members === undefined || members === null) {
         continue;
       }
-      const selector = Object.entries(members);
+      const causes = Object.keys(members).filter((c) => c !== "_");
       for (
-        const cause of selector.length > 0 ? Object.keys(selector) : [undefined]
+        const cause of causes.length > 0 ? causes : [undefined]
       ) {
         const selector: { of?: Entity; the?: The; cause?: Cause } = {};
         if (of) {
