@@ -32,7 +32,7 @@ TEMP_CACHE_DIR=$(mktemp -d)
 
 # 1. Delete existing cache
 echo "Deleting existing LLM cache..."
-rm -rf jumble/integration/cache/llm-api-cache
+# rm -rf jumble/integration/cache/llm-api-cache
 mkdir -p jumble/integration/cache/llm-api-cache
 
 # 2. Start toolshed on port 8000
