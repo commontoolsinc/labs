@@ -95,33 +95,27 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   console.log("LLM HASH", await cache.hashKey(JSON.stringify(payload)));
   console.log("LLM PAYLOAD", JSON.stringify(payload, null, 2));
 
-  const modelString = payload.model;
+  // Check cache for existing response
+  const cacheKey = await cache.hashKey(JSON.stringify(payload));
+  const cachedResult = await cache.loadItem(cacheKey);
+  if (cachedResult) {
+    const lastMessage = cachedResult.messages[cachedResult.messages.length - 1];
+    return c.json(lastMessage);
+  }
 
-  // Validate model and JSON mode compatibility
   const validationError = validateModelAndJsonMode(
     c,
-    modelString,
+    payload.model,
     payload.mode,
   );
   if (validationError) {
     return validationError;
   }
 
-  const model = findModel(modelString!);
+  const model = findModel(payload.model);
   const modelDefaultMaxTokens = model?.capabilities.maxOutputTokens || 8000;
 
   try {
-    // Check cache for existing response - skip caching for JSON mode requests
-    if (!payload.mode) {
-      const cacheKey = await cache.hashKey(JSON.stringify(payload));
-      const cachedResult = await cache.loadItem(cacheKey);
-      if (cachedResult) {
-        const lastMessage =
-          cachedResult.messages[cachedResult.messages.length - 1];
-        return c.json(lastMessage);
-      }
-    }
-
     const result = await generateTextCore({
       ...payload,
       abortSignal: c.req.raw.signal,
@@ -129,14 +123,13 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
     });
 
     if (!payload.stream) {
-      // Save to cache only if not in JSON mode
-      if (!payload.mode) {
-        const cacheKey = await cache.hashKey(JSON.stringify(payload));
-        await cache.saveItem(cacheKey, {
-          ...payload,
-          messages: [...payload.messages, result.message],
-        });
-      }
+      // Save to cache
+      const cacheKey = await cache.hashKey(JSON.stringify(payload));
+      await cache.saveItem(cacheKey, {
+        ...payload,
+        // FIXME(jake): I believe this is persisting duplicate messages to the cached json blobs.
+        messages: [...payload.messages, result.message],
+      });
       return c.json(result.message);
     }
 
