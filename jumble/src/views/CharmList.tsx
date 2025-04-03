@@ -118,7 +118,8 @@ export default function CharmList() {
     );
   }
 
-  if (!charms || charms.length === 0) {
+  // Only show empty state when both main list and trash are empty
+  if ((!charms || charms.length === 0) && (!trash || trash.length === 0)) {
     return (
       <div className="flex flex-col items-center justify-center h-[70vh] text-center p-8">
         <div className="mb-6">
