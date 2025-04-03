@@ -966,7 +966,9 @@ export async function imagine(
   context: {
     currentCharm?: Cell<Charm>;
     dataReferences?: Record<string, any>;
-    previewPlan?: string[]; // Add ability to pass through a pre-generated plan
+    previewPlan?: string[]; // Pre-generated execution plan steps
+    previewSpec?: string; // Pre-generated specification text
+    previewSchema?: JSONSchema; // Pre-generated schema (for rework workflow)
   },
   workflowOverride?: WorkflowType,
   model?: string,
@@ -975,7 +977,6 @@ export async function imagine(
   let processedInput = input;
   let dataReferences = context.dataReferences || {};
 
-  debugger;
   try {
     const processed = await formatPromptWithMentions(input, charmManager);
     processedInput = processed.text;
@@ -1050,23 +1051,46 @@ export async function imagine(
         referenceSpec = iframe?.spec;
       }
 
-      // Generate a quick spec and schema from the input and plan
-      // This avoids a full roundtrip to the LLM for the plan
-      const planText = context.previewPlan && Array.isArray(context.previewPlan)
-        ? context.previewPlan.join("\n")
-        : "Generate implementation based on specification";
-
-      const quickSpec = await generateSpecAndSchema(
-        `${processedInput}\n\nFollow this plan:\n${planText}`,
-        undefined,
-        model,
-      );
-
+      // For pregenerated plans, we can use the provided spec and schema if available
+      // This avoids unnecessary LLM calls
+      
+      // 1. Determine the spec to use
+      let updatedSpec: string;
+      if (context.previewSpec) {
+        // Use the pre-generated spec if available
+        updatedSpec = context.previewSpec;
+        console.log("Using pre-generated specification");
+      } else {
+        // If no previewSpec is available, create a simple one based on the plan
+        const planText = context.previewPlan && Array.isArray(context.previewPlan)
+          ? context.previewPlan.join("\n")
+          : "Execute plan";
+        updatedSpec = `Charm based on user request: ${processedInput}\n\nPlan:\n${planText}`;
+        console.log("Created simple specification from plan");
+      }
+      
+      // 2. Determine the schema to use
+      let updatedSchema: JSONSchema | undefined;
+      if (workflowType === "rework" && context.previewSchema) {
+        // For rework, use the pre-generated schema if available
+        updatedSchema = context.previewSchema;
+        console.log("Using pre-generated schema for rework workflow");
+      } else if (context.currentCharm) {
+        // For edit or when no schema is provided, try to use schema from current charm
+        try {
+          const { iframe } = getIframeRecipe(context.currentCharm);
+          updatedSchema = iframe?.argumentSchema;
+          console.log("Using existing schema from current charm");
+        } catch (e) {
+          console.warn("Could not get schema from current charm:", e);
+        }
+      }
+      
       executionPlan = {
         workflowType,
         steps: context.previewPlan,
-        updatedSpec: quickSpec.spec,
-        updatedSchema: quickSpec.resultSchema,
+        updatedSpec,
+        updatedSchema
       };
 
       console.log(
@@ -1087,15 +1111,19 @@ export async function imagine(
           );
         } catch (error) {
           console.error(`Plan generation failed: ${error.message}`);
-          throw new Error(`Could not generate a plan for the ${workflowType} workflow. ${
-            workflowType === 'rework' ? 
-            'This workflow requires generating valid schemas, which failed.' : 
-            'Please try again with a different prompt or workflow.'
-          }`);
+          throw new Error(
+            `Could not generate a plan for the ${workflowType} workflow. ${
+              workflowType === "rework"
+                ? "This workflow requires generating valid schemas, which failed."
+                : "Please try again with a different prompt or workflow."
+            }`,
+          );
         }
       } catch (error) {
         console.error("Error generating plan:", error);
-        throw new Error(`Failed to generate plan for ${workflowType} workflow: ${error.message}`);
+        throw new Error(
+          `Failed to generate plan for ${workflowType} workflow: ${error.message}`,
+        );
       }
     }
   }
@@ -1104,8 +1132,10 @@ export async function imagine(
   if (workflowType === "fix" && context.currentCharm) {
     // For fix, we use the existing iterate function but pass the unchanged spec
     // existingSpec was already retrieved above
-    
-    console.log("DEBUG: Executing FIX workflow with existing spec and current charm");
+
+    console.log(
+      "DEBUG: Executing FIX workflow with existing spec and current charm",
+    );
 
     // Pass the existing spec directly to prevent regeneration, but also include plan
     return iterate(
@@ -1119,22 +1149,24 @@ export async function imagine(
     );
   } else if (workflowType === "edit" && context.currentCharm) {
     // For edit, use iterate with the updated spec from our execution plan
-    
-    console.log("DEBUG: Executing EDIT workflow with updated spec and current charm");
+
+    console.log(
+      "DEBUG: Executing EDIT workflow with updated spec and current charm",
+    );
     // Check what sourceCell and argument look like
     try {
       const sourceCell = context.currentCharm.getSourceCell();
       const argument = sourceCell?.key("argument");
-      
+
       console.log("DEBUG: Source cell details:", {
         hasSourceCell: Boolean(sourceCell),
         hasArgument: Boolean(argument),
-        argumentHasData: argument ? Boolean(argument.get()) : false
+        argumentHasData: argument ? Boolean(argument.get()) : false,
       });
     } catch (e) {
       console.error("DEBUG: Error checking sourceCell/argument:", e);
     }
-    
+
     return iterate(
       charmManager,
       context.currentCharm,
@@ -1157,51 +1189,28 @@ export async function imagine(
         executionPlan.steps,
       );
     }
-    
+
     // Check if we have a schema from the plan
     let updatedSchema = executionPlan.updatedSchema;
-    
-    // If we don't have a schema from the plan, generate one properly
-    if (!updatedSchema || 
-        !updatedSchema.properties || 
-        Object.keys(updatedSchema.properties).length === 0) {
-      console.log("No valid schema from executionPlan, generating a proper schema using generateSpecAndSchema");
-      
-      // Use the more reliable generateSpecAndSchema function directly
-      const generated = await generateSpecAndSchema(
-        processedInput, 
-        undefined, // Don't use existing schema to ensure we get a fresh one
-        model
-      );
-      
-      // Use the schemas from the direct generation which are more reliable
-      updatedSchema = generated.resultSchema;
-      console.log("Generated schema details:", {
-        hasResultSchema: Boolean(updatedSchema),
-        resultSchemaType: updatedSchema?.type,
-        resultSchemaPropertyCount: updatedSchema?.properties ? Object.keys(updatedSchema.properties).length : 0,
-        argumentSchemaPropertyCount: generated.argumentSchema?.properties ? 
-          Object.keys(generated.argumentSchema.properties).length : 0
-      });
-      
-      // If we still don't have a good schema, create a minimal valid one
-      if (!updatedSchema || !updatedSchema.properties || Object.keys(updatedSchema.properties).length === 0) {
-        console.log("Still no valid schema, creating a minimal schema");
-        updatedSchema = {
-          type: "object",
-          title: "Generated Charm",
-          description: "Generated from user request: " + processedInput.substring(0, 100),
-          properties: {
-            result: {
-              type: "string",
-              title: "Result",
-              description: "Output generated by the charm"
-            }
-          }
-        };
+
+    // For rework, we must have a valid schema
+    if (!updatedSchema || !updatedSchema.properties || Object.keys(updatedSchema.properties).length === 0) {
+      // If we already have a previewSchema in the context, use that
+      if (context.previewSchema) {
+        updatedSchema = context.previewSchema;
+        console.log("Using preview schema from context:", {
+          hasSchema: Boolean(updatedSchema),
+          properties: Object.keys(updatedSchema.properties || {})
+        });
+      } else {
+        // We're missing a schema - this is a critical issue for rework
+        throw new Error(
+          "The rework workflow requires a valid schema, but none was provided. " +
+          "Make sure the generateWorkflowPreview returns a valid schema for rework workflows."
+        );
       }
     }
-    
+
     // Process references to ensure consistent naming and proper cell handling
     // This is crucial for properly accessing data from referenced charms
     let allReferences: Record<string, Cell<any>> = {};
@@ -1311,7 +1320,7 @@ export async function imagine(
               );
               if (cellSchema.properties) {
                 const propertyNames = Object.keys(cellSchema.properties).filter(
-                  (k) => !k.startsWith("$")
+                  (k) => !k.startsWith("$"),
                 );
                 console.log(
                   `Reference "${uniqueId}" schema properties: ${
@@ -1388,11 +1397,13 @@ export async function imagine(
           // Add current charm to references
           allReferences[uniqueId] = context.currentCharm;
           console.log(`Added current charm as "${uniqueId}" (${charmName})`);
-          
+
           // IMPORTANT: Remove any "currentCharm" entry - we want to ensure
           // the charm is explicitly named with a proper camelCase ID, not a generic key
           if (allReferences["currentCharm"]) {
-            console.log("Removing generic 'currentCharm' entry in favor of named reference");
+            console.log(
+              "Removing generic 'currentCharm' entry in favor of named reference",
+            );
             delete allReferences["currentCharm"];
           }
 
@@ -1405,7 +1416,7 @@ export async function imagine(
               );
               if (cellSchema.properties) {
                 const propertyNames = Object.keys(cellSchema.properties).filter(
-                  (k) => !k.startsWith("$")
+                  (k) => !k.startsWith("$"),
                 );
                 console.log(
                   `Current charm schema properties: ${
@@ -1479,15 +1490,16 @@ export async function imagine(
  * Used to include schema information in LLM prompts for better planning
  */
 function addSchemaToReferencesContext(
-  referencesContext: string, 
-  existingSchema?: JSONSchema, 
-  prefix: string = "Current Charm"
+  referencesContext: string,
+  existingSchema?: JSONSchema,
+  prefix: string = "Current Charm",
 ): string {
   if (existingSchema) {
     // Include the argument schema in the context
-    return referencesContext + `\n${prefix} Schema:\n\`\`\`json\n${
-      JSON.stringify(existingSchema, null, 2)
-    }\n\`\`\`\n`;
+    return referencesContext +
+      `\n${prefix} Schema:\n\`\`\`json\n${
+        JSON.stringify(existingSchema, null, 2)
+      }\n\`\`\`\n`;
   }
   return referencesContext;
 }
@@ -1556,11 +1568,11 @@ export async function generateWorkflowPreview(
   workflowType: WorkflowType;
   confidence: number;
   plan: string[];
-  spec?: string;
-  updatedSchema?: JSONSchema;
+  spec?: string;     // Same as previewSpec for imagination
+  updatedSchema?: JSONSchema;  // Same as previewSchema for imagination
   reasoning?: string;
-  processedInput?: string; // Add the processed input with mentions replaced
-  mentionedCharms?: Record<string, Cell<Charm>>; // Add the mentioned charms
+  processedInput?: string; // Processed input with mentions replaced
+  mentionedCharms?: Record<string, Cell<Charm>>; // Mentioned charms
 }> {
   if (!input || input.trim().length === 0) {
     return {

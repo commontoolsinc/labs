@@ -18,7 +18,7 @@ Based on the user's request, classify it into one of the following workflows:
    - Modifies code and specification, but preserves core schema structure
 
 3. REWORK: Create something new, potentially combining multiple data sources
-   - Example: "Create a dashboard combining my tasks and calendar" 
+   - Example: "Create a dashboard combining my tasks and calendar"
    - Creates new code, specification, and potentially new schema
 
 User's request: "{{ INPUT }}"
@@ -46,30 +46,65 @@ User's request: "{{ INPUT }}"
 Current Charm Context:
 {{ CONTEXT }}
 
-Based on the operation type, follow these guidelines for schema handling:
+Based on the workflow type, follow these guidelines:
 
 - FIX workflow:
-  * Preserve existing specification and schemas completely
-  * No schema changes required
+  * PURPOSE: Fix bugs without changing functionality
+  * SPEC: Keep existing specification exactly as-is
+  * SCHEMA: No schema changes needed
+  * CODE: Focus solely on fixing the implementation
 
 - EDIT workflow:
-  * Use existing argument schema as a base - DO NOT CHANGE ITS STRUCTURE
-  * You may add new properties to the argument schema, but NEVER remove existing ones
-  * Result schema should be based on the existing one, but can be modified as needed
-  * Primary goal: maintain backward compatibility while adding new functionality
+  * PURPOSE: Enhance functionality within existing data structure
+  * SPEC: Build upon the existing specification
+  * SCHEMA: Can add properties but never remove existing ones
+  * CODE: Modify implementation while maintaining backward compatibility
 
 - REWORK workflow:
-  * Create new argument and result schemas with careful consideration of existing data
-  * For argument schema:
-    - If working with referenced charms, include properties needed to access their data
-    - If extending an existing charm, preserve necessary properties from its argument schema
-  * For result schema:
-    - Define a clean schema representing the new charm's output
-    - Can be completely different from the argument schema
-    - Must include all properties that will be returned by the charm
+  * PURPOSE: Create new functionality, possibly using existing charms as sources
+  * SPEC: Write a fresh specification, possibly referencing existing ones
+  * SCHEMA: Define both input and output schemas
+  * CODE: Create a new implementation that may use data from other charms
 
-For ALL workflows that modify schemas, you MUST include BOTH argument_schema and result_schema tags with valid JSON schemas.
-Both schemas must be top-level objects with "type": "object" and a "properties" object containing property definitions.
+For REWORK workflows, you MUST include both <argument_schema> and <result_schema> tags with valid JSON schemas.
+Each schema must be a JSON object with "type": "object" and must include a "properties" object with property definitions.
+
+Example schema format:
+\`\`\`json
+{
+  "type": "object",
+  "title": "Task Schema",
+  "description": "Schema for task data",
+  "properties": {
+    "title": {
+      "type": "string",
+      "title": "Task Title",
+      "description": "The title of the task",
+      "default": "New Task"
+    },
+    "dueDate": {
+      "type": "string",
+      "format": "date",
+      "title": "Due Date",
+      "description": "When the task is due"
+    },
+    "completed": {
+      "type": "boolean",
+      "title": "Completed",
+      "description": "Whether the task is completed",
+      "default": false
+    }
+  },
+  "required": ["title"]
+}
+\`\`\`
+
+When writing schemas:
+- Focus on essential properties (3-7 max)
+- Include title, description, and sensible defaults
+- Mark required properties in the "required" array
+- Use proper JSON Schema format as shown in the examples
+- Think about data flow and how properties will be used in the implementation
 
 Please create a comprehensive response with BOTH a step-by-step execution plan AND a detailed specification.
 Always include all XML tags in your response and ensure JSON schemas are correctly formatted.
@@ -114,26 +149,31 @@ function generateCharmContext(
   }
 
   let context = "";
-  
+
   if (existingSpec) {
     context += `\nExisting Specification:\n\`\`\`\n${existingSpec}\n\`\`\`\n`;
   }
-  
+
   if (existingSchema) {
     // Provide more detailed schema context with clear labeling
-    context += `\nExisting Schema (IMPORTANT - preserve this structure):\n\`\`\`json\n${JSON.stringify(existingSchema, null, 2)}\n\`\`\`\n`;
-    
+    context +=
+      `\nExisting Schema (IMPORTANT - preserve this structure):\n\`\`\`json\n${
+        JSON.stringify(existingSchema, null, 2)
+      }\n\`\`\`\n`;
+
     // Add explicit guidance on handling the existing schema
     context += `\nSchema Handling Guidelines:
 - For FIX workflows: This schema must be preserved exactly as-is
 - For EDIT workflows: Keep this basic structure, but you may add new properties
 - For REWORK workflows: Use this as reference, but you can create a new schema structure\n`;
   }
-  
+
   if (existingCode) {
-    context += `\nExisting Code (excerpt):\n\`\`\`javascript\n${existingCode.substring(0, 500)}${existingCode.length > 500 ? '...' : ''}\n\`\`\`\n`;
+    context += `\nExisting Code (excerpt):\n\`\`\`javascript\n${
+      existingCode.substring(0, 500)
+    }${existingCode.length > 500 ? "..." : ""}\n\`\`\`\n`;
   }
-  
+
   return context;
 }
 
@@ -152,15 +192,20 @@ export async function classifyWorkflow(
   reasoning: string;
   enhancedPrompt?: string;
 }> {
-  const context = generateCharmContext(existingSpec, existingSchema, existingCode);
-  
+  const context = generateCharmContext(
+    existingSpec,
+    existingSchema,
+    existingCode,
+  );
+
   const prompt = hydratePrompt(WORKFLOW_CLASSIFICATION_PROMPT, {
     INPUT: input,
     CONTEXT: context,
   });
 
   const response = await client.sendRequest({
-    system: "You are a helpful AI assistant tasked with classifying user intents for code generation",
+    system:
+      "You are a helpful AI assistant tasked with classifying user intents for code generation",
     messages: [{ role: "user", content: prompt }],
     model: model || "anthropic:claude-3-7-sonnet-latest",
   });
@@ -169,7 +214,7 @@ export async function classifyWorkflow(
     const workflow = parseTagFromResponse(response, "workflow").toLowerCase();
     const confidence = parseFloat(parseTagFromResponse(response, "confidence"));
     const reasoning = parseTagFromResponse(response, "reasoning");
-    
+
     let enhancedPrompt: string | undefined;
     try {
       enhancedPrompt = parseTagFromResponse(response, "enhanced_prompt");
@@ -201,7 +246,7 @@ export async function classifyWorkflow(
 function cleanJsonString(jsonStr: string): string {
   // Strip markdown code blocks if present
   let cleaned = jsonStr.trim();
-  
+
   // Remove markdown code block markers
   const codeBlockRegex = /^```(?:json)?\s*([\s\S]*?)```$/;
   const match = cleaned.match(codeBlockRegex);
@@ -209,7 +254,7 @@ function cleanJsonString(jsonStr: string): string {
     cleaned = match[1].trim();
     console.log("Removed markdown code block markers");
   }
-  
+
   // Check and fix common JSON issues
   // Sometimes LLM adds explanatory text before or after the JSON
   try {
@@ -221,21 +266,26 @@ function cleanJsonString(jsonStr: string): string {
       cleaned = cleaned.substring(jsonStart);
       console.log("Trimmed text before JSON starts");
     }
-    
+
     // Try to find the end of a JSON object or array
-    const lastBrace = Math.max(cleaned.lastIndexOf('}'), cleaned.lastIndexOf(']'));
+    const lastBrace = Math.max(
+      cleaned.lastIndexOf("}"),
+      cleaned.lastIndexOf("]"),
+    );
     if (lastBrace > 0 && lastBrace < cleaned.length - 1) {
       // There's text after the JSON ends
       cleaned = cleaned.substring(0, lastBrace + 1);
       console.log("Trimmed text after JSON ends");
     }
-    
+
     // Validate JSON by parsing it
     JSON.parse(cleaned);
   } catch (e) {
-    console.warn("Could not automatically fix JSON, returning cleaned string as-is");
+    console.warn(
+      "Could not automatically fix JSON, returning cleaned string as-is",
+    );
   }
-  
+
   return cleaned;
 }
 
@@ -254,33 +304,58 @@ export async function generateWorkflowPlan(
   updatedSpec?: string;
   updatedSchema?: JSONSchema;
 }> {
-  const context = generateCharmContext(existingSpec, existingSchema, existingCode);
-  
+  const context = generateCharmContext(
+    existingSpec,
+    existingSchema,
+    existingCode,
+  );
+
   // Schema section only for rework workflow
   const schemaSection = workflowType === "rework"
     ? `<argument_schema>
+// Define the schema for input data
 {
   "type": "object",
   "title": "Input Schema",
   "description": "Data required by this charm",
   "properties": {
-    // Add properties needed for input data
-  }
+    // Add 3-7 properties that represent the input data
+    // Each property should have a type, title, and description
+  },
+  "required": []
 }
 </argument_schema>
 
 <result_schema>
+// Define the schema for output data
 {
   "type": "object",
   "title": "Result Schema",
   "description": "Data returned by this charm",
   "properties": {
-    // Add properties for output data
+    // Add 3-7 properties that represent the output data
+    // Each property should have a type, title, and description
   }
 }
-</result_schema>`
+</result_schema>
+
+SCHEMA GUIDELINES:
+1. Keep schemas minimal:
+   - Include only essential fields (3-7 properties max)
+   - Focus on the core functionality
+   - If user requested complex features, simplify for this first version
+
+2. Each property should have:
+   - A descriptive "title" field
+   - A brief "description" field
+   - A sensible default value where appropriate
+
+3. Schemas must be valid JSON with:
+   - "type": "object" at the top level
+   - A "properties" object containing property definitions
+   - Required properties listed in the "required" array`
     : "";
-  
+
   const prompt = hydratePrompt(PLAN_GENERATION_PROMPT, {
     INPUT: input,
     WORKFLOW_TYPE: workflowType.toUpperCase(),
@@ -289,7 +364,8 @@ export async function generateWorkflowPlan(
   });
 
   const response = await client.sendRequest({
-    system: "You are a helpful AI assistant tasked with planning code generation workflows",
+    system:
+      "You are a helpful AI assistant tasked with planning code generation workflows",
     messages: [{ role: "user", content: prompt }],
     model: model || "anthropic:claude-3-7-sonnet-latest",
   });
@@ -299,65 +375,73 @@ export async function generateWorkflowPlan(
     const stepsText = parseTagFromResponse(response, "steps");
     const steps = stepsText
       .split(/\d+\.\s+/)
-      .filter(step => step.trim().length > 0)
-      .map(step => step.trim());
-    
+      .filter((step) => step.trim().length > 0)
+      .map((step) => step.trim());
+
     // For the spec, we'll combine all parts into a structured XML document
     // This becomes our full specification that gets saved
     const fullSpec = response; // Keep the entire response with all XML tags
-    
+
     // Get individual components for specific usage
     let specification = "";
     let dataModel = "";
     let schema: JSONSchema | undefined;
     let references = "";
-    
+
     try {
       specification = parseTagFromResponse(response, "specification");
     } catch (e) {
       // Specification might not be available
     }
-    
+
     try {
       dataModel = parseTagFromResponse(response, "data_model");
     } catch (e) {
       // Data model might not be available
     }
-    
+
     try {
       references = parseTagFromResponse(response, "references");
     } catch (e) {
       // References might not be available
     }
-    
+
     // For rework workflows, extract both argument and result schemas
     if (workflowType === "rework") {
       try {
         // Get argument and result schemas from the response
-        const argumentSchemaJson = parseTagFromResponse(response, "argument_schema");
-        const resultSchemaJson = parseTagFromResponse(response, "result_schema");
-        
+        const argumentSchemaJson = parseTagFromResponse(
+          response,
+          "argument_schema",
+        );
+        const resultSchemaJson = parseTagFromResponse(
+          response,
+          "result_schema",
+        );
+
         // Validate both schemas exist
         if (!argumentSchemaJson || !resultSchemaJson) {
-          throw new Error("Missing schema tags in LLM response for rework workflow");
+          throw new Error(
+            "Missing schema tags in LLM response for rework workflow",
+          );
         }
-        
+
         // Parse and validate argument schema
         const cleanArgumentJson = cleanJsonString(argumentSchemaJson);
         const argumentSchema = JSON.parse(cleanArgumentJson);
-        
-        if (argumentSchema.type !== 'object' || !argumentSchema.properties) {
+
+        if (argumentSchema.type !== "object" || !argumentSchema.properties) {
           throw new Error("Invalid argument schema structure");
         }
-        
+
         // Parse and validate result schema
         const cleanResultJson = cleanJsonString(resultSchemaJson);
         const resultSchema = JSON.parse(cleanResultJson);
-        
-        if (resultSchema.type !== 'object' || !resultSchema.properties) {
+
+        if (resultSchema.type !== "object" || !resultSchema.properties) {
           throw new Error("Invalid result schema structure");
         }
-        
+
         // Use argument schema as primary and attach result schema for downstream use
         schema = argumentSchema;
         (schema as any).resultSchema = resultSchema;
@@ -366,12 +450,12 @@ export async function generateWorkflowPlan(
         throw e; // Re-throw to ensure the client knows we failed
       }
     }
-    
+
     // For fix workflow, if we have an existing spec, use that instead
-    const updatedSpec = workflowType === "fix" && existingSpec 
-      ? existingSpec 
+    const updatedSpec = workflowType === "fix" && existingSpec
+      ? existingSpec
       : fullSpec;
-    
+
     return {
       steps,
       updatedSpec,
@@ -379,10 +463,10 @@ export async function generateWorkflowPlan(
     };
   } catch (error) {
     console.error("Error parsing workflow plan response:", error);
-    
+
     // Create a fallback spec that preserves the existing spec for fix/edit
-    const fallbackSpec = workflowType === "fix" && existingSpec 
-      ? existingSpec 
+    const fallbackSpec = workflowType === "fix" && existingSpec
+      ? existingSpec
       : `<steps>
 1. Analyze the request
 2. Implement the changes
@@ -400,9 +484,13 @@ Standard data model appropriate for this implementation
 <references>
 Uses any provided data references as appropriate
 </references>`;
-    
+
     return {
-      steps: ["Analyze the request", "Implement the changes", "Verify the result"],
+      steps: [
+        "Analyze the request",
+        "Implement the changes",
+        "Verify the result",
+      ],
       updatedSpec: fallbackSpec,
     };
   }
