@@ -4,6 +4,10 @@ const SCRIPT_CDNS = [
   "https://esm.sh",
 ];
 
+const STYLE_CDNS = [
+  "https://fonts.googleapis.com"
+];
+
 // In Chromium browsers, "'self'" selects the top frame origin from
 // null origins. In Firefox this does not apply. Instead, use
 // the top frame origin explicitly.
@@ -20,7 +24,7 @@ export const CSP = `` +
   // Scripts: Allow 1P, inline, and CDNs.
   `script-src ${HOST_ORIGIN} 'unsafe-inline' ${SCRIPT_CDNS.join(" ")};` +
   // Styles: Allow 1P, inline.
-  `style-src ${HOST_ORIGIN} 'unsafe-inline';` +
+  `style-src ${HOST_ORIGIN} 'unsafe-inline' ${STYLE_CDNS.join(" ")};` +
   // Images: Allow 1P, inline.
   `img-src ${HOST_ORIGIN} 'unsafe-inline';` +
   // Disabling until we have a concrete case.
