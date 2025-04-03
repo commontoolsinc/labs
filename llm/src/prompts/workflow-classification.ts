@@ -46,13 +46,33 @@ User's request: "{{ INPUT }}"
 Current Charm Context:
 {{ CONTEXT }}
 
-Based on the operation type, follow these guidelines:
-- FIX: Preserve the existing specification completely, just fix implementation issues
-- EDIT: Use the existing specification as a base and modify it to incorporate the new features
-- REWORK: Create a new specification while considering the context of the existing one
+Based on the operation type, follow these guidelines for schema handling:
+
+- FIX workflow:
+  * Preserve existing specification and schemas completely
+  * No schema changes required
+
+- EDIT workflow:
+  * Use existing argument schema as a base - DO NOT CHANGE ITS STRUCTURE
+  * You may add new properties to the argument schema, but NEVER remove existing ones
+  * Result schema should be based on the existing one, but can be modified as needed
+  * Primary goal: maintain backward compatibility while adding new functionality
+
+- REWORK workflow:
+  * Create new argument and result schemas with careful consideration of existing data
+  * For argument schema:
+    - If working with referenced charms, include properties needed to access their data
+    - If extending an existing charm, preserve necessary properties from its argument schema
+  * For result schema:
+    - Define a clean schema representing the new charm's output
+    - Can be completely different from the argument schema
+    - Must include all properties that will be returned by the charm
+
+For ALL workflows that modify schemas, you MUST include BOTH argument_schema and result_schema tags with valid JSON schemas.
+Both schemas must be top-level objects with "type": "object" and a "properties" object containing property definitions.
 
 Please create a comprehensive response with BOTH a step-by-step execution plan AND a detailed specification.
-Always include all XML tags in your response.
+Always include all XML tags in your response and ensure JSON schemas are correctly formatted.
 
 Respond in the following format:
 
@@ -100,7 +120,14 @@ function generateCharmContext(
   }
   
   if (existingSchema) {
-    context += `\nExisting Schema:\n\`\`\`json\n${JSON.stringify(existingSchema, null, 2)}\n\`\`\`\n`;
+    // Provide more detailed schema context with clear labeling
+    context += `\nExisting Schema (IMPORTANT - preserve this structure):\n\`\`\`json\n${JSON.stringify(existingSchema, null, 2)}\n\`\`\`\n`;
+    
+    // Add explicit guidance on handling the existing schema
+    context += `\nSchema Handling Guidelines:
+- For FIX workflows: This schema must be preserved exactly as-is
+- For EDIT workflows: Keep this basic structure, but you may add new properties
+- For REWORK workflows: Use this as reference, but you can create a new schema structure\n`;
   }
   
   if (existingCode) {
@@ -168,6 +195,51 @@ export async function classifyWorkflow(
 }
 
 /**
+ * Helper function to clean JSON strings from LLM responses
+ * Handles markdown code blocks and other common issues
+ */
+function cleanJsonString(jsonStr: string): string {
+  // Strip markdown code blocks if present
+  let cleaned = jsonStr.trim();
+  
+  // Remove markdown code block markers
+  const codeBlockRegex = /^```(?:json)?\s*([\s\S]*?)```$/;
+  const match = cleaned.match(codeBlockRegex);
+  if (match) {
+    cleaned = match[1].trim();
+    console.log("Removed markdown code block markers");
+  }
+  
+  // Check and fix common JSON issues
+  // Sometimes LLM adds explanatory text before or after the JSON
+  try {
+    // Try to find the start of a JSON object or array
+    const jsonStartRegex = /(\{|\[)/;
+    const jsonStart = cleaned.search(jsonStartRegex);
+    if (jsonStart > 0) {
+      // There's text before the JSON starts
+      cleaned = cleaned.substring(jsonStart);
+      console.log("Trimmed text before JSON starts");
+    }
+    
+    // Try to find the end of a JSON object or array
+    const lastBrace = Math.max(cleaned.lastIndexOf('}'), cleaned.lastIndexOf(']'));
+    if (lastBrace > 0 && lastBrace < cleaned.length - 1) {
+      // There's text after the JSON ends
+      cleaned = cleaned.substring(0, lastBrace + 1);
+      console.log("Trimmed text after JSON ends");
+    }
+    
+    // Validate JSON by parsing it
+    JSON.parse(cleaned);
+  } catch (e) {
+    console.warn("Could not automatically fix JSON, returning cleaned string as-is");
+  }
+  
+  return cleaned;
+}
+
+/**
  * Generates an execution plan for a workflow
  */
 export async function generateWorkflowPlan(
@@ -184,9 +256,29 @@ export async function generateWorkflowPlan(
 }> {
   const context = generateCharmContext(existingSpec, existingSchema, existingCode);
   
-  // Schema section is only needed for rework
+  // Schema section only for rework workflow
   const schemaSection = workflowType === "rework"
-    ? "<schema>\nJSON schema definition for the data model\n</schema>"
+    ? `<argument_schema>
+{
+  "type": "object",
+  "title": "Input Schema",
+  "description": "Data required by this charm",
+  "properties": {
+    // Add properties needed for input data
+  }
+}
+</argument_schema>
+
+<result_schema>
+{
+  "type": "object",
+  "title": "Result Schema",
+  "description": "Data returned by this charm",
+  "properties": {
+    // Add properties for output data
+  }
+}
+</result_schema>`
     : "";
   
   const prompt = hydratePrompt(PLAN_GENERATION_PROMPT, {
@@ -238,13 +330,40 @@ export async function generateWorkflowPlan(
       // References might not be available
     }
     
-    // For rework, try to parse the schema
+    // For rework workflows, extract both argument and result schemas
     if (workflowType === "rework") {
       try {
-        const schemaJson = parseTagFromResponse(response, "schema");
-        schema = JSON.parse(schemaJson);
+        // Get argument and result schemas from the response
+        const argumentSchemaJson = parseTagFromResponse(response, "argument_schema");
+        const resultSchemaJson = parseTagFromResponse(response, "result_schema");
+        
+        // Validate both schemas exist
+        if (!argumentSchemaJson || !resultSchemaJson) {
+          throw new Error("Missing schema tags in LLM response for rework workflow");
+        }
+        
+        // Parse and validate argument schema
+        const cleanArgumentJson = cleanJsonString(argumentSchemaJson);
+        const argumentSchema = JSON.parse(cleanArgumentJson);
+        
+        if (argumentSchema.type !== 'object' || !argumentSchema.properties) {
+          throw new Error("Invalid argument schema structure");
+        }
+        
+        // Parse and validate result schema
+        const cleanResultJson = cleanJsonString(resultSchemaJson);
+        const resultSchema = JSON.parse(cleanResultJson);
+        
+        if (resultSchema.type !== 'object' || !resultSchema.properties) {
+          throw new Error("Invalid result schema structure");
+        }
+        
+        // Use argument schema as primary and attach result schema for downstream use
+        schema = argumentSchema;
+        (schema as any).resultSchema = resultSchema;
       } catch (e) {
-        // Schema might not be available or valid JSON
+        console.error("Schema extraction failed:", e);
+        throw e; // Re-throw to ensure the client knows we failed
       }
     }
     

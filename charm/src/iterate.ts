@@ -306,6 +306,51 @@ function turnCellsIntoAliases(data: any): any {
 }
 
 /**
+ * Helper function to clean JSON strings from LLM responses
+ * Handles markdown code blocks and other common issues
+ */
+function cleanJsonString(jsonStr: string): string {
+  // Strip markdown code blocks if present
+  let cleaned = jsonStr.trim();
+  
+  // Remove markdown code block markers
+  const codeBlockRegex = /^```(?:json)?\s*([\s\S]*?)```$/;
+  const match = cleaned.match(codeBlockRegex);
+  if (match) {
+    cleaned = match[1].trim();
+    console.log("Removed markdown code block markers");
+  }
+  
+  // Check and fix common JSON issues
+  // Sometimes LLM adds explanatory text before or after the JSON
+  try {
+    // Try to find the start of a JSON object or array
+    const jsonStartRegex = /(\{|\[)/;
+    const jsonStart = cleaned.search(jsonStartRegex);
+    if (jsonStart > 0) {
+      // There's text before the JSON starts
+      cleaned = cleaned.substring(jsonStart);
+      console.log("Trimmed text before JSON starts");
+    }
+    
+    // Try to find the end of a JSON object or array
+    const lastBrace = Math.max(cleaned.lastIndexOf('}'), cleaned.lastIndexOf(']'));
+    if (lastBrace > 0 && lastBrace < cleaned.length - 1) {
+      // There's text after the JSON ends
+      cleaned = cleaned.substring(0, lastBrace + 1);
+      console.log("Trimmed text after JSON ends");
+    }
+    
+    // Validate JSON by parsing it
+    JSON.parse(cleaned);
+  } catch (e) {
+    console.warn("Could not automatically fix JSON, returning cleaned string as-is");
+  }
+  
+  return cleaned;
+}
+
+/**
  * Creates a structured specification with goal, plan, and spec
  */
 export function createStructuredSpec(goal: string, plan: string | undefined, spec: string): string {
@@ -399,10 +444,29 @@ export async function castNewRecipe(
       newSpec = preGeneratedSpec;
     }
     
-    // Use existing schema as the result schema initially
-    resultSchema = existingSchema;
-    title = existingSchema.title || "New Charm";
-    description = existingSchema.description || "";
+    // Simple schema handling - for pregenerated workflows
+    if (preGeneratedSchema) {
+      // For pre-generated schemas, we expect a valid argument schema
+      if (!preGeneratedSchema.type || preGeneratedSchema.type !== 'object' || !preGeneratedSchema.properties) {
+        throw new Error("Invalid argument schema: must be an object type with properties");
+      }
+
+      // Check for attached result schema (from workflow classification)
+      if ((preGeneratedSchema as any).resultSchema) {
+        resultSchema = (preGeneratedSchema as any).resultSchema;
+        delete (preGeneratedSchema as any).resultSchema;
+      } else {
+        // No separate result schema, use argument schema
+        resultSchema = preGeneratedSchema;
+      }
+    } else {
+      // Default case - use existing schema
+      resultSchema = existingSchema;
+    }
+    
+    // Set title and description
+    title = (preGeneratedSchema?.title || resultSchema?.title || existingSchema.title || "New Charm");
+    description = (preGeneratedSchema?.description || resultSchema?.description || existingSchema.description || "");
   } else {
     // Phase 1: Generate spec/plan and schema based on goal and possibly existing schema
     // NOTE: We're passing goal directly here, which should already have mentions processed
@@ -421,45 +485,27 @@ export async function castNewRecipe(
   console.log("resultSchema", resultSchema);
   console.log("newSpec", newSpec);
 
-  // NOTE(ja): we put the result schema in the argument schema
-  // as a hack to work around iframes not supporting results schemas
-  const schema = {
-    ...existingSchema,
-    title,
-    description,
-  } as Writable<JSONSchema>;
-
-  if (!schema.type) {
-    schema.type = "object";
+  // Simplify schema handling
+  // For argument schema, prioritize preGeneratedSchema (from workflow) over existingSchema
+  const argumentSchema = preGeneratedSchema || existingSchema;
+  
+  // Ensure minimum structure for result schema (default to argument schema if none available)
+  if (!resultSchema) {
+    resultSchema = argumentSchema;
   }
-
-  if (schema.type === "object" && !schema.properties) {
-    schema.properties = {};
-  }
-
-  // FIXME(ja): we shouldn't just throw results into the argument schema
-  // as this is a hack...
-  if (schema.type === "object" && resultSchema?.properties) {
-    const props = resultSchema.properties ?? {};
-    Object.keys(props).forEach((key) => {
-      if (schema.properties && schema.properties[key]) {
-        console.error(`skipping ${key} already in the argument schema`);
-      } else {
-        (schema.properties as Record<string, JSONSchema>)[key] = props[key];
-      }
-    });
-  }
-
-  // Phase 2: Generate UI code using the schema and enhanced spec
-  const newIFrameSrc = await genSrc({ newSpec, schema });
-  const name = extractTitle(newIFrameSrc, title); // Use the generated title as fallback
+  
+  // Generate the UI code
+  const newIFrameSrc = await genSrc({ newSpec, schema: argumentSchema });
+  const name = extractTitle(newIFrameSrc, title || "New Charm");
+  
+  // Build the recipe
   const newRecipeSrc = buildFullRecipe({
     src: newIFrameSrc,
     spec,
     plan,
     goal,
-    argumentSchema: schema,
-    resultSchema: resultSchema || schema,
+    argumentSchema,
+    resultSchema,
     name,
   });
 
