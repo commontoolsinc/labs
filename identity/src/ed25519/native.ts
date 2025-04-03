@@ -5,6 +5,7 @@ import {
   didToBytes,
   ED25519_ALG,
   ed25519RawToPkcs8,
+  isNativeEd25519Supported,
 } from "./utils.ts";
 import {
   AsBytes,
@@ -14,7 +15,6 @@ import {
   Signer,
   Verifier,
 } from "../interface.ts";
-import { clone } from "../utils.ts";
 
 // WebCrypto Key formats for Ed25519
 // Non-explicitly described in https://wicg.github.io/webcrypto-secure-curves/#ed25519
@@ -25,38 +25,6 @@ import { clone } from "../utils.ts";
 // | jwk    |   X    |    X    |
 // | pkcs8  |        |    X    |
 // | spki   |   X    |         |
-
-// Returns whether ed25519 is supported in Web Crypto API.
-// Tests both 1) key creation and 2) serialization.
-//
-// * Chrome currently requires Experimental Web Features flag enabled for ed25519 keys
-// * Firefox supports ed25519 keys, though cannot be serialized (stored in IndexedDB)
-//   until v136 https://bugzilla.mozilla.org/show_bug.cgi?id=1939993
-export const isNativeEd25519Supported = (() => {
-  let isSupported: boolean | null = null;
-  return async function isNativeEd25519Supported() {
-    if (isSupported !== null) {
-      return isSupported;
-    }
-    const dummyKey = new Uint8Array(32);
-    try {
-      const key = await globalThis.crypto.subtle.importKey(
-        "raw",
-        dummyKey,
-        ED25519_ALG,
-        false,
-        [
-          "verify",
-        ],
-      );
-      await clone(key);
-      isSupported = true;
-    } catch (e) {
-      isSupported = false;
-    }
-    return isSupported;
-  };
-})();
 
 export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
   #keypair: CryptoKeyPair;

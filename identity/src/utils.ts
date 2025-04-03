@@ -28,14 +28,3 @@ const HASH_ALG = "SHA-256";
 export async function hash(input: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await globalThis.crypto.subtle.digest(HASH_ALG, input));
 }
-
-// Clones object using Structured Clone Algorithm.
-// Used to test if ed25519 keys can be stored in IndexedDB.
-export function clone<T>(obj: T): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const { port1, port2 } = new MessageChannel();
-    port1.onmessage = (msg) => resolve(msg.data);
-    port1.onmessageerror = (e) => reject(e);
-    port2.postMessage(obj);
-  });
-}
