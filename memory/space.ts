@@ -7,16 +7,12 @@ import { fromString, refer } from "./reference.ts";
 import { unclaimed } from "./fact.ts";
 import { from as toChanges, set } from "./changes.ts";
 import { create as createCommit, the as COMMIT_THE } from "./commit.ts";
-import {
-  addMemoryAttributes,
-  recordResult,
-  traceAsync,
-  traceSync,
-} from "./telemetry.ts";
+import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
   Assert,
   Assertion,
   AsyncResult,
+  Cause,
   Claim,
   Commit,
   CommitData,
@@ -27,12 +23,12 @@ import type {
   Fact,
   JSONValue,
   MemorySpace,
-  Principal,
   Query,
   QueryError,
   Reference,
   Result,
   Retract,
+  SchemaQuery,
   Selection,
   SpaceSession,
   SystemError,
@@ -43,6 +39,7 @@ import type {
   Unit,
 } from "./interface.ts";
 import * as Error from "./error.ts";
+import { selectSchema } from "./space-schema.ts";
 export * from "./interface.ts";
 
 export const PREPARE = `
@@ -158,7 +155,7 @@ export type Options = {
   url: URL;
 };
 
-interface Session<Space extends MemorySpace> {
+export interface Session<Space extends MemorySpace> {
   subject: Space;
   store: Database;
 }
@@ -186,6 +183,17 @@ class Space<Subject extends MemorySpace = MemorySpace>
       });
 
       return query(this, source);
+    });
+  }
+
+  querySchema(source: SchemaQuery<Subject>) {
+    return traceSync("space.instance.querySchema", (span) => {
+      addMemoryAttributes(span, {
+        operation: "querySchema",
+        space: this.subject,
+      });
+
+      return querySchema(this, source);
     });
   }
 
@@ -422,6 +430,44 @@ const select = <Space extends MemorySpace>(
   }
 
   return selection;
+};
+
+export type FactSelector = {
+  the: The | "_";
+  of: Entity | "_";
+  cause: Cause | "_";
+  is?: undefined | Record<string | number | symbol, never>;
+  since?: number;
+};
+
+export type SelectedFact = {
+  the: The;
+  of: Entity;
+  cause: Cause;
+  is?: JSONValue;
+};
+
+export const SelectAll = "_";
+export const selectFacts = function* <Space extends MemorySpace>(
+  { store }: Session<Space>,
+  { the, of, cause, is, since }: FactSelector,
+): Iterable<SelectedFact> {
+  const rows = store.prepare(EXPORT).all({
+    the: the === SelectAll ? null : the,
+    of: of === SelectAll ? null : of,
+    cause: cause === SelectAll ? null : cause,
+    is: is === undefined ? null : {},
+    since: since ?? null,
+  }) as StateRow[];
+
+  for (const row of rows) {
+    yield {
+      the: row.the,
+      of: row.of,
+      cause: row.cause ?? refer(unclaimed(row)).toString() as Cause,
+      is: row.is ? JSON.parse(row.is) as JSONValue : undefined,
+    };
+  }
 };
 
 /**
@@ -673,4 +719,45 @@ export const query = <Space extends MemorySpace>(
   });
 };
 
-const SelectAll = "_";
+export const querySchema = <Space extends MemorySpace>(
+  session: Session<Space>,
+  command: SchemaQuery<Space>,
+): Result<Selection<Space>, QueryError> => {
+  return traceSync("space.querySchema", (span) => {
+    addMemoryAttributes(span, {
+      operation: "querySchema",
+      space: session.subject,
+    });
+
+    if (command.args?.selectSchema) {
+      span.setAttribute("querySchema.has_selector", true);
+    }
+    if (command.args?.since !== undefined) {
+      span.setAttribute("querySchema.since", command.args.since);
+    }
+
+    try {
+      const result = session.store.transaction(selectSchema)(
+        session,
+        command.args,
+      );
+
+      const entities = Object.keys(result || {}).length;
+      span.setAttribute("querySchema.result_entity_count", entities);
+
+      return {
+        ok: {
+          [command.sub]: result,
+        } as Selection<Space>,
+      };
+    } catch (error) {
+      return {
+        error: Error.query(
+          command.sub,
+          command.args.selectSchema,
+          error as SqliteError,
+        ),
+      };
+    }
+  });
+};

@@ -1,5 +1,6 @@
 import type { Cancel, EntityId } from "@commontools/runner";
 import { log } from "../storage.ts";
+import { SchemaContext } from "@commontools/memory/interface";
 
 export interface StorageValue<T = any> {
   value: T;
@@ -27,9 +28,14 @@ export interface StorageProvider {
    * @param entityId - Entity ID to sync.
    * @param expectedInStorage - Wait for the value, it's assumed to be in
    *   storage eventually.
+   * @param schemaContext - The schemaContext that determines what to sync.
    * @returns Promise that resolves when the value is synced.
    */
-  sync(entityId: EntityId, expectedInStorage?: boolean): Promise<void>;
+  sync(
+    entityId: EntityId,
+    expectedInStorage?: boolean,
+    schemaContext?: SchemaContext,
+  ): Promise<void>;
 
   /**
    * Get a value from the local cache reflecting storage. Call `sync()` first.
@@ -77,8 +83,11 @@ export abstract class BaseStorageProvider implements StorageProvider {
     { ok: object; error?: undefined } | { ok?: undefined; error: Error }
   >;
 
-  abstract sync(entityId: EntityId, expectedInStorage: boolean): Promise<void>;
-
+  abstract sync(
+    entityId: EntityId,
+    expectedInStorage: boolean,
+    schemaContext?: SchemaContext,
+  ): Promise<void>;
   abstract get<T = any>(entityId: EntityId): StorageValue<T> | undefined;
 
   sink<T = any>(

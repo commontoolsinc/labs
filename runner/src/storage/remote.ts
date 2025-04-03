@@ -8,6 +8,8 @@ import type {
   Protocol,
   Query,
   Result,
+  SchemaContext,
+  SchemaQuery,
   Subscribe,
   Transaction,
   UCAN,
@@ -170,7 +172,7 @@ export class RemoteStorageProvider implements StorageProvider {
     }
   }
 
-  subscribe(entityId: EntityId) {
+  subscribe(entityId: EntityId, schemaContext?: SchemaContext) {
     const { the, inspector } = this;
     const of = RemoteStorageProvider.toEntity(entityId);
     const local = this.mount(this.workspace);
@@ -178,16 +180,27 @@ export class RemoteStorageProvider implements StorageProvider {
 
     if (!subscription) {
       if (local.remote.size < this.settings.maxSubscriptionsPerSpace) {
+        const selector = (schemaContext === undefined)
+          ? { select: { [of]: { [the]: {} } } }
+          : {
+            selectSchema: {
+              [of]: {
+                [the]: { "_": { path: [], schemaContext: schemaContext } },
+              },
+            },
+          };
+
         // If we do not have a subscription yet we create a query and
         // subscribe to it.
-        subscription = Subscription.spawn(
-          local.memory,
-          { select: { [of]: { [the]: {} } } },
-          inspector,
-        );
+        subscription = Subscription.spawn(local.memory, selector, inspector);
 
         // store subscription so it can be reused.
         local.remote.set(of, subscription);
+
+        // We also want to add any subscriptions that should follow from that query
+        if (schemaContext) {
+          this.subscribeToContents(subscription);
+        }
       }
     }
 
@@ -200,9 +213,10 @@ export class RemoteStorageProvider implements StorageProvider {
   ): Cancel {
     const subscription = this.subscribe(entityId);
     if (subscription) {
+      const of = RemoteStorageProvider.toEntity(entityId);
       // ⚠️ Types are incorrect because when there is no value we still want to
       // notify the subscriber.
-      return subscription.subscribe(callback as unknown as Subscriber);
+      return subscription.subscribe(of, callback as unknown as Subscriber);
     } else {
       console.warn(
         `⚠️ Reached maximum subscription limit on ${this.workspace}. Call to .sink is ignored`,
@@ -210,11 +224,16 @@ export class RemoteStorageProvider implements StorageProvider {
       return () => {};
     }
   }
-  async sync(entityId: EntityId): Promise<void> {
-    const subscription = this.subscribe(entityId);
+  async sync(
+    entityId: EntityId,
+    _expectedInStorage: boolean = false,
+    schemaContext?: SchemaContext,
+  ): Promise<void> {
+    const subscription = this.subscribe(entityId, schemaContext);
     if (subscription) {
+      const of = RemoteStorageProvider.toEntity(entityId);
       // We add noop subscriber just to keep subscription alive.
-      subscription.subscribe(RemoteStorageProvider.sync);
+      subscription.subscribe(of, RemoteStorageProvider.sync);
       // Then await for the query to be resolved because that is what
       // caller will await on.
       await subscription.query;
@@ -237,7 +256,7 @@ export class RemoteStorageProvider implements StorageProvider {
     const local = this.mount(this.workspace);
     const query = local.remote.get(of);
 
-    return query?.value as StorageValue<T> | undefined;
+    return query?.getValue(of) as StorageValue<T> | undefined;
   }
   async send<T = any>(
     changes: { entityId: EntityId; value: StorageValue<T> }[],
@@ -252,7 +271,7 @@ export class RemoteStorageProvider implements StorageProvider {
       // Cause is last fact for the the given `{ the, of }` pair. If we have a
       // a local fact we use that as it may be ahead, otherwise we use a remote
       // fact.
-      const cause = local.get(of) ?? remote.get(of)?.fact;
+      const cause = local.get(of) ?? remote.get(of)?.getFact(of);
 
       // If desired state is same as current state this is redundant and we skip
       if (cause && JSON.stringify(cause.is) === content) {
@@ -528,6 +547,34 @@ export class RemoteStorageProvider implements StorageProvider {
   getReplica(): string {
     return this.workspace;
   }
+
+  subscribeToContents(subscription: Subscription<MemorySpace>): void {
+    const { inspector } = this;
+    const local = this.mount(this.workspace);
+    const initialSubscription = subscription;
+    const unsubscribe = subscription.subscribe("_", (_value) => {
+      // we only want this event once
+      unsubscribe();
+      const includedQueryView = initialSubscription.query.includedQueryView();
+      if (includedQueryView !== undefined) {
+        const viewSelector = includedQueryView.selector as Memory.Selector;
+        const newSubscription = new Subscription(
+          local.memory,
+          { select: viewSelector },
+          new Map<Entity, Set<Subscriber>>(),
+          includedQueryView,
+          inspector,
+        );
+        for (const [of, _rest] of Object.entries(viewSelector)) {
+          if (
+            of !== "_" && local.remote.get(of as Entity) === undefined
+          ) {
+            local.remote.set(of as Entity, newSubscription);
+          }
+        }
+      }
+    });
+  }
 }
 
 export interface Subscriber {
@@ -541,22 +588,35 @@ class Subscription<Space extends MemorySpace> {
 
   static spawn<Space extends MemorySpace>(
     session: Memory.MemorySpaceSession<Space>,
-    selector: Query["args"],
+    selector: Query["args"] | SchemaQuery["args"],
     inspector?: BroadcastChannel,
   ) {
-    return new Subscription(session, selector, new Set(), inspector);
+    return new Subscription(
+      session,
+      selector,
+      new Map<Entity | "_", Set<Subscriber>>(),
+      undefined,
+      inspector,
+    );
   }
   constructor(
     public session: Memory.MemorySpaceSession<Space>,
-    public selector: Query["args"],
-    public subscribers: Set<Subscriber>,
+    public selector: Query["args"] | SchemaQuery["args"],
+    public subscribers: Map<Entity | "_", Set<Subscriber>>,
+    public queryView?: Memory.QueryView<Space, Protocol<Space>>,
     public inspector?: BroadcastChannel,
   ) {
-    this.connect();
+    this.connect(queryView);
   }
 
-  connect() {
-    const query = this.session.query(this.selector);
+  // Run an initial query to get the data, then subscribe to get updates
+  // In the case of a selector that is a SchemaSelector, we will run the
+  // query with the schema selector, but subscribe to updates on the doc
+  // with a standard selector.
+  connect(queryView?: Memory.QueryView<Space, Protocol<Space>>) {
+    const query = (queryView === undefined)
+      ? this.session.query(this.selector)
+      : queryView;
     const subscription = query.subscribe();
     this.query = query;
     this.subscription = subscription;
@@ -568,11 +628,13 @@ class Subscription<Space extends MemorySpace> {
     this.poll();
     return this;
   }
-  get value(): JSONValue | undefined {
-    return this.query.facts?.[0]?.is;
+
+  getValue(of: Entity) {
+    return this.getFact(of)?.is;
   }
-  get fact() {
-    return this.query.facts[0];
+
+  getFact(of: Entity) {
+    return this.query.facts.find((fact) => fact.of == of);
   }
 
   inspect<T>(
@@ -586,18 +648,30 @@ class Subscription<Space extends MemorySpace> {
   }
 
   broadcast() {
-    const { value } = this;
-    this.inspector?.postMessage({
-      integrate: {
-        url: this.subscription.toURL(),
-        value,
-      },
-    });
+    const fullSubscribers = this.subscribers.get("_");
+    for (const fact of this.query.facts) {
+      const value = fact.is;
+      this.inspector?.postMessage({
+        integrate: {
+          url: this.subscription.toURL(),
+          value,
+        },
+      });
 
-    for (const subscriber of this.subscribers) {
-      subscriber(value);
+      const currentSubscribers = this.subscribers.get(fact.of);
+      if (currentSubscribers !== undefined) {
+        for (const subscriber of currentSubscribers) {
+          subscriber(fact.is);
+        }
+      }
+      if (fullSubscribers !== undefined) {
+        for (const subscriber of fullSubscribers) {
+          subscriber(fact.is);
+        }
+      }
     }
   }
+
   async poll() {
     const { reader } = this;
     while (true) {
@@ -616,11 +690,18 @@ class Subscription<Space extends MemorySpace> {
     this.connect();
   }
 
-  subscribe(subscriber: Subscriber): Cancel {
-    this.subscribers.add(subscriber);
-    return () => this.unsubscribe.bind(this, subscriber);
+  subscribe(of: Entity | "_", subscriber: Subscriber): Cancel {
+    const currentSubscribers = this.subscribers.get(of) ?? new Set();
+    currentSubscribers.add(subscriber);
+    this.subscribers.set(of, currentSubscribers);
+    return () => this.unsubscribe(of, subscriber);
   }
-  unsubscribe(subscriber: Subscriber) {
-    this.subscribers.delete(subscriber);
+
+  unsubscribe(of: Entity | "_", subscriber: Subscriber) {
+    const currentSubscribers = this.subscribers.get(of);
+    if (currentSubscribers !== undefined) {
+      currentSubscribers.delete(subscriber);
+      this.subscribers.set(of, currentSubscribers);
+    }
   }
 }

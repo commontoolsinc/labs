@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertMatch } from "@std/assert";
+import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
 import * as Fact from "../fact.ts";
 import * as Transaction from "../transaction.ts";
 import * as Changes from "../changes.ts";
@@ -282,6 +282,45 @@ test("list different fact types", store, async (session) => {
       [subject.did()]: Changes.from([text]),
     },
     "lists text facts",
+  );
+});
+
+test("list multiple facts using schema query", store, async (session) => {
+  const clock = new Clock();
+  const memory = Consumer.open({ as: subject, session, clock })
+    .mount(subject.did());
+  const doc2 = `of:${refer({ doc: 2 })}` as const;
+
+  const facts = [
+    Fact.assert({ the, of: doc, is: { value: { v: 1 } } }),
+    Fact.assert({ the, of: doc2, is: { value: { v: 2 } } }),
+  ];
+
+  // Create multiple facts
+  await memory.transact({
+    changes: Changes.from(facts),
+  });
+
+  const result = await memory.query({
+    selectSchema: {
+      _: {
+        [the]: {
+          _: { path: [], schemaContext: { schema: true, rootSchema: true } },
+        },
+      },
+    },
+  });
+
+  const expectedFacts: Record<string, any> = {};
+  for (const fact of facts) {
+    expectedFacts[fact.cause.toString()] = { is: fact.is };
+  }
+  const factChanges = Changes.from(facts);
+  const newObject = { ...factChanges, "_": { [the]: expectedFacts } };
+  assertEquals(
+    result.ok?.selection,
+    { [subject.did()]: newObject },
+    "lists multiple facts",
   );
 });
 
