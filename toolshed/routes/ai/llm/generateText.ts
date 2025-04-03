@@ -23,14 +23,17 @@ export interface GenerateTextParams {
   abortSignal?: AbortSignal;
   max_tokens?: number;
   mode?: "json";
-  // Optional callback for when streaming is complete (used for caching)
-  onStreamComplete?: (
-    finalMessage: { role: "user" | "assistant"; content: string },
-  ) => void;
+  // Updated callback to receive complete data for caching
+  onStreamComplete?: (result: {
+    message: { role: "user" | "assistant"; content: string };
+    messages: { role: "user" | "assistant"; content: string }[];
+    originalRequest: GenerateTextParams;
+  }) => void;
 }
 
 export interface GenerateTextResult {
   message: { role: "user" | "assistant"; content: string };
+  messages: { role: "user" | "assistant"; content: string }[];
   stream?: ReadableStream;
 }
 
@@ -225,7 +228,10 @@ export async function generateText(
       messages[messages.length - 1].content = result;
     }
 
-    return { message: messages[messages.length - 1] };
+    return {
+      message: messages[messages.length - 1],
+      messages: [...messages],
+    };
   }
 
   // Create streaming response
@@ -271,10 +277,13 @@ export async function generateText(
         messages[messages.length - 1].content = result;
       }
 
-      // Call the onStreamComplete callback with the final message, if provided
-      // This is used to save the completed stream response to the cache
+      // Call the onStreamComplete callback with all the data needed for caching
       if (params.onStreamComplete) {
-        params.onStreamComplete(messages[messages.length - 1]);
+        params.onStreamComplete({
+          message: messages[messages.length - 1],
+          messages: [...messages],
+          originalRequest: params,
+        });
       }
 
       controller.close();
@@ -283,6 +292,7 @@ export async function generateText(
 
   return {
     message: messages[messages.length - 1],
+    messages: [...messages],
     stream,
   };
 }
