@@ -26,14 +26,9 @@ elif [[ "$(basename "$(pwd)")" == "jumble" ]]; then
   cd ..
 fi
 
-#0. Create temp cache directory
+#1. Create temp cache directory
 echo "Creating temp cache directory..."
 TEMP_CACHE_DIR=$(mktemp -d)
-
-# 1. Delete existing cache
-echo "Deleting existing LLM cache..."
-# rm -rf jumble/integration/cache/llm-api-cache
-mkdir -p jumble/integration/cache/llm-api-cache
 
 # 2. Start toolshed on port 8000
 echo "Starting toolshed on port 8000..."
