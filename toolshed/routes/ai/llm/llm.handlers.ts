@@ -120,11 +120,24 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
       ...payload,
       abortSignal: c.req.raw.signal,
       max_tokens: payload.max_tokens || modelDefaultMaxTokens,
+      onStreamComplete: payload.stream
+        ? (finalMessage) => {
+          // Save the completed stream response to the cache
+          cache.saveItem(cacheKey, {
+            ...payload,
+            messages: [...payload.messages, finalMessage],
+          }).catch((e) => {
+            console.error("Error saving streamed response to cache:", e);
+          });
+        }
+        : undefined,
     });
 
     if (!payload.stream) {
       // Save to cache
-      const cacheKey = await cache.hashKey(JSON.stringify(payload));
+      console.log("messagesssssss", [...payload.messages, result.message]);
+      console.log("=======================");
+      console.log("minus one", [...payload.messages]);
       await cache.saveItem(cacheKey, {
         ...payload,
         // FIXME(jake): I believe this is persisting duplicate messages to the cached json blobs.

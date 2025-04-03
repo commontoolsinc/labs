@@ -23,6 +23,10 @@ export interface GenerateTextParams {
   abortSignal?: AbortSignal;
   max_tokens?: number;
   mode?: "json";
+  // Optional callback for when streaming is complete (used for caching)
+  onStreamComplete?: (
+    finalMessage: { role: "user" | "assistant"; content: string },
+  ) => void;
 }
 
 export interface GenerateTextResult {
@@ -265,6 +269,12 @@ export async function generateText(
         messages.push({ role: "assistant", content: result });
       } else {
         messages[messages.length - 1].content = result;
+      }
+
+      // Call the onStreamComplete callback with the final message, if provided
+      // This is used to save the completed stream response to the cache
+      if (params.onStreamComplete) {
+        params.onStreamComplete(messages[messages.length - 1]);
       }
 
       controller.close();
