@@ -3,7 +3,6 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createGroq, groq } from "@ai-sdk/groq";
 import { openai } from "@ai-sdk/openai";
 import { createVertex, vertex } from "@ai-sdk/google-vertex";
-import { cerebras, createCerebras } from "@ai-sdk/cerebras";
 
 import env from "@/env.ts";
 
@@ -50,8 +49,7 @@ const addModel = ({
     | typeof anthropic
     | typeof groq
     | typeof openai
-    | typeof vertex
-    | typeof cerebras;
+    | typeof vertex;
   name: string;
   aliases: string[];
   capabilities: Capabilities;
@@ -91,20 +89,6 @@ const addModel = ({
 if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
   const anthropicProvider = createAnthropic({
     apiKey: env.CTTS_AI_LLM_ANTHROPIC_API_KEY,
-  });
-  addModel({
-    provider: anthropicProvider,
-    name: "anthropic:claude-3-5-haiku-20241022",
-    aliases: ["anthropic:claude-3-5-haiku-latest", "claude-3-5-haiku"],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 8192,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-    },
   });
 
   addModel({
@@ -156,21 +140,6 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
       anthropic: {
         thinking: { type: "enabled", budgetTokens: 64000 },
       },
-    },
-  });
-
-  addModel({
-    provider: anthropicProvider,
-    name: "anthropic:claude-3-opus-20240229",
-    aliases: ["anthropic:claude-3-opus-latest", "claude-3-opus"],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 4096,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
     },
   });
 }
@@ -247,21 +216,6 @@ if (env.CTTS_AI_LLM_GROQ_API_KEY) {
       contextWindow: 8192,
       maxOutputTokens: 8192,
       images: false,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: false,
-    },
-  });
-
-  addModel({
-    provider: groqProvider,
-    name: "groq:llama-3.2-90b-vision-preview",
-    aliases: ["groq:llama-3.2-90b-vision", "llama-3.2-90b-vision"],
-    capabilities: {
-      contextWindow: 128_000,
-      maxOutputTokens: 8000,
-      images: true,
       prefill: true,
       systemPrompt: true,
       stopSequences: true,
@@ -413,66 +367,6 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
 
   addModel({
     provider: vertexProvider,
-    name: "google:gemini-2.0-flash",
-    aliases: ["google:gemini-2.0-flash", "gemini-2.0-flash"],
-    capabilities: {
-      contextWindow: 1_048_576,
-      maxOutputTokens: 8192,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-    },
-  });
-
-  addModel({
-    provider: vertexProvider,
-    name: "google:gemini-2.0-flash-lite-preview-02-05",
-    aliases: ["google:gemini-2.0-flash-lite", "gemini-2.0-flash-lite"],
-    capabilities: {
-      contextWindow: 1_048_576,
-      maxOutputTokens: 8192,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-    },
-  });
-
-  addModel({
-    provider: vertexProvider,
-    name: "google:gemini-2.0-flash-thinking-exp-01-21",
-    aliases: ["google:gemini-2.0-flash-thinking", "gemini-2.0-flash-thinking"],
-    capabilities: {
-      contextWindow: 1_048_576,
-      maxOutputTokens: 8192,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-    },
-  });
-
-  addModel({
-    provider: vertexProvider,
-    name: "google:gemini-2.0-pro-exp-02-05",
-    aliases: ["google:gemini-2.0-pro", "gemini-2.0-pro"],
-    capabilities: {
-      contextWindow: 2_097_152,
-      maxOutputTokens: 8192,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-    },
-  });
-
-  addModel({
-    provider: vertexProvider,
     name: "google:gemini-2.5-pro-exp-03-25",
     aliases: ["google:gemini-2.5-pro", "gemini-2.5-pro"],
     capabilities: {
@@ -480,26 +374,6 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
       maxOutputTokens: 65_535,
       images: true,
       prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-    },
-  });
-}
-
-if (env.CTTS_AI_LLM_CEREBRAS_API_KEY) {
-  const cerebrasProvider = createCerebras({
-    apiKey: env.CTTS_AI_LLM_CEREBRAS_API_KEY,
-  });
-  addModel({
-    provider: cerebrasProvider,
-    name: "cerebras:llama-3.3-70b",
-    aliases: ["cerebras"],
-    capabilities: {
-      contextWindow: 8192,
-      maxOutputTokens: 8192,
-      images: false,
-      prefill: false,
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
@@ -543,73 +417,7 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
       streaming: true,
     },
   });
-
-  addModel({
-    provider: perplexityProvider,
-    name: "perplexity:sonar",
-    aliases: ["sonar"],
-    capabilities: {
-      contextWindow: 127_000,
-      maxOutputTokens: 8000,
-      images: false,
-      prefill: false,
-      systemPrompt: false,
-      stopSequences: true,
-      streaming: true,
-    },
-  });
 }
-
-// FIXME(jake): There's some package import error with the bedrock provider. Commenting out for now.
-// if (
-//   env.CTTS_AI_LLM_AWS_ACCESS_KEY_ID &&
-//   env.CTTS_AI_LLM_AWS_SECRET_ACCESS_KEY
-// ) {
-//   addModel({
-//     provider: bedrock,
-//     name: "us.amazon.nova-micro-v1:0",
-//     aliases: ["amazon:nova-micro", "nova-micro"],
-//     capabilities: {
-//       contextWindow: 128_000,
-//       maxOutputTokens: 5000,
-//       images: false,
-//       prefill: true,
-//       systemPrompt: true,
-//       stopSequences: true,
-//       streaming: true,
-//     },
-//   });
-
-//   addModel({
-//     provider: bedrock,
-//     name: "us.amazon.nova-lite-v1:0",
-//     aliases: ["amazon:nova-lite", "nova-lite"],
-//     capabilities: {
-//       contextWindow: 300_000,
-//       maxOutputTokens: 5000,
-//       images: true,
-//       prefill: true,
-//       systemPrompt: true,
-//       stopSequences: true,
-//       streaming: true,
-//     },
-//   });
-
-//   addModel({
-//     provider: bedrock,
-//     name: "us.amazon.nova-pro-v1:0",
-//     aliases: ["amazon:nova-pro", "nova-pro"],
-//     capabilities: {
-//       contextWindow: 300_000,
-//       maxOutputTokens: 5000,
-//       images: true,
-//       prefill: true,
-//       systemPrompt: true,
-//       stopSequences: true,
-//       streaming: true,
-//     },
-//   });
-// }
 
 export const findModel = (name: string) => {
   return MODELS[name];
