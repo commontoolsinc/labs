@@ -10,26 +10,23 @@ const JsonView: React.FC<{
   style: any;
   collapsed?: number | boolean;
 }> = JsonViewImport as any;
-
-import { getDoc } from "@commontools/runner";
 import { useAnimationSmoothing } from "@/hooks/use-animation-smoothing.ts";
 
-import { useCell } from "@/hooks/use-cell.ts";
-const model = getDoc(Inspector.create(), "inspector", "").asCell();
-
 // Custom hooks
-export function useStorageBroadcast(callback: (data: any) => void) {
+export function useStorageBroadcast(
+  scope: string,
+  callback: (data: Inspector.BroadcastCommand) => void,
+) {
   useEffect(() => {
-    const messages = new BroadcastChannel(storage.id);
-    messages.onmessage = ({ data }) => callback(data);
-    return () => messages.close();
-  }, [callback]);
+    const channel = new Inspector.Channel(scope, callback);
+    return () => channel.close();
+  }, [scope, callback]);
 }
 
 export function useStatusMonitor() {
   const status = useRef(Inspector.create());
 
-  const updateStatus = useCallback((command: Inspector.Command) => {
+  const updateStatus = useCallback((command: Inspector.BroadcastCommand) => {
     if (!status.current) {
       throw new Error("Status is not initialized");
     }
@@ -43,25 +40,34 @@ export function useStatusMonitor() {
 // Example usage with dummy data
 export const DummyModelInspector: React.FC = () => {
   const { status, updateStatus } = useStatusMonitor();
-  useStorageBroadcast(updateStatus);
+  useStorageBroadcast(storage.id, updateStatus);
   if (!status.current) return null;
 
   return <ModelInspector model={status.current} />;
 };
 
-export const ToggleableNetworkInspector: React.FC<{ visible: boolean }> = (
-  { visible },
+export const ToggleableNetworkInspector: React.FC<
+  { fullscreen?: boolean; visible: boolean }
+> = (
+  { visible, fullscreen = false },
 ) => {
   const { status, updateStatus } = useStatusMonitor();
-  useStorageBroadcast(updateStatus);
+  const scope = fullscreen ? "" : storage.id;
+  useStorageBroadcast(scope, updateStatus);
 
   if (!visible || !status.current) return null;
 
-  return <ModelInspector model={status.current} initiallyOpen />;
+  return (
+    <ModelInspector
+      model={status.current}
+      initiallyOpen
+      fullscreen={fullscreen}
+    />
+  );
 };
 const ModelInspector: React.FC<
-  { model: Inspector.Model; initiallyOpen?: boolean }
-> = ({ model, initiallyOpen = false }) => {
+  { model: Inspector.Model; initiallyOpen?: boolean; fullscreen?: boolean }
+> = ({ model, initiallyOpen = false, fullscreen = false }) => {
   const [isOpen, setIsOpen] = useState(initiallyOpen);
   const [activeTab, setActiveTab] = useState<"actions" | "subscriptions">(
     "actions",
@@ -352,6 +358,8 @@ const ModelInspector: React.FC<
     return type === "push" ? "↑" : "↓";
   };
 
+  const computedDrawerHeight = fullscreen ? "100vh" : `${drawerHeight}px`;
+
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50">
       <button
@@ -365,7 +373,7 @@ const ModelInspector: React.FC<
       {isOpen && (
         <div
           className="bg-gray-900 text-white shadow-lg border-t border-gray-700 text-xs flex flex-col"
-          style={{ height: `${drawerHeight}px` }}
+          style={{ height: `${computedDrawerHeight}` }}
         >
           {/* Resize Handle */}
           <div
