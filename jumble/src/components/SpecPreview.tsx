@@ -303,3 +303,11 @@ export function SpecPreview({
                       Your preview will appear here as you type...
                     </animated.div>
                   )}
+                </animated.div>
+              )
+          )}
+        </div>
+      </div>
+    </animated.div>
+  );
+}

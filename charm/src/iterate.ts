@@ -16,7 +16,7 @@ import {
 import { Charm, CharmManager, charmSourceCellSchema } from "./charm.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
-import { generateSpecAndSchema } from "@commontools/llm";
+import { generateSpecAndSchema, parseTagFromResponse } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
 
 const genSrc = async ({
@@ -93,6 +93,42 @@ export async function iterate(
 }
 
 /**
+ * Standardized tag names used in XML structures throughout the codebase
+ */
+export const TAGS = {
+  TITLE: "title",
+  DESCRIPTION: "description",
+  SPEC: "spec",
+  PLAN: "plan",
+  GOAL: "goal",
+  ARGUMENT_SCHEMA: "argument_schema",
+  RESULT_SCHEMA: "result_schema",
+  EXAMPLE_DATA: "example_data",
+  ORIGINAL_SPEC: "original_spec",
+  USER_PROMPT: "user_prompt",
+  EXECUTION_PLAN: "execution_plan"
+} as const;
+
+/**
+ * Wraps content in XML tags
+ */
+export function wrapInTag(content: string, tag: string): string {
+  return `<${tag}>\n${content}\n</${tag}>`;
+}
+
+/**
+ * Extracts content from XML tags
+ * Uses the same implementation as parseTagFromResponse but returns undefined instead of throwing
+ */
+export function extractFromTag(content: string, tag: string): string | undefined {
+  try {
+    return parseTagFromResponse(content, tag);
+  } catch (e) {
+    return undefined;
+  }
+}
+
+/**
  * Formats a spec to include the user prompt and execution plan
  * This ensures the full context is preserved in the recipe even for "fix" workflows
  * where we preserve the original spec
@@ -102,17 +138,11 @@ function formatSpecWithPlanAndPrompt(originalSpec: string, userPrompt: string, p
   const planText = Array.isArray(plan) ? plan.join('\n- ') : plan;
   
   // Create a formatted spec with XML tags to separate sections
-  return `<ORIGINAL_SPEC>
-${originalSpec}
-</ORIGINAL_SPEC>
-
-<USER_PROMPT>
-${userPrompt}
-</USER_PROMPT>
-
-<EXECUTION_PLAN>
-- ${planText}
-</EXECUTION_PLAN>`;
+  return [
+    wrapInTag(originalSpec, TAGS.ORIGINAL_SPEC),
+    wrapInTag(userPrompt, TAGS.USER_PROMPT),
+    wrapInTag(`- ${planText}`, TAGS.EXECUTION_PLAN)
+  ].join("\n\n");
 }
 
 export function extractTitle(src: string, defaultTitle: string): string {
@@ -141,12 +171,58 @@ export const generateNewRecipeVersion = async (
     name,
   });
 
+  // IMPORTANT: For debugging - see what's in the source cell's argument
+  const sourceCell = parent.getSourceCell();
+  const argument = sourceCell?.key("argument");
+  
+  if (argument) {
+    try {
+      console.log("DEBUG: Parent charm argument cell found. Details:", {
+        hasCellMethods: typeof argument.get === 'function',
+        hasData: argument.get() !== undefined
+      });
+      
+      // More detailed debugging to see what's actually in the argument
+      try {
+        const argumentValue = argument.get();
+        if (argumentValue) {
+          console.log("DEBUG: Argument value type:", typeof argumentValue);
+          if (typeof argumentValue === 'object') {
+            const keys = Object.keys(argumentValue);
+            console.log("DEBUG: Argument keys:", keys);
+            
+            // Check if there are any cell references or aliases
+            const hasAliases = keys.some(k => argumentValue[k] && argumentValue[k].$alias);
+            console.log("DEBUG: Argument has aliases:", hasAliases);
+          }
+        }
+      } catch (e) {
+        console.error("DEBUG: Error examining argument value:", e);
+      }
+    } catch (e) {
+      console.error("DEBUG: Error accessing parent argument cell:", e);
+    }
+  } else {
+    console.warn("DEBUG: Parent charm has no argument in source cell");
+  }
+
+  // IMPORTANT: When creating a new version of a charm in the edit workflow,
+  // we need to reuse the EXACT SAME argument data from the parent charm.
+  // This ensures references to other charms are preserved.
+  const parentArgument = parent.getSourceCell()?.key("argument");
+  
+  if (!parentArgument) {
+    console.warn("Parent charm has no argument in source cell");
+  } else {
+    console.log("Using parent charm's argument for continuity in edit workflow");
+  }
+
   // Pass the newSpec so it's properly persisted and can be displayed/edited
   const newCharm = await compileAndRunRecipe(
     charmManager,
     newRecipeSrc,
     newSpec,
-    parent.getSourceCell()?.key("argument"),
+    parentArgument, // Pass the exact same argument cell from the parent charm
     recipeId ? [recipeId] : undefined,
   );
 
@@ -230,6 +306,23 @@ function turnCellsIntoAliases(data: any): any {
 }
 
 /**
+ * Creates a structured specification with goal, plan, and spec
+ */
+export function createStructuredSpec(goal: string, plan: string | undefined, spec: string): string {
+  const sections = [
+    wrapInTag(goal, TAGS.GOAL)
+  ];
+  
+  if (plan) {
+    sections.push(wrapInTag(plan, TAGS.PLAN));
+  }
+  
+  sections.push(wrapInTag(spec, TAGS.SPEC));
+  
+  return sections.join("\n\n");
+}
+
+/**
  * Cast a new recipe from a goal and data
  *
  * @param charmManager Charm manager representing the space this will be generated in
@@ -247,10 +340,44 @@ export async function castNewRecipe(
   preGeneratedSpec?: string,
   preGeneratedSchema?: JSONSchema
 ): Promise<Cell<Charm>> {
-  console.log("Processing goal:", goal, cells);
+  console.log("Processing goal:", goal);
+  console.log("Raw cells provided:", cells);
+
+  // DEBUGGING: Add more logging about cells
+  if (cells) {
+    try {
+      const cellsEntries = Object.entries(cells);
+      console.log(`DEBUG: Processing ${cellsEntries.length} cells/references:`);
+      
+      for (const [key, value] of cellsEntries) {
+        console.log(`  - ${key}: ${isCell(value) ? 'Is a Cell' : 'Not a Cell'}`);
+        if (isCell(value)) {
+          try {
+            console.log(`    * Has data: ${Boolean(value.get())}`);
+            // For the case of currentCharm explicitly
+            if (key === "currentCharm") {
+              const sourceCell = value.getSourceCell();
+              if (sourceCell) {
+                const argument = sourceCell.key("argument");
+                console.log(`    * Has source cell with argument: ${Boolean(argument)}`);
+                if (argument) {
+                  console.log(`    * Argument has data: ${Boolean(argument.get())}`);
+                }
+              }
+            }
+          } catch (e) {
+            console.log(`    * Error getting cell data: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("DEBUG: Error examining cells:", e);
+    }
+  }
 
   // Remove $UI, $NAME, and any streams from the cells
   const scrubbed = scrub(cells);
+  console.log("Cells after scrubbing:", scrubbed);
 
   // First, extract any existing schema if we have data and no pre-generated schema
   const existingSchema = preGeneratedSchema || createJsonSchema(scrubbed);
@@ -261,16 +388,13 @@ export async function castNewRecipe(
   // If we have a pre-generated spec, use it
   if (preGeneratedSpec) {
     // Try to extract structured information from the pre-generated spec
-    const specMatch = preGeneratedSpec.match(/<SPEC>([\s\S]*?)<\/SPEC>/);
-    const planMatch = preGeneratedSpec.match(/<PLAN>([\s\S]*?)<\/PLAN>/);
-    const goalMatch = preGeneratedSpec.match(/<GOAL>([\s\S]*?)<\/GOAL>/);
-    
-    spec = specMatch ? specMatch[1] : preGeneratedSpec;
-    plan = planMatch ? planMatch[1] : "";
+    spec = extractFromTag(preGeneratedSpec, TAGS.SPEC) || preGeneratedSpec;
+    plan = extractFromTag(preGeneratedSpec, TAGS.PLAN) || "";
+    const extractedGoal = extractFromTag(preGeneratedSpec, TAGS.GOAL);
     
     // If the spec doesn't already have the XML structure, add it
-    if (!preGeneratedSpec.includes("<SPEC>")) {
-      newSpec = `<GOAL>${goal}</GOAL>\n<PLAN>${plan || ""}</PLAN>\n<SPEC>${spec}</SPEC>`;
+    if (!preGeneratedSpec.includes(`<${TAGS.SPEC}>`)) {
+      newSpec = createStructuredSpec(goal, plan, spec);
     } else {
       newSpec = preGeneratedSpec;
     }
@@ -291,7 +415,7 @@ export async function castNewRecipe(
     description = generated.description;
     plan = generated.plan;
     
-    newSpec = `<GOAL>${goal}</GOAL>\n<PLAN>${plan}</PLAN>\n<SPEC>${spec}</SPEC>`;
+    newSpec = createStructuredSpec(goal, plan, spec);
   }
 
   console.log("resultSchema", resultSchema);
@@ -340,6 +464,7 @@ export async function castNewRecipe(
   });
 
   const input = turnCellsIntoAliases(scrubbed);
+  console.log("Final input after turnCellsIntoAliases:", input);
 
   return compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, input);
 }
