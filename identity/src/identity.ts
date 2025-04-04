@@ -1,9 +1,16 @@
-import { Ed25519Signer, Ed25519Verifier } from "./ed25519/index.ts";
+import {
+  Ed25519CreateConfig,
+  Ed25519Signer,
+  Ed25519Verifier,
+} from "./ed25519/index.ts";
 import { AsBytes, DIDKey, KeyPairRaw, Signer, Verifier } from "./interface.ts";
 import { base64pad } from "multiformats/bases/base64";
 import { hash } from "./utils.ts";
 
 const textEncoder = new TextEncoder();
+
+// Creation options used in `Identity` instantiation.
+export interface IdentityCreateConfig extends Ed25519CreateConfig {}
 
 // An `Identity` represents a public/private key pair.
 //
@@ -51,19 +58,24 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
   // Generate a new identity from raw ed25519 key material.
   static async fromRaw<ID extends DIDKey>(
     rawPrivateKey: Uint8Array,
+    config: IdentityCreateConfig = {},
   ): Promise<Identity<ID>> {
-    return new Identity(await Ed25519Signer.fromRaw<ID>(rawPrivateKey));
+    return new Identity(await Ed25519Signer.fromRaw<ID>(rawPrivateKey, config));
   }
 
   // Generate a new identity.
-  static async generate<ID extends DIDKey>(): Promise<Identity<ID>> {
-    return new Identity(await Ed25519Signer.generate<ID>());
+  static async generate<ID extends DIDKey>(
+    config: IdentityCreateConfig = {},
+  ): Promise<Identity<ID>> {
+    return new Identity(await Ed25519Signer.generate<ID>(config));
   }
 
-  static async generateMnemonic<ID extends DIDKey>(): Promise<
+  static async generateMnemonic<ID extends DIDKey>(
+    config: IdentityCreateConfig = {},
+  ): Promise<
     [Identity<ID>, string]
   > {
-    const [signer, mnemonic] = await Ed25519Signer.generateMnemonic<ID>();
+    const [signer, mnemonic] = await Ed25519Signer.generateMnemonic<ID>(config);
     return [new Identity(signer), mnemonic];
   }
 
@@ -81,40 +93,33 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
   // Read a PKCS8/PEM key.
   static async fromPkcs8<ID extends DIDKey>(
     pkcs8: Uint8Array,
+    config: IdentityCreateConfig = {},
   ): Promise<Identity<ID>> {
-    const signer = await Ed25519Signer.fromPkcs8<ID>(pkcs8);
-    return new Identity(signer);
-  }
-
-  // Like `fromPkcs8` but forces the usage of `@noble/ed25519`
-  // implementation, making private key material available to the context.
-  static async fromPkcs8FallbackImplementation<ID extends DIDKey>(
-    pkcs8: Uint8Array,
-  ): Promise<Identity<ID>> {
-    const signer = await Ed25519Signer.fromPkcs8FallbackImplementation<ID>(
-      pkcs8,
-    );
+    const signer = await Ed25519Signer.fromPkcs8<ID>(pkcs8, config);
     return new Identity(signer);
   }
 
   static async fromMnemonic<ID extends DIDKey>(
     mnemonic: string,
+    config: IdentityCreateConfig = {},
   ): Promise<Identity<ID>> {
-    const signer = await Ed25519Signer.fromMnemonic<ID>(mnemonic);
+    const signer = await Ed25519Signer.fromMnemonic<ID>(mnemonic, config);
     return new Identity(signer);
   }
 
   static async fromPassphrase<ID extends DIDKey>(
     passphrase: string,
+    config: IdentityCreateConfig = {},
   ): Promise<Identity<ID>> {
     const rawPrivateKey = await hash(new TextEncoder().encode(passphrase));
-    return new Identity(await Ed25519Signer.fromRaw<ID>(rawPrivateKey));
+    return new Identity(await Ed25519Signer.fromRaw<ID>(rawPrivateKey, config));
   }
 
   static fromString<ID extends DIDKey>(
     stringKey: string,
+    config: IdentityCreateConfig = {},
   ): Promise<Identity<ID>> {
-    return Identity.fromRaw(base64pad.decode(stringKey));
+    return Identity.fromRaw(base64pad.decode(stringKey), config);
   }
 
   // Deserialize `input` from storage into an `Identity`.
