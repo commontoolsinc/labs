@@ -1,23 +1,7 @@
 import { parseArgs } from "@std/cli/parse-args";
-import {
-  Browser,
-  ConsoleEvent,
-  DialogEvent,
-  launch,
-  Page,
-} from "@astral/astral";
-import {
-  castNewRecipe,
-  CharmManager,
-  compileAndRunRecipe,
-} from "@commontools/charm";
-import {
-  getEntityId,
-  getRecipe,
-  getRecipeSrc,
-  setBobbyServerUrl,
-  storage,
-} from "@commontools/runner";
+import { ConsoleEvent, launch, Page } from "@astral/astral";
+import { castNewRecipe, CharmManager } from "@commontools/charm";
+import { getEntityId, setBobbyServerUrl, storage } from "@commontools/runner";
 import { createSession, Identity } from "@commontools/identity";
 import { client as llm } from "@commontools/llm";
 import { prompts } from "./prompts.ts";
