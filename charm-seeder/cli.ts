@@ -4,8 +4,8 @@ import { castNewRecipe, CharmManager } from "@commontools/charm";
 import { getEntityId, setBobbyServerUrl, storage } from "@commontools/runner";
 import { createSession, Identity } from "@commontools/identity";
 import { client as llm } from "@commontools/llm";
-import { scenarios } from "./prompts.ts";
-import { Command, CommandType } from "./commands.ts";
+import { scenarios, Step } from "./scenarios.ts";
+import { CommandType } from "./commands.ts";
 import { generateObject, generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
@@ -115,18 +115,20 @@ async function processPrompts() {
   let promptCount = 0;
   console.log(`Processing prompts...`);
 
-  for (const command of scenarios) {
-    promptCount++;
-    await processCommand(command);
+  for (const scenario of scenarios) {
+    for (const step of scenario.steps) {
+      promptCount++;
+      await processCommand(step);
+    }
   }
   console.log(`Successfully processed ${promptCount} prompts.`);
 }
 
-async function processCommand(command: Command) {
+async function processCommand(step: Step) {
   await page.goto(`http://localhost:5173/`);
   await sleep(1000);
   consoleLogs.length = 0;
-  const { type, prompt } = command;
+  const { type, prompt } = step;
   switch (type) {
     case CommandType.New: {
       console.log(`Adding: "${prompt}"`);
@@ -235,7 +237,13 @@ async function generateReport() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Charm Seeder Results - ${name}</title>
+  <title>${name} - ${
+    new Date().toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    })
+  }</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
