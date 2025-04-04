@@ -249,7 +249,65 @@ logic.
 
 2. **Use `asCell: true` for Handler State**: When defining handler state schema, use `asCell: true` for properties that need to be updated. This gives you direct access to the Cell methods like `.set()` and `.get()`.
 
-3. **Reference Data Instead of Copying**: When transforming data, reference the original objects rather than copying all their properties. This maintains reactivity and creates cleaner code:
+3. **Avoid All Direct Conditionals in Recipes**: Never use direct if statements, ternary operators, or any other conditionals inside a recipe function - they won't work properly because they immediately evaluate data instead of creating reactive nodes:
+
+   ```typescript
+   // DON'T DO THIS - if statements don't work in recipes
+   const result = emails.map(email => {
+     if (email.hasContent) {  // This won't work!
+       return processEmail(email);
+     } else {
+       return { email, empty: true };
+     }
+   });
+   
+   // DON'T DO THIS EITHER - ternary operators also don't work
+   const tableHeader = <tr>
+     <th>Name</th>
+     {settings.showDetails ? <th>Details</th> : null} // This won't work!
+   </tr>;
+   
+   // DON'T DO THIS - ternaries in string templates don't work
+   const prompt = str`
+     Process this data
+     ${settings.includeTimestamp ? "Include timestamps" : "No timestamps"} // This won't work!
+   `;
+   
+   // DO THIS INSTEAD - use ifElse function for conditionals in data flow
+   const result = emails.map(email => 
+     ifElse(
+       email.hasContent,
+       () => processEmail(email),
+       () => ({ email, empty: true })
+     )
+   );
+   
+   // USE ifElse IN JSX TOO
+   const tableHeader = <tr>
+     <th>Name</th>
+     {ifElse(settings.showDetails, <th>Details</th>, null)}
+   </tr>;
+   
+   // USE ifElse IN STRING TEMPLATES
+   const includeTimestampText = ifElse(
+     settings.includeTimestamp,
+     "Include timestamps",
+     "No timestamps"
+   );
+   const prompt = str`
+     Process this data
+     ${includeTimestampText}
+   `;
+   
+   // WHEN APPROPRIATE - skip conditionals entirely
+   // and let LLM handle edge cases:
+   const result = emails.map(email => {
+     const processed = processWithLLM(email);
+     return { email, result: processed };
+   });
+   ```
+
+4. **Reference Data Instead of Copying**: When transforming data, reference the original objects rather than copying all their properties. This maintains reactivity and creates cleaner code:
 
    ```typescript
    // DO THIS: Reference the original data
@@ -285,6 +343,157 @@ logic.
 9. **Schema Reuse**: Define schemas once and reuse them across recipes, handlers, and lifted functions to maintain consistency.
 
 10. **Follow Type Through Schema**: Leverage the framework's automatic type inference from JSON Schema rather than duplicating type definitions with TypeScript interfaces.
+
+## Schema Best Practices
+
+When defining schemas in the Recipe Framework, follow these guidelines for best results:
+
+1. **Define Schemas as Constants**: Declare schemas as constants for reuse and reference:
+
+   ```typescript
+   const UserSchema = {
+     type: "object",
+     properties: {
+       id: { type: "string" },
+       name: { type: "string" },
+       email: { type: "string", format: "email" }
+     },
+     required: ["id", "name"]
+   } as const satisfies JSONSchema;
+   ```
+
+2. **Use `as const satisfies JSONSchema`**: Always use this pattern to ensure proper type inference and compile-time validation:
+
+   ```typescript
+   // DO THIS
+   const schema = { /*...*/ } as const satisfies JSONSchema;
+   
+   // NOT THIS
+   const schema = { /*...*/ } as JSONSchema; // Doesn't provide proper type checking
+   ```
+
+3. **Always Include Reasonable Defaults**: Where possible, provide sensible default values to improve usability and reduce errors:
+
+   ```typescript
+   const SettingsSchema = {
+     type: "object",
+     properties: {
+       theme: { 
+         type: "string", 
+         enum: ["light", "dark", "system"],
+         default: "system" // Sensible default
+       },
+       fontSize: { 
+         type: "number",
+         minimum: 8,
+         maximum: 32,
+         default: 14 // Reasonable default
+       },
+       notifications: {
+         type: "boolean",
+         default: true // Sensible default
+       }
+     }
+   } as const satisfies JSONSchema;
+   ```
+
+4. **Extract Types from Schemas**: Use the `Schema` utility to derive TypeScript types from JSON Schemas:
+
+   ```typescript
+   const UserSchema = { /*...*/ } as const satisfies JSONSchema;
+   type User = Schema<typeof UserSchema>;
+   
+   // Now User is a TypeScript type matching the schema
+   ```
+
+5. **Reference Schemas Instead of Duplicating**: For nested objects, reference existing schemas:
+
+   ```typescript
+   // Instead of duplicating user properties
+   const PostSchema = {
+     type: "object",
+     properties: {
+       author: UserSchema, // Reference the existing schema
+       content: { type: "string" },
+       timestamp: { type: "string", format: "date-time" }
+     },
+     required: ["author", "content"]
+   } as const satisfies JSONSchema;
+   ```
+
+6. **Document Schemas with Descriptions**: Add descriptions to schemas and properties for better self-documentation:
+
+   ```typescript
+   {
+     type: "string",
+     title: "Email",
+     description: "User's primary email address used for notifications",
+     format: "email"
+   }
+   ```
+
+7. **Use `asCell: true` for Reactive State**: In handler state schemas, use `asCell: true` for properties that need direct access to Cell methods:
+
+   ```typescript
+   const stateSchema = {
+     type: "object",
+     properties: {
+       counter: { 
+         type: "number", 
+         asCell: true,  // Will be received as Cell<number>
+         description: "Counter value that can be directly manipulated",
+         default: 0  // Provide a default value
+       }
+     }
+   };
+   ```
+
+8. **Define Required Properties Explicitly**: Always specify which properties are required:
+
+   ```typescript
+   {
+     // Properties definition...
+     required: ["id", "name", "email"]
+   }
+   ```
+
+9. **Use Schema Composition**: Break down complex schemas into smaller, reusable parts:
+
+   ```typescript
+   const AddressSchema = { /*...*/ } as const satisfies JSONSchema;
+   const ContactSchema = { /*...*/ } as const satisfies JSONSchema;
+   
+   const UserSchema = {
+     type: "object",
+     properties: {
+       // Basic info
+       id: { type: "string" },
+       name: { type: "string" },
+       // Composed schemas
+       address: AddressSchema,
+       contact: ContactSchema
+     },
+     required: ["id", "name"]
+   } as const satisfies JSONSchema;
+   ```
+
+10. **Define Enums with Constant Arrays**:
+
+    ```typescript
+    const StatusValues = ["pending", "active", "suspended", "deleted"] as const;
+    
+    const UserSchema = {
+      // ...
+      properties: {
+        // ...
+        status: {
+          type: "string",
+          enum: StatusValues,
+          default: "pending"  // Provide a reasonable default
+        }
+      }
+    } as const satisfies JSONSchema;
+    ```
 
 ## Advanced Type Concepts
 
