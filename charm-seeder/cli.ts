@@ -4,6 +4,9 @@ import { castNewRecipe, CharmManager } from "@commontools/charm";
 import { getEntityId, setBobbyServerUrl, storage } from "@commontools/runner";
 import { createSession, Identity } from "@commontools/identity";
 import { client as llm } from "@commontools/llm";
+import { charmSchema } from "@commontools/charm";
+import { NAME } from "@commontools/builder";
+import { Cell } from "@commontools/runner";
 import { scenarios, Step } from "./scenarios.ts";
 import { CommandType } from "./commands.ts";
 import { generateObject, generateText } from "ai";
@@ -24,7 +27,7 @@ if (!name) {
 
 const HEADLESS = false;
 const browser = await launch({
-  args: ["--window-size=1200,800"],
+  args: ["--window-size=1280,1024"],
   headless: HEADLESS,
 });
 const page = await browser.newPage();
@@ -116,17 +119,64 @@ async function processPrompts() {
   console.log(`Processing prompts...`);
 
   for (const scenario of scenarios) {
+    await page.goto(`http://localhost:5173/`);
+    await sleep(1000);
+    let lastCharmId: string | undefined = undefined;
     for (const step of scenario.steps) {
       promptCount++;
-      await processCommand(step);
+      const newCharmId = await processCommand(step, lastCharmId);
+      if (newCharmId) {
+        lastCharmId = newCharmId;
+      }
     }
   }
   console.log(`Successfully processed ${promptCount} prompts.`);
 }
 
-async function processCommand(step: Step) {
-  await page.goto(`http://localhost:5173/`);
-  await sleep(1000);
+function toCamelCase(input: string): string {
+  // Handle empty string case
+  if (!input) return "";
+
+  // Split the input string by non-alphanumeric characters
+  return input
+    .split(/[^a-zA-Z0-9]/)
+    .filter((word) => word.length > 0) // Remove empty strings
+    .map((word, index) => {
+      // First word should be all lowercase
+      if (index === 0) {
+        return word.toLowerCase();
+      }
+      // Other words should have their first letter capitalized and the rest lowercase
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join("");
+}
+
+export function getCharmNameAsCamelCase(
+  cell: Cell<any>,
+): string {
+  return toCamelCase(cell.asSchema(charmSchema).key(NAME).get());
+}
+
+async function extendCharm(
+  focusedCharmId: string,
+  goal: string,
+) {
+  const charm = (await charmManager.get(focusedCharmId, false))!;
+
+  const shadowId = getCharmNameAsCamelCase(charm);
+
+  return castNewRecipe(
+    charmManager,
+    goal,
+    { [shadowId]: charm },
+  );
+}
+
+async function processCommand(
+  step: Step,
+  lastCharmId: string | undefined,
+): Promise<string | undefined> {
   consoleLogs.length = 0;
   const { type, prompt } = step;
   switch (type) {
@@ -137,6 +187,21 @@ async function processCommand(step: Step) {
       if (id) {
         console.log(`Charm added: ${id["/"]}`);
         await verifyCharm(id["/"], prompt);
+        return id["/"];
+      }
+      break;
+    }
+    case CommandType.Extend: {
+      console.log(`Extending: "${prompt}"`);
+      if (!lastCharmId) {
+        throw new Error("Last charm ID is undefined.");
+      }
+      const charm = await extendCharm(lastCharmId, prompt);
+      const id = getEntityId(charm);
+      if (id) {
+        console.log(`Charm added: ${id["/"]}`);
+        await verifyCharm(id["/"], prompt);
+        return id["/"];
       }
       break;
     }
@@ -157,7 +222,7 @@ function checkForErrors() {
     // Remove the "charm-runtime-error" prefix
     const jsonText = errorText.replace("charm-runtime-error", "").trim();
     try {
-      return JSON.parse(jsonText);
+      return JSON.parse(jsonText)["description"];
     } catch (e) {
       return errorText;
     }
@@ -230,7 +295,63 @@ interface CharmResult {
 
 const charmResults: CharmResult[] = [];
 
+// Helper function to group results by scenario
+function groupResultsByScenario(
+  results: CharmResult[],
+): Map<number, { name: string; results: CharmResult[] }> {
+  const groups = new Map<number, { name: string; results: CharmResult[] }>();
+  let currentScenario = 0;
+  let resultIndex = 0;
+
+  // Initialize the first scenario group
+  groups.set(currentScenario, {
+    name: scenarios[currentScenario]?.name || `Scenario ${currentScenario + 1}`,
+    results: [],
+  });
+
+  // Process each result
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+
+    // Check if we need to move to the next scenario
+    // We do this by checking if we've processed all steps in the current scenario
+    let stepsInCurrentScenario = 0;
+    for (let j = 0; j <= currentScenario; j++) {
+      if (j < scenarios.length) {
+        stepsInCurrentScenario += scenarios[j].steps.length;
+      }
+    }
+
+    // If we've processed all steps in the current scenario, move to the next one
+    if (i >= stepsInCurrentScenario && currentScenario < scenarios.length - 1) {
+      currentScenario++;
+      groups.set(currentScenario, {
+        name: scenarios[currentScenario]?.name ||
+          `Scenario ${currentScenario + 1}`,
+        results: [],
+      });
+    }
+
+    // Add the result to the current scenario group
+    groups.get(currentScenario)!.results.push(result);
+  }
+
+  return groups;
+}
+
 async function generateReport() {
+  // Calculate overall statistics
+  const totalScenarios = scenarios.length;
+  const totalSteps = charmResults.length;
+  const totalPassed = charmResults.filter((r) => r.status === "PASS").length;
+  const totalFailed = totalSteps - totalPassed;
+  const passRate = totalSteps > 0
+    ? Math.round((totalPassed / totalSteps) * 100)
+    : 0;
+
+  // Calculate statistics per scenario
+  const scenarioGroups = groupResultsByScenario(charmResults);
+
   const html = `
 <!DOCTYPE html>
 <html lang="en">
@@ -244,102 +365,128 @@ async function generateReport() {
       year: "numeric",
     })
   }</title>
+  <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 20px;
-      background-color: #f5f5f5;
+    .fade-in {
+      animation: fadeIn 0.5s ease-in-out;
     }
-    h1 {
-      color: #333;
-      text-align: center;
-      margin-bottom: 30px;
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
     }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background-color: white;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-      border-radius: 8px;
-      overflow: hidden;
+    .hover-scale {
+      transition: transform 0.3s ease;
     }
-    th, td {
-      padding: 12px 15px;
-      text-align: left;
-      border-bottom: 1px solid #eee;
-    }
-    th {
-      background-color: #f8f9fa;
-      font-weight: 600;
-    }
-    tr:last-child td {
-      border-bottom: none;
-    }
-    .thumbnail {
-      width: 150px;
-      height: 100px;
-      object-fit: cover;
-      border-radius: 4px;
-    }
-    .status {
-      display: inline-block;
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-weight: 500;
-      font-size: 14px;
-    }
-    .status-pass {
-      background-color: #d4edda;
-      color: #155724;
-    }
-    .status-fail {
-      background-color: #f8d7da;
-      color: #721c24;
-    }
-    .link {
-      color: #007bff;
-      text-decoration: none;
-    }
-    .link:hover {
-      text-decoration: underline;
+    .hover-scale:hover {
+      transform: scale(1.03);
     }
   </style>
 </head>
-<body>
-  <h1>Charm Seeder Results - ${name}</h1>
-  <table>
-    <thead>
-      <tr>
-        <th>Thumbnail</th>
-        <th>ID</th>
-        <th>Prompt</th>
-        <th>Status</th>
-        <th>Summary</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${
-    charmResults.map((result) => {
-      // Convert the full path to a relative path for the HTML
-      const relativePath = result.screenshotPath.replace(
-        `results/`,
-        "./",
-      );
-      return `
-        <tr>
-          <td><img src="${relativePath}" alt="Screenshot" class="thumbnail"></td>
-          <td><a href="http://localhost:5173/${name}/${result.id}" class="link" target="_blank">${result.id}</a></td>
-          <td>${result.prompt}</td>
-          <td><span class="status status-${result.status.toLowerCase()}">${result.status}</span></td>
-          <td>${result.summary}</td>
-        </tr>
+<body class="bg-gray-50 min-h-screen">
+  <div class="container mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold text-center text-gray-800 mb-4">${name}</h1>
+    
+    <!-- Summary Section -->
+    <div class="mb-8 fade-in bg-white p-5 rounded-lg shadow-md">
+      <h2 class="text-xl font-semibold mb-3 border-b pb-2">Summary</h2>
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-center">
+        <div class="bg-blue-50 p-3 rounded-lg">
+          <p class="text-blue-800 font-bold text-2xl">${totalScenarios}</p>
+          <p class="text-blue-600">Scenarios</p>
+        </div>
+        <div class="bg-gray-50 p-3 rounded-lg">
+          <p class="text-gray-800 font-bold text-2xl">${totalSteps}</p>
+          <p class="text-gray-600">Total Steps</p>
+        </div>
+        <div class="bg-green-50 p-3 rounded-lg">
+          <p class="text-green-800 font-bold text-2xl">${totalPassed}</p>
+          <p class="text-green-600">Passed</p>
+        </div>
+        <div class="bg-red-50 p-3 rounded-lg">
+          <p class="text-red-800 font-bold text-2xl">${totalFailed}</p>
+          <p class="text-red-600">Failed</p>
+        </div>
+      </div>
+      <div class="mt-4 w-full bg-gray-200 rounded-full h-4">
+        <div class="bg-green-500 h-4 rounded-full" style="width: ${passRate}%"></div>
+      </div>
+      <p class="text-center mt-1 text-gray-600">${passRate}% Success Rate</p>
+    </div>
+    
+    ${
+    Array.from(scenarioGroups).map(
+      ([scenarioIndex, scenarioData], groupIndex) => {
+        const scenarioPassed =
+          scenarioData.results.filter((r) => r.status === "PASS").length;
+        const scenarioFailed = scenarioData.results.length - scenarioPassed;
+        const scenarioPassRate = scenarioData.results.length > 0
+          ? Math.round((scenarioPassed / scenarioData.results.length) * 100)
+          : 0;
+        const headerBgColor = scenarioPassRate >= 80
+          ? "bg-blue-600"
+          : scenarioPassRate >= 50
+          ? "bg-yellow-500"
+          : "bg-red-600";
+
+        return `
+        <div class="mb-10 fade-in" style="animation-delay: ${
+          groupIndex * 0.1
+        }s">
+          <div class="${headerBgColor} text-white py-3 px-5 rounded-t-lg shadow-md flex justify-between items-center">
+            <h2 class="text-xl font-semibold">${scenarioData.name}</h2>
+            <div class="flex items-center space-x-2">
+              <span class="bg-white text-green-700 px-2 py-1 rounded-md text-sm">${scenarioPassed} ✓</span>
+              <span class="bg-white text-red-700 px-2 py-1 rounded-md text-sm">${scenarioFailed} ✗</span>
+              <span class="bg-white text-gray-700 px-2 py-1 rounded-md text-sm">${scenarioPassRate}%</span>
+            </div>
+          </div>
+          <div class="bg-white p-5 rounded-b-lg shadow-md">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              ${
+          scenarioData.results.map((result, index) => {
+            const relativePath = result.screenshotPath.replace(
+              `results/`,
+              "./",
+            );
+            const statusColor = result.status === "PASS"
+              ? "bg-green-100 text-green-800"
+              : "bg-red-100 text-red-800";
+
+            return `
+                    <div class="bg-white rounded-lg overflow-hidden shadow-md hover-scale fade-in" style="animation-delay: ${
+              (groupIndex * 0.1) + (index * 0.05)
+            }s">
+                      <div class="relative">
+                        <a href="${relativePath}" target="_blank">
+                          <img src="${relativePath}" alt="Screenshot" class="w-full h-48 object-cover">
+                        </a>
+                        <div class="absolute top-0 right-0 m-2">
+                          <span class="px-3 py-1 rounded-full text-sm font-medium ${statusColor}">
+                            ${result.status}
+                          </span>
+                        </div>
+                      </div>
+                      <div class="p-4">
+                        <a href="http://localhost:5173/${name}/${result.id}" class="text-blue-600 hover:text-blue-800 font-medium" target="_blank">
+                          Charm ID: ${result.id.slice(-6)}
+                        </a>
+                        <p class="mt-2 text-gray-700 font-medium">Prompt:</p>
+                        <p class="text-gray-600 mb-3">${result.prompt}</p>
+                        <p class="text-gray-700 font-medium">Verdict:</p>
+                        <p class="text-gray-600">${result.summary}</p>
+                      </div>
+                    </div>
+                  `;
+          }).join("")
+        }
+            </div>
+          </div>
+        </div>
       `;
-    }).join("")
+      },
+    ).join("")
   }
-    </tbody>
-  </table>
+  </div>
 </body>
 </html>
   `;
