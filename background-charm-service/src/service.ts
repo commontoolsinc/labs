@@ -77,7 +77,7 @@ export class BackgroundCharmService {
         });
         this.charmSchedulers.set(did, scheduler);
         scheduler.start().catch((err) => {
-          log(`Scheduler failed to initialize: ${err}`);
+          log(`${did} Scheduler failed to initialize: ${err}`);
           this.charmSchedulers.delete(did);
         });
       }
