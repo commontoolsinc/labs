@@ -11,6 +11,7 @@ import {
   renameCharm,
   WorkflowType,
 } from "@commontools/charm";
+import { WorkflowFormData } from "./SpecPreview.tsx";
 // Import NavigateFunction from our types rather than directly from react-router-dom
 import type { NavigateFunction } from "react-router-dom";
 import { charmId } from "@/utils/charms.ts";
@@ -145,6 +146,8 @@ export interface CommandContext {
   addJobMessage: (jobId: string, message: string) => void;
   updateJobProgress: (jobId: string, progress: number) => void;
   commandPathIds: string[];
+  // Workflow preview data from SpecPreview
+  workflowForm?: WorkflowFormData;
 }
 
 export type CommandMode =
@@ -265,14 +268,16 @@ async function handleImagineOperation(
     let newCharm;
     // Extract cells and any special keys starting with underscore
     const dataReferences = grabCells(sources);
+
+    // Get workflow data from the deps.workflowForm
+    const formWorkflowType = deps.workflowForm?.workflowType;
+    const formPlan = deps.workflowForm?.plan;
+    const formSpec = deps.workflowForm?.spec;
+    const formSchema = deps.workflowForm?.schema;
     
-    // Extract workflow information from sources if present
-    const extractedWorkflowType = sources?._workflowType as WorkflowType | undefined;
-    const extractedPlan = sources?._previewPlan as string[] | undefined;
-    
-    // Use provided workflow type, or extracted from sources, or the parameter
-    const effectiveWorkflowType = extractedWorkflowType || workflowType;
-    
+    // Use the workflow type from the form or the provided parameter
+    const effectiveWorkflowType = formWorkflowType || workflowType || "edit";
+
     // Handle differently based on whether we're modifying an existing charm or creating a new one
     if (deps.focusedCharmId) {
       // Get the current charm
@@ -280,18 +285,22 @@ async function handleImagineOperation(
       if (!charm) {
         throw new Error("Failed to load charm");
       }
-      
+
       // Import modifyCharm from @commontools/charm
       const { modifyCharm } = await import("@commontools/charm");
-      
-      // Prepare plan if available - convert to array if it's a string
-      const planArray = extractedPlan 
-        ? (typeof extractedPlan === 'string' ? [extractedPlan] : extractedPlan)
+
+      // Prepare plan from form data if available - convert to array if it's a string
+      const planArray = formPlan
+        ? (typeof formPlan === "string" ? [formPlan] : formPlan)
         : undefined;
-      
-      console.log("Using modifyCharm with workflow:", effectiveWorkflowType, 
-                 "plan:", planArray ? planArray.length + " steps" : "none");
-      
+
+      console.log(
+        "Using modifyCharm with workflow:",
+        effectiveWorkflowType,
+        "plan:",
+        planArray ? planArray.length + " steps" : "none",
+      );
+
       // Use modifyCharm for existing charms - this handles both iterate and extend cases
       newCharm = await modifyCharm(
         deps.charmManager,
@@ -299,29 +308,39 @@ async function handleImagineOperation(
         charm,
         deps.preferredModel,
         effectiveWorkflowType,
-        planArray
+        planArray,
       );
     } else {
-      // For new charms, use the imagine function directly with 'rework' workflow
+      // For new charms, use imagine with workflow data from the form
+      // Prepare the plan array for the new charm too
+      const newCharmPlanArray = formPlan
+        ? (typeof formPlan === "string" ? [formPlan] : formPlan)
+        : undefined;
+        
       newCharm = await imagine(
         deps.charmManager,
         input,
-        { dataReferences },
-        workflowType || "rework", // Default to rework for new charms
-        deps.preferredModel
+        { 
+          dataReferences, 
+          workflowType: effectiveWorkflowType,
+          previewPlan: newCharmPlanArray,
+          previewSpec: formSpec,
+          previewSchema: formSchema
+        },
+        deps.preferredModel,
       );
     }
-    
+
     if (!newCharm) {
       throw new Error("Failed to create charm");
     }
-    
+
     // Navigate to the new charm
     const id = charmId(newCharm);
     if (!id || !deps.focusedReplicaId) {
       throw new Error("Missing charm ID or replica name");
     }
-    
+
     deps.navigate(
       createPath("charmShow", {
         charmId: id,
@@ -782,7 +801,8 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       type: "input",
       title: "New Charm",
       group: "Create",
-      handler: (input, data) => handleImagineOperation(deps, input, data, "rework"),
+      handler: (input, data) =>
+        handleImagineOperation(deps, input, data, "rework"),
     },
     {
       id: "search-charms",

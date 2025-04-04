@@ -5,8 +5,10 @@ import {
   generateWorkflowPreview, 
   WorkflowType, 
   CharmManager, 
-  classifyIntent 
+  classifyIntent,
+  formatPromptWithMentions as formatMentions 
 } from "@commontools/charm";
+import { WorkflowFormData } from "@/components/SpecPreview.tsx";
 import { Cell } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
 import { JSONSchema } from "@commontools/builder";
@@ -86,114 +88,93 @@ export function useLiveSpecPreview(
       console.log("Formatting mentions using charmManager:", !!charmManager);
       let processedText;
       let sources = {};
+      let mentionResult;
       
       try {
-        const mentionResult = await formatPromptWithMentions(text, charmManager);
+        // First try the app's formatPromptWithMentions
+        mentionResult = await formatPromptWithMentions(text, charmManager);
         processedText = mentionResult.text;
         sources = mentionResult.sources;
-        console.log("Mentions formatted:", processedText?.substring(0, 30), "sources:", Object.keys(sources).length);
-      } catch (mentionError) {
-        console.error("Error processing mentions:", mentionError);
-        throw mentionError;
+      } catch (appMentionError) {
+        console.warn("App mention formatting failed, trying charm version:", appMentionError);
+        
+        // Fall back to the charm package's formatPromptWithMentions
+        try {
+          const charmMentionResult = await formatMentions(text, charmManager);
+          processedText = charmMentionResult.text;
+          sources = charmMentionResult.mentions;
+        } catch (charmMentionError) {
+          console.error("Both mention formatting approaches failed:", charmMentionError);
+          processedText = text; // Use the raw text if both approaches fail
+        }
       }
+      
+      console.log("Mentions formatted:", processedText?.substring(0, 30), "sources:", Object.keys(sources || {}).length);
       
       // Define a shared model ID for both calls
       const modelId = getModelId(model);
       
-      // Split into two parallel operations
-      // 1. Get classification (faster)
-      const classificationPromise = (async () => {
-        // Skip if text is too short or empty
-        if (!processedText || processedText.trim().length < 10) {
-          console.log("Skipping classification due to short/empty input");
-          setClassificationLoading(false);
-          return null;
-        }
-        
-        try {
-          console.log("Calling classifyIntent for workflow classification");
-          const classification = await classifyIntent(
-            processedText,
-            currentCharm,
-            modelId,
-            sources
-          );
-          
-          console.log("Classification completed:", classification.workflowType);
-          
-          // Update classification-related state as soon as it's available
-          setWorkflowType(classification.workflowType);
-          setWorkflowConfidence(classification.confidence);
-          setWorkflowReasoning(classification.reasoning || "");
-          setClassificationLoading(false);
-          
-          return classification;
-        } catch (error) {
-          console.error("Classification error:", error);
-          setClassificationLoading(false);
-          throw error;
-        }
-      })();
+      // Use the new unified workflow preview function that handles both classification and plan generation
+      console.log("Calling generateWorkflowPreview with model:", modelId);
+      const result = await generateWorkflowPreview(
+        processedText, 
+        currentCharm, 
+        modelId, 
+        sources, // Pass the sources which contain the mentioned charms
+        charmManager // Pass CharmManager to handle nested mentions
+      );
       
-      // 2. Get the full workflow preview (including plan and spec)
-      const workflowPreviewPromise = (async () => {
-        // Skip if text is too short or empty
-        if (!processedText || processedText.trim().length < 10) {
-          console.log("Skipping workflow preview due to short/empty input");
-          setPlanLoading(false);
-          return null;
-        }
-        
-        try {
-          console.log("Calling generateWorkflowPreview with model:", modelId);
-          const result = await generateWorkflowPreview(processedText, currentCharm, modelId, sources);
-          console.log("Full preview generated successfully!", result);
-          
-          // Pass the plan as an array to the UI for better formatting
-          if (result.plan && result.plan.length > 0) {
-            setPreviewPlan(result.plan);
-          } else {
-            setPreviewPlan("");
-          }
-          
-          // Process spec results
-          if (result.spec) {
-            try {
-              // Attempt to extract just the specification section for display
-              const specMatch = result.spec.match(/<specification>([\s\S]*?)<\/specification>/);
-              if (specMatch && specMatch[1]) {
-                setPreviewSpec(specMatch[1].trim());
-              } else {
-                // If can't extract, use the full spec but remove the XML tags
-                setPreviewSpec(result.spec.replace(/<\/?[^>]+(>|$)/g, "").trim());
-              }
-            } catch (e) {
-              // If parsing fails, just use the raw spec
-              setPreviewSpec(result.spec);
-            }
-          } else {
-            setPreviewSpec("");
-          }
-          
-          setUpdatedSchema(result.updatedSchema);
-          setPlanLoading(false);
-          
-          return result;
-        } catch (error) {
-          console.error("Workflow preview error:", error);
-          setPlanLoading(false);
-          throw error;
-        }
-      })();
+      console.log("Workflow preview generated:", result);
       
-      // Wait for both operations to complete if they're running
-      // We await this just to catch any errors, the state updates already happened
-      if (processedText && processedText.trim().length >= 10) {
-        await Promise.all([classificationPromise, workflowPreviewPromise]);
+      // Update all the states with the results
+      if (result.workflowType) {
+        setWorkflowType(result.workflowType);
       }
       
-      // Both classification and plan generation are now complete
+      if (typeof result.confidence === 'number') {
+        setWorkflowConfidence(result.confidence);
+      }
+      
+      if (result.reasoning) {
+        setWorkflowReasoning(result.reasoning);
+      }
+      
+      // Update plan if available
+      if (result.plan && result.plan.length > 0) {
+        setPreviewPlan(result.plan);
+      } else {
+        setPreviewPlan("");
+      }
+      
+      // Update spec if available
+      if (result.spec) {
+        try {
+          // Attempt to extract just the specification section for display
+          const specMatch = result.spec.match(/<specification>([\s\S]*?)<\/specification>/);
+          if (specMatch && specMatch[1]) {
+            setPreviewSpec(specMatch[1].trim());
+          } else {
+            // If can't extract, use the full spec but remove the XML tags
+            setPreviewSpec(result.spec.replace(/<\/?[^>]+(>|$)/g, "").trim());
+          }
+        } catch (e) {
+          // If parsing fails, just use the raw spec
+          setPreviewSpec(result.spec);
+        }
+      } else {
+        setPreviewSpec("");
+      }
+      
+      // Update schema if available
+      if (result.updatedSchema) {
+        setUpdatedSchema(result.updatedSchema);
+      }
+      
+      // Clear loading states
+      setClassificationLoading(false);
+      setPlanLoading(false);
       setLoading(false);
+      
     } catch (error) {
       console.error("Error generating preview:", error);
       
@@ -345,6 +326,14 @@ export function useLiveSpecPreview(
     }
   };
 
+  // Create a form data object to expose to parent components
+  const formData: WorkflowFormData = {
+    workflowType,
+    plan: previewPlan,
+    spec: previewSpec,
+    schema: updatedSchema
+  };
+
   return {
     previewSpec,
     previewPlan,
@@ -358,5 +347,7 @@ export function useLiveSpecPreview(
     workflowReasoning,
     updatedSchema,
     setWorkflow,
+    // Return the form data for downstream consumers
+    formData
   };
 }

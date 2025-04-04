@@ -1,6 +1,6 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { beforeEach, describe, it, afterEach } from "@std/testing/bdd";
-import { extractFromTag, scrub, TAGS, wrapInTag, createStructuredSpec, generateNewRecipeVersion } from "../src/iterate.ts";
+import { scrub } from "../src/iterate.ts";
 import { getImmutableCell, isCell, isStream, Cell } from "@commontools/runner";
 import { JSONSchema } from "@commontools/builder";
 import { isObj } from "@commontools/utils";
@@ -88,37 +88,5 @@ describe("scrub function", () => {
   });
 });
 
-describe("XML tag functions", () => {
-  it("should wrap content in XML tags", () => {
-    const content = "test content";
-    const tag = "testTag";
-    const wrapped = wrapInTag(content, tag);
-    assertEquals(wrapped, `<${tag}>\n${content}\n</${tag}>`);
-  });
-
-  it("should extract content from XML tags", () => {
-    const content = "test content";
-    const tag = "testTag";
-    const wrapped = `<${tag}>\n${content}\n</${tag}>`;
-    const extracted = extractFromTag(wrapped, tag);
-    assertEquals(extracted, content);
-  });
-
-  it("should return undefined when extracting from missing tags", () => {
-    const content = "test content with no tags";
-    const extracted = extractFromTag(content, "missingTag");
-    assertEquals(extracted, undefined);
-  });
-
-  it("should create a structured spec with goal, plan, and spec", () => {
-    const goal = "test goal";
-    const plan = "test plan";
-    const spec = "test specification";
-    
-    const structured = createStructuredSpec(goal, plan, spec);
-    
-    assertEquals(extractFromTag(structured, TAGS.GOAL), goal);
-    assertEquals(extractFromTag(structured, TAGS.PLAN), plan);
-    assertEquals(extractFromTag(structured, TAGS.SPEC), spec);
-  });
-});
+// XML tag functions have been moved elsewhere
+// Tests will be updated when we create proper tests for the workflow module

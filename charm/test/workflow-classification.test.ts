@@ -2,13 +2,13 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Cell } from "@commontools/runner";
 
+import type { WorkflowType } from "../src/workflow.ts";
 import { 
-  WorkflowType,
   classifyIntent,
   generatePlan,
   WORKFLOWS,
   generateWorkflowPreview
-} from "../src/imagine.ts";
+} from "../src/workflow.ts";
 import { Charm, CharmManager } from "../src/charm.ts";
 
 describe("Workflow Classification", () => {

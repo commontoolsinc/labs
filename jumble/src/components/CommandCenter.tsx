@@ -83,7 +83,8 @@ function CommandProcessor({
     workflowType,
     workflowConfidence,
     workflowReasoning,
-    setWorkflow // Add the setter function to allow changing workflow type manually
+    setWorkflow, // Add the setter function to allow changing workflow type manually
+    formData // Get the form data to pass to commands
   } = useLiveSpecPreview(
       inputValue,
       charmManager, // Explicitly pass CharmManager instance
@@ -92,6 +93,9 @@ function CommandProcessor({
       previewModel,
       focusedCharm // Pass the current charm for context
     );
+    
+  // Update the context with the current workflow form data
+  context.workflowForm = formData;
 
   if (context.loading && mode.type !== "input") {
     return (

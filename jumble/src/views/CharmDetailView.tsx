@@ -49,7 +49,7 @@ import { useCharmMentions } from "@/components/CommandCenter.tsx";
 import { formatPromptWithMentions } from "@/utils/format.ts";
 import { CharmLink } from "@/components/CharmLink.tsx";
 import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
-import { SpecPreview, WorkflowType } from "@/components/SpecPreview.tsx";
+import { SpecPreview, WorkflowType, WorkflowFormData } from "@/components/SpecPreview.tsx";
 import {
   SpecPreviewModel,
   useLiveSpecPreview,
@@ -96,6 +96,9 @@ interface CharmOperationContextType {
   isPreviewLoading: boolean;
   previewModel: SpecPreviewModel;
   setPreviewModel: (model: SpecPreviewModel) => void;
+  // The current form data from the preview
+  workflowForm?: WorkflowFormData;
+  setWorkflowForm: (form: WorkflowFormData) => void;
   handlePerformOperation: () => void;
   handleCancelVariants: () => void;
   performOperation: (
@@ -274,6 +277,8 @@ function useCharmOperation() {
     null,
   );
   const [expectedVariantCount, setExpectedVariantCount] = useState(0);
+  // The current workflow form data from SpecPreview
+  const [workflowForm, setWorkflowForm] = useState<WorkflowFormData>();
 
   // Preview model state
   const [previewModel, setPreviewModel] = useState<SpecPreviewModel>("think");
@@ -327,11 +332,14 @@ function useCharmOperation() {
           throw new Error(`Charm with ID ${charmId} not found`);
         }
 
-        // Get the current plan and workflow type from the spec preview
-        // Convert previewPlan to array if it's a string
-        const planArray = typeof previewPlan === 'string' 
-          ? [previewPlan] 
-          : (Array.isArray(previewPlan) ? previewPlan : []);
+        // Get workflow data from the form
+        const planArray = workflowForm?.plan
+          ? (typeof workflowForm.plan === 'string' 
+              ? [workflowForm.plan] 
+              : workflowForm.plan)
+          : [];
+          
+        const effectiveWorkflowType = workflowForm?.workflowType || classifiedWorkflowType;
         
         // Use modifyCharm which supports all workflow types
         return modifyCharm(
@@ -339,12 +347,12 @@ function useCharmOperation() {
           input,
           fetched,
           model,
-          classifiedWorkflowType,  // Pass the current workflow type
-          planArray                // Pass the current plan
+          effectiveWorkflowType,  // Pass the workflow type from form
+          planArray               // Pass the plan from form
         );
       });
     },
-    [charmManager, previewPlan, classifiedWorkflowType],
+    [charmManager, workflowForm, classifiedWorkflowType],
   );
 
   // Handle performing the operation
@@ -453,6 +461,8 @@ function useCharmOperation() {
     isPreviewLoading,
     previewModel,
     setPreviewModel,
+    workflowForm, // Add the workflow form data
+    setWorkflowForm, // Add the setter
     handlePerformOperation,
     handleCancelVariants,
     performOperation,
@@ -948,6 +958,7 @@ const OperationTab = () => {
           workflowConfidence={workflowConfidence}
           workflowReasoning={workflowReasoning}
           onWorkflowChange={setWorkflow}
+          onFormChange={setWorkflowForm}
         />
         <Variants />
         <Suggestions />

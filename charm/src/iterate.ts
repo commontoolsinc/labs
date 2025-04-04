@@ -19,7 +19,10 @@ import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import { generateSpecAndSchema } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
 
-const genSrc = async ({
+/**
+ * Generate source code for a charm based on its specification, schema, and optional existing source
+ */
+export const genSrc = async ({
   src,
   spec,
   newSpec,
@@ -47,23 +50,32 @@ const genSrc = async ({
   return source;
 };
 
+/**
+ * Iterate on an existing charm by generating new source code based on a new specification
+ * This is a core function used by various workflows
+ */
 export async function iterate(
   charmManager: CharmManager,
   charm: Cell<Charm>,
   spec: string,
   shiftKey: boolean,
   model?: string,
+  existingSpec?: string,
+  executionPlan?: string[],
 ): Promise<Cell<Charm>> {
   const { iframe } = getIframeRecipe(charm);
   if (!iframe) {
     throw new Error("Cannot iterate on a non-iframe. Must extend instead.");
   }
 
-  const newSpec = shiftKey ? iframe.spec + "\n" + spec : spec;
+  // If an existing spec is provided, use it directly
+  // This is used by the Fix workflow where we preserve the original spec
+  const iframeSpec = existingSpec || iframe.spec;
+  const newSpec = shiftKey ? iframeSpec + "\n" + spec : spec;
 
   const newIFrameSrc = await genSrc({
     src: iframe.src,
-    spec: iframe.spec,
+    spec: iframeSpec,
     newSpec,
     schema: iframe.argumentSchema,
     model: model,
