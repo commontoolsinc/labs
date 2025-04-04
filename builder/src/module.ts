@@ -18,8 +18,6 @@ import {
 } from "./utils.ts";
 import { getTopFrame } from "./recipe.ts";
 import { Schema, SchemaWithoutCell } from "./schema-to-ts.ts";
-import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,
@@ -54,13 +52,6 @@ export function lift<
   resultSchema: R,
   implementation: (input: Schema<T>) => Schema<R>,
 ): ModuleFactory<SchemaWithoutCell<T>, SchemaWithoutCell<R>>;
-export function lift<T extends z.ZodTypeAny, R extends z.ZodTypeAny>(
-  argumentSchema: T,
-  resultSchema: R,
-  implementation: (
-    input: z.infer<typeof argumentSchema>,
-  ) => z.infer<typeof resultSchema>,
-): ModuleFactory<T, R>;
 export function lift<T, R>(
   implementation: (input: T) => R,
 ): ModuleFactory<T, R>;
@@ -71,19 +62,13 @@ export function lift<T extends (...args: any[]) => any>(
   implementation: T,
 ): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
 export function lift<T, R>(
-  argumentSchema?: z.ZodTypeAny | JSONSchema | ((input: any) => any),
-  resultSchema?: z.ZodTypeAny | JSONSchema,
+  argumentSchema?: JSONSchema | ((input: any) => any),
+  resultSchema?: JSONSchema,
   implementation?: (input: T) => R,
 ): ModuleFactory<T, R> {
   if (typeof argumentSchema === "function") {
     implementation = argumentSchema;
     argumentSchema = resultSchema = undefined;
-  }
-  if (argumentSchema instanceof z.ZodType) {
-    argumentSchema = zodToJsonSchema(argumentSchema) as JSONSchema;
-  }
-  if (resultSchema instanceof z.ZodType) {
-    resultSchema = zodToJsonSchema(resultSchema) as JSONSchema;
   }
 
   return createNodeFactory({
@@ -114,36 +99,20 @@ export function handler<E, T>(
   stateSchema: JSONSchema,
   handler: (event: E, props: T) => any,
 ): HandlerFactory<T, E>;
-export function handler<E extends z.ZodTypeAny, T extends z.ZodTypeAny>(
-  eventSchema: E,
-  stateSchema: T,
-  handler: (
-    event: z.infer<typeof eventSchema>,
-    props: z.infer<typeof stateSchema>,
-  ) => any,
-): HandlerFactory<T, E>;
 export function handler<E, T>(
   handler: (event: E, props: T) => any,
 ): HandlerFactory<T, E>;
 export function handler<E, T>(
   eventSchema:
     | JSONSchema
-    | z.ZodTypeAny
     | ((event: E, props: T) => any)
     | undefined,
-  stateSchema?: JSONSchema | z.ZodTypeAny,
+  stateSchema?: JSONSchema,
   handler?: (event: E, props: T) => any,
 ): HandlerFactory<T, E> {
   if (typeof eventSchema === "function") {
     handler = eventSchema;
     eventSchema = stateSchema = undefined;
-  }
-
-  if (eventSchema instanceof z.ZodType) {
-    eventSchema = zodToJsonSchema(eventSchema) as JSONSchema;
-  }
-  if (stateSchema instanceof z.ZodType) {
-    stateSchema = zodToJsonSchema(stateSchema) as JSONSchema;
   }
 
   const schema: JSONSchema | undefined = eventSchema || stateSchema
