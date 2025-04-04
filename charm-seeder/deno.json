@@ -6,5 +6,9 @@
   },
   "exports": {
     ".": "./cli.ts"
+  },
+  "imports": {
+    "@ai-sdk/anthropic": "npm:@ai-sdk/anthropic@^1.1.6",
+    "@ai-sdk/openai": "npm:@ai-sdk/openai@^1.1.9"
   }
 }
