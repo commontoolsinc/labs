@@ -1,22 +1,59 @@
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import { DitheredCube } from "./DitherCube.tsx";
 import { animated, useSpring, useTransition } from "@react-spring/web";
+import { ToggleButton } from "./common/CommonToggle.tsx";
+
+export type WorkflowType = "fix" | "edit" | "rework";
+
+export interface WorkflowFormData {
+  workflowType: WorkflowType;
+  plan: string[] | string;
+  spec?: string;
+  schema?: any;
+}
 
 interface SpecPreviewProps {
   spec?: string;
-  plan?: string;
+  plan?: string[] | string;
   loading: boolean;
+  classificationLoading?: boolean; // Separate loading state for classification
+  planLoading?: boolean; // Separate loading state for plan generation
   visible: boolean;
   floating?: boolean;
+  workflowType?: WorkflowType;
+  workflowConfidence?: number;
+  workflowReasoning?: string;
+  onWorkflowChange?: (workflow: WorkflowType) => void;
+  onFormChange?: (formData: WorkflowFormData) => void; // Callback to expose form data
 }
 
 export function SpecPreview({
   spec,
   plan,
   loading,
+  classificationLoading = false,
+  planLoading = false,
   visible,
   floating = false,
+  workflowType = "edit",
+  workflowConfidence = 0,
+  workflowReasoning,
+  onWorkflowChange,
+  onFormChange,
 }: SpecPreviewProps) {
+  // Create the current form state
+  const formData = React.useMemo<WorkflowFormData>(() => ({
+    workflowType,
+    plan: plan || [],
+    spec
+  }), [workflowType, plan, spec]);
+  
+  // Notify parent when form data changes
+  React.useEffect(() => {
+    if (onFormChange) {
+      onFormChange(formData);
+    }
+  }, [formData, onFormChange]);
   const hasContent = loading || plan || spec;
 
   // Create a reference to measure content height
@@ -25,10 +62,10 @@ export function SpecPreview({
   // Calculate different heights for different states
   const loaderHeight = 80; // Height for just the loader (48px cube + padding)
   const maxContentHeight = floating
-    ? 200
+    ? 320
     : typeof window !== "undefined"
     ? Math.min(300, globalThis.innerHeight * 0.5)
-    : 200;
+    : 320;
 
   // Container animation that handles visibility and dimensions
   const containerSpring = useSpring({
@@ -79,6 +116,9 @@ export function SpecPreview({
     ? "preview-container border border-2 fixed z-50 bg-gray-200"
     : "preview-container border-t-2 border-black pt-2 bg-gray-200 ";
 
+  // Format the confidence as a percentage
+  const confidencePercentage = Math.round(workflowConfidence * 100);
+
   return (
     <animated.div
       className={containerClasses}
@@ -105,6 +145,7 @@ export function SpecPreview({
     >
       <div className="p-3 relative" ref={contentRef}>
         <div
+          className="space-y-4"
           style={{
             position: "relative",
             minHeight: loading ? "48px" : "auto",
@@ -130,34 +171,202 @@ export function SpecPreview({
               )
               : (
                 <animated.div className="space-y-4 w-full" style={style}>
-                  {plan && (
+                  {/* Workflow section with its own loading state */}
+                  <div className="mb-3 relative">
+                    {classificationLoading
+                      ? (
+                        <div className="flex items-center justify-center py-4">
+                          <DitheredCube
+                            animationSpeed={2}
+                            width={32}
+                            height={32}
+                            animate
+                            cameraZoom={12}
+                          />
+                          <span className="ml-2 text-sm">
+                            Classifying workflow...
+                          </span>
+                        </div>
+                      )
+                      : (
+                        <div className="flex flex-col gap-2">
+                          <div className="text-xs font-bold mb-1 flex items-center justify-between">
+                            <span>WORKFLOW: {workflowType.toUpperCase()}</span>
+                            {workflowConfidence > 0 && (
+                              <span
+                                className={`text-xs ${
+                                  workflowConfidence > 0.7
+                                    ? "text-green-700"
+                                    : "text-amber-600"
+                                }`}
+                              >
+                                {confidencePercentage}% confidence
+                              </span>
+                            )}
+                          </div>
+                          <ToggleButton
+                            options={[
+                              { value: "fix", label: "FIX" },
+                              { value: "edit", label: "EDIT" },
+                              { value: "rework", label: "REWORK" },
+                            ]}
+                            value={workflowType}
+                            onChange={(value) =>
+                              onWorkflowChange?.(value as WorkflowType)}
+                            size="small"
+                          />
+                          {workflowReasoning && (
+                            <div className="text-xs text-gray-600 italic mt-1">
+                              {workflowReasoning}
+                            </div>
+                          )}
+
+                          {/* Display workflow explanation with descriptive labels */}
+                          <div className="mt-2 p-2 bg-gray-100 rounded-md">
+                            <div className="text-xs font-semibold">
+                              {workflowType === "fix" &&
+                                "🛠️ Fix: Preserves existing spec, only modifies code"}
+                              {workflowType === "edit" &&
+                                "✏️ Edit: Preserves data structure, updates functionality"}
+                              {workflowType === "rework" &&
+                                "🔄 Rework: Creates new spec with potentially different schema"}
+                            </div>
+                            {workflowReasoning && (
+                              <div className="text-xs text-gray-700 mt-1 leading-tight bg-white p-2 rounded my-1 border border-gray-200 max-h-32 overflow-y-auto">
+                                <strong>Classification reasoning:</strong>
+                                <br />
+                                {workflowReasoning}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                  </div>
+
+                  {/* Plan section with its own loading state */}
+                  <div className="relative">
+                    <div className="text-xs font-bold mb-1 flex justify-between items-center">
+                      <span>PLAN</span>
+                      {!planLoading && plan && (
+                        <span className="text-gray-500 text-xs">
+                          {typeof plan === "string"
+                            ? "1 step"
+                            : `${plan.length} steps`}
+                        </span>
+                      )}
+                    </div>
+
+                    {planLoading
+                      ? (
+                        <div className="flex items-center justify-center py-4 border border-gray-200 rounded bg-gray-50">
+                          <DitheredCube
+                            animationSpeed={2}
+                            width={32}
+                            height={32}
+                            animate
+                            cameraZoom={12}
+                          />
+                          <span className="ml-2 text-sm">
+                            Generating plan...
+                          </span>
+                        </div>
+                      )
+                      : plan
+                      ? (
+                        <animated.div
+                          className="font-mono text-xs whitespace-pre-wrap max-h-60 overflow-y-auto p-2 bg-gray-50 rounded border border-gray-200"
+                          style={{
+                            ...textSpring,
+                            scrollbarWidth: "thin",
+                            scrollbarColor: "#aaa #eee",
+                          }}
+                        >
+                          {Array.isArray(plan)
+                            ? plan.map((step, index) => (
+                              <div
+                                key={index}
+                                className="mb-2 pb-2 border-b border-gray-100 last:border-b-0"
+                              >
+                                <strong>{index + 1}.</strong> {step}
+                              </div>
+                            ))
+                            : plan}
+                        </animated.div>
+                      )
+                      : (
+                        <div className="text-xs text-gray-500 italic p-2">
+                          Plan will appear here...
+                        </div>
+                      )}
+                  </div>
+
+                  {/* Spec section */}
+                  {(spec || planLoading) && workflowType !== "fix" && (
                     <div>
-                      <div className="text-xs font-bold mb-1">PLAN</div>
-                      <animated.div
-                        className="font-mono text-xs whitespace-pre-wrap"
-                        style={textSpring}
-                      >
-                        {plan}
-                      </animated.div>
+                      <div className="text-xs font-bold mb-1 flex justify-between">
+                        <span>SPEC</span>
+                      </div>
+
+                      {planLoading
+                        ? (
+                          <div className="p-4 bg-gray-50 border border-gray-200 rounded text-center text-xs text-gray-500">
+                            Generating specification...
+                          </div>
+                        )
+                        : spec
+                        ? (
+                          <animated.div
+                            className="font-mono text-xs whitespace-pre-wrap max-h-48 overflow-y-auto p-2 bg-gray-50 rounded border border-gray-200"
+                            style={{
+                              ...textSpring,
+                              scrollbarWidth: "thin",
+                              scrollbarColor: "#aaa #eee",
+                            }}
+                          >
+                            {spec}
+                          </animated.div>
+                        )
+                        : null}
                     </div>
                   )}
-                  {spec && (
+
+                  {/* Display original spec for fix workflow */}
+                  {(spec || planLoading) && workflowType === "fix" && (
                     <div>
-                      <div className="text-xs font-bold mb-1">SPEC</div>
-                      <animated.div
-                        className="font-mono text-xs whitespace-pre-wrap"
-                        style={textSpring}
-                      >
-                        {spec}
-                      </animated.div>
+                      <div className="text-xs font-bold mb-1 flex justify-between">
+                        <span>ORIGINAL SPEC</span>
+                        <span className="text-xs text-blue-600">
+                          (preserved)
+                        </span>
+                      </div>
+
+                      {spec
+                        ? (
+                          <animated.div
+                            className="font-mono text-xs whitespace-pre-wrap max-h-48 overflow-y-auto p-2 bg-gray-50 rounded border border-gray-200"
+                            style={{
+                              ...textSpring,
+                              scrollbarWidth: "thin",
+                              scrollbarColor: "#aaa #eee",
+                            }}
+                          >
+                            {spec}
+                          </animated.div>
+                        )
+                        : (
+                          <div className="p-4 bg-gray-50 border border-gray-200 rounded text-center text-xs text-gray-500">
+                            Loading original specification...
+                          </div>
+                        )}
                     </div>
                   )}
-                  {!spec && !plan && (
+
+                  {!spec && !plan && !classificationLoading && !planLoading && (
                     <animated.div
-                      className="text-xs text-gray-500 italic"
+                      className="text-xs text-gray-500 italic py-4 text-center"
                       style={textSpring}
                     >
-                      Your specification preview will appear here as you type...
+                      Your preview will appear here as you type...
                     </animated.div>
                   )}
                 </animated.div>

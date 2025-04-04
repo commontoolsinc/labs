@@ -25,6 +25,8 @@ import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { charmId, getMentionableCharms } from "@/utils/charms.ts";
 import { formatPromptWithMentions } from "@/utils/format.ts";
 import { NAME } from "@commontools/builder";
+import { Cell } from "@commontools/runner";
+import { Charm } from "@commontools/charm";
 import {
   SpecPreviewModel,
   useLiveSpecPreview,
@@ -52,14 +54,48 @@ function CommandProcessor({
     "think",
   );
 
+  // Get the focused charm if available
+  const { focusedCharmId } = context;
+  const [focusedCharm, setFocusedCharm] = useState<Cell<Charm> | undefined>(undefined);
+  
+  // Fetch the focused charm when ID changes
+  useEffect(() => {
+    if (focusedCharmId) {
+      charmManager.get(focusedCharmId, false).then(charm => {
+        if (charm) {
+          setFocusedCharm(charm);
+        }
+      }).catch(err => {
+        console.error("Error fetching focused charm:", err);
+      });
+    } else {
+      setFocusedCharm(undefined);
+    }
+  }, [focusedCharmId, charmManager]);
+  
   // Get spec preview as user types in command center
-  const { previewSpec, previewPlan, loading: isPreviewLoading } =
-    useLiveSpecPreview(
+  const { 
+    previewSpec, 
+    previewPlan, 
+    loading: isPreviewLoading,
+    classificationLoading,
+    planLoading,
+    workflowType,
+    workflowConfidence,
+    workflowReasoning,
+    setWorkflow, // Add the setter function to allow changing workflow type manually
+    formData // Get the form data to pass to commands
+  } = useLiveSpecPreview(
       inputValue,
+      charmManager, // Explicitly pass CharmManager instance
       true,
       1000,
       previewModel,
+      focusedCharm // Pass the current charm for context
     );
+    
+  // Update the context with the current workflow form data
+  context.workflowForm = formData;
 
   if (context.loading && mode.type !== "input") {
     return (
@@ -80,9 +116,22 @@ function CommandProcessor({
       charmManager,
     );
     if ((mode.command as InputCommandItem).handler) {
-      (mode.command as InputCommandItem).handler(text, sources);
+      // Pass the current workflow type and plan to the handler 
+      // This ensures the command uses the latest workflow selection
+      // (which may have been manually changed by the user)
+      const commandData = {
+        ...sources,
+        _workflowType: workflowType,
+        _workflowConfidence: workflowConfidence, 
+        _previewPlan: previewPlan
+      };
+      
+      // Log the workflow information at submission time
+      console.log(`Submitting with workflow: ${workflowType}, confidence: ${Math.round(workflowConfidence * 100)}%, plan steps: ${typeof previewPlan === 'string' ? 1 : (Array.isArray(previewPlan) ? previewPlan.length : 0)}`);
+      
+      (mode.command as InputCommandItem).handler(text, commandData);
     }
-  }, [mode, inputValue, charmManager]);
+  }, [mode, inputValue, charmManager, workflowType, workflowConfidence, previewPlan]);
 
   switch (mode.type) {
     case "input": {
@@ -94,8 +143,14 @@ function CommandProcessor({
               spec={previewSpec}
               plan={previewPlan}
               loading={isPreviewLoading}
+              classificationLoading={classificationLoading}
+              planLoading={planLoading}
               visible
               floating
+              workflowType={workflowType}
+              workflowConfidence={workflowConfidence}
+              workflowReasoning={workflowReasoning}
+              onWorkflowChange={setWorkflow} // Add workflow change handler to enable manual selection
             />
 
             <Composer

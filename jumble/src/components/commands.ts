@@ -6,9 +6,12 @@ import {
   Charm,
   CharmManager,
   compileAndRunRecipe,
+  imagine,
   iterate,
   renameCharm,
+  WorkflowType,
 } from "@commontools/charm";
+import { WorkflowFormData } from "./SpecPreview.tsx";
 // Import NavigateFunction from our types rather than directly from react-router-dom
 import type { NavigateFunction } from "react-router-dom";
 import { charmId } from "@/utils/charms.ts";
@@ -143,6 +146,8 @@ export interface CommandContext {
   addJobMessage: (jobId: string, message: string) => void;
   updateJobProgress: (jobId: string, progress: number) => void;
   commandPathIds: string[];
+  // Workflow preview data from SpecPreview
+  workflowForm?: WorkflowFormData;
 }
 
 export type CommandMode =
@@ -249,33 +254,101 @@ async function handleExecuteCharmAction(deps: CommandContext) {
 }
 
 // Command handlers
-async function handleNewCharm(
+// Unified handler for charm operations using the imagine function
+async function handleImagineOperation(
   deps: CommandContext,
   input: string,
   sources?: SourceSet,
+  workflowType?: WorkflowType, // Optional workflow type override
 ) {
+  if (!input) return;
   deps.setLoading(true);
 
   try {
-    // Pass the goal directly to castNewRecipe, which will handle the two-phase process
-    const newCharm = await castNewRecipe(
-      deps.charmManager,
-      input,
-      grabCells(sources),
-    );
-    if (!newCharm) {
-      throw new Error("Failed to cast charm");
+    let newCharm;
+    // Extract cells and any special keys starting with underscore
+    const dataReferences = grabCells(sources);
+
+    // Get workflow data from the deps.workflowForm
+    const formWorkflowType = deps.workflowForm?.workflowType;
+    const formPlan = deps.workflowForm?.plan;
+    const formSpec = deps.workflowForm?.spec;
+    const formSchema = deps.workflowForm?.schema;
+    
+    // Use the workflow type from the form or the provided parameter
+    const effectiveWorkflowType = formWorkflowType || workflowType || "edit";
+
+    // Handle differently based on whether we're modifying an existing charm or creating a new one
+    if (deps.focusedCharmId) {
+      // Get the current charm
+      const charm = await deps.charmManager.get(deps.focusedCharmId, false);
+      if (!charm) {
+        throw new Error("Failed to load charm");
+      }
+
+      // Import modifyCharm from @commontools/charm
+      const { modifyCharm } = await import("@commontools/charm");
+
+      // Prepare plan from form data if available - convert to array if it's a string
+      const planArray = formPlan
+        ? (typeof formPlan === "string" ? [formPlan] : formPlan)
+        : undefined;
+
+      console.log(
+        "Using modifyCharm with workflow:",
+        effectiveWorkflowType,
+        "plan:",
+        planArray ? planArray.length + " steps" : "none",
+      );
+
+      // Use modifyCharm for existing charms - this handles both iterate and extend cases
+      newCharm = await modifyCharm(
+        deps.charmManager,
+        input,
+        charm,
+        deps.preferredModel,
+        effectiveWorkflowType,
+        planArray,
+      );
+    } else {
+      // For new charms, use imagine with workflow data from the form
+      // Prepare the plan array for the new charm too
+      const newCharmPlanArray = formPlan
+        ? (typeof formPlan === "string" ? [formPlan] : formPlan)
+        : undefined;
+        
+      newCharm = await imagine(
+        deps.charmManager,
+        input,
+        { 
+          dataReferences, 
+          workflowType: effectiveWorkflowType,
+          previewPlan: newCharmPlanArray,
+          previewSpec: formSpec,
+          previewSchema: formSchema
+        },
+        deps.preferredModel,
+      );
     }
+
+    if (!newCharm) {
+      throw new Error("Failed to create charm");
+    }
+
+    // Navigate to the new charm
     const id = charmId(newCharm);
     if (!id || !deps.focusedReplicaId) {
       throw new Error("Missing charm ID or replica name");
     }
+
     deps.navigate(
       createPath("charmShow", {
         charmId: id,
         replicaName: deps.focusedReplicaId,
       }),
     );
+  } catch (error) {
+    console.error("Imagine operation error:", error);
   } finally {
     deps.setLoading(false);
     deps.setOpen(false);
@@ -324,54 +397,9 @@ async function handleSearchCharms(deps: CommandContext) {
   }
 }
 
-async function handleEditRecipe(
-  deps: CommandContext,
-  input: string | undefined,
-) {
-  if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
-  deps.setLoading(true);
+// handleEditRecipe now uses handleImagineOperation with a 'fix' workflow type
 
-  const charm = (await deps.charmManager.get(deps.focusedCharmId, false))!;
-  try {
-    const newCharm = await iterate(
-      deps.charmManager,
-      charm,
-      input,
-      false,
-      deps.preferredModel,
-    );
-    deps.navigate(createPath("charmShow", {
-      charmId: charmId(newCharm)!,
-      replicaName: deps.focusedReplicaId!,
-    }));
-  } catch (e) {
-    console.error("Error editing recipe:", e);
-  } finally {
-    deps.setLoading(false); // FIXME(ja): load status should update on exception
-    deps.setOpen(false);
-  }
-}
-
-async function handleExtendRecipe(
-  deps: CommandContext,
-  input?: string,
-  sources?: SourceSet,
-) {
-  if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
-  deps.setLoading(true);
-  const newCharm = await extendCharm(
-    deps.charmManager,
-    deps.focusedCharmId,
-    input,
-    grabCells(sources),
-  );
-  deps.navigate(createPath("charmShow", {
-    charmId: charmId(newCharm)!,
-    replicaName: deps.focusedReplicaId,
-  }));
-  deps.setLoading(false);
-  deps.setOpen(false);
-}
+// handleExtendRecipe now uses handleImagineOperation with an 'edit' workflow type
 
 async function handleRenameCharm(
   deps: CommandContext,
@@ -773,7 +801,8 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       type: "input",
       title: "New Charm",
       group: "Create",
-      handler: (input, data) => handleNewCharm(deps, input, data),
+      handler: (input, data) =>
+        handleImagineOperation(deps, input, data, "rework"),
     },
     {
       id: "search-charms",
@@ -872,20 +901,11 @@ export function getCommands(deps: CommandContext): CommandItem[] {
     {
       id: "edit-recipe",
       type: "input",
-      title: `Iterate on Recipe`,
+      title: `Modify Charm`,
       group: "Edit",
       predicate: !!deps.focusedCharmId,
       placeholder: "What would you like to change?",
-      handler: (input) => handleEditRecipe(deps, input),
-    },
-    {
-      id: "extend-recipe",
-      type: "input",
-      title: `Extend Recipe`,
-      group: "Edit",
-      predicate: !!deps.focusedCharmId,
-      placeholder: "What you like to see?",
-      handler: (input, data) => handleExtendRecipe(deps, input, data),
+      handler: (input, data) => handleImagineOperation(deps, input, data),
     },
     {
       id: "delete-charm",
@@ -1160,7 +1180,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
     {
       id: "edit-recipe-voice",
       type: "transcribe",
-      title: `Iterate (Voice)${
+      title: `Modify Charm (Voice)${
         deps.preferredModel ? ` (${deps.preferredModel})` : ""
       }`,
       group: "Edit",

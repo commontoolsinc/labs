@@ -7,6 +7,7 @@ import {
   IFrameRecipe,
   injectUserCode,
   iterate,
+  modifyCharm,
 } from "@commontools/charm";
 import { useCharmReferences } from "@/hooks/use-charm-references.ts";
 import { isCell, isStream } from "@commontools/runner";
@@ -48,7 +49,7 @@ import { useCharmMentions } from "@/components/CommandCenter.tsx";
 import { formatPromptWithMentions } from "@/utils/format.ts";
 import { CharmLink } from "@/components/CharmLink.tsx";
 import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
-import { SpecPreview } from "@/components/SpecPreview.tsx";
+import { SpecPreview, WorkflowType, WorkflowFormData } from "@/components/SpecPreview.tsx";
 import {
   SpecPreviewModel,
   useLiveSpecPreview,
@@ -72,6 +73,12 @@ interface CharmOperationContextType {
   setSelectedModel: (model: string) => void;
   operationType: OperationType;
   setOperationType: (type: OperationType) => void;
+  workflowType: WorkflowType;
+  setWorkflow: (type: WorkflowType) => void;
+  workflowConfidence: number;
+  workflowReasoning?: string;
+  classificationLoading: boolean; // Loading state for workflow classification
+  planLoading: boolean; // Loading state for plan generation
   showVariants: boolean;
   setShowVariants: (show: boolean) => void;
   showPreview: boolean;
@@ -85,10 +92,13 @@ interface CharmOperationContextType {
   expectedVariantCount: number;
   setExpectedVariantCount: (count: number) => void;
   previewSpec: string;
-  previewPlan: string;
+  previewPlan: string[] | string;
   isPreviewLoading: boolean;
   previewModel: SpecPreviewModel;
   setPreviewModel: (model: SpecPreviewModel) => void;
+  // The current form data from the preview
+  workflowForm?: WorkflowFormData;
+  setWorkflowForm: (form: WorkflowFormData) => void;
   handlePerformOperation: () => void;
   handleCancelVariants: () => void;
   performOperation: (
@@ -267,19 +277,48 @@ function useCharmOperation() {
     null,
   );
   const [expectedVariantCount, setExpectedVariantCount] = useState(0);
+  // The current workflow form data from SpecPreview
+  const [workflowForm, setWorkflowForm] = useState<WorkflowFormData>();
 
   // Preview model state
   const [previewModel, setPreviewModel] = useState<SpecPreviewModel>("think");
 
-  // Live preview generation
+  // Live preview generation with workflow classification
   const {
     previewSpec,
     previewPlan,
     loading: isPreviewLoading,
+    classificationLoading,
+    planLoading,
     model,
-  } = useLiveSpecPreview(input, showPreview, 250, previewModel);
+    workflowType: classifiedWorkflowType,
+    workflowConfidence,
+    workflowReasoning,
+    setWorkflow,
+  } = useLiveSpecPreview(
+    input,
+    charmManager, // Explicitly pass CharmManager instance
+    showPreview,
+    250,
+    previewModel,
+    charm || undefined,
+  );
 
-  // Function that performs the selected operation (iterate or extend)
+  // Automatically update operationType based on workflow classification
+  useEffect(() => {
+    if (!classifiedWorkflowType || workflowConfidence < 0.3) return;
+
+    // Map the workflow type to operation type
+    if (classifiedWorkflowType === "rework") {
+      // For rework workflows, use extend operation
+      setOperationType("extend");
+    } else {
+      // For fix and edit workflows, use iterate operation
+      setOperationType("iterate");
+    }
+  }, [classifiedWorkflowType, workflowConfidence, setOperationType]);
+
+  // Function that performs the selected operation using modifyCharm
   const performOperation = useCallback(
     (
       charmId: string,
@@ -287,28 +326,33 @@ function useCharmOperation() {
       model: string,
       data: any,
     ) => {
-      if (operationType === "iterate") {
-        // TODO(bf): do we use @-ref data for iterate?
-        return charmManager.get(charmId, false).then((fetched) => {
-          const charm = fetched!;
-          return iterate(
-            charmManager,
-            charm,
-            input,
-            false,
-            model,
-          );
-        });
-      } else {
-        return extendCharm(
+      // First get the charm by ID
+      return charmManager.get(charmId, false).then((fetched) => {
+        if (!fetched) {
+          throw new Error(`Charm with ID ${charmId} not found`);
+        }
+
+        // Get workflow data from the form
+        const planArray = workflowForm?.plan
+          ? (typeof workflowForm.plan === 'string' 
+              ? [workflowForm.plan] 
+              : workflowForm.plan)
+          : [];
+          
+        const effectiveWorkflowType = workflowForm?.workflowType || classifiedWorkflowType;
+        
+        // Use modifyCharm which supports all workflow types
+        return modifyCharm(
           charmManager,
-          charmId,
           input,
-          data,
+          fetched,
+          model,
+          effectiveWorkflowType,  // Pass the workflow type from form
+          planArray               // Pass the plan from form
         );
-      }
+      });
     },
-    [operationType, charmManager],
+    [charmManager, workflowForm, classifiedWorkflowType],
   );
 
   // Handle performing the operation
@@ -394,6 +438,12 @@ function useCharmOperation() {
     setSelectedModel,
     operationType,
     setOperationType,
+    workflowType: classifiedWorkflowType, // Use the classified workflow type from the preview
+    setWorkflow,
+    workflowConfidence,
+    workflowReasoning,
+    classificationLoading, // Add the classification loading state
+    planLoading, // Add the plan loading state
     showVariants,
     setShowVariants,
     showPreview,
@@ -411,6 +461,8 @@ function useCharmOperation() {
     isPreviewLoading,
     previewModel,
     setPreviewModel,
+    workflowForm, // Add the workflow form data
+    setWorkflowForm, // Add the setter
     handlePerformOperation,
     handleCancelVariants,
     performOperation,
@@ -776,8 +828,14 @@ const OperationTab = () => {
     previewSpec,
     previewPlan,
     isPreviewLoading,
+    classificationLoading,
+    planLoading,
     previewModel,
     setPreviewModel,
+    workflowType: classifiedWorkflowType,
+    workflowConfidence,
+    workflowReasoning,
+    setWorkflow, // Add this to access from context
   } = useCharmOperationContext();
 
   const mentions = useCharmMentions();
@@ -786,23 +844,14 @@ const OperationTab = () => {
   return (
     <div className="flex flex-col p-4">
       <div className="flex flex-col gap-3">
-        <ToggleButton
-          options={[
-            { value: "iterate", label: "Iterate" },
-            { value: "extend", label: "Extend" },
-          ]}
-          value={operationType}
-          onChange={(value) => setOperationType(value as OperationType)}
-          size="large"
-          className="mb-2"
-        />
-
         <div className="flex flex-col gap-2">
           <div className="border border-gray-300">
             <Composer
-              placeholder={operationType === "iterate"
-                ? "Tweak your charm"
-                : "Add new features to your charm"}
+              placeholder={classifiedWorkflowType === "fix"
+                ? "Fix issues in your charm..."
+                : classifiedWorkflowType === "edit"
+                ? "Tweak your charm..."
+                : "Create a new charm based on this data..."}
               readOnly={false}
               mentions={mentions}
               value={input}
@@ -898,15 +947,19 @@ const OperationTab = () => {
 
       {/* Content Container with single scrollbar */}
       <div className="flex-grow overflow-auto mt-3 -mx-4 px-4">
-        {/* TODO(bf): restore in https://github.com/commontoolsinc/labs/issues/876 */}
-        {
-          /* <SpecPreview
+        <SpecPreview
           spec={previewSpec}
           plan={previewPlan}
           loading={isPreviewLoading}
+          classificationLoading={classificationLoading}
+          planLoading={planLoading}
           visible={showPreview}
-        /> */
-        }
+          workflowType={classifiedWorkflowType}
+          workflowConfidence={workflowConfidence}
+          workflowReasoning={workflowReasoning}
+          onWorkflowChange={setWorkflow}
+          onFormChange={setWorkflowForm}
+        />
         <Variants />
         <Suggestions />
       </div>
