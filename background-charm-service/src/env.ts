@@ -14,15 +14,14 @@ const envSchema = z.object({
   // Timeouts (in milliseconds)
   //CHARM_EXECUTION_TIMEOUT_MS: z.coerce.number().positive().default(30_000),
 
-  // Identity 
+  // Identity
   OPERATOR_PASS: z.string().default("implicit trust"),
   // Path to the identity keyfile that the service
   // runs as.
   IDENTITY: z.string(),
-  
+
   // Toolshed configuration
   TOOLSHED_API_URL: z.string().default("http://localhost:8000"),
-
   // Background Charm Service: default is public space "toolshed-system"
   //SERVICE_DID: z.string().default(
   //  "did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88",
