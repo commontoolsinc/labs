@@ -1,21 +1,16 @@
 import { BGCharmEntry, sleep } from "@commontools/utils";
 import { Cell } from "@commontools/runner";
 import { log } from "./utils.ts";
-import { WorkerController } from "./worker-controller.ts";
+import { WorkerController, type WorkerOptions } from "./worker-controller.ts";
 import { type Cancel, useCancelGroup } from "@commontools/runner";
-import { Identity } from "@commontools/identity";
 
-type CharmSchedulerOptions = {
-  did: string;
-  toolshedUrl: string;
-  identity: Identity;
+export interface CharmSchedulerOptions extends WorkerOptions {
   maxConcurrentJobs?: number;
   maxRetries?: number;
   pollingIntervalMs?: number;
   deactivationTimeoutMs?: number;
   rerunIntervalMs?: number;
-  timeoutMs?: number;
-};
+}
 
 type RunBg = {
   charmId: string;
@@ -33,7 +28,6 @@ export class SpaceManager {
   private deactivationTimeoutMs: number;
   private workerController: WorkerController;
   private rerunIntervalMs: number;
-  private timeoutMs: number;
   private pendingRuns: RunBg[] = [];
 
   constructor(options: CharmSchedulerOptions) {
@@ -43,8 +37,8 @@ export class SpaceManager {
     this.pollingIntervalMs = options.pollingIntervalMs ?? 100;
     this.deactivationTimeoutMs = options.deactivationTimeoutMs ?? 10000;
     this.rerunIntervalMs = options.rerunIntervalMs ?? 60000;
-    this.workerController = new WorkerController(this.did);
-    this.timeoutMs = options.timeoutMs ?? 10000;
+    this.workerController = new WorkerController(options);
+
     log(`Charm scheduler initialized`);
     log(` - did: ${this.did}`);
     log(` - maxConcurrentJobs: ${this.maxConcurrentJobs}`);
@@ -52,19 +46,6 @@ export class SpaceManager {
     log(` - pollingIntervalMs: ${this.pollingIntervalMs}`);
     log(` - deactivationTimeoutMs: ${this.deactivationTimeoutMs}`);
     log(` - rerunIntervalMs: ${this.rerunIntervalMs}`);
-
-    this.workerController.setupWorker(
-      options.toolshedUrl,
-      options.identity,
-    ).then(
-      () => {
-        log(`Worker controller ${this.did} ready for work`);
-      },
-    ).catch((err) => {
-      log(`Failed to setup worker controller: ${err}`);
-    });
-
-    this.execLoop();
   }
 
   private addPendingRun(
@@ -134,8 +115,11 @@ export class SpaceManager {
     return cancel;
   }
 
-  start() {
-    log("Charm scheduler started");
+  async start(): Promise<void> {
+    log("Charm scheduler starting...");
+    await this.workerController.initialize();
+    this.execLoop();
+    log(`Worker controller ${this.did} ready for work`);
   }
 
   async stop(): Promise<void> {
@@ -158,27 +142,11 @@ export class SpaceManager {
     }
 
     // FIXME(ja): stop web worker!
-    this.workerController.shutdown();
-  }
-
-  getStatus() {
-    return {
-      running: this.workerController.ready,
-      activeCharm: this.activeBg,
-      scheduledCharms: this.schedulableBgs.size,
-      pendingRuns: this.pendingRuns.length,
-    };
+    await this.workerController.shutdown();
   }
 
   private async execLoop(): Promise<void> {
     while (true) {
-      // fixme(ja): we could await a race of the following:
-      if (!this.workerController.ready) {
-        log("worker controller not ready, sleeping");
-        await sleep(this.pollingIntervalMs);
-        continue;
-      }
-
       if (this.activeBg) {
         log("active charm, sleeping");
         await sleep(this.pollingIntervalMs);
@@ -199,7 +167,7 @@ export class SpaceManager {
     }
   }
 
-  private processCharm(charmId: string, bg: Cell<BGCharmEntry>) {
+  private async processCharm(charmId: string, bg: Cell<BGCharmEntry>) {
     log(`processCharm ${charmId}`);
 
     const b = bg.get();
@@ -213,31 +181,19 @@ export class SpaceManager {
 
     this.activeBg = bg;
 
-    Promise.race([
-      this.workerController.runCharm(bg).catch((e) => {
-        log(e instanceof Error ? e.message : String(e), {
-          error: true,
-        });
-        return {
-          success: false,
-          error: e instanceof Error ? e.message : String(e),
-          charmId,
-        };
-      }),
-      sleep(this.timeoutMs).then(() => ({
-        success: false,
-        error: "Timeout while running charm",
-      })),
-    ]).then((result) => {
-      if (!result.success) {
-        const error = "error" in result ? result.error : "Unknown error";
-        this.disableCharm(charmId, bg, error);
-      } else {
-        this.recordSuccess(charmId, bg);
-      }
-    }).finally(() => {
-      this.activeBg = null;
-    });
+    try {
+      await this.workerController.runCharm(bg);
+      this.recordSuccess(charmId, bg);
+    } catch (error) {
+      const errorString = error instanceof Error
+        ? error.message
+        : String(error);
+      log(errorString, {
+        error: true,
+      });
+      this.disableCharm(charmId, bg, errorString);
+    }
+    this.activeBg = null;
   }
 
   private recordSuccess(charmId: string, bg: Cell<BGCharmEntry>) {
