@@ -1,6 +1,6 @@
 import { Charm, CharmManager } from "@commontools/charm";
 import { Cell, getEntityId } from "@commontools/runner";
-import { Identity, DID, type Session } from "@commontools/identity";
+import { DID, Identity, type Session } from "@commontools/identity";
 import { env } from "./env.ts";
 
 /**
@@ -16,25 +16,32 @@ export function log(
   options?: { charm?: Cell<Charm> | string; error?: boolean },
   ...args: any[]
 ) {
-  const timestamp = new Date().toISOString();
   let charmIdSuffix = "";
 
   if (options?.charm) {
     const charm = options.charm;
     if (typeof charm === "string") {
-      charmIdSuffix = ` [${charm.slice(-10)}]`;
+      charmIdSuffix = `[${charm.slice(-10)}]`;
     } else {
       const id = getEntityId(charm)?.["/"];
       if (id) {
-        charmIdSuffix = ` [${id.slice(-10)}]`;
+        charmIdSuffix = `[${id.slice(-10)}]`;
       }
     }
   }
 
   if (options?.error) {
-    console.error(`${timestamp}${charmIdSuffix}`, message, ...args);
+    if (charmIdSuffix) {
+      console.error(charmIdSuffix, message, ...args);
+    } else {
+      console.error(message, ...args);
+    }
   } else {
-    console.log(`${timestamp}${charmIdSuffix}`, message, ...args);
+    if (charmIdSuffix) {
+      console.log(charmIdSuffix, message, ...args);
+    } else {
+      console.log(message, ...args);
+    }
   }
 }
 
@@ -53,8 +60,11 @@ export function isValidCharmId(id: string): boolean {
 // If not set, falls back to operator pass to
 // use an insecure passphrase.
 // This fallback should be removed once fully migrated
-// over to using keyfiles. 
-export async function getIdentity(identityPath?: string, operatorPass?: string): Promise<Identity> {
+// over to using keyfiles.
+export async function getIdentity(
+  identityPath?: string,
+  operatorPass?: string,
+): Promise<Identity> {
   if (identityPath) {
     console.log(`Using identity at ${identityPath}`);
     try {

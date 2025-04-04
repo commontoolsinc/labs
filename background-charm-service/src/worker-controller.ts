@@ -35,7 +35,7 @@ export class WorkerController {
     this.toolshedUrl = options.toolshedUrl;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TASK_TIMEOUT;
 
-    log(`Creating worker controller ${this.did}`);
+    log(`${this.did} Creating worker controller`);
 
     this.worker = new Worker(
       new URL("./worker.ts", import.meta.url).href,
