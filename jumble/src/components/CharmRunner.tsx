@@ -123,6 +123,13 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
     function handleIframeError(event: Event) {
       const customEvent = event as CustomEvent<Error>;
       setRuntimeError(customEvent.detail);
+      console.error(
+        "charm-runtime-error",
+        JSON.stringify({
+          ...customEvent.detail,
+          charmId: charmId(charm),
+        }),
+      );
     }
 
     container.addEventListener("common-iframe-error", handleIframeError);
