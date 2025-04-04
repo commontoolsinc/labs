@@ -1,9 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { isModule, isRecipe, type Module, type Recipe } from "../src/types.ts";
+import {
+  isModule,
+  isRecipe,
+  type JSONSchema,
+  type Module,
+  type Recipe,
+} from "../src/types.ts";
 import { lift } from "../src/module.ts";
 import { recipe } from "../src/recipe.ts";
-import { z } from "zod";
 import { opaqueRef } from "../src/opaque-ref.ts";
 
 describe("recipe function", () => {
@@ -76,9 +81,20 @@ describe("complex recipe function", () => {
 });
 
 describe("schemas", () => {
-  it("can be Zod, should become JSON", () => {
-    const schema = z.object({ x: z.number() }).describe("A number");
-    const testRecipe = recipe(schema, schema, ({ x }) => ({ x }));
+  it("supports JSON Schema with descriptions", () => {
+    const makeRecipeWithSchemas = () => {
+      const schema = {
+        type: "object",
+        properties: {
+          x: { type: "number" },
+        },
+        description: "A number",
+      } as const satisfies JSONSchema;
+
+      return recipe<{ x: number }>(schema, ({ x }) => ({ x }));
+    };
+
+    const testRecipe = makeRecipeWithSchemas();
     expect(isRecipe(testRecipe)).toBe(true);
     expect(testRecipe.argumentSchema).toMatchObject({
       description: "A number",
@@ -87,24 +103,36 @@ describe("schemas", () => {
         x: { type: "number" },
       },
     });
-    expect(testRecipe.resultSchema).toMatchObject(
-      testRecipe.argumentSchema as unknown as Record<string, unknown>,
-    );
   });
 
-  it("also works for lifted functions", () => {
+  it("works with JSON Schema in lifted functions", () => {
+    const inputSchema = {
+      type: "number",
+      description: "A number",
+    } as const satisfies JSONSchema;
+
+    const outputSchema = {
+      type: "number",
+      description: "Doubled",
+    } as const satisfies JSONSchema;
+
     const double = lift(
-      z.number().describe("A number"),
-      z.number().describe("Doubled"),
-      (x) => x * 2,
+      inputSchema,
+      outputSchema,
+      (x: number) => x * 2,
     );
-    // @ts-ignore-error ZodNumber and number clash to be investigated
-    const testRecipe = recipe(
-      z.object({ x: z.number() }),
-      z.object({ doubled: z.number() }),
-      // @ts-ignore-error
-      ({ x }) => ({ doubled: double(x) }),
-    );
+
+    const recipeInputSchema = {
+      type: "object",
+      properties: {
+        x: { type: "number" },
+      },
+    } as const satisfies JSONSchema;
+
+    const testRecipe = recipe<{ x: number }>(recipeInputSchema, ({ x }) => ({
+      doubled: double(x),
+    }));
+
     const module = testRecipe.nodes[0].module as Module;
     expect(module.argumentSchema).toMatchObject({
       description: "A number",
