@@ -4,7 +4,7 @@ import { castNewRecipe, CharmManager } from "@commontools/charm";
 import { getEntityId, setBobbyServerUrl, storage } from "@commontools/runner";
 import { createSession, Identity } from "@commontools/identity";
 import { client as llm } from "@commontools/llm";
-import { prompts } from "./prompts.ts";
+import { scenarios } from "./prompts.ts";
 import { Command, CommandType } from "./commands.ts";
 import { generateObject, generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
@@ -115,7 +115,7 @@ async function processPrompts() {
   let promptCount = 0;
   console.log(`Processing prompts...`);
 
-  for (const command of prompts) {
+  for (const command of scenarios) {
     promptCount++;
     await processCommand(command);
   }
@@ -164,8 +164,17 @@ function checkForErrors() {
 
 async function screenshot(id: string) {
   const screenshot = await page.screenshot();
-  const filename = `results/${name}-${id}.png`;
-  Deno.writeFileSync(filename, screenshot);
+  // Create directory if it doesn't exist
+  const dirPath = `results/${name}`;
+  try {
+    await Deno.mkdir(dirPath, { recursive: true });
+  } catch (e) {
+    // Directory might already exist, which is fine
+  }
+
+  // Use just the charm name as the filename
+  const filename = `${dirPath}/${id}.png`;
+  await Deno.writeFile(filename, screenshot);
   return filename;
 }
 
@@ -208,6 +217,130 @@ If the screenshot does not match the prompt, return a FAIL result with a brief e
   return JSON.stringify(result);
 }
 
+// Store results for the report
+interface CharmResult {
+  id: string;
+  prompt: string;
+  screenshotPath: string;
+  status: string;
+  summary: string;
+}
+
+const charmResults: CharmResult[] = [];
+
+async function generateReport() {
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Charm Seeder Results - ${name}</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    h1 {
+      color: #333;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background-color: white;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td {
+      padding: 12px 15px;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+    }
+    th {
+      background-color: #f8f9fa;
+      font-weight: 600;
+    }
+    tr:last-child td {
+      border-bottom: none;
+    }
+    .thumbnail {
+      width: 150px;
+      height: 100px;
+      object-fit: cover;
+      border-radius: 4px;
+    }
+    .status {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-weight: 500;
+      font-size: 14px;
+    }
+    .status-pass {
+      background-color: #d4edda;
+      color: #155724;
+    }
+    .status-fail {
+      background-color: #f8d7da;
+      color: #721c24;
+    }
+    .link {
+      color: #007bff;
+      text-decoration: none;
+    }
+    .link:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <h1>Charm Seeder Results - ${name}</h1>
+  <table>
+    <thead>
+      <tr>
+        <th>Thumbnail</th>
+        <th>ID</th>
+        <th>Prompt</th>
+        <th>Status</th>
+        <th>Summary</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${
+    charmResults.map((result) => {
+      // Convert the full path to a relative path for the HTML
+      const relativePath = result.screenshotPath.replace(
+        `results/`,
+        "./",
+      );
+      return `
+        <tr>
+          <td><img src="${relativePath}" alt="Screenshot" class="thumbnail"></td>
+          <td><a href="http://localhost:5173/${name}/${result.id}" class="link" target="_blank">${result.id}</a></td>
+          <td>${result.prompt}</td>
+          <td><span class="status status-${result.status.toLowerCase()}">${result.status}</span></td>
+          <td>${result.summary}</td>
+        </tr>
+      `;
+    }).join("")
+  }
+    </tbody>
+  </table>
+</body>
+</html>
+  `;
+
+  const reportPath = `results/${name}.html`;
+  await Deno.writeTextFile(reportPath, html);
+  console.log(`Report generated: ${reportPath}`);
+}
+
 async function verifyCharm(id: string, prompt: string): Promise<string> {
   // FIXME(ja): can we navigate without causing a page reload?
   await page.goto(`http://localhost:5173/${name}/${id}`);
@@ -216,11 +349,32 @@ async function verifyCharm(id: string, prompt: string): Promise<string> {
   const error = checkForErrors();
   if (error) {
     console.error("Error:", error);
+    // Add failed result to charmResults
+    charmResults.push({
+      id,
+      prompt,
+      screenshotPath: filename,
+      status: "FAIL",
+      summary: `Error: ${
+        typeof error === "string" ? error : JSON.stringify(error)
+      }`,
+    });
     return `Error: ${error}`;
   }
 
   const verdict = await llmVerifyCharm(prompt, filename);
   console.log(`Charm verified: ${id} - ${verdict}`);
+
+  // Parse the verdict and add to results
+  const parsedVerdict = JSON.parse(verdict);
+  charmResults.push({
+    id,
+    prompt,
+    screenshotPath: filename,
+    status: parsedVerdict.result,
+    summary: parsedVerdict.summary,
+  });
+
   return verdict;
 }
 
@@ -233,6 +387,7 @@ try {
 
   await login();
   await processPrompts();
+  await generateReport();
 } finally {
   await sleep(500);
   await browser.close();
