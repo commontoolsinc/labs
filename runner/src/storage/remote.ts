@@ -423,7 +423,8 @@ export class RemoteStorageProvider implements StorageProvider {
     // If we did have connection
     if (this.connectionCount > 1) {
       for (const local of this.state.values()) {
-        for (const query of local.remote.values()) {
+        const uniqueRemotes = new Set(local.remote.values());
+        for (const query of uniqueRemotes) {
           query.reconnect();
         }
       }
