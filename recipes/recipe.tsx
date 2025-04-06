@@ -1,27 +1,55 @@
 import { h } from "@commontools/html";
-import { derive, handler, NAME, recipe, UI } from "@commontools/builder";
-import { z } from "zod";
+import {
+  derive,
+  handler,
+  JSONSchema,
+  NAME,
+  recipe,
+  UI,
+} from "@commontools/builder";
 
-const InputSchema = z
-  .object({
-    superCoolField: z.string(),
-    auth: z.object({
-      token: z.string(),
-      tokenType: z.string(),
-      scope: z.string(),
-      expiresIn: z.number(),
-      refreshToken: z.string(),
-      expiresAt: z.number(),
-    }),
-  })
-  .describe("Secret");
+const InputSchema = {
+  type: "object",
+  properties: {
+    superCoolField: { type: "string" },
+    auth: {
+      type: "object",
+      properties: {
+        token: { type: "string" },
+        tokenType: { type: "string" },
+        scope: { type: "string" },
+        expiresIn: { type: "number" },
+        refreshToken: { type: "string" },
+        expiresAt: { type: "number" },
+      },
+      required: [
+        "token",
+        "tokenType",
+        "scope",
+        "expiresIn",
+        "refreshToken",
+        "expiresAt",
+      ],
+    },
+  },
+  required: ["superCoolField", "auth"],
+  description: "Secret",
+} as const satisfies JSONSchema;
 
-const OutputSchema = z.object({
-  exportedSuperCoolField: z.string(),
-  exportedAuth: z.object({
-    token: z.string(),
-  }),
-});
+const OutputSchema = {
+  type: "object",
+  properties: {
+    exportedSuperCoolField: { type: "string" },
+    exportedAuth: {
+      type: "object",
+      properties: {
+        token: { type: "string" },
+      },
+      required: ["token"],
+    },
+  },
+  required: ["exportedSuperCoolField", "exportedAuth"],
+} as const satisfies JSONSchema;
 
 const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => {
