@@ -171,6 +171,18 @@ class MemoryConsumerSession<
     return invocation;
   }
 
+  getInvocation<Ability extends string>(
+    command: ConsumerCommandFor<Ability, MemoryProtocol>,
+  ) {
+    const invocation = ConsumerInvocation.create(
+      this.as.did(),
+      command as Command<Ability, InferOf<MemoryProtocol>>,
+      this.clock.now(),
+      this.ttl,
+    );
+    return invocation;
+  }
+
   async execute<Ability extends string>(
     invocation: ConsumerInvocation<Ability, MemoryProtocol>,
   ) {
@@ -434,7 +446,7 @@ class QueryView<
   // Since we already have these results, we don't want to re-fetch them, so
   // make a QueryView available for subscriptions to use that lets us skip
   // that step when we subscribe.
-  includedQueryView(): QueryView<Space, MemoryProtocol> | undefined {
+  includedQueryView(): QueryView<MemorySpace, MemoryProtocol> | undefined {
     const factSelection = this.selection[this.space];
     const subSelector: Selector = {};
     for (const [of, attributes] of Object.entries(factSelection)) {
@@ -454,9 +466,15 @@ class QueryView<
     // If we included any entries in our selection that were not in our
     // selector, create a new QueryView for them, and subscribe to that
     // We pre-populate the query view with the results
+    const invocation = this.session.getInvocation({
+      cmd: "/memory/query" as const,
+      sub: this.space,
+      args: { select: subSelector },
+    });
+    invocation.return(Promise.resolve(this.selection));
     const subQueryView = new QueryView(
       this.session,
-      this.invocation,
+      invocation,
       Promise.resolve({ ok: this }),
     );
 
