@@ -37,13 +37,13 @@ import { SchemaWithoutCell } from "./schema-to-ts.ts";
  *
  * or
  *
- * @param argumentSchema A schema for the recipe inputs, either JSON
+ * @param argumentSchema A JSONSchema for the recipe inputs
  * @param fn A function that creates the recipe graph
  *
  * or
  *
- * @param argumentSchema A schema for the recipe inputs, either JSON
- * @param resultSchema A schema for the recipe outputs, either JSON
+ * @param argumentSchema A JSONSchema for the recipe inputs
+ * @param resultSchema A JSONSchema for the recipe outputs
  * @param fn A function that creates the recipe graph
  *
  * @returns A recipe node factory that also serializes as recipe.
