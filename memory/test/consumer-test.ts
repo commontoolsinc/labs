@@ -6,7 +6,7 @@ import * as Commit from "../commit.ts";
 import * as Provider from "../provider.ts";
 import * as Consumer from "../consumer.ts";
 import * as Selection from "../selection.ts";
-import { refer } from "merkle-reference";
+import { CODE, refer } from "merkle-reference";
 import { alice, bob, space as subject } from "./principal.ts";
 import { UTCUnixTimestampInSeconds } from "../interface.ts";
 
@@ -313,9 +313,11 @@ test("list multiple facts using schema query", store, async (session) => {
   ];
 
   // Create multiple facts
-  await memory.transact({
+  const tr = await memory.transact({
     changes: Changes.from(facts),
   });
+  assert(tr.ok);
+  const commit = Commit.toRevision(tr.ok);
 
   const result = await memory.query({
     selectSchema: {
@@ -329,9 +331,9 @@ test("list multiple facts using schema query", store, async (session) => {
 
   const expectedFacts: Record<string, any> = {};
   for (const fact of facts) {
-    expectedFacts[fact.cause.toString()] = { is: fact.is };
+    expectedFacts[fact.cause.toString()] = { is: fact.is, since: commit.since };
   }
-  const factChanges = Changes.from(facts);
+  const factChanges = Selection.from(facts.map((fact) => [fact, commit.since]));
   const newObject = { ...factChanges, "_": { [the]: expectedFacts } };
   assertEquals(
     result.ok?.selection,

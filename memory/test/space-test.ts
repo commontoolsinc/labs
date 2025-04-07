@@ -1189,6 +1189,7 @@ test("list single fact with schema query", DB, async (session) => {
   });
   const write = await session.transact(tr);
   assert(write.ok);
+  const commit = Commit.toRevision(write.ok);
 
   const subscriptions: SchemaContext = {
     schema: { "type": "number" },
@@ -1224,6 +1225,7 @@ test("list single fact with schema query", DB, async (session) => {
     [the]: {
       [cause.toString()]: {
         is: { "value": { "v": 1 } },
+        since: commit.since,
       },
     },
   };
@@ -1231,7 +1233,7 @@ test("list single fact with schema query", DB, async (session) => {
 });
 
 test(
-  "list fact through alias with schema query and schema filter",
+  "only list fact through alias with schema query and schema filter",
   DB,
   async (session) => {
     const v1 = Fact.assert({
@@ -1278,6 +1280,7 @@ test(
     });
     const write1 = await session.transact(tr1);
     assert(write1.ok);
+    const c1 = Commit.toRevision(write1.ok);
     const tr2 = Transaction.create({
       issuer: alice.did(),
       subject: space.did(),
@@ -1285,6 +1288,7 @@ test(
     });
     const write2 = await session.transact(tr2);
     assert(write2.ok);
+    const c2 = Commit.toRevision(write2.ok);
 
     // We'll use a schema selector to exclude the name from the address, since we already have that
     const schemaSelector: SchemaSelector = {
@@ -1336,6 +1340,8 @@ test(
               },
             },
           },
+          // @gozala: I would expect this to contain c1.since instead
+          since: c2.since,
         },
       },
     };
@@ -1411,15 +1417,29 @@ test(
       },
     });
 
-    for (const fact of [v1, v2, v3]) {
-      const tr = Transaction.create({
-        issuer: alice.did(),
-        subject: space.did(),
-        changes: Changes.from([fact]),
-      });
-      const write = await session.transact(tr);
-      assert(write.ok);
-    }
+    const tr1 = session.transact(Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v1]),
+    }));
+    assert(tr1.ok);
+    const c1 = Commit.toRevision(tr1.ok);
+
+    const tr2 = session.transact(Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v2]),
+    }));
+    assert(tr2.ok);
+    const c2 = Commit.toRevision(tr2.ok);
+
+    const tr3 = session.transact(Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v3]),
+    }));
+    assert(tr3.ok);
+    const c3 = Commit.toRevision(tr3.ok);
 
     // We'll use a schema selector to exclude the name from the address, since we already have that
     const schemaSelector: SchemaSelector = {
@@ -1473,6 +1493,7 @@ test(
               }],
             },
           },
+          since: c1.since,
         },
       },
     };
@@ -1506,6 +1527,7 @@ test(
     });
     const write = await session.transact(tr);
     assert(write.ok);
+    const commit = Commit.toRevision(write.ok);
 
     const schemaSelector: SchemaSelector = {
       [doc]: {
@@ -1555,6 +1577,7 @@ test(
           is: {
             "value": { "left": { "name": "Alice" } },
           },
+          since: commit.since,
         },
       },
     };
@@ -1595,6 +1618,7 @@ test(
     });
     const write = await session.transact(tr);
     assert(write.ok);
+    const commit = Commit.toRevision(write.ok);
 
     const schemaSelector: SchemaSelector = {
       [doc]: {
@@ -1664,6 +1688,7 @@ test(
               ],
             },
           },
+          since: commit.since,
         },
       },
     };
