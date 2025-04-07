@@ -92,8 +92,6 @@ interface CharmOperationContextType {
   setSelectedVariant: (variant: Cell<Charm> | null) => void;
   expectedVariantCount: number;
   setExpectedVariantCount: (count: number) => void;
-  previewSpec: string;
-  previewPlan: string[] | string;
   isPreviewLoading: boolean;
   previewModel: SpecPreviewModel;
   setPreviewModel: (model: SpecPreviewModel) => void;
@@ -334,8 +332,17 @@ function useCharmOperation() {
           throw new Error(`Charm with ID ${charmId} not found`);
         }
 
+        // IMPORTANT: Determine the correct workflow type to use, with explicit precedence:
+        // 1. Form data from UI is highest priority (user-selected)
+        // 2. Classified workflow type is fallback
         const effectiveWorkflowType = workflowForm?.workflowType ||
           classifiedWorkflowType;
+
+        console.log("Using workflow type for operation:", {
+          fromForm: workflowForm?.workflowType,
+          fromClassification: classifiedWorkflowType,
+          effective: effectiveWorkflowType,
+        });
 
         // TODO(bf): highly suspicious
         if (!updatedSchema) {
@@ -357,13 +364,33 @@ function useCharmOperation() {
         );
       });
     },
-    [charmManager, workflowForm, classifiedWorkflowType],
+    [
+      charmManager,
+      workflowForm,
+      classifiedWorkflowType,
+      previewSpec,
+      updatedSchema,
+    ],
   );
 
   // Handle performing the operation
   const handlePerformOperation = useCallback(async () => {
     if (!input || !charm || !paramCharmId || !replicaName) return;
     setLoading(true);
+
+    // IMPORTANT: Ensure workflow type in state matches what's in the form
+    // This fixes desync issues when the user changes the workflow type but it hasn't fully processed
+    if (
+      workflowForm?.workflowType &&
+      workflowForm.workflowType !== classifiedWorkflowType
+    ) {
+      console.log("Syncing workflow type before operation", {
+        fromForm: workflowForm.workflowType,
+        fromState: classifiedWorkflowType,
+      });
+      // Force the workflow type to match what's in the UI
+      setWorkflow(workflowForm.workflowType);
+    }
 
     const handleVariants = async () => {
       setVariants([]);
@@ -421,6 +448,9 @@ function useCharmOperation() {
     charmManager,
     navigate,
     operationType,
+    workflowForm,
+    classifiedWorkflowType,
+    setWorkflow,
   ]);
 
   const handleCancelVariants = useCallback(() => {
@@ -823,8 +853,6 @@ const OperationTab = () => {
     setShowPreview,
     loading,
     handlePerformOperation,
-    previewSpec,
-    previewPlan,
     isPreviewLoading,
     classificationLoading,
     planLoading,
@@ -833,6 +861,7 @@ const OperationTab = () => {
     workflowType: classifiedWorkflowType,
     workflowConfidence,
     workflowReasoning,
+    workflowForm,
     setWorkflow,
     setWorkflowForm,
   } = useCharmOperationContext();
@@ -947,8 +976,9 @@ const OperationTab = () => {
       {/* Content Container with single scrollbar */}
       <div className="flex-grow overflow-auto mt-3 -mx-4 px-4">
         <SpecPreview
-          spec={previewSpec}
-          plan={previewPlan}
+          spec={workflowForm?.spec}
+          plan={workflowForm?.steps}
+          schema={workflowForm?.schema}
           loading={isPreviewLoading}
           classificationLoading={classificationLoading}
           planLoading={planLoading}

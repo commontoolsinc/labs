@@ -78,6 +78,7 @@ function CommandProcessor({
   const {
     previewSpec,
     previewPlan,
+    schema,
     loading: isPreviewLoading,
     classificationLoading,
     planLoading,
@@ -133,6 +134,7 @@ function CommandProcessor({
             <SpecPreview
               spec={previewSpec}
               plan={previewPlan}
+              schema={schema}
               loading={isPreviewLoading}
               classificationLoading={classificationLoading}
               planLoading={planLoading}

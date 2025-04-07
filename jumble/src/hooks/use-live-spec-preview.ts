@@ -62,10 +62,10 @@ export function useLiveSpecPreview(
 
   // Track the current generation process to cancel outdated requests
   const currentGenerationRef = useRef<number>(0);
-  
+
   // Track the text input that generated the current displayed results
   const [lastSuccessfulText, setLastSuccessfulText] = useState<string>("");
-  
+
   // Track if input is a completely new topic vs. refinement of existing one
   const isCompleteTopic = useRef<boolean>(true);
 
@@ -101,16 +101,17 @@ export function useLiveSpecPreview(
 
     // Reset states based on whether this is a refinement or new topic
     const resetState = () => {
-      const textInvalid = (!text || !text.trim() || text.trim().length < 10 || !enabled);
+      const textInvalid = !text || !text.trim() || text.trim().length < 10 ||
+        !enabled;
       const isNewTopic = isCompleteTopic.current;
-      
+
       console.log("Reset state check:", {
-        textInvalid, 
+        textInvalid,
         isNewTopic,
         lastSuccessfulText: lastSuccessfulText.substring(0, 20) + "...",
-        currentText: text.substring(0, 20) + "..."
+        currentText: text.substring(0, 20) + "...",
       });
-      
+
       // Always reset content when starting a completely new topic
       if (isNewTopic) {
         console.log("Resetting preview content - new topic detected");
@@ -119,18 +120,20 @@ export function useLiveSpecPreview(
         setWorkflowConfidence(0);
         setWorkflowReasoning("");
       }
-      
+
       // Always reset loading states
       setClassificationLoading(false);
       setPlanLoading(false);
       setLoading(false);
-      
+
       // Only reset progress flags if:
       // 1. Text is invalid (too short/empty/disabled) OR
       // 2. This is a completely new topic (not a refinement)
       if (textInvalid || isNewTopic) {
-        console.log("Full reset of progress flags - " + 
-          (textInvalid ? "invalid input" : "new topic"));
+        console.log(
+          "Full reset of progress flags - " +
+            (textInvalid ? "invalid input" : "new topic"),
+        );
         setProgress({
           classification: false,
           plan: false,
@@ -160,11 +163,14 @@ export function useLiveSpecPreview(
     setClassificationLoading(true);
     setPlanLoading(true);
     setLoading(true);
-    
+
     // IMPORTANT: We're NOT resetting progress flags here anymore
     // Only show loading indicators but keep any existing progress
-    console.log("Starting new request but preserving progress state:", progress);
-    
+    console.log(
+      "Starting new request but preserving progress state:",
+      progress,
+    );
+
     // Instead, set loading without touching progress
     // If previous sections completed, they should stay completed
 
@@ -229,7 +235,7 @@ export function useLiveSpecPreview(
       setWorkflowConfidence(form.classification.confidence);
       setClassificationLoading(false);
       setProgress((prev) => ({ ...prev, classification: true }));
-      
+
       // Important: Turn off the main loading state after classification
       // so UI can show partial results while plan and spec are loading
       setLoading(false);
@@ -243,21 +249,21 @@ export function useLiveSpecPreview(
       }
 
       form = await fillPlanningSection(form);
-      
+
       // Log the plan data from form
       console.log("RECEIVED PLAN DATA:", form.plan);
-      
+
       // Make a copy of the plan steps to avoid reference issues
-      const planSteps = form.plan?.steps && form.plan.steps.length > 0 
-        ? [...form.plan.steps] 
+      const planSteps = form.plan?.steps && form.plan.steps.length > 0
+        ? [...form.plan.steps]
         : [];
-      
+
       if (planSteps && planSteps.length > 0) {
         console.log("Setting plan data:", planSteps);
-        
+
         // First set the plan data
         setPreviewPlan(planSteps);
-        
+
         // Then update the progress state in the next tick
         setTimeout(() => {
           console.log("Setting plan progress - delayed update");
@@ -271,7 +277,7 @@ export function useLiveSpecPreview(
         setPlanLoading(false);
         setProgress((prev) => ({ ...prev, plan: true }));
       }
-      
+
       console.log("got plan", form);
 
       // PROGRESSIVE UPDATE: Handle spec extraction
@@ -281,6 +287,10 @@ export function useLiveSpecPreview(
         return;
       }
 
+      if (form.plan.schema) {
+        setUpdatedSchema(form.plan.schema);
+      }
+
       // PROGRESSIVE UPDATE: Finally, update spec if available
       if (form.plan.spec) {
         try {
@@ -288,7 +298,7 @@ export function useLiveSpecPreview(
           const specMatch = form.plan.spec.match(
             /<specification>([\s\S]*?)<\/specification>/,
           );
-          
+
           let parsedSpec = "";
           if (specMatch && specMatch[1]) {
             parsedSpec = specMatch[1].trim();
@@ -296,10 +306,13 @@ export function useLiveSpecPreview(
             // If can't extract, use the full spec but remove the XML tags
             parsedSpec = form.plan.spec.replace(/<\/?[^>]+(>|$)/g, "").trim();
           }
-          
-          console.log("Setting spec content:", parsedSpec.substring(0, 50) + "...");
+
+          console.log(
+            "Setting spec content:",
+            parsedSpec.substring(0, 50) + "...",
+          );
           setPreviewSpec(parsedSpec);
-          
+
           // Ensure progress is updated
           setTimeout(() => {
             setProgress((prev) => {
@@ -341,39 +354,47 @@ export function useLiveSpecPreview(
   // Check if input is a significant change from previous content
   useEffect(() => {
     if (!lastSuccessfulText || !debouncedInput) return;
-    
+
     // Determine if this is a refinement of the same topic or a completely new topic
     // A simple heuristic: if 50% or more of the content has changed, consider it a new topic
-    const similarity = calculateTextSimilarity(lastSuccessfulText, debouncedInput);
-    isCompleteTopic.current = (similarity < 0.5);
-    
-    console.log("Text similarity:", similarity, 
-      isCompleteTopic.current ? "NEW TOPIC - Will reset all progress" : "Refinement - Will preserve progress");
+    const similarity = calculateTextSimilarity(
+      lastSuccessfulText,
+      debouncedInput,
+    );
+    isCompleteTopic.current = similarity < 0.5;
+
+    console.log(
+      "Text similarity:",
+      similarity,
+      isCompleteTopic.current
+        ? "NEW TOPIC - Will reset all progress"
+        : "Refinement - Will preserve progress",
+    );
   }, [debouncedInput, lastSuccessfulText]);
-  
+
   // Calculate text similarity as a rough percentage of how much text is preserved
   const calculateTextSimilarity = (textA: string, textB: string): number => {
     if (!textA || !textB) return 0;
-    
+
     // Use a simple character-based comparison for efficiency
     const lengthA = textA.length;
     const lengthB = textB.length;
     const maxLength = Math.max(lengthA, lengthB);
-    
+
     // Early exit for empty strings
     if (maxLength === 0) return 1;
-    
+
     // If lengths are very different, likely a new topic
     if (Math.abs(lengthA - lengthB) / maxLength > 0.5) return 0.25;
-    
+
     // Simple character-based similarity for quick comparison
     let commonChars = 0;
     const minLength = Math.min(lengthA, lengthB);
-    
+
     for (let i = 0; i < minLength; i++) {
       if (textA[i] === textB[i]) commonChars++;
     }
-    
+
     return commonChars / maxLength;
   };
 
@@ -574,23 +595,25 @@ export function useLiveSpecPreview(
     : undefined;
 
   // Debug logging to verify state
-  console.log("Current state:", { 
-    loading, 
-    classificationLoading, 
-    planLoading, 
-    progress, 
+  console.log("Current state:", {
+    loading,
+    classificationLoading,
+    planLoading,
+    progress,
     workflowType,
     planData: previewPlan,
     planType: typeof previewPlan,
     isArray: Array.isArray(previewPlan),
-    planLength: Array.isArray(previewPlan) ? previewPlan.length : 0
+    planLength: Array.isArray(previewPlan) ? previewPlan.length : 0,
   });
 
   // Extra debugging for spec content
   console.log("RETURNING SPEC:", {
     specContent: previewSpec ? previewSpec.substring(0, 30) + "..." : "none",
-    planContent: Array.isArray(previewPlan) ? previewPlan.slice(0, 2) : previewPlan,
-    progressState: progress
+    planContent: Array.isArray(previewPlan)
+      ? previewPlan.slice(0, 2)
+      : previewPlan,
+    progressState: progress,
   });
 
   return {
@@ -604,7 +627,7 @@ export function useLiveSpecPreview(
     workflowType,
     workflowConfidence,
     workflowReasoning,
-    updatedSchema,
+    schema,
     setWorkflow,
     // Include progress state to let components know which parts are ready
     progress,

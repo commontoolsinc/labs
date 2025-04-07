@@ -3,10 +3,12 @@ import { DitheredCube } from "./DitherCube.tsx";
 import { animated, useSpring, useTransition } from "@react-spring/web";
 import { ToggleButton } from "./common/CommonToggle.tsx";
 import type { ExecutionPlan, WorkflowType } from "@commontools/charm";
+import { JSONSchema } from "@commontools/builder";
 
 interface SpecPreviewProps {
   spec?: string;
   plan?: string[] | string;
+  schema?: JSONSchema;
   loading: boolean;
   classificationLoading?: boolean; // Separate loading state for classification
   planLoading?: boolean; // Separate loading state for plan generation
@@ -115,6 +117,7 @@ function Accordion(
 export function SpecPreview({
   spec,
   plan,
+  schema,
   loading,
   classificationLoading = false,
   planLoading = false,
@@ -132,6 +135,7 @@ export function SpecPreview({
     console.log("SpecPreview FULL PROPS:", {
       spec: spec ? `${spec.substring(0, 30)}...` : null,
       plan,
+      schema,
       workflowType,
       progress,
       loading,
@@ -141,6 +145,7 @@ export function SpecPreview({
   }, [
     spec,
     plan,
+    schema,
     workflowType,
     progress,
     loading,
@@ -152,7 +157,8 @@ export function SpecPreview({
     workflowType,
     plan: plan || [],
     spec,
-  }), [workflowType, plan, spec]);
+    schema,
+  }), [workflowType, plan, spec, schema]);
 
   // Notify parent when form data changes
   React.useEffect(() => {
@@ -358,7 +364,7 @@ export function SpecPreview({
                       : (
                         <>
                           <div className="flex flex-col gap-1">
-                            <div className="flex items-center justify-between mb-0.5">
+                            <div className="flex items-center w-full mb-0.5">
                               <ToggleButton
                                 options={[
                                   { value: "fix", label: "FIX" },
@@ -369,50 +375,77 @@ export function SpecPreview({
                                 onChange={(value) =>
                                   onWorkflowChange?.(value as WorkflowType)}
                                 size="small"
+                                className="w-full"
                               />
-
-                              {workflowConfidence > 0 && (
-                                <span
-                                  className={`text-[10px] ${
-                                    workflowConfidence > 0.7
-                                      ? "text-green-700"
-                                      : "text-amber-600"
-                                  }`}
-                                >
-                                  {confidencePercentage}% confidence
-                                </span>
-                              )}
                             </div>
 
                             {/* Compact workflow explanation */}
-                            <div className="text-[10px] text-gray-600 mb-1">
+                            {
+                              /* <div className="text-[10px] text-gray-600 mb-1">
                               {workflowType === "fix" &&
                                 "🛠️ Preserves existing spec, only modifies code"}
                               {workflowType === "edit" &&
                                 "✏️ Preserves data structure, updates functionality"}
                               {workflowType === "imagine" &&
                                 "🔄 Creates new spec with potentially different schema"}
-                            </div>
-
-                            {/* Classification Reasoning Accordion */}
-                            {workflowReasoning && (
-                              <Accordion
-                                title={
-                                  <span className="text-[10px]">Reasoning</span>
-                                }
-                                defaultOpen={false}
-                                badge={null}
-                              >
-                                <div className="text-[10px] text-gray-700 leading-tight max-h-16 overflow-y-auto">
-                                  {workflowReasoning}
-                                </div>
-                              </Accordion>
-                            )}
+                            </div> */
+                            }
                           </div>
 
                           {/* Show plan and spec in a 2-column layout */}
                           {
                             <div className="grid grid-cols-2 gap-1">
+                              {/* Spec Section */}
+                              {workflowType !== "fix"
+                                ? (
+                                  <div className="bg-gray-50 rounded p-1">
+                                    <div className="text-xs font-bold mb-1">
+                                      SPEC
+                                    </div>
+                                    {/* Show spec when available, otherwise loading */}
+                                    {spec
+                                      ? (
+                                        <div className="font-mono text-[10px] whitespace-pre-wrap overflow-y-auto">
+                                          {spec}
+                                        </div>
+                                      )
+                                      : (
+                                        <div className="flex items-center py-1">
+                                          <DitheredCube
+                                            animationSpeed={2}
+                                            width={20}
+                                            height={20}
+                                            animate
+                                            cameraZoom={12}
+                                          />
+                                          <span className="ml-1 text-[10px]">
+                                            Generating...
+                                          </span>
+                                        </div>
+                                      )}
+                                  </div>
+                                )
+                                : (
+                                  <div className="bg-gray-50 rounded p-1">
+                                    <div className="text-xs font-bold mb-1">
+                                      ORIGINAL SPEC{" "}
+                                      <span className="text-[10px] text-blue-600">
+                                        (preserved)
+                                      </span>
+                                    </div>
+                                    {spec
+                                      ? (
+                                        <div className="font-mono text-[10px] whitespace-pre-wrap overflow-y-auto">
+                                          {spec}
+                                        </div>
+                                      )
+                                      : (
+                                        <div className="text-[10px] text-gray-500 italic">
+                                          Loading original specification...
+                                        </div>
+                                      )}
+                                  </div>
+                                )}
                               {/* Plan Section */}
                               <div className="bg-gray-50 rounded p-1">
                                 <div className="text-xs font-bold mb-1">
@@ -458,62 +491,51 @@ export function SpecPreview({
                                     </div>
                                   )}
                               </div>
-
-                              {/* Spec Section */}
-                              {workflowType !== "fix"
-                                ? (
-                                  <div className="bg-gray-50 rounded p-1">
-                                    <div className="text-xs font-bold mb-1">
-                                      SPEC
-                                    </div>
-                                    {/* Show spec when available, otherwise loading */}
-                                    {spec
-                                      ? (
-                                        <div className="font-mono text-[10px] whitespace-pre-wrap overflow-y-auto max-h-40">
-                                          {spec}
-                                        </div>
-                                      )
-                                      : (
-                                        <div className="flex items-center py-1">
-                                          <DitheredCube
-                                            animationSpeed={2}
-                                            width={20}
-                                            height={20}
-                                            animate
-                                            cameraZoom={12}
-                                          />
-                                          <span className="ml-1 text-[10px]">
-                                            Generating...
-                                          </span>
-                                        </div>
-                                      )}
-                                  </div>
-                                )
-                                : (
-                                  <div className="bg-gray-50 rounded p-1">
-                                    <div className="text-xs font-bold mb-1">
-                                      ORIGINAL SPEC{" "}
-                                      <span className="text-[10px] text-blue-600">
-                                        (preserved)
-                                      </span>
-                                    </div>
-                                    {spec
-                                      ? (
-                                        <div className="font-mono text-[10px] whitespace-pre-wrap overflow-y-auto max-h-40">
-                                          {spec}
-                                        </div>
-                                      )
-                                      : (
-                                        <div className="text-[10px] text-gray-500 italic">
-                                          Loading original specification...
-                                        </div>
-                                      )}
-                                  </div>
-                                )}
                             </div>
                           }
                         </>
                       )}
+
+                    {/* Classification Reasoning Accordion */}
+                    {workflowReasoning && (
+                      <Accordion
+                        title={
+                          <div className="text-[10px] inline-flex gap-1">
+                            <span>Reasoning</span>
+
+                            {workflowConfidence > 0 && (
+                              <span
+                                className={`text-[10px] ${
+                                  workflowConfidence > 0.7
+                                    ? "text-green-700"
+                                    : "text-amber-600"
+                                }`}
+                              >
+                                ({confidencePercentage}% confidence)
+                              </span>
+                            )}
+                          </div>
+                        }
+                        defaultOpen={false}
+                        badge={null}
+                      >
+                        <div className="text-[10px] text-gray-700 leading-tight max-h-16 overflow-y-auto">
+                          {workflowReasoning}
+                        </div>
+                      </Accordion>
+                    )}
+
+                    {schema && (
+                      <Accordion
+                        title={<span className="text-[10px]">Schema</span>}
+                        defaultOpen={false}
+                        badge={null}
+                      >
+                        <pre className="text-[10px] text-gray-700 leading-tight max-h-32 overflow-y-auto">
+                          {JSON.stringify(schema, null, 2)}
+                        </pre>
+                      </Accordion>
+                    )}
 
                     {/* Empty state message */}
                     {!spec && !plan && !classificationLoading && !planLoading &&
