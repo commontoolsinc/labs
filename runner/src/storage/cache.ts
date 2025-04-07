@@ -614,11 +614,6 @@ export class Replica {
   }
 }
 
-/**
- * ed25519 key derived from the sha256 of the "common knowledge".
- */
-const HOME = "did:key:z6Mko2qR9b8mbdPnaEKXvcYwdK7iDnRkh8mEcEP2719aCu6P";
-
 export interface RemoteStorageProviderSettings {
   /**
    * Number of subscriptions remote storage provider is allowed to have per
@@ -642,7 +637,7 @@ export interface RemoteStorageProviderOptions {
 
   address: URL;
   as: Memory.Signer;
-  space?: MemorySpace;
+  space: MemorySpace;
   the?: string;
   settings?: RemoteStorageProviderSettings;
 
@@ -686,7 +681,7 @@ export class Provider implements StorageProvider {
     id,
     address,
     as,
-    space = HOME,
+    space,
     the = "application/json",
     settings = defaultSettings,
     inspector = globalThis.BroadcastChannel
