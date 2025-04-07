@@ -47,7 +47,7 @@ export const toRevision = (
       is,
       cause: fromString(cause) as Reference<Fact>,
     }),
-    since: is.since - 1,
+    since: is.since,
   };
 };
 
