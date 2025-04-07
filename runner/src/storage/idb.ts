@@ -33,6 +33,12 @@ export const open = <
   format: IDBStoreFormat<Model, Address, EncodedValue, EncodedKey>,
 ): AsyncStore<Model, Address> => Store.open(new Session(address), format);
 
+/**
+ * Returns `true` is IDB is supported on the given runtime.
+ */
+export const available = () =>
+  typeof globalThis?.indexedDB?.open === "function";
+
 export const swap = <T extends object>(
   store: IDBObjectStore,
   key: IDBValidKey,

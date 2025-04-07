@@ -113,6 +113,25 @@ export interface FactAddress {
 
 const toKey = ({ the, of }: FactAddress) => `${of}/${the}`;
 
+export class NoCache<Model extends object, Address>
+  implements AsyncStore<Model, Address> {
+  /**
+   * Pulls nothing because this store does not store anything.
+   */
+  async pull(
+    selector: Selector<Address>,
+  ): Promise<Result<Selection<Address, Model>, StoreError>> {
+    return await { ok: new Map() };
+  }
+
+  /**
+   * Merges nothing because this store discards everything.
+   */
+  async merge(entries: Iterable<Model>, merge: Merge<Model>) {
+    return await { ok: {} };
+  }
+}
+
 class Nursery implements SyncPush<State> {
   static put(before?: State, after?: State) {
     return after;
@@ -299,17 +318,20 @@ export class Replica {
     public remote: MemorySpaceSession,
     /**
      * Represents persisted cache of the memory state that was fetched in one
-     * of the sessions.
+     * of the sessions. If IDB is not available in this runtime we do not have
+     * persisted cache.
      */
-    public cache: AsyncStore<Revision<State>, FactAddress> = IDB.open({
-      name: "memory",
-      store: space,
-      version: 1,
-    }, {
-      key: RevisionAddress,
-      address: RevisionAddress,
-      value: RevisionCodec,
-    }),
+    public cache: AsyncStore<Revision<State>, FactAddress> = IDB.available()
+      ? IDB.open({
+        name: "memory",
+        store: space,
+        version: 1,
+      }, {
+        key: RevisionAddress,
+        address: RevisionAddress,
+        value: RevisionCodec,
+      })
+      : new NoCache(),
     /**
      * Represents cache of the memory state that was loaded from the persisted
      * cache during this session.
