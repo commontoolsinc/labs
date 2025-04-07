@@ -18,12 +18,11 @@ import {
   SelectCommandItem,
   TranscribeCommandItem,
 } from "./commands.ts";
-import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext.tsx";
+import { formatPromptWithMentions } from "@commontools/charm";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
 import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { charmId, getMentionableCharms } from "@/utils/charms.ts";
-import { formatPromptWithMentions } from "@/utils/format.ts";
 import { NAME } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
 import { Charm } from "@commontools/charm";

@@ -29,11 +29,8 @@ export {
   renameCharm,
 } from "./commands.ts";
 export { getIframeRecipe, type IFrameRecipe } from "./iframe/recipe.ts";
-export {
-  formatPromptWithMentions,
-  type ParsedMention,
-  type ProcessedPrompt,
-} from "./imagine.ts";
+export { type ParsedMention, type ProcessedPrompt } from "./imagine.ts";
+export { formatPromptWithMentions } from "./format.ts";
 
 // Export workflow module
 export {

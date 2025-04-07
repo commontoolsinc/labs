@@ -19,7 +19,6 @@ import type { NavigateFunction } from "react-router-dom";
 import { charmId } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
 import { EntityId, isStream } from "@commontools/runner";
-import { extendCharm } from "@/utils/charm-operations.ts";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext.tsx";
 import { startCharmIndexing } from "@/utils/indexing.ts";
 import { createPath, createPathWithHash, ROUTES } from "@/routes.ts";

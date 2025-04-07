@@ -11,11 +11,14 @@ import {
 import { NAME } from "@commontools/builder";
 import {
   executeWorkflow,
-  formatPromptWithMentions,
   generateWorkflowPreview,
   WorkflowType,
 } from "./imagine.ts";
-import { ExecutionPlan, WorkflowForm } from "./index.ts";
+import {
+  ExecutionPlan,
+  formatPromptWithMentions,
+  WorkflowForm,
+} from "./index.ts";
 
 export const castSpellAsCharm = async (
   charmManager: CharmManager,
@@ -126,23 +129,23 @@ export async function modifyCharm(
   model?: string,
 ): Promise<Cell<Charm>> {
   // Process the prompt to handle @mentions
-  const { text, mentions } = await formatPromptWithMentions(
+  const { text, sources } = await formatPromptWithMentions(
     promptText,
     charmManager,
   );
 
   // Check if we have references to other charms (except the current charm)
-  const hasOtherCharmReferences = mentions && Object.keys(mentions).length > 0;
+  const hasOtherCharmReferences = sources && Object.keys(sources).length > 0;
 
   // Include the current charm in the context
   const context = {
     currentCharm: currentCharm,
-    dataReferences: mentions,
+    dataReferences: sources, // TODO(bf): this name is bad
     previewPlan: previewPlan,
     model,
   };
 
-  // Use the imagine workflow which will classify and handle the operation
+  // Use the imagine workflow which will classify and handle the operation z
   // Pass the effective workflow type which may override the user's selection if references exist
   return executeWorkflow(
     charmManager,
@@ -213,7 +216,7 @@ export async function previewModifyCharm(
   model?: string,
 ) {
   // Process the prompt to handle @mentions
-  const { text, mentions } = await formatPromptWithMentions(
+  const { text, sources } = await formatPromptWithMentions(
     promptText,
     charmManager,
   );
@@ -223,7 +226,7 @@ export async function previewModifyCharm(
     text, // Use the processed text with mentions replaced
     currentCharm, // The current charm being modified
     model, // The model to use
-    mentions, // All mentions found in the text
+    sources, // All mentions found in the text
     charmManager, // Pass CharmManager to handle any nested mentions
   );
 }
@@ -242,11 +245,11 @@ export async function createCharm(
   model?: string,
 ): Promise<Cell<Charm>> {
   // Process the prompt to handle @mentions
-  const { text, mentions } = await formatPromptWithMentions(
+  const { text, sources } = await formatPromptWithMentions(
     promptText,
     charmManager,
   );
 
   // Use castNewRecipe directly, passing the processed text and mentions
-  return castNewRecipe(charmManager, text, mentions);
+  return castNewRecipe(charmManager, text, sources);
 }

@@ -35,7 +35,6 @@ import { useCharm } from "@/hooks/use-charm.ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
-import { extendCharm } from "@/utils/charm-operations.ts";
 import { charmId } from "@/utils/charms.ts";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import {
@@ -47,7 +46,7 @@ import { createPath } from "@/routes.ts";
 import JsonView from "@uiw/react-json-view";
 import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { useCharmMentions } from "@/components/CommandCenter.tsx";
-import { formatPromptWithMentions } from "@/utils/format.ts";
+import { formatPromptWithMentions } from "@commontools/charm";
 import { CharmLink } from "@/components/CharmLink.tsx";
 import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
 import { SpecPreview, WorkflowType } from "@/components/SpecPreview.tsx";
