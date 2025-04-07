@@ -247,7 +247,7 @@ class PullQueue {
     }
   }
 
-  reset(): FactAddress[] {
+  consume(): FactAddress[] {
     const entries = [...this.members.values()];
     this.members.clear();
     return entries;
@@ -369,7 +369,7 @@ export class Replica {
    * local store in this session.
    */
   async pull(
-    entries: FactAddress[] = this.queue.reset(),
+    entries: FactAddress[] = this.queue.consume(),
   ): Promise<
     Result<
       Selection<FactAddress, Revision<State>>,
