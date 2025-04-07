@@ -2,9 +2,7 @@ import React, { useRef, useState } from "react";
 import { DitheredCube } from "./DitherCube.tsx";
 import { animated, useSpring, useTransition } from "@react-spring/web";
 import { ToggleButton } from "./common/CommonToggle.tsx";
-import type { ExecutionPlan } from "@commontools/charm";
-
-export type WorkflowType = "fix" | "edit" | "rework";
+import type { ExecutionPlan, WorkflowType } from "@commontools/charm";
 
 interface SpecPreviewProps {
   spec?: string;
@@ -29,12 +27,14 @@ interface AccordionProps {
   badge?: React.ReactNode;
 }
 
-function Accordion({ title, children, defaultOpen = false, badge }: AccordionProps) {
+function Accordion(
+  { title, children, defaultOpen = false, badge }: AccordionProps,
+) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
-  
+
   const contentStyles = useSpring({
-    from: { 
-      opacity: 0, 
+    from: {
+      opacity: 0,
       height: 0,
       transform: "translateY(-10px)",
       overflow: "hidden",
@@ -48,11 +48,11 @@ function Accordion({ title, children, defaultOpen = false, badge }: AccordionPro
       display: isOpen ? "block" : "none",
     },
     immediate: !isOpen,
-    config: { 
-      tension: 300, 
+    config: {
+      tension: 300,
       friction: 26,
       clamp: true,
-    }
+    },
   });
 
   return (
@@ -64,9 +64,14 @@ function Accordion({ title, children, defaultOpen = false, badge }: AccordionPro
         aria-expanded={isOpen}
       >
         <div className="flex items-center">
-          <span className="mr-2 transition-transform" style={{ 
-            transform: isOpen ? "rotate(90deg)" : "rotate(0deg)" 
-          }}>▶</span>
+          <span
+            className="mr-2 transition-transform"
+            style={{
+              transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
+            }}
+          >
+            ▶
+          </span>
           {title}
         </div>
         {badge}
@@ -205,222 +210,244 @@ export function SpecPreview({
         >
           {!visible ? null : (
             <div className="space-y-4 w-full">
-              {loading ? (
-                <div className="flex items-center justify-center w-full py-4">
-                  <DitheredCube
-                    animationSpeed={2}
-                    width={48}
-                    height={48}
-                    animate
-                    cameraZoom={12}
-                  />
-                </div>
-              ) : (
-                <div className="space-y-4 w-full">
-                  {/* Workflow Classification Section */}
-                  {classificationLoading ? (
-                    <div className="flex items-center justify-center py-4">
-                      <DitheredCube
-                        animationSpeed={2}
-                        width={32}
-                        height={32}
-                        animate
-                        cameraZoom={12}
-                      />
-                      <span className="ml-2 text-sm">
-                        Classifying workflow...
-                      </span>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="flex flex-col gap-2">
-                        <div className="text-xs font-bold mb-1 flex items-center justify-between">
-                          <span>WORKFLOW: {workflowType.toUpperCase()}</span>
-                          {workflowConfidence > 0 && (
-                            <span
-                              className={`text-xs ${
-                                workflowConfidence > 0.7
-                                  ? "text-green-700"
-                                  : "text-amber-600"
-                              }`}
-                            >
-                              {confidencePercentage}% confidence
-                            </span>
-                          )}
+              {loading
+                ? (
+                  <div className="flex items-center justify-center w-full py-4">
+                    <DitheredCube
+                      animationSpeed={2}
+                      width={48}
+                      height={48}
+                      animate
+                      cameraZoom={12}
+                    />
+                  </div>
+                )
+                : (
+                  <div className="space-y-4 w-full">
+                    {/* Workflow Classification Section */}
+                    {classificationLoading
+                      ? (
+                        <div className="flex items-center justify-center py-4">
+                          <DitheredCube
+                            animationSpeed={2}
+                            width={32}
+                            height={32}
+                            animate
+                            cameraZoom={12}
+                          />
+                          <span className="ml-2 text-sm">
+                            Classifying workflow...
+                          </span>
                         </div>
-                        <ToggleButton
-                          options={[
-                            { value: "fix", label: "FIX" },
-                            { value: "edit", label: "EDIT" },
-                            { value: "rework", label: "REWORK" },
-                          ]}
-                          value={workflowType}
-                          onChange={(value) =>
-                            onWorkflowChange?.(value as WorkflowType)}
-                          size="small"
-                        />
-                        
-                        {/* Workflow explanation */}
-                        <div className="mt-2 p-2 bg-gray-100 rounded-md">
-                          <div className="text-xs font-semibold">
-                            {workflowType === "fix" &&
-                              "🛠️ Fix: Preserves existing spec, only modifies code"}
-                            {workflowType === "edit" &&
-                              "✏️ Edit: Preserves data structure, updates functionality"}
-                            {workflowType === "rework" &&
-                              "🔄 Rework: Creates new spec with potentially different schema"}
-                          </div>
-                        </div>
-
-                        {/* Classification Reasoning Accordion */}
-                        {workflowReasoning && (
-                          <Accordion 
-                            title="Classification Reasoning" 
-                            defaultOpen={false}
-                            badge={
-                              <span className="text-xs text-gray-500">
-                                {workflowConfidence > 0.8 ? "High confidence" : "Medium confidence"}
-                              </span>
-                            }
-                          >
-                            <div className="text-xs text-gray-700 leading-tight">
-                              {workflowReasoning}
-                            </div>
-                          </Accordion>
-                        )}
-                      </div>
-                      
-                      {/* Only show plan and spec sections if classification is complete */}
-                      {!classificationLoading && (
+                      )
+                      : (
                         <>
-                          {/* Plan Section */}
-                          <div className="relative">
-                            {planLoading ? (
-                              <div className="flex items-center justify-center py-4 border border-gray-200 rounded bg-gray-50">
-                                <DitheredCube
-                                  animationSpeed={2}
-                                  width={32}
-                                  height={32}
-                                  animate
-                                  cameraZoom={12}
-                                />
-                                <span className="ml-2 text-sm">
-                                  Generating plan...
+                          <div className="flex flex-col gap-2">
+                            <div className="text-xs font-bold mb-1 flex items-center justify-between">
+                              <span>
+                                WORKFLOW: {workflowType.toUpperCase()}
+                              </span>
+                              {workflowConfidence > 0 && (
+                                <span
+                                  className={`text-xs ${
+                                    workflowConfidence > 0.7
+                                      ? "text-green-700"
+                                      : "text-amber-600"
+                                  }`}
+                                >
+                                  {confidencePercentage}% confidence
                                 </span>
+                              )}
+                            </div>
+                            <ToggleButton
+                              options={[
+                                { value: "fix", label: "FIX" },
+                                { value: "edit", label: "EDIT" },
+                                { value: "imagine", label: "IMAGINE" },
+                              ]}
+                              value={workflowType}
+                              onChange={(value) =>
+                                onWorkflowChange?.(value as WorkflowType)}
+                              size="small"
+                            />
+
+                            {/* Workflow explanation */}
+                            <div className="mt-2 p-2 bg-gray-100 rounded-md">
+                              <div className="text-xs font-semibold">
+                                {workflowType === "fix" &&
+                                  "🛠️ Fix: Preserves existing spec, only modifies code"}
+                                {workflowType === "edit" &&
+                                  "✏️ Edit: Preserves data structure, updates functionality"}
+                                {workflowType === "imagine" &&
+                                  "🔄 Imagine: Creates new spec with potentially different schema"}
                               </div>
-                            ) : plan ? (
-                              <Accordion 
-                                title="PLAN" 
-                                defaultOpen={true}
+                            </div>
+
+                            {/* Classification Reasoning Accordion */}
+                            {workflowReasoning && (
+                              <Accordion
+                                title="Classification Reasoning"
+                                defaultOpen={false}
                                 badge={
-                                  <span className="text-gray-500 text-xs">
-                                    {typeof plan === "string"
-                                      ? "1 step"
-                                      : `${plan.length} steps`}
+                                  <span className="text-xs text-gray-500">
+                                    {workflowConfidence > 0.8
+                                      ? "High confidence"
+                                      : "Medium confidence"}
                                   </span>
                                 }
                               >
-                                <animated.div
-                                  className="font-mono text-xs whitespace-pre-wrap"
-                                  style={{
-                                    ...textSpring,
-                                    scrollbarWidth: "thin",
-                                    scrollbarColor: "#aaa #eee",
-                                  }}
-                                >
-                                  {Array.isArray(plan)
-                                    ? plan.map((step, index) => (
-                                      <div
-                                        key={index}
-                                        className="mb-2 pb-2 border-b border-gray-100 last:border-b-0"
-                                      >
-                                        <strong>{index + 1}.</strong> {step}
-                                      </div>
-                                    ))
-                                    : plan}
-                                </animated.div>
+                                <div className="text-xs text-gray-700 leading-tight">
+                                  {workflowReasoning}
+                                </div>
                               </Accordion>
-                            ) : (
-                              <div className="text-xs text-gray-500 italic p-2">
-                                Plan will appear here...
-                              </div>
                             )}
                           </div>
 
-                          {/* Spec Section - Only for edit/rework workflows */}
-                          {workflowType !== "fix" && (spec || planLoading) && (
-                            <div>
-                              {planLoading ? (
-                                <div className="p-4 bg-gray-50 border border-gray-200 rounded text-center text-xs text-gray-500">
-                                  Generating specification...
-                                </div>
-                              ) : spec ? (
-                                <Accordion 
-                                  title="SPEC" 
-                                  defaultOpen={true}
-                                >
-                                  <animated.div
-                                    className="font-mono text-xs whitespace-pre-wrap"
-                                    style={{
-                                      ...textSpring,
-                                      scrollbarWidth: "thin",
-                                      scrollbarColor: "#aaa #eee",
-                                    }}
-                                  >
-                                    {spec}
-                                  </animated.div>
-                                </Accordion>
-                              ) : null}
-                            </div>
-                          )}
+                          {/* Only show plan and spec sections if classification is complete */}
+                          {!classificationLoading && (
+                            <>
+                              {/* Plan Section */}
+                              <div className="relative">
+                                {planLoading
+                                  ? (
+                                    <div className="flex items-center justify-center py-4 border border-gray-200 rounded bg-gray-50">
+                                      <DitheredCube
+                                        animationSpeed={2}
+                                        width={32}
+                                        height={32}
+                                        animate
+                                        cameraZoom={12}
+                                      />
+                                      <span className="ml-2 text-sm">
+                                        Generating plan...
+                                      </span>
+                                    </div>
+                                  )
+                                  : plan
+                                  ? (
+                                    <Accordion
+                                      title="PLAN"
+                                      defaultOpen={true}
+                                      badge={
+                                        <span className="text-gray-500 text-xs">
+                                          {typeof plan === "string"
+                                            ? "1 step"
+                                            : `${plan.length} steps`}
+                                        </span>
+                                      }
+                                    >
+                                      <animated.div
+                                        className="font-mono text-xs whitespace-pre-wrap"
+                                        style={{
+                                          ...textSpring,
+                                          scrollbarWidth: "thin",
+                                          scrollbarColor: "#aaa #eee",
+                                        }}
+                                      >
+                                        {Array.isArray(plan)
+                                          ? plan.map((step, index) => (
+                                            <div
+                                              key={index}
+                                              className="mb-2 pb-2 border-b border-gray-100 last:border-b-0"
+                                            >
+                                              <strong>{index + 1}.</strong>{" "}
+                                              {step}
+                                            </div>
+                                          ))
+                                          : plan}
+                                      </animated.div>
+                                    </Accordion>
+                                  )
+                                  : (
+                                    <div className="text-xs text-gray-500 italic p-2">
+                                      Plan will appear here...
+                                    </div>
+                                  )}
+                              </div>
 
-                          {/* Original Spec - Only for fix workflow */}
-                          {workflowType === "fix" && (spec || planLoading) && (
-                            <div>
-                              {spec ? (
-                                <Accordion 
-                                  title="ORIGINAL SPEC" 
-                                  defaultOpen={false}
-                                  badge={
-                                    <span className="text-xs text-blue-600">
-                                      (preserved)
-                                    </span>
-                                  }
-                                >
-                                  <animated.div
-                                    className="font-mono text-xs whitespace-pre-wrap"
-                                    style={{
-                                      ...textSpring,
-                                      scrollbarWidth: "thin",
-                                      scrollbarColor: "#aaa #eee",
-                                    }}
-                                  >
-                                    {spec}
-                                  </animated.div>
-                                </Accordion>
-                              ) : (
-                                <div className="p-4 bg-gray-50 border border-gray-200 rounded text-center text-xs text-gray-500">
-                                  Loading original specification...
+                              {/* Spec Section - Only for edit/imagine workflows */}
+                              {workflowType !== "fix" &&
+                                (spec || planLoading) && (
+                                <div>
+                                  {planLoading
+                                    ? (
+                                      <div className="p-4 bg-gray-50 border border-gray-200 rounded text-center text-xs text-gray-500">
+                                        Generating specification...
+                                      </div>
+                                    )
+                                    : spec
+                                    ? (
+                                      <Accordion
+                                        title="SPEC"
+                                        defaultOpen={true}
+                                      >
+                                        <animated.div
+                                          className="font-mono text-xs whitespace-pre-wrap"
+                                          style={{
+                                            ...textSpring,
+                                            scrollbarWidth: "thin",
+                                            scrollbarColor: "#aaa #eee",
+                                          }}
+                                        >
+                                          {spec}
+                                        </animated.div>
+                                      </Accordion>
+                                    )
+                                    : null}
                                 </div>
                               )}
-                            </div>
+
+                              {/* Original Spec - Only for fix workflow */}
+                              {workflowType === "fix" &&
+                                (spec || planLoading) && (
+                                <div>
+                                  {spec
+                                    ? (
+                                      <Accordion
+                                        title="ORIGINAL SPEC"
+                                        defaultOpen={false}
+                                        badge={
+                                          <span className="text-xs text-blue-600">
+                                            (preserved)
+                                          </span>
+                                        }
+                                      >
+                                        <animated.div
+                                          className="font-mono text-xs whitespace-pre-wrap"
+                                          style={{
+                                            ...textSpring,
+                                            scrollbarWidth: "thin",
+                                            scrollbarColor: "#aaa #eee",
+                                          }}
+                                        >
+                                          {spec}
+                                        </animated.div>
+                                      </Accordion>
+                                    )
+                                    : (
+                                      <div className="p-4 bg-gray-50 border border-gray-200 rounded text-center text-xs text-gray-500">
+                                        Loading original specification...
+                                      </div>
+                                    )}
+                                </div>
+                              )}
+                            </>
                           )}
                         </>
                       )}
-                    </>
-                  )}
 
-                  {/* Empty state message */}
-                  {!spec && !plan && !classificationLoading && !planLoading && (
-                    <animated.div
-                      className="text-xs text-gray-500 italic py-4 text-center"
-                      style={textSpring}
-                    >
-                      Your preview will appear here as you type...
-                    </animated.div>
-                  )}
-                </div>
-              )}
+                    {/* Empty state message */}
+                    {!spec && !plan && !classificationLoading && !planLoading &&
+                      (
+                        <animated.div
+                          className="text-xs text-gray-500 italic py-4 text-center"
+                          style={textSpring}
+                        >
+                          Your preview will appear here as you type...
+                        </animated.div>
+                      )}
+                  </div>
+                )}
             </div>
           )}
         </div>

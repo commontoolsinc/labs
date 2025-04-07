@@ -25,7 +25,6 @@ export {
   extendCharm,
   fixItCharm,
   modifyCharm,
-  previewModifyCharm,
   renameCharm,
 } from "./commands.ts";
 export { getIframeRecipe, type IFrameRecipe } from "./iframe/recipe.ts";

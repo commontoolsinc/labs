@@ -172,8 +172,8 @@ export async function extendCharm(
 
   const classification: WorkflowForm["classification"] = {
     confidence: 1.0,
-    workflowType: "rework",
-    reasoning: "Extend is always reworking since it changes argument schema",
+    workflowType: "imagine",
+    reasoning: "Extend is always imagining since it changes argument schema",
   };
 
   const context = {
@@ -185,37 +185,6 @@ export async function extendCharm(
   };
 
   return executeWorkflow(charmManager, goal, context);
-}
-
-/**
- * Generate a preview for modifying a charm showing the workflow type and plan
- *
- * @param charmManager The CharmManager instance
- * @param promptText The user's prompt text describing the desired changes
- * @param currentCharm The charm to be modified
- * @param model Optional LLM model to use
- * @returns Preview with classified workflow, plan, and spec
- */
-export async function previewModifyCharm(
-  charmManager: CharmManager,
-  promptText: string,
-  currentCharm: Cell<Charm>,
-  model?: string,
-) {
-  // Process the prompt to handle @mentions
-  const { text, sources } = await formatPromptWithMentions(
-    promptText,
-    charmManager,
-  );
-
-  // Generate a workflow preview
-  return generateWorkflowPreview(
-    text, // Use the processed text with mentions replaced
-    currentCharm, // The current charm being modified
-    model, // The model to use
-    sources, // All mentions found in the text
-    charmManager, // Pass CharmManager to handle any nested mentions
-  );
 }
 
 /**

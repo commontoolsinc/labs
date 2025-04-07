@@ -324,7 +324,7 @@ export function useLiveSpecPreview(
 
         // PROGRESSIVE REVEAL: Then update the spec
         // For fix workflows, we preserve the existing spec
-        // For edit/rework, use the new spec
+        // For edit/imagine, use the new spec
         if (type === "fix") {
           // For fix workflows, we might want to show the original spec but mark it as preserved
           if (currentCharm) {
@@ -339,7 +339,7 @@ export function useLiveSpecPreview(
             setPreviewSpec(""); // No current charm, hide spec
           }
         } else if (preview.spec) {
-          // For edit/rework, show the generated spec
+          // For edit/imagine, show the generated spec
           try {
             // Attempt to extract just the specification section for display
             const specMatch = preview.spec.match(

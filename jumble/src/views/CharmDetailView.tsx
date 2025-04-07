@@ -9,6 +9,7 @@ import {
   injectUserCode,
   iterate,
   modifyCharm,
+  WorkflowType,
 } from "@commontools/charm";
 import { useCharmReferences } from "@/hooks/use-charm-references.ts";
 import { isCell, isStream } from "@commontools/runner";
@@ -49,7 +50,7 @@ import { useCharmMentions } from "@/components/CommandCenter.tsx";
 import { formatPromptWithMentions } from "@commontools/charm";
 import { CharmLink } from "@/components/CharmLink.tsx";
 import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
-import { SpecPreview, WorkflowType } from "@/components/SpecPreview.tsx";
+import { SpecPreview } from "@/components/SpecPreview.tsx";
 import {
   SpecPreviewModel,
   useLiveSpecPreview,
@@ -305,12 +306,13 @@ function useCharmOperation() {
     charm || undefined,
   );
 
+  // TODO(bf): this needs to die
   // Automatically update operationType based on workflow classification
   useEffect(() => {
     if (!classifiedWorkflowType || workflowConfidence < 0.3) return;
 
     // Map the workflow type to operation type
-    if (classifiedWorkflowType === "rework") {
+    if (classifiedWorkflowType === "imagine") {
       // For rework workflows, use extend operation
       setOperationType("extend");
     } else {

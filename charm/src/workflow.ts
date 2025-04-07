@@ -20,7 +20,7 @@ import { formatPromptWithMentions } from "./format.ts";
 const { castNewRecipe } = await import("./iterate.ts");
 
 // Types for workflow classification
-export type WorkflowType = "fix" | "edit" | "rework";
+export type WorkflowType = "fix" | "edit" | "imagine";
 
 // Configuration for each workflow type
 export interface WorkflowConfig {
@@ -48,8 +48,8 @@ export const WORKFLOWS: Record<WorkflowType, WorkflowConfig> = {
     updateSchema: false,
     allowsDataReferences: true,
   },
-  rework: {
-    name: "rework",
+  imagine: {
+    name: "imagine",
     description: "Create a new charm with a potentially different data schema",
     updateSpec: true,
     updateSchema: true,
@@ -144,10 +144,10 @@ export async function classifyIntent(
     if (hasOtherCharmReferences) {
       // Auto-classify as rework when referencing other charms
       return {
-        workflowType: "rework",
+        workflowType: "imagine",
         confidence: 1.0,
         reasoning:
-          "Automatically classified as 'rework' because the prompt references other charms. " +
+          "Automatically classified as 'imagine' because the prompt references other charms. " +
           "When referencing other charms, we need to construct a new argument cell that can " +
           "access data from all references with a combined schema.",
         enhancedPrompt: input,
@@ -171,17 +171,17 @@ export async function classifyIntent(
   } catch (error) {
     console.error("Error during workflow classification:", error);
 
-    // First check if we have any charm references, as this should force "rework" workflow
+    // First check if we have any charm references, as this should force "imagine" workflow
     const hasOtherCharmReferences = dataReferences &&
       Object.keys(dataReferences).filter((key) => key !== "currentCharm")
           .length > 0;
 
     if (hasOtherCharmReferences) {
       return {
-        workflowType: "rework",
+        workflowType: "imagine",
         confidence: 0.9,
         reasoning:
-          "Fallback classification: Input references other charms, which requires rework workflow",
+          "Fallback classification: Input references other charms, which requires imagine workflow",
       };
     }
 
@@ -209,7 +209,7 @@ export async function classifyIntent(
       };
     } else {
       return {
-        workflowType: "rework",
+        workflowType: "imagine",
         confidence: 0.5,
         reasoning: "Fallback classification: Input suggests new functionality",
       };
@@ -284,7 +284,7 @@ export async function generatePlan(
       steps.push("Update specification to reflect new requirements");
       steps.push("Modify code to implement the new functionality");
       steps.push("Ensure backward compatibility with existing data");
-    } else { // rework
+    } else { // imagine
       steps.push("Generate new specification and schema");
       steps.push("Create new implementation based on requirements");
       steps.push("Link to referenced data from existing charms");
@@ -434,7 +434,7 @@ export async function fillClassificationSection(
     return newForm;
   }
 
-  // Check if we have references to other charms that would force rework
+  // Check if we have references to other charms that would force imagine
   const hasOtherCharmReferences = form.input.references &&
     Object.keys(form.input.references).filter((key) => key !== "currentCharm")
         .length > 0;
@@ -505,7 +505,7 @@ export async function fillPlanningSection(
       schema: executionPlan.schema,
     };
   } else {
-    // For edit/rework, generate both plan and spec
+    // For edit/imagine, generate both plan and spec
     const executionPlan = await generatePlan(
       form.input.processedInput,
       form.classification.workflowType,
@@ -585,7 +585,7 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
       );
       break;
 
-    case "rework":
+    case "imagine":
       charm = await executeReworkWorkflow(
         newForm.meta.charmManager,
         form.input.processedInput,
@@ -866,7 +866,7 @@ export async function executeReworkWorkflow(
   dataReferences?: Record<string, Cell<any>>,
   currentCharm?: Cell<Charm>,
 ): Promise<Cell<Charm>> {
-  console.log("Executing REWORK workflow");
+  console.log("Executing IMAGINE workflow");
 
   // Process references - this allows the new charm to access data from multiple sources
   let allReferences: Record<string, Cell<any>> = {};
@@ -970,7 +970,6 @@ export async function executeWorkflow(
   input: string,
   context: {
     currentCharm?: Cell<Charm>;
-    dataReferences?: Record<string, Cell<any>>;
     prefill?: Partial<WorkflowForm>;
     model?: string;
   },
@@ -979,7 +978,6 @@ export async function executeWorkflow(
   const form = await processWorkflow(input, false, {
     charmManager,
     existingCharm: context.currentCharm,
-    dataReferences: context.dataReferences,
     model: context.model,
     prefill: context.prefill,
   });

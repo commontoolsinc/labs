@@ -1,7 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { WorkflowType } from "../SpecPreview.tsx";
-import { ExecutionPlan } from "@commontools/charm";
+import { ExecutionPlan, WorkflowType } from "@commontools/charm";
 
 describe("WorkflowFormData", () => {
   it("should properly structure workflow form data", () => {
@@ -20,7 +19,7 @@ describe("WorkflowFormData", () => {
     expect(typeof formData.schema).toBe("object");
 
     // Ensure workflowType is a valid type
-    const validTypes: WorkflowType[] = ["fix", "edit", "rework"];
+    const validTypes: WorkflowType[] = ["fix", "edit", "imagine"];
     expect(validTypes).toContain(formData.workflowType);
   });
 });

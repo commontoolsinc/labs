@@ -256,7 +256,6 @@ async function handleExecuteCharmAction(deps: CommandContext) {
 async function handleImagineOperation(
   deps: CommandContext,
   input: string,
-  sources?: SourceSet,
   workflowType?: WorkflowType, // Optional workflow type override
   model?: string,
 ) {
@@ -265,8 +264,6 @@ async function handleImagineOperation(
 
   try {
     let newCharm;
-    // Extract cells and any special keys starting with underscore
-    const dataReferences = grabCells(sources);
 
     // Get workflow data from the deps.workflowForm
     const formWorkflowType = deps.previewPlan?.workflowType;
@@ -295,7 +292,6 @@ async function handleImagineOperation(
         deps.charmManager,
         input,
         {
-          dataReferences,
           prefill: {
             classification: {
               confidence: 1.0,
@@ -742,7 +738,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       title: "New Charm",
       group: "Create",
       handler: (input, data) =>
-        handleImagineOperation(deps, input, data, "rework"),
+        handleImagineOperation(deps, input, data, "imagine"),
     },
     {
       id: "search-charms",

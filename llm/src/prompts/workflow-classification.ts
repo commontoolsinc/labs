@@ -1,6 +1,7 @@
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { client } from "../client.ts";
 import type { JSONSchema } from "@commontools/builder";
+import { WorkflowType } from '@commontools/charm';
 
 /**
  * Basic prompt for classifying user intent into a workflow type
@@ -17,7 +18,7 @@ Based on the user's request, classify it into one of the following workflows:
    - Example: "Add dark mode support" or "Include a search feature"
    - Modifies code and specification, but preserves core schema structure
 
-3. REWORK: Create something new, potentially combining multiple data sources
+3. IMAGINE: Create something new, potentially combining multiple data sources
    - Example: "Create a dashboard combining my tasks and calendar"
    - Creates new code, specification, and potentially new schema
 
@@ -28,7 +29,7 @@ Current Charm Context:
 
 Please analyze this request and respond in the following format:
 
-<workflow>FIX|EDIT|REWORK</workflow>
+<workflow>FIX|EDIT|IMAGINE</workflow>
 <confidence>0.0-1.0</confidence>
 <reasoning>Brief explanation of your classification</reasoning>
 <enhanced_prompt>Optional improved or clarified version of the user's request</enhanced_prompt>
@@ -60,13 +61,13 @@ Based on the workflow type, follow these guidelines:
   * SCHEMA: Can add properties but never remove existing ones
   * CODE: Modify implementation while maintaining backward compatibility
 
-- REWORK workflow:
+- IMAGINE workflow:
   * PURPOSE: Create new functionality, possibly using existing charms as sources
   * SPEC: Write a fresh specification, possibly referencing existing ones
   * SCHEMA: Will receive combined input schema, generate output schemas
   * CODE: Create a new implementation that may use data from other charms
 
-For REWORK workflows you MUST include both <result_schema> tags with valid JSON schemas.
+For IMAGINE workflows you MUST include both <result_schema> tags with valid JSON schemas.
 Each schema must be a JSON object with "type": "object" and must include a "properties" object with property definitions.
 
 Example schema format:
@@ -120,13 +121,13 @@ Respond in the following format:
 <specification>
 A detailed description of what the charm does, its purpose, and functionality.
 Include a clear explanation of how it works and what problems it solves.
-For EDIT and REWORK, explain how it builds upon or differs from the existing charm.
+For EDIT and IMAGINE, explain how it builds upon or differs from the existing charm.
 </specification>
 
 <data_model>
 Describe the key data structures and relationships used in the implementation.
 Explain how input data is processed and how output is structured.
-For EDIT and REWORK, explain any changes to the existing data model.
+For EDIT and IMAGINE, explain any changes to the existing data model.
 </data_model>
 
 {{ SCHEMA_SECTION }}
@@ -165,7 +166,7 @@ function generateCharmContext(
     context += `\nSchema Handling Guidelines:
 - For FIX workflows: This schema must be preserved exactly as-is
 - For EDIT workflows: Keep this basic structure, but you may add new properties
-- For REWORK workflows: Use this as reference, but you can create a new schema structure\n`;
+- For IMAGINE workflows: Use this as reference, but you can create a new schema structure\n`;
   }
 
   if (existingCode) {
@@ -187,7 +188,7 @@ export async function classifyWorkflow(
   existingCode?: string,
   model?: string,
 ): Promise<{
-  workflowType: "fix" | "edit" | "rework";
+  workflowType: WorkflowType;
   confidence: number;
   reasoning: string;
   enhancedPrompt?: string;
@@ -223,7 +224,7 @@ export async function classifyWorkflow(
     }
 
     return {
-      workflowType: workflow as "fix" | "edit" | "rework",
+      workflowType: workflow as WorkflowType,
       confidence: isNaN(confidence) ? 0.5 : confidence,
       reasoning,
       enhancedPrompt,
@@ -294,7 +295,7 @@ function cleanJsonString(jsonStr: string): string {
  */
 export async function generateWorkflowPlan(
   input: string,
-  workflowType: "fix" | "edit" | "rework",
+  workflowType: WorkflowType,
   existingSpec?: string,
   existingSchema?: JSONSchema,
   existingCode?: string,
@@ -311,7 +312,7 @@ export async function generateWorkflowPlan(
   );
 
   // Schema section only for rework workflow
-  const schemaSection = workflowType === "rework"
+  const schemaSection = workflowType === "imagine"
     ? `<argument_schema>
 // Define the schema for input data
 {
@@ -407,7 +408,7 @@ SCHEMA GUIDELINES:
     }
 
     // For rework workflows, extract both argument and result schemas
-    if (workflowType === "rework") {
+    if (workflowType === "imagine") {
       try {
         // Get argument and result schemas from the response
         const argumentSchemaJson = parseTagFromResponse(
@@ -422,7 +423,7 @@ SCHEMA GUIDELINES:
         // Validate both schemas exist
         if (!argumentSchemaJson || !resultSchemaJson) {
           throw new Error(
-            "Missing schema tags in LLM response for rework workflow",
+            "Missing schema tags in LLM response for imagine workflow",
           );
         }
 
@@ -456,7 +457,7 @@ SCHEMA GUIDELINES:
       ? existingSpec
       : fullSpec;
 
-    const updatedSchema = workflowType !== "rework" && existingSchema
+    const updatedSchema = workflowType !== "imagine" && existingSchema
       ? existingSchema
       : schema;
 
