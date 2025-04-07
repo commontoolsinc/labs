@@ -36,7 +36,7 @@ export interface StorageProvider {
     entityId: EntityId,
     expectedInStorage?: boolean,
     schemaContext?: SchemaContext,
-  ): Promise<void>;
+  ): Promise<Result<Unit, Error>>;
 
   /**
    * Get a value from the local cache reflecting storage. Call `sync()` first.

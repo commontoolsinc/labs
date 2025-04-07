@@ -7,6 +7,7 @@ import {
   type Unit,
 } from "./base.ts";
 import { SchemaContext } from "@commontools/memory/interface";
+import { RemoteStorageProvider } from "./remote.ts";
 
 /**
  * Volatile (in-memory) storage provider. Just for testing.
