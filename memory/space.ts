@@ -447,6 +447,7 @@ export type SelectedFact = {
   of: Entity;
   cause: Cause;
   is?: JSONValue;
+  since: number;
 };
 
 export const SelectAll = "_";
@@ -468,6 +469,7 @@ export const selectFacts = function* <Space extends MemorySpace>(
       of: row.of,
       cause: row.cause ?? refer(unclaimed(row)).toString() as Cause,
       is: row.is ? JSON.parse(row.is) as JSONValue : undefined,
+      since: row.since,
     };
   }
 };

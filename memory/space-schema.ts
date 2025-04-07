@@ -124,8 +124,8 @@ export const selectSchema = <Space extends MemorySpace>(
         }
         // copy our expanded object into the top level of our result
         const resultEntry = (result !== undefined)
-          ? { is: { value: result } }
-          : {};
+          ? { is: { value: result }, since: factEntry.since }
+          : { since: factEntry.since };
         set(includedFacts, ["_", the], cause, resultEntry);
       }
     }
@@ -305,7 +305,9 @@ function loadFacts<Space extends MemorySpace>(
       selection,
       [fact.of, fact.the],
       fact.cause,
-      (fact.is !== undefined) ? { is: fact.is } : {},
+      (fact.is !== undefined)
+        ? { is: fact.is, since: fact.since }
+        : { since: fact.since },
     );
   }
   return selection;

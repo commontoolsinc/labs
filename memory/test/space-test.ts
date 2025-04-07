@@ -1716,6 +1716,7 @@ test(
     });
     const write = await session.transact(tr);
     assert(write.ok);
+    const commit = Commit.toRevision(write.ok);
 
     // We'll use a schema selector to grab Bob's name and work address
     const schemaSelector: SchemaSelector = {
@@ -1777,6 +1778,7 @@ test(
               ],
             },
           },
+          since: commit.since,
         },
       },
     };
