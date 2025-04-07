@@ -477,7 +477,7 @@ class QuerySubscriptionInvocation<
         ChangesBuilder.set(differential, [of], the, {
           [cause]: {
             is,
-            since: since - 1,
+            since,
           },
         });
       }

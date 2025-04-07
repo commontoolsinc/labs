@@ -11,9 +11,7 @@ import { the as commitType } from "./commit.ts";
 export const match = (commit: Commit, watched: Set<string>) => {
   for (const at of Object.keys(commit) as MemorySpace[]) {
     const changes = commit[at][commitType] ?? {};
-    for (
-      const [cause, { is: { transaction, since } }] of Object.entries(changes)
-    ) {
+    for (const { is: { transaction } } of Object.values(changes)) {
       // If commit on this space are watched we have a match
       if (matchAddress(watched, { the: commitType, of: at, at })) {
         return true;

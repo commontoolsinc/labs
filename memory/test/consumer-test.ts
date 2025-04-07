@@ -676,7 +676,7 @@ test("subscribe to commits", store, async (session) => {
           ["application/commit+json"]: {
             [c3.cause.toString()]: {
               is: c3.is,
-              since: c3.is.since - 1,
+              since: c3.is.since,
             },
           },
         },
