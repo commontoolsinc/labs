@@ -1,6 +1,6 @@
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
-import { Cell, type CellLink, isCell, isCellLink } from "./cell.ts";
+import { Cell, type CellLink, isCell, isCellLink, isStream } from "./cell.ts";
 import { type EntityId, getDocByEntityId } from "./doc-map.ts";
 import {
   getCellLinkOrThrow,
@@ -18,6 +18,7 @@ import { isBrowser } from "@commontools/utils/env";
 import { sleep } from "@commontools/utils/sleep";
 import { TransactionResult } from "@commontools/memory";
 import { defer } from "@commontools/utils";
+import { SchemaContext } from "@commontools/memory/interface";
 
 export function log(fn: () => any[]) {
   debug(() => {
@@ -88,12 +89,14 @@ export interface Storage {
    *
    * @param cell - Document / Cell to load into.
    * @param expectedInStorage - Whether the cell is expected to be in storage.
+   * @param schemaContext - Schema Context to use for the cell to override cell default.
    * @returns Promise that resolves to the cell when it is loaded.
    * @throws Will throw if called on a cell without an entity ID.
    */
   syncCell<T = any>(
     cell: DocImpl<T> | Cell<any>,
     expectedInStorage?: boolean,
+    schemaContext?: SchemaContext,
   ): Promise<DocImpl<T>> | DocImpl<T>;
 
   /**
@@ -252,8 +255,26 @@ class StorageImpl implements Storage {
   syncCell<T>(
     subject: DocImpl<T> | Cell<any>,
     expectedInStorage: boolean = false,
+    schemaContext?: SchemaContext,
   ): Promise<DocImpl<T>> | DocImpl<T> {
-    const entityCell = this._ensureIsSynced(subject, expectedInStorage);
+    // If we aren't overriding the schema context, and we have a schema in the cell, use that
+    if (
+      schemaContext === undefined && isCell(subject) &&
+      subject.schema !== undefined
+    ) {
+      schemaContext = {
+        schema: subject.schema,
+        rootSchema: (subject.rootSchema !== undefined)
+          ? subject.rootSchema
+          : subject.schema,
+      };
+    }
+
+    const entityCell = this._ensureIsSynced(
+      subject,
+      expectedInStorage,
+      schemaContext,
+    );
 
     // If doc is loading, return the promise. Otherwise return immediately.
     return this.docIsLoading.get(entityCell) ?? entityCell;
@@ -333,8 +354,9 @@ class StorageImpl implements Storage {
   private _ensureIsSynced<T>(
     doc: DocImpl<T> | Cell<any>,
     expectedInStorage: boolean = false,
+    schemaContext?: SchemaContext,
   ): DocImpl<T> {
-    if (isCell(doc)) doc = doc.getAsCellLink().cell;
+    if (isCell(doc) || isStream(doc)) doc = doc.getDoc();
     if (!isDoc(doc)) {
       throw new Error("Invalid subject: " + JSON.stringify(doc));
     }
@@ -357,7 +379,7 @@ class StorageImpl implements Storage {
 
     // Start loading the doc and safe the promise for processBatch to await for
     const loadingPromise = this._getStorageProviderForSpace(doc.space)
-      .sync(doc.entityId!, expectedInStorage)
+      .sync(doc.entityId!, expectedInStorage, schemaContext)
       .then(() => doc);
     this.loadingPromises.set(doc, loadingPromise);
 
@@ -430,6 +452,8 @@ class StorageImpl implements Storage {
       value: traverse(doc.get(), []),
       source: doc.sourceCell?.entityId,
     };
+
+    // 🤔 I'm guessing we should be storting schema here
 
     if (JSON.stringify(value) !== JSON.stringify(this.writeValues.get(doc))) {
       this.writeDependentDocs.set(doc, dependencies);

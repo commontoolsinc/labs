@@ -6,6 +6,7 @@ import {
   type StorageValue,
   type Unit,
 } from "./base.ts";
+import { SchemaContext } from "@commontools/memory/interface";
 
 /**
  * Volatile (in-memory) storage provider. Just for testing.
@@ -110,6 +111,7 @@ export class VolatileStorageProvider extends BaseStorageProvider {
   sync(
     entityId: EntityId,
     expectedInStorage: boolean = false,
+    _schemaContext?: SchemaContext,
   ): Promise<Result<Unit, Error>> {
     const spaceStorage = getOrCreateSpaceStorage(this.spaceName);
     const key = JSON.stringify(entityId);

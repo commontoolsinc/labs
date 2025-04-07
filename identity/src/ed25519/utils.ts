@@ -126,3 +126,78 @@ export function didToBytes(did: DIDKey): Uint8Array {
 export class AuthorizationError extends Error {
   override name = "AuthorizationError" as const;
 }
+
+// Returns whether ed25519 is supported in Web Crypto API.
+// Supported implies:
+//
+// * WebCrypto ED25519 key implementation supported[1].
+// * Can be serialized for IndexedDb[2][3].
+// * Uses deterministic signatures as per RFC 8032[4].
+//
+// * [1] Webkit and Firefox implement WebCrypto (caveats below), and Chrome currently requires
+//   "Experimental Web Features" flag enabled for ed25519 keys.
+//   https://caniuse.com/mdn-api_subtlecrypto_generatekey_ed25519
+// * [2] Firefox supports ed25519 keys, though cannot be serialized (stored in IndexedDB)
+//   until v136 https://bugzilla.mozilla.org/show_bug.cgi?id=1939993.
+// * [3] While Deno serializes `CryptoKey`s without throwing, they cannot be rehydrated
+//   after cloning. We do not test that here, as we prefer the WebCrypto implementation
+//   in Deno, but in scenarios where a clone is necessary, a fallback implementation
+//   can be requested.
+//   https://github.com/denoland/deno/issues/12067#issuecomment-1975001079
+// * [4] Safari/Webkit generates randomized signatures as per `draft-irtf-cfrg-det-sigs-with-noise`
+//   https://datatracker.ietf.org/doc/draft-irtf-cfrg-det-sigs-with-noise/
+export const isNativeEd25519Supported = (() => {
+  async function isDeterministic(key: CryptoKey): Promise<boolean> {
+    const payload = new Uint8Array(32);
+    const [first, second] = [
+      new Uint8Array(await crypto.subtle.sign("ed25519", key, payload)),
+      new Uint8Array(await crypto.subtle.sign("ed25519", key, payload)),
+    ];
+    if (first.length !== second.length) return false;
+    for (let i = 0; i < first.length; i++) {
+      if (first[i] !== second[i]) return false;
+    }
+    return true;
+  }
+
+  // Note we do not test if the key can be rehydrated (fails in Deno if needed),
+  // we're mostly checking that Firefox keys can be saved to storage.
+  function isCloneable(key: CryptoKey): boolean {
+    try {
+      globalThis.structuredClone(key);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async function testEd25519Features(): Promise<boolean> {
+    let key;
+    try {
+      key = await crypto.subtle.generateKey("ed25519", false, [
+        "sign",
+      ]) as CryptoKeyPair;
+    } catch (e) {
+      return false;
+    }
+
+    if (!(await isDeterministic(key.privateKey))) {
+      return false;
+    }
+    if (!isCloneable(key.privateKey)) {
+      return false;
+    }
+    return true;
+  }
+
+  let isSupported: boolean | null = null;
+
+  return async function isNativeEd25519Supported() {
+    if (isSupported !== null) {
+      return isSupported;
+    }
+
+    isSupported = await testEd25519Features();
+    return isSupported;
+  };
+})();

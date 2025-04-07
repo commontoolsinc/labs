@@ -3,6 +3,7 @@ import {
   Commit,
   Entity,
   MemorySpace,
+  SchemaSelector,
   Selector,
   The,
 } from "./interface.ts";
@@ -50,7 +51,10 @@ const matchAddress = (
 
 export const ANY = "_";
 
-export const channels = function* (space: MemorySpace, selector: Selector) {
+export const channels = function* (
+  space: MemorySpace,
+  selector: Selector | SchemaSelector,
+) {
   const all = [[ANY, {}]] as const;
   const entities = Object.entries(selector);
   for (const [of, attributes] of entities.length > 0 ? entities : all) {

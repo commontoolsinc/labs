@@ -42,7 +42,8 @@ export const from = <
             controller.error(event);
           };
         },
-        cancel() {
+        cancel(reason?) {
+          console.log("Socket canceled", reason);
           span.setAttribute("socket.cancelled", true);
           socket.close();
         },

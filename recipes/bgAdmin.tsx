@@ -9,6 +9,7 @@ import {
   UI,
 } from "@commontools/builder";
 
+// NOTE(ja): this must be the same as the schema in utils/src/updaters.ts
 const BGCharmEntrySchema = {
   type: "object",
   properties: {
@@ -17,9 +18,9 @@ const BGCharmEntrySchema = {
     integration: { type: "string" },
     createdAt: { type: "number" },
     updatedAt: { type: "number" },
-    disabledAt: { type: "number" },
-    lastRun: { type: "number" },
-    status: { type: "string" },
+    disabledAt: { type: "number", default: 0 },
+    lastRun: { type: "number", default: 0 },
+    status: { type: "string", default: "" },
   },
   required: [
     "space",

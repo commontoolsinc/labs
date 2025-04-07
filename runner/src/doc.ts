@@ -24,6 +24,83 @@ import {
 import { type ReactivityLog } from "./scheduler.ts";
 import { type Cancel } from "./cancel.ts";
 import { arrayEqual } from "./utils.ts";
+import { refer } from "@commontools/memory/reference";
+
+/**
+ * Just capturing type of what is being represented as a string.
+ */
+export type AsString<T> = string & { valueOf(): AsString<T> };
+
+export type DocumentPathEntry = string | number;
+export type DocumentPath = AsString<DocumentPathEntry[]>;
+
+export type SchemaGroup = {
+  [key: AsString<DocumentSchema>]: MemberSchema;
+};
+
+export type MemberSchema = {
+  /**
+   * Schema for the actual member.
+   */
+  schema: JSONSchema;
+
+  /**
+   * Sometimes schema may have a reference type which is resolved in this
+   * JSON schema.
+   */
+  context?: JSONSchema;
+};
+
+export type DocumentSchema = {
+  [key: DocumentPath]: SchemaGroup;
+};
+
+const JSONSchemaForNever = {
+  "enum": [],
+};
+
+/**
+ * Tracks schema usage by path and stores groups of schemas per path.
+ */
+class DocumentSchemaBuilder {
+  constructor(private model: DocumentSchema = {}) {
+  }
+  build() {
+    return this.model;
+  }
+
+  /**
+   * Registers access pattern for the path.
+   *
+   * @param path
+   * @param schema
+   * @param context
+   */
+  register(
+    path: DocumentPathEntry[],
+    schema: JSONSchema,
+    context: JSONSchema = JSONSchemaForNever,
+  ) {
+    // Create a consistent key by normalizing the path components
+    // Convert numbers to strings to ensure '0' and 0 are treated the same
+    const normalizedPath = path.map((key) => String(key));
+    // Use JSON.stringify to create a unique representation of the path
+    const pathKey = JSON.stringify(normalizedPath);
+
+    let group = this.model[pathKey];
+    if (!group) {
+      group = Object.create(null);
+      this.model[pathKey] = group;
+    }
+
+    const member = { schema, context };
+
+    const memberID = refer(member).toString() as string;
+    group[memberID] = member;
+
+    return this;
+  }
+}
 
 /**
  * Lowest level cell implementation.
@@ -261,11 +338,8 @@ export function createDoc<T>(
   let readOnly = false;
   let sourceCell: DocImpl<any> | undefined;
   let ephemeral = false;
-  // Track schema usage per path - store multiple schemas per path
-  const schemaRegistry = new Map<
-    string,
-    Array<{ schema: JSONSchema; rootSchema?: JSONSchema }>
-  >();
+
+  const schemaBuilder = new DocumentSchemaBuilder();
 
   const self: DocImpl<T> = {
     get: () => value as T,
@@ -348,6 +422,9 @@ export function createDoc<T>(
         );
       }
       sourceCell = cell;
+
+      // Notify callbacks that there was a change.
+      for (const callback of [...callbacks]) callback(value as T, []);
     },
     get ephemeral(): boolean {
       return ephemeral;
@@ -361,22 +438,11 @@ export function createDoc<T>(
       throw new Error("Copy trap: Don't copy cells, create references instead");
     },
     registerSchemaUse(
-      path: PropertyKey[],
+      path: DocumentPathEntry[],
       schema: JSONSchema,
-      rootSchema?: JSONSchema,
+      context?: JSONSchema,
     ): void {
-      // Create a consistent key by normalizing the path components
-      // Convert numbers to strings to ensure '0' and 0 are treated the same
-      const normalizedPath = path.map((key) => String(key));
-      // Use JSON.stringify to create a unique representation of the path
-      const pathKey = JSON.stringify(normalizedPath);
-
-      // Get existing schemas for this path or create new array
-      const schemas = schemaRegistry.get(pathKey) || [];
-      // Add the new schema registration
-      schemas.push({ schema, rootSchema });
-      // Store the updated array
-      schemaRegistry.set(pathKey, schemas);
+      schemaBuilder.register(path, schema, context);
     },
   };
 

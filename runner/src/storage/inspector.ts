@@ -7,6 +7,7 @@ import {
   Query,
   QueryError,
   Result,
+  SchemaQuery,
   Subscribe,
   Transaction,
   TransactionError,
@@ -39,7 +40,7 @@ export type PushState = Record<
 
 export type PullState = Record<
   string,
-  Result<UCAN<Query>, PullError & { time: Time }>
+  Result<UCAN<Query | SchemaQuery>, PullError & { time: Time }>
 >;
 
 export type SubscriptionState = Record<string, {
@@ -109,6 +110,57 @@ export class Model {
   }
 }
 
+export type ChannelCallback = (data: BroadcastCommand) => void;
+
+export class Channel extends EventTarget {
+  #scope: string;
+  #channel: BroadcastChannel;
+  #closed: boolean;
+  #callback?: ChannelCallback;
+
+  constructor(scope: string, callback?: ChannelCallback) {
+    super();
+    this.#scope = scope;
+    this.#closed = false;
+    this.#scope = scope;
+    this.#callback = callback;
+    this.#channel = new BroadcastChannel("inspector");
+    if (this.#callback) {
+      this.#channel.addEventListener("message", this.onMessage);
+    }
+  }
+
+  postMessage(input: Command): BroadcastCommand {
+    const command = { ...input, sessionId: this.#scope };
+    this.#channel.postMessage(command);
+    return command;
+  }
+
+  onMessage = (e: MessageEvent<BroadcastCommand>) => {
+    if (!this.#callback) {
+      return;
+    }
+
+    // If sessionId matches scope, or if no scope provided,
+    // propagate the message.
+    if (!this.#scope || e.data?.sessionId === this.#scope) {
+      // Use vanilla callback here rather than extending
+      // from EventTarget, as MessageEvents from a BroadcastChannel
+      // cannot be re-dispatched.
+      this.#callback(e.data);
+    }
+  };
+
+  close() {
+    if (this.#closed) {
+      throw new Error("Channel already closed.");
+    }
+    this.#closed = true;
+    this.#channel.close();
+    this.#channel.removeEventListener("message", this.onMessage);
+  }
+}
+
 export const create = (time = Date.now()) =>
   new Model(
     { pending: { ok: { attempt: 0 } }, time },
@@ -117,6 +169,7 @@ export const create = (time = Date.now()) =>
     {},
   );
 
+export type WithSessionId<T> = T & { sessionId?: string };
 export type WithTime<T> = T & { time: Time };
 
 export type Disconnect = {
@@ -128,15 +181,17 @@ export type Connect = {
   attempt: number;
 };
 
-export type Command = WithTime<
-  Variant<{
-    send: UCAN<ConsumerCommandInvocation<Protocol>>;
-    receive: ProviderCommand<Protocol>;
-    integrate: { url: string; value: JSONValue | undefined };
-    disconnect: Disconnect;
-    connect: Connect;
-  }>
->;
+export type RawCommand = Variant<{
+  send: UCAN<ConsumerCommandInvocation<Protocol>>;
+  receive: ProviderCommand<Protocol>;
+  integrate: { url: string; value: JSONValue | undefined };
+  disconnect: Disconnect;
+  connect: Connect;
+}>;
+
+export type Command = WithTime<RawCommand>;
+
+export type BroadcastCommand = WithSessionId<Command>;
 
 export const update = (state: Model, command: Command): Model => {
   if (command.send) {
@@ -197,6 +252,10 @@ const send = (
       return state;
     }
     case "/memory/query": {
+      state.pull[url] = { ok: { invocation, authorization } };
+      return state;
+    }
+    case "/memory/graph/query": {
       state.pull[url] = { ok: { invocation, authorization } };
       return state;
     }

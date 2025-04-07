@@ -1,5 +1,10 @@
 import { isStreamAlias, TYPE } from "@commontools/builder";
-import { getTopFrame, ID, type JSONSchema } from "@commontools/builder";
+import {
+  getTopFrame,
+  ID,
+  ID_FIELD,
+  type JSONSchema,
+} from "@commontools/builder";
 import { type DeepKeyLookup, type DocImpl, getDoc, isDoc } from "./doc.ts";
 import {
   createQueryResultProxy,
@@ -103,15 +108,15 @@ import { type Schema } from "@commontools/builder";
  */
 export interface Cell<T> {
   get(): T;
-  set(value: T): void;
-  send(value: T): void;
-  update(values: Partial<T>): void;
+  set(value: Cellify<T> | T): void;
+  send(value: Cellify<T> | T): void;
+  update<V extends Cellify<Partial<T> | Partial<T>>>(
+    values: V extends object ? V : never,
+  ): void;
   push(
     ...value: Array<
-      | (T extends Array<infer U> ? U : any)
-      | DocImpl<T extends Array<infer U> ? U : any>
+      | (T extends Array<infer U> ? (Cellify<U> | U | DocImpl<U>) : any)
       | CellLink
-      | Cell<T extends Array<infer U> ? U : any>
     >
   ): void;
   equals(other: Cell<any>): boolean;
@@ -134,6 +139,7 @@ export interface Cell<T> {
     log?: ReactivityLog,
   ): QueryResult<DeepKeyLookup<T, Path>>;
   getAsCellLink(): CellLink;
+  getDoc(): DocImpl<any>;
   getSourceCell<T>(
     schema?: JSONSchema,
   ): Cell<
@@ -163,9 +169,30 @@ export interface Cell<T> {
   copyTrap: boolean;
 }
 
+/**
+ * Cellify is a type utility that allows any part of type T to be wrapped in
+ * Cell<>, and allow any part of T that is currently wrapped in Cell<> to be
+ * used unwrapped. This is designed for use with Cell<T> method parameters,
+ * allowing flexibility in how values are passed.
+ */
+export type Cellify<T> =
+  // Handle existing Cell<> types, allowing unwrapping
+  T extends Cell<infer U> ? Cellify<U> | Cell<Cellify<U>>
+    // Handle arrays
+    : T extends Array<infer U> ? Array<Cellify<U>> | Cell<Array<Cellify<U>>>
+    // Handle objects (excluding null), adding optional ID fields
+    : T extends object ?
+        | ({ [K in keyof T]: Cellify<T[K]> } & { [ID]?: any; [ID_FIELD]?: any })
+        | Cell<
+          { [K in keyof T]: Cellify<T[K]> } & { [ID]?: any; [ID_FIELD]?: any }
+        >
+    // Handle primitives
+    : T | Cell<T>;
+
 export interface Stream<T> {
   send(event: T): void;
   sink(callback: (event: T) => Cancel | undefined | void): Cancel;
+  getDoc(): DocImpl<any>;
   schema?: JSONSchema;
   rootSchema?: JSONSchema;
   [isStreamMarker]: true;
@@ -232,27 +259,31 @@ export function getCellFromEntityId(
 }
 
 export function getCellFromLink<T>(
-  docLink: CellLink,
+  cellLink: CellLink,
   schema?: JSONSchema,
   log?: ReactivityLog,
 ): Cell<T>;
 export function getCellFromLink<S extends JSONSchema = JSONSchema>(
-  docLink: CellLink,
+  cellLink: CellLink,
   schema: S,
   log?: ReactivityLog,
 ): Cell<Schema<S>>;
 export function getCellFromLink(
-  docLink: CellLink,
+  cellLink: CellLink,
   schema?: JSONSchema,
   log?: ReactivityLog,
 ): Cell<any> {
-  if (!docLink.space) {
+  let doc;
+
+  if (isDoc(cellLink.cell)) {
+    doc = cellLink.cell;
+  } else if (cellLink.space) {
+    doc = getDocByEntityId(cellLink.space, getEntityId(cellLink.cell)!, true)!;
+    if (!doc) throw new Error(`Can't find ${cellLink.space}/${cellLink.cell}!`);
+  } else {
     throw new Error("Cell link has no space");
   }
-  const doc = isDoc(docLink.cell)
-    ? docLink.cell
-    : getDocByEntityId(docLink.space, getEntityId(docLink.cell)!, true)!;
-  return createCell(doc, docLink.path, log, schema);
+  return createCell(doc, cellLink.path, log, schema);
 }
 
 export function getImmutableCell<T>(
@@ -333,6 +364,7 @@ function createStreamCell<T>(
       listeners.add(callback);
       return () => listeners.delete(callback);
     },
+    getDoc: () => doc,
     schema,
     rootSchema,
     [isStreamMarker]: true,
@@ -352,15 +384,15 @@ function createRegularCell<T>(
 
   const self = {
     get: () => validateAndTransform(doc, path, schema, log, rootSchema),
-    set: (newValue: T) =>
+    set: (newValue: Cellify<T>) =>
       diffAndUpdate(
         resolveLinkToAlias(doc, path, log),
         newValue,
         log,
         getTopFrame()?.cause,
       ),
-    send: (newValue: T) => self.set(newValue),
-    update: (values: Partial<T>) => {
+    send: (newValue: Cellify<T>) => self.set(newValue),
+    update: (values: Cellify<Partial<T>>) => {
       if (typeof values !== "object" || values === null) {
         throw new Error("Can't update with non-object value");
       }
@@ -371,10 +403,8 @@ function createRegularCell<T>(
     },
     push: (
       ...values: Array<
-        | (T extends Array<infer U> ? U : any)
-        | DocImpl<T extends Array<infer U> ? U : any>
+        | (T extends Array<infer U> ? (Cellify<U> | U | DocImpl<U>) : any)
         | CellLink
-        | Cell<T extends Array<infer U> ? U : any>
       >
     ) => {
       // Follow aliases and references, since we want to get to an assumed
@@ -469,6 +499,7 @@ function createRegularCell<T>(
     getAsCellLink: () =>
       // Add space here, so that JSON.stringify() of this retains the space.
       ({ space: doc.space, cell: doc, path }) satisfies CellLink,
+    getDoc: () => doc,
     getSourceCell: (schema?: JSONSchema) =>
       doc.sourceCell?.asCell([], log, schema) as Cell<any>,
     toJSON: () =>

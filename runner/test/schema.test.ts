@@ -335,7 +335,7 @@ describe("Schema Support", () => {
         "test",
       ).asCell();
       doc.setAtPath(["current"], {
-        $alias: { cell: third.getAsCellLink().cell, path: [] },
+        $alias: { cell: third.getDoc(), path: [] },
       });
 
       await idle();

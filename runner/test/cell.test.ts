@@ -4,13 +4,7 @@ import { type DocImpl, getDoc, isDoc } from "../src/doc.ts";
 import { isCell, isCellLink } from "../src/cell.ts";
 import { isQueryResult } from "../src/query-result-proxy.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
-import {
-  getTopFrame,
-  ID,
-  JSONSchema,
-  popFrame,
-  pushFrame,
-} from "@commontools/builder";
+import { ID, JSONSchema, popFrame, pushFrame } from "@commontools/builder";
 import { addEventHandler, idle } from "../src/scheduler.ts";
 import { addCommonIDfromObjectID } from "../src/utils.ts";
 
@@ -562,7 +556,7 @@ describe("asCell with schema", () => {
         },
       },
       required: ["name", "age", "tags", "nested"],
-    } satisfies JSONSchema;
+    } as const satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
     const value = cell.get();
@@ -596,7 +590,7 @@ describe("asCell with schema", () => {
         },
       },
       required: ["id", "metadata"],
-    } satisfies JSONSchema;
+    } as const satisfies JSONSchema;
 
     const value = c.asCell([], undefined, schema).get();
 
@@ -643,7 +637,7 @@ describe("asCell with schema", () => {
         },
       },
       required: ["name", "children"],
-    } satisfies JSONSchema;
+    } as const satisfies JSONSchema;
 
     const value = c.asCell([], undefined, schema).get();
 
@@ -700,7 +694,7 @@ describe("asCell with schema", () => {
         },
       },
       required: ["user"],
-    } satisfies JSONSchema;
+    } as const satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
     const userCell = cell.key("user");
@@ -831,7 +825,7 @@ describe("asCell with schema", () => {
         },
       },
       required: ["id", "context"],
-    } satisfies JSONSchema;
+    } as const satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
     const value = cell.get();
@@ -873,7 +867,7 @@ describe("asCell with schema", () => {
         },
       },
       required: ["context"],
-    } satisfies JSONSchema;
+    } as const satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
     const value = cell.get();
@@ -919,7 +913,7 @@ describe("asCell with schema", () => {
         },
       },
       required: ["context"],
-    } satisfies JSONSchema;
+    } as const satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
     const value = cell.get();
@@ -965,7 +959,7 @@ describe("asCell with schema", () => {
         },
       },
       required: ["context"],
-    } satisfies JSONSchema;
+    } as const satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
     const value = cell.get();
@@ -1032,7 +1026,7 @@ describe("asCell with schema", () => {
         },
       },
       required: ["context"],
-    } satisfies JSONSchema;
+    } as const satisfies JSONSchema;
 
     const log = { reads: [], writes: [] } as ReactivityLog;
     const cell = c.asCell([], log, schema);
@@ -1082,7 +1076,7 @@ describe("asCell with schema", () => {
         },
       },
       required: ["items"],
-    } satisfies JSONSchema;
+    } as const satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
     const itemsCell = cell.key("items");
@@ -1115,7 +1109,7 @@ describe("asCell with schema", () => {
           value: { type: "number" },
         },
       },
-    } satisfies JSONSchema;
+    } as const satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
 
@@ -1149,7 +1143,7 @@ describe("asCell with schema", () => {
         type: "object",
         properties: { anything: { asCell: true } },
       },
-    } satisfies JSONSchema;
+    } as const satisfies JSONSchema;
 
     const cell = c.asCell([], undefined, schema);
 
@@ -1226,8 +1220,8 @@ describe("asCell with schema", () => {
     const schema = {
       type: "array",
       items: { type: "object", properties: { value: { type: "number" } } },
-      default: [{ [ID]: "test", "value": 10 }, { [ID]: "test2", "value": 20 }],
-    } as JSONSchema;
+      default: [{ [ID]: "test", value: 10 }, { [ID]: "test2", value: 20 }],
+    } as const satisfies JSONSchema;
 
     const c = getDoc({}, "push-to-undefined-schema-stable-id", "test");
     const arrayCell = c.asCell(["items"], undefined, schema);

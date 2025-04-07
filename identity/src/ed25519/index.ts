@@ -7,17 +7,14 @@ import {
   Signer,
   Verifier,
 } from "../interface.ts";
-import {
-  isNativeEd25519Supported,
-  NativeEd25519Signer,
-  NativeEd25519Verifier,
-} from "./native.ts";
+import { NativeEd25519Signer, NativeEd25519Verifier } from "./native.ts";
 import { NobleEd25519Signer, NobleEd25519Verifier } from "./noble.ts";
 import * as bip39 from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
 import {
   fromPEM,
   generateEd25519Pkcs8,
+  isNativeEd25519Supported,
   pkcs8ToEd25519Raw,
   toPEM,
 } from "./utils.ts";

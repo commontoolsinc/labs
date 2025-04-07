@@ -216,7 +216,7 @@ Deno.test({
           await sleep(1000);
           await page.keyboard.press("Enter");
 
-          await sleep(1000);
+          await sleep(300);
           await page.keyboard.type("count of values");
           await sleep(1000);
           await page.keyboard.press("Enter");

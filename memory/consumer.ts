@@ -26,6 +26,8 @@ import {
   QueryError,
   Reference,
   Result,
+  SchemaQuery,
+  SchemaSelector,
   Seconds,
   Selection,
   Selector,
@@ -170,6 +172,18 @@ class MemoryConsumerSession<
     return invocation;
   }
 
+  getInvocation<Ability extends string>(
+    command: ConsumerCommandFor<Ability, MemoryProtocol>,
+  ) {
+    const invocation = ConsumerInvocation.create(
+      this.as.did(),
+      command as Command<Ability, InferOf<MemoryProtocol>>,
+      this.clock.now(),
+      this.ttl,
+    );
+    return invocation;
+  }
+
   async execute<Ability extends string>(
     invocation: ConsumerInvocation<Ability, MemoryProtocol>,
   ) {
@@ -224,7 +238,9 @@ export interface MemorySession<Space extends MemorySpace> {
 
 export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {
   transact(source: Transaction<Space>["args"]): TransactionResult<Space>;
-  query(source: Query["args"]): QueryView<Space, Protocol<Space>>;
+  query(
+    source: Query["args"] | SchemaQuery["args"],
+  ): QueryView<Space, Protocol<Space>>;
 }
 
 export type { QueryView };
@@ -239,16 +255,27 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
     return this.session.invoke({
       cmd: "/memory/transact",
       sub: this.space,
-      args: source as Transaction["args"],
+      args: source,
     });
   }
-  query(source: Query["args"]): QueryView<Space, Protocol<Space>> {
-    const query = this.session.invoke({
-      cmd: "/memory/query" as const,
-      sub: this.space,
-      args: source as Query["args"],
-    });
-    return QueryView.create(this.session, query);
+  query(
+    source: Query["args"] | SchemaQuery["args"],
+  ): QueryView<Space, Protocol<Space>> {
+    if ("select" in source) {
+      const query = this.session.invoke({
+        cmd: "/memory/query" as const,
+        sub: this.space,
+        args: source,
+      });
+      return QueryView.create(this.session, query);
+    } else {
+      const query = this.session.invoke({
+        cmd: "/memory/graph/query" as const,
+        sub: this.space,
+        args: source,
+      });
+      return QueryView.create(this.session, query);
+    }
   }
 }
 
@@ -336,7 +363,9 @@ class QueryView<
     MemoryProtocol extends Protocol<Space>,
   >(
     session: MemoryConsumerSession<Space, MemoryProtocol>,
-    invocation: ConsumerInvocation<"/memory/query", MemoryProtocol>,
+    invocation:
+      | ConsumerInvocation<"/memory/query", MemoryProtocol>
+      | ConsumerInvocation<"/memory/graph/query", MemoryProtocol>,
   ): QueryView<Space, MemoryProtocol> {
     const view: QueryView<Space, MemoryProtocol> = new QueryView(
       session,
@@ -354,19 +383,22 @@ class QueryView<
     return view;
   }
   selection: Selection<Space>;
+  selector: Selector | SchemaSelector;
 
   constructor(
     public session: MemoryConsumerSession<Space, MemoryProtocol>,
-    public invocation: ConsumerInvocation<"/memory/query", MemoryProtocol>,
+    public invocation:
+      | ConsumerInvocation<"/memory/query", MemoryProtocol>
+      | ConsumerInvocation<"/memory/graph/query", MemoryProtocol>,
     public promise: Promise<
       Result<QueryView<Space, MemoryProtocol>, QueryError | ConnectionError>
     >,
   ) {
     this.selection = { [this.space]: {} } as Selection<InferOf<Protocol>>;
-  }
-
-  get selector() {
-    return (this.invocation.args as { select?: Selector }).select as Selector;
+    this.selector = ("select" in this.invocation.args)
+      ? (this.invocation.args as { select?: Selector }).select as Selector
+      : (this.invocation.args as { selectSchema?: Selector })
+        .selectSchema as SchemaSelector;
   }
 
   return(selection: Selection<InferOf<Protocol>>) {
@@ -409,6 +441,48 @@ class QueryView<
     this.session.execute(subscription);
 
     return subscription;
+  }
+
+  // A SchemaSelector query will include results that aren't in the selector
+  // Since we already have these results, we don't want to re-fetch them, so
+  // make a QueryView available for subscriptions to use that lets us skip
+  // that step when we subscribe.
+  includedQueryView(): QueryView<MemorySpace, MemoryProtocol> | undefined {
+    const factSelection = this.selection[this.space];
+    const subSelector: Selector = {};
+    for (const [of, attributes] of Object.entries(factSelection)) {
+      if (of === "_" || of in this.selector) {
+        continue;
+      }
+      const entityEntry: Record<The, Record<Cause, any>> = {};
+      for (const [the, _causes] of Object.entries(attributes)) {
+        entityEntry[the as Entity] = { _: {} };
+      }
+      subSelector[of as Entity] = entityEntry;
+    }
+    if (Object.entries(subSelector).length == 0) {
+      // Nothing new
+      return undefined;
+    }
+    // If we included any entries in our selection that were not in our
+    // selector, create a new QueryView for them, and subscribe to that
+    // We pre-populate the query view with the results
+    const invocation = this.session.getInvocation({
+      cmd: "/memory/query" as const,
+      sub: this.space,
+      args: { select: subSelector },
+    });
+    invocation.return(Promise.resolve(this.selection));
+    const subQueryView = new QueryView(
+      this.session,
+      invocation,
+      Promise.resolve({ ok: this }),
+    );
+
+    subQueryView.selection = this.selection;
+    subQueryView.selector = subSelector;
+    subQueryView.promise = Promise.resolve({ ok: subQueryView });
+    return subQueryView;
   }
 }
 

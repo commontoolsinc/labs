@@ -1,6 +1,6 @@
 import { Identity } from "@commontools/identity";
 import { type Cell, storage } from "@commontools/runner";
-import { type BGCharmEntry, newGetFunc } from "@commontools/utils";
+import { type BGCharmEntry, getBGUpdaterCharmsCell } from "@commontools/utils";
 import { log } from "./utils.ts";
 import { SpaceManager } from "./space-manager.ts";
 import { useCancelGroup } from "@commontools/runner";
@@ -25,7 +25,7 @@ export class BackgroundCharmService {
   async initialize() {
     storage.setRemoteStorage(new URL(this.toolshedUrl));
     storage.setSigner(this.identity);
-    this.charmsCell = await newGetFunc();
+    this.charmsCell = await getBGUpdaterCharmsCell();
     await storage.syncCell(this.charmsCell, true);
     await storage.synced();
 
@@ -76,7 +76,10 @@ export class BackgroundCharmService {
           identity: this.identity,
         });
         this.charmSchedulers.set(did, scheduler);
-        scheduler.start();
+        scheduler.start().catch((err) => {
+          log(`${did} Scheduler failed to initialize: ${err}`);
+          this.charmSchedulers.delete(did);
+        });
       }
 
       // we are only filtering charms because until the FIXME above is fixed

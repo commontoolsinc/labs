@@ -9,7 +9,10 @@
     },
     "test": {
       "description": "Type check & run tests",
-      "dependencies": ["check", "just-test"]
+      "dependencies": [
+        "check",
+        "just-test"
+      ]
     },
     "migrate": {
       "description": "Performs database migration",
@@ -17,7 +20,9 @@
     }
   },
   "test": {
-    "include": ["test/*-test.ts"]
+    "include": [
+      "test/*-test.ts"
+    ]
   },
   "exports": {
     ".": "./lib.ts",
@@ -27,7 +32,8 @@
     "./selection": "./selection.ts",
     "./consumer": "./consumer.ts",
     "./commit": "./commit.ts",
-    "./codec": "./codec.ts"
+    "./codec": "./codec.ts",
+    "./reference": "./reference.ts"
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",

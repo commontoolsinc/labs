@@ -1,18 +1,15 @@
-import React from "react";
+import React, { useRef } from "react";
 import { DitheredCube } from "./DitherCube.tsx";
 import { animated, useSpring, useTransition } from "@react-spring/web";
 
 interface SpecPreviewProps {
-  spec: string;
-  plan: string;
+  spec?: string;
+  plan?: string;
   loading: boolean;
   visible: boolean;
   floating?: boolean;
 }
 
-/**
- * Component that shows a live preview of the spec and plan
- */
 export function SpecPreview({
   spec,
   plan,
@@ -20,14 +17,29 @@ export function SpecPreview({
   visible,
   floating = false,
 }: SpecPreviewProps) {
-  // Calculate if we have content to show
   const hasContent = loading || plan || spec;
 
-  // Animation for container sliding in/out
+  // Create a reference to measure content height
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  // Calculate different heights for different states
+  const loaderHeight = 80; // Height for just the loader (48px cube + padding)
+  const maxContentHeight = floating
+    ? 200
+    : typeof window !== "undefined"
+    ? Math.min(300, globalThis.innerHeight * 0.5)
+    : 200;
+
+  // Container animation that handles visibility and dimensions
   const containerSpring = useSpring({
     opacity: visible && hasContent ? 1 : 0,
     transform: visible && hasContent ? "translateY(0%)" : "translateY(-20%)",
-    height: visible && hasContent ? "auto" : 0, // Fix: use 0 instead of "0px" to avoid string/number type conflict
+    // Adjust height based on loading state
+    height: !visible || !hasContent
+      ? 0
+      : loading
+      ? loaderHeight
+      : maxContentHeight,
     width: visible && hasContent ? "100%" : "95%",
     config: {
       tension: 280,
@@ -35,7 +47,7 @@ export function SpecPreview({
     },
   });
 
-  // Transition for content sections with absolute positioning to prevent overlap
+  // Content transition between loading and content
   const contentTransition = useTransition(loading, {
     from: { opacity: 0, transform: "scale(0.9)" },
     enter: { opacity: 1, transform: "scale(1)" },
@@ -60,16 +72,12 @@ export function SpecPreview({
     config: {
       tension: 300,
       friction: 20,
-      delay: loading ? 0 : 100, // Delay text animation when transitioning from loading state
     },
   });
 
-  if (!visible) return null;
-
-  // Different styles based on whether it's floating or inline
   const containerClasses = floating
-    ? "preview-container border border-2 fixed z-50"
-    : "preview-container border-t-2 border-black pt-2 bg-white";
+    ? "preview-container border border-2 fixed z-50 bg-gray-200"
+    : "preview-container border-t-2 border-black pt-2 bg-gray-200 ";
 
   return (
     <animated.div
@@ -80,21 +88,29 @@ export function SpecPreview({
           ? {
             width: "calc(100% - 2rem)",
             left: "1rem",
-            bottom: "calc(100% + 0.5rem)", // Position above the composer
+            bottom: "calc(100% + 0.5rem)",
             overflowY: "auto",
-            maxHeight: "300px", // Set a fixed maxHeight for floating mode
           }
           : {
-            overflowY: "auto", // Always use overflow auto instead of hidden
-            maxHeight: visible && hasContent
-              ? (loading ? 150 : "calc(min(500px, 80vh))") // Constrain to 80% of viewport height
-              : 0,
+            overflowY: "auto",
           }),
+        // Use visibility instead of display for animation purposes
+        visibility: containerSpring.opacity.to((o) =>
+          o === 0 ? "hidden" : "visible"
+        ),
+        pointerEvents: containerSpring.opacity.to((o) =>
+          o === 0 ? "none" : "auto"
+        ),
       }}
     >
-      <div className="p-3 bg-gray-200 relative">
+      <div className="p-3 relative" ref={contentRef}>
         <div
-          style={{ position: "relative", minHeight: loading ? "48px" : "auto" }}
+          style={{
+            position: "relative",
+            minHeight: loading ? "48px" : "auto",
+            // Set a smooth transition if needed for immediate inner content changes
+            transition: "min-height 0.3s ease",
+          }}
         >
           {contentTransition((style, isLoading) =>
             isLoading

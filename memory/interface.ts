@@ -1,4 +1,5 @@
 import type { Reference } from "merkle-reference";
+import { JSONSchema } from "../builder/src/types.ts";
 
 export type { Reference };
 
@@ -154,6 +155,13 @@ export type Protocol<Space extends MemorySpace = MemorySpace> = {
         unsubscribe(
           source: Unsubscribe<Space>["args"],
         ): Task<Result<Unit, SystemError | AuthorizationError>>;
+      };
+      graph: {
+        query(
+          schemaQuery: { selectSchema: SchemaSelector; since?: number },
+        ): Task<
+          Result<Selection<Space>, AuthorizationError | QueryError>
+        >;
       };
     };
   };
@@ -435,6 +443,11 @@ export interface Session<Space extends MemorySpace = MemorySpace> {
    */
   query(source: Query<Space>): QueryResult<Space>;
 
+  /**
+   * Queries space for matching entities based on provided selector.
+   */
+  querySchema(source: SchemaQuery<Space>): QueryResult<Space>;
+
   close(): CloseResult;
 }
 
@@ -688,7 +701,8 @@ export type Query<Space extends MemorySpace = MemorySpace> = Invocation<
 export type Subscribe<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/query/subscribe",
   Space,
-  { select: Selector; since?: number }
+  | { select: Selector; since?: number }
+  | { selectSchema: SchemaSelector; since?: number }
 >;
 
 export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
@@ -697,7 +711,61 @@ export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
   { source: InvocationURL<Reference<Subscribe<Space>>> }
 >;
 
-export type Operation = Transaction | Query | Subscribe | Unsubscribe;
+export type SchemaQuery<Space extends MemorySpace = MemorySpace> = Invocation<
+  "/memory/graph/query",
+  Space,
+  { selectSchema: SchemaSelector; since?: number }
+>;
+
+// A normal Selector looks like this (with _ as wildcard cause):
+// {
+//   "of:ba4jcbvpq3k5sooggkwwosy6sqd3fhr5md7hroyf3bq3vrambqm4xkkus": {
+//     "application/json": {
+//       _: {
+//         is: {}
+//       }
+//     }
+//   }
+// }
+
+// A SchemaSelector looks like this (with _ as wildcard cause):
+// {
+//   "of:ba4jcbvpq3k5sooggkwwosy6sqd3fhr5md7hroyf3bq3vrambqm4xkkus": {
+//     "application/json": {
+//       _: {
+//         path: [],
+//         schemaContext: {
+//           schema: { "type": "object" },
+//           rootSchema: { "type": "object" }
+//         }
+//       }
+//     }
+//   }
+// }
+
+export type SchemaSelector = Select<
+  Entity,
+  Select<The, Select<Cause, SchemaPathSelector>>
+>;
+
+export type SchemaPathSelector = {
+  path: string[];
+  schemaContext: SchemaContext;
+};
+
+// This is a schema, together with its rootSchema for resolving $ref entries
+// In the future, we should include the boolean option in the JSONSchema type itself
+export type SchemaContext = {
+  schema: JSONSchema | boolean;
+  rootSchema: JSONSchema | boolean;
+};
+
+export type Operation =
+  | Transaction
+  | Query
+  | SchemaQuery
+  | Subscribe
+  | Unsubscribe;
 
 export type QueryResult<Space extends MemorySpace = MemorySpace> = AwaitResult<
   Selection<Space>,
@@ -852,7 +920,7 @@ export interface QueryError extends Error {
   cause: SystemError;
 
   space: MemorySpace;
-  selector: Selector;
+  selector: Selector | SchemaSelector;
 }
 
 /**
