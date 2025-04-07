@@ -15,6 +15,7 @@ interface SpecPreviewProps {
   workflowType?: WorkflowType;
   workflowConfidence?: number;
   workflowReasoning?: string;
+  progress?: { classification: boolean; plan: boolean; spec: boolean }; // Progress tracking for staged rendering
   onWorkflowChange?: (workflow: WorkflowType) => void;
   onFormChange?: (formData: Partial<ExecutionPlan>) => void; // Callback to expose form data
 }
@@ -32,21 +33,33 @@ function Accordion(
 ) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
+  // Force a rerender when children content changes to fix animation issues
+  const childrenContentKey = React.useMemo(() => {
+    return typeof children === "string" ? children : JSON.stringify(
+      React.Children.toArray(children).map((child) =>
+        React.isValidElement(child) ? child.key : child
+      ),
+    );
+  }, [children]);
+
   const contentStyles = useSpring({
     from: {
       opacity: 0,
       height: 0,
       transform: "translateY(-10px)",
       overflow: "hidden",
-      display: "none",
+      visibility: "hidden",
     },
     to: {
       opacity: isOpen ? 1 : 0,
       height: isOpen ? "auto" : 0,
       transform: isOpen ? "translateY(0)" : "translateY(-10px)",
       overflow: "hidden",
-      display: isOpen ? "block" : "none",
+      visibility: isOpen ? "visible" : "hidden",
     },
+    // Reset animation when content changes to avoid stale animations
+    reset: true,
+    // Only animate when closing, immediate when opening to avoid height calculation issues
     immediate: !isOpen,
     config: {
       tension: 300,
@@ -55,6 +68,13 @@ function Accordion(
     },
   });
 
+  // Force update the accordion when content changes
+  React.useEffect(() => {
+    // Intentionally empty, just to trigger a re-render
+    console.log("Accordion content changed:", childrenContentKey);
+  }, [childrenContentKey]);
+
+  // This is a much simpler approach that doesn't rely on react-spring for height animation
   return (
     <div className="border border-gray-200 rounded-md mb-2 overflow-hidden">
       <button
@@ -76,9 +96,18 @@ function Accordion(
         </div>
         {badge}
       </button>
-      <animated.div style={contentStyles}>
-        <div className="p-2 bg-white">{children}</div>
-      </animated.div>
+      {/* Simplified rendering that doesn't use react-spring for height */}
+      {isOpen && (
+        <div
+          className="p-2 bg-white"
+          style={{
+            opacity: isOpen ? 1 : 0,
+            transition: "opacity 200ms ease-in-out",
+          }}
+        >
+          {children}
+        </div>
+      )}
     </div>
   );
 }
@@ -94,9 +123,23 @@ export function SpecPreview({
   workflowType = "edit",
   workflowConfidence = 0,
   workflowReasoning,
+  progress = { classification: false, plan: false, spec: false },
   onWorkflowChange,
   onFormChange,
 }: SpecPreviewProps) {
+  
+  // Debug all incoming props for comprehensive tracking
+  React.useEffect(() => {
+    console.log("SpecPreview FULL PROPS:", {
+      spec: spec ? `${spec.substring(0, 30)}...` : null,
+      plan,
+      workflowType,
+      progress,
+      loading,
+      classificationLoading,
+      planLoading
+    });
+  }, [spec, plan, workflowType, progress, loading, classificationLoading, planLoading]);
   // Create the current form state
   const formData = React.useMemo<Partial<ExecutionPlan>>(() => ({
     workflowType,
@@ -123,25 +166,78 @@ export function SpecPreview({
     ? Math.min(300, globalThis.innerHeight * 0.5)
     : 320;
 
-  // Container animation that handles visibility and dimensions
+  // Force a re-render when any of these change
+  React.useEffect(() => {
+    // This effect just forces a re-render
+    console.log("Content/Progress changed:", {
+      hasContent,
+      planLoaded: Boolean(plan),
+      planType: typeof plan,
+      planIsArray: Array.isArray(plan),
+      planData: plan,
+      specLoaded: Boolean(spec),
+      progress,
+    });
+    
+    // Force a re-render when plan data arrives
+    if (plan && progress.plan) {
+      const forceUpdate = setTimeout(() => {
+        console.log("Force updating component due to plan data");
+      }, 50);
+      return () => clearTimeout(forceUpdate);
+    }
+  }, [hasContent, plan, spec, progress]);
+
+  // Directly set the height style without animation
+  const containerHeight = React.useMemo(() => {
+    if (!visible || !hasContent) {
+      return 0;
+    }
+
+    // If we're loading and no progress, show minimal height
+    if (loading && !progress.classification) {
+      return loaderHeight;
+    }
+
+    // If we have any content, show full height
+    if (progress.classification || plan || spec) {
+      return maxContentHeight;
+    }
+
+    return maxContentHeight;
+  }, [
+    visible,
+    hasContent,
+    loading,
+    progress.classification,
+    plan,
+    spec,
+    loaderHeight,
+    maxContentHeight,
+  ]);
+
+  // Create a key that changes when progress state changes to force re-renders
+  const progressKey =
+    `${progress.classification}-${progress.plan}-${progress.spec}-${
+      Boolean(plan)
+    }-${Boolean(spec)}`;
+
+  // Container animation that handles visibility only
   const containerSpring = useSpring({
     opacity: visible && hasContent ? 1 : 0,
     transform: visible && hasContent ? "translateY(0%)" : "translateY(-20%)",
-    // Adjust height based on loading state
-    height: !visible || !hasContent
-      ? 0
-      : loading
-      ? loaderHeight
-      : maxContentHeight,
     width: visible && hasContent ? "100%" : "95%",
     config: {
       tension: 280,
       friction: 24,
     },
+    // Reset on significant changes
+    reset: true,
+    key: progressKey,
   });
 
-  // Content transition between loading and content
-  const contentTransition = useTransition(loading, {
+  // Content transition between loading and content states
+  const contentTransition = useTransition(!loading || progress.classification, {
     from: { opacity: 0, transform: "scale(0.9)" },
     enter: { opacity: 1, transform: "scale(1)" },
     leave: {
@@ -156,16 +252,25 @@ export function SpecPreview({
       tension: 300,
       friction: 26,
     },
+    // Reset when progress changes to prevent animation glitches
+    reset: true,
+    key: progressKey,
   });
 
-  // Text reveal animation
+  // Text reveal animation - updates based on progress state not just loading
   const textSpring = useSpring({
-    opacity: !loading && visible ? 1 : 0,
-    transform: !loading && visible ? "translateY(0)" : "translateY(10px)",
+    opacity: (visible && (!loading || progress.classification)) ? 1 : 0,
+    transform: (visible && (!loading || progress.classification))
+      ? "translateY(0)"
+      : "translateY(10px)",
     config: {
       tension: 300,
       friction: 20,
     },
+    // Reset animation when progress changes
+    reset: true,
+    // Add key to force update when progress changes
+    key: progressKey,
   });
 
   const containerClasses = floating
@@ -180,6 +285,8 @@ export function SpecPreview({
       className={containerClasses}
       style={{
         ...containerSpring,
+        // Set height directly without animation
+        height: containerHeight,
         ...(floating
           ? {
             width: "calc(100% - 2rem)",
@@ -210,7 +317,8 @@ export function SpecPreview({
         >
           {!visible ? null : (
             <div className="space-y-4 w-full">
-              {loading
+              {/* Only show main loading spinner while we wait for classification */}
+              {loading && !progress.classification
                 ? (
                   <div className="flex items-center justify-center w-full py-4">
                     <DitheredCube
@@ -303,14 +411,16 @@ export function SpecPreview({
                             )}
                           </div>
 
-                          {/* Only show plan and spec sections if classification is complete */}
-                          {!classificationLoading && (
+                          {/* Always show the plan and spec sections - with appropriate state for each */}
+                          {(
                             <>
                               {/* Plan Section */}
-                              <div className="relative">
-                                {planLoading
+                              <div className="relative bg-gray-50 border border-gray-200 rounded p-2">
+                                <div className="text-sm font-bold mb-2">PLAN</div>
+                                {/* Show loading spinner whenever plan is still loading */}
+                                {(loading || planLoading) && !progress.plan
                                   ? (
-                                    <div className="flex items-center justify-center py-4 border border-gray-200 rounded bg-gray-50">
+                                    <div className="flex items-center justify-center py-4">
                                       <DitheredCube
                                         animationSpeed={2}
                                         width={32}
@@ -325,38 +435,31 @@ export function SpecPreview({
                                   )
                                   : plan
                                   ? (
-                                    <Accordion
-                                      title="PLAN"
-                                      defaultOpen={true}
-                                      badge={
-                                        <span className="text-gray-500 text-xs">
-                                          {typeof plan === "string"
-                                            ? "1 step"
-                                            : `${plan.length} steps`}
-                                        </span>
-                                      }
-                                    >
-                                      <animated.div
-                                        className="font-mono text-xs whitespace-pre-wrap"
-                                        style={{
-                                          ...textSpring,
-                                          scrollbarWidth: "thin",
-                                          scrollbarColor: "#aaa #eee",
-                                        }}
-                                      >
+                                    <div className="font-mono text-xs whitespace-pre-wrap">
+                                      {/* Debug output */}
+                                      <div className="bg-red-100 p-2 mb-2">
+                                        Plan data: {JSON.stringify({
+                                          planType: typeof plan,
+                                          isArray: Array.isArray(plan),
+                                          length: Array.isArray(plan) ? plan.length : (plan ? plan.length : 0)
+                                        })}
+                                      </div>
+                                      
+                                            {/* Display the plan contents */}
+                                      <div className="font-mono text-xs whitespace-pre-wrap">
                                         {Array.isArray(plan)
-                                          ? plan.map((step, index) => (
-                                            <div
-                                              key={index}
-                                              className="mb-2 pb-2 border-b border-gray-100 last:border-b-0"
-                                            >
-                                              <strong>{index + 1}.</strong>{" "}
-                                              {step}
-                                            </div>
-                                          ))
-                                          : plan}
-                                      </animated.div>
-                                    </Accordion>
+                                        ? plan.map((step, index) => (
+                                          <div
+                                            key={index}
+                                            className="mb-2 pb-2 border-b border-gray-100 last:border-b-0"
+                                          >
+                                            <strong>{index + 1}.</strong>{" "}
+                                            {step}
+                                          </div>
+                                        ))
+                                        : plan}
+                                      </div>
+                                    </div>
                                   )
                                   : (
                                     <div className="text-xs text-gray-500 italic p-2">
@@ -365,64 +468,44 @@ export function SpecPreview({
                                   )}
                               </div>
 
-                              {/* Spec Section - Only for edit/imagine workflows */}
-                              {workflowType !== "fix" &&
-                                (spec || planLoading) && (
-                                <div>
-                                  {planLoading
-                                    ? (
-                                      <div className="p-4 bg-gray-50 border border-gray-200 rounded text-center text-xs text-gray-500">
+                              {/* Spec Section - Always show for edit/imagine workflows after classification */}
+                              {workflowType !== "fix" && (
+                                <div className="bg-gray-50 border border-gray-200 rounded p-2">
+                                  <div className="text-sm font-bold mb-2">SPEC</div>
+                                  {/* Show spec when available, otherwise loading */}
+                                  {spec ? (
+                                    <div className="font-mono text-xs whitespace-pre-wrap">
+                                      {spec}
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center justify-center py-4">
+                                      <DitheredCube
+                                        animationSpeed={2}
+                                        width={32}
+                                        height={32}
+                                        animate
+                                        cameraZoom={12}
+                                      />
+                                      <span className="ml-2 text-sm">
                                         Generating specification...
-                                      </div>
-                                    )
-                                    : spec
-                                    ? (
-                                      <Accordion
-                                        title="SPEC"
-                                        defaultOpen={true}
-                                      >
-                                        <animated.div
-                                          className="font-mono text-xs whitespace-pre-wrap"
-                                          style={{
-                                            ...textSpring,
-                                            scrollbarWidth: "thin",
-                                            scrollbarColor: "#aaa #eee",
-                                          }}
-                                        >
-                                          {spec}
-                                        </animated.div>
-                                      </Accordion>
-                                    )
-                                    : null}
+                                      </span>
+                                    </div>
+                                  )}
                                 </div>
                               )}
 
                               {/* Original Spec - Only for fix workflow */}
                               {workflowType === "fix" &&
-                                (spec || planLoading) && (
-                                <div>
+                                (spec || progress.classification) && (
+                                <div className="bg-gray-50 border border-gray-200 rounded p-2">
+                                  <div className="text-sm font-bold mb-2">
+                                    ORIGINAL SPEC <span className="text-xs text-blue-600">(preserved)</span>
+                                  </div>
                                   {spec
                                     ? (
-                                      <Accordion
-                                        title="ORIGINAL SPEC"
-                                        defaultOpen={false}
-                                        badge={
-                                          <span className="text-xs text-blue-600">
-                                            (preserved)
-                                          </span>
-                                        }
-                                      >
-                                        <animated.div
-                                          className="font-mono text-xs whitespace-pre-wrap"
-                                          style={{
-                                            ...textSpring,
-                                            scrollbarWidth: "thin",
-                                            scrollbarColor: "#aaa #eee",
-                                          }}
-                                        >
-                                          {spec}
-                                        </animated.div>
-                                      </Accordion>
+                                      <div className="font-mono text-xs whitespace-pre-wrap">
+                                        {spec}
+                                      </div>
                                     )
                                     : (
                                       <div className="p-4 bg-gray-50 border border-gray-200 rounded text-center text-xs text-gray-500">

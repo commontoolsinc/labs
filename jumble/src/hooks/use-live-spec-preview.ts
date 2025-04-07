@@ -1,6 +1,7 @@
 import { generateSpecAndSchema } from "@commontools/llm";
 import { useCallback, useEffect, useState } from "react";
 import { useDebounce } from "./use-debounce.ts";
+import { useRef } from "react";
 import {
   CharmManager,
   createWorkflowForm,
@@ -43,7 +44,7 @@ export function useLiveSpecPreview(
   input: string,
   charmManager: CharmManager, // Properly typed CharmManager instance
   enabled: boolean = true,
-  debounceTime: number = 250,
+  debounceTime: number = 300, // Increased to 300ms as requested
   model: SpecPreviewModel = "think",
   currentCharm?: Cell<Charm>,
 ) {
@@ -58,6 +59,15 @@ export function useLiveSpecPreview(
     plan: false,
     spec: false,
   });
+
+  // Track the current generation process to cancel outdated requests
+  const currentGenerationRef = useRef<number>(0);
+  
+  // Track the text input that generated the current displayed results
+  const [lastSuccessfulText, setLastSuccessfulText] = useState<string>("");
+  
+  // Track if input is a completely new topic vs. refinement of existing one
+  const isCompleteTopic = useRef<boolean>(true);
 
   // Preview content state
   const [previewSpec, setPreviewSpec] = useState<string>("");
@@ -85,21 +95,55 @@ export function useLiveSpecPreview(
       enabled,
     );
 
-    // Reset all states at the beginning
+    // Create a unique ID for this generation process
+    const generationId = Date.now();
+    currentGenerationRef.current = generationId;
+
+    // Reset states based on whether this is a refinement or new topic
     const resetState = () => {
-      setPreviewSpec("");
-      setPreviewPlan([]);
-      setWorkflowConfidence(0);
-      setWorkflowReasoning("");
+      const textInvalid = (!text || !text.trim() || text.trim().length < 10 || !enabled);
+      const isNewTopic = isCompleteTopic.current;
+      
+      console.log("Reset state check:", {
+        textInvalid, 
+        isNewTopic,
+        lastSuccessfulText: lastSuccessfulText.substring(0, 20) + "...",
+        currentText: text.substring(0, 20) + "..."
+      });
+      
+      // Always reset content when starting a completely new topic
+      if (isNewTopic) {
+        console.log("Resetting preview content - new topic detected");
+        setPreviewSpec("");
+        setPreviewPlan([]);
+        setWorkflowConfidence(0);
+        setWorkflowReasoning("");
+      }
+      
+      // Always reset loading states
       setClassificationLoading(false);
       setPlanLoading(false);
       setLoading(false);
-      setProgress({
-        classification: false,
-        plan: false,
-        spec: false,
-      });
+      
+      // Only reset progress flags if:
+      // 1. Text is invalid (too short/empty/disabled) OR
+      // 2. This is a completely new topic (not a refinement)
+      if (textInvalid || isNewTopic) {
+        console.log("Full reset of progress flags - " + 
+          (textInvalid ? "invalid input" : "new topic"));
+        setProgress({
+          classification: false,
+          plan: false,
+          spec: false,
+        });
+      } else {
+        console.log("Preserving progress state - refinement of existing text");
+      }
     };
+
+    // Helper function to check if this generation process is still current
+    const isCurrentGeneration = () =>
+      currentGenerationRef.current === generationId;
 
     // Don't generate previews for very short inputs (less than 10 chars) or if disabled
     // This helps prevent unnecessary API calls and LLM requests
@@ -111,15 +155,18 @@ export function useLiveSpecPreview(
 
     console.log("Starting preview generation...");
 
-    // Set loading states to true at the start, but keep progress states false
+    // Set loading states to true at the start, but DON'T reset progress states
+    // This is critical to prevent erasing progress when user is typing quickly
     setClassificationLoading(true);
     setPlanLoading(true);
     setLoading(true);
-    setProgress({
-      classification: false,
-      plan: false,
-      spec: false,
-    });
+    
+    // IMPORTANT: We're NOT resetting progress flags here anymore
+    // Only show loading indicators but keep any existing progress
+    console.log("Starting new request but preserving progress state:", progress);
+    
+    // Instead, set loading without touching progress
+    // If previous sections completed, they should stay completed
 
     try {
       // Process mentions first - needed for both classification and plan
@@ -169,48 +216,70 @@ export function useLiveSpecPreview(
 
       form = await processInputSection(charmManager, form);
       console.log("formatted input", form);
+
+      // Check if this is still the current generation before proceeding
+      if (!isCurrentGeneration()) {
+        console.log("Abandoning outdated generation process");
+        return;
+      }
+
       form = await fillClassificationSection(form);
+      setWorkflowType(form.classification.workflowType);
+      setWorkflowReasoning(form.classification.reasoning);
+      setWorkflowConfidence(form.classification.confidence);
+      setClassificationLoading(false);
+      setProgress((prev) => ({ ...prev, classification: true }));
+      
+      // Important: Turn off the main loading state after classification
+      // so UI can show partial results while plan and spec are loading
+      setLoading(false);
+
       console.log("classified task", form);
+
+      // Check if this is still the current generation before proceeding
+      if (!isCurrentGeneration()) {
+        console.log("Abandoning outdated generation process");
+        return;
+      }
+
       form = await fillPlanningSection(form);
+      
+      // Log the plan data from form
+      console.log("RECEIVED PLAN DATA:", form.plan);
+      
+      // Make a copy of the plan steps to avoid reference issues
+      const planSteps = form.plan?.steps && form.plan.steps.length > 0 
+        ? [...form.plan.steps] 
+        : [];
+      
+      if (planSteps && planSteps.length > 0) {
+        console.log("Setting plan data:", planSteps);
+        
+        // First set the plan data
+        setPreviewPlan(planSteps);
+        
+        // Then update the progress state in the next tick
+        setTimeout(() => {
+          console.log("Setting plan progress - delayed update");
+          setPlanLoading(false);
+          setProgress((prev) => ({ ...prev, plan: true }));
+        }, 100);
+      } else {
+        console.warn("No plan steps found in form data", form.plan);
+        // Set empty plan and update progress
+        setPreviewPlan([]);
+        setPlanLoading(false);
+        setProgress((prev) => ({ ...prev, plan: true }));
+      }
+      
       console.log("got plan", form);
 
-      // Use the new unified workflow preview function that handles both classification and plan generation
-      console.log("Calling generateWorkflowPreview with model:", modelId);
-
-      // PROGRESSIVE UPDATE: First update classification
-      if (form.classification.workflowType) {
-        setWorkflowType(form.classification.workflowType);
+      // PROGRESSIVE UPDATE: Handle spec extraction
+      // Check if this is still the current generation
+      if (!isCurrentGeneration()) {
+        console.log("Abandoning outdated generation process");
+        return;
       }
-
-      if (typeof form.classification.confidence === "number") {
-        setWorkflowConfidence(form.classification.confidence);
-      }
-
-      if (form.classification.reasoning) {
-        setWorkflowReasoning(form.classification.reasoning);
-      }
-
-      // Update classification progress and remove loading state
-      setProgress((prev) => ({ ...prev, classification: true }));
-      setClassificationLoading(false);
-
-      // Small artificial delay to allow the UI to reflect classification
-      // This makes the progressive reveal more noticeable
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      // PROGRESSIVE UPDATE: Then update plan
-      if (form.plan?.steps && form.plan.steps.length > 0) {
-        setPreviewPlan(form.plan.steps);
-      } else {
-        setPreviewPlan([]);
-      }
-
-      // Update plan progress and remove loading state
-      setProgress((prev) => ({ ...prev, plan: true }));
-      setPlanLoading(false);
-
-      // Small artificial delay before showing spec
-      await new Promise((resolve) => setTimeout(resolve, 100));
 
       // PROGRESSIVE UPDATE: Finally, update spec if available
       if (form.plan.spec) {
@@ -219,38 +288,94 @@ export function useLiveSpecPreview(
           const specMatch = form.plan.spec.match(
             /<specification>([\s\S]*?)<\/specification>/,
           );
+          
+          let parsedSpec = "";
           if (specMatch && specMatch[1]) {
-            setPreviewSpec(specMatch[1].trim());
+            parsedSpec = specMatch[1].trim();
           } else {
             // If can't extract, use the full spec but remove the XML tags
-            setPreviewSpec(
-              form.plan.spec.replace(/<\/?[^>]+(>|$)/g, "").trim(),
-            );
+            parsedSpec = form.plan.spec.replace(/<\/?[^>]+(>|$)/g, "").trim();
           }
+          
+          console.log("Setting spec content:", parsedSpec.substring(0, 50) + "...");
+          setPreviewSpec(parsedSpec);
+          
+          // Ensure progress is updated
+          setTimeout(() => {
+            setProgress((prev) => {
+              const newProgress = { ...prev, spec: true };
+              console.log("Updated progress to include spec:", newProgress);
+              return newProgress;
+            });
+          }, 50);
         } catch (e) {
           // If parsing fails, just use the raw spec
+          console.log("Error parsing spec, using raw content:", e);
           setPreviewSpec(form.plan.spec);
+          setProgress((prev) => ({ ...prev, spec: true }));
         }
       } else {
         setPreviewSpec("");
+        // Mark spec as complete even if empty
+        setProgress((prev) => ({ ...prev, spec: true }));
       }
 
-      // Update schema if available
-      if (form.plan.schema) {
-        setUpdatedSchema(form.plan.schema);
-      }
-
-      // Mark spec as complete
-      setProgress((prev) => ({ ...prev, spec: true }));
+      // Record this successful text for future comparison
+      setLastSuccessfulText(text);
 
       // Clear any remaining loading states
       setLoading(false);
     } catch (error) {
       console.error("Error generating preview:", error);
     } finally {
-      setLoading(false);
+      // Only reset loading states if this is still the current generation
+      if (isCurrentGeneration()) {
+        setLoading(false);
+        // Reset any lingering loading states to ensure UI doesn't get stuck
+        setClassificationLoading(false);
+        setPlanLoading(false);
+      }
     }
   }, [enabled, model, getModelId, currentCharm, charmManager]);
+
+  // Check if input is a significant change from previous content
+  useEffect(() => {
+    if (!lastSuccessfulText || !debouncedInput) return;
+    
+    // Determine if this is a refinement of the same topic or a completely new topic
+    // A simple heuristic: if 50% or more of the content has changed, consider it a new topic
+    const similarity = calculateTextSimilarity(lastSuccessfulText, debouncedInput);
+    isCompleteTopic.current = (similarity < 0.5);
+    
+    console.log("Text similarity:", similarity, 
+      isCompleteTopic.current ? "NEW TOPIC - Will reset all progress" : "Refinement - Will preserve progress");
+  }, [debouncedInput, lastSuccessfulText]);
+  
+  // Calculate text similarity as a rough percentage of how much text is preserved
+  const calculateTextSimilarity = (textA: string, textB: string): number => {
+    if (!textA || !textB) return 0;
+    
+    // Use a simple character-based comparison for efficiency
+    const lengthA = textA.length;
+    const lengthB = textB.length;
+    const maxLength = Math.max(lengthA, lengthB);
+    
+    // Early exit for empty strings
+    if (maxLength === 0) return 1;
+    
+    // If lengths are very different, likely a new topic
+    if (Math.abs(lengthA - lengthB) / maxLength > 0.5) return 0.25;
+    
+    // Simple character-based similarity for quick comparison
+    let commonChars = 0;
+    const minLength = Math.min(lengthA, lengthB);
+    
+    for (let i = 0; i < minLength; i++) {
+      if (textA[i] === textB[i]) commonChars++;
+    }
+    
+    return commonChars / maxLength;
+  };
 
   // Generate preview when input changes
   useEffect(() => {
@@ -270,6 +395,14 @@ export function useLiveSpecPreview(
 
   // Function to manually change the workflow type
   const setWorkflow = useCallback((type: WorkflowType) => {
+    // Create a unique ID for this generation process
+    const generationId = Date.now();
+    currentGenerationRef.current = generationId;
+
+    // Helper function to check if this generation process is still current
+    const isCurrentGeneration = () =>
+      currentGenerationRef.current === generationId;
+
     // Update the workflow type state immediately
     setWorkflowType(type);
 
@@ -293,6 +426,12 @@ export function useLiveSpecPreview(
           classification: true,
         }));
 
+        // Check if this operation has been superseded before making expensive API call
+        if (!isCurrentGeneration()) {
+          console.log("Abandoning outdated workflow change generation");
+          return;
+        }
+
         // Pass the processed text, sources, and the new workflow type to the workflow preview
         const preview = await generateWorkflowPreview(
           input,
@@ -307,6 +446,12 @@ export function useLiveSpecPreview(
             },
           },
         );
+
+        // Check if this is still the current generation before proceeding
+        if (!isCurrentGeneration()) {
+          console.log("Abandoning outdated workflow change generation");
+          return;
+        }
 
         // PROGRESSIVE REVEAL: First update the plan
         if (preview.plan && preview.plan.length > 0) {
@@ -372,8 +517,10 @@ export function useLiveSpecPreview(
         // Even on error, mark classification as complete since user manually selected it
         setProgress((prev) => ({ ...prev, classification: true }));
       } finally {
-        // Clear loading state
-        setPlanLoading(false);
+        // Clear loading state only if this is still the current generation
+        if (isCurrentGeneration()) {
+          setPlanLoading(false);
+        }
       }
     };
 
@@ -425,6 +572,26 @@ export function useLiveSpecPreview(
       schema,
     }
     : undefined;
+
+  // Debug logging to verify state
+  console.log("Current state:", { 
+    loading, 
+    classificationLoading, 
+    planLoading, 
+    progress, 
+    workflowType,
+    planData: previewPlan,
+    planType: typeof previewPlan,
+    isArray: Array.isArray(previewPlan),
+    planLength: Array.isArray(previewPlan) ? previewPlan.length : 0
+  });
+
+  // Extra debugging for spec content
+  console.log("RETURNING SPEC:", {
+    specContent: previewSpec ? previewSpec.substring(0, 30) + "..." : "none",
+    planContent: Array.isArray(previewPlan) ? previewPlan.slice(0, 2) : previewPlan,
+    progressState: progress
+  });
 
   return {
     previewSpec,

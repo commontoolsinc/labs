@@ -83,6 +83,17 @@ export function getCharmNameAsCamelCase(
   return name;
 }
 
+// Type definition for Slate document node structure
+type Descendant = {
+  type?: string;
+  text?: string;
+  id?: string;
+  character?: string;
+  bold?: boolean;
+  italic?: boolean;
+  children?: Descendant[];
+};
+
 // Function to parse Slate document and extract mention references
 export async function parseComposerDocument(
   serializedDocument: string,
