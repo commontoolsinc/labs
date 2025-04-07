@@ -195,8 +195,9 @@ export class Store<
   ) {
   }
   /**
-   * Loads records from the underlying store and returns a map of records keyed by keys in
-   * the provided selector.
+   * Loads records from the underlying store and returns a map of records keyed
+   * by keys in the provided selector. Entries that did not exist in the store
+   * will not be included in the selection.
    */
   pull(
     selector: Selector<Address>,
@@ -216,9 +217,7 @@ export class Store<
         for (const [at, { ok, error }] of results.entries()) {
           if (error) {
             return { error: new StoreError("Failed to load", error) };
-          } else if (ok === NOT_FOUND) {
-            selection.set(addresses[at], undefined);
-          } else {
+          } else if (ok !== NOT_FOUND) {
             selection.set(addresses[at], value.decode(ok));
           }
         }

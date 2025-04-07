@@ -32,8 +32,10 @@ export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
 }
 
-export interface Selection<Key, Value>
-  extends Iterable<[Key, Value | undefined]> {
+export interface Selection<Key, Value> extends Iterable<[Key, Value]> {
+  size: number;
+
+  values(): Iterable<Value>;
 }
 
 export interface Merge<Model> {
@@ -236,6 +238,22 @@ class RevisionAddress {
   }
 }
 
+class PullQueue {
+  constructor(public members: Map<string, FactAddress> = new Map()) {
+  }
+  add(entries: Iterable<FactAddress>) {
+    for (const entry of entries) {
+      this.members.set(toKey(entry), entry);
+    }
+  }
+
+  reset(): FactAddress[] {
+    const entries = [...this.members.values()];
+    this.members.clear();
+    return entries;
+  }
+}
+
 export class Replica {
   static put(
     local: Revision<State> | undefined,
@@ -302,12 +320,14 @@ export class Replica {
      * yet made it to the remote store.
      */
     public nursery: Nursery = new Nursery(),
+    public queue: PullQueue = new PullQueue(),
     public channel: BroadcastChannel = new globalThis.BroadcastChannel(
       `idb:${space}`,
     ),
     public pullRetryLimit: number = 100,
   ) {
     channel.addEventListener("message", this);
+    this.pull = this.pull.bind(this);
   }
 
   async poll() {
@@ -343,53 +363,13 @@ export class Replica {
   }
 
   /**
-   * Loads requested entries from the persisted cache into a heap. If some of
-   * the requested entries are not found in persisted cache they will be
-   * returned mapped to `undefined` in the returned selection.
+   * Pulls requested entries from the remote source and updates both in memory
+   * cache and local store so they will be available for future reads. If
+   * entries are not provided it will pull entries that have being loaded from
+   * local store in this session.
    */
-  async load(
-    entries: FactAddress[],
-  ): Promise<Result<Selection<FactAddress, Revision<State>>, StoreError>> {
-    const need = [];
-    // First we identify entries that we have need to load from the persisted
-    // cache.
-    for (const address of entries) {
-      if (!this.get(address)) {
-        need.push(address);
-      }
-    }
-
-    // If we have all the entries already we don't need to load anything
-    // from the store.
-    if (need.length === 0) {
-      return { ok: new Map() };
-    }
-
-    // Otherwise we attempt to load entries from the store.
-    const result = await this.cache.pull(need);
-
-    // If load succeeds we put loaded entries into the heap.
-    if (result.ok) {
-      const loaded = [];
-      for (const [address, revision] of result.ok) {
-        if (revision) {
-          loaded.push(revision);
-        }
-      }
-
-      this.heap.merge(loaded, Replica.put);
-    }
-
-    // We return result as is whether it was successful or not.
-    return result;
-  }
-
-  /**
-   * Fetches requested entries from the remote source and updates both in memory cache
-   * and local `store` so they will be available for future reads.
-   */
-  async fetch(
-    entries: FactAddress[],
+  async pull(
+    entries: FactAddress[] = this.queue.reset(),
   ): Promise<
     Result<
       Selection<FactAddress, Revision<State>>,
@@ -442,8 +422,8 @@ export class Replica {
     }
 
     // Add notFound entries to the heap and also persist them in the cache.
-    this.heap.merge(notFound, Replica.put);
-    const result = await this.cache.merge(revisions.values(), Replica.put);
+    this.heap.merge(notFound, Replica.update);
+    const result = await this.cache.merge(revisions.values(), Replica.update);
 
     if (result.error) {
       return result;
@@ -453,38 +433,75 @@ export class Replica {
   }
 
   /**
-   * Pulls requested entries into local cache. It will load entries that are not already
-   * in cache form the local `store` and fetch all the entries that were not found in the
-   `store` from the remote source, replicating them locally (both in store and cache).
+   * Loads requested entries from the local store into a heap unless entries are
+   * already loaded. If some of the entries are not available locally they will
+   * be fetched from the remote.
    */
-  async pull(
+  async load(
     entries: FactAddress[],
   ): Promise<
-    Result<Unit, StoreError | QueryError | ConnectionError>
+    Result<
+      Selection<FactAddress, Revision<State>>,
+      StoreError | QueryError | ConnectionError
+    >
   > {
-    // First we attempt to load entries from the local store.
-    const load = await this.load(entries);
-    if (load.error) {
-      return load;
-    }
-
-    // If some of the requested entries were not found in the persisted cache,
-    // we attempt to fetch them from the remote source.
+    // First we identify entries that we have need to load from the store.
     const need = [];
-    for (const [address, loaded] of load.ok) {
-      if (loaded == null) {
+    for (const address of entries) {
+      if (!this.get(address)) {
         need.push(address);
       }
     }
+    // We also include the commit entity to keep track of the current head.
+    if (!this.get({ the, of: this.space })) {
+      need.unshift({ the, of: this.space });
+    }
 
-    return need.length > 0 ? await this.fetch(need) : load;
+    // If all the entries were already loaded we don't need to do anything
+    // so we return immediately.
+    if (need.length === 0) {
+      return { ok: new Map() };
+    }
+
+    // Otherwise we attempt pull needed entries from the local store.
+    const { ok: pulled, error } = await this.cache.pull(need);
+
+    if (error) {
+      return { error };
+    } else {
+      // If number of pulled records is less than what we requested we have some
+      // some records that we'll need to fetch.
+      this.heap.merge(pulled.values(), Replica.put);
+      // If number of items pulled from cache is less than number of needed items
+      // we did not have everything we needed in cache, in which case we will
+      // have to wait until fetch is complete.
+      if (pulled.size < need.length) {
+        return await this.pull(need);
+      } //
+      // Otherwise we are able to complete checkout and we schedule a pull in
+      // the background so we can get latest entries if there are some available.
+      else {
+        this.queue.add(need);
+        this.sync();
+
+        return { ok: pulled };
+      }
+    }
+  }
+
+  syncTimer: number = -1;
+  syncTimeout = 1000;
+
+  sync() {
+    clearTimeout(this.syncTimer);
+    this.syncTimer = setTimeout(this.pull, this.syncTimeout);
   }
 
   /**
    * Attempts to commit and push changes to the remote. It optimistically
    * updates local state so that subsequent commits can be made without having
    * awaiting for each commit to succeed. However if commit fails all the local
-   * changes it made will be reverted back to the last merged state.
+   * changes made will be reverted back to the last merged state.
    *
    * ⚠️ Please note that if commits stack up e.g by incrementing value of the
    * same entity, rejected commit will ripple through stack as the changes there
@@ -505,7 +522,7 @@ export class Replica {
   > {
     // First we pull all the affected entries into heap so we can build a
     // transaction that is aware of latest state.
-    const { error } = await this.pull(changes);
+    const { error } = await this.load(changes);
     if (error) {
       return { error };
     } else {
@@ -520,14 +537,16 @@ export class Replica {
           // matches current state in which case we omit this change from the
           // transaction, otherwise we retract fact.
           if (fact?.is !== undefined) {
-            const state = retract(fact);
-            facts.push(state);
+            facts.push(retract(fact));
           }
         } else {
-          // If fact has no `cause` it is unclaimed fact.
-          const cause = fact?.cause ? assert(fact as Assert) : null;
-          const state = assert({ the, of, is, cause });
-          facts.push(state);
+          facts.push(assert({
+            the,
+            of,
+            is,
+            // If fact has no `cause` it is unclaimed fact.
+            cause: fact?.cause ? fact : null,
+          }));
         }
       }
 
@@ -550,8 +569,13 @@ export class Replica {
       else {
         const commit = toRevision(result.ok);
         const { since } = commit.is;
+        const revisions = [
+          ...facts.map((fact) => ({ ...fact, since })),
+          // We strip transaction info so we don't duplicate same data
+          { ...commit, is: { since: commit.is.since } },
+        ];
         // Turn facts into revisions corresponding with the commit.
-        this.heap.merge(facts.map((fact) => ({ ...fact, since })), Replica.put);
+        this.heap.merge(revisions, Replica.put);
         this.nursery.merge(facts, Nursery.delete);
       }
 
@@ -571,9 +595,8 @@ export class Replica {
 
   merge(commit: Commit) {
     const { the, of, cause, is, since } = toRevision(commit);
-    const changes = toChanges(commit);
     const revisions = [
-      { the, of, cause, is: { is: { since: is.since } }, since },
+      { the, of, cause, is: { since: is.since }, since },
       ...toChanges(commit),
     ];
 
@@ -730,13 +753,14 @@ export class Provider implements StorageProvider {
     };
 
     workspace.subscribe(address, subscriber);
+    this.workspace.load([address]);
 
     return () => workspace.unsubscribe(address, subscriber);
   }
   sync(entityId: EntityId) {
     const { the } = this;
     const of = Provider.toEntity(entityId);
-    return this.workspace.pull([{ the, of }]);
+    return this.workspace.load([{ the, of }]);
   }
 
   get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
