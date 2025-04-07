@@ -1233,7 +1233,7 @@ test("list single fact with schema query", DB, async (session) => {
 });
 
 test(
-  "only list fact through alias with schema query and schema filter",
+  "list fact through alias with schema query and schema filter",
   DB,
   async (session) => {
     const v1 = Fact.assert({
@@ -1340,7 +1340,6 @@ test(
               },
             },
           },
-          // @gozala: I would expect this to contain c1.since instead
           since: c2.since,
         },
       },
@@ -1493,7 +1492,7 @@ test(
               }],
             },
           },
-          since: c1.since,
+          since: c3.since,
         },
       },
     };
