@@ -74,18 +74,18 @@ function Accordion(
     console.log("Accordion content changed:", childrenContentKey);
   }, [childrenContentKey]);
 
-  // This is a much simpler approach that doesn't rely on react-spring for height animation
+  // Compact accordion with minimal styling
   return (
-    <div className="border border-gray-200 rounded-md mb-2 overflow-hidden">
+    <div className="border border-gray-200 rounded-md mb-1 overflow-hidden">
       <button
-        className="w-full p-2 bg-gray-50 text-left flex items-center justify-between text-xs font-bold"
+        className="w-full px-1.5 py-0.5 bg-gray-50 text-left flex items-center justify-between text-[10px] font-medium"
         onClick={() => setIsOpen(!isOpen)}
         type="button"
         aria-expanded={isOpen}
       >
         <div className="flex items-center">
           <span
-            className="mr-2 transition-transform"
+            className="mr-1 transition-transform text-[8px]"
             style={{
               transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
             }}
@@ -99,7 +99,7 @@ function Accordion(
       {/* Simplified rendering that doesn't use react-spring for height */}
       {isOpen && (
         <div
-          className="p-2 bg-white"
+          className="p-1 bg-white"
           style={{
             opacity: isOpen ? 1 : 0,
             transition: "opacity 200ms ease-in-out",
@@ -127,7 +127,6 @@ export function SpecPreview({
   onWorkflowChange,
   onFormChange,
 }: SpecPreviewProps) {
-  
   // Debug all incoming props for comprehensive tracking
   React.useEffect(() => {
     console.log("SpecPreview FULL PROPS:", {
@@ -137,9 +136,17 @@ export function SpecPreview({
       progress,
       loading,
       classificationLoading,
-      planLoading
+      planLoading,
     });
-  }, [spec, plan, workflowType, progress, loading, classificationLoading, planLoading]);
+  }, [
+    spec,
+    plan,
+    workflowType,
+    progress,
+    loading,
+    classificationLoading,
+    planLoading,
+  ]);
   // Create the current form state
   const formData = React.useMemo<Partial<ExecutionPlan>>(() => ({
     workflowType,
@@ -158,13 +165,13 @@ export function SpecPreview({
   // Create a reference to measure content height
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // Calculate different heights for different states
-  const loaderHeight = 80; // Height for just the loader (48px cube + padding)
+  // Calculate different heights for different states (more compact)
+  const loaderHeight = 60; // Height for just the loader (smaller cube + padding)
   const maxContentHeight = floating
-    ? 320
+    ? 280
     : typeof window !== "undefined"
-    ? Math.min(300, globalThis.innerHeight * 0.5)
-    : 320;
+    ? Math.min(260, globalThis.innerHeight * 0.45)
+    : 280;
 
   // Force a re-render when any of these change
   React.useEffect(() => {
@@ -178,7 +185,7 @@ export function SpecPreview({
       specLoaded: Boolean(spec),
       progress,
     });
-    
+
     // Force a re-render when plan data arrives
     if (plan && progress.plan) {
       const forceUpdate = setTimeout(() => {
@@ -306,58 +313,67 @@ export function SpecPreview({
         ),
       }}
     >
-      <div className="p-3 relative" ref={contentRef}>
+      <div className="p-2 relative" ref={contentRef}>
         <div
-          className="space-y-4"
+          className="space-y-2"
           style={{
             position: "relative",
-            minHeight: loading ? "48px" : "auto",
+            minHeight: loading ? "32px" : "auto",
             transition: "min-height 0.3s ease",
           }}
         >
           {!visible ? null : (
-            <div className="space-y-4 w-full">
+            <div className="space-y-2 w-full">
               {/* Only show main loading spinner while we wait for classification */}
               {loading && !progress.classification
                 ? (
-                  <div className="flex items-center justify-center w-full py-4">
+                  <div className="flex items-center justify-center w-full py-2">
                     <DitheredCube
                       animationSpeed={2}
-                      width={48}
-                      height={48}
+                      width={32}
+                      height={32}
                       animate
                       cameraZoom={12}
                     />
                   </div>
                 )
                 : (
-                  <div className="space-y-4 w-full">
+                  <div className="space-y-2 w-full">
                     {/* Workflow Classification Section */}
                     {classificationLoading
                       ? (
-                        <div className="flex items-center justify-center py-4">
+                        <div className="flex items-center justify-center py-2">
                           <DitheredCube
                             animationSpeed={2}
-                            width={32}
-                            height={32}
+                            width={24}
+                            height={24}
                             animate
                             cameraZoom={12}
                           />
-                          <span className="ml-2 text-sm">
+                          <span className="ml-2 text-xs">
                             Classifying workflow...
                           </span>
                         </div>
                       )
                       : (
                         <>
-                          <div className="flex flex-col gap-2">
-                            <div className="text-xs font-bold mb-1 flex items-center justify-between">
-                              <span>
-                                WORKFLOW: {workflowType.toUpperCase()}
-                              </span>
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center justify-between mb-0.5">
+                              <ToggleButton
+                                options={[
+                                  { value: "fix", label: "FIX" },
+                                  { value: "edit", label: "EDIT" },
+                                  { value: "imagine", label: "IMAGINE" },
+                                ]}
+                                value={workflowType}
+                                onChange={(value) =>
+                                  onWorkflowChange?.(value as WorkflowType)}
+                                size="small"
+                              />
+
                               {workflowConfidence > 0 && (
                                 <span
-                                  className={`text-xs ${
+                                  className={`text-[10px] ${
                                     workflowConfidence > 0.7
                                       ? "text-green-700"
                                       : "text-amber-600"
@@ -367,155 +383,135 @@ export function SpecPreview({
                                 </span>
                               )}
                             </div>
-                            <ToggleButton
-                              options={[
-                                { value: "fix", label: "FIX" },
-                                { value: "edit", label: "EDIT" },
-                                { value: "imagine", label: "IMAGINE" },
-                              ]}
-                              value={workflowType}
-                              onChange={(value) =>
-                                onWorkflowChange?.(value as WorkflowType)}
-                              size="small"
-                            />
 
-                            {/* Workflow explanation */}
-                            <div className="mt-2 p-2 bg-gray-100 rounded-md">
-                              <div className="text-xs font-semibold">
-                                {workflowType === "fix" &&
-                                  "🛠️ Fix: Preserves existing spec, only modifies code"}
-                                {workflowType === "edit" &&
-                                  "✏️ Edit: Preserves data structure, updates functionality"}
-                                {workflowType === "imagine" &&
-                                  "🔄 Imagine: Creates new spec with potentially different schema"}
-                              </div>
+                            {/* Compact workflow explanation */}
+                            <div className="text-[10px] text-gray-600 mb-1">
+                              {workflowType === "fix" &&
+                                "🛠️ Preserves existing spec, only modifies code"}
+                              {workflowType === "edit" &&
+                                "✏️ Preserves data structure, updates functionality"}
+                              {workflowType === "imagine" &&
+                                "🔄 Creates new spec with potentially different schema"}
                             </div>
 
                             {/* Classification Reasoning Accordion */}
                             {workflowReasoning && (
                               <Accordion
-                                title="Classification Reasoning"
-                                defaultOpen={false}
-                                badge={
-                                  <span className="text-xs text-gray-500">
-                                    {workflowConfidence > 0.8
-                                      ? "High confidence"
-                                      : "Medium confidence"}
-                                  </span>
+                                title={
+                                  <span className="text-[10px]">Reasoning</span>
                                 }
+                                defaultOpen={false}
+                                badge={null}
                               >
-                                <div className="text-xs text-gray-700 leading-tight">
+                                <div className="text-[10px] text-gray-700 leading-tight max-h-16 overflow-y-auto">
                                   {workflowReasoning}
                                 </div>
                               </Accordion>
                             )}
                           </div>
 
-                          {/* Always show the plan and spec sections - with appropriate state for each */}
-                          {(
-                            <>
+                          {/* Show plan and spec in a 2-column layout */}
+                          {
+                            <div className="grid grid-cols-2 gap-1">
                               {/* Plan Section */}
-                              <div className="relative bg-gray-50 border border-gray-200 rounded p-2">
-                                <div className="text-sm font-bold mb-2">PLAN</div>
+                              <div className="bg-gray-50 rounded p-1">
+                                <div className="text-xs font-bold mb-1">
+                                  PLAN
+                                </div>
                                 {/* Show loading spinner whenever plan is still loading */}
                                 {(loading || planLoading) && !progress.plan
                                   ? (
-                                    <div className="flex items-center justify-center py-4">
+                                    <div className="flex items-center py-1">
                                       <DitheredCube
                                         animationSpeed={2}
-                                        width={32}
-                                        height={32}
+                                        width={20}
+                                        height={20}
                                         animate
                                         cameraZoom={12}
                                       />
-                                      <span className="ml-2 text-sm">
-                                        Generating plan...
+                                      <span className="ml-1 text-[10px]">
+                                        Generating...
                                       </span>
                                     </div>
                                   )
                                   : plan
                                   ? (
-                                    <div className="font-mono text-xs whitespace-pre-wrap">
-                                      {/* Debug output */}
-                                      <div className="bg-red-100 p-2 mb-2">
-                                        Plan data: {JSON.stringify({
-                                          planType: typeof plan,
-                                          isArray: Array.isArray(plan),
-                                          length: Array.isArray(plan) ? plan.length : (plan ? plan.length : 0)
-                                        })}
-                                      </div>
-                                      
-                                            {/* Display the plan contents */}
-                                      <div className="font-mono text-xs whitespace-pre-wrap">
-                                        {Array.isArray(plan)
+                                    <div className="font-mono text-[10px] whitespace-pre-wrap">
+                                      {Array.isArray(plan)
                                         ? plan.map((step, index) => (
                                           <div
                                             key={index}
-                                            className="mb-2 pb-2 border-b border-gray-100 last:border-b-0"
+                                            className="py-0.5 border-t first:border-t-0 border-gray-100"
                                           >
-                                            <strong>{index + 1}.</strong>{" "}
+                                            <span className="font-bold">
+                                              {index + 1}.
+                                            </span>{" "}
                                             {step}
                                           </div>
                                         ))
                                         : plan}
-                                      </div>
                                     </div>
                                   )
                                   : (
-                                    <div className="text-xs text-gray-500 italic p-2">
+                                    <div className="text-[10px] text-gray-500 italic">
                                       Plan will appear here...
                                     </div>
                                   )}
                               </div>
 
-                              {/* Spec Section - Always show for edit/imagine workflows after classification */}
-                              {workflowType !== "fix" && (
-                                <div className="bg-gray-50 border border-gray-200 rounded p-2">
-                                  <div className="text-sm font-bold mb-2">SPEC</div>
-                                  {/* Show spec when available, otherwise loading */}
-                                  {spec ? (
-                                    <div className="font-mono text-xs whitespace-pre-wrap">
-                                      {spec}
+                              {/* Spec Section */}
+                              {workflowType !== "fix"
+                                ? (
+                                  <div className="bg-gray-50 rounded p-1">
+                                    <div className="text-xs font-bold mb-1">
+                                      SPEC
                                     </div>
-                                  ) : (
-                                    <div className="flex items-center justify-center py-4">
-                                      <DitheredCube
-                                        animationSpeed={2}
-                                        width={32}
-                                        height={32}
-                                        animate
-                                        cameraZoom={12}
-                                      />
-                                      <span className="ml-2 text-sm">
-                                        Generating specification...
+                                    {/* Show spec when available, otherwise loading */}
+                                    {spec
+                                      ? (
+                                        <div className="font-mono text-[10px] whitespace-pre-wrap overflow-y-auto max-h-40">
+                                          {spec}
+                                        </div>
+                                      )
+                                      : (
+                                        <div className="flex items-center py-1">
+                                          <DitheredCube
+                                            animationSpeed={2}
+                                            width={20}
+                                            height={20}
+                                            animate
+                                            cameraZoom={12}
+                                          />
+                                          <span className="ml-1 text-[10px]">
+                                            Generating...
+                                          </span>
+                                        </div>
+                                      )}
+                                  </div>
+                                )
+                                : (
+                                  <div className="bg-gray-50 rounded p-1">
+                                    <div className="text-xs font-bold mb-1">
+                                      ORIGINAL SPEC{" "}
+                                      <span className="text-[10px] text-blue-600">
+                                        (preserved)
                                       </span>
                                     </div>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Original Spec - Only for fix workflow */}
-                              {workflowType === "fix" &&
-                                (spec || progress.classification) && (
-                                <div className="bg-gray-50 border border-gray-200 rounded p-2">
-                                  <div className="text-sm font-bold mb-2">
-                                    ORIGINAL SPEC <span className="text-xs text-blue-600">(preserved)</span>
+                                    {spec
+                                      ? (
+                                        <div className="font-mono text-[10px] whitespace-pre-wrap overflow-y-auto max-h-40">
+                                          {spec}
+                                        </div>
+                                      )
+                                      : (
+                                        <div className="text-[10px] text-gray-500 italic">
+                                          Loading original specification...
+                                        </div>
+                                      )}
                                   </div>
-                                  {spec
-                                    ? (
-                                      <div className="font-mono text-xs whitespace-pre-wrap">
-                                        {spec}
-                                      </div>
-                                    )
-                                    : (
-                                      <div className="p-4 bg-gray-50 border border-gray-200 rounded text-center text-xs text-gray-500">
-                                        Loading original specification...
-                                      </div>
-                                    )}
-                                </div>
-                              )}
-                            </>
-                          )}
+                                )}
+                            </div>
+                          }
                         </>
                       )}
 
