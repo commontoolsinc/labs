@@ -395,17 +395,16 @@ export function useLiveSpecPreview(
     originalSchema = getOriginalArgumentSchemaFromCharm(currentCharm);
   }
   const schema = updatedSchema || originalSchema;
-  if (!schema) {
-    throw new Error("we need a schema");
-  }
 
   // Create a form data object to expose to parent components
-  const formData: ExecutionPlan = {
-    workflowType,
-    steps: previewPlan,
-    spec: previewSpec,
-    schema,
-  };
+  const formData: ExecutionPlan | undefined = schema
+    ? {
+      workflowType,
+      steps: previewPlan,
+      spec: previewSpec,
+      schema,
+    }
+    : undefined;
 
   return {
     previewSpec,

@@ -342,7 +342,7 @@ function useCharmOperation() {
           throw new Error("must have schema to proceed");
         }
 
-        if (sources) {
+        if (Object.entries(sources).length > 0) {
           throw new Error(
             "We do not know what to do with sources in a modification. I expect this entire code branch should be replaced with a call to executeWorkflow.",
           );

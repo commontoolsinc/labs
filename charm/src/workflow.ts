@@ -816,13 +816,13 @@ export async function processWorkflow(
   }
 
   // Step 3: Planning if not already planned
-  if (!form.plan.steps || form.plan.steps.length === 0) {
+  if (!form.plan || !form.plan.steps || form.plan.steps.length === 0) {
     form = await fillPlanningSection(form, {
-      preGeneratedPlan: form.plan.steps && form.plan.steps.length > 0
+      preGeneratedPlan: form.plan?.steps && form.plan.steps.length > 0
         ? form.plan.steps
         : undefined,
-      preGeneratedSpec: form.plan.spec,
-      preGeneratedSchema: form.plan.schema,
+      preGeneratedSpec: form.plan?.spec,
+      preGeneratedSchema: form.plan?.schema,
     });
   }
 
