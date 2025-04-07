@@ -7,85 +7,152 @@ The Charm Workflow System provides an LLM-powered approach to charm generation a
 ## Code Execution Flow
 
 ```mermaid
-graph TD
-    %% Entry Points
-    UI[UI Components] --> A[imagine/modifyCharm]
-    A --> B[executeWorkflow]
-
-    %% Core Linear Pipeline with Form Object Flow
-    B --> C[processWorkflow]
-    C --> |Form| D1[processInputSection]
-    D1 --> |Form with mentions| D2[fillClassificationSection]
-    D2 --> |Form with classification| D3[fillPlanningSection]
-    D3 --> |Form with plan/spec| D4[generateCode]
-
-    %% Form Processing Details
-    D1 --> |Handles| P1[formatPromptWithMentions]
-    D2 --> |Performs| P2[classifyIntent]
-    P2 --> |Uses| P2a[classifyWorkflow LLM function]
-    D3 --> |Generates| P3[generatePlan]
-    P3 --> |Uses| P3a[generateWorkflowPlan LLM function]
-
-    %% Workflow Branching Based on Classification
-    D4 --> |Form.classification = Fix| W1[executeFixWorkflow]
-    D4 --> |Form.classification = Edit| W2[executeEditWorkflow]
-    D4 --> |Form.classification = Rework| W3[executeReworkWorkflow]
-
-    %% Implementation Path for Fix/Edit (Both use iterate)
-    W1 --> I1[iterate]
-    W2 --> I1
-    I1 --> |1| I2[getIframeRecipe]
-    I1 --> |2| I3[genSrc]
-    I1 --> |3| I4[generateNewRecipeVersion]
-    I4 --> I5[compileAndRunRecipe]
-
-    %% Implementation Path for Rework
-    W3 --> R1[castNewRecipe]
-    R1 --> |1| R2[scrub/turnCellsIntoAliases]
-    R1 --> |2| R3[generateSpecAndSchema]
-    R1 --> |3| R4[genSrc]
-    R1 --> |4| R5[compileAndRunRecipe]
-
-    %% Final compilation and charm creation (shared)
-    I5 --> F1[compileRecipe]
-    R5 --> F1
-    F1 --> F2[tsToExports]
-    F1 --> F3[registerNewRecipe]
-    F1 --> Result[Charm Cell]
+flowchart TD
+    %% Entry Point
+    start([UI: user input]) --> A["imagine/modifyCharm"]
+    A --> B["executeWorkflow"]
+    
+    %% Main processing function
+    B --> C["processWorkflow"]
+    
+    %% 1. FORMAT stage
+    C --> F1["1. FORMAT: processInputSection"]
+    F1 --> FM["formatPromptWithMentions"]
+    FM --> DP1[/"Form Packet 1:
+    - rawInput
+    - processedInput 
+    - references"/]
+    
+    %% 2. CLASSIFY stage
+    DP1 --> CL1["2. CLASSIFY: fillClassificationSection"]
+    CL1 --> CL2["classifyIntent"]
+    CL2 --> CL3["classifyWorkflow LLM"]
+    CL3 --> DP2[/"Form Packet 2:
+    - workflowType
+    - confidence
+    - reasoning"/]
+    
+    %% 3. PLAN stage
+    DP2 --> P1["3. PLAN: fillPlanningSection"]
+    P1 --> P2["generatePlan"]
+    P2 --> P3["generateWorkflowPlan LLM"]
+    P3 --> DP3[/"Form Packet 3:
+    - steps
+    - spec
+    - schema
+    - meta.isFilled = true"/]
+    
+    %% 4. GENERATE CODE stage - branching point
+    DP3 --> G1["4. GENERATE: generateCode"]
+    
+    %% Workflow type decision
+    G1 --> decision{Which workflow?}
+    decision -->|"fix"| FIX["executeFixWorkflow"]
+    decision -->|"edit"| EDIT["executeEditWorkflow"]
+    decision -->|"rework"| REWORK["executeReworkWorkflow"]
+    
+    %% Fix & Edit Path (via iterate)
+    FIX & EDIT --> IT1["iterate"]
+    IT1 --> IT2["getIframeRecipe"]
+    IT2 --> IT3["genSrc"]
+    IT3 --> IT4["generateNewRecipeVersion"]
+    IT4 --> DP4A[/"Data Packet 4A:
+    - recipeId
+    - newRecipeSrc
+    - newSpec"/]
+    
+    %% Rework Path
+    REWORK --> RW1["castNewRecipe"]
+    RW1 --> RW2["scrub/turnCellsIntoAliases"]
+    RW2 --> RW3["generateSpecAndSchema"]
+    RW3 --> RW4["genSrc"]
+    RW4 --> RW5["buildFullRecipe"]
+    RW5 --> DP4B[/"Data Packet 4B:
+    - newRecipeSrc
+    - newSpec
+    - scrubbed data"/]
+    
+    %% 5. COMPILE Stage - paths converge
+    DP4A & DP4B --> CO1["5. COMPILE: compileAndRunRecipe"]
+    CO1 --> CO2["compileRecipe"]
+    CO2 --> CO3["tsToExports"]
+    CO3 --> CO4["registerNewRecipe"]
+    
+    %% Result
+    CO4 --> Result[/"Final Form:
+    - generation.charm
+    - meta.isComplete = true"/]
+    Result --> final([Charm Cell])
 ```
 
 ### Pipeline Description
 
-The workflow system follows a clear linear pipeline where a `WorkflowForm` object is progressively built and passed through each stage:
+The workflow system flows through distinct stages with clear data assembly at each step:
 
-1. **Entry Point**:
-   - UI components call `imagine()` or `modifyCharm()`
-   - Both ultimately call `executeWorkflow()`
+1. **FORMAT** - Processing input and references
+   - `processInputSection` handles raw user input
+   - `formatPromptWithMentions` resolves @mentions to charm references
+   - **Output Packet**: Form with processed input and references
 
-2. **Form Pipeline**:
-   - `processWorkflow()` orchestrates the form-building pipeline
-   - Each stage enriches the same form object:
-     1. `processInputSection()`: Processes raw input, resolves @mentions
-     2. `fillClassificationSection()`: Determines workflow type (Fix/Edit/Rework)
-     3. `fillPlanningSection()`: Generates execution plan, spec, and schema
-     4. `generateCode()`: Routes to workflow-specific implementation
+2. **CLASSIFY** - Determining the workflow type
+   - `fillClassificationSection` orchestrates classification
+   - `classifyIntent` analyzes input to choose workflow type
+   - Forces "rework" workflow when other charms are referenced
+   - **Output Packet**: Form with workflow type, confidence score, and reasoning
 
-3. **Workflow-Specific Implementation**:
-   - All workflows receive the same fully populated form object
-   - **Fix and Edit**: Both use `iterate()` but handle spec differently
-     - Fix: Preserves existing spec from original charm
-     - Edit: Uses newly generated spec from form
+3. **PLAN** - Generating execution plan
+   - `fillPlanningSection` develops the execution plan
+   - `generatePlan` creates steps, spec updates, and schema updates
+   - Preserves existing spec for "fix" workflow
+   - **Output Packet**: Form with execution plan, spec, and schema
 
-   - **Rework**: Uses `castNewRecipe()` with different approach
-     - Creates entirely new charm rather than modifying
-     - Handles references to other charms
+4. **GENERATE CODE** - Branching to workflow-specific implementation
+   - Routes form to appropriate workflow function:
+   
+   **4A. ITERATE** (Fix & Edit workflows)
+   - Both use `iterate()` but with different parameters
+   - Fix: Preserves spec, only updates code
+   - Edit: Updates both spec and code
+   - `generateNewRecipeVersion` creates new recipe with updates
+   - **Output Packet**: Recipe id, source, spec
 
-4. **Common Final Path**:
-   - All workflows compile and run their recipes
-   - `compileRecipe()` takes source code and compiles it
-   - Results in a new charm cell that's returned to caller
+   **4B. REWORK** (Rework workflow)
+   - Uses `castNewRecipe()` to create entirely new charm
+   - Processes charm references with `turnCellsIntoAliases`
+   - Generates new spec and schema
+   - **Output Packet**: Recipe source, spec, processed data references
 
-The form object flows sequentially through each stage, accumulating more data until it contains everything needed for code generation. The pipeline only branches after classification determines which specific implementation to use.
+5. **COMPILE** - Final recipe compilation and charm creation
+   - `compileAndRunRecipe` takes recipe source and compiles it
+   - `compileRecipe` handles TypeScript compilation
+   - Updates form with the generated charm
+   - **Output Packet**: Completed form with charm cell, ready to return
+
+The form object is progressively enriched at each stage, with each stage building on the data packet from the previous stage. The system only branches after the planning stage when the workflow type must be handled differently.
+
+## Entry Points
+
+The workflow system can be initiated from several places in the UI:
+
+1. **Command Center** (`CommandCenter.tsx`)
+   - Global command palette (⌘K)
+   - Processes user input and @mentions
+   - Shows live preview with `useLiveSpecPreview` hook
+   - Uses `handleImagineOperation()` in `commands.ts` to dispatch workflow
+   - Entry point for both new charms and modifications to existing charms
+   - Supports "Fast" vs "Smart" model selection for preview generation
+
+2. **CharmDetailView** (`CharmDetailView.tsx`)
+   - Operation tab in the bottom sheet when viewing a charm
+   - Uses `useCharmOperation()` hook to manage operations
+   - Handles iterate, extend, and variant generation workflows
+   - Performs operations via `performOperation()` function
+
+3. **Direct Functions**
+   - External applications can call the core functions directly:
+   - `executeWorkflow()`: Main entry point for all workflow processing
+   - `imagine()`: Alias for `executeWorkflow()`, used in most places
+   - `modifyCharm()`: Higher-level function for modifying existing charms
 
 ## Core Workflow Types
 
@@ -113,30 +180,6 @@ The system supports three primary workflows:
    - **Example**: "Create a dashboard combining my tasks and calendar"
    - **Implementation**: Uses `castNewRecipe()`
    - **References**: Can reference multiple charms
-
-## Entry Points
-
-The workflow system can be initiated from several places in the UI:
-
-1. **Command Center** (`CommandCenter.tsx`)
-   - Global command palette (⌘K)
-   - Processes user input and @mentions
-   - Shows live preview with `useLiveSpecPreview` hook
-   - Uses `handleImagineOperation()` in `commands.ts` to dispatch workflow
-   - Entry point for both new charms and modifications to existing charms
-   - Supports "Fast" vs "Smart" model selection for preview generation
-
-2. **CharmDetailView** (`CharmDetailView.tsx`)
-   - Operation tab in the bottom sheet when viewing a charm
-   - Uses `useCharmOperation()` hook to manage operations
-   - Handles iterate, extend, and variant generation workflows
-   - Performs operations via `performOperation()` function
-
-3. **Direct Functions**
-   - External applications can call the core functions directly:
-   - `executeWorkflow()`: Main entry point for all workflow processing
-   - `imagine()`: Alias for `executeWorkflow()`, used in most places
-   - `modifyCharm()`: Higher-level function for modifying existing charms
 
 ## Workflow Form Progression
 

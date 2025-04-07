@@ -1,9 +1,4 @@
-import {
-  Cell,
-  getEntityId,
-  isCell,
-  isStream,
-} from "@commontools/runner";
+import { Cell, getEntityId, isCell, isStream } from "@commontools/runner";
 import { isObj } from "@commontools/utils";
 import { JSONSchema } from "@commontools/builder";
 import { Charm, CharmManager } from "./charm.ts";
@@ -11,15 +6,12 @@ import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode } from "./iframe/static.ts";
 
 // Re-export workflow types and functions from workflow module
-export type { 
-  WorkflowType,
-  WorkflowConfig,
-} from "./workflow.ts";
+export type { WorkflowConfig, WorkflowType } from "./workflow.ts";
 
-export { 
-  WORKFLOWS,
+export {
+  executeWorkflow,
   generateWorkflowPreview,
-  executeWorkflow as imagine,
+  WORKFLOWS,
 } from "./workflow.ts";
 
 /**

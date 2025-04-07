@@ -2,15 +2,9 @@ import React, { useRef, useState } from "react";
 import { DitheredCube } from "./DitherCube.tsx";
 import { animated, useSpring, useTransition } from "@react-spring/web";
 import { ToggleButton } from "./common/CommonToggle.tsx";
+import type { ExecutionPlan } from "@commontools/charm";
 
 export type WorkflowType = "fix" | "edit" | "rework";
-
-export interface WorkflowFormData {
-  workflowType: WorkflowType;
-  plan: string[] | string;
-  spec?: string;
-  schema?: any;
-}
 
 interface SpecPreviewProps {
   spec?: string;
@@ -24,7 +18,7 @@ interface SpecPreviewProps {
   workflowConfidence?: number;
   workflowReasoning?: string;
   onWorkflowChange?: (workflow: WorkflowType) => void;
-  onFormChange?: (formData: WorkflowFormData) => void; // Callback to expose form data
+  onFormChange?: (formData: Partial<ExecutionPlan>) => void; // Callback to expose form data
 }
 
 export function SpecPreview({
@@ -42,12 +36,12 @@ export function SpecPreview({
   onFormChange,
 }: SpecPreviewProps) {
   // Create the current form state
-  const formData = React.useMemo<WorkflowFormData>(() => ({
+  const formData = React.useMemo<Partial<ExecutionPlan>>(() => ({
     workflowType,
     plan: plan || [],
-    spec
+    spec,
   }), [workflowType, plan, spec]);
-  
+
   // Notify parent when form data changes
   React.useEffect(() => {
     if (onFormChange) {

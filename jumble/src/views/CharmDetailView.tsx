@@ -1,5 +1,6 @@
 import {
   Charm,
+  ExecutionPlan,
   extractUserCode,
   extractVersionTag,
   generateNewRecipeVersion,
@@ -49,7 +50,7 @@ import { useCharmMentions } from "@/components/CommandCenter.tsx";
 import { formatPromptWithMentions } from "@/utils/format.ts";
 import { CharmLink } from "@/components/CharmLink.tsx";
 import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
-import { SpecPreview, WorkflowType, WorkflowFormData } from "@/components/SpecPreview.tsx";
+import { SpecPreview, WorkflowType } from "@/components/SpecPreview.tsx";
 import {
   SpecPreviewModel,
   useLiveSpecPreview,
@@ -97,8 +98,8 @@ interface CharmOperationContextType {
   previewModel: SpecPreviewModel;
   setPreviewModel: (model: SpecPreviewModel) => void;
   // The current form data from the preview
-  workflowForm?: WorkflowFormData;
-  setWorkflowForm: (form: WorkflowFormData) => void;
+  workflowForm?: Partial<ExecutionPlan>;
+  setWorkflowForm: (form: Partial<ExecutionPlan>) => void;
   handlePerformOperation: () => void;
   handleCancelVariants: () => void;
   performOperation: (
@@ -278,7 +279,7 @@ function useCharmOperation() {
   );
   const [expectedVariantCount, setExpectedVariantCount] = useState(0);
   // The current workflow form data from SpecPreview
-  const [workflowForm, setWorkflowForm] = useState<WorkflowFormData>();
+  const [workflowForm, setWorkflowForm] = useState<Partial<ExecutionPlan>>();
 
   // Preview model state
   const [previewModel, setPreviewModel] = useState<SpecPreviewModel>("think");
@@ -295,6 +296,7 @@ function useCharmOperation() {
     workflowConfidence,
     workflowReasoning,
     setWorkflow,
+    updatedSchema,
   } = useLiveSpecPreview(
     input,
     charmManager, // Explicitly pass CharmManager instance
@@ -324,7 +326,7 @@ function useCharmOperation() {
       charmId: string,
       input: string,
       model: string,
-      data: any,
+      sources?: any,
     ) => {
       // First get the charm by ID
       return charmManager.get(charmId, false).then((fetched) => {
@@ -332,23 +334,32 @@ function useCharmOperation() {
           throw new Error(`Charm with ID ${charmId} not found`);
         }
 
-        // Get workflow data from the form
-        const planArray = workflowForm?.plan
-          ? (typeof workflowForm.plan === 'string' 
-              ? [workflowForm.plan] 
-              : workflowForm.plan)
-          : [];
-          
-        const effectiveWorkflowType = workflowForm?.workflowType || classifiedWorkflowType;
-        
+        const effectiveWorkflowType = workflowForm?.workflowType ||
+          classifiedWorkflowType;
+
+        // TODO(bf): highly suspicious
+        if (!updatedSchema) {
+          throw new Error("must have schema to proceed");
+        }
+
+        if (sources) {
+          throw new Error(
+            "We do not know what to do with sources in a modification. I expect this entire code branch should be replaced with a call to executeWorkflow.",
+          );
+        }
+
         // Use modifyCharm which supports all workflow types
         return modifyCharm(
           charmManager,
           input,
           fetched,
+          {
+            workflowType: effectiveWorkflowType,
+            steps: workflowForm?.steps || [],
+            spec: previewSpec,
+            schema: updatedSchema,
+          },
           model,
-          effectiveWorkflowType,  // Pass the workflow type from form
-          planArray               // Pass the plan from form
         );
       });
     },
@@ -835,7 +846,8 @@ const OperationTab = () => {
     workflowType: classifiedWorkflowType,
     workflowConfidence,
     workflowReasoning,
-    setWorkflow, // Add this to access from context
+    setWorkflow,
+    setWorkflowForm,
   } = useCharmOperationContext();
 
   const mentions = useCharmMentions();

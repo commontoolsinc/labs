@@ -63,10 +63,10 @@ Based on the workflow type, follow these guidelines:
 - REWORK workflow:
   * PURPOSE: Create new functionality, possibly using existing charms as sources
   * SPEC: Write a fresh specification, possibly referencing existing ones
-  * SCHEMA: Define both input and output schemas
+  * SCHEMA: Will receive combined input schema, generate output schemas
   * CODE: Create a new implementation that may use data from other charms
 
-For REWORK workflows, you MUST include both <argument_schema> and <result_schema> tags with valid JSON schemas.
+For REWORK workflows you MUST include both <result_schema> tags with valid JSON schemas.
 Each schema must be a JSON object with "type": "object" and must include a "properties" object with property definitions.
 
 Example schema format:
@@ -301,8 +301,8 @@ export async function generateWorkflowPlan(
   model?: string,
 ): Promise<{
   steps: string[];
-  updatedSpec?: string;
-  updatedSchema?: JSONSchema;
+  spec: string;
+  schema: JSONSchema;
 }> {
   const context = generateCharmContext(
     existingSpec,
@@ -456,42 +456,21 @@ SCHEMA GUIDELINES:
       ? existingSpec
       : fullSpec;
 
+    const updatedSchema = workflowType !== "rework" && existingSchema
+      ? existingSchema
+      : schema;
+
+    if (!updatedSchema) {
+      throw new Error("we need a schema");
+    }
+
     return {
       steps,
-      updatedSpec,
-      updatedSchema: schema,
+      spec: updatedSpec,
+      schema: updatedSchema,
     };
   } catch (error) {
-    console.error("Error parsing workflow plan response:", error);
-
-    // Create a fallback spec that preserves the existing spec for fix/edit
-    const fallbackSpec = workflowType === "fix" && existingSpec
-      ? existingSpec
-      : `<steps>
-1. Analyze the request
-2. Implement the changes
-3. Verify the result
-</steps>
-
-<specification>
-Implementation of "${input}" request
-</specification>
-
-<data_model>
-Standard data model appropriate for this implementation
-</data_model>
-
-<references>
-Uses any provided data references as appropriate
-</references>`;
-
-    return {
-      steps: [
-        "Analyze the request",
-        "Implement the changes",
-        "Verify the result",
-      ],
-      updatedSpec: fallbackSpec,
-    };
+    console.error(error);
+    throw new Error("Error parsing workflow plan response:");
   }
 }

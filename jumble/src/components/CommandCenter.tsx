@@ -56,27 +56,29 @@ function CommandProcessor({
 
   // Get the focused charm if available
   const { focusedCharmId } = context;
-  const [focusedCharm, setFocusedCharm] = useState<Cell<Charm> | undefined>(undefined);
-  
+  const [focusedCharm, setFocusedCharm] = useState<Cell<Charm> | undefined>(
+    undefined,
+  );
+
   // Fetch the focused charm when ID changes
   useEffect(() => {
     if (focusedCharmId) {
-      charmManager.get(focusedCharmId, false).then(charm => {
+      charmManager.get(focusedCharmId, false).then((charm) => {
         if (charm) {
           setFocusedCharm(charm);
         }
-      }).catch(err => {
+      }).catch((err) => {
         console.error("Error fetching focused charm:", err);
       });
     } else {
       setFocusedCharm(undefined);
     }
   }, [focusedCharmId, charmManager]);
-  
+
   // Get spec preview as user types in command center
-  const { 
-    previewSpec, 
-    previewPlan, 
+  const {
+    previewSpec,
+    previewPlan,
     loading: isPreviewLoading,
     classificationLoading,
     planLoading,
@@ -84,18 +86,18 @@ function CommandProcessor({
     workflowConfidence,
     workflowReasoning,
     setWorkflow, // Add the setter function to allow changing workflow type manually
-    formData // Get the form data to pass to commands
+    formData, // Get the form data to pass to commands
   } = useLiveSpecPreview(
-      inputValue,
-      charmManager, // Explicitly pass CharmManager instance
-      true,
-      1000,
-      previewModel,
-      focusedCharm // Pass the current charm for context
-    );
-    
+    inputValue,
+    charmManager, // Explicitly pass CharmManager instance
+    true,
+    1000,
+    previewModel,
+    focusedCharm, // Pass the current charm for context
+  );
+
   // Update the context with the current workflow form data
-  context.workflowForm = formData;
+  context.previewPlan = formData;
 
   if (context.loading && mode.type !== "input") {
     return (
@@ -116,22 +118,37 @@ function CommandProcessor({
       charmManager,
     );
     if ((mode.command as InputCommandItem).handler) {
-      // Pass the current workflow type and plan to the handler 
+      // Pass the current workflow type and plan to the handler
       // This ensures the command uses the latest workflow selection
       // (which may have been manually changed by the user)
       const commandData = {
         ...sources,
         _workflowType: workflowType,
-        _workflowConfidence: workflowConfidence, 
-        _previewPlan: previewPlan
+        _workflowConfidence: workflowConfidence,
+        _previewPlan: previewPlan,
       };
-      
+
       // Log the workflow information at submission time
-      console.log(`Submitting with workflow: ${workflowType}, confidence: ${Math.round(workflowConfidence * 100)}%, plan steps: ${typeof previewPlan === 'string' ? 1 : (Array.isArray(previewPlan) ? previewPlan.length : 0)}`);
-      
+      console.log(
+        `Submitting with workflow: ${workflowType}, confidence: ${
+          Math.round(workflowConfidence * 100)
+        }%, plan steps: ${
+          typeof previewPlan === "string"
+            ? 1
+            : (Array.isArray(previewPlan) ? previewPlan.length : 0)
+        }`,
+      );
+
       (mode.command as InputCommandItem).handler(text, commandData);
     }
-  }, [mode, inputValue, charmManager, workflowType, workflowConfidence, previewPlan]);
+  }, [
+    mode,
+    inputValue,
+    charmManager,
+    workflowType,
+    workflowConfidence,
+    previewPlan,
+  ]);
 
   switch (mode.type) {
     case "input": {
@@ -182,7 +199,8 @@ function CommandProcessor({
                     { value: "think", label: "Smart" },
                   ]}
                   value={previewModel}
-                  onChange={(value) => setPreviewModel(value as SpecPreviewModel)}
+                  onChange={(value) =>
+                    setPreviewModel(value as SpecPreviewModel)}
                   size="small"
                 />
               </div>
@@ -270,7 +288,9 @@ export function useCharmMentions() {
             id,
             name: `${name} (#${id.slice(-4)})`,
           };
-        }).filter((mention): mention is {id: string, name: string} => mention !== null);
+        }).filter((mention): mention is { id: string; name: string } =>
+          mention !== null
+        );
 
         setCharmMentions(mentions);
       } catch (error) {
@@ -418,7 +438,9 @@ export function CommandCenter() {
     const handleEditRecipe = (e: KeyboardEvent) => {
       if (e.key === "i" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        const editRecipeCommand = allCommands.find((cmd) => cmd.id === "edit-recipe");
+        const editRecipeCommand = allCommands.find((cmd) =>
+          cmd.id === "edit-recipe"
+        );
         if (!editRecipeCommand) {
           console.warn("Edit recipe command not found");
           return;
@@ -434,7 +456,9 @@ export function CommandCenter() {
 
     const handleEditRecipeEvent = () => {
       if (focusedCharmId) {
-        const editRecipeCommand = allCommands.find((cmd) => cmd.id === "edit-recipe");
+        const editRecipeCommand = allCommands.find((cmd) =>
+          cmd.id === "edit-recipe"
+        );
         if (!editRecipeCommand) {
           console.warn("Edit recipe command not found");
           return;

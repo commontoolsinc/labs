@@ -6,12 +6,14 @@ import {
   Charm,
   CharmManager,
   compileAndRunRecipe,
-  imagine,
-  iterate,
   renameCharm,
   WorkflowType,
 } from "@commontools/charm";
-import { WorkflowFormData } from "./SpecPreview.tsx";
+import {
+  executeWorkflow,
+  ExecutionPlan,
+  modifyCharm,
+} from "@commontools/charm";
 // Import NavigateFunction from our types rather than directly from react-router-dom
 import type { NavigateFunction } from "react-router-dom";
 import { charmId } from "@/utils/charms.ts";
@@ -146,8 +148,7 @@ export interface CommandContext {
   addJobMessage: (jobId: string, message: string) => void;
   updateJobProgress: (jobId: string, progress: number) => void;
   commandPathIds: string[];
-  // Workflow preview data from SpecPreview
-  workflowForm?: WorkflowFormData;
+  previewPlan?: ExecutionPlan;
 }
 
 export type CommandMode =
@@ -270,11 +271,8 @@ async function handleImagineOperation(
     const dataReferences = grabCells(sources);
 
     // Get workflow data from the deps.workflowForm
-    const formWorkflowType = deps.workflowForm?.workflowType;
-    const formPlan = deps.workflowForm?.plan;
-    const formSpec = deps.workflowForm?.spec;
-    const formSchema = deps.workflowForm?.schema;
-    
+    const formWorkflowType = deps.previewPlan?.workflowType;
+
     // Use the workflow type from the form or the provided parameter
     const effectiveWorkflowType = formWorkflowType || workflowType || "edit";
 
@@ -286,48 +284,29 @@ async function handleImagineOperation(
         throw new Error("Failed to load charm");
       }
 
-      // Import modifyCharm from @commontools/charm
-      const { modifyCharm } = await import("@commontools/charm");
-
-      // Prepare plan from form data if available - convert to array if it's a string
-      const planArray = formPlan
-        ? (typeof formPlan === "string" ? [formPlan] : formPlan)
-        : undefined;
-
-      console.log(
-        "Using modifyCharm with workflow:",
-        effectiveWorkflowType,
-        "plan:",
-        planArray ? planArray.length + " steps" : "none",
-      );
-
       // Use modifyCharm for existing charms - this handles both iterate and extend cases
       newCharm = await modifyCharm(
         deps.charmManager,
         input,
         charm,
-        deps.preferredModel,
-        effectiveWorkflowType,
-        planArray,
+        deps.previewPlan,
       );
     } else {
-      // For new charms, use imagine with workflow data from the form
-      // Prepare the plan array for the new charm too
-      const newCharmPlanArray = formPlan
-        ? (typeof formPlan === "string" ? [formPlan] : formPlan)
-        : undefined;
-        
-      newCharm = await imagine(
+      newCharm = await executeWorkflow(
         deps.charmManager,
         input,
-        { 
-          dataReferences, 
-          workflowType: effectiveWorkflowType,
-          previewPlan: newCharmPlanArray,
-          previewSpec: formSpec,
-          previewSchema: formSchema
+        {
+          dataReferences,
+          prefill: {
+            classification: {
+              confidence: 1.0,
+              workflowType: effectiveWorkflowType,
+              reasoning: "Pre-determined",
+            },
+            plan: deps.previewPlan,
+          },
+          model: deps.preferredModel,
         },
-        deps.preferredModel,
       );
     }
 
