@@ -376,10 +376,7 @@ export function createWorkflowForm(rawInput: string): WorkflowForm {
 export async function processInputSection(
   charmManager: CharmManager,
   form: WorkflowForm,
-  options: {
-    existingCharm?: Cell<Charm>;
-    dataReferences?: Record<string, Cell<any>>;
-  } = {},
+  options: {} = {},
 ): Promise<WorkflowForm> {
   const newForm = { ...form };
 
@@ -408,24 +405,6 @@ export async function processInputSection(
     }
   } catch (error) {
     console.warn("Error processing mentions in form:", error);
-  }
-
-  // Add existing charm as a reference if provided
-  if (options.existingCharm) {
-    references = {
-      ...references,
-      "currentCharm": options.existingCharm,
-    };
-    newForm.input.existingCharm = options.existingCharm;
-  }
-
-  // Add any additional references
-  if (options.dataReferences) {
-    for (const [key, value] of Object.entries(options.dataReferences)) {
-      if (!references[key]) {
-        references[key] = value;
-      }
-    }
   }
 
   // Update the form
@@ -651,13 +630,14 @@ export async function processWorkflow(
   options: {
     charmManager?: CharmManager;
     existingCharm?: Cell<Charm>;
-    dataReferences?: Record<string, Cell<any>>;
     prefill?: Partial<WorkflowForm>;
     model?: string;
   } = {},
 ): Promise<WorkflowForm> {
   // Create a new form or use prefilled form
   let form = createWorkflowForm(input);
+  form.input.existingCharm = options.existingCharm;
+
   if (options.prefill) {
     form = { ...form, ...options.prefill };
   }
@@ -676,10 +656,7 @@ export async function processWorkflow(
       throw new Error("charmManager required to format input");
     }
 
-    form = await processInputSection(options.charmManager, form, {
-      existingCharm: options.existingCharm,
-      dataReferences: options.dataReferences,
-    });
+    form = await processInputSection(options.charmManager, form);
   }
 
   // Step 2: Classification if not already classified
@@ -716,7 +693,6 @@ export async function generateWorkflowPreview(
   input: string,
   existingCharm?: Cell<Charm>,
   model?: string,
-  dataReferences?: Record<string, Cell<any>>,
   charmManager?: CharmManager,
   prefill?: Partial<WorkflowForm>,
 ): Promise<{
@@ -733,7 +709,6 @@ export async function generateWorkflowPreview(
   const form = await processWorkflow(input, true, {
     charmManager,
     existingCharm,
-    dataReferences,
     prefill,
     model,
   });

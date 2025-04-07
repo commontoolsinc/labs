@@ -165,6 +165,7 @@ export function useLiveSpecPreview(
 
       let form = createWorkflowForm(text);
       form.meta.modelId = modelId;
+      form.input.existingCharm = currentCharm;
 
       form = await processInputSection(charmManager, form);
       console.log("formatted input", form);
@@ -292,18 +293,11 @@ export function useLiveSpecPreview(
           classification: true,
         }));
 
-        // Process mentions in the input text
-        const { text: processedText, sources } = await formatPromptWithMentions(
-          input,
-          charmManager,
-        );
-
         // Pass the processed text, sources, and the new workflow type to the workflow preview
         const preview = await generateWorkflowPreview(
-          processedText,
+          input,
           currentCharm,
           getModelId(model),
-          sources, // Pass the sources which contain the mentioned charms
           charmManager, // Pass CharmManager to handle nested mentions
           {
             classification: {

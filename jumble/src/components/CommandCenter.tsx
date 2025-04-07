@@ -108,37 +108,12 @@ function CommandProcessor({
     );
   }
 
-  const onSubmit = useCallback(async () => {
+  const onSubmit = useCallback(() => {
     if (mode.type !== "input") {
       return;
     }
-    const { text, sources } = await formatPromptWithMentions(
-      inputValue,
-      charmManager,
-    );
     if ((mode.command as InputCommandItem).handler) {
-      // Pass the current workflow type and plan to the handler
-      // This ensures the command uses the latest workflow selection
-      // (which may have been manually changed by the user)
-      const commandData = {
-        ...sources,
-        _workflowType: workflowType,
-        _workflowConfidence: workflowConfidence,
-        _previewPlan: previewPlan,
-      };
-
-      // Log the workflow information at submission time
-      console.log(
-        `Submitting with workflow: ${workflowType}, confidence: ${
-          Math.round(workflowConfidence * 100)
-        }%, plan steps: ${
-          typeof previewPlan === "string"
-            ? 1
-            : (Array.isArray(previewPlan) ? previewPlan.length : 0)
-        }`,
-      );
-
-      (mode.command as InputCommandItem).handler(text, commandData);
+      (mode.command as InputCommandItem).handler(inputValue);
     }
   }, [
     mode,

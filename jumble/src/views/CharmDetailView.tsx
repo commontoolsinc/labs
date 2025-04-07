@@ -325,7 +325,6 @@ function useCharmOperation() {
       charmId: string,
       input: string,
       model: string,
-      sources?: any,
     ) => {
       // First get the charm by ID
       return charmManager.get(charmId, false).then((fetched) => {
@@ -339,12 +338,6 @@ function useCharmOperation() {
         // TODO(bf): highly suspicious
         if (!updatedSchema) {
           throw new Error("must have schema to proceed");
-        }
-
-        if (Object.entries(sources).length > 0) {
-          throw new Error(
-            "We do not know what to do with sources in a modification. I expect this entire code branch should be replaced with a call to executeWorkflow.",
-          );
         }
 
         // Use modifyCharm which supports all workflow types
@@ -370,11 +363,6 @@ function useCharmOperation() {
     if (!input || !charm || !paramCharmId || !replicaName) return;
     setLoading(true);
 
-    const { text, sources } = await formatPromptWithMentions(
-      input,
-      charmManager,
-    );
-
     const handleVariants = async () => {
       setVariants([]);
       setSelectedVariant(charm);
@@ -382,9 +370,8 @@ function useCharmOperation() {
       const gens = variantModels.map(async (model) => {
         const newCharm = await performOperation(
           charmId(charm)!,
-          text,
+          input,
           model,
-          sources,
         );
         // Store the variant and keep track of which model was used
         setVariants((prev) => [...prev, newCharm]);
@@ -408,9 +395,8 @@ function useCharmOperation() {
       try {
         const newCharm = await performOperation(
           charmId(charm)!,
-          text,
+          input,
           selectedModel,
-          sources,
         );
         navigate(createPath("charmShow", {
           charmId: charmId(newCharm)!,
