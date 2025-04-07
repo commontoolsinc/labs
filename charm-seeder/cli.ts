@@ -9,7 +9,7 @@ import { NAME } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
 import { scenarios, Step } from "./scenarios.ts";
 import { CommandType } from "./commands.ts";
-import { generateObject, generateText } from "ai";
+import { generateObject } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 
@@ -62,7 +62,7 @@ export async function waitForSelectorClick(
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function login() {
-  await page.goto(`http://localhost:5173/${name}`);
+  await page.goto(new URL(`/${name}`, toolshedUrl).toString());
   await sleep(1000);
   const avatar = await page.$("#user-avatar");
   if (avatar) {
@@ -89,7 +89,7 @@ async function login() {
   // Click the first button, "register with passphrase"
   await waitForSelectorClick(
     page,
-    "button[aria-label='register-with-passphrase']",
+    "button[aria-label='method-passphrase']",
   );
 
   // Get the mnemonic from textarea.
@@ -119,7 +119,7 @@ async function processPrompts() {
   console.log(`Processing prompts...`);
 
   for (const scenario of scenarios) {
-    await page.goto(`http://localhost:5173/`);
+    await page.goto(toolshedUrl);
     await sleep(1000);
     let lastCharmId: string | undefined = undefined;
     for (const step of scenario.steps) {
@@ -301,7 +301,6 @@ function groupResultsByScenario(
 ): Map<number, { name: string; results: CharmResult[] }> {
   const groups = new Map<number, { name: string; results: CharmResult[] }>();
   let currentScenario = 0;
-  let resultIndex = 0;
 
   // Initialize the first scenario group
   groups.set(currentScenario, {
@@ -467,7 +466,7 @@ async function generateReport() {
                         </div>
                       </div>
                       <div class="p-4">
-                        <a href="http://localhost:5173/${name}/${result.id}" class="text-blue-600 hover:text-blue-800 font-medium" target="_blank">
+                        <a href="${toolshedUrl}/${name}/${result.id}" class="text-blue-600 hover:text-blue-800 font-medium" target="_blank">
                           Charm ID: ${result.id.slice(-6)}
                         </a>
                         <p class="mt-2 text-gray-700 font-medium">Prompt:</p>
@@ -498,7 +497,7 @@ async function generateReport() {
 
 async function verifyCharm(id: string, prompt: string): Promise<string> {
   // FIXME(ja): can we navigate without causing a page reload?
-  await page.goto(`http://localhost:5173/${name}/${id}`);
+  await page.goto(new URL(`/${name}/${id}`, toolshedUrl).toString());
   await sleep(5000);
   const filename = await screenshot(id);
   const error = checkForErrors();
@@ -534,12 +533,6 @@ async function verifyCharm(id: string, prompt: string): Promise<string> {
 }
 
 try {
-  // await llmVerifyCharm(
-  //   "2048 game",
-  //   "results/a-baedreiew75mhu47xkvza2cyf3xja7dvin5cgvbp2p5jyiaf3utpqnqn574.png",
-  // );
-  // Deno.exit(0);
-
   await login();
   await processPrompts();
   await generateReport();
