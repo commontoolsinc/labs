@@ -1416,7 +1416,7 @@ test(
       },
     });
 
-    const tr1 = session.transact(Transaction.create({
+    const tr1 = await session.transact(Transaction.create({
       issuer: alice.did(),
       subject: space.did(),
       changes: Changes.from([v1]),
