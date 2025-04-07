@@ -586,6 +586,8 @@ export type Statement<
 
 export type State = Fact | Unclaimed;
 
+export type Revision<T = Unit> = T & { since: number };
+
 export type Assert = {
   assert: Assertion;
   retract?: undefined;
@@ -618,6 +620,12 @@ export type CommitData = {
   since: number;
   transaction: Transaction;
 };
+
+export type CommitFact<Subject extends MemorySpace = MemorySpace> = Assertion<
+  "application/commit+json",
+  Subject,
+  CommitData
+>;
 
 export type ClaimFact = true;
 

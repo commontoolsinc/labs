@@ -8,9 +8,8 @@ import type {
   Protocol,
   Query,
   Result,
-  Subscribe,
-  Transaction,
   UCAN,
+  Unit,
 } from "@commontools/memory/interface";
 import * as Memory from "@commontools/memory/consumer";
 import { assert } from "@commontools/memory/fact";
@@ -210,7 +209,7 @@ export class RemoteStorageProvider implements StorageProvider {
       return () => {};
     }
   }
-  async sync(entityId: EntityId): Promise<void> {
+  async sync(entityId: EntityId): Promise<Result<Unit, Error>> {
     const subscription = this.subscribe(entityId);
     if (subscription) {
       // We add noop subscriber just to keep subscription alive.
@@ -218,11 +217,12 @@ export class RemoteStorageProvider implements StorageProvider {
       // Then await for the query to be resolved because that is what
       // caller will await on.
       await subscription.query;
+      return { ok: {} };
     } else {
       console.warn(
         `⚠️ Reached maximum subscription limit on ${this.workspace}. Call to .sync is ignored`,
       );
-      return new Promise(() => {});
+      return new Promise(() => {}) as Promise<Result<Unit, Error>>;
     }
   }
 

@@ -187,7 +187,7 @@ test("list single fact", store, async (session) => {
     changes: Changes.from([v1]),
   });
   assert(tr1.ok);
-  const c1 = Commit.toFact(tr1.ok);
+  const c1 = Commit.toRevision(tr1.ok);
 
   const result = await memory.query({ select: { _: { [the]: {} } } });
 
@@ -215,7 +215,7 @@ test("list multiple facts", store, async (session) => {
   });
   assert(tr1.ok);
 
-  const c1 = Commit.toFact(tr1.ok);
+  const c1 = Commit.toRevision(tr1.ok);
 
   const result = await memory.query({
     select: { _: { [the]: {} } },
@@ -239,7 +239,7 @@ test("list excludes retracted facts", store, async (session) => {
   const tr1 = await memory.transact({ changes: Changes.from([v1]) });
 
   assert(tr1.ok);
-  const c1 = Commit.toFact(tr1.ok);
+  const c1 = Commit.toRevision(tr1.ok);
 
   const q1 = await memory.query({
     select: { [doc]: { [the]: {} } },
@@ -276,7 +276,7 @@ test("list different fact types", store, async (session) => {
   const { ok } = await memory.transact({ changes: Changes.from([json, text]) });
 
   assert(ok);
-  const c1 = Commit.toFact(ok);
+  const c1 = Commit.toRevision(ok);
 
   const jsonResult = await memory.query({
     select: { _: { [the]: {} } },
@@ -323,12 +323,12 @@ test(
       changes: Changes.from([a]),
     });
 
-    const c1 = Commit.toFact(tr1.ok!);
+    const c1 = Commit.toRevision(tr1.ok!);
 
     const tr2 = await bobSpace.transact({
       changes: Changes.from([b]),
     });
-    const c2 = Commit.toFact(tr2.ok!);
+    const c2 = Commit.toRevision(tr2.ok!);
 
     const aliceResult = await aliceSpace.query({ select: { [doc]: {} } });
 
@@ -375,12 +375,16 @@ test("subscribe receives unclaimed state", store, async (session) => {
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
   const tr1 = await memory.transact({ changes: Changes.from([v1]) });
   assert(tr1.ok);
-  const c1 = Commit.toFact(tr1.ok);
+  const c1 = Commit.toRevision(tr1.ok);
 
   assertEquals(query.selection, {
     [subject.did()]: Selection.from([[v1, c1.is.since]]),
   });
-  assertEquals(query.facts, [v1], "changes were reflected");
+  assertEquals(
+    query.facts,
+    [{ ...v1, since: c1.is.since }],
+    "changes were reflected",
+  );
 });
 
 test("subscribe receives unclaimed state", store, async (session) => {
@@ -408,12 +412,16 @@ test("subscribe receives unclaimed state", store, async (session) => {
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
   const tr1 = await memory.transact({ changes: Changes.from([v1]) });
   assert(tr1.ok);
-  const c1 = Commit.toFact(tr1.ok);
+  const c1 = Commit.toRevision(tr1.ok);
 
   assertEquals(query.selection, {
     [subject.did()]: Selection.from([[v1, c1.is.since]]),
   });
-  assertEquals(query.facts, [v1], "changes were reflected");
+  assertEquals(
+    query.facts,
+    [{ ...v1, since: c1.is.since }],
+    "changes were reflected",
+  );
 });
 
 test("subscription receives retraction", store, async (session) => {
@@ -422,7 +430,9 @@ test("subscription receives retraction", store, async (session) => {
     .mount(subject.did());
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
 
-  await memory.transact({ changes: Changes.from([v1]) });
+  const tr1 = await memory.transact({ changes: Changes.from([v1]) });
+  assert(tr1.ok);
+  const c1 = Commit.toRevision(tr1.ok);
 
   const selector = { [doc]: { [the]: {} } };
 
@@ -430,14 +440,16 @@ test("subscription receives retraction", store, async (session) => {
   assert(query);
   query.subscribe();
 
-  assertEquals(query.facts, [v1]);
+  assertEquals(query.facts, [{ ...v1, since: c1.is.since }]);
   const v2 = Fact.retract(v1);
 
   const retract = await memory.transact({ changes: Changes.from([v2]) });
+  assert(retract.ok);
+  const c2 = Commit.toRevision(retract.ok);
 
   assert(retract.ok, "retracted");
 
-  assertEquals(query.facts, [v2]);
+  assertEquals(query.facts, [{ ...v2, since: c2.is.since }]);
 });
 
 test("cancel subscription", store, async (session) => {
@@ -461,6 +473,8 @@ test("cancel subscription", store, async (session) => {
   });
 
   const r1 = await memory.transact({ changes: Changes.from([v2]) });
+  assert(r1.ok);
+  const c1 = Commit.toRevision(r1.ok);
 
   assert(r1.ok, "asserted second doc");
 
@@ -478,15 +492,24 @@ test("cancel subscription", store, async (session) => {
 
   const r2 = await memory.transact({ changes: Changes.from([v1]) });
   assert(r2.ok);
+  const c2 = Commit.toRevision(r2.ok);
 
-  assertEquals(query.facts, [v1], "received transaction on subscription");
+  assertEquals(
+    query.facts,
+    [{ ...v1, since: c2.is.since }],
+    "received transaction on subscription",
+  );
 
   const selector2 = { [doc2]: { [the]: {} } };
   const { ok: query2 } = await memory.query({ select: selector2 });
   assert(query2, "subscription established");
   query2.subscribe();
 
-  assertEquals(query2.facts, [v2], "has facts from first transaction");
+  assertEquals(
+    query2.facts,
+    [{ ...v2, since: c1.is.since }],
+    "has facts from first transaction",
+  );
   await subscription.close();
 
   const v3 = Fact.assert({ the, of: doc, is: { doc: 1, t: 3 }, cause: v1 });
@@ -496,7 +519,7 @@ test("cancel subscription", store, async (session) => {
 
   assertEquals(
     query.facts,
-    [v1],
+    [{ ...v1, since: c2.is.since }],
     "cancelled subscription does not receives a transaction",
   );
 
@@ -504,8 +527,9 @@ test("cancel subscription", store, async (session) => {
 
   const r4 = await memory.transact({ changes: Changes.from([v4]) });
   assert(r4.ok);
+  const c4 = Commit.toRevision(r4.ok);
 
-  assertEquals(query2.facts, [v4]);
+  assertEquals(query2.facts, [{ ...v4, since: c4.is.since }]);
 });
 
 test("several subscriptions receive single update", store, async (session) => {
@@ -536,7 +560,7 @@ test("several subscriptions receive single update", store, async (session) => {
   });
 
   assert(tr.ok);
-  const c1 = Commit.toFact(tr.ok);
+  const c1 = Commit.toRevision(tr.ok);
 
   assertEquals(query1?.selection, {
     [subject.did()]: Selection.from([[fact1, c1.is.since]]),
@@ -642,7 +666,7 @@ test("subscribe to commits", store, async (session) => {
   });
   assert(r3.ok);
 
-  const c3 = Commit.toFact(r3.ok);
+  const c3 = Commit.toRevision(r3.ok);
 
   assertEquals(await p1, {
     done: false,

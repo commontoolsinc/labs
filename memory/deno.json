@@ -9,10 +9,7 @@
     },
     "test": {
       "description": "Type check & run tests",
-      "dependencies": [
-        "check",
-        "just-test"
-      ]
+      "dependencies": ["check", "just-test"]
     },
     "migrate": {
       "description": "Performs database migration",
@@ -20,9 +17,7 @@
     }
   },
   "test": {
-    "include": [
-      "test/*-test.ts"
-    ]
+    "include": ["test/*-test.ts"]
   },
   "exports": {
     ".": "./lib.ts",
@@ -31,6 +26,7 @@
     "./changes": "./changes.ts",
     "./selection": "./selection.ts",
     "./consumer": "./consumer.ts",
+    "./commit": "./commit.ts",
     "./codec": "./codec.ts"
   },
   "imports": {

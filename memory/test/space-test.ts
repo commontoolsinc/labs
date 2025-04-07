@@ -1049,7 +1049,7 @@ test("list single fact", DB, async (session) => {
   });
   const write = await session.transact(tr);
   assert(write.ok);
-  const c1 = Commit.toFact(write.ok);
+  const c1 = Commit.toRevision(write.ok);
 
   const result = session.query({
     cmd: "/memory/query",
@@ -1079,7 +1079,7 @@ test("ony list excludes retracted facts", DB, async (session) => {
   const fact = await session.transact(tr);
 
   assert(fact.ok);
-  const c1 = Commit.toFact(fact.ok);
+  const c1 = Commit.toRevision(fact.ok);
 
   const v2 = Fact.retract(v1);
   const tr2 = Transaction.create({
@@ -1089,7 +1089,7 @@ test("ony list excludes retracted facts", DB, async (session) => {
   });
   const retract = session.transact(tr2);
   assert(retract.ok);
-  const c2 = Commit.toFact(retract.ok);
+  const c2 = Commit.toRevision(retract.ok);
 
   const result = session.query({
     cmd: "/memory/query",

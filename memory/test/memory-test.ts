@@ -182,7 +182,7 @@ test("list single fact", memory, async (session) => {
     }),
   );
   assert(tr1.ok);
-  const c1 = Commit.toFact(tr1.ok);
+  const c1 = Commit.toRevision(tr1.ok);
 
   const result = await session.query(
     Query.create({
@@ -218,7 +218,7 @@ test("list multiple facts", memory, async (session) => {
     }),
   );
   assert(tr1.ok);
-  const c1 = Commit.toFact(tr1.ok);
+  const c1 = Commit.toRevision(tr1.ok);
 
   const result = await session.query(
     Query.create({
@@ -248,7 +248,7 @@ test("list excludes retracted facts", memory, async (session) => {
     }),
   );
   assert(tr1.ok);
-  const c1 = Commit.toFact(tr1.ok);
+  const c1 = Commit.toRevision(tr1.ok);
 
   assertEquals(
     await session.query(
@@ -309,7 +309,7 @@ test("list different fact types", memory, async (session) => {
   // Create facts of different types
   const result = await session.transact(tr);
   assert(result.ok);
-  const c1 = Commit.toFact(result.ok);
+  const c1 = Commit.toRevision(result.ok);
 
   const jsonResult = await session.query(
     Query.create({
@@ -359,7 +359,7 @@ test("list facts from different replicas", memory, async (session) => {
     }),
   );
   assert(tr1.ok);
-  const c1 = Commit.toFact(tr1.ok);
+  const c1 = Commit.toRevision(tr1.ok);
 
   const tr2 = await session.transact(
     Transaction.create({
@@ -369,7 +369,7 @@ test("list facts from different replicas", memory, async (session) => {
     }),
   );
   assert(tr2.ok);
-  const c2 = Commit.toFact(tr2.ok);
+  const c2 = Commit.toRevision(tr2.ok);
 
   const aliceResult = await session.query(
     Query.create({

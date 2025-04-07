@@ -7,6 +7,7 @@ import {
   JSONValue,
   Reference,
   Retraction,
+  Revision,
   The,
   Unclaimed,
 } from "./interface.ts";
@@ -51,16 +52,19 @@ export const claim = (fact: Fact): Invariant => ({
   fact: refer(fact),
 });
 
-export const iterate = function* (selection: FactSelection): Iterable<Fact> {
+export const iterate = function* (
+  selection: FactSelection,
+): Iterable<Revision<Fact>> {
   for (const [entity, attributes] of Object.entries(selection)) {
     for (const [the, changes] of Object.entries(attributes)) {
       const [change] = Object.entries(changes);
       if (change) {
-        const [cause, { is }] = change;
+        const [cause, { is, since }] = change;
         yield {
           the,
           of: entity as Entity,
           cause: fromString(cause),
+          since,
           ...(is ? { is } : undefined),
         };
       }

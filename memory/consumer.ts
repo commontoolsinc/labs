@@ -46,7 +46,7 @@ import { toStringStream } from "./ucan.ts";
 import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
 export * from "./interface.ts";
-import { the as commitType, toFact } from "./commit.ts";
+import { the as commitType, toRevision } from "./commit.ts";
 export { ChangesBuilder };
 
 export const connect = ({
@@ -462,7 +462,7 @@ class QuerySubscriptionInvocation<
     // Here we will collect subset of changes that match the query.
     let differential = null;
 
-    const fact = toFact(commit);
+    const fact = toRevision(commit);
 
     const { the, of, is } = fact;
     const cause = fact.cause.toString();

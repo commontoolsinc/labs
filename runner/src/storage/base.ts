@@ -1,5 +1,8 @@
 import type { Cancel, EntityId } from "@commontools/runner";
+import type { Result, Unit } from "@commontools/memory/interface";
 import { log } from "../storage.ts";
+
+export type { Result, Unit };
 
 export interface StorageValue<T = any> {
   value: T;
@@ -17,9 +20,7 @@ export interface StorageProvider {
    */
   send<T = any>(
     batch: { entityId: EntityId; value: StorageValue<T> }[],
-  ): Promise<
-    { ok: object; error?: undefined } | { ok?: undefined; error?: Error }
-  >;
+  ): Promise<Result<Unit, Error>>;
 
   /**
    * Sync a value from storage. Use `get()` to retrieve the value.
@@ -29,7 +30,10 @@ export interface StorageProvider {
    *   storage eventually.
    * @returns Promise that resolves when the value is synced.
    */
-  sync(entityId: EntityId, expectedInStorage?: boolean): Promise<void>;
+  sync(
+    entityId: EntityId,
+    expectedInStorage?: boolean,
+  ): Promise<Result<Unit, Error>>;
 
   /**
    * Get a value from the local cache reflecting storage. Call `sync()` first.
@@ -77,7 +81,10 @@ export abstract class BaseStorageProvider implements StorageProvider {
     { ok: object; error?: undefined } | { ok?: undefined; error: Error }
   >;
 
-  abstract sync(entityId: EntityId, expectedInStorage: boolean): Promise<void>;
+  abstract sync(
+    entityId: EntityId,
+    expectedInStorage: boolean,
+  ): Promise<Result<Unit, Error>>;
 
   abstract get<T = any>(entityId: EntityId): StorageValue<T> | undefined;
 

@@ -1,7 +1,11 @@
 import type { EntityId } from "@commontools/runner";
 import { log } from "../storage.ts";
-import { BaseStorageProvider, type StorageValue } from "./base.ts";
-import { RemoteStorageProvider } from "./remote.ts";
+import {
+  BaseStorageProvider,
+  type Result,
+  type StorageValue,
+  type Unit,
+} from "./base.ts";
 
 /**
  * Volatile (in-memory) storage provider. Just for testing.
@@ -56,7 +60,7 @@ export class VolatileStorageProvider extends BaseStorageProvider {
   send<T = any>(
     batch: { entityId: EntityId; value: StorageValue<T> }[],
     doNotNotify: boolean = false, // for testing
-  ): Promise<{ ok: object } | { error: Error }> {
+  ): Promise<Result<Unit, Error>> {
     const spaceStorage = getOrCreateSpaceStorage(this.spaceName);
     const spaceSubscribers = getOrCreateSpaceSubscribers(this.spaceName);
 
@@ -106,7 +110,7 @@ export class VolatileStorageProvider extends BaseStorageProvider {
   sync(
     entityId: EntityId,
     expectedInStorage: boolean = false,
-  ): Promise<void> {
+  ): Promise<Result<Unit, Error>> {
     const spaceStorage = getOrCreateSpaceStorage(this.spaceName);
     const key = JSON.stringify(entityId);
     log(
@@ -117,7 +121,7 @@ export class VolatileStorageProvider extends BaseStorageProvider {
     } else if (!expectedInStorage) {
       this.lastValues.delete(key);
     }
-    return Promise.resolve();
+    return Promise.resolve({ ok: {} });
   }
 
   get<T>(entityId: EntityId): StorageValue<T> | undefined {
