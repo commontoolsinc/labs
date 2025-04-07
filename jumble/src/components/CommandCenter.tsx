@@ -310,7 +310,6 @@ export function CommandCenter() {
   const [mode, setMode] = useState<CommandMode>({ type: "main" });
   const [commandPathIds, setCommandPathIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
-  const { modelId, setPreferredModel } = usePreferredLanguageModel();
   const { stopJob, startJob, addJobMessage, listJobs, updateJobProgress } =
     useBackgroundTasks();
 
@@ -334,8 +333,6 @@ export function CommandCenter() {
         focusedCharmId,
         focusedReplicaId,
         setOpen,
-        preferredModel: modelId ?? undefined,
-        setPreferredModel,
         setMode,
         loading,
         setLoading,
@@ -357,11 +354,9 @@ export function CommandCenter() {
       navigate,
       focusedCharmId,
       focusedReplicaId,
-      modelId,
       loading,
       commandPathIds,
       setMode,
-      setPreferredModel,
       stopJob,
       startJob,
       addJobMessage,
@@ -490,8 +485,6 @@ export function CommandCenter() {
     focusedCharmId,
     focusedReplicaId,
     setOpen,
-    preferredModel: modelId ?? undefined,
-    setPreferredModel,
     setMode,
     loading,
     setLoading,

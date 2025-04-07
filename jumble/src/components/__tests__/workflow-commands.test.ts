@@ -37,7 +37,6 @@ describe("Workflow Commands", () => {
       focusedReplicaId: "test-replica",
       setLoading: spy(() => {}),
       setOpen: spy(() => {}),
-      preferredModel: "test-model",
       previewPlan: undefined,
     };
   });

@@ -138,8 +138,6 @@ export interface CommandContext {
   setOpen: (open: boolean) => void;
   setMode: (mode: CommandMode) => void;
   loading: boolean;
-  preferredModel?: string;
-  setPreferredModel: (model: string) => void;
   setLoading: (loading: boolean) => void;
   setModeWithInput: (mode: CommandMode, initialInput: string) => void;
   listJobs: () => BackgroundJob[];
@@ -261,6 +259,7 @@ async function handleImagineOperation(
   input: string,
   sources?: SourceSet,
   workflowType?: WorkflowType, // Optional workflow type override
+  model?: string,
 ) {
   if (!input) return;
   deps.setLoading(true);
@@ -276,7 +275,7 @@ async function handleImagineOperation(
     // Use the workflow type from the form or the provided parameter
     const effectiveWorkflowType = formWorkflowType || workflowType || "edit";
 
-    // Handle differently based on whether we're modifying an existing charm or creating a new one
+    // bf: I suspect this is pointless and already handled in executeWorkflow
     if (deps.focusedCharmId) {
       // Get the current charm
       const charm = await deps.charmManager.get(deps.focusedCharmId, false);
@@ -290,6 +289,7 @@ async function handleImagineOperation(
         input,
         charm,
         deps.previewPlan,
+        model,
       );
     } else {
       newCharm = await executeWorkflow(
@@ -305,7 +305,7 @@ async function handleImagineOperation(
             },
             plan: deps.previewPlan,
           },
-          model: deps.preferredModel,
+          model: model,
         },
       );
     }
@@ -518,44 +518,6 @@ async function handleLoadRecipe(deps: CommandContext) {
   } finally {
     deps.setLoading(false);
     deps.setOpen(false);
-  }
-}
-
-async function handleSelectModel(deps: CommandContext) {
-  deps.setLoading(true);
-  try {
-    const response = await fetch("/api/ai/llm/models");
-    const models = await response.json();
-
-    const modelOptions = Object.entries(models).map((
-      [key, model]: [string, any],
-    ) => ({
-      id: key,
-      title:
-        `${key} (${model.capabilities.contextWindow.toLocaleString()} tokens)`,
-      value: {
-        id: key,
-        ...model,
-      },
-    }));
-
-    deps.setMode({
-      type: "select",
-      command: {
-        id: "model-select",
-        type: "select",
-        title: "Select Model",
-        handler: (selectedModel) => {
-          deps.setPreferredModel(selectedModel.id);
-          deps.setOpen(false);
-        },
-      },
-      options: modelOptions,
-    });
-  } catch (error) {
-    console.error("Failed to fetch models:", error);
-  } finally {
-    deps.setLoading(false);
   }
 }
 
@@ -1138,40 +1100,6 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           handler: () => handleAddRemoteRecipe(deps, "rss.tsx", "RSS Importer"),
         },
       ],
-    },
-    {
-      id: "select-model",
-      type: "action",
-      title: "Select AI Model",
-      group: "Settings",
-      handler: () => handleSelectModel(deps),
-    },
-    {
-      id: "edit-recipe-voice",
-      type: "transcribe",
-      title: `Modify Charm (Voice)${
-        deps.preferredModel ? ` (${deps.preferredModel})` : ""
-      }`,
-      group: "Edit",
-      predicate: !!deps.focusedCharmId,
-      handler: (transcription) => {
-        if (!transcription) return;
-
-        const commands = getCommands(deps);
-        const editRecipeCommand = commands.find((cmd) =>
-          cmd.id === "edit-recipe"
-        )!;
-
-        deps.setModeWithInput(
-          {
-            type: "input",
-            command: editRecipeCommand,
-            placeholder: "What would you like to change?",
-            preserveInput: true,
-          },
-          transcription,
-        );
-      },
     },
     {
       id: "background-jobs",
