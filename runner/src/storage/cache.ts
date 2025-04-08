@@ -775,7 +775,7 @@ export class Provider implements StorageProvider {
         // but we do is empty object per
         // @see https://github.com/commontoolsinc/labs/pull/989#discussion_r2033651935
         // TODO: Make proper API update instead of workaround
-        callback(revision?.is ?? {} as unknown as StorageValue<T>);
+        callback((revision?.is ?? {}) as unknown as StorageValue<T>);
       }
     };
 
