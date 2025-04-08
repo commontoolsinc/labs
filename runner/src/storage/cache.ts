@@ -164,7 +164,7 @@ class Nursery implements SyncPush<State> {
 class Heap implements SyncPush<Revision<State>> {
   constructor(
     public store: Map<string, Revision<State>> = new Map(),
-    public subscribers: Map<string, Set<(revision: Revision<State>) => void>> =
+    public subscribers: Map<string, Set<(revision?: Revision<State>) => void>> =
       new Map(),
   ) {
   }
@@ -191,14 +191,17 @@ class Heap implements SyncPush<Revision<State>> {
     // Notify all the subscribers
     for (const key of updated) {
       for (const subscriber of this.subscribers.get(key) ?? []) {
-        subscriber(this.store.get(key)!);
+        subscriber(this.store.get(key));
       }
     }
 
     return { ok: {} };
   }
 
-  subscribe(entry: FactAddress, subscriber: (value: Revision<State>) => void) {
+  subscribe(
+    entry: FactAddress,
+    subscriber: (value?: Revision<State>) => void,
+  ) {
     const key = toKey(entry);
     let subscribers = this.subscribers.get(key);
     if (!subscribers) {
@@ -211,7 +214,7 @@ class Heap implements SyncPush<Revision<State>> {
 
   unsubscribe(
     entry: FactAddress,
-    subscriber: (value: Revision<State>) => void,
+    subscriber: (value?: Revision<State>) => void,
   ) {
     const key = toKey(entry);
     const subscribers = this.subscribers.get(key);
@@ -605,12 +608,12 @@ export class Replica {
     }
   }
 
-  subscribe(entry: FactAddress, subscriber: (value: Revision<State>) => void) {
+  subscribe(entry: FactAddress, subscriber: (value?: Revision<State>) => void) {
     this.heap.subscribe(entry, subscriber);
   }
   unsubscribe(
     entry: FactAddress,
-    subscriber: (value: Revision<State>) => void,
+    subscriber: (value?: Revision<State>) => void,
   ) {
     this.heap.unsubscribe(entry, subscriber);
   }
@@ -765,8 +768,13 @@ export class Provider implements StorageProvider {
     const of = Provider.toEntity(entityId);
     const { workspace } = this;
     const address = { the, of };
-    const subscriber = (revision: Revision<State>) => {
-      callback(revision.is as unknown as StorageValue<T>);
+    const subscriber = (revision?: Revision<State>) => {
+      if (revision) {
+        // ⚠️ We may not have a value because fact was retracted or
+        // (less likely) deleted alltogether. I assume we still need to
+        // call callback but it is not clear what should we pass into it.
+        callback(revision?.is as unknown as StorageValue<T>);
+      }
     };
 
     workspace.subscribe(address, subscriber);
