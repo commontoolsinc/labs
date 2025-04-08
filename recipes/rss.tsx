@@ -101,115 +101,108 @@ async function fetchRSSFeed(
     items: Cell<FeedItem[]>;
   },
 ) {
-  try {
-    const response = await fetch(feedUrl);
-    const text = await response.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(text, "text/xml");
+  const response = await fetch(feedUrl);
+  const text = await response.text();
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(text, "text/xml");
 
-    // Helper function to get text content from an element
-    const getTextContent = (element: Element | null, tagName: string) => {
-      const el = element?.getElementsByTagName(tagName)[0];
-      return el?.textContent?.trim() || "";
-    };
+  // Helper function to get text content from an element
+  const getTextContent = (element: Element | null, tagName: string) => {
+    const el = element?.getElementsByTagName(tagName)[0];
+    return el?.textContent?.trim() || "";
+  };
 
-    // Helper function to get attribute value
-    const getAttributeValue = (
-      element: Element | null,
-      tagName: string,
-      attrName: string,
-    ) => {
-      const el = element?.getElementsByTagName(tagName)[0];
-      return el?.getAttribute(attrName) || "";
-    };
+  // Helper function to get attribute value
+  const getAttributeValue = (
+    element: Element | null,
+    tagName: string,
+    attrName: string,
+  ) => {
+    const el = element?.getElementsByTagName(tagName)[0];
+    return el?.getAttribute(attrName) || "";
+  };
 
-    const items: FeedItem[] = [];
+  const items: FeedItem[] = [];
 
-    // Check if it's an Atom feed
-    const isAtom = doc.querySelector("feed") !== null;
+  // Check if it's an Atom feed
+  const isAtom = doc.querySelector("feed") !== null;
 
-    if (isAtom) {
-      // Parse Atom feed
-      const entries = doc.getElementsByTagName("entry");
+  if (isAtom) {
+    // Parse Atom feed
+    const entries = doc.getElementsByTagName("entry");
 
-      for (let i = 0; i < Math.min(entries.length, maxResults); i++) {
-        const entry = entries[i];
+    for (let i = 0; i < Math.min(entries.length, maxResults); i++) {
+      const entry = entries[i];
 
-        // In Atom, id is mandatory
-        const id = getTextContent(entry, "id") || Math.random().toString(36);
+      // In Atom, id is mandatory
+      const id = getTextContent(entry, "id") || Math.random().toString(36);
 
-        // Skip if we already have this item
-        if (state.items.get().some((item) => item.id === id)) {
-          continue;
-        }
-
-        // Parse link - in Atom links are elements with href attributes
-        const link = getAttributeValue(entry, "link", "href");
-
-        // For content, check content tag first, then summary
-        const content = getTextContent(entry, "content") ||
-          getTextContent(entry, "summary");
-
-        // For author, it might be nested as <author><name>Author</name></author>
-        let author = "";
-        const authorEl = entry.getElementsByTagName("author")[0];
-        if (authorEl) {
-          author = getTextContent(authorEl, "name");
-        }
-
-        // For pubDate, Atom uses <published> or <updated>
-        const pubDate = getTextContent(entry, "published") ||
-          getTextContent(entry, "updated");
-
-        items.push({
-          id,
-          title: getTextContent(entry, "title"),
-          link,
-          description: getTextContent(entry, "summary"),
-          pubDate,
-          author,
-          content,
-        });
+      // Skip if we already have this item
+      if (state.items.get().some((item) => item.id === id)) {
+        continue;
       }
-    } else {
-      // Parse RSS feed
-      const rssItems = doc.getElementsByTagName("item");
 
-      for (let i = 0; i < Math.min(rssItems.length, maxResults); i++) {
-        const item = rssItems[i];
+      // Parse link - in Atom links are elements with href attributes
+      const link = getAttributeValue(entry, "link", "href");
 
-        const id = getTextContent(item, "guid") ||
-          getTextContent(item, "link") ||
-          Math.random().toString(36);
+      // For content, check content tag first, then summary
+      const content = getTextContent(entry, "content") ||
+        getTextContent(entry, "summary");
 
-        if (state.items.get().some((existingItem) => existingItem.id === id)) {
-          continue;
-        }
-
-        items.push({
-          id,
-          title: getTextContent(item, "title"),
-          link: getTextContent(item, "link"),
-          description: getTextContent(item, "description"),
-          pubDate: getTextContent(item, "pubDate"),
-          author: getTextContent(item, "author"),
-          content: getTextContent(item, "content:encoded") ||
-            getTextContent(item, "description"),
-        });
+      // For author, it might be nested as <author><name>Author</name></author>
+      let author = "";
+      const authorEl = entry.getElementsByTagName("author")[0];
+      if (authorEl) {
+        author = getTextContent(authorEl, "name");
       }
-    }
 
-    if (items.length > 0) {
-      items.forEach((item) => {
-        item[ID] = item.id;
+      // For pubDate, Atom uses <published> or <updated>
+      const pubDate = getTextContent(entry, "published") ||
+        getTextContent(entry, "updated");
+
+      items.push({
+        id,
+        title: getTextContent(entry, "title"),
+        link,
+        description: getTextContent(entry, "summary"),
+        pubDate,
+        author,
+        content,
       });
-      state.items.push(...items);
     }
+  } else {
+    // Parse RSS feed
+    const rssItems = doc.getElementsByTagName("item");
 
-    return { items };
-  } catch (error) {
-    console.error("Error fetching feed:", error);
-    return { items: [] };
+    for (let i = 0; i < Math.min(rssItems.length, maxResults); i++) {
+      const item = rssItems[i];
+
+      const id = getTextContent(item, "guid") ||
+        getTextContent(item, "link") ||
+        Math.random().toString(36);
+
+      if (state.items.get().some((existingItem) => existingItem.id === id)) {
+        continue;
+      }
+
+      items.push({
+        id,
+        title: getTextContent(item, "title"),
+        link: getTextContent(item, "link"),
+        description: getTextContent(item, "description"),
+        pubDate: getTextContent(item, "pubDate"),
+        author: getTextContent(item, "author"),
+        content: getTextContent(item, "content:encoded") ||
+          getTextContent(item, "description"),
+      });
+    }
+  }
+
+  if (items.length > 0) {
+    items.forEach((item) => {
+      item[ID] = item.id;
+    });
+    state.items.push(...items);
   }
 }
 
@@ -228,13 +221,13 @@ const feedUpdater = handler(
     },
     required: ["items", "settings"],
   } as const satisfies JSONSchema,
-  (_event, state) => {
+  async (_event, state) => {
     if (!state.settings.feedUrl) {
       console.warn("no feed URL provided");
       return;
     }
 
-    fetchRSSFeed(
+    return await fetchRSSFeed(
       state.settings.feedUrl,
       state.settings.limit,
       state,

@@ -1,7 +1,10 @@
 import { BGCharmEntry, sleep } from "@commontools/utils";
 import { Cell } from "@commontools/runner";
-import { log } from "./utils.ts";
-import { WorkerController, type WorkerOptions } from "./worker-controller.ts";
+import {
+  WorkerController,
+  WorkerControllerErrorEvent,
+  type WorkerOptions,
+} from "./worker-controller.ts";
 import { type Cancel, useCancelGroup } from "@commontools/runner";
 
 export interface CharmSchedulerOptions extends WorkerOptions {
@@ -10,66 +13,70 @@ export interface CharmSchedulerOptions extends WorkerOptions {
   rerunIntervalMs?: number;
 }
 
-type RunBg = {
+type Task = {
   charmId: string;
   timestamp: number;
-  bg: Cell<BGCharmEntry>;
+  entry: Cell<BGCharmEntry>;
 };
 
 export class SpaceManager {
   private did: string;
   private pollingIntervalMs: number;
-  private schedulableBgs = new Map<string, Cell<BGCharmEntry>>();
-  private activeBg: Cell<BGCharmEntry> | null = null;
+  private enabledCharms = new Map<string, Cell<BGCharmEntry>>();
+  private activeCharm: Cell<BGCharmEntry> | null = null;
   private deactivationTimeoutMs: number;
-  private workerController: WorkerController;
+  private workerController!: WorkerController;
   private rerunIntervalMs: number;
-  private pendingRuns: RunBg[] = [];
+  private pendingTasks: Task[] = [];
+  private failureTracking = new Map<string, number>();
+  private workerOptions: WorkerOptions;
 
   constructor(options: CharmSchedulerOptions) {
     this.did = options.did;
     this.pollingIntervalMs = options.pollingIntervalMs ?? 100;
     this.deactivationTimeoutMs = options.deactivationTimeoutMs ?? 10000;
     this.rerunIntervalMs = options.rerunIntervalMs ?? 60000;
-    this.workerController = new WorkerController(options);
+    this.workerOptions = options;
+    this.setupWorkerController();
 
-    log(
+    console.log(
       `${this.did} Charm scheduler initialized | pollingIntervalMs: ${this.pollingIntervalMs} | deactivationTimeoutMs: ${this.deactivationTimeoutMs} | rerunIntervalMs: ${this.rerunIntervalMs}`,
     );
   }
 
-  private addPendingRun(
+  private pushTask(
     charmId: string,
-    bg: Cell<BGCharmEntry>,
-    secondsFromNow: number = 0,
+    entry: Cell<BGCharmEntry>,
+    whenInMs?: number,
   ) {
-    const timestamp = Date.now() + (secondsFromNow * 1000);
-    this.pendingRuns.push({
+    const when = whenInMs ?? this.rerunIntervalMs;
+    const timestamp = Date.now() + when;
+    this.pendingTasks.push({
       charmId,
       timestamp,
-      bg,
+      entry,
     });
 
-    this.pendingRuns.sort((a, b) => a.timestamp - b.timestamp);
+    this.pendingTasks.sort((a, b) => a.timestamp - b.timestamp);
   }
 
   private updateCharmStatus(b: BGCharmEntry, c: Cell<BGCharmEntry>) {
     const charmId = b.charmId;
     const enabled = !b.disabledAt;
-    const currentlyScheduled = this.schedulableBgs.has(charmId) ||
-      this.activeBg?.get().charmId === charmId;
+    const currentlyScheduled = this.enabledCharms.has(charmId) ||
+      this.activeCharm?.get().charmId === charmId;
 
     if (enabled) {
-      // if we aren't already scheuduling this charm, add it to the list
+      // if we aren't already scheduling this charm, add it to the list
       if (!currentlyScheduled) {
-        this.schedulableBgs.set(charmId, c);
-        this.addPendingRun(charmId, c);
+        this.enabledCharms.set(charmId, c);
+        this.pushTask(charmId, c, 0);
       }
     } else {
       // if we are disabling a charm, remove it from the list
       if (currentlyScheduled) {
-        this.schedulableBgs.delete(charmId);
-        this.pendingRuns = this.pendingRuns.filter((r) =>
+        this.enabledCharms.delete(charmId);
+        this.pendingTasks = this.pendingTasks.filter((r) =>
           r.charmId !== charmId
         );
       }
@@ -77,51 +84,51 @@ export class SpaceManager {
   }
 
   // Update the list of charms to watch (removing any charms that are no longer in the list)
-  watch(bg: Cell<BGCharmEntry>[]): Cancel {
+  watch(entries: Cell<BGCharmEntry>[]): Cancel {
     const [cancel, addCancel] = useCancelGroup();
 
-    const scheduled = Array.from(this.schedulableBgs.keys());
+    const scheduled = Array.from(this.enabledCharms.keys());
     const desired = new Set();
 
-    for (const c of bg) {
-      const b = c.get();
-      addCancel(c.sink((b) => this.updateCharmStatus(b, c)));
+    for (const entry of entries) {
+      const raw = entry.get();
+      addCancel(entry.sink((value) => this.updateCharmStatus(value, entry)));
 
-      if (!b.disabledAt) {
-        desired.add(b.charmId);
+      if (!raw.disabledAt) {
+        desired.add(raw.charmId);
       }
     }
 
-    const toRemove = scheduled.filter((c) => !desired.has(c));
+    const toRemove = scheduled.filter((charmId) => !desired.has(charmId));
 
-    for (const c of toRemove) {
-      this.schedulableBgs.delete(c);
-      this.pendingRuns = this.pendingRuns.filter((r) => r.charmId !== c);
+    for (const charmId of toRemove) {
+      this.enabledCharms.delete(charmId);
+      this.pendingTasks = this.pendingTasks.filter((task) =>
+        task.charmId !== charmId
+      );
     }
 
-    log(
-      `${this.did} Charm scheduling ${this.schedulableBgs.size} charm updaters`,
+    console.log(
+      `${this.did} Charm scheduling ${this.enabledCharms.size} charm updaters`,
     );
     return cancel;
   }
 
-  async start(): Promise<void> {
-    log(`${this.did} Charm scheduler starting...`);
-    await this.workerController.initialize();
-    log(`${this.did} Worker controller ready for work`);
+  start(): void {
+    console.log(`${this.did} Charm scheduler starting...`);
     this.execLoop();
   }
 
   async stop(): Promise<void> {
-    log(`${this.did} Stopping charm scheduler...`);
+    console.log(`${this.did} Stopping charm scheduler...`);
 
     // Wait for active jobs to finish with a timeout
-    if (this.activeBg) {
+    if (this.activeCharm) {
       await Promise.race([
         sleep(this.deactivationTimeoutMs),
         new Promise((resolve) => {
           const checkInterval = setInterval(() => {
-            if (!this.activeBg) {
+            if (!this.activeCharm) {
               clearInterval(checkInterval);
               resolve(true);
             }
@@ -130,79 +137,152 @@ export class SpaceManager {
       ]);
     }
 
-    // FIXME(ja): stop web worker!
     await this.workerController.shutdown();
   }
 
   private async execLoop(): Promise<void> {
     while (true) {
-      if (this.activeBg) {
+      if (!this.workerController.isReady()) {
+        await sleep(this.pollingIntervalMs);
+        continue;
+      }
+
+      if (this.activeCharm) {
         await sleep(this.pollingIntervalMs);
         continue;
       }
 
       if (
-        this.pendingRuns.length === 0 ||
-        this.pendingRuns[0].timestamp > Date.now()
+        this.pendingTasks.length === 0 ||
+        this.pendingTasks[0].timestamp > Date.now()
       ) {
         await sleep(this.pollingIntervalMs);
         continue;
       }
 
-      const { charmId, bg, timestamp } = this.pendingRuns.shift()!;
+      const { charmId, entry, timestamp } = this.pendingTasks.shift()!;
 
-      this.processCharm(charmId, bg);
+      this.processCharm(charmId, entry);
     }
   }
 
-  private async processCharm(charmId: string, bg: Cell<BGCharmEntry>) {
-    const b = bg.get();
+  private async processCharm(charmId: string, entry: Cell<BGCharmEntry>) {
+    const raw = entry.get();
 
-    if (b.disabledAt) {
-      log(`${this.did} Charm ${charmId} is disabled, skipping`);
+    if (raw.disabledAt) {
+      console.log(`${this.did} Charm ${charmId} is disabled, skipping`);
       return;
     }
 
-    log(`${this.did} Starting ${b.integration} ${b.charmId}`);
+    console.log(`${this.did} Starting ${raw.integration} ${raw.charmId}`);
 
-    this.activeBg = bg;
+    this.activeCharm = entry;
 
     try {
-      await this.workerController.runCharm(bg);
-      this.recordSuccess(charmId, bg);
+      await this.workerController.runCharm(entry);
+      this.onProcessSuccess(charmId, entry);
     } catch (error) {
       const errorString = error instanceof Error
         ? error.message
         : String(error);
-      log(`${this.did} ${errorString}`, {
-        error: true,
-      });
-      this.disableCharm(charmId, bg, errorString);
+      console.error(`${this.did} ${errorString}`);
+      this.onProcessFail(charmId, entry, errorString);
     }
-    this.activeBg = null;
+    this.activeCharm = null;
   }
 
-  private recordSuccess(charmId: string, bg: Cell<BGCharmEntry>) {
-    bg.update({
+  private onProcessSuccess(charmId: string, entry: Cell<BGCharmEntry>) {
+    // If previous runs have failed, clear out the counter
+    if (this.failureTracking.has(charmId)) {
+      this.failureTracking.delete(charmId);
+    }
+
+    entry.update({
       lastRun: Date.now(),
       status: "Success",
     });
-    if (this.schedulableBgs.has(charmId)) {
-      this.addPendingRun(charmId, bg, this.rerunIntervalMs / 1000);
+
+    if (this.enabledCharms.has(charmId)) {
+      this.pushTask(charmId, entry);
+    }
+  }
+
+  private onProcessFail(
+    charmId: string,
+    entry: Cell<BGCharmEntry>,
+    error: string,
+  ) {
+    const failureCount = (this.failureTracking.get(charmId) ?? 0) + 1;
+
+    // If we've received graph errors 3 times in a row,
+    // disable the charm.
+    if (failureCount >= 3) {
+      this.failureTracking.delete(charmId);
+      this.disableCharm(charmId, entry, error);
+    } else {
+      this.failureTracking.set(charmId, failureCount);
+      entry.update({
+        lastRun: Date.now(),
+        status: error,
+      });
+      if (this.enabledCharms.has(charmId)) {
+        // Apply a linear backoff for the next attempts
+        this.pushTask(
+          charmId,
+          entry,
+          this.rerunIntervalMs * (failureCount + 1),
+        );
+      }
     }
   }
 
   private disableCharm(
     charmId: string,
-    bg: Cell<BGCharmEntry>,
-    error?: string,
+    entry: Cell<BGCharmEntry>,
+    error: string,
   ) {
-    bg.update({
+    entry.update({
       disabledAt: Date.now(),
       lastRun: Date.now(),
-      status: error ? error : "Disabled",
+      status: `Disabled: ${error}`,
     });
-    this.schedulableBgs.delete(charmId);
-    this.pendingRuns = this.pendingRuns.filter((r) => r.charmId !== charmId);
+    this.enabledCharms.delete(charmId);
+    this.pendingTasks = this.pendingTasks.filter((r) => r.charmId !== charmId);
+  }
+
+  // This is fired from `WorkerController` when an terminal error
+  // occurs (e.g. outside of the graph), and may happen at any point
+  // during execution.
+  //
+  // The worker is recreated,
+  private onTerminalError = (event: WorkerControllerErrorEvent) => {
+    console.error(
+      `${this.did} Terminal error received: ${event.error?.message}`,
+    );
+    this.setupWorkerController();
+  };
+
+  private async setupWorkerController() {
+    const previousWorker = this.workerController;
+    const newWorker = new WorkerController(this.workerOptions);
+    newWorker.addEventListener(
+      "error",
+      this.onTerminalError,
+    );
+    this.workerController = newWorker;
+
+    const tasks = [
+      newWorker.initialize().then(() => {
+        console.log(`${this.did} Worker controller ready for work`);
+      }),
+    ];
+
+    if (previousWorker) {
+      console.log(`${this.did} Restarting Worker Controller`);
+      previousWorker.removeEventListener("error", this.onTerminalError);
+      tasks.push(previousWorker.shutdown());
+    }
+
+    await Promise.all(tasks);
   }
 }
