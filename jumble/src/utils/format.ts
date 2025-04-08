@@ -1,7 +1,5 @@
-import { CharmManager, charmSchema } from "@commontools/charm";
 import { Cell } from "@commontools/runner";
 import { Module, NAME, Recipe } from "@commontools/builder";
-import { parseComposerDocument } from "@/components/Composer.tsx";
 
 export function formatCell(
   cell: Cell<any & { argument: any; resultRef?: any }>,
@@ -50,57 +48,6 @@ export function formatRecipe(recipe: Recipe | Module) {
   }
 }
 
-export async function formatPromptWithMentions(
-  prompt: string,
-  charmManager: CharmManager,
-): Promise<{ text: string; sources: Record<string, any> }> {
-  const payload = await parseComposerDocument(
-    prompt,
-    charmManager,
-  );
-
-  // Create a mapping of IDs to source objects
-  const sourcesMap: Record<string, any> = {};
-
-  // Process the text to inject IDs where mentions are
-  let processedText = payload.text;
-
-  // Check if there are any sources to process
-  if (payload.sources && Object.keys(payload.sources).length > 0) {
-    // Add each source to the map
-    Object.entries(payload.sources).forEach(([id, source]) => {
-      const shadowId = getCharmNameAsCamelCase(source.cell, sourcesMap);
-      sourcesMap[shadowId] = source;
-
-      // Replace the markdown link mention with the ID
-      // Format: [character](charm://id)
-      processedText = processedText.replace(
-        new RegExp(`\\[(.*?)\\]\\(charm://${id}\\)`, "g"),
-        `\`${shadowId}\``,
-      );
-    });
-  }
-
-  return {
-    text: processedText,
-    sources: sourcesMap,
-  };
-}
-
-export function getCharmNameAsCamelCase(
-  cell: Cell<any>,
-  usedKeys: Record<string, any>,
-): string {
-  const charmName = toCamelCase(cell.asSchema(charmSchema).key(NAME).get());
-
-  let name = charmName;
-  let num = 0;
-
-  while (name in usedKeys) name = charmName + `${++num}`;
-
-  return name;
-}
-
 /**
  * Converts a string of multiple words into camelCase format
  * @param input - The string to convert
@@ -112,7 +59,7 @@ export function getCharmNameAsCamelCase(
  * - "this-is-a-test" -> "thisIsATest"
  * - "already_camel_case" -> "alreadyCamelCase"
  */
-function toCamelCase(input: string): string {
+export function toCamelCase(input: string): string {
   // Handle empty string case
   if (!input) return "";
 

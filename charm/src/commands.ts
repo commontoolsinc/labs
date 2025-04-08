@@ -3,8 +3,18 @@ import { Cell, getRecipe } from "@commontools/runner";
 import { Charm, CharmManager } from "./charm.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode, injectUserCode } from "./iframe/static.ts";
-import { compileAndRunRecipe, generateNewRecipeVersion } from "./iterate.ts";
+import {
+  castNewRecipe,
+  compileAndRunRecipe,
+  generateNewRecipeVersion,
+} from "./iterate.ts";
 import { NAME } from "@commontools/builder";
+import { executeWorkflow } from "./imagine.ts";
+import {
+  ExecutionPlan,
+  formatPromptWithMentions,
+  WorkflowForm,
+} from "./index.ts";
 
 export const castSpellAsCharm = async (
   charmManager: CharmManager,
@@ -92,4 +102,83 @@ export async function addGithubRecipe(
     spec,
     runOptions,
   );
+}
+
+/**
+ * Modify a charm with the given prompt. This replaces the separate Etherate/Extend functionality.
+ * The prompt will be processed for mentions and the current charm will be included in the context.
+ * The workflow (edit, rework, fix) will be automatically determined based on the prompt.
+ *
+ * @param charmManager The CharmManager instance
+ * @param promptText The user's input describing what they want to do
+ * @param currentCharm The charm being modified
+ * @param model Optional LLM model to use
+ * @param workflowType Optional: Allow specifying workflow type (will be overridden to "rework" if references exist)
+ * @param previewPlan Optional: Pass through a pre-generated plan
+ * @returns A new or modified charm
+ */
+export function modifyCharm(
+  charmManager: CharmManager,
+  promptText: string,
+  currentCharm: Cell<Charm>,
+  prefill?: Partial<WorkflowForm>,
+  model?: string,
+): Promise<Cell<Charm>> {
+  // Include the current charm in the context
+  const context = {
+    currentCharm: currentCharm,
+    prefill,
+    model,
+  };
+
+  return executeWorkflow(
+    charmManager,
+    promptText,
+    context,
+  );
+}
+
+/**
+ * This function is equivalent to calling modifyCharm with workflowType="rework"
+ * It exists for backward compatibility and clarity in code
+ *
+ * @param charmManager CharmManager instance
+ * @param currentCharmId ID of the charm to extend from
+ * @param goal The prompt text describing what to create
+ * @param cells Optional additional data references to include
+ * @returns A new charm that extends from the current charm
+ */
+export async function extendCharm(
+  charmManager: CharmManager,
+  currentCharmId: string,
+  goal: string,
+  cells?: Record<string, Cell<any>>,
+): Promise<Cell<Charm>> {
+  const charm = (await charmManager.get(currentCharmId, false))!;
+
+  // Process any cells to include as references
+  const additionalReferences: Record<string, Cell<any>> = {};
+
+  if (cells && Object.keys(cells).length > 0) {
+    // Add cells to additionalReferences
+    for (const [id, cell] of Object.entries(cells)) {
+      additionalReferences[id] = cell;
+    }
+  }
+
+  const classification: WorkflowForm["classification"] = {
+    confidence: 1.0,
+    workflowType: "imagine",
+    reasoning: "Extend is always imagining since it changes argument schema",
+  };
+
+  const context = {
+    currentCharm: charm,
+    dataReferences: additionalReferences,
+    prefill: {
+      classification,
+    },
+  };
+
+  return executeWorkflow(charmManager, goal, context);
 }

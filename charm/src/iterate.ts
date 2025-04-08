@@ -5,7 +5,7 @@ import {
   registerNewRecipe,
   tsToExports,
 } from "@commontools/runner";
-import { client as llm } from "@commontools/llm";
+import { client as llm, formatForm } from "@commontools/llm";
 import { isObj } from "@commontools/utils";
 import {
   createJsonSchema,
@@ -18,8 +18,12 @@ import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import { generateSpecAndSchema } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
+import { WorkflowForm } from "./index.ts";
 
-const genSrc = async ({
+/**
+ * Generate source code for a charm based on its specification, schema, and optional existing source
+ */
+export const genSrc = async ({
   src,
   spec,
   newSpec,
@@ -47,11 +51,14 @@ const genSrc = async ({
   return source;
 };
 
+/**
+ * Iterate on an existing charm by generating new source code based on a new specification
+ * This is a core function used by various workflows
+ */
 export async function iterate(
   charmManager: CharmManager,
   charm: Cell<Charm>,
-  spec: string,
-  shiftKey: boolean,
+  plan: WorkflowForm["plan"],
   model?: string,
 ): Promise<Cell<Charm>> {
   const { iframe } = getIframeRecipe(charm);
@@ -59,11 +66,13 @@ export async function iterate(
     throw new Error("Cannot iterate on a non-iframe. Must extend instead.");
   }
 
-  const newSpec = shiftKey ? iframe.spec + "\n" + spec : spec;
+  // TODO(bf): questionable logic...
+  const iframeSpec = iframe.spec;
+  const newSpec = plan?.spec ?? iframeSpec;
 
   const newIFrameSrc = await genSrc({
     src: iframe.src,
-    spec: iframe.spec,
+    spec: iframeSpec,
     newSpec,
     schema: iframe.argumentSchema,
     model: model,
@@ -196,13 +205,12 @@ function turnCellsIntoAliases(data: any): any {
  */
 export async function castNewRecipe(
   charmManager: CharmManager,
-  goal: string,
-  cells?: any,
+  form: WorkflowForm,
 ): Promise<Cell<Charm>> {
-  console.log("Processing goal:", goal, cells);
+  console.log("Processing form:", form);
 
   // Remove $UI, $NAME, and any streams from the cells
-  const scrubbed = scrub(cells);
+  const scrubbed = scrub(form.input.references);
 
   // First, extract any existing schema if we have data
   const existingSchema = createJsonSchema(scrubbed);
@@ -214,12 +222,14 @@ export async function castNewRecipe(
     title,
     description,
     plan,
-  } = await generateSpecAndSchema(goal, existingSchema);
+  } = await generateSpecAndSchema(form, existingSchema);
 
   console.log("resultSchema", resultSchema);
 
-  const newSpec =
-    `<GOAL>${goal}</GOAL>\n<PLAN>${plan}</PLAN>\n<SPEC>${spec}</SPEC>`;
+  // We're goig from loose plan to detailed plan here.
+  const newSpec = `<REQUEST>${
+    formatForm(form)
+  }</REQUEST>\n<PLAN>${plan}</PLAN>\n<SPEC>${spec}</SPEC>`;
 
   console.log("newSpec", newSpec);
 
@@ -227,7 +237,7 @@ export async function castNewRecipe(
   // as a hack to work around iframes not supporting results schemas
   const schema = {
     ...existingSchema,
-    title,
+    title: title || "missing",
     description,
   } as Writable<JSONSchema>;
 
@@ -259,7 +269,7 @@ export async function castNewRecipe(
     src: newIFrameSrc,
     spec,
     plan,
-    goal,
+    goal: form.input.processedInput,
     argumentSchema: schema,
     resultSchema,
     name,

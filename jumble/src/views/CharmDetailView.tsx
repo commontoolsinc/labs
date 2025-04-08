@@ -1,5 +1,6 @@
 import {
   Charm,
+  ExecutionPlan,
   extractUserCode,
   extractVersionTag,
   generateNewRecipeVersion,
@@ -7,6 +8,9 @@ import {
   IFrameRecipe,
   injectUserCode,
   iterate,
+  modifyCharm,
+  WorkflowForm,
+  WorkflowType,
 } from "@commontools/charm";
 import { useCharmReferences } from "@/hooks/use-charm-references.ts";
 import { isCell, isStream } from "@commontools/runner";
@@ -33,7 +37,6 @@ import { useCharm } from "@/hooks/use-charm.ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
-import { extendCharm } from "@/utils/charm-operations.ts";
 import { charmId } from "@/utils/charms.ts";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import {
@@ -45,7 +48,7 @@ import { createPath } from "@/routes.ts";
 import JsonView from "@uiw/react-json-view";
 import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { useCharmMentions } from "@/components/CommandCenter.tsx";
-import { formatPromptWithMentions } from "@/utils/format.ts";
+import { formatPromptWithMentions } from "@commontools/charm";
 import { CharmLink } from "@/components/CharmLink.tsx";
 import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
 import { SpecPreview } from "@/components/SpecPreview.tsx";
@@ -65,13 +68,16 @@ const variantModels = [
 ] as const;
 
 // =================== Context for Shared State ===================
+//
+// TODO(bf): this is also super bloated
 interface CharmOperationContextType {
   input: string;
+  previewForm: Partial<WorkflowForm>;
   setInput: (input: string) => void;
   selectedModel: string;
   setSelectedModel: (model: string) => void;
-  operationType: OperationType;
-  setOperationType: (type: OperationType) => void;
+  classificationLoading: boolean; // Loading state for workflow classification
+  planLoading: boolean; // Loading state for plan generation
   showVariants: boolean;
   setShowVariants: (show: boolean) => void;
   showPreview: boolean;
@@ -84,13 +90,12 @@ interface CharmOperationContextType {
   setSelectedVariant: (variant: Cell<Charm> | null) => void;
   expectedVariantCount: number;
   setExpectedVariantCount: (count: number) => void;
-  previewSpec: string;
-  previewPlan: string;
   isPreviewLoading: boolean;
   previewModel: SpecPreviewModel;
   setPreviewModel: (model: SpecPreviewModel) => void;
   handlePerformOperation: () => void;
   handleCancelVariants: () => void;
+  setWorkflowType: (workflowType: WorkflowType) => void;
   performOperation: (
     charmId: string,
     input: string,
@@ -255,7 +260,6 @@ function useCharmOperation() {
   const [selectedModel, setSelectedModel] = useState(
     "anthropic:claude-3-7-sonnet-latest",
   );
-  const [operationType, setOperationType] = useState<OperationType>("iterate");
   const [showVariants, setShowVariants] = useState(false);
   const [showPreview, setShowPreview] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -271,55 +275,56 @@ function useCharmOperation() {
   // Preview model state
   const [previewModel, setPreviewModel] = useState<SpecPreviewModel>("think");
 
-  // Live preview generation
+  // Live preview generation with workflow classification
   const {
-    previewSpec,
-    previewPlan,
+    previewForm,
     loading: isPreviewLoading,
+    classificationLoading,
+    planLoading,
     model,
-  } = useLiveSpecPreview(input, showPreview, 250, previewModel);
+    setWorkflowType,
+  } = useLiveSpecPreview(
+    input,
+    charmManager, // Explicitly pass CharmManager instance
+    showPreview,
+    250,
+    previewModel,
+    charm || undefined,
+  );
 
-  // Function that performs the selected operation (iterate or extend)
+  // Function that performs the selected operation using modifyCharm
   const performOperation = useCallback(
     (
       charmId: string,
       input: string,
       model: string,
-      data: any,
     ) => {
-      if (operationType === "iterate") {
-        // TODO(bf): do we use @-ref data for iterate?
-        return charmManager.get(charmId, false).then((fetched) => {
-          const charm = fetched!;
-          return iterate(
-            charmManager,
-            charm,
-            input,
-            false,
-            model,
-          );
-        });
-      } else {
-        return extendCharm(
+      // First get the charm by ID
+      return charmManager.get(charmId, false).then((fetched) => {
+        if (!fetched) {
+          throw new Error(`Charm with ID ${charmId} not found`);
+        }
+
+        // Use modifyCharm which supports all workflow types
+        return modifyCharm(
           charmManager,
-          charmId,
           input,
-          data,
+          fetched,
+          previewForm,
+          model,
         );
-      }
+      });
     },
-    [operationType, charmManager],
+    [
+      charmManager,
+      previewForm,
+    ],
   );
 
   // Handle performing the operation
   const handlePerformOperation = useCallback(async () => {
     if (!input || !charm || !paramCharmId || !replicaName) return;
     setLoading(true);
-
-    const { text, sources } = await formatPromptWithMentions(
-      input,
-      charmManager,
-    );
 
     const handleVariants = async () => {
       setVariants([]);
@@ -328,9 +333,8 @@ function useCharmOperation() {
       const gens = variantModels.map(async (model) => {
         const newCharm = await performOperation(
           charmId(charm)!,
-          text,
+          input,
           model,
-          sources,
         );
         // Store the variant and keep track of which model was used
         setVariants((prev) => [...prev, newCharm]);
@@ -354,16 +358,15 @@ function useCharmOperation() {
       try {
         const newCharm = await performOperation(
           charmId(charm)!,
-          text,
+          input,
           selectedModel,
-          sources,
         );
         navigate(createPath("charmShow", {
           charmId: charmId(newCharm)!,
           replicaName,
         }));
       } catch (error) {
-        console.error(`${operationType} error:`, error);
+        console.error(`performOperation error:`, error);
       } finally {
         setLoading(false);
       }
@@ -378,7 +381,7 @@ function useCharmOperation() {
     performOperation,
     charmManager,
     navigate,
-    operationType,
+    previewForm,
   ]);
 
   const handleCancelVariants = useCallback(() => {
@@ -387,13 +390,15 @@ function useCharmOperation() {
     setExpectedVariantCount(0);
   }, []);
 
+  // TODO(bf): this is stupidly bloated
   return {
     input,
     setInput,
     selectedModel,
     setSelectedModel,
-    operationType,
-    setOperationType,
+    setWorkflowType,
+    classificationLoading, // Add the classification loading state
+    planLoading, // Add the plan loading state
     showVariants,
     setShowVariants,
     showPreview,
@@ -406,15 +411,14 @@ function useCharmOperation() {
     setSelectedVariant,
     expectedVariantCount,
     setExpectedVariantCount,
-    previewSpec,
-    previewPlan,
+    previewForm,
     isPreviewLoading,
     previewModel,
     setPreviewModel,
     handlePerformOperation,
     handleCancelVariants,
     performOperation,
-  };
+  } as CharmOperationContextType;
 }
 
 // =================== Components ===================
@@ -596,15 +600,11 @@ const Suggestions = () => {
   const { suggestions, loadingSuggestions } = useSuggestions(charm);
   const {
     setInput,
-    setShowVariants,
-    handlePerformOperation,
-    setOperationType,
     selectedModel,
     setLoading,
     setVariants,
     setSelectedVariant,
     setExpectedVariantCount,
-    operationType,
     performOperation,
     showVariants,
   } = useCharmOperationContext();
@@ -621,20 +621,13 @@ const Suggestions = () => {
 
   // React to suggestion selection
   const handleSuggestion = useCallback((suggestion: CharmSuggestion) => {
-    // Set the operation type based on suggestion type
-    if (suggestion.type.toLowerCase().includes("extend")) {
-      setOperationType("extend");
-    } else {
-      setOperationType("iterate");
-    }
-
     // Update the input state
     setInput(suggestion.prompt);
 
     // Store the suggestion for the effect to handle
     setSelectedSuggestion(suggestion);
     setLoading(true);
-  }, [setOperationType, setInput, setLoading]);
+  }, [setInput, setLoading]);
 
   // Handle the actual operation when selectedSuggestion changes
   useEffect(() => {
@@ -765,19 +758,16 @@ const OperationTab = () => {
     setInput,
     selectedModel,
     setSelectedModel,
-    operationType,
-    setOperationType,
     showVariants,
     setShowVariants,
     showPreview,
-    setShowPreview,
     loading,
     handlePerformOperation,
-    previewSpec,
-    previewPlan,
     isPreviewLoading,
-    previewModel,
-    setPreviewModel,
+    classificationLoading,
+    setWorkflowType,
+    planLoading,
+    previewForm,
   } = useCharmOperationContext();
 
   const mentions = useCharmMentions();
@@ -786,23 +776,14 @@ const OperationTab = () => {
   return (
     <div className="flex flex-col p-4">
       <div className="flex flex-col gap-3">
-        <ToggleButton
-          options={[
-            { value: "iterate", label: "Iterate" },
-            { value: "extend", label: "Extend" },
-          ]}
-          value={operationType}
-          onChange={(value) => setOperationType(value as OperationType)}
-          size="large"
-          className="mb-2"
-        />
-
         <div className="flex flex-col gap-2">
           <div className="border border-gray-300">
             <Composer
-              placeholder={operationType === "iterate"
-                ? "Tweak your charm"
-                : "Add new features to your charm"}
+              placeholder={previewForm.classification?.workflowType === "fix"
+                ? "Fix issues in your charm..."
+                : previewForm.classification?.workflowType === "edit"
+                ? "Tweak your charm..."
+                : "Create a new charm based on this data..."}
               readOnly={false}
               mentions={mentions}
               value={input}
@@ -815,54 +796,9 @@ const OperationTab = () => {
 
           <ComposerSubmitBar
             loading={loading}
-            operation={operationType === "iterate" ? "Iterate" : "Extend"}
+            operation="Submit"
             onSubmit={handlePerformOperation}
           >
-            {/* TODO(bf): restore in https://github.com/commontoolsinc/labs/issues/876 */}
-            {
-              /* <div className="flex items-center mr-2">
-              <input
-                type="checkbox"
-                id="preview"
-                checked={showPreview}
-                onChange={(e) => setShowPreview(e.target.checked)}
-                className="border-2 border-black mr-2"
-              />
-              <label htmlFor="preview" className="text-sm font-medium">
-                Live Preview
-              </label>
-            </div>
-
-            {showPreview && (
-              <div className="flex items-center mr-2">
-                <div className="flex border border-gray-300 rounded-full overflow-hidden text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setPreviewModel("fast")}
-                    className={`px-2 py-1 text-xs ${
-                      previewModel === "fast"
-                        ? "bg-black text-white"
-                        : "bg-gray-100"
-                    }`}
-                  >
-                    Fast
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewModel("think")}
-                    className={`px-2 py-1 text-xs ${
-                      previewModel === "think"
-                        ? "bg-black text-white"
-                        : "bg-gray-100"
-                    }`}
-                  >
-                    Precise
-                  </button>
-                </div>
-              </div>
-            )} */
-            }
-
             <CheckboxToggle
               id="variants"
               label="Variants"
@@ -898,15 +834,14 @@ const OperationTab = () => {
 
       {/* Content Container with single scrollbar */}
       <div className="flex-grow overflow-auto mt-3 -mx-4 px-4">
-        {/* TODO(bf): restore in https://github.com/commontoolsinc/labs/issues/876 */}
-        {
-          /* <SpecPreview
-          spec={previewSpec}
-          plan={previewPlan}
+        <SpecPreview
+          form={previewForm}
           loading={isPreviewLoading}
-          visible={showPreview}
-        /> */
-        }
+          classificationLoading={classificationLoading}
+          planLoading={planLoading}
+          visible={showPreview && input.trim().length >= 16}
+          onWorkflowChange={setWorkflowType}
+        />
         <Variants />
         <Suggestions />
       </div>
