@@ -58,7 +58,7 @@ describe("Workflow Commands", () => {
         workflowType: "edit",
         steps: ["Step 1", "Step 2"],
         spec: "Test specification",
-        schema: { "type": "object" },
+        dataModel: "an email",
       };
 
       // In a real test with proper mocking, we would:

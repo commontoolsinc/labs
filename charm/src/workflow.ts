@@ -74,7 +74,7 @@ export interface ExecutionPlan {
   workflowType: WorkflowType;
   steps: string[];
   spec: string;
-  schema: JSONSchema;
+  dataModel: string;
 }
 
 /**
@@ -215,13 +215,11 @@ export async function classifyIntent(
  * @returns Execution plan with steps, spec, and schema
  */
 export async function generatePlan(
-  { input, workflowType, currentCharm, model, references }: {
+  { input, workflowType, currentCharm, model }: {
     input: string;
     workflowType: WorkflowType;
     currentCharm?: Cell<Charm>;
     model?: string;
-    // TODO(bf): we should format these into the input in whatever way is actually useful
-    references?: Record<string, Cell<any>>;
   },
 ): Promise<ExecutionPlan> {
   // Extract context from the current charm if available
@@ -253,7 +251,7 @@ export async function generatePlan(
       workflowType,
       steps: result.steps,
       spec: result.spec,
-      schema: result.schema,
+      dataModel: result.dataModel,
     };
   } catch (error) {
     console.error("Error during plan generation:", error);
@@ -283,7 +281,7 @@ export async function generatePlan(
       workflowType,
       steps,
       spec: existingSpec,
-      schema: existingSchema,
+      dataModel: "",
     };
   }
 }
@@ -312,7 +310,7 @@ export interface WorkflowForm {
   plan: {
     steps: string[];
     spec?: string;
-    schema?: JSONSchema;
+    dataModel?: string;
   } | null;
 
   // Generation information (only when actually generating code)
@@ -386,7 +384,7 @@ export async function processInputSection(
     // Merge mentioned charms into references
     for (const [mentionId, charm] of Object.entries(sources)) {
       if (!references[mentionId]) {
-        references[mentionId] = charm;
+        references[mentionId] = charm.cell;
       }
     }
   } catch (error) {
@@ -472,6 +470,7 @@ export async function fillPlanningSection(
       existingSchema = iframe?.argumentSchema;
     } catch (error) {
       console.warn("Error getting existing spec for fix workflow:", error);
+      throw new Error("We need an existing iframe to fix");
     }
 
     // Generate just the plan without updating spec
@@ -481,14 +480,13 @@ export async function fillPlanningSection(
         workflowType: form.classification.workflowType,
         currentCharm: form.input.existingCharm,
         model: form.meta.modelId,
-        references: form.input.references,
       },
     );
 
     planningResult = {
       steps: executionPlan.steps,
       spec: existingSpec, // Use existing spec for fix workflow
-      schema: existingSchema,
+      dataModel: "",
     };
   } else {
     // For edit/imagine, generate both plan and spec
@@ -498,14 +496,13 @@ export async function fillPlanningSection(
         workflowType: form.classification.workflowType,
         currentCharm: form.input.existingCharm,
         model: form.meta.modelId,
-        references: form.input.references,
       },
     );
 
     planningResult = {
       steps: executionPlan.steps,
       spec: executionPlan.spec,
-      schema: executionPlan.schema,
+      dataModel: executionPlan.dataModel,
     };
   }
 
@@ -513,7 +510,7 @@ export async function fillPlanningSection(
   newForm.plan = {
     steps: planningResult.steps || [],
     spec: planningResult.spec,
-    schema: planningResult.schema,
+    dataModel: planningResult.dataModel,
   };
 
   // Mark the form as filled (ready for generation) once we have a plan
@@ -577,16 +574,9 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
       break;
 
     case "imagine":
-      charm = await executeReworkWorkflow(
+      charm = await executeImagineWorkflow(
         newForm.meta.charmManager,
-        form.input.processedInput,
-        {
-          steps: form.plan.steps,
-          updatedSpec: form.plan.spec,
-          updatedSchema: form.plan.schema,
-        },
-        form.input.references,
-        form.input.existingCharm,
+        form,
       );
       break;
 
@@ -657,13 +647,7 @@ export async function processWorkflow(
 
   // Step 3: Planning if not already planned
   if (!form.plan || !form.plan.steps || form.plan.steps.length === 0) {
-    form = await fillPlanningSection(form, {
-      preGeneratedPlan: form.plan?.steps && form.plan.steps.length > 0
-        ? form.plan.steps
-        : undefined,
-      preGeneratedSpec: form.plan?.spec,
-      preGeneratedSchema: form.plan?.schema,
-    });
+    form = await fillPlanningSection(form);
   }
 
   // Step 4: Generation (if not a dry run and not already generated)
@@ -795,16 +779,9 @@ function toCamelCase(input: string): string {
  * schema, allowing for more significant changes or combinations of
  * data from multiple existing charms.
  */
-export async function executeReworkWorkflow(
+export function executeImagineWorkflow(
   charmManager: CharmManager,
-  input: string,
-  executionPlan: {
-    steps: string[];
-    updatedSpec?: string;
-    updatedSchema?: JSONSchema;
-  },
-  dataReferences?: Record<string, { name: string; cell: Cell<any> }>,
-  currentCharm?: Cell<Charm>,
+  form: WorkflowForm,
 ): Promise<Cell<Charm>> {
   console.log("Executing IMAGINE workflow");
 
@@ -812,10 +789,9 @@ export async function executeReworkWorkflow(
   let allReferences: Record<string, Cell<any>> = {};
 
   // Add all external references first with validation
-  if (dataReferences && Object.keys(dataReferences).length > 0) {
-    for (const [id, reference] of Object.entries(dataReferences)) {
+  if (form.input.references && Object.keys(form.input.references).length > 0) {
+    for (const [id, cell] of Object.entries(form.input.references)) {
       if (id === "currentCharm") continue;
-      const { cell } = reference;
 
       if (
         !cell || typeof cell !== "object" || !("get" in cell) ||
@@ -847,12 +823,14 @@ export async function executeReworkWorkflow(
   }
 
   // Add current charm if available
+  // TODO(bf): overly defensive Claude code
   if (
-    currentCharm && typeof currentCharm === "object" && "get" in currentCharm &&
-    typeof currentCharm.get === "function"
+    form.input.existingCharm && typeof form.input.existingCharm === "object" &&
+    "get" in form.input.existingCharm &&
+    typeof form.input.existingCharm.get === "function"
   ) {
     try {
-      const charmData = currentCharm.get();
+      const charmData = form.input.existingCharm.get();
       const charmName = charmData && charmData["NAME"]
         ? charmData["NAME"]
         : "currentCharm";
@@ -865,7 +843,7 @@ export async function executeReworkWorkflow(
         uniqueId = `${camelCaseId}${counter++}`;
       }
 
-      allReferences[uniqueId] = currentCharm;
+      allReferences[uniqueId] = form.input.existingCharm;
       console.log(`Added current charm as "${uniqueId}"`);
 
       // Remove any generic "currentCharm" entry
@@ -877,23 +855,10 @@ export async function executeReworkWorkflow(
     }
   }
 
-  // Format the spec to include plan and prompt
-  let formattedSpec = executionPlan.updatedSpec;
-  if (executionPlan.updatedSpec && executionPlan.steps) {
-    formattedSpec = formatSpecWithPlanAndPrompt(
-      executionPlan.updatedSpec,
-      input,
-      executionPlan.steps,
-    );
-  }
-
-  // TODO(bf): update spec of recipe?
-
   // Cast a new recipe with references, spec, and schema
   return castNewRecipe(
     charmManager,
-    input,
-    allReferences,
+    form,
   );
 }
 

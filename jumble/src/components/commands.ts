@@ -6,6 +6,7 @@ import {
   Charm,
   CharmManager,
   compileAndRunRecipe,
+  createWorkflowForm,
   renameCharm,
   WorkflowForm,
   WorkflowType,
@@ -439,7 +440,10 @@ async function handleImportJSON(deps: CommandContext) {
     const title = prompt("Enter a title for your imported recipe:");
     if (!title) return;
 
-    const newCharm = await castNewRecipe(deps.charmManager, title, data);
+    const form = createWorkflowForm({ input: title });
+    form.input.references = data;
+
+    const newCharm = await castNewRecipe(deps.charmManager, form);
     if (!newCharm) throw new Error("Failed to create new charm");
 
     const id = charmId(newCharm);

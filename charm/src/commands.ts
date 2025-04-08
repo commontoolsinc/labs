@@ -9,9 +9,7 @@ import {
   generateNewRecipeVersion,
 } from "./iterate.ts";
 import { NAME } from "@commontools/builder";
-import {
-  executeWorkflow,
-} from "./imagine.ts";
+import { executeWorkflow } from "./imagine.ts";
 import {
   ExecutionPlan,
   formatPromptWithMentions,
@@ -183,27 +181,4 @@ export async function extendCharm(
   };
 
   return executeWorkflow(charmManager, goal, context);
-}
-
-/**
- * Create a fresh charm with the given prompt text
- *
- * @param charmManager The CharmManager instance
- * @param promptText The user's prompt text describing the charm to create
- * @param model Optional LLM model to use
- * @returns A new charm
- */
-export async function createCharm(
-  charmManager: CharmManager,
-  promptText: string,
-  model?: string,
-): Promise<Cell<Charm>> {
-  // Process the prompt to handle @mentions
-  const { text, sources } = await formatPromptWithMentions(
-    promptText,
-    charmManager,
-  );
-
-  // Use castNewRecipe directly, passing the processed text and mentions
-  return castNewRecipe(charmManager, text, sources);
 }

@@ -1,7 +1,7 @@
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { client } from "../client.ts";
 import type { JSONSchema } from "@commontools/builder";
-import { WorkflowType } from '@commontools/charm';
+import { WorkflowType } from "@commontools/charm";
 
 /**
  * Basic prompt for classifying user intent into a workflow type
@@ -39,13 +39,14 @@ Please analyze this request and respond in the following format:
  * Prompt for generating an execution plan with comprehensive specification
  */
 export const PLAN_GENERATION_PROMPT = `
-You are creating an execution plan and specification for a code generation request.
+You are creating a brief execution plan and specification for a tool to fulfill a user's intent.
 The user's request has been classified as a {{ WORKFLOW_TYPE }} operation.
 
 User's request: "{{ INPUT }}"
 
-Current Charm Context:
+<current-charm-context>
 {{ CONTEXT }}
+</current-charm-context>
 
 Based on the workflow type, follow these guidelines:
 
@@ -67,74 +68,33 @@ Based on the workflow type, follow these guidelines:
   * SCHEMA: Will receive combined input schema, generate output schemas
   * CODE: Create a new implementation that may use data from other charms
 
-For IMAGINE workflows you MUST include both <result_schema> tags with valid JSON schemas.
-Each schema must be a JSON object with "type": "object" and must include a "properties" object with property definitions.
-
-Example schema format:
-\`\`\`json
-{
-  "type": "object",
-  "title": "Task Schema",
-  "description": "Schema for task data",
-  "properties": {
-    "title": {
-      "type": "string",
-      "title": "Task Title",
-      "description": "The title of the task",
-      "default": "New Task"
-    },
-    "dueDate": {
-      "type": "string",
-      "format": "date",
-      "title": "Due Date",
-      "description": "When the task is due"
-    },
-    "completed": {
-      "type": "boolean",
-      "title": "Completed",
-      "description": "Whether the task is completed",
-      "default": false
-    }
-  },
-  "required": ["title"]
-}
-\`\`\`
-
-When writing schemas:
-- Focus on essential properties (3-7 max)
-- Include title, description, and sensible defaults
-- Mark required properties in the "required" array
-- Use proper JSON Schema format as shown in the examples
-- Think about data flow and how properties will be used in the implementation
-
-Please create a comprehensive response with BOTH a step-by-step execution plan AND a detailed specification.
+Please create a medium-detail plan with BOTH a step-by-step execution plan AND a clear specification.
 Always include all XML tags in your response and ensure JSON schemas are correctly formatted.
 
 Respond in the following format:
 
+(include ~5 steps)
 <steps>
 1. First step of the plan
 2. Second step of the plan
 3. ...
 </steps>
 
+(include ~1 paragraph)
 <specification>
-A detailed description of what the charm does, its purpose, and functionality.
+A clear description of what the charm does, its purpose, and functionality.
 Include a clear explanation of how it works and what problems it solves.
 For EDIT and IMAGINE, explain how it builds upon or differs from the existing charm.
 </specification>
 
 <data_model>
-Describe the key data structures and relationships used in the implementation.
-Explain how input data is processed and how output is structured.
+Sketch key entity types as type signature.
+Explain how data is processed and output with arrow diagrams.
 For EDIT and IMAGINE, explain any changes to the existing data model.
+Include how this charm uses any referenced data from other charms.
 </data_model>
 
-{{ SCHEMA_SECTION }}
-
-<references>
-Describe how this charm uses any referenced data from other charms.
-</references>
+DO NOT GENERATE A SCHEMA.
 `;
 
 /**
@@ -303,7 +263,7 @@ export async function generateWorkflowPlan(
 ): Promise<{
   steps: string[];
   spec: string;
-  schema: JSONSchema;
+  dataModel: string;
 }> {
   const context = generateCharmContext(
     existingSpec,
@@ -311,57 +271,10 @@ export async function generateWorkflowPlan(
     existingCode,
   );
 
-  // Schema section only for rework workflow
-  const schemaSection = workflowType === "imagine"
-    ? `<argument_schema>
-// Define the schema for input data
-{
-  "type": "object",
-  "title": "Input Schema",
-  "description": "Data required by this charm",
-  "properties": {
-    // Add 3-7 properties that represent the input data
-    // Each property should have a type, title, and description
-  },
-  "required": []
-}
-</argument_schema>
-
-<result_schema>
-// Define the schema for output data
-{
-  "type": "object",
-  "title": "Result Schema",
-  "description": "Data returned by this charm",
-  "properties": {
-    // Add 3-7 properties that represent the output data
-    // Each property should have a type, title, and description
-  }
-}
-</result_schema>
-
-SCHEMA GUIDELINES:
-1. Keep schemas minimal:
-   - Include only essential fields (3-7 properties max)
-   - Focus on the core functionality
-   - If user requested complex features, simplify for this first version
-
-2. Each property should have:
-   - A descriptive "title" field
-   - A brief "description" field
-   - A sensible default value where appropriate
-
-3. Schemas must be valid JSON with:
-   - "type": "object" at the top level
-   - A "properties" object containing property definitions
-   - Required properties listed in the "required" array`
-    : "";
-
   const prompt = hydratePrompt(PLAN_GENERATION_PROMPT, {
     INPUT: input,
     WORKFLOW_TYPE: workflowType.toUpperCase(),
     CONTEXT: context,
-    SCHEMA_SECTION: schemaSection,
   });
 
   const response = await client.sendRequest({
@@ -401,74 +314,15 @@ SCHEMA GUIDELINES:
       // Data model might not be available
     }
 
-    try {
-      references = parseTagFromResponse(response, "references");
-    } catch (e) {
-      // References might not be available
-    }
-
-    // For rework workflows, extract both argument and result schemas
-    if (workflowType === "imagine") {
-      try {
-        // Get argument and result schemas from the response
-        const argumentSchemaJson = parseTagFromResponse(
-          response,
-          "argument_schema",
-        );
-        const resultSchemaJson = parseTagFromResponse(
-          response,
-          "result_schema",
-        );
-
-        // Validate both schemas exist
-        if (!argumentSchemaJson || !resultSchemaJson) {
-          throw new Error(
-            "Missing schema tags in LLM response for imagine workflow",
-          );
-        }
-
-        // Parse and validate argument schema
-        const cleanArgumentJson = cleanJsonString(argumentSchemaJson);
-        const argumentSchema = JSON.parse(cleanArgumentJson);
-
-        if (argumentSchema.type !== "object" || !argumentSchema.properties) {
-          throw new Error("Invalid argument schema structure");
-        }
-
-        // Parse and validate result schema
-        const cleanResultJson = cleanJsonString(resultSchemaJson);
-        const resultSchema = JSON.parse(cleanResultJson);
-
-        if (resultSchema.type !== "object" || !resultSchema.properties) {
-          throw new Error("Invalid result schema structure");
-        }
-
-        // Use argument schema as primary and attach result schema for downstream use
-        schema = argumentSchema;
-        (schema as any).resultSchema = resultSchema;
-      } catch (e) {
-        console.error("Schema extraction failed:", e);
-        throw e; // Re-throw to ensure the client knows we failed
-      }
-    }
-
     // For fix workflow, if we have an existing spec, use that instead
     const updatedSpec = workflowType === "fix" && existingSpec
       ? existingSpec
       : fullSpec;
 
-    const updatedSchema = workflowType !== "imagine" && existingSchema
-      ? existingSchema
-      : schema;
-
-    if (!updatedSchema) {
-      throw new Error("we need a schema");
-    }
-
     return {
       steps,
       spec: updatedSpec,
-      schema: updatedSchema,
+      dataModel,
     };
   } catch (error) {
     console.error(error);

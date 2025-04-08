@@ -1,5 +1,5 @@
 import { Module, NAME, Recipe } from "@commontools/builder";
-import { CharmManager, charmSchema } from "./index.ts";
+import { Charm, CharmManager, charmSchema } from "./index.ts";
 import { Cell, getEntityId, isCell, isStream } from "@commontools/runner";
 
 /**
@@ -35,7 +35,15 @@ function toCamelCase(input: string): string {
 export async function formatPromptWithMentions(
   prompt: string,
   charmManager: CharmManager,
-): Promise<{ text: string; sources: Record<string, any> }> {
+): Promise<
+  {
+    text: string;
+    sources: Record<
+      string,
+      { name: string; cell: Cell<Charm>; recipe?: Recipe | Module }
+    >;
+  }
+> {
   const payload = await parseComposerDocument(
     prompt,
     charmManager,

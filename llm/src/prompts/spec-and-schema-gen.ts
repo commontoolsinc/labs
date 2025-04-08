@@ -1,6 +1,7 @@
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { client } from "../client.ts";
 import type { JSONSchema, JSONSchemaWritable } from "@commontools/builder";
+import { WorkflowForm } from "@commontools/charm";
 
 // Prompt for generating schema and specification from a goal
 export const SCHEMA_FROM_GOAL_PROMPT = `
@@ -44,12 +45,12 @@ SCHEMA GUIDELINES:
    - Include only essential fields (5-7 properties max)
    - Focus on the core functionality
    - If user requested complex features, simplify for this first version
-   
+
 2. Each property should have:
    - A descriptive "title" field
    - A brief "description" field
    - A sensible default value where appropriate
-   
+
 3. Example of a simple schema:
 \`\`\`json
 {
@@ -124,12 +125,12 @@ SCHEMA GUIDELINES:
    - Include only essential fields (5-7 properties max)
    - Focus on the core functionality
    - If user requested complex features, simplify for this first version
-   
+
 2. Each property should have:
    - A descriptive "title" field
    - A brief "description" field
    - A sensible default value where appropriate
-   
+
 3. Example of a simple schema:
 \`\`\`json
 {
@@ -171,6 +172,17 @@ IMPORTANT:
 - The user can always iterate and improve the solution later
 `;
 
+function formatForm(form: WorkflowForm) {
+  return `
+<goal>${form.input.processedInput}</goal>
+<plan>${
+    form.plan?.steps.map((step) => `<step>${step}</step>`).join("\n")
+  }</plan>
+<description>${form.plan?.spec}</description>
+<data>${JSON.stringify(form.plan?.dataModel)}</data>
+`;
+}
+
 /**
  * Generates a complete specification, schema, and plan from a goal.
  * @param goal The user's goal or request
@@ -179,7 +191,7 @@ IMPORTANT:
  * @returns Object containing title, description, specification, schema
  */
 export async function generateSpecAndSchema(
-  goal: string,
+  form: WorkflowForm,
   existingSchema?: JSONSchema,
   model: string = "anthropic:claude-3-7-sonnet-latest",
 ): Promise<{
@@ -191,12 +203,15 @@ export async function generateSpecAndSchema(
   argumentSchema: JSONSchema;
 }> {
   let systemPrompt, userContent;
+  if (!form.plan) {
+    throw new Error("Plan is required");
+  }
 
   if (existingSchema && Object.keys(existingSchema).length > 0) {
     // When we have an existing schema, focus on generating specification
     systemPrompt = SPEC_FROM_SCHEMA_PROMPT;
     userContent = `
-Goal: ${goal}
+${formatForm(form)}
 
 Existing Schema:
 \`\`\`json
@@ -208,7 +223,7 @@ Based on this goal and the existing schema, please provide a title, description,
   } else {
     // When generating from scratch, use the full schema generation prompt
     systemPrompt = SCHEMA_FROM_GOAL_PROMPT;
-    userContent = goal;
+    userContent = formatForm(form);
   }
 
   // Send the request to the LLM using the specified model or default
@@ -226,9 +241,8 @@ Based on this goal and the existing schema, please provide a title, description,
 
   // Extract sections from the response
   const title = parseTagFromResponse(response, "title") || "New Charm";
-  const description = parseTagFromResponse(response, "description") ||
-    `A tool to ${goal}`;
-  const spec = parseTagFromResponse(response, "spec") || goal;
+  const description = parseTagFromResponse(response, "description");
+  const spec = parseTagFromResponse(response, "spec");
   const plan = parseTagFromResponse(response, "plan");
 
   // If we have an existing schema, use it; otherwise parse the generated schema

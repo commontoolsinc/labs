@@ -59,22 +59,28 @@ describe("Workflow Classification", () => {
     // These tests will use the fallback plan since we're not mocking the LLM
 
     it("should generate plan for fix workflow", async () => {
-      const plan = await generatePlan("Fix the button alignment", "fix");
+      const plan = await generatePlan({
+        input: "Fix the button alignment",
+        workflowType: "fix",
+      });
       expect(plan.workflowType).toBe("fix");
       expect(plan.steps.length).toBeGreaterThan(0);
     });
 
     it("should generate plan for edit workflow", async () => {
-      const plan = await generatePlan("Add a dark mode toggle", "edit");
+      const plan = await generatePlan({
+        input: "Add a dark mode toggle",
+        workflowType: "edit",
+      });
       expect(plan.workflowType).toBe("edit");
       expect(plan.steps.length).toBeGreaterThan(0);
     });
 
     it("should generate plan for imagine workflow", async () => {
-      const plan = await generatePlan(
-        "Create a dashboard for my data",
-        "imagine",
-      );
+      const plan = await generatePlan({
+        input: "Create a dashboard for my data",
+        workflowType: "imagine",
+      });
       expect(plan.workflowType).toBe("imagine");
       expect(plan.steps.length).toBeGreaterThan(0);
     });

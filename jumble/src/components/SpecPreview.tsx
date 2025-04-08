@@ -474,14 +474,14 @@ export function SpecPreview({
                       </Accordion>
                     )}
 
-                    {form.plan?.schema && (
+                    {form.plan?.dataModel && (
                       <Accordion
                         title={<span className="text-[10px]">Schema</span>}
                         defaultOpen={false}
                         badge={null}
                       >
                         <pre className="text-[10px] text-gray-700 leading-tight max-h-32 overflow-y-auto">
-                          {JSON.stringify(form.plan.schema, null, 2)}
+                          {JSON.stringify(form.plan.dataModel, null, 2)}
                         </pre>
                       </Accordion>
                     )}

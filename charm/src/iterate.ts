@@ -18,6 +18,7 @@ import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import { generateSpecAndSchema } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
+import { WorkflowForm } from "./index.ts";
 
 /**
  * Generate source code for a charm based on its specification, schema, and optional existing source
@@ -208,13 +209,12 @@ function turnCellsIntoAliases(data: any): any {
  */
 export async function castNewRecipe(
   charmManager: CharmManager,
-  goal: string,
-  cells?: any,
+  form: WorkflowForm,
 ): Promise<Cell<Charm>> {
-  console.log("Processing goal:", goal, cells);
+  console.log("Processing form:", form);
 
   // Remove $UI, $NAME, and any streams from the cells
-  const scrubbed = scrub(cells);
+  const scrubbed = scrub(form.input.references);
 
   // First, extract any existing schema if we have data
   const existingSchema = createJsonSchema(scrubbed);
@@ -226,14 +226,15 @@ export async function castNewRecipe(
     title,
     description,
     plan,
-  } = await generateSpecAndSchema(goal, existingSchema);
+  } = await generateSpecAndSchema(form, existingSchema);
 
   console.log("resultSchema", resultSchema);
 
   // TODO(bf): this doesn't seem like it should be needed, or it's named poorly
   // we seem to be regenerating our plan and spec just before generating the code
-  const newSpec =
-    `<GOAL>${goal}</GOAL>\n<PLAN>${plan}</PLAN>\n<SPEC>${spec}</SPEC>`;
+  const newSpec = `<REQUEST>${
+    JSON.stringify(form)
+  }</REQUEST>\n<PLAN>${plan}</PLAN>\n<SPEC>${spec}</SPEC>`;
 
   console.log("newSpec", newSpec);
 
@@ -241,7 +242,7 @@ export async function castNewRecipe(
   // as a hack to work around iframes not supporting results schemas
   const schema = {
     ...existingSchema,
-    title,
+    title: title || "missing",
     description,
   } as Writable<JSONSchema>;
 
@@ -273,7 +274,7 @@ export async function castNewRecipe(
     src: newIFrameSrc,
     spec,
     plan,
-    goal,
+    goal: form.input.processedInput,
     argumentSchema: schema,
     resultSchema,
     name,

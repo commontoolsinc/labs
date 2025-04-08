@@ -9,14 +9,14 @@ describe("WorkflowFormData", () => {
       workflowType: "edit",
       steps: ["Step 1", "Step 2"],
       spec: "Test specification",
-      schema: { type: "object", properties: {} },
+      dataModel: "an email",
     };
 
     // Ensure properties have the expected types
     expect(typeof formData.workflowType).toBe("string");
     expect(Array.isArray(formData.steps)).toBe(true);
     expect(typeof formData.spec).toBe("string");
-    expect(typeof formData.schema).toBe("object");
+    expect(typeof formData.dataModel).toBe("string");
 
     // Ensure workflowType is a valid type
     const validTypes: WorkflowType[] = ["fix", "edit", "imagine"];
