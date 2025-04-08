@@ -316,7 +316,7 @@ async function handleModifyCharm(
 async function handleNewCharm(
   deps: CommandContext,
   input: string,
-  { model }: { model: string },
+  options?: { model: string },
 ) {
   if (!input) return;
   deps.setLoading(true);
@@ -327,7 +327,7 @@ async function handleNewCharm(
       input,
       {
         prefill: deps.previewForm,
-        model: model,
+        model: options?.model,
       },
     );
 
@@ -565,7 +565,7 @@ async function handleUseDataInSpell(deps: CommandContext) {
           if (!newCharm) {
             throw new Error("No source cell found");
           }
-          navigateToCharm(newCharm, deps);
+          navigateToCharm(deps, newCharm);
           deps.setOpen(false);
           deps.setLoading(false);
         },
@@ -647,7 +647,7 @@ async function handleUseSpellOnOtherData(deps: CommandContext) {
           );
           if (!newCharm) throw new Error("Failed to cast spell");
 
-          navigateToCharm(newCharm, deps);
+          navigateToCharm(deps, newCharm);
           deps.setOpen(false);
           deps.setLoading(false);
         },
@@ -691,7 +691,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       type: "input",
       title: "New Charm",
       group: "Create",
-      handler: (input) => handleNewCharm(deps, input, {}),
+      handler: (input) => handleNewCharm(deps, input),
     },
     {
       id: "search-charms",
