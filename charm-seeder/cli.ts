@@ -4,7 +4,7 @@ import { castNewRecipe, CharmManager } from "@commontools/charm";
 import { getEntityId, setBobbyServerUrl, storage } from "@commontools/runner";
 import { createSession, Identity } from "@commontools/identity";
 import { client as llm } from "@commontools/llm";
-import { charmSchema } from "@commontools/charm";
+import { charmSchema, processWorkflow } from "@commontools/charm";
 import { NAME } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
 import { scenarios, Step } from "./scenarios.ts";
@@ -158,21 +158,6 @@ export function getCharmNameAsCamelCase(
   return toCamelCase(cell.asSchema(charmSchema).key(NAME).get());
 }
 
-async function extendCharm(
-  focusedCharmId: string,
-  goal: string,
-) {
-  const charm = (await charmManager.get(focusedCharmId, false))!;
-
-  const shadowId = getCharmNameAsCamelCase(charm);
-
-  return castNewRecipe(
-    charmManager,
-    goal,
-    { [shadowId]: charm },
-  );
-}
-
 async function processCommand(
   step: Step,
   lastCharmId: string | undefined,
@@ -182,7 +167,17 @@ async function processCommand(
   switch (type) {
     case CommandType.New: {
       console.log(`Adding: "${prompt}"`);
-      const charm = await castNewRecipe(charmManager, prompt);
+      const form = await processWorkflow(prompt, false, {
+        charmManager,
+        prefill: {
+          classification: {
+            workflowType: "imagine",
+            confidence: 1.0,
+            reasoning: "hard coded",
+          },
+        },
+      });
+      const charm = await castNewRecipe(charmManager, form);
       const id = getEntityId(charm);
       if (id) {
         console.log(`Charm added: ${id["/"]}`);
@@ -196,7 +191,20 @@ async function processCommand(
       if (!lastCharmId) {
         throw new Error("Last charm ID is undefined.");
       }
-      const charm = await extendCharm(lastCharmId, prompt);
+      const charm = await charmManager.get(lastCharmId);
+      const form = await processWorkflow(prompt, false, {
+        charmManager,
+        existingCharm: charm,
+        prefill: {
+          classification: {
+            workflowType: "imagine",
+            confidence: 1.0,
+            reasoning: "hard coded",
+          },
+        },
+      });
+
+      await castNewRecipe(charmManager, form);
       const id = getEntityId(charm);
       if (id) {
         console.log(`Charm added: ${id["/"]}`);
@@ -252,7 +260,7 @@ async function llmVerifyCharm(
   const system = `You are a helpful assistant that verifies charm screenshots.
 
 Your task is to evaluate how well the screenshot represents what the user asked for in the prompt.
-    
+
 If the screenshot accurately represents the prompt, return a PASS result with a brief explanation.
 If the screenshot does not match the prompt, return a FAIL result with a brief explanation of what's missing or incorrect.`;
 
@@ -384,7 +392,7 @@ async function generateReport() {
 <body class="bg-gray-50 min-h-screen">
   <div class="container mx-auto px-4 py-8">
     <h1 class="text-3xl font-bold text-center text-gray-800 mb-4">${name}</h1>
-    
+
     <!-- Summary Section -->
     <div class="mb-8 fade-in bg-white p-5 rounded-lg shadow-md">
       <h2 class="text-xl font-semibold mb-3 border-b pb-2">Summary</h2>
@@ -411,7 +419,7 @@ async function generateReport() {
       </div>
       <p class="text-center mt-1 text-gray-600">${passRate}% Success Rate</p>
     </div>
-    
+
     ${
     Array.from(scenarioGroups).map(
       ([scenarioIndex, scenarioData], groupIndex) => {
