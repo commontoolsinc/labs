@@ -17,13 +17,13 @@ describe("Workflow Classification", () => {
       expect(WORKFLOWS.fix.name).toBe("fix");
       expect(WORKFLOWS.fix.updateSpec).toBe(false);
       expect(WORKFLOWS.fix.updateSchema).toBe(false);
-      expect(WORKFLOWS.fix.allowsDataReferences).toBe(true);
+      expect(WORKFLOWS.fix.allowsDataReferences).toBe(false);
 
       // Edit workflow
       expect(WORKFLOWS.edit.name).toBe("edit");
       expect(WORKFLOWS.edit.updateSpec).toBe(true);
       expect(WORKFLOWS.edit.updateSchema).toBe(false);
-      expect(WORKFLOWS.edit.allowsDataReferences).toBe(true);
+      expect(WORKFLOWS.edit.allowsDataReferences).toBe(false);
 
       // Rework workflow
       expect(WORKFLOWS.imagine.name).toBe("imagine");
