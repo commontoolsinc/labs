@@ -536,6 +536,8 @@ try {
   await login();
   await processPrompts();
   await generateReport();
+} catch (e) {
+  console.error(e);
 } finally {
   await sleep(500);
   await browser.close();
