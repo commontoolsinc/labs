@@ -243,8 +243,8 @@ export const setupIframe = () =>
       const jsonPayload = JSON.parse(payload);
       if (!jsonPayload.model) {
         jsonPayload.model = [
+          "google:gemini-2.0-flash",
           "groq:llama-3.3-70b-versatile",
-          "anthropic:claude-3-7-sonnet-latest",
         ];
       }
 
