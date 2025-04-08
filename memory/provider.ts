@@ -3,6 +3,7 @@ import type {
   AsyncResult,
   Await,
   CloseResult,
+  Commit,
   ConnectionError,
   ConsumerCommandInvocation,
   ConsumerInvocationFor,
@@ -88,6 +89,7 @@ class MemoryProvider<
   fetch(request: Request) {
     return fetch(this, request);
   }
+
   session(): ProviderSession<MemoryProtocol> {
     const session = new MemoryProviderSession(
       this.memory,
@@ -264,9 +266,9 @@ class MemoryProviderSession<
     }
   }
 
-  transact(transaction: Transaction<Space>) {
+  commit(commit: Commit<Space>) {
     for (const [id, channels] of this.channels) {
-      if (Subscription.match(transaction, channels)) {
+      if (Subscription.match(commit, channels)) {
         // Note that we intentionally exit on the first match because we do not
         // want to send same transaction multiple times to the same consumer.
         // Consumer does it's own bookkeeping of all the subscriptions and will
@@ -274,7 +276,7 @@ class MemoryProviderSession<
         return this.perform({
           the: "task/effect",
           of: id,
-          is: transaction,
+          is: commit,
         });
       }
     }

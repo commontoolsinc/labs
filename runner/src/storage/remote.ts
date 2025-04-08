@@ -7,9 +7,11 @@ import type {
   MemorySpace,
   Protocol,
   Query,
+  Result,
   SchemaContext,
   SchemaQuery,
   UCAN,
+  Unit,
 } from "@commontools/memory/interface";
 import * as Memory from "@commontools/memory/consumer";
 import { assert } from "@commontools/memory/fact";
@@ -229,7 +231,7 @@ export class RemoteStorageProvider implements StorageProvider {
     entityId: EntityId,
     _expectedInStorage: boolean = false,
     schemaContext?: SchemaContext,
-  ): Promise<void> {
+  ): Promise<Result<Unit, Error>> {
     const subscription = this.subscribe(entityId, schemaContext);
     if (subscription) {
       const of = RemoteStorageProvider.toEntity(entityId);
@@ -238,11 +240,12 @@ export class RemoteStorageProvider implements StorageProvider {
       // Then await for the query to be resolved because that is what
       // caller will await on.
       await subscription.query;
+      return { ok: {} };
     } else {
       console.warn(
         `⚠️ Reached maximum subscription limit on ${this.workspace}. Call to .sync is ignored`,
       );
-      return new Promise(() => {});
+      return new Promise(() => {}) as Promise<Result<Unit, Error>>;
     }
   }
 

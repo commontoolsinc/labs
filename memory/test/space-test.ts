@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
 import * as Space from "../space.ts";
 import * as Changes from "../changes.ts";
+import * as Selection from "../selection.ts";
 import * as Commit from "../commit.ts";
 import * as Transaction from "../transaction.ts";
 import * as Fact from "../fact.ts";
@@ -151,7 +152,7 @@ test("create new memory", DB, async (session) => {
 
   assertEquals(read, {
     ok: {
-      [space.did()]: Changes.from([v1]),
+      [space.did()]: Selection.from([[v1, 0]]),
     },
   });
 });
@@ -213,7 +214,7 @@ test("explicit empty creation", DB, async (session) => {
     }),
     {
       ok: {
-        [space.did()]: Changes.from([assertion]),
+        [space.did()]: Selection.from([[assertion, 0]]),
       },
     },
   );
@@ -576,7 +577,9 @@ test("retract unclaimed", DB, async (session) => {
       [space.did()]: {
         [doc]: {
           [the]: {
-            [refer(v0).toString()]: {},
+            [refer(v0).toString()]: {
+              since: commit.is.since,
+            },
           },
         },
       },
@@ -640,7 +643,7 @@ test("retract document", DB, async (session) => {
     }),
     {
       ok: {
-        [space.did()]: Changes.from([v1]),
+        [space.did()]: Selection.from([[v1, c1.is.since]]),
       },
     },
   );
@@ -677,7 +680,7 @@ test("retract document", DB, async (session) => {
       prf: [],
     }),
     {
-      ok: { [space.did()]: Changes.from([v2]) },
+      ok: { [space.did()]: Selection.from([[v2, c2.is.since]]) },
     },
     "once retracted `is` no longer included",
   );
@@ -848,7 +851,7 @@ test("batch updates", DB, async (session) => {
     }),
     {
       ok: {
-        [space.did()]: Changes.from([hi1]),
+        [space.did()]: Selection.from([[hi1, c1.is.since]]),
       },
     },
   );
@@ -869,7 +872,7 @@ test("batch updates", DB, async (session) => {
     }),
     {
       ok: {
-        [space.did()]: Changes.from([hola1]),
+        [space.did()]: Selection.from([[hola1, c1.is.since]]),
       },
     },
   );
@@ -912,7 +915,7 @@ test("batch updates", DB, async (session) => {
       prf: [],
     }),
     {
-      ok: { [space.did()]: Changes.from([hi2]) },
+      ok: { [space.did()]: Selection.from([[hi2, c2.is.since]]) },
     },
   );
 
@@ -929,7 +932,7 @@ test("batch updates", DB, async (session) => {
       prf: [],
     }),
     {
-      ok: { [space.did()]: Changes.from([hola1]) },
+      ok: { [space.did()]: Selection.from([[hola1, c1.is.since]]) },
     },
   );
 
@@ -946,7 +949,7 @@ test("batch updates", DB, async (session) => {
       prf: [],
     }),
     {
-      ok: { [space.did()]: Changes.from([ciao1]) },
+      ok: { [space.did()]: Selection.from([[ciao1, c2.is.since]]) },
     },
   );
 
@@ -988,7 +991,7 @@ test("batch updates", DB, async (session) => {
       prf: [],
     }),
     {
-      ok: { [space.did()]: Changes.from([ciao1]) },
+      ok: { [space.did()]: Selection.from([[ciao1, c2.is.since]]) },
     },
     "doc3 was not updated",
   );
@@ -1051,7 +1054,7 @@ test(
     });
 
     assertEquals(select, {
-      ok: { [space.did()]: Changes.from([v1]) },
+      ok: { [space.did()]: Selection.from([[v1, c1.is.since]]) },
     });
   },
 );
@@ -1084,6 +1087,7 @@ test("list single fact", DB, async (session) => {
   });
   const write = await session.transact(tr);
   assert(write.ok);
+  const c1 = Commit.toRevision(write.ok);
 
   const result = session.query({
     cmd: "/memory/query",
@@ -1098,7 +1102,7 @@ test("list single fact", DB, async (session) => {
   });
 
   assertEquals(result, {
-    ok: { [space.did()]: Changes.from([v1]) },
+    ok: { [space.did()]: Selection.from([[v1, c1.is.since]]) },
   });
 });
 
@@ -1113,6 +1117,8 @@ test("list excludes retracted facts", DB, async (session) => {
   const fact = await session.transact(tr);
 
   assert(fact.ok);
+  const c1 = Commit.toRevision(fact.ok);
+
   const v2 = Fact.retract(v1);
   const tr2 = Transaction.create({
     issuer: alice.did(),
@@ -1121,6 +1127,7 @@ test("list excludes retracted facts", DB, async (session) => {
   });
   const retract = session.transact(tr2);
   assert(retract.ok);
+  const c2 = Commit.toRevision(retract.ok);
 
   const result = session.query({
     cmd: "/memory/query",
@@ -1167,7 +1174,7 @@ test("list excludes retracted facts", DB, async (session) => {
   assertEquals(
     withRetractions,
     {
-      ok: { [space.did()]: Changes.from([v2]) },
+      ok: { [space.did()]: Selection.from([[v2, c2.is.since]]) },
     },
     "selects retracted facts",
   );
@@ -1182,6 +1189,7 @@ test("list single fact with schema query", DB, async (session) => {
   });
   const write = await session.transact(tr);
   assert(write.ok);
+  const commit = Commit.toRevision(write.ok);
 
   const subscriptions: SchemaContext = {
     schema: { "type": "number" },
@@ -1217,6 +1225,7 @@ test("list single fact with schema query", DB, async (session) => {
     [the]: {
       [cause.toString()]: {
         is: { "value": { "v": 1 } },
+        since: commit.since,
       },
     },
   };
@@ -1271,6 +1280,7 @@ test(
     });
     const write1 = await session.transact(tr1);
     assert(write1.ok);
+    const c1 = Commit.toRevision(write1.ok);
     const tr2 = Transaction.create({
       issuer: alice.did(),
       subject: space.did(),
@@ -1278,6 +1288,7 @@ test(
     });
     const write2 = await session.transact(tr2);
     assert(write2.ok);
+    const c2 = Commit.toRevision(write2.ok);
 
     // We'll use a schema selector to exclude the name from the address, since we already have that
     const schemaSelector: SchemaSelector = {
@@ -1329,6 +1340,7 @@ test(
               },
             },
           },
+          since: c2.since,
         },
       },
     };
@@ -1404,15 +1416,29 @@ test(
       },
     });
 
-    for (const fact of [v1, v2, v3]) {
-      const tr = Transaction.create({
-        issuer: alice.did(),
-        subject: space.did(),
-        changes: Changes.from([fact]),
-      });
-      const write = await session.transact(tr);
-      assert(write.ok);
-    }
+    const tr1 = await session.transact(Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v1]),
+    }));
+    assert(tr1.ok);
+    const c1 = Commit.toRevision(tr1.ok);
+
+    const tr2 = session.transact(Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v2]),
+    }));
+    assert(tr2.ok);
+    const c2 = Commit.toRevision(tr2.ok);
+
+    const tr3 = session.transact(Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v3]),
+    }));
+    assert(tr3.ok);
+    const c3 = Commit.toRevision(tr3.ok);
 
     // We'll use a schema selector to exclude the name from the address, since we already have that
     const schemaSelector: SchemaSelector = {
@@ -1466,6 +1492,7 @@ test(
               }],
             },
           },
+          since: c3.since,
         },
       },
     };
@@ -1499,6 +1526,7 @@ test(
     });
     const write = await session.transact(tr);
     assert(write.ok);
+    const commit = Commit.toRevision(write.ok);
 
     const schemaSelector: SchemaSelector = {
       [doc]: {
@@ -1548,6 +1576,7 @@ test(
           is: {
             "value": { "left": { "name": "Alice" } },
           },
+          since: commit.since,
         },
       },
     };
@@ -1588,6 +1617,7 @@ test(
     });
     const write = await session.transact(tr);
     assert(write.ok);
+    const commit = Commit.toRevision(write.ok);
 
     const schemaSelector: SchemaSelector = {
       [doc]: {
@@ -1657,6 +1687,7 @@ test(
               ],
             },
           },
+          since: commit.since,
         },
       },
     };
@@ -1709,6 +1740,7 @@ test(
     });
     const write = await session.transact(tr);
     assert(write.ok);
+    const commit = Commit.toRevision(write.ok);
 
     // We'll use a schema selector to grab Bob's name and work address
     const schemaSelector: SchemaSelector = {
@@ -1770,6 +1802,7 @@ test(
               ],
             },
           },
+          since: commit.since,
         },
       },
     };

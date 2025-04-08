@@ -5,13 +5,13 @@ import {
   Changes,
   Clock,
   Command,
+  Commit,
   ConnectionError,
   ConsumerCommandFor,
   ConsumerCommandInvocation,
   ConsumerEffectFor,
   ConsumerInvocationFor,
   ConsumerResultFor,
-  ConsumerSession,
   DID,
   Entity,
   InferOf,
@@ -48,6 +48,7 @@ import { toStringStream } from "./ucan.ts";
 import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
 export * from "./interface.ts";
+import { the as commitType, toRevision } from "./commit.ts";
 export { ChangesBuilder };
 
 export const connect = ({
@@ -530,28 +531,51 @@ class QuerySubscriptionInvocation<
 
     await unsubscribe;
   }
-  override perform(transaction: Transaction<Space>) {
-    const selection = this.selection[this.sub as MemorySpace as Space];
+  override perform(commit: Commit<Space>) {
+    const selection = this.selection[this.space];
     // Here we will collect subset of changes that match the query.
     let differential = null;
 
-    for (const [of, attributes] of Object.entries(transaction.args.changes)) {
-      for (const [the, changes] of Object.entries(attributes)) {
-        const [[cause, change]] = Object.entries(changes);
-        if (change !== true) {
-          const state = Object.entries(selection?.[of as Entity]?.[the] ?? {});
-          const [current] = state.length > 0 ? state[0] : [];
-          if (cause !== current) {
-            for (const pattern of this.patterns) {
-              const match = (!pattern.of || pattern.of === of) &&
-                (!pattern.the || pattern.the === the) &&
-                (!pattern.cause || pattern.cause === cause);
+    const fact = toRevision(commit);
 
-              if (match) {
-                differential = differential ?? {};
-                ChangesBuilder.set(differential, [of], the, {
-                  [cause]: change,
-                });
+    const { the, of, is } = fact;
+    const cause = fact.cause.toString();
+    const { transaction, since } = is;
+    for (const pattern of this.patterns) {
+      const match = (!pattern.of || pattern.of === of) &&
+        (!pattern.the || pattern.the === the) &&
+        (!pattern.cause || pattern.cause === cause);
+
+      if (match) {
+        differential = differential ?? {};
+        ChangesBuilder.set(differential, [of], the, {
+          [cause]: {
+            is,
+            since,
+          },
+        });
+      }
+
+      for (const [of, attributes] of Object.entries(transaction.args.changes)) {
+        for (const [the, changes] of Object.entries(attributes)) {
+          const [[cause, change]] = Object.entries(changes);
+          if (change !== true) {
+            const state = Object.entries(
+              selection?.[of as Entity]?.[the] ?? {},
+            );
+            const [current] = state.length > 0 ? state[0] : [];
+            if (cause !== current) {
+              for (const pattern of this.patterns) {
+                const match = (!pattern.of || pattern.of === of) &&
+                  (!pattern.the || pattern.the === the) &&
+                  (!pattern.cause || pattern.cause === cause);
+
+                if (match) {
+                  differential = differential ?? {};
+                  ChangesBuilder.set(differential, [of], the, {
+                    [cause]: { ...change, since },
+                  });
+                }
               }
             }
           }
@@ -561,7 +585,7 @@ class QuerySubscriptionInvocation<
 
     if (differential) {
       this.query.integrate(differential);
-      this.integrate({ [transaction.sub]: differential } as Selection<Space>);
+      this.integrate({ [this.space]: differential } as Selection<Space>);
     }
 
     return { ok: {} };

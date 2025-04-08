@@ -422,7 +422,9 @@ const select = <Space extends MemorySpace>(
             selection,
             [row.of, row.the],
             row.cause ?? refer(unclaimed(row)).toString(),
-            row.is ? { is: JSON.parse(row.is) } : {},
+            row.is
+              ? { is: JSON.parse(row.is), since: row.since }
+              : { since: row.since },
           );
         }
       }
@@ -445,6 +447,7 @@ export type SelectedFact = {
   of: Entity;
   cause: Cause;
   is?: JSONValue;
+  since: number;
 };
 
 export const SelectAll = "_";
@@ -466,6 +469,7 @@ export const selectFacts = function* <Space extends MemorySpace>(
       of: row.of,
       cause: row.cause ?? refer(unclaimed(row)).toString() as Cause,
       is: row.is ? JSON.parse(row.is) as JSONValue : undefined,
+      since: row.since,
     };
   }
 };

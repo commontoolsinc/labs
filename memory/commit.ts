@@ -1,11 +1,16 @@
 import type {
   Assertion,
+  Commit,
   CommitData,
+  CommitFact,
+  Fact,
   MemorySpace,
   Reference,
+  Revision,
   Transaction,
 } from "./interface.ts";
 import { assert } from "./fact.ts";
+import { fromString } from "merkle-reference";
 
 export const the = "application/commit+json" as const;
 export const create = <Space extends MemorySpace>({
@@ -28,3 +33,44 @@ export const create = <Space extends MemorySpace>({
     },
     cause,
   });
+
+export const toRevision = (
+  commit: Commit,
+): Revision<CommitFact> => {
+  const [[space, attributes]] = Object.entries(commit);
+  const [[cause, { is }]] = Object.entries(attributes[the]);
+
+  return {
+    ...assert({
+      the,
+      of: space as MemorySpace,
+      is,
+      cause: fromString(cause) as Reference<Fact>,
+    }),
+    since: is.since,
+  };
+};
+
+/**
+ * Takes a `Commit` and returns all the changes as an array of fact revisions,
+ * where the first one is the commit itself.
+ */
+export const toChanges = function* (
+  source: Commit,
+): Iterable<Revision<Fact>> {
+  const commit = toRevision(source);
+  const { since, transaction } = commit.is;
+  for (const [of, attributes] of Object.entries(transaction.args.changes)) {
+    for (const [the, revesion] of Object.entries(attributes)) {
+      for (const [cause, state] of Object.entries(revesion)) {
+        if (state !== true) {
+          const { is } = state;
+          const change = is == null
+            ? { the, of, cause: fromString(cause), since }
+            : { the, of, is, cause: fromString(cause), since };
+          yield change as Revision<Fact>;
+        }
+      }
+    }
+  }
+};

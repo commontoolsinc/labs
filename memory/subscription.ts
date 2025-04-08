@@ -1,72 +1,95 @@
 import {
   Cause,
+  Commit,
   Entity,
   MemorySpace,
   SchemaSelector,
   Selector,
   The,
-  Transaction,
 } from "./interface.ts";
+import { the as commitType } from "./commit.ts";
 
-export const match = (transaction: Transaction, watched: Set<string>) => {
-  for (const [of, attributes] of Object.entries(transaction.args.changes)) {
-    for (const [the, changes] of Object.entries(attributes)) {
-      for (const change of Object.values(changes)) {
-        // If `change == true` we simply confirm that state has not changed
-        // so we don't need to notify those subscribers.
-        if (change !== true) {
-          const watches =
-            watched.has(formatAddress(transaction.sub, { the, of })) ||
-            watched.has(formatAddress(transaction.sub, { the })) ||
-            watched.has(formatAddress(transaction.sub, { of })) ||
-            watched.has(formatAddress(transaction.sub, {}));
+export const match = (commit: Commit, watched: Set<string>) => {
+  for (const at of Object.keys(commit) as MemorySpace[]) {
+    const changes = commit[at][commitType] ?? {};
+    for (const { is: { transaction } } of Object.values(changes)) {
+      // If commit on this space are watched we have a match
+      if (matchAddress(watched, { the: commitType, of: at, at })) {
+        return true;
+      }
 
-          if (watches) {
-            return true;
+      // Otherwise we consider individual in the commit transaction to figure
+      // out if we have a match.
+      for (const [of, attributes] of Object.entries(transaction.args.changes)) {
+        for (const [the, changes] of Object.entries(attributes)) {
+          for (const change of Object.values(changes)) {
+            // If `change == true` we simply confirm that state has not changed
+            // so we don't need to notify those subscribers.
+            if (
+              change !== true &&
+              matchAddress(watched, { at: transaction.sub, the, of })
+            ) {
+              return true;
+            }
           }
         }
       }
     }
   }
+
   return false;
 };
+
+const matchAddress = (
+  watched: Set<string>,
+  { at, the, of }: { the: string; of: string; at: MemorySpace },
+) =>
+  watched.has(formatAddress({ at, the, of })) ||
+  watched.has(formatAddress({ at, the })) ||
+  watched.has(formatAddress({ at, of })) ||
+  watched.has(formatAddress({ at }));
+
+export const ANY = "_";
 
 export const channels = function* (
   space: MemorySpace,
   selector: Selector | SchemaSelector,
 ) {
-  const all = [["_", {}]] as const;
+  const all = [[ANY, {}]] as const;
   const entities = Object.entries(selector);
   for (const [of, attributes] of entities.length > 0 ? entities : all) {
     const selector = Object.entries(attributes);
     for (const [the] of selector.length > 0 ? selector : all) {
-      yield formatAddress(space, { the, of });
+      yield formatAddress({ at: space, the, of });
     }
   }
 };
 
 export const fromSelector = function* (selector: Selector | SchemaSelector) {
-  const all = [[undefined, {}]] as const;
+  const all = [[ANY, {}]] as const;
   const entities = Object.entries(selector);
   for (const [of, attributes] of entities.length > 0 ? entities : all) {
     const selector = Object.entries(attributes);
-    for (const [the, members] of selector.length > 0 ? selector : all) { // type checking is confused here
+    for (const [the, members] of selector.length > 0 ? selector : all) {
       // type checking is confused here, so we double test
-      if (members === undefined || members === null) {
+      if (members == null) {
         continue;
       }
-      const causes = Object.keys(members).filter((c) => c !== "_");
+
+      const selector = Object.keys(members);
       for (
-        const cause of causes.length > 0 ? causes : [undefined]
+        const cause of selector.length > 0 ? selector : [ANY]
       ) {
         const selector: { of?: Entity; the?: The; cause?: Cause } = {};
-        if (of) {
+        if (of !== ANY) {
           selector.of = of as Entity;
         }
-        if (the) {
+
+        if (the !== ANY) {
           selector.the = the as The;
         }
-        if (cause) {
+
+        if (cause !== ANY) {
           selector.cause = cause as Cause;
         }
         yield selector;
@@ -76,6 +99,9 @@ export const fromSelector = function* (selector: Selector | SchemaSelector) {
 };
 
 export const formatAddress = (
-  space: MemorySpace,
-  { of = "_", the = "_" }: { the?: string; of?: string },
-) => `watch:///${space}/${of}/${the}`;
+  { at = "_", of = "_", the = "_" }: {
+    at?: string;
+    the?: string;
+    of?: string;
+  },
+) => `watch:///${at}/${of}/${the}`;

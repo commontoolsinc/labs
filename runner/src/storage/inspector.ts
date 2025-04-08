@@ -289,7 +289,10 @@ const receive = (
 ): Model => {
   switch (receipt.the) {
     case "task/effect":
-      return state;
+      return integrate(state, time, {
+        url: receipt.of,
+        value: receipt.is as unknown as JSONValue,
+      });
     case "task/return":
       return complete(state, time, receipt);
     default: {

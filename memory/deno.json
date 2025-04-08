@@ -29,7 +29,9 @@
     "./interface": "./interface.ts",
     "./fact": "./fact.ts",
     "./changes": "./changes.ts",
+    "./selection": "./selection.ts",
     "./consumer": "./consumer.ts",
+    "./commit": "./commit.ts",
     "./codec": "./codec.ts",
     "./reference": "./reference.ts"
   },

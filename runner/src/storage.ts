@@ -10,6 +10,7 @@ import { idle } from "./scheduler.ts";
 import { isStatic, markAsStatic } from "@commontools/builder";
 import { StorageProvider, StorageValue } from "./storage/base.ts";
 import { RemoteStorageProvider } from "./storage/remote.ts";
+import { Provider as CachedStorageProvider } from "./storage/cache.ts";
 import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
 import { VolatileStorageProvider } from "./storage/volatile.ts";
 import { Signer } from "@commontools/identity";
@@ -320,6 +321,17 @@ class StorageImpl implements Storage {
         });
       } else if (type === "volatile") {
         provider = new VolatileStorageProvider(space);
+      } else if (type === "cached") {
+        if (!this.remoteStorageUrl) {
+          throw new Error("No remote storage URL set");
+        }
+
+        provider = new CachedStorageProvider({
+          id: this.id,
+          address: new URL("/api/storage/memory", this.remoteStorageUrl!),
+          space: space as `did:${string}:${string}`,
+          as: this.signer,
+        });
       } else {
         throw new Error(`Unknown storage type: ${type}`);
       }

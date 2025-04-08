@@ -150,7 +150,7 @@ export type Protocol<Space extends MemorySpace = MemorySpace> = {
           source: Subscribe<Space>["args"],
         ): Task<
           Result<Unit, SystemError | AuthorizationError>,
-          Transaction<Space>
+          Commit<Space>
         >;
         unsubscribe(
           source: Unsubscribe<Space>["args"],
@@ -238,9 +238,6 @@ export type Method<
     perform(effect: Effect): void;
   };
 };
-
-type PC = ProviderCommand<Protocol>;
-type CCI = ConsumerCommandInvocation<Protocol>;
 
 export type InferOf<T> = keyof T extends DID ? keyof T : never;
 
@@ -473,7 +470,7 @@ export interface MemorySession<Space extends MemorySpace = MemorySpace>
 }
 
 export interface Subscriber<Space extends MemorySpace = MemorySpace> {
-  transact(transaction: Transaction<Space>): AwaitResult<Unit, SystemError>;
+  commit(commit: Commit<Space>): AwaitResult<Unit, SystemError>;
   close(): AwaitResult<Unit, SystemError>;
 }
 
@@ -602,6 +599,8 @@ export type Statement<
 
 export type State = Fact | Unclaimed;
 
+export type Revision<T = Unit> = T & { since: number };
+
 export type Assert = {
   assert: Assertion;
   retract?: undefined;
@@ -620,13 +619,6 @@ export type Claim = {
   retract?: undefined;
 };
 
-// export interface Commit extends Assertion {
-//   the: "application/commit+json";
-//   is: {
-//     since: number;
-//     transaction: Transaction;
-//   };
-// }
 export type Commit<Subject extends string = MemorySpace> = {
   [of in Subject]: {
     ["application/commit+json"]: {
@@ -641,6 +633,12 @@ export type CommitData = {
   since: number;
   transaction: Transaction;
 };
+
+export type CommitFact<Subject extends MemorySpace = MemorySpace> = Assertion<
+  "application/commit+json",
+  Subject,
+  CommitData
+>;
 
 export type ClaimFact = true;
 
@@ -668,7 +666,10 @@ export type FactSelection<
 > = {
   [of in Of]: {
     [the in T]: {
-      [cause: Cause]: RetractFact | AssertFact<Is>;
+      [cause: Cause]: {
+        is?: Is;
+        since: number;
+      };
     };
   };
 };

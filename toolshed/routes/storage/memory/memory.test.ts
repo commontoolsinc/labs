@@ -9,8 +9,8 @@ import {
   Fact,
   TransactionBuilder,
 } from "@commontools/memory";
+import * as Commit from "@commontools/memory/commit";
 import { Identity } from "@commontools/identity";
-import * as FS from "@std/fs";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
@@ -103,11 +103,12 @@ Deno.test("test consumer", async (t) => {
     });
 
     assert(tr.ok);
+    const commit = Commit.toRevision(tr.ok);
 
     const message = await subscription.getReader().read();
     assertEquals(message.done, false);
 
-    assertEquals(query.facts, [fact]);
+    assertEquals(query.facts, [{ ...fact, since: commit.is.since }]);
 
     session.close();
   } finally {

@@ -3,6 +3,7 @@ import * as Memory from "../memory.ts";
 import * as Fact from "../fact.ts";
 import * as Transaction from "../transaction.ts";
 import * as Changes from "../changes.ts";
+import * as Selection from "../selection.ts";
 import * as Commit from "../commit.ts";
 import * as Query from "../query.ts";
 import { refer } from "merkle-reference";
@@ -97,7 +98,7 @@ test("create new memory", memory, async (session) => {
       }),
     ),
     {
-      ok: { [space]: Changes.from([v1]) },
+      ok: { [space]: Selection.from([[v1, c1.is.since]]) },
     },
     "fact was added to the memory",
   );
@@ -173,13 +174,15 @@ test("list empty memory", memory, async (session) => {
 test("list single fact", memory, async (session) => {
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
   // First create a fact
-  await session.transact(
+  const tr1 = await session.transact(
     Transaction.create({
       issuer: alice,
       subject: space,
       changes: Changes.from([v1]),
     }),
   );
+  assert(tr1.ok);
+  const c1 = Commit.toRevision(tr1.ok);
 
   const result = await session.query(
     Query.create({
@@ -192,7 +195,7 @@ test("list single fact", memory, async (session) => {
   assertEquals(
     result,
     {
-      ok: { [space]: Changes.from([v1]) },
+      ok: { [space]: Selection.from([[v1, c1.is.since]]) },
     },
     "lists single fact",
   );
@@ -207,13 +210,15 @@ test("list multiple facts", memory, async (session) => {
   ];
 
   // Create multiple facts
-  await session.transact(
+  const tr1 = await session.transact(
     Transaction.create({
       issuer: alice,
       subject: space,
       changes: Changes.from(facts),
     }),
   );
+  assert(tr1.ok);
+  const c1 = Commit.toRevision(tr1.ok);
 
   const result = await session.query(
     Query.create({
@@ -226,7 +231,7 @@ test("list multiple facts", memory, async (session) => {
   assertEquals(
     result,
     {
-      ok: { [space]: Changes.from(facts) },
+      ok: { [space]: Selection.from(facts.map((fact) => [fact, c1.is.since])) },
     },
     "lists multiple facts",
   );
@@ -235,13 +240,15 @@ test("list multiple facts", memory, async (session) => {
 test("list excludes retracted facts", memory, async (session) => {
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
   // First create and then retract a fact
-  await session.transact(
+  const tr1 = await session.transact(
     Transaction.create({
       issuer: alice,
       subject: space,
       changes: Changes.from([v1]),
     }),
   );
+  assert(tr1.ok);
+  const c1 = Commit.toRevision(tr1.ok);
 
   assertEquals(
     await session.query(
@@ -252,7 +259,7 @@ test("list excludes retracted facts", memory, async (session) => {
       }),
     ),
     {
-      ok: { [space]: Changes.from([v1]) },
+      ok: { [space]: Selection.from([[v1, c1.is.since]]) },
     },
   );
 
@@ -300,7 +307,9 @@ test("list different fact types", memory, async (session) => {
   });
 
   // Create facts of different types
-  await session.transact(tr);
+  const result = await session.transact(tr);
+  assert(result.ok);
+  const c1 = Commit.toRevision(result.ok);
 
   const jsonResult = await session.query(
     Query.create({
@@ -321,7 +330,7 @@ test("list different fact types", memory, async (session) => {
   assertEquals(
     jsonResult,
     {
-      ok: { [space]: Changes.from([json]) },
+      ok: { [space]: Selection.from([[json, c1.is.since]]) },
     },
     "lists json facts",
   );
@@ -330,7 +339,7 @@ test("list different fact types", memory, async (session) => {
     textResult,
     {
       ok: {
-        [space]: Changes.from([text]),
+        [space]: Selection.from([[text, c1.is.since]]),
       },
     },
     "lists text facts",
@@ -342,21 +351,25 @@ test("list facts from different replicas", memory, async (session) => {
   const b = Fact.assert({ the, of: doc, is: { v: 2 } });
 
   // Create facts in different replica spaces
-  await session.transact(
+  const tr1 = await session.transact(
     Transaction.create({
       issuer: alice,
       subject: alice,
       changes: Changes.from([a]),
     }),
   );
+  assert(tr1.ok);
+  const c1 = Commit.toRevision(tr1.ok);
 
-  await session.transact(
+  const tr2 = await session.transact(
     Transaction.create({
       issuer: alice,
       subject: bob,
       changes: Changes.from([b]),
     }),
   );
+  assert(tr2.ok);
+  const c2 = Commit.toRevision(tr2.ok);
 
   const aliceResult = await session.query(
     Query.create({
@@ -377,7 +390,7 @@ test("list facts from different replicas", memory, async (session) => {
   assertEquals(
     aliceResult,
     {
-      ok: { [alice]: Changes.from([a]) },
+      ok: { [alice]: Selection.from([[a, c1.is.since]]) },
     },
     "lists alice's facts",
   );
@@ -385,7 +398,7 @@ test("list facts from different replicas", memory, async (session) => {
   assertEquals(
     bobResult,
     {
-      ok: { [bob]: Changes.from([b]) },
+      ok: { [bob]: Selection.from([[b, c2.is.since]]) },
     },
     "lists bob's facts",
   );
