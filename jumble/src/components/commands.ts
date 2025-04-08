@@ -9,13 +9,8 @@ import {
   createWorkflowForm,
   renameCharm,
   WorkflowForm,
-  WorkflowType,
 } from "@commontools/charm";
-import {
-  executeWorkflow,
-  ExecutionPlan,
-  modifyCharm,
-} from "@commontools/charm";
+import { executeWorkflow, modifyCharm } from "@commontools/charm";
 // Import NavigateFunction from our types rather than directly from react-router-dom
 import type { NavigateFunction } from "react-router-dom";
 import { charmId } from "@/utils/charms.ts";
@@ -171,14 +166,14 @@ export interface SelectOption {
   value: any;
 }
 
-async function handleExecuteCharmAction(deps: CommandContext) {
-  deps.setLoading(true);
+async function handleExecuteCharmAction(ctx: CommandContext) {
+  ctx.setLoading(true);
   try {
-    if (!deps.focusedCharmId || !deps.focusedReplicaId) {
+    if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
       throw new Error("No charm is focused");
     }
 
-    const charm = await deps.charmManager.get(deps.focusedCharmId);
+    const charm = await ctx.charmManager.get(ctx.focusedCharmId);
     if (!charm) {
       throw new Error("Failed to load charm");
     }
@@ -188,7 +183,7 @@ async function handleExecuteCharmAction(deps: CommandContext) {
     const actions = entries.filter(([_, value]) => isStream(value));
 
     if (actions.length === 0) {
-      deps.setOpen(false);
+      ctx.setOpen(false);
       return;
     }
 
@@ -203,7 +198,7 @@ async function handleExecuteCharmAction(deps: CommandContext) {
     });
 
     // Show selection menu for actions
-    deps.setMode({
+    ctx.setMode({
       type: "select",
       command: {
         id: "charm-action-select",
@@ -211,7 +206,7 @@ async function handleExecuteCharmAction(deps: CommandContext) {
         title: "Select Action to Execute",
         handler: (selectedAction) => {
           // Prompt for input parameters for the action
-          deps.setMode({
+          ctx.setMode({
             type: "input",
             command: {
               id: "action-params",
@@ -226,13 +221,13 @@ async function handleExecuteCharmAction(deps: CommandContext) {
                     `Executed action ${selectedAction.key} with input:`,
                     input,
                   );
-                  deps.setOpen(false);
+                  ctx.setOpen(false);
                 } catch (error) {
                   console.error(
                     `Error executing action ${selectedAction.key}:`,
                     error,
                   );
-                  deps.setOpen(false);
+                  ctx.setOpen(false);
                 }
               },
             },
@@ -244,26 +239,26 @@ async function handleExecuteCharmAction(deps: CommandContext) {
     });
   } catch (error) {
     console.error("Error fetching charm actions:", error);
-    deps.addJobMessage(
-      deps.startJob("Action Error"),
+    ctx.addJobMessage(
+      ctx.startJob("Action Error"),
       `Error: ${error instanceof Error ? error.message : String(error)}`,
     );
   } finally {
-    deps.setLoading(false);
+    ctx.setLoading(false);
   }
 }
 
-function navigateToCharm(deps: CommandContext, charm: Charm | string) {
+function navigateToCharm(ctx: CommandContext, charm: Charm | string) {
   // Navigate to the new charm
   const id = typeof charm === "string" ? charm : charmId(charm);
-  if (!id || !deps.focusedReplicaId) {
+  if (!id || !ctx.focusedReplicaId) {
     throw new Error("Missing charm ID or replica name");
   }
 
-  deps.navigate(
+  ctx.navigate(
     createPath("charmShow", {
       charmId: id,
-      replicaName: deps.focusedReplicaId,
+      replicaName: ctx.focusedReplicaId,
     }),
   );
 }
@@ -271,29 +266,29 @@ function navigateToCharm(deps: CommandContext, charm: Charm | string) {
 // Command handlers
 // Unified handler for charm operations using the imagine function
 async function handleModifyCharm(
-  deps: CommandContext,
+  ctx: CommandContext,
   input: string,
   options?: { model: string },
 ) {
   if (!input) return;
-  deps.setLoading(true);
+  ctx.setLoading(true);
 
   try {
     let newCharm;
 
     // bf: I suspect this is pointless and already handled in executeWorkflow
-    if (deps.focusedCharmId) {
+    if (ctx.focusedCharmId) {
       // Get the current charm
-      const charm = await deps.charmManager.get(deps.focusedCharmId, false);
+      const charm = await ctx.charmManager.get(ctx.focusedCharmId, false);
       if (!charm) {
         throw new Error("Failed to load charm");
       }
 
       newCharm = await modifyCharm(
-        deps.charmManager,
+        ctx.charmManager,
         input,
         charm,
-        deps.previewForm,
+        ctx.previewForm,
         options?.model,
       );
     } else {
@@ -304,47 +299,47 @@ async function handleModifyCharm(
       throw new Error("Failed to create charm");
     }
 
-    navigateToCharm(deps, newCharm.get());
+    navigateToCharm(ctx, newCharm.get());
   } catch (error) {
     console.error("Imagine operation error:", error);
   } finally {
-    deps.setLoading(false);
-    deps.setOpen(false);
+    ctx.setLoading(false);
+    ctx.setOpen(false);
   }
 }
 
 async function handleNewCharm(
-  deps: CommandContext,
+  ctx: CommandContext,
   input: string,
   options?: { model: string },
 ) {
   if (!input) return;
-  deps.setLoading(true);
+  ctx.setLoading(true);
 
   try {
     const newCharm = await executeWorkflow(
-      deps.charmManager,
+      ctx.charmManager,
       input,
       {
-        prefill: deps.previewForm,
+        prefill: ctx.previewForm,
         model: options?.model,
       },
     );
 
-    navigateToCharm(deps, newCharm.get());
+    navigateToCharm(ctx, newCharm.get());
   } catch (error) {
     console.error("New charm operation error:", error);
   } finally {
-    deps.setLoading(false);
-    deps.setOpen(false);
+    ctx.setLoading(false);
+    ctx.setOpen(false);
   }
 }
 
-async function handleSearchCharms(deps: CommandContext) {
-  deps.setLoading(true);
+async function handleSearchCharms(ctx: CommandContext) {
+  ctx.setLoading(true);
   try {
-    const charms = deps.charmManager.getCharms();
-    await deps.charmManager.sync(charms);
+    const charms = ctx.charmManager.getCharms();
+    await ctx.charmManager.sync(charms);
     const results = charms.get().map((charm) => {
       const data = charm.get();
       const title = data?.[NAME] ?? "Untitled";
@@ -354,15 +349,15 @@ async function handleSearchCharms(deps: CommandContext) {
         value: charm.entityId!,
       };
     });
-    deps.setMode({
+    ctx.setMode({
       type: "select",
       command: {
         id: "charm-select",
         type: "select",
         title: "Select Charm",
         handler: (selected) => {
-          navigateToCharm(deps, selected);
-          deps.setOpen(false);
+          navigateToCharm(ctx, selected);
+          ctx.setOpen(false);
         },
       },
       options: results,
@@ -370,36 +365,36 @@ async function handleSearchCharms(deps: CommandContext) {
   } catch (error) {
     console.error("Search charms error:", error);
   } finally {
-    deps.setLoading(false);
+    ctx.setLoading(false);
   }
 }
 
 async function handleRenameCharm(
-  deps: CommandContext,
+  ctx: CommandContext,
   input: string | undefined,
 ) {
-  if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
-  deps.setLoading(true);
+  if (!input || !ctx.focusedCharmId || !ctx.focusedReplicaId) return;
+  ctx.setLoading(true);
 
-  await renameCharm(deps.charmManager, deps.focusedCharmId, input);
+  await renameCharm(ctx.charmManager, ctx.focusedCharmId, input);
 
-  deps.setLoading(false);
-  deps.setOpen(false);
+  ctx.setLoading(false);
+  ctx.setOpen(false);
 }
 
-async function handleDeleteCharm(deps: CommandContext) {
-  if (!deps.focusedCharmId) return;
-  const result = await deps.charmManager.remove(deps.focusedCharmId);
-  if (result) deps.navigate(ROUTES.root);
-  else deps.setOpen(false);
+async function handleDeleteCharm(ctx: CommandContext) {
+  if (!ctx.focusedCharmId) return;
+  const result = await ctx.charmManager.remove(ctx.focusedCharmId);
+  if (result) ctx.navigate(ROUTES.root);
+  else ctx.setOpen(false);
 }
 
-function handleStartCounterJob(deps: CommandContext) {
-  const jobId = deps.startJob("Counter Job");
+function handleStartCounterJob(ctx: CommandContext) {
+  const jobId = ctx.startJob("Counter Job");
   console.log("Started counter job with ID:", jobId);
 
   const interval = setInterval(() => {
-    const job = deps.listJobs().find((j) => j.id === jobId);
+    const job = ctx.listJobs().find((j) => j.id === jobId);
     console.log("Current job state:", job);
 
     if (!job || job.status !== "running") {
@@ -414,24 +409,24 @@ function handleStartCounterJob(deps: CommandContext) {
     const newCount = currentCount + 1;
     console.log("Updating count from", currentCount, "to", newCount);
 
-    deps.addJobMessage(jobId, `Count: ${newCount}`);
+    ctx.addJobMessage(jobId, `Count: ${newCount}`);
     console.log(`Count: ${newCount}`);
-    deps.updateJobProgress(jobId, (newCount % 100) / 100);
+    ctx.updateJobProgress(jobId, (newCount % 100) / 100);
 
     if (newCount >= 1000) {
       console.log("Reached max count, stopping job");
-      deps.stopJob(jobId);
+      ctx.stopJob(jobId);
       clearInterval(interval);
     }
   }, 1000);
 
   console.log("Adding initial message");
-  deps.addJobMessage(jobId, "Count: 0");
-  deps.setOpen(false);
+  ctx.addJobMessage(jobId, "Count: 0");
+  ctx.setOpen(false);
 }
 
-async function handleImportJSON(deps: CommandContext) {
-  deps.setLoading(true);
+async function handleImportJSON(ctx: CommandContext) {
+  ctx.setLoading(true);
   try {
     const input = document.createElement("input");
     input.type = "file";
@@ -453,18 +448,18 @@ async function handleImportJSON(deps: CommandContext) {
     const form = createWorkflowForm({ input: title });
     form.input.references = data;
 
-    const newCharm = await castNewRecipe(deps.charmManager, form);
+    const newCharm = await castNewRecipe(ctx.charmManager, form);
     if (!newCharm) throw new Error("Failed to create new charm");
 
-    navigateToCharm(deps, newCharm);
+    navigateToCharm(ctx, newCharm);
   } finally {
-    deps.setLoading(false);
-    deps.setOpen(false);
+    ctx.setLoading(false);
+    ctx.setOpen(false);
   }
 }
 
-async function handleLoadRecipe(deps: CommandContext) {
-  deps.setLoading(true);
+async function handleLoadRecipe(ctx: CommandContext) {
+  ctx.setLoading(true);
   try {
     const input = document.createElement("input");
     input.type = "file";
@@ -480,7 +475,7 @@ async function handleLoadRecipe(deps: CommandContext) {
 
     const src = await file.text();
     const newCharm = await compileAndRunRecipe(
-      deps.charmManager,
+      ctx.charmManager,
       src,
       "imported",
       {},
@@ -489,28 +484,28 @@ async function handleLoadRecipe(deps: CommandContext) {
       throw new Error("Failed to cast charm");
     }
 
-    navigateToCharm(deps, newCharm);
+    navigateToCharm(ctx, newCharm);
   } finally {
-    deps.setLoading(false);
-    deps.setOpen(false);
+    ctx.setLoading(false);
+    ctx.setOpen(false);
   }
 }
 
-function handleIndexCharms(deps: CommandContext) {
-  startCharmIndexing(deps.charmManager, {
-    startJob: deps.startJob,
-    stopJob: deps.stopJob,
-    addJobMessage: deps.addJobMessage,
-    updateJobProgress: deps.updateJobProgress,
-    listJobs: deps.listJobs,
+function handleIndexCharms(ctx: CommandContext) {
+  startCharmIndexing(ctx.charmManager, {
+    startJob: ctx.startJob,
+    stopJob: ctx.stopJob,
+    addJobMessage: ctx.addJobMessage,
+    updateJobProgress: ctx.updateJobProgress,
+    listJobs: ctx.listJobs,
   });
-  deps.setOpen(false);
+  ctx.setOpen(false);
 }
 
-async function handleUseDataInSpell(deps: CommandContext) {
-  deps.setLoading(true);
+async function handleUseDataInSpell(ctx: CommandContext) {
+  ctx.setLoading(true);
   try {
-    if (!deps.focusedCharmId || !deps.focusedReplicaId) {
+    if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
       return;
     }
 
@@ -520,12 +515,12 @@ async function handleUseDataInSpell(deps: CommandContext) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        charmId: deps.focusedCharmId,
-        replica: deps.focusedReplicaId,
+        charmId: ctx.focusedCharmId,
+        replica: ctx.focusedReplicaId,
       }),
     });
 
-    deps.setLoading(false);
+    ctx.setLoading(false);
 
     const result = await response.json();
     const compatibleSpells: Record<string, Spell> = result.compatibleSpells;
@@ -536,7 +531,7 @@ async function handleUseDataInSpell(deps: CommandContext) {
       value: { ...spell, id: spellId },
     }));
 
-    deps.setMode({
+    ctx.setMode({
       type: "select",
       command: {
         id: "spell-select",
@@ -544,20 +539,20 @@ async function handleUseDataInSpell(deps: CommandContext) {
         title: "Select Spell to Use",
         handler: async (selectedSpell) => {
           console.log("Selected spell:", selectedSpell);
-          if (!deps.focusedCharmId) {
+          if (!ctx.focusedCharmId) {
             throw new Error("No charm selected");
           }
 
-          const charm = await deps.charmManager.get(deps.focusedCharmId);
+          const charm = await ctx.charmManager.get(ctx.focusedCharmId);
           if (!charm) throw new Error("No current charm found");
-          const argument = deps.charmManager.getArgument(charm);
+          const argument = ctx.charmManager.getArgument(charm);
           if (!argument) {
             throw new Error("No sourceCell/argument found for current charm");
           }
 
-          deps.setLoading(true);
+          ctx.setLoading(true);
           const newCharm = await castSpellAsCharm(
-            deps.charmManager,
+            ctx.charmManager,
             selectedSpell.id,
             argument,
           );
@@ -565,9 +560,9 @@ async function handleUseDataInSpell(deps: CommandContext) {
           if (!newCharm) {
             throw new Error("No source cell found");
           }
-          navigateToCharm(deps, newCharm);
-          deps.setOpen(false);
-          deps.setLoading(false);
+          navigateToCharm(ctx, newCharm);
+          ctx.setOpen(false);
+          ctx.setLoading(false);
         },
       },
       options: spells,
@@ -575,14 +570,14 @@ async function handleUseDataInSpell(deps: CommandContext) {
   } catch (e) {
     console.error("Error casting spell:", e);
   } finally {
-    deps.setLoading(false);
+    ctx.setLoading(false);
   }
 }
 
-async function handleUseSpellOnOtherData(deps: CommandContext) {
-  deps.setLoading(true);
+async function handleUseSpellOnOtherData(ctx: CommandContext) {
+  ctx.setLoading(true);
   try {
-    if (!deps.focusedCharmId || !deps.focusedReplicaId) {
+    if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
       return;
     }
 
@@ -592,8 +587,8 @@ async function handleUseSpellOnOtherData(deps: CommandContext) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        charmId: deps.focusedCharmId,
-        replica: deps.focusedReplicaId,
+        charmId: ctx.focusedCharmId,
+        replica: ctx.focusedReplicaId,
       }),
     });
 
@@ -605,7 +600,7 @@ async function handleUseSpellOnOtherData(deps: CommandContext) {
     //   }
     // }
 
-    deps.setLoading(false);
+    ctx.setLoading(false);
 
     const result = await response.json();
     const spellId: string = result.spellId;
@@ -619,7 +614,7 @@ async function handleUseSpellOnOtherData(deps: CommandContext) {
       value: { id, cell },
     }));
 
-    deps.setMode({
+    ctx.setMode({
       type: "select",
       command: {
         id: "charm-select",
@@ -631,25 +626,25 @@ async function handleUseSpellOnOtherData(deps: CommandContext) {
             throw new Error("No cell selected");
           }
 
-          deps.setLoading(true);
+          ctx.setLoading(true);
 
           console.log("Syncing blob...");
           // TODO(ben,seefeld): We might want spellcaster to return docId/path
           // pairs and use those directly instead of hardcoding `argument` here.
-          const argument = await deps.charmManager.getCellById({
+          const argument = await ctx.charmManager.getCellById({
             "/": selectedCell.id,
           }, ["argument"]);
 
           const newCharm = await castSpellAsCharm(
-            deps.charmManager,
+            ctx.charmManager,
             spellId,
             argument,
           );
           if (!newCharm) throw new Error("Failed to cast spell");
 
-          navigateToCharm(deps, newCharm);
-          deps.setOpen(false);
-          deps.setLoading(false);
+          navigateToCharm(ctx, newCharm);
+          ctx.setOpen(false);
+          ctx.setLoading(false);
         },
       },
       options: charms,
@@ -657,56 +652,56 @@ async function handleUseSpellOnOtherData(deps: CommandContext) {
   } catch (e) {
     console.error("Error casting spell:", e);
   } finally {
-    deps.setLoading(false);
+    ctx.setLoading(false);
   }
 }
 
 async function handleAddRemoteRecipe(
-  deps: CommandContext,
+  ctx: CommandContext,
   filename: string,
   name: string,
 ) {
-  deps.setLoading(true);
+  ctx.setLoading(true);
   try {
     const newCharm = await addGithubRecipe(
-      deps.charmManager,
+      ctx.charmManager,
       filename,
       name,
       {},
     );
 
-    navigateToCharm(deps, newCharm);
+    navigateToCharm(ctx, newCharm);
   } catch (error) {
     console.error(`Error loading ${filename}:`, error);
   } finally {
-    deps.setLoading(false);
-    deps.setOpen(false);
+    ctx.setLoading(false);
+    ctx.setOpen(false);
   }
 }
 
-export function getCommands(deps: CommandContext): CommandItem[] {
+export function getCommands(ctx: CommandContext): CommandItem[] {
   return [
     {
       id: "new-charm",
       type: "input",
       title: "New Charm",
       group: "Create",
-      handler: (input) => handleNewCharm(deps, input),
+      handler: (input) => handleNewCharm(ctx, input),
     },
     {
       id: "search-charms",
       type: "action",
       title: "Search Charms",
       group: "Navigation",
-      handler: () => handleSearchCharms(deps),
+      handler: () => handleSearchCharms(ctx),
     },
     {
       id: "execute-charm-action",
       type: "action",
       title: "Execute Charm Action",
       group: "Action",
-      predicate: !!deps.focusedCharmId,
-      handler: () => handleExecuteCharmAction(deps),
+      predicate: !!ctx.focusedCharmId,
+      handler: () => handleExecuteCharmAction(ctx),
     },
     {
       id: "open-in-stack",
@@ -714,10 +709,10 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       title: "Open in Stack",
       group: "Navigation",
       handler: async () => {
-        deps.setLoading(true);
+        ctx.setLoading(true);
         try {
-          const charms = deps.charmManager.getCharms();
-          await deps.charmManager.sync(charms);
+          const charms = ctx.charmManager.getCharms();
+          await ctx.charmManager.sync(charms);
           const results = charms.get().map((charm) => {
             const data = charm.get();
             const title = data?.[NAME] ?? "Untitled";
@@ -727,15 +722,15 @@ export function getCommands(deps: CommandContext): CommandItem[] {
               value: charm.entityId!,
             };
           });
-          deps.setMode({
+          ctx.setMode({
             type: "select",
             command: {
               id: "stack-charm-select",
               type: "select",
               title: "Select Charm for Stack",
               handler: (selected) => {
-                navigateToCharm(deps, selected);
-                deps.setOpen(false);
+                navigateToCharm(ctx, selected);
+                ctx.setOpen(false);
               },
             },
             options: results,
@@ -743,7 +738,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
         } catch (error) {
           console.error("Open in stack error:", error);
         } finally {
-          deps.setLoading(false);
+          ctx.setLoading(false);
         }
       },
     },
@@ -752,21 +747,21 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       type: "menu",
       title: "Spellcaster",
       group: "Create",
-      predicate: !!deps.focusedReplicaId,
+      predicate: !!ctx.focusedReplicaId,
       children: [
         {
           id: "use-data-in-spell",
           type: "action",
           title: "Use Data with...",
-          predicate: !!deps.focusedCharmId,
-          handler: () => handleUseDataInSpell(deps),
+          predicate: !!ctx.focusedCharmId,
+          handler: () => handleUseDataInSpell(ctx),
         },
         {
           id: "use-spell-on-other-data",
           type: "action",
           title: "Re-cast Spell with...",
-          predicate: !!deps.focusedCharmId,
-          handler: () => handleUseSpellOnOtherData(deps),
+          predicate: !!ctx.focusedCharmId,
+          handler: () => handleUseSpellOnOtherData(ctx),
         },
       ],
     },
@@ -775,47 +770,47 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       type: "input",
       title: "Rename Charm",
       group: "Edit",
-      predicate: !!deps.focusedCharmId,
-      handler: (input) => handleRenameCharm(deps, input),
+      predicate: !!ctx.focusedCharmId,
+      handler: (input) => handleRenameCharm(ctx, input),
     },
     {
       id: "edit-recipe",
       type: "input",
       title: `Modify Charm`,
       group: "Edit",
-      predicate: !!deps.focusedCharmId,
+      predicate: !!ctx.focusedCharmId,
       placeholder: "What would you like to change?",
-      handler: (input) => handleModifyCharm(deps, input),
+      handler: (input) => handleModifyCharm(ctx, input),
     },
     {
       id: "delete-charm",
       type: "confirm",
       title: "Delete Charm",
       group: "Edit",
-      predicate: !!deps.focusedCharmId,
+      predicate: !!ctx.focusedCharmId,
       message: "Are you sure you want to delete this charm?",
-      handler: () => handleDeleteCharm(deps),
+      handler: () => handleDeleteCharm(ctx),
     },
     {
       id: "pin-charm",
       type: "action",
       title: "Pin Charm",
       group: "View",
-      predicate: !!deps.focusedCharmId,
+      predicate: !!ctx.focusedCharmId,
       handler: async () => {
-        if (!deps.focusedCharmId || !deps.focusedReplicaId) {
-          deps.setOpen(false);
+        if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
+          ctx.setOpen(false);
           return;
         }
 
-        const charm = await deps.charmManager.get(deps.focusedCharmId);
+        const charm = await ctx.charmManager.get(ctx.focusedCharmId);
         if (!charm) {
-          console.error("Failed to load charm", deps.focusedCharmId);
+          console.error("Failed to load charm", ctx.focusedCharmId);
           return;
         }
 
-        await deps.charmManager.pin(charm);
-        deps.setOpen(false);
+        await ctx.charmManager.pin(charm);
+        ctx.setOpen(false);
       },
     },
     {
@@ -823,21 +818,21 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       type: "action",
       title: "Unpin Charm",
       group: "View",
-      predicate: !!deps.focusedCharmId,
+      predicate: !!ctx.focusedCharmId,
       handler: async () => {
-        if (!deps.focusedCharmId || !deps.focusedReplicaId) {
-          deps.setOpen(false);
+        if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
+          ctx.setOpen(false);
           return;
         }
 
-        const charm = await deps.charmManager.get(deps.focusedCharmId);
+        const charm = await ctx.charmManager.get(ctx.focusedCharmId);
         if (!charm) {
-          console.error("Failed to load charm", deps.focusedCharmId);
+          console.error("Failed to load charm", ctx.focusedCharmId);
           return;
         }
 
-        await deps.charmManager.unpin(charm);
-        deps.setOpen(false);
+        await ctx.charmManager.unpin(charm);
+        ctx.setOpen(false);
       },
     },
     {
@@ -845,19 +840,19 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       type: "action",
       title: "View Detail",
       group: "View",
-      predicate: !!deps.focusedCharmId,
+      predicate: !!ctx.focusedCharmId,
       handler: () => {
-        if (!deps.focusedCharmId || !deps.focusedReplicaId) {
-          deps.setOpen(false);
+        if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
+          ctx.setOpen(false);
           return;
         }
-        deps.navigate(
+        ctx.navigate(
           createPath("charmDetail", {
-            charmId: deps.focusedCharmId,
-            replicaName: deps.focusedReplicaId,
+            charmId: ctx.focusedCharmId,
+            replicaName: ctx.focusedReplicaId,
           }),
         );
-        deps.setOpen(false);
+        ctx.setOpen(false);
       },
     },
     {
@@ -865,23 +860,23 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       type: "action",
       title: "Edit Code",
       group: "View",
-      predicate: !!deps.focusedCharmId,
+      predicate: !!ctx.focusedCharmId,
       handler: () => {
-        if (!deps.focusedCharmId || !deps.focusedReplicaId) {
-          deps.setOpen(false);
+        if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
+          ctx.setOpen(false);
           return;
         }
-        deps.navigate(
+        ctx.navigate(
           createPathWithHash(
             "charmDetail",
             {
-              charmId: deps.focusedCharmId,
-              replicaName: deps.focusedReplicaId,
+              charmId: ctx.focusedCharmId,
+              replicaName: ctx.focusedReplicaId,
             },
             "code",
           ),
         );
-        deps.setOpen(false);
+        ctx.setOpen(false);
       },
     },
     {
@@ -889,23 +884,23 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       type: "action",
       title: "View Backing Data",
       group: "View",
-      predicate: !!deps.focusedCharmId,
+      predicate: !!ctx.focusedCharmId,
       handler: () => {
-        if (!deps.focusedCharmId || !deps.focusedReplicaId) {
-          deps.setOpen(false);
+        if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
+          ctx.setOpen(false);
           return;
         }
-        deps.navigate(
+        ctx.navigate(
           createPathWithHash(
             "charmDetail",
             {
-              charmId: deps.focusedCharmId,
-              replicaName: deps.focusedReplicaId,
+              charmId: ctx.focusedCharmId,
+              replicaName: ctx.focusedReplicaId,
             },
             "data",
           ),
         );
-        deps.setOpen(false);
+        ctx.setOpen(false);
       },
     },
     {
@@ -913,15 +908,15 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       type: "action",
       title: "View Charm",
       group: "View",
-      predicate: !!deps.focusedCharmId,
+      predicate: !!ctx.focusedCharmId,
       handler: () => {
-        if (!deps.focusedCharmId || !deps.focusedReplicaId) {
+        if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
           console.warn("Missing charm ID or replica name");
-          deps.setOpen(false);
+          ctx.setOpen(false);
           return;
         }
-        navigateToCharm(deps, deps.focusedCharmId);
-        deps.setOpen(false);
+        navigateToCharm(ctx, ctx.focusedCharmId);
+        ctx.setOpen(false);
       },
     },
     {
@@ -931,7 +926,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       group: "Navigation",
       handler: () => {
         globalThis.history.back();
-        deps.setOpen(false);
+        ctx.setOpen(false);
       },
     },
     {
@@ -939,14 +934,14 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       type: "action",
       title: "Navigate Home",
       group: "Navigation",
-      predicate: !!deps.focusedReplicaId,
+      predicate: !!ctx.focusedReplicaId,
       handler: () => {
-        if (deps.focusedReplicaId) {
-          deps.navigate(
-            createPath("replicaRoot", { replicaName: deps.focusedReplicaId }),
+        if (ctx.focusedReplicaId) {
+          ctx.navigate(
+            createPath("replicaRoot", { replicaName: ctx.focusedReplicaId }),
           );
         }
-        deps.setOpen(false);
+        ctx.setOpen(false);
       },
     },
     {
@@ -961,7 +956,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           predicate: localStorage.getItem("networkInspectorVisible") !== "true",
           handler: () => {
             localStorage.setItem("networkInspectorVisible", "true");
-            deps.setOpen(false);
+            ctx.setOpen(false);
             // Refresh the page to ensure the setting takes effect
             globalThis.location.reload();
           },
@@ -973,7 +968,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           predicate: localStorage.getItem("networkInspectorVisible") === "true",
           handler: () => {
             localStorage.setItem("networkInspectorVisible", "false");
-            deps.setOpen(false);
+            ctx.setOpen(false);
             // Refresh the page to ensure the setting takes effect
             globalThis.location.reload();
           },
@@ -992,25 +987,25 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           id: "start-counter-job",
           type: "action",
           title: "Start Counter Job",
-          handler: () => handleStartCounterJob(deps),
+          handler: () => handleStartCounterJob(ctx),
         },
         {
           id: "index-charms",
           type: "action",
           title: "Index Charms",
-          handler: () => handleIndexCharms(deps),
+          handler: () => handleIndexCharms(ctx),
         },
         {
           id: "import-json",
           type: "action",
           title: "Import JSON",
-          handler: () => handleImportJSON(deps),
+          handler: () => handleImportJSON(ctx),
         },
         {
           id: "load-recipe",
           type: "action",
           title: "Load Recipe",
-          handler: () => handleLoadRecipe(deps),
+          handler: () => handleLoadRecipe(ctx),
         },
         {
           id: "switch-replica",
@@ -1021,7 +1016,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
             if (input) {
               globalThis.location.href = `/${input}`;
             }
-            deps.setOpen(false);
+            ctx.setOpen(false);
           },
         },
         {
@@ -1029,30 +1024,30 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           type: "action",
           title: "Add Gmail Importer",
           handler: () =>
-            handleAddRemoteRecipe(deps, "gmail.tsx", "GMail Importer"),
+            handleAddRemoteRecipe(ctx, "gmail.tsx", "GMail Importer"),
         },
         {
           id: "add-gcal-importer",
           type: "action",
           title: "Add GCal Importer",
           handler: () =>
-            handleAddRemoteRecipe(deps, "gcal.tsx", "GCal Importer"),
+            handleAddRemoteRecipe(ctx, "gcal.tsx", "GCal Importer"),
         },
         {
           id: "add-rss-importer",
           type: "action",
           title: "Add RSS Importer",
-          handler: () => handleAddRemoteRecipe(deps, "rss.tsx", "RSS Importer"),
+          handler: () => handleAddRemoteRecipe(ctx, "rss.tsx", "RSS Importer"),
         },
       ],
     },
     {
       id: "background-jobs",
       type: "menu",
-      title: `Background Jobs (${deps.listJobs().length})`,
+      title: `Background Jobs (${ctx.listJobs().length})`,
       group: "Other",
       children: [
-        ...deps.listJobs().map(
+        ...ctx.listJobs().map(
           (job): CommandItem => ({
             id: `job-${job.id}`,
             type: "menu",
@@ -1064,11 +1059,11 @@ export function getCommands(deps: CommandContext): CommandItem[] {
                 title: job.status === "running" ? "Pause" : "Resume",
                 handler: () => {
                   if (job.status === "running") {
-                    deps.stopJob(job.id);
+                    ctx.stopJob(job.id);
                   } else {
-                    // deps.resumeJob(job.id);
+                    // ctx.resumeJob(job.id);
                   }
-                  deps.setMode({ type: "main" });
+                  ctx.setMode({ type: "main" });
                 },
               },
               {
@@ -1076,8 +1071,8 @@ export function getCommands(deps: CommandContext): CommandItem[] {
                 type: "action",
                 title: "Stop",
                 handler: () => {
-                  deps.stopJob(job.id);
-                  deps.setMode({ type: "main" });
+                  ctx.stopJob(job.id);
+                  ctx.setMode({ type: "main" });
                 },
               },
               {
@@ -1101,8 +1096,8 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           type: "action",
           title: "Clear Completed Jobs",
           handler: () => {
-            // deps.clearCompletedJobs();
-            deps.setMode({ type: "main" });
+            // ctx.clearCompletedJobs();
+            ctx.setMode({ type: "main" });
           },
         },
       ],
