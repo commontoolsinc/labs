@@ -58,21 +58,17 @@ export const genSrc = async ({
 export async function iterate(
   charmManager: CharmManager,
   charm: Cell<Charm>,
-  spec: string,
-  shiftKey: boolean,
+  plan: WorkflowForm["plan"],
   model?: string,
-  existingSpec?: string,
-  executionPlan?: string[],
 ): Promise<Cell<Charm>> {
   const { iframe } = getIframeRecipe(charm);
   if (!iframe) {
     throw new Error("Cannot iterate on a non-iframe. Must extend instead.");
   }
 
-  // If an existing spec is provided, use it directly
-  // This is used by the Fix workflow where we preserve the original spec
-  const iframeSpec = existingSpec || iframe.spec;
-  const newSpec = shiftKey ? iframeSpec + "\n" + spec : spec;
+  // TODO(bf): questionable logic...
+  const iframeSpec = iframe.spec;
+  const newSpec = plan?.spec ?? iframeSpec;
 
   const newIFrameSrc = await genSrc({
     src: iframe.src,
@@ -230,8 +226,7 @@ export async function castNewRecipe(
 
   console.log("resultSchema", resultSchema);
 
-  // TODO(bf): this doesn't seem like it should be needed, or it's named poorly
-  // we seem to be regenerating our plan and spec just before generating the code
+  // We're goig from loose plan to detailed plan here.
   const newSpec = `<REQUEST>${
     JSON.stringify(form)
   }</REQUEST>\n<PLAN>${plan}</PLAN>\n<SPEC>${spec}</SPEC>`;

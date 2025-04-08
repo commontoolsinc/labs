@@ -273,14 +273,10 @@ export async function generatePlan(
       steps.push("Link to referenced data from existing charms");
     }
 
-    if (!existingSpec || !existingSchema) {
-      throw new Error("must have both spec and schema before proceeding");
-    }
-
     return {
       workflowType,
       steps,
-      spec: existingSpec,
+      spec: input,
       dataModel: "",
     };
   }
@@ -550,10 +546,8 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
       charm = await executeFixWorkflow(
         newForm.meta.charmManager,
         form.input.existingCharm,
-        form.input.processedInput,
+        form.plan,
         form.meta.modelId,
-        { steps: form.plan.steps },
-        form.plan.spec,
       );
       break;
 
@@ -564,12 +558,8 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
       charm = await executeEditWorkflow(
         newForm.meta.charmManager,
         form.input.existingCharm,
-        form.input.processedInput,
+        form.plan,
         form.meta.modelId,
-        {
-          steps: form.plan.steps,
-          updatedSpec: form.plan.spec,
-        },
       );
       break;
 
@@ -693,31 +683,17 @@ ${userPrompt}
 export function executeFixWorkflow(
   charmManager: CharmManager,
   currentCharm: Cell<Charm>,
-  input: string,
+  plan: WorkflowForm["plan"],
   model?: string,
-  executionPlan?: { steps: string[] },
-  existingSpec?: string,
 ): Promise<Cell<Charm>> {
   console.log("Executing FIX workflow");
-
-  // For the fix workflow, we always preserve the existing spec
-  if (!existingSpec) {
-    const { iframe } = getIframeRecipe(currentCharm);
-    existingSpec = iframe?.spec;
-  }
-
-  // Pass the execution plan steps if available
-  const planSteps = executionPlan?.steps;
 
   // Call iterate with the existing spec to ensure it's preserved
   return iterate(
     charmManager,
     currentCharm,
-    input,
-    false,
+    plan,
     model,
-    existingSpec,
-    planSteps,
   );
 }
 
@@ -731,9 +707,8 @@ export function executeFixWorkflow(
 export function executeEditWorkflow(
   charmManager: CharmManager,
   currentCharm: Cell<Charm>,
-  input: string,
+  plan: WorkflowForm["plan"],
   model?: string,
-  executionPlan?: { steps: string[]; updatedSpec?: string },
 ): Promise<Cell<Charm>> {
   console.log("Executing EDIT workflow");
 
@@ -742,11 +717,8 @@ export function executeEditWorkflow(
   return iterate(
     charmManager,
     currentCharm,
-    input,
-    true,
+    plan,
     model,
-    executionPlan?.updatedSpec,
-    executionPlan?.steps,
   );
 }
 
@@ -823,11 +795,8 @@ export function executeImagineWorkflow(
   }
 
   // Add current charm if available
-  // TODO(bf): overly defensive Claude code
   if (
-    form.input.existingCharm && typeof form.input.existingCharm === "object" &&
-    "get" in form.input.existingCharm &&
-    typeof form.input.existingCharm.get === "function"
+    form.input.existingCharm
   ) {
     try {
       const charmData = form.input.existingCharm.get();
