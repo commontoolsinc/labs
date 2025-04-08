@@ -117,7 +117,7 @@ export async function addGithubRecipe(
  * @param previewPlan Optional: Pass through a pre-generated plan
  * @returns A new or modified charm
  */
-export async function modifyCharm(
+export function modifyCharm(
   charmManager: CharmManager,
   promptText: string,
   currentCharm: Cell<Charm>,

@@ -300,7 +300,7 @@ export async function generateWorkflowPlan(
     let specification = "";
     let dataModel = "";
     let schema: JSONSchema | undefined;
-    let references = "";
+    const references = "";
 
     try {
       specification = parseTagFromResponse(response, "specification");

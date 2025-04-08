@@ -361,7 +361,7 @@ export function createWorkflowForm(
 export async function processInputSection(
   charmManager: CharmManager,
   form: WorkflowForm,
-  options: {} = {},
+  options: Record<string, never> = {},
 ): Promise<WorkflowForm> {
   const newForm = { ...form };
 
@@ -403,7 +403,7 @@ export async function processInputSection(
  */
 export async function fillClassificationSection(
   form: WorkflowForm,
-  options: {} = {},
+  options: Record<string, never> = {},
 ): Promise<WorkflowForm> {
   const newForm = { ...form };
 
@@ -439,7 +439,7 @@ export async function fillClassificationSection(
  */
 export async function fillPlanningSection(
   form: WorkflowForm,
-  options: {} = {},
+  options: Record<string, never> = {},
 ): Promise<WorkflowForm> {
   if (!form.classification) {
     throw new Error("Classification is required");
@@ -690,7 +690,7 @@ ${userPrompt}
  * The Fix workflow preserves the existing specification and schema,
  * focusing only on fixing issues in the implementation.
  */
-export async function executeFixWorkflow(
+export function executeFixWorkflow(
   charmManager: CharmManager,
   currentCharm: Cell<Charm>,
   input: string,
@@ -728,7 +728,7 @@ export async function executeFixWorkflow(
  * the existing schema, modifying the implementation to add features
  * or enhance functionality while maintaining compatibility.
  */
-export async function executeEditWorkflow(
+export function executeEditWorkflow(
   charmManager: CharmManager,
   currentCharm: Cell<Charm>,
   input: string,
@@ -786,7 +786,7 @@ export function executeImagineWorkflow(
   console.log("Executing IMAGINE workflow");
 
   // Process references - this allows the new charm to access data from multiple sources
-  let allReferences: Record<string, Cell<any>> = {};
+  const allReferences: Record<string, Cell<any>> = {};
 
   // Add all external references first with validation
   if (form.input.references && Object.keys(form.input.references).length > 0) {
