@@ -379,6 +379,21 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
       streaming: true,
     },
   });
+
+  addModel({
+    provider: vertexProvider,
+    name: "google:gemini-2.0-flash-001",
+    aliases: ["google:gemini-2.0-flash", "gemini-2.0-flash"],
+    capabilities: {
+      contextWindow: 1_048_576,
+      maxOutputTokens: 8_191,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
 }
 
 if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {

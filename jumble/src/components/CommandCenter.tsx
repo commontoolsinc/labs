@@ -18,13 +18,14 @@ import {
   SelectCommandItem,
   TranscribeCommandItem,
 } from "./commands.ts";
-import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext.tsx";
+import { formatPromptWithMentions } from "@commontools/charm";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
 import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { charmId, getMentionableCharms } from "@/utils/charms.ts";
-import { formatPromptWithMentions } from "@/utils/format.ts";
 import { NAME } from "@commontools/builder";
+import { Cell } from "@commontools/runner";
+import { Charm } from "@commontools/charm";
 import {
   SpecPreviewModel,
   useLiveSpecPreview,
@@ -52,14 +53,45 @@ function CommandProcessor({
     "think",
   );
 
+  // Get the focused charm if available
+  const { focusedCharmId } = context;
+  const [focusedCharm, setFocusedCharm] = useState<Cell<Charm> | undefined>(
+    undefined,
+  );
+
+  // Fetch the focused charm when ID changes
+  useEffect(() => {
+    if (focusedCharmId) {
+      charmManager.get(focusedCharmId, false).then((charm) => {
+        if (charm) {
+          setFocusedCharm(charm);
+        }
+      }).catch((err) => {
+        console.error("Error fetching focused charm:", err);
+      });
+    } else {
+      setFocusedCharm(undefined);
+    }
+  }, [focusedCharmId, charmManager]);
+
   // Get spec preview as user types in command center
-  const { previewSpec, previewPlan, loading: isPreviewLoading } =
-    useLiveSpecPreview(
-      inputValue,
-      true,
-      1000,
-      previewModel,
-    );
+  const {
+    previewForm,
+    loading: isPreviewLoading,
+    classificationLoading,
+    planLoading,
+    setWorkflowType, // Add the setter function to allow changing workflow type manually
+  } = useLiveSpecPreview(
+    inputValue,
+    charmManager, // Explicitly pass CharmManager instance
+    true,
+    1000,
+    previewModel,
+    focusedCharm, // Pass the current charm for context
+  );
+
+  // Update the command context with the current workflow form data
+  context.previewForm = previewForm;
 
   if (context.loading && mode.type !== "input") {
     return (
@@ -71,18 +103,19 @@ function CommandProcessor({
     );
   }
 
-  const onSubmit = useCallback(async () => {
+  const onSubmit = useCallback(() => {
     if (mode.type !== "input") {
       return;
     }
-    const { text, sources } = await formatPromptWithMentions(
-      inputValue,
-      charmManager,
-    );
     if ((mode.command as InputCommandItem).handler) {
-      (mode.command as InputCommandItem).handler(text, sources);
+      (mode.command as InputCommandItem).handler(inputValue);
     }
-  }, [mode, inputValue, charmManager]);
+  }, [
+    mode,
+    inputValue,
+    charmManager,
+    previewForm,
+  ]);
 
   switch (mode.type) {
     case "input": {
@@ -91,11 +124,13 @@ function CommandProcessor({
           <div className="relative">
             {/* The floating spec preview will be positioned above the composer */}
             <SpecPreview
-              spec={previewSpec}
-              plan={previewPlan}
+              form={previewForm}
               loading={isPreviewLoading}
+              classificationLoading={classificationLoading}
+              planLoading={planLoading}
               visible
               floating
+              onWorkflowChange={setWorkflowType}
             />
 
             <Composer
@@ -127,7 +162,8 @@ function CommandProcessor({
                     { value: "think", label: "Smart" },
                   ]}
                   value={previewModel}
-                  onChange={(value) => setPreviewModel(value as SpecPreviewModel)}
+                  onChange={(value) =>
+                    setPreviewModel(value as SpecPreviewModel)}
                   size="small"
                 />
               </div>
@@ -215,7 +251,9 @@ export function useCharmMentions() {
             id,
             name: `${name} (#${id.slice(-4)})`,
           };
-        }).filter((mention): mention is {id: string, name: string} => mention !== null);
+        }).filter((mention): mention is { id: string; name: string } =>
+          mention !== null
+        );
 
         setCharmMentions(mentions);
       } catch (error) {
@@ -235,7 +273,6 @@ export function CommandCenter() {
   const [mode, setMode] = useState<CommandMode>({ type: "main" });
   const [commandPathIds, setCommandPathIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
-  const { modelId, setPreferredModel } = usePreferredLanguageModel();
   const { stopJob, startJob, addJobMessage, listJobs, updateJobProgress } =
     useBackgroundTasks();
 
@@ -259,8 +296,6 @@ export function CommandCenter() {
         focusedCharmId,
         focusedReplicaId,
         setOpen,
-        preferredModel: modelId ?? undefined,
-        setPreferredModel,
         setMode,
         loading,
         setLoading,
@@ -282,11 +317,9 @@ export function CommandCenter() {
       navigate,
       focusedCharmId,
       focusedReplicaId,
-      modelId,
       loading,
       commandPathIds,
       setMode,
-      setPreferredModel,
       stopJob,
       startJob,
       addJobMessage,
@@ -363,7 +396,9 @@ export function CommandCenter() {
     const handleEditRecipe = (e: KeyboardEvent) => {
       if (e.key === "i" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        const editRecipeCommand = allCommands.find((cmd) => cmd.id === "edit-recipe");
+        const editRecipeCommand = allCommands.find((cmd) =>
+          cmd.id === "edit-recipe"
+        );
         if (!editRecipeCommand) {
           console.warn("Edit recipe command not found");
           return;
@@ -379,7 +414,9 @@ export function CommandCenter() {
 
     const handleEditRecipeEvent = () => {
       if (focusedCharmId) {
-        const editRecipeCommand = allCommands.find((cmd) => cmd.id === "edit-recipe");
+        const editRecipeCommand = allCommands.find((cmd) =>
+          cmd.id === "edit-recipe"
+        );
         if (!editRecipeCommand) {
           console.warn("Edit recipe command not found");
           return;
@@ -411,8 +448,6 @@ export function CommandCenter() {
     focusedCharmId,
     focusedReplicaId,
     setOpen,
-    preferredModel: modelId ?? undefined,
-    setPreferredModel,
     setMode,
     loading,
     setLoading,

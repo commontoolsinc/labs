@@ -453,20 +453,20 @@ class StorageImpl implements Storage {
       source: doc.sourceCell?.entityId,
     };
 
-    // 🤔 I'm guessing we should be storting schema here
+    // 🤔 I'm guessing we should be storing schema here
 
     if (JSON.stringify(value) !== JSON.stringify(this.writeValues.get(doc))) {
-      this.writeDependentDocs.set(doc, dependencies);
-      this.writeValues.set(doc, value);
-
-      this._addToBatch([{ doc, type: "storage" }]);
-
       log(() => [
         "prep for storage",
         JSON.stringify(doc.entityId),
         value,
+        this.writeValues.get(doc),
         [...dependencies].map((c) => JSON.stringify(c.entityId)),
       ]);
+      this.writeDependentDocs.set(doc, dependencies);
+      this.writeValues.set(doc, value);
+
+      this._addToBatch([{ doc, type: "storage" }]);
     }
   }
 
@@ -800,12 +800,13 @@ class StorageImpl implements Storage {
       return storage.send(jobs).then((result) => retryOnConflict(result))
         .then((result) => {
           if (result.ok) {
+            log(() => ["storage ok", JSON.stringify(result.ok, null, 2)]);
             // Apply updates from retry, if transaction ultimately succeeded
             updatesFromRetry.forEach(([doc, value]) =>
               this._batchForDoc(doc, value.value, value.source)
             );
           } else if (result.error) {
-            log(() => ["storage error", result.error]);
+            log(() => ["storage error", JSON.stringify(result.error, null, 2)]);
             console.error("storage error", result.error);
           }
           return result;
@@ -815,7 +816,7 @@ class StorageImpl implements Storage {
     // Write all storage jobs to storage, in parallel
     const promiseJobs = [];
     for (const [space, jobs] of storageJobsBySpace.entries()) {
-      promiseJobs.push(process(space, jobs));
+      if (jobs.length) promiseJobs.push(process(space, jobs));
     }
     await Promise.all(promiseJobs);
     log(() => ["storage jobs done"]);
