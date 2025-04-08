@@ -122,13 +122,20 @@ export async function classifyIntent(
   let existingCode: string | undefined;
 
   if (currentCharm) {
-    const iframeRecipe = getIframeRecipe(currentCharm);
-    if (iframeRecipe && iframeRecipe.iframe) {
-      existingSpec = iframeRecipe.iframe.spec;
-      existingSchema = iframeRecipe.iframe.argumentSchema;
-      existingCode = extractUserCode(iframeRecipe.iframe.src || "") ||
-        undefined;
-    }
+    const { spec, schema, code } = extractContext(currentCharm);
+    existingSpec = spec;
+    existingSchema = schema;
+    existingCode = code;
+  }
+
+  if (!existingSpec || !existingSchema) {
+    return {
+      workflowType: "imagine",
+      confidence: 1.0,
+      reasoning:
+        "Automatically classified as 'imagine' because there is nothing to refer to (either no current charm or no iframe recipe).",
+      enhancedPrompt: input,
+    };
   }
 
   // Check if we have any mentions of other charms (except the current charm)
@@ -201,6 +208,30 @@ export async function classifyIntent(
   }
 }
 
+function extractContext(charm: Cell<Charm>) {
+  let spec: string | undefined;
+  let schema: JSONSchema | undefined;
+  let code: string | undefined;
+
+  try {
+    const iframeRecipe = getIframeRecipe(charm);
+    if (iframeRecipe && iframeRecipe.iframe) {
+      spec = iframeRecipe.iframe.spec;
+      schema = iframeRecipe.iframe.argumentSchema;
+      code = extractUserCode(iframeRecipe.iframe.src || "") ||
+        undefined;
+    }
+  } catch {
+    console.warn("Failed to extract context from charm");
+  }
+
+  return {
+    spec,
+    schema,
+    code,
+  };
+}
+
 /**
  * Step 2: Generate execution plan for the given intent and workflow
  *
@@ -228,13 +259,10 @@ export async function generatePlan(
   let existingCode: string | undefined;
 
   if (currentCharm) {
-    const iframeRecipe = getIframeRecipe(currentCharm);
-    if (iframeRecipe && iframeRecipe.iframe) {
-      existingSpec = iframeRecipe.iframe.spec;
-      existingSchema = iframeRecipe.iframe.argumentSchema;
-      existingCode = extractUserCode(iframeRecipe.iframe.src || "") ||
-        undefined;
-    }
+    const { spec, schema, code } = extractContext(currentCharm);
+    existingSpec = spec;
+    existingSchema = schema;
+    existingCode = code;
   }
 
   try {
@@ -459,14 +487,13 @@ export async function fillPlanningSection(
     // For fix workflow, preserve existing spec
     let existingSpec: string | undefined;
     let existingSchema: JSONSchema | undefined;
+    let existingCode: string | undefined;
 
-    try {
-      const { iframe } = getIframeRecipe(form.input.existingCharm);
-      existingSpec = iframe?.spec;
-      existingSchema = iframe?.argumentSchema;
-    } catch (error) {
-      console.warn("Error getting existing spec for fix workflow:", error);
-      throw new Error("We need an existing iframe to fix");
+    if (form.input.existingCharm) {
+      const { spec, schema, code } = extractContext(form.input.existingCharm);
+      existingSpec = spec;
+      existingSchema = schema;
+      existingCode = code;
     }
 
     // Generate just the plan without updating spec
@@ -758,13 +785,11 @@ export function executeImagineWorkflow(
   console.log("Executing IMAGINE workflow");
 
   // Process references - this allows the new charm to access data from multiple sources
-  const allReferences: Record<string, Cell<any>> = {};
+  let allReferences: Record<string, Cell<any>> = {};
 
   // Add all external references first with validation
   if (form.input.references && Object.keys(form.input.references).length > 0) {
     for (const [id, cell] of Object.entries(form.input.references)) {
-      if (id === "currentCharm") continue;
-
       if (
         !cell || typeof cell !== "object" || !("get" in cell) ||
         typeof cell.get !== "function"
@@ -812,7 +837,13 @@ export function executeImagineWorkflow(
         uniqueId = `${camelCaseId}${counter++}`;
       }
 
-      allReferences[uniqueId] = form.input.existingCharm;
+      // HACK: avoid nesting for a single self reference
+      if (Object.keys(allReferences).length === 0) {
+        allReferences = form.input.existingCharm as any;
+      } else {
+        allReferences[uniqueId] = form.input.existingCharm;
+      }
+
       console.log(`Added current charm as "${uniqueId}"`);
 
       // Remove any generic "currentCharm" entry
@@ -823,6 +854,8 @@ export function executeImagineWorkflow(
       console.error(`Error processing current charm:`, error);
     }
   }
+
+  form.input.references = allReferences;
 
   // Cast a new recipe with references, spec, and schema
   return castNewRecipe(
