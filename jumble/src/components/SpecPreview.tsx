@@ -122,7 +122,8 @@ export function SpecPreview({
   onWorkflowChange,
   onFormChange,
 }: SpecPreviewProps) {
-  const hasContent = (loading || form.plan?.steps || form.plan?.spec) &&
+  const hasContent =
+    (loading || form.classification || form.plan?.steps || form.plan?.spec) &&
     visible;
 
   // Create a reference to measure content height
@@ -155,34 +156,51 @@ export function SpecPreview({
 
   // Directly set the height style without animation
   const containerHeight = React.useMemo(() => {
+    console.log("Recalculating container height", {
+      visible,
+      hasContent,
+      loading,
+      classification: !!form.classification,
+      plan: !!form.plan?.steps,
+      spec: !!form.plan?.spec,
+      maxContentHeight,
+    });
+
     // Never show content if not visible or no actual content to display
     if (!visible || !hasContent) {
+      console.log("Container hidden, height: 0");
       return 0;
     }
 
     // If we're loading and no progress, show minimal height
     if (loading && !form.classification) {
+      console.log("Loading state, height:", loaderHeight);
       return loaderHeight;
     }
 
-    console.log("calculate container height", form);
-
-    // If we have any content, show full height
+    // If we have a complete plan, show full height
     if (form.plan && form.plan.steps && form.plan.spec) {
+      console.log("Full plan state, height:", maxContentHeight);
       return maxContentHeight;
     }
 
-    // If we have any content, show full height
+    // If we only have classification, show half height
     if (form.classification) {
-      return maxContentHeight / 2;
+      const height = maxContentHeight / 3 * 2;
+      console.log("Classification only state, height:", height);
+      return height;
     }
 
+    // Default height for other cases
+    console.log("Default state, height:", maxContentHeight);
     return maxContentHeight;
   }, [
     visible,
     hasContent,
     loading,
-    form,
+    form.classification,
+    form.plan?.steps,
+    form.plan?.spec,
     loaderHeight,
     maxContentHeight,
   ]);
@@ -206,9 +224,9 @@ export function SpecPreview({
       tension: 280,
       friction: 24,
     },
-    // Reset on significant changes
-    reset: true,
-    key: progressKey,
+    // Don't reset on height changes to allow smooth transitions
+    reset: false,
+    // Remove key dependency on progressKey to prevent animation resets
   });
 
   // Text reveal animation - updates based on progress state not just loading
@@ -267,6 +285,10 @@ export function SpecPreview({
         pointerEvents: containerSpring.opacity.to((o) =>
           o === 0 ? "none" : "auto"
         ),
+        // Set an explicit height to override the reactive value if needed
+        height: containerHeight,
+        // Add explicit transition for height - this is key to smooth animation
+        transition: "height 500ms ease-in-out, opacity 300ms ease-in-out",
       }}
     >
       <div className="p-2 relative" ref={contentRef}>
