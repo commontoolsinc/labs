@@ -317,7 +317,7 @@ export async function generateWorkflowPlan(
     // For fix workflow, if we have an existing spec, use that instead
     const updatedSpec = workflowType === "fix" && existingSpec
       ? existingSpec
-      : fullSpec;
+      : specification;
 
     return {
       steps,

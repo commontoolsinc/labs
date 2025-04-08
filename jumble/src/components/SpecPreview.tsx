@@ -476,12 +476,12 @@ export function SpecPreview({
 
                     {form.plan?.dataModel && (
                       <Accordion
-                        title={<span className="text-[10px]">Schema</span>}
+                        title={<span className="text-[10px]">Data Model</span>}
                         defaultOpen={false}
                         badge={null}
                       >
                         <pre className="text-[10px] text-gray-700 leading-tight max-h-32 overflow-y-auto">
-                          {JSON.stringify(form.plan.dataModel, null, 2)}
+                          {form.plan.dataModel}
                         </pre>
                       </Accordion>
                     )}
