@@ -253,13 +253,27 @@ async function handleExecuteCharmAction(deps: CommandContext) {
   }
 }
 
+function navigateToCharm(deps: CommandContext, charm: Charm | string) {
+  // Navigate to the new charm
+  const id = typeof charm === "string" ? charm : charmId(charm);
+  if (!id || !deps.focusedReplicaId) {
+    throw new Error("Missing charm ID or replica name");
+  }
+
+  deps.navigate(
+    createPath("charmShow", {
+      charmId: id,
+      replicaName: deps.focusedReplicaId,
+    }),
+  );
+}
+
 // Command handlers
 // Unified handler for charm operations using the imagine function
-async function handleImagineOperation(
+async function handleModifyCharm(
   deps: CommandContext,
   input: string,
-  workflowType?: WorkflowType, // Optional workflow type override
-  model?: string,
+  options?: { model: string },
 ) {
   if (!input) return;
   deps.setLoading(true);
@@ -275,43 +289,51 @@ async function handleImagineOperation(
         throw new Error("Failed to load charm");
       }
 
-      // Use modifyCharm for existing charms - this handles both iterate and extend cases
       newCharm = await modifyCharm(
         deps.charmManager,
         input,
         charm,
         deps.previewForm,
-        model,
+        options?.model,
       );
     } else {
-      newCharm = await executeWorkflow(
-        deps.charmManager,
-        input,
-        {
-          prefill: deps.previewForm,
-          model: model,
-        },
-      );
+      console.warn("Attempted to modify charm without a focused charm ID");
     }
 
     if (!newCharm) {
       throw new Error("Failed to create charm");
     }
 
-    // Navigate to the new charm
-    const id = charmId(newCharm);
-    if (!id || !deps.focusedReplicaId) {
-      throw new Error("Missing charm ID or replica name");
-    }
-
-    deps.navigate(
-      createPath("charmShow", {
-        charmId: id,
-        replicaName: deps.focusedReplicaId,
-      }),
-    );
+    navigateToCharm(deps, newCharm.get());
   } catch (error) {
     console.error("Imagine operation error:", error);
+  } finally {
+    deps.setLoading(false);
+    deps.setOpen(false);
+  }
+}
+
+async function handleNewCharm(
+  deps: CommandContext,
+  input: string,
+  { model }: { model: string },
+) {
+  if (!input) return;
+  deps.setLoading(true);
+
+  try {
+    const newCharm = await executeWorkflow(
+      deps.charmManager,
+      input,
+      {
+        prefill: deps.previewForm,
+        model: model,
+      },
+    );
+
+    navigateToCharm(deps, newCharm.get());
+  } catch (error) {
+    console.error("New charm operation error:", error);
   } finally {
     deps.setLoading(false);
     deps.setOpen(false);
@@ -339,15 +361,7 @@ async function handleSearchCharms(deps: CommandContext) {
         type: "select",
         title: "Select Charm",
         handler: (selected) => {
-          const id = charmId(selected);
-          if (!id || !deps.focusedReplicaId) {
-            throw new Error("Missing charm ID or replica name");
-          }
-          const path = createPath("charmDetail", {
-            charmId: id,
-            replicaName: deps.focusedReplicaId,
-          });
-          deps.navigate(path);
+          navigateToCharm(deps, selected);
           deps.setOpen(false);
         },
       },
@@ -359,10 +373,6 @@ async function handleSearchCharms(deps: CommandContext) {
     deps.setLoading(false);
   }
 }
-
-// handleEditRecipe now uses handleImagineOperation with a 'fix' workflow type
-
-// handleExtendRecipe now uses handleImagineOperation with an 'edit' workflow type
 
 async function handleRenameCharm(
   deps: CommandContext,
@@ -446,19 +456,7 @@ async function handleImportJSON(deps: CommandContext) {
     const newCharm = await castNewRecipe(deps.charmManager, form);
     if (!newCharm) throw new Error("Failed to create new charm");
 
-    const id = charmId(newCharm);
-    if (!id || !deps.focusedReplicaId) {
-      throw new Error("Missing charm ID or replica name");
-    }
-
-    if (id) {
-      deps.navigate(
-        createPath("charmShow", {
-          charmId: id,
-          replicaName: deps.focusedReplicaId,
-        }),
-      );
-    }
+    navigateToCharm(deps, newCharm);
   } finally {
     deps.setLoading(false);
     deps.setOpen(false);
@@ -490,39 +488,12 @@ async function handleLoadRecipe(deps: CommandContext) {
     if (!newCharm) {
       throw new Error("Failed to cast charm");
     }
-    const id = charmId(newCharm);
-    if (!id || !deps.focusedReplicaId) {
-      throw new Error("Missing charm ID or replica name");
-    }
-    if (id) {
-      deps.navigate(
-        createPath("charmShow", {
-          charmId: id,
-          replicaName: deps.focusedReplicaId,
-        }),
-      );
-    }
+
+    navigateToCharm(deps, newCharm);
   } finally {
     deps.setLoading(false);
     deps.setOpen(false);
   }
-}
-
-function navigateToCharm(charm: Charm | EntityId, deps: CommandContext) {
-  if (!charm) {
-    throw new Error("Failed to cast charm");
-  }
-  const id = charmId(charm);
-  if (!id || !deps.focusedReplicaId) {
-    throw new Error("Missing charm ID or replica name");
-  }
-
-  deps.navigate(
-    createPath("charmShow", {
-      charmId: id,
-      replicaName: deps.focusedReplicaId,
-    }),
-  );
 }
 
 function handleIndexCharms(deps: CommandContext) {
@@ -703,17 +674,8 @@ async function handleAddRemoteRecipe(
       name,
       {},
     );
-    const id = charmId(newCharm);
-    if (!id || !deps.focusedReplicaId) {
-      throw new Error("Missing charm ID or replica name");
-    }
 
-    deps.navigate(
-      createPath("charmShow", {
-        charmId: id,
-        replicaName: deps.focusedReplicaId,
-      }),
-    );
+    navigateToCharm(deps, newCharm);
   } catch (error) {
     console.error(`Error loading ${filename}:`, error);
   } finally {
@@ -729,8 +691,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       type: "input",
       title: "New Charm",
       group: "Create",
-      handler: (input, data) =>
-        handleImagineOperation(deps, input, data, "imagine"),
+      handler: (input) => handleNewCharm(deps, input, {}),
     },
     {
       id: "search-charms",
@@ -773,16 +734,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
               type: "select",
               title: "Select Charm for Stack",
               handler: (selected) => {
-                const id = charmId(selected);
-                if (!id || !deps.focusedReplicaId) {
-                  throw new Error("Missing charm ID or replica name");
-                }
-                // Navigate to stack URL instead of detail page
-                const path = createPath("stackedCharms", {
-                  charmIds: deps.focusedCharmId + "," + id,
-                  replicaName: deps.focusedReplicaId,
-                });
-                deps.navigate(path);
+                navigateToCharm(deps, selected);
                 deps.setOpen(false);
               },
             },
@@ -833,7 +785,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       group: "Edit",
       predicate: !!deps.focusedCharmId,
       placeholder: "What would you like to change?",
-      handler: (input, data) => handleImagineOperation(deps, input, data),
+      handler: (input) => handleModifyCharm(deps, input),
     },
     {
       id: "delete-charm",
@@ -964,15 +916,11 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       predicate: !!deps.focusedCharmId,
       handler: () => {
         if (!deps.focusedCharmId || !deps.focusedReplicaId) {
+          console.warn("Missing charm ID or replica name");
           deps.setOpen(false);
           return;
         }
-        deps.navigate(
-          createPath("charmShow", {
-            charmId: deps.focusedCharmId,
-            replicaName: deps.focusedReplicaId,
-          }),
-        );
+        navigateToCharm(deps, deps.focusedCharmId);
         deps.setOpen(false);
       },
     },
