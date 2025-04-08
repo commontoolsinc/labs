@@ -168,10 +168,12 @@ export function useLiveSpecPreview(
       // Define a shared model ID for both calls
       const modelId = getModelId(model);
 
-      let form = createWorkflowForm(text);
+      let form = createWorkflowForm({
+        input: text,
+        charm: currentCharm,
+        modelId,
+      });
       setPreviewForm(form);
-      form.meta.modelId = modelId;
-      form.input.existingCharm = currentCharm;
 
       form = await processInputSection(charmManager, form);
       setPreviewForm(form);
@@ -311,109 +313,7 @@ export function useLiveSpecPreview(
         reasoning: "Manual override",
       },
     });
-
-    // Reset progress states for plan and spec (but keep classification)
-    // so that we show the proper loading indicators
-    setProgress((prev) => ({
-      ...prev,
-      plan: false,
-      spec: false,
-    }));
-
-    // Always regenerate the plan when workflow type changes to ensure consistency
-    const regeneratePreviewForWorkflow = async () => {
-      try {
-        // Set plan loading state to true
-        setPlanLoading(true);
-
-        // We're manually setting the workflow, so mark classification as complete
-        setProgress((prev) => ({
-          ...prev,
-          classification: true,
-        }));
-
-        // Check if this operation has been superseded before making expensive API call
-        if (!isCurrentGeneration()) {
-          console.log("Abandoning outdated workflow change generation");
-          return;
-        }
-
-        // Pass the processed text, sources, and the new workflow type to the workflow preview
-        const preview = await generateWorkflowPreview(
-          input,
-          currentCharm,
-          getModelId(model),
-          charmManager, // Pass CharmManager to handle nested mentions
-          {
-            classification: {
-              workflowType: type,
-              confidence: 1.0,
-              reasoning: "Manual selection by user", // Clear indication of manual override
-            },
-          },
-        );
-
-        // Check if this is still the current generation before proceeding
-        if (!isCurrentGeneration()) {
-          console.log("Abandoning outdated workflow change generation");
-          return;
-        }
-
-        // Update plan progress
-        setProgress((prev) => ({ ...prev, plan: true }));
-
-        // Mark spec as complete
-        setProgress((prev) => ({ ...prev, spec: true }));
-      } catch (error) {
-        console.error("Error regenerating preview on workflow change:", error);
-
-        // Even on error, mark classification as complete since user manually selected it
-        setProgress((prev) => ({ ...prev, classification: true }));
-      } finally {
-        // Clear loading state only if this is still the current generation
-        if (isCurrentGeneration()) {
-          setPlanLoading(false);
-        }
-      }
-    };
-
-    // Execute the async function, only for inputs with sufficient length
-    if (input && input.trim().length >= 16) {
-      regeneratePreviewForWorkflow();
-    }
   }, [input, currentCharm, model, getModelId, charmManager]);
-
-  // Helper function to extract the original spec from a charm
-  // const getOriginalSpecFromCharm = (charm: Cell<Charm>) => {
-  //   try {
-  //     // Import getIframeRecipe from the charm package if needed
-  //     // This should extract the spec from the charm
-  //     const iframeRecipe = getIframeRecipe(charm);
-  //     return iframeRecipe?.iframe?.spec || "";
-  //   } catch (error) {
-  //     console.error("Error getting original spec from charm:", error);
-  //     return "";
-  //   }
-  // };
-
-  // // Helper function to extract the original argument schema from a charm
-  // const getOriginalArgumentSchemaFromCharm = (charm: Cell<Charm>) => {
-  //   try {
-  //     const iframeRecipe = getIframeRecipe(charm);
-  //     return iframeRecipe?.iframe?.argumentSchema || undefined;
-  //   } catch (error) {
-  //     console.error(
-  //       "Error getting original argument schema from charm:",
-  //       error,
-  //     );
-  //     return undefined;
-  //   }
-  // };
-
-  // let originalSchema;
-  // if (currentCharm) {
-  //   originalSchema = getOriginalArgumentSchemaFromCharm(currentCharm);
-  // }
 
   return {
     previewForm,

@@ -106,16 +106,14 @@ export interface ProcessedPrompt {
  * @param input User input text
  * @param currentCharm Current charm context (optional)
  * @param model LLM model to use
- * @param dataReferences Referenced charm data
- * @param charmManager CharmManager for processing mentions
+ * @param references Referenced charm data
  * @returns Classification result
  */
 export async function classifyIntent(
   input: string,
   currentCharm?: Cell<Charm>,
   model?: string,
-  dataReferences?: Record<string, Cell<any>>,
-  charmManager?: CharmManager,
+  references?: Record<string, Cell<any>>,
 ): Promise<IntentClassificationResult> {
   // Process the input for @mentions if a CharmManager is provided
   // Extract context from the current charm if available
@@ -133,27 +131,27 @@ export async function classifyIntent(
     }
   }
 
+  // Check if we have any mentions of other charms (except the current charm)
+  // If so, we should automatically classify as "rework" since we need to build
+  // a combined schema and create a new argument cell that can access all referenced data
+  const hasOtherCharmReferences = references &&
+    Object.keys(references).filter((key) => key !== "currentCharm")
+        .length > 0;
+
+  if (hasOtherCharmReferences) {
+    // Auto-classify as rework when referencing other charms
+    return {
+      workflowType: "imagine",
+      confidence: 1.0,
+      reasoning:
+        "Automatically classified as 'imagine' because the prompt references other charms. " +
+        "When referencing other charms, we need to construct a new argument cell that can " +
+        "access data from all references with a combined schema.",
+      enhancedPrompt: input,
+    };
+  }
+
   try {
-    // Check if we have any mentions of other charms (except the current charm)
-    // If so, we should automatically classify as "rework" since we need to build
-    // a combined schema and create a new argument cell that can access all referenced data
-    const hasOtherCharmReferences = dataReferences &&
-      Object.keys(dataReferences).filter((key) => key !== "currentCharm")
-          .length > 0;
-
-    if (hasOtherCharmReferences) {
-      // Auto-classify as rework when referencing other charms
-      return {
-        workflowType: "imagine",
-        confidence: 1.0,
-        reasoning:
-          "Automatically classified as 'imagine' because the prompt references other charms. " +
-          "When referencing other charms, we need to construct a new argument cell that can " +
-          "access data from all references with a combined schema.",
-        enhancedPrompt: input,
-      };
-    }
-
     const result = await classifyWorkflow(
       input,
       existingSpec,
@@ -170,20 +168,6 @@ export async function classifyIntent(
     };
   } catch (error) {
     console.error("Error during workflow classification:", error);
-
-    // First check if we have any charm references, as this should force "imagine" workflow
-    const hasOtherCharmReferences = dataReferences &&
-      Object.keys(dataReferences).filter((key) => key !== "currentCharm")
-          .length > 0;
-
-    if (hasOtherCharmReferences) {
-      return {
-        workflowType: "imagine",
-        confidence: 0.9,
-        reasoning:
-          "Fallback classification: Input references other charms, which requires imagine workflow",
-      };
-    }
 
     // If no references, fallback to a simple heuristic based on keywords
     const lowerInput = input.toLowerCase();
@@ -232,12 +216,14 @@ export async function classifyIntent(
  * @returns Execution plan with steps, spec, and schema
  */
 export async function generatePlan(
-  input: string,
-  workflowType: WorkflowType,
-  currentCharm?: Cell<Charm>,
-  model?: string,
-  dataReferences?: Record<string, Cell<any>>,
-  charmManager?: CharmManager,
+  { input, workflowType, currentCharm, model, references }: {
+    input: string;
+    workflowType: WorkflowType;
+    currentCharm?: Cell<Charm>;
+    model?: string;
+    // TODO(bf): we should format these into the input in whatever way is actually useful
+    references?: Record<string, Cell<any>>;
+  },
 ): Promise<ExecutionPlan> {
   // Extract context from the current charm if available
   let existingSpec: string | undefined;
@@ -321,14 +307,14 @@ export interface WorkflowForm {
     workflowType: WorkflowType;
     confidence: number;
     reasoning: string;
-  };
+  } | null;
 
   // Planning information
   plan: {
     steps: string[];
     spec?: string;
     schema?: JSONSchema;
-  };
+  } | null;
 
   // Generation information (only when actually generating code)
   generation?: {
@@ -347,24 +333,26 @@ export interface WorkflowForm {
 /**
  * Create a new workflow form with default values
  */
-export function createWorkflowForm(rawInput: string): WorkflowForm {
+export function createWorkflowForm(
+  { input, modelId, charm }: {
+    input: string;
+    modelId?: string;
+    charm?: Cell<Charm>;
+  },
+): WorkflowForm {
   return {
     input: {
-      rawInput,
-      processedInput: rawInput, // Initially same as raw input
+      rawInput: input,
+      processedInput: "",
       references: {},
+      existingCharm: charm,
     },
-    classification: {
-      workflowType: "edit", // Default type
-      confidence: 0,
-      reasoning: "",
-    },
-    plan: {
-      steps: [],
-    },
+    classification: null,
+    plan: null,
     meta: {
       isComplete: false,
       isFilled: false,
+      modelId,
     },
   };
 }
@@ -382,13 +370,12 @@ export async function processInputSection(
 
   // Skip for empty inputs
   if (!form.input.rawInput || form.input.rawInput.trim().length === 0) {
-    newForm.meta.isFilled = true; // Mark as filled since there's nothing to do
-    return newForm;
+    throw new Error("Input is empty");
   }
 
   // Process mentions if CharmManager is provided
   let processedInput = form.input.rawInput;
-  let references = { ...form.input.references };
+  const references = { ...form.input.references };
 
   try {
     const { text, sources } = await formatPromptWithMentions(
@@ -407,7 +394,6 @@ export async function processInputSection(
     console.warn("Error processing mentions in form:", error);
   }
 
-  // Update the form
   newForm.input.processedInput = processedInput;
   newForm.input.references = references;
   newForm.meta.charmManager = charmManager;
@@ -434,17 +420,11 @@ export async function fillClassificationSection(
     return newForm;
   }
 
-  // Check if we have references to other charms that would force imagine
-  const hasOtherCharmReferences = form.input.references &&
-    Object.keys(form.input.references).filter((key) => key !== "currentCharm")
-        .length > 0;
-
   const classification = await classifyIntent(
     form.input.processedInput,
     form.input.existingCharm,
     form.meta.modelId,
     form.input.references,
-    form.meta.charmManager,
   );
 
   // Update classification in the form
@@ -464,6 +444,10 @@ export async function fillPlanningSection(
   form: WorkflowForm,
   options: {} = {},
 ): Promise<WorkflowForm> {
+  if (!form.classification) {
+    throw new Error("Classification is required");
+  }
+
   const newForm = { ...form };
 
   // Skip for empty inputs
@@ -481,38 +465,42 @@ export async function fillPlanningSection(
   ) {
     // For fix workflow, preserve existing spec
     let existingSpec: string | undefined;
+    let existingSchema: JSONSchema | undefined;
 
     try {
       const { iframe } = getIframeRecipe(form.input.existingCharm);
       existingSpec = iframe?.spec;
+      existingSchema = iframe?.argumentSchema;
     } catch (error) {
       console.warn("Error getting existing spec for fix workflow:", error);
     }
 
     // Generate just the plan without updating spec
     const executionPlan = await generatePlan(
-      form.input.processedInput,
-      form.classification.workflowType,
-      form.input.existingCharm,
-      form.meta.modelId,
-      form.input.references,
-      form.meta.charmManager,
+      {
+        input: form.input.processedInput,
+        workflowType: form.classification.workflowType,
+        currentCharm: form.input.existingCharm,
+        model: form.meta.modelId,
+        references: form.input.references,
+      },
     );
 
     planningResult = {
       steps: executionPlan.steps,
       spec: existingSpec, // Use existing spec for fix workflow
-      schema: executionPlan.schema,
+      schema: existingSchema,
     };
   } else {
     // For edit/imagine, generate both plan and spec
     const executionPlan = await generatePlan(
-      form.input.processedInput,
-      form.classification.workflowType,
-      form.input.existingCharm,
-      form.meta.modelId,
-      form.input.references,
-      form.meta.charmManager,
+      {
+        input: form.input.processedInput,
+        workflowType: form.classification.workflowType,
+        currentCharm: form.input.existingCharm,
+        model: form.meta.modelId,
+        references: form.input.references,
+      },
     );
 
     planningResult = {
@@ -540,6 +528,10 @@ export async function fillPlanningSection(
  * This is the final step that actually creates a charm
  */
 export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
+  if (!form.classification || !form.plan) {
+    throw new Error("Classification and plan are required for code generation");
+  }
+
   const newForm = { ...form };
 
   // Check if the form is filled properly
@@ -635,22 +627,20 @@ export async function processWorkflow(
   } = {},
 ): Promise<WorkflowForm> {
   // Create a new form or use prefilled form
-  let form = createWorkflowForm(input);
-  form.input.existingCharm = options.existingCharm;
+  let form = createWorkflowForm({
+    input,
+    charm: options.existingCharm,
+    modelId: options.model,
+  });
 
   if (options.prefill) {
     form = { ...form, ...options.prefill };
   }
 
-  // If using prefill, ensure the raw input is set correctly
-  if (options.prefill) {
-    form.input.rawInput = input;
-  }
-
   // Step 1: Process input (mentions, references, etc.) if not already processed
   if (
-    !form.input.processedInput ||
-    form.input.processedInput === form.input.rawInput
+    !form.input?.processedInput ||
+    form.input?.processedInput === form.input?.rawInput
   ) {
     if (!options.charmManager) {
       throw new Error("charmManager required to format input");
@@ -660,7 +650,7 @@ export async function processWorkflow(
   }
 
   // Step 2: Classification if not already classified
-  if (form.classification.confidence === 0) {
+  if (form.classification?.confidence === 0) {
     form = await fillClassificationSection(form, {
       model: options.model,
     });
@@ -683,55 +673,6 @@ export async function processWorkflow(
   }
 
   return form;
-}
-
-/**
- * Generate a live preview of the spec and plan based on user input
- * Used in the UI to show a real-time preview while the user is typing
- */
-export async function generateWorkflowPreview(
-  input: string,
-  existingCharm?: Cell<Charm>,
-  model?: string,
-  charmManager?: CharmManager,
-  prefill?: Partial<WorkflowForm>,
-): Promise<{
-  workflowType: WorkflowType;
-  confidence: number;
-  plan: string[];
-  spec?: string;
-  updatedSchema?: JSONSchema;
-  reasoning?: string;
-  processedInput?: string;
-  mentionedCharms?: Record<string, Cell<Charm>>;
-}> {
-  // Process the workflow but with dryRun=true to fill the form without generating code
-  const form = await processWorkflow(input, true, {
-    charmManager,
-    existingCharm,
-    prefill,
-    model,
-  });
-
-  // Extract mentioned charms from references (any reference that's not currentCharm)
-  const mentionedCharms: Record<string, Cell<Charm>> = {};
-  for (const [key, value] of Object.entries(form.input.references)) {
-    if (key !== "currentCharm") {
-      mentionedCharms[key] = value as Cell<Charm>;
-    }
-  }
-
-  // Return the preview format expected by the UI
-  return {
-    workflowType: form.classification.workflowType,
-    confidence: form.classification.confidence,
-    plan: form.plan.steps,
-    spec: form.plan.spec,
-    updatedSchema: form.plan.schema,
-    reasoning: form.classification.reasoning,
-    processedInput: form.input.processedInput,
-    mentionedCharms,
-  };
 }
 
 /**

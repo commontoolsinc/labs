@@ -106,6 +106,10 @@ export async function parseComposerDocument(
   };
 }> {
   try {
+    if (serializedDocument.trim().length == 0) {
+      return { text: "", mentions: [], sources: {} };
+    }
+
     const document = JSON.parse(serializedDocument) as Descendant[];
     let fullText = "";
     const mentions: string[] = [];

@@ -16,7 +16,6 @@ interface SpecPreviewProps {
   planLoading?: boolean; // Separate loading state for plan generation
   visible: boolean;
   floating?: boolean;
-  progress?: { classification: boolean; plan: boolean; spec: boolean }; // Progress tracking for staged rendering
   onWorkflowChange?: (workflow: WorkflowType) => void;
   onFormChange?: (formData: Partial<ExecutionPlan>) => void; // Callback to expose form data
 }
@@ -120,7 +119,6 @@ export function SpecPreview({
   planLoading = false,
   visible,
   floating = false,
-  progress = { classification: false, plan: false, spec: false },
   onWorkflowChange,
   onFormChange,
 }: SpecPreviewProps) {
@@ -144,7 +142,6 @@ export function SpecPreview({
     console.log("Content/Progress changed:", {
       hasContent,
       form,
-      progress,
     });
 
     // Force a re-render when plan data arrives
@@ -154,7 +151,7 @@ export function SpecPreview({
     //   }, 50);
     //   return () => clearTimeout(forceUpdate);
     // }
-  }, [hasContent, form, progress]);
+  }, [hasContent, form]);
 
   // Directly set the height style without animation
   const containerHeight = React.useMemo(() => {
@@ -164,32 +161,40 @@ export function SpecPreview({
     }
 
     // If we're loading and no progress, show minimal height
-    if (loading && !progress.classification) {
+    if (loading && !form.classification) {
       return loaderHeight;
     }
 
+    console.log("calculate container height", form);
+
     // If we have any content, show full height
-    if (progress.classification || form.plan?.spec) {
+    if (form.plan && form.plan.steps && form.plan.spec) {
       return maxContentHeight;
     }
 
-    // Default to zero height for empty state
-    return 0;
+    // If we have any content, show full height
+    if (form.classification) {
+      return maxContentHeight / 2;
+    }
+
+    return maxContentHeight;
   }, [
     visible,
     hasContent,
     loading,
-    progress.classification,
     form,
     loaderHeight,
     maxContentHeight,
   ]);
 
+  console.log("containerHeight", containerHeight);
+
   // Create a key that changes when progress state changes to force re-renders
-  const progressKey =
-    `${progress.classification}-${progress.plan}-${progress.spec}-${
-      Boolean(form.plan?.steps)
-    }-${Boolean(form.plan?.spec)}`;
+  const progressKey = `${Boolean(form.classification)}-${
+    Boolean(form.plan?.steps)
+  }-${Boolean(form.plan?.spec)}-${Boolean(form.plan?.steps)}-${
+    Boolean(form.plan?.spec)
+  }`;
 
   // Container animation that handles visibility only
   const containerSpring = useSpring({
@@ -206,31 +211,10 @@ export function SpecPreview({
     key: progressKey,
   });
 
-  // Content transition between loading and content states
-  const contentTransition = useTransition(!loading || progress.classification, {
-    from: { opacity: 0, transform: "scale(0.9)" },
-    enter: { opacity: 1, transform: "scale(1)" },
-    leave: {
-      opacity: 0,
-      transform: "scale(0.9)",
-      position: "absolute",
-      top: 0,
-      left: 0,
-      right: 0,
-    },
-    config: {
-      tension: 300,
-      friction: 26,
-    },
-    // Reset when progress changes to prevent animation glitches
-    reset: true,
-    key: progressKey,
-  });
-
   // Text reveal animation - updates based on progress state not just loading
   const textSpring = useSpring({
-    opacity: (visible && (!loading || progress.classification)) ? 1 : 0,
-    transform: (visible && (!loading || progress.classification))
+    opacity: (visible && (!loading || form.classification)) ? 1 : 0,
+    transform: (visible && (!loading || form.classification))
       ? "translateY(0)"
       : "translateY(10px)",
     config: {
@@ -254,7 +238,7 @@ export function SpecPreview({
 
   if (
     !form.plan?.spec && (!form.plan?.steps || form.plan?.steps.length === 0) &&
-    !progress.classification &&
+    !form.classification &&
     !loading && !planLoading
   ) {
     return null;
@@ -297,7 +281,7 @@ export function SpecPreview({
           {!visible ? null : (
             <div className="space-y-2 w-full">
               {/* Only show main loading spinner while we wait for classification */}
-              {loading && !progress.classification
+              {loading && !form.classification
                 ? (
                   <div className="flex items-center justify-center w-full py-2">
                     <DitheredCube
@@ -419,7 +403,7 @@ export function SpecPreview({
                                   PLAN
                                 </div>
                                 {/* Show loading spinner whenever plan is still loading */}
-                                {(loading || planLoading) && !progress.plan
+                                {(loading || planLoading) && !form.plan?.spec
                                   ? (
                                     <div className="flex items-center py-1">
                                       <DitheredCube
