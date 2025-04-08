@@ -28,15 +28,17 @@ export const genSrc = async ({
   spec,
   newSpec,
   schema,
+  steps,
   model,
 }: {
   src?: string;
   spec?: string;
   newSpec: string;
   schema: JSONSchema;
+  steps?: string[];
   model?: string;
 }) => {
-  const request = buildPrompt({ src, spec, newSpec, schema, model });
+  const request = buildPrompt({ src, spec, newSpec, schema, model, steps });
 
   let response = await llm.sendRequest(request);
 
@@ -75,6 +77,7 @@ export async function iterate(
     spec: iframeSpec,
     newSpec,
     schema: iframe.argumentSchema,
+    steps: plan?.steps,
     model: model,
   });
 
@@ -263,7 +266,11 @@ export async function castNewRecipe(
   }
 
   // Phase 2: Generate UI code using the schema and enhanced spec
-  const newIFrameSrc = await genSrc({ newSpec, schema });
+  const newIFrameSrc = await genSrc({
+    newSpec,
+    schema,
+    steps: form.plan?.steps,
+  });
   const name = extractTitle(newIFrameSrc, title); // Use the generated title as fallback
   const newRecipeSrc = buildFullRecipe({
     src: newIFrameSrc,
