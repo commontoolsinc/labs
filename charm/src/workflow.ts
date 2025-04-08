@@ -17,7 +17,7 @@ import { genSrc, iterate } from "./iterate.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode } from "./iframe/static.ts";
 import { formatPromptWithMentions } from "./format.ts";
-const { castNewRecipe } = await import("./iterate.ts");
+import { castNewRecipe } from "./iterate.ts";
 
 // Types for workflow classification
 export type WorkflowType = "fix" | "edit" | "imagine";
