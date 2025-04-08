@@ -97,7 +97,7 @@ type Descendant = {
 // Function to parse Slate document and extract mention references
 export async function parseComposerDocument(
   serializedDocument: string,
-  charmManager: CharmManager,
+  charmManager?: CharmManager,
 ): Promise<{
   text: string;
   mentions: string[];
@@ -128,19 +128,20 @@ export async function parseComposerDocument(
           if (!mentionIndices[node.id]) {
             mentions.push(node.id);
 
-            // Create bibliography entry
+            // Create bibliography entry if charmManager is provided
             const bibIndex = Object.keys(sources).length + 1;
-            const charm = await charmManager.get(node.id);
-            if (!charm) {
-              throw new Error(`Charm not found for mention ${node.id}`);
+
+            if (charmManager) {
+              const charm = await charmManager.get(node.id);
+              if (charm) {
+                sources[node.id] = {
+                  name: node.character || `Reference ${bibIndex}`,
+                  cell: charm,
+                };
+
+                mentionIndices[node.id] = bibIndex;
+              }
             }
-
-            sources[node.id] = {
-              name: node.character || `Reference ${bibIndex}`,
-              cell: charm,
-            };
-
-            mentionIndices[node.id] = bibIndex;
           }
 
           // Add reference in markdown format

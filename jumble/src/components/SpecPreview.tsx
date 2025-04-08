@@ -2,21 +2,20 @@ import React, { useRef, useState } from "react";
 import { DitheredCube } from "./DitherCube.tsx";
 import { animated, useSpring, useTransition } from "@react-spring/web";
 import { ToggleButton } from "./common/CommonToggle.tsx";
-import type { ExecutionPlan, WorkflowType } from "@commontools/charm";
+import type {
+  ExecutionPlan,
+  WorkflowForm,
+  WorkflowType,
+} from "@commontools/charm";
 import { JSONSchema } from "@commontools/builder";
 
 interface SpecPreviewProps {
-  spec?: string;
-  plan?: string[] | string;
-  schema?: JSONSchema;
+  form: Partial<WorkflowForm>;
   loading: boolean;
   classificationLoading?: boolean; // Separate loading state for classification
   planLoading?: boolean; // Separate loading state for plan generation
   visible: boolean;
   floating?: boolean;
-  workflowType?: WorkflowType;
-  workflowConfidence?: number;
-  workflowReasoning?: string;
   progress?: { classification: boolean; plan: boolean; spec: boolean }; // Progress tracking for staged rendering
   onWorkflowChange?: (workflow: WorkflowType) => void;
   onFormChange?: (formData: Partial<ExecutionPlan>) => void; // Callback to expose form data
@@ -115,58 +114,18 @@ function Accordion(
 }
 
 export function SpecPreview({
-  spec,
-  plan,
-  schema,
+  form,
   loading,
   classificationLoading = false,
   planLoading = false,
   visible,
   floating = false,
-  workflowType = "edit",
-  workflowConfidence = 0,
-  workflowReasoning,
   progress = { classification: false, plan: false, spec: false },
   onWorkflowChange,
   onFormChange,
 }: SpecPreviewProps) {
-  // Debug all incoming props for comprehensive tracking
-  React.useEffect(() => {
-    console.log("SpecPreview FULL PROPS:", {
-      spec: spec ? `${spec.substring(0, 30)}...` : null,
-      plan,
-      schema,
-      workflowType,
-      progress,
-      loading,
-      classificationLoading,
-      planLoading,
-    });
-  }, [
-    spec,
-    plan,
-    schema,
-    workflowType,
-    progress,
-    loading,
-    classificationLoading,
-    planLoading,
-  ]);
-  // Create the current form state
-  const formData = React.useMemo<Partial<ExecutionPlan>>(() => ({
-    workflowType,
-    plan: plan || [],
-    spec,
-    schema,
-  }), [workflowType, plan, spec, schema]);
-
-  // Notify parent when form data changes
-  React.useEffect(() => {
-    if (onFormChange) {
-      onFormChange(formData);
-    }
-  }, [formData, onFormChange]);
-  const hasContent = loading || plan || spec;
+  const hasContent = (loading || form.plan?.steps || form.plan?.spec) &&
+    visible;
 
   // Create a reference to measure content height
   const contentRef = useRef<HTMLDivElement>(null);
@@ -184,25 +143,22 @@ export function SpecPreview({
     // This effect just forces a re-render
     console.log("Content/Progress changed:", {
       hasContent,
-      planLoaded: Boolean(plan),
-      planType: typeof plan,
-      planIsArray: Array.isArray(plan),
-      planData: plan,
-      specLoaded: Boolean(spec),
+      form,
       progress,
     });
 
     // Force a re-render when plan data arrives
-    if (plan && progress.plan) {
-      const forceUpdate = setTimeout(() => {
-        console.log("Force updating component due to plan data");
-      }, 50);
-      return () => clearTimeout(forceUpdate);
-    }
-  }, [hasContent, plan, spec, progress]);
+    // if (plan && progress.plan) {
+    //   const forceUpdate = setTimeout(() => {
+    //     console.log("Force updating component due to plan data");
+    //   }, 50);
+    //   return () => clearTimeout(forceUpdate);
+    // }
+  }, [hasContent, form, progress]);
 
   // Directly set the height style without animation
   const containerHeight = React.useMemo(() => {
+    // Never show content if not visible or no actual content to display
     if (!visible || !hasContent) {
       return 0;
     }
@@ -213,18 +169,18 @@ export function SpecPreview({
     }
 
     // If we have any content, show full height
-    if (progress.classification || plan || spec) {
+    if (progress.classification || form.plan?.spec) {
       return maxContentHeight;
     }
 
-    return maxContentHeight;
+    // Default to zero height for empty state
+    return 0;
   }, [
     visible,
     hasContent,
     loading,
     progress.classification,
-    plan,
-    spec,
+    form,
     loaderHeight,
     maxContentHeight,
   ]);
@@ -232,14 +188,15 @@ export function SpecPreview({
   // Create a key that changes when progress state changes to force re-renders
   const progressKey =
     `${progress.classification}-${progress.plan}-${progress.spec}-${
-      Boolean(plan)
-    }-${Boolean(spec)}`;
+      Boolean(form.plan?.steps)
+    }-${Boolean(form.plan?.spec)}`;
 
   // Container animation that handles visibility only
   const containerSpring = useSpring({
     opacity: visible && hasContent ? 1 : 0,
     transform: visible && hasContent ? "translateY(0%)" : "translateY(-20%)",
     width: visible && hasContent ? "100%" : "95%",
+    height: containerHeight,
     config: {
       tension: 280,
       friction: 24,
@@ -291,15 +248,23 @@ export function SpecPreview({
     : "preview-container border-t-2 border-black pt-2 bg-gray-200 ";
 
   // Format the confidence as a percentage
-  const confidencePercentage = Math.round(workflowConfidence * 100);
+  const confidencePercentage = Math.round(
+    (form.classification?.confidence ?? 0) * 100,
+  );
+
+  if (
+    !form.plan?.spec && (!form.plan?.steps || form.plan?.steps.length === 0) &&
+    !progress.classification &&
+    !loading && !planLoading
+  ) {
+    return null;
+  }
 
   return (
     <animated.div
       className={containerClasses}
       style={{
         ...containerSpring,
-        // Set height directly without animation
-        height: containerHeight,
         ...(floating
           ? {
             width: "calc(100% - 2rem)",
@@ -310,7 +275,8 @@ export function SpecPreview({
           : {
             overflowY: "auto",
           }),
-        // Use visibility instead of display for animation purposes
+        // Use visibility to completely hide when not visible
+        display: !visible || !hasContent ? "none" : "block",
         visibility: containerSpring.opacity.to((o) =>
           o === 0 ? "hidden" : "visible"
         ),
@@ -346,7 +312,8 @@ export function SpecPreview({
                 : (
                   <div className="space-y-2 w-full">
                     {/* Workflow Classification Section */}
-                    {classificationLoading
+                    {(classificationLoading ||
+                        !form.classification?.workflowType)
                       ? (
                         <div className="flex items-center justify-center py-2">
                           <DitheredCube
@@ -371,7 +338,7 @@ export function SpecPreview({
                                   { value: "edit", label: "EDIT" },
                                   { value: "imagine", label: "IMAGINE" },
                                 ]}
-                                value={workflowType}
+                                value={form.classification?.workflowType}
                                 onChange={(value) =>
                                   onWorkflowChange?.(value as WorkflowType)}
                                 size="small"
@@ -396,17 +363,17 @@ export function SpecPreview({
                           {
                             <div className="grid grid-cols-2 gap-1">
                               {/* Spec Section */}
-                              {workflowType !== "fix"
+                              {form.classification?.workflowType !== "fix"
                                 ? (
                                   <div className="bg-gray-50 rounded p-1">
                                     <div className="text-xs font-bold mb-1">
                                       SPEC
                                     </div>
                                     {/* Show spec when available, otherwise loading */}
-                                    {spec
+                                    {form.plan?.spec
                                       ? (
                                         <div className="font-mono text-[10px] whitespace-pre-wrap overflow-y-auto">
-                                          {spec}
+                                          {form.plan?.spec}
                                         </div>
                                       )
                                       : (
@@ -433,10 +400,10 @@ export function SpecPreview({
                                         (preserved)
                                       </span>
                                     </div>
-                                    {spec
+                                    {form.plan?.spec
                                       ? (
                                         <div className="font-mono text-[10px] whitespace-pre-wrap overflow-y-auto">
-                                          {spec}
+                                          {form.plan?.spec}
                                         </div>
                                       )
                                       : (
@@ -467,22 +434,20 @@ export function SpecPreview({
                                       </span>
                                     </div>
                                   )
-                                  : plan
+                                  : form.plan?.steps
                                   ? (
                                     <div className="font-mono text-[10px] whitespace-pre-wrap">
-                                      {Array.isArray(plan)
-                                        ? plan.map((step, index) => (
-                                          <div
-                                            key={index}
-                                            className="py-0.5 border-t first:border-t-0 border-gray-100"
-                                          >
-                                            <span className="font-bold">
-                                              {index + 1}.
-                                            </span>{" "}
-                                            {step}
-                                          </div>
-                                        ))
-                                        : plan}
+                                      {form.plan?.steps.map((step, index) => (
+                                        <div
+                                          key={index}
+                                          className="py-0.5 border-t first:border-t-0 border-gray-100"
+                                        >
+                                          <span className="font-bold">
+                                            {index + 1}.
+                                          </span>{" "}
+                                          {step}
+                                        </div>
+                                      ))}
                                     </div>
                                   )
                                   : (
@@ -497,16 +462,16 @@ export function SpecPreview({
                       )}
 
                     {/* Classification Reasoning Accordion */}
-                    {workflowReasoning && (
+                    {form.classification?.reasoning && (
                       <Accordion
                         title={
                           <div className="text-[10px] inline-flex gap-1">
                             <span>Reasoning</span>
 
-                            {workflowConfidence > 0 && (
+                            {form.classification?.confidence > 0 && (
                               <span
                                 className={`text-[10px] ${
-                                  workflowConfidence > 0.7
+                                  form.classification?.confidence > 0.7
                                     ? "text-green-700"
                                     : "text-amber-600"
                                 }`}
@@ -520,25 +485,26 @@ export function SpecPreview({
                         badge={null}
                       >
                         <div className="text-[10px] text-gray-700 leading-tight max-h-16 overflow-y-auto">
-                          {workflowReasoning}
+                          {form.classification?.reasoning}
                         </div>
                       </Accordion>
                     )}
 
-                    {schema && (
+                    {form.plan?.schema && (
                       <Accordion
                         title={<span className="text-[10px]">Schema</span>}
                         defaultOpen={false}
                         badge={null}
                       >
                         <pre className="text-[10px] text-gray-700 leading-tight max-h-32 overflow-y-auto">
-                          {JSON.stringify(schema, null, 2)}
+                          {JSON.stringify(form.plan.schema, null, 2)}
                         </pre>
                       </Accordion>
                     )}
 
                     {/* Empty state message */}
-                    {!spec && !plan && !classificationLoading && !planLoading &&
+                    {!form.plan?.spec && !form.plan?.steps &&
+                      !classificationLoading && !planLoading &&
                       (
                         <animated.div
                           className="text-xs text-gray-500 italic py-4 text-center"

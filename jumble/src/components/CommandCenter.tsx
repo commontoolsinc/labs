@@ -76,17 +76,11 @@ function CommandProcessor({
 
   // Get spec preview as user types in command center
   const {
-    previewSpec,
-    previewPlan,
-    schema,
+    previewForm,
     loading: isPreviewLoading,
     classificationLoading,
     planLoading,
-    workflowType,
-    workflowConfidence,
-    workflowReasoning,
-    setWorkflow, // Add the setter function to allow changing workflow type manually
-    formData, // Get the form data to pass to commands
+    setWorkflowType, // Add the setter function to allow changing workflow type manually
   } = useLiveSpecPreview(
     inputValue,
     charmManager, // Explicitly pass CharmManager instance
@@ -96,8 +90,8 @@ function CommandProcessor({
     focusedCharm, // Pass the current charm for context
   );
 
-  // Update the context with the current workflow form data
-  context.previewPlan = formData;
+  // Update the command context with the current workflow form data
+  context.previewForm = previewForm;
 
   if (context.loading && mode.type !== "input") {
     return (
@@ -120,9 +114,7 @@ function CommandProcessor({
     mode,
     inputValue,
     charmManager,
-    workflowType,
-    workflowConfidence,
-    previewPlan,
+    previewForm,
   ]);
 
   switch (mode.type) {
@@ -132,18 +124,13 @@ function CommandProcessor({
           <div className="relative">
             {/* The floating spec preview will be positioned above the composer */}
             <SpecPreview
-              spec={previewSpec}
-              plan={previewPlan}
-              schema={schema}
+              form={previewForm}
               loading={isPreviewLoading}
               classificationLoading={classificationLoading}
               planLoading={planLoading}
               visible
               floating
-              workflowType={workflowType}
-              workflowConfidence={workflowConfidence}
-              workflowReasoning={workflowReasoning}
-              onWorkflowChange={setWorkflow} // Add workflow change handler to enable manual selection
+              onWorkflowChange={setWorkflowType}
             />
 
             <Composer

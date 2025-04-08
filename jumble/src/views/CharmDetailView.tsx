@@ -9,6 +9,7 @@ import {
   injectUserCode,
   iterate,
   modifyCharm,
+  WorkflowForm,
   WorkflowType,
 } from "@commontools/charm";
 import { useCharmReferences } from "@/hooks/use-charm-references.ts";
@@ -67,17 +68,14 @@ const variantModels = [
 ] as const;
 
 // =================== Context for Shared State ===================
+//
+// TODO(bf): this is also super bloated
 interface CharmOperationContextType {
   input: string;
+  previewForm: Partial<WorkflowForm>;
   setInput: (input: string) => void;
   selectedModel: string;
   setSelectedModel: (model: string) => void;
-  operationType: OperationType;
-  setOperationType: (type: OperationType) => void;
-  workflowType: WorkflowType;
-  setWorkflow: (type: WorkflowType) => void;
-  workflowConfidence: number;
-  workflowReasoning?: string;
   classificationLoading: boolean; // Loading state for workflow classification
   planLoading: boolean; // Loading state for plan generation
   showVariants: boolean;
@@ -95,11 +93,9 @@ interface CharmOperationContextType {
   isPreviewLoading: boolean;
   previewModel: SpecPreviewModel;
   setPreviewModel: (model: SpecPreviewModel) => void;
-  // The current form data from the preview
-  workflowForm?: Partial<ExecutionPlan>;
-  setWorkflowForm: (form: Partial<ExecutionPlan>) => void;
   handlePerformOperation: () => void;
   handleCancelVariants: () => void;
+  setWorkflowType: (workflowType: WorkflowType) => void;
   performOperation: (
     charmId: string,
     input: string,
@@ -264,7 +260,6 @@ function useCharmOperation() {
   const [selectedModel, setSelectedModel] = useState(
     "anthropic:claude-3-7-sonnet-latest",
   );
-  const [operationType, setOperationType] = useState<OperationType>("iterate");
   const [showVariants, setShowVariants] = useState(false);
   const [showPreview, setShowPreview] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -276,25 +271,18 @@ function useCharmOperation() {
     null,
   );
   const [expectedVariantCount, setExpectedVariantCount] = useState(0);
-  // The current workflow form data from SpecPreview
-  const [workflowForm, setWorkflowForm] = useState<Partial<ExecutionPlan>>();
 
   // Preview model state
   const [previewModel, setPreviewModel] = useState<SpecPreviewModel>("think");
 
   // Live preview generation with workflow classification
   const {
-    previewSpec,
-    previewPlan,
+    previewForm,
     loading: isPreviewLoading,
     classificationLoading,
     planLoading,
     model,
-    workflowType: classifiedWorkflowType,
-    workflowConfidence,
-    workflowReasoning,
-    setWorkflow,
-    updatedSchema,
+    setWorkflowType,
   } = useLiveSpecPreview(
     input,
     charmManager, // Explicitly pass CharmManager instance
@@ -303,21 +291,6 @@ function useCharmOperation() {
     previewModel,
     charm || undefined,
   );
-
-  // TODO(bf): this needs to die
-  // Automatically update operationType based on workflow classification
-  useEffect(() => {
-    if (!classifiedWorkflowType || workflowConfidence < 0.3) return;
-
-    // Map the workflow type to operation type
-    if (classifiedWorkflowType === "imagine") {
-      // For rework workflows, use extend operation
-      setOperationType("extend");
-    } else {
-      // For fix and edit workflows, use iterate operation
-      setOperationType("iterate");
-    }
-  }, [classifiedWorkflowType, workflowConfidence, setOperationType]);
 
   // Function that performs the selected operation using modifyCharm
   const performOperation = useCallback(
@@ -332,44 +305,19 @@ function useCharmOperation() {
           throw new Error(`Charm with ID ${charmId} not found`);
         }
 
-        // IMPORTANT: Determine the correct workflow type to use, with explicit precedence:
-        // 1. Form data from UI is highest priority (user-selected)
-        // 2. Classified workflow type is fallback
-        const effectiveWorkflowType = workflowForm?.workflowType ||
-          classifiedWorkflowType;
-
-        console.log("Using workflow type for operation:", {
-          fromForm: workflowForm?.workflowType,
-          fromClassification: classifiedWorkflowType,
-          effective: effectiveWorkflowType,
-        });
-
-        // TODO(bf): highly suspicious
-        if (!updatedSchema) {
-          throw new Error("must have schema to proceed");
-        }
-
         // Use modifyCharm which supports all workflow types
         return modifyCharm(
           charmManager,
           input,
           fetched,
-          {
-            workflowType: effectiveWorkflowType,
-            steps: workflowForm?.steps || [],
-            spec: previewSpec,
-            schema: updatedSchema,
-          },
+          previewForm,
           model,
         );
       });
     },
     [
       charmManager,
-      workflowForm,
-      classifiedWorkflowType,
-      previewSpec,
-      updatedSchema,
+      previewForm,
     ],
   );
 
@@ -377,20 +325,6 @@ function useCharmOperation() {
   const handlePerformOperation = useCallback(async () => {
     if (!input || !charm || !paramCharmId || !replicaName) return;
     setLoading(true);
-
-    // IMPORTANT: Ensure workflow type in state matches what's in the form
-    // This fixes desync issues when the user changes the workflow type but it hasn't fully processed
-    if (
-      workflowForm?.workflowType &&
-      workflowForm.workflowType !== classifiedWorkflowType
-    ) {
-      console.log("Syncing workflow type before operation", {
-        fromForm: workflowForm.workflowType,
-        fromState: classifiedWorkflowType,
-      });
-      // Force the workflow type to match what's in the UI
-      setWorkflow(workflowForm.workflowType);
-    }
 
     const handleVariants = async () => {
       setVariants([]);
@@ -432,7 +366,7 @@ function useCharmOperation() {
           replicaName,
         }));
       } catch (error) {
-        console.error(`${operationType} error:`, error);
+        console.error(`performOperation error:`, error);
       } finally {
         setLoading(false);
       }
@@ -447,10 +381,7 @@ function useCharmOperation() {
     performOperation,
     charmManager,
     navigate,
-    operationType,
-    workflowForm,
-    classifiedWorkflowType,
-    setWorkflow,
+    previewForm,
   ]);
 
   const handleCancelVariants = useCallback(() => {
@@ -459,17 +390,13 @@ function useCharmOperation() {
     setExpectedVariantCount(0);
   }, []);
 
+  // TODO(bf): this is stupidly bloated
   return {
     input,
     setInput,
     selectedModel,
     setSelectedModel,
-    operationType,
-    setOperationType,
-    workflowType: classifiedWorkflowType, // Use the classified workflow type from the preview
-    setWorkflow,
-    workflowConfidence,
-    workflowReasoning,
+    setWorkflowType,
     classificationLoading, // Add the classification loading state
     planLoading, // Add the plan loading state
     showVariants,
@@ -484,17 +411,14 @@ function useCharmOperation() {
     setSelectedVariant,
     expectedVariantCount,
     setExpectedVariantCount,
-    previewSpec,
-    previewPlan,
+    previewForm,
     isPreviewLoading,
     previewModel,
     setPreviewModel,
-    workflowForm, // Add the workflow form data
-    setWorkflowForm, // Add the setter
     handlePerformOperation,
     handleCancelVariants,
     performOperation,
-  };
+  } as CharmOperationContextType;
 }
 
 // =================== Components ===================
@@ -676,15 +600,11 @@ const Suggestions = () => {
   const { suggestions, loadingSuggestions } = useSuggestions(charm);
   const {
     setInput,
-    setShowVariants,
-    handlePerformOperation,
-    setOperationType,
     selectedModel,
     setLoading,
     setVariants,
     setSelectedVariant,
     setExpectedVariantCount,
-    operationType,
     performOperation,
     showVariants,
   } = useCharmOperationContext();
@@ -701,20 +621,13 @@ const Suggestions = () => {
 
   // React to suggestion selection
   const handleSuggestion = useCallback((suggestion: CharmSuggestion) => {
-    // Set the operation type based on suggestion type
-    if (suggestion.type.toLowerCase().includes("extend")) {
-      setOperationType("extend");
-    } else {
-      setOperationType("iterate");
-    }
-
     // Update the input state
     setInput(suggestion.prompt);
 
     // Store the suggestion for the effect to handle
     setSelectedSuggestion(suggestion);
     setLoading(true);
-  }, [setOperationType, setInput, setLoading]);
+  }, [setInput, setLoading]);
 
   // Handle the actual operation when selectedSuggestion changes
   useEffect(() => {
@@ -845,25 +758,16 @@ const OperationTab = () => {
     setInput,
     selectedModel,
     setSelectedModel,
-    operationType,
-    setOperationType,
     showVariants,
     setShowVariants,
     showPreview,
-    setShowPreview,
     loading,
     handlePerformOperation,
     isPreviewLoading,
     classificationLoading,
+    setWorkflowType,
     planLoading,
-    previewModel,
-    setPreviewModel,
-    workflowType: classifiedWorkflowType,
-    workflowConfidence,
-    workflowReasoning,
-    workflowForm,
-    setWorkflow,
-    setWorkflowForm,
+    previewForm,
   } = useCharmOperationContext();
 
   const mentions = useCharmMentions();
@@ -875,9 +779,9 @@ const OperationTab = () => {
         <div className="flex flex-col gap-2">
           <div className="border border-gray-300">
             <Composer
-              placeholder={classifiedWorkflowType === "fix"
+              placeholder={previewForm.classification?.workflowType === "fix"
                 ? "Fix issues in your charm..."
-                : classifiedWorkflowType === "edit"
+                : previewForm.classification?.workflowType === "edit"
                 ? "Tweak your charm..."
                 : "Create a new charm based on this data..."}
               readOnly={false}
@@ -892,7 +796,7 @@ const OperationTab = () => {
 
           <ComposerSubmitBar
             loading={loading}
-            operation={operationType === "iterate" ? "Iterate" : "Extend"}
+            operation="Submit"
             onSubmit={handlePerformOperation}
           >
             {/* TODO(bf): restore in https://github.com/commontoolsinc/labs/issues/876 */}
@@ -976,18 +880,12 @@ const OperationTab = () => {
       {/* Content Container with single scrollbar */}
       <div className="flex-grow overflow-auto mt-3 -mx-4 px-4">
         <SpecPreview
-          spec={workflowForm?.spec}
-          plan={workflowForm?.steps}
-          schema={workflowForm?.schema}
+          form={previewForm}
           loading={isPreviewLoading}
           classificationLoading={classificationLoading}
           planLoading={planLoading}
-          visible={showPreview}
-          workflowType={classifiedWorkflowType}
-          workflowConfidence={workflowConfidence}
-          workflowReasoning={workflowReasoning}
-          onWorkflowChange={setWorkflow}
-          onFormChange={setWorkflowForm}
+          visible={showPreview && input.trim().length >= 16}
+          onWorkflowChange={setWorkflowType}
         />
         <Variants />
         <Suggestions />

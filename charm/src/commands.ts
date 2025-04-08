@@ -125,13 +125,13 @@ export async function modifyCharm(
   charmManager: CharmManager,
   promptText: string,
   currentCharm: Cell<Charm>,
-  previewPlan?: ExecutionPlan,
+  prefill?: Partial<WorkflowForm>,
   model?: string,
 ): Promise<Cell<Charm>> {
   // Include the current charm in the context
   const context = {
     currentCharm: currentCharm,
-    previewPlan: previewPlan,
+    prefill,
     model,
   };
 

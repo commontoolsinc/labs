@@ -5,13 +5,13 @@ import { useRef } from "react";
 import {
   CharmManager,
   createWorkflowForm,
-  ExecutionPlan,
   fillClassificationSection,
   fillPlanningSection,
   formatPromptWithMentions as formatMentions,
   generateWorkflowPreview,
-  getIframeRecipe,
+  parseComposerDocument,
   processInputSection,
+  WorkflowForm,
   WorkflowType,
 } from "@commontools/charm";
 import { Cell } from "@commontools/runner";
@@ -70,14 +70,7 @@ export function useLiveSpecPreview(
   const isCompleteTopic = useRef<boolean>(true);
 
   // Preview content state
-  const [previewSpec, setPreviewSpec] = useState<string>("");
-  const [previewPlan, setPreviewPlan] = useState<string[]>([]);
-  const [workflowType, setWorkflowType] = useState<WorkflowType>("edit");
-  const [workflowConfidence, setWorkflowConfidence] = useState<number>(0);
-  const [workflowReasoning, setWorkflowReasoning] = useState<string>("");
-  const [updatedSchema, setUpdatedSchema] = useState<JSONSchema | undefined>(
-    undefined,
-  );
+  const [previewForm, setPreviewForm] = useState<Partial<WorkflowForm>>({});
   const debouncedInput = useDebounce(input, debounceTime);
 
   // Map the model type to actual model identifiers
@@ -115,10 +108,7 @@ export function useLiveSpecPreview(
       // Always reset content when starting a completely new topic
       if (isNewTopic) {
         console.log("Resetting preview content - new topic detected");
-        setPreviewSpec("");
-        setPreviewPlan([]);
-        setWorkflowConfidence(0);
-        setWorkflowReasoning("");
+        setPreviewForm({});
       }
 
       // Always reset loading states
@@ -148,9 +138,9 @@ export function useLiveSpecPreview(
     const isCurrentGeneration = () =>
       currentGenerationRef.current === generationId;
 
-    // Don't generate previews for very short inputs (less than 10 chars) or if disabled
+    // Don't generate previews for short inputs (less than 16 chars) or if disabled
     // This helps prevent unnecessary API calls and LLM requests
-    if (!text || !text.trim() || text.trim().length < 10 || !enabled) {
+    if (!text || !text.trim() || text.trim().length < 16 || !enabled) {
       console.log("Skipping preview generation - text too short or disabled");
       resetState();
       return;
@@ -175,52 +165,16 @@ export function useLiveSpecPreview(
     // If previous sections completed, they should stay completed
 
     try {
-      // Process mentions first - needed for both classification and plan
-      console.log("Formatting mentions using charmManager:", !!charmManager);
-      let processedText;
-      let sources = {};
-      let mentionResult;
-
-      // try {
-      //   // First try the app's formatPromptWithMentions
-      //   mentionResult = await formatPromptWithMentions(text, charmManager);
-      //   processedText = mentionResult.text;
-      //   sources = mentionResult.sources;
-      // } catch (appMentionError) {
-      //   console.warn(
-      //     "App mention formatting failed, trying charm version:",
-      //     appMentionError,
-      //   );
-
-      //   // Fall back to the charm package's formatPromptWithMentions
-      //   try {
-      //     const charmMentionResult = await formatMentions(text, charmManager);
-      //     processedText = charmMentionResult.text;
-      //     sources = charmMentionResult.mentions;
-      //   } catch (charmMentionError) {
-      //     console.error(
-      //       "Both mention formatting approaches failed:",
-      //       charmMentionError,
-      //     );
-      //     processedText = text; // Use the raw text if both approaches fail
-      //   }
-      // }
-
-      // console.log(
-      //   "Mentions formatted:",
-      //   processedText?.substring(0, 30),
-      //   "sources:",
-      //   Object.keys(sources || {}).length,
-      // );
-
       // Define a shared model ID for both calls
       const modelId = getModelId(model);
 
       let form = createWorkflowForm(text);
+      setPreviewForm(form);
       form.meta.modelId = modelId;
       form.input.existingCharm = currentCharm;
 
       form = await processInputSection(charmManager, form);
+      setPreviewForm(form);
       console.log("formatted input", form);
 
       // Check if this is still the current generation before proceeding
@@ -230,9 +184,7 @@ export function useLiveSpecPreview(
       }
 
       form = await fillClassificationSection(form);
-      setWorkflowType(form.classification.workflowType);
-      setWorkflowReasoning(form.classification.reasoning);
-      setWorkflowConfidence(form.classification.confidence);
+      setPreviewForm(form);
       setClassificationLoading(false);
       setProgress((prev) => ({ ...prev, classification: true }));
 
@@ -249,89 +201,9 @@ export function useLiveSpecPreview(
       }
 
       form = await fillPlanningSection(form);
-
-      // Log the plan data from form
-      console.log("RECEIVED PLAN DATA:", form.plan);
-
-      // Make a copy of the plan steps to avoid reference issues
-      const planSteps = form.plan?.steps && form.plan.steps.length > 0
-        ? [...form.plan.steps]
-        : [];
-
-      if (planSteps && planSteps.length > 0) {
-        console.log("Setting plan data:", planSteps);
-
-        // First set the plan data
-        setPreviewPlan(planSteps);
-
-        // Then update the progress state in the next tick
-        setTimeout(() => {
-          console.log("Setting plan progress - delayed update");
-          setPlanLoading(false);
-          setProgress((prev) => ({ ...prev, plan: true }));
-        }, 100);
-      } else {
-        console.warn("No plan steps found in form data", form.plan);
-        // Set empty plan and update progress
-        setPreviewPlan([]);
-        setPlanLoading(false);
-        setProgress((prev) => ({ ...prev, plan: true }));
-      }
+      setPreviewForm(form);
 
       console.log("got plan", form);
-
-      // PROGRESSIVE UPDATE: Handle spec extraction
-      // Check if this is still the current generation
-      if (!isCurrentGeneration()) {
-        console.log("Abandoning outdated generation process");
-        return;
-      }
-
-      if (form.plan.schema) {
-        setUpdatedSchema(form.plan.schema);
-      }
-
-      // PROGRESSIVE UPDATE: Finally, update spec if available
-      if (form.plan.spec) {
-        try {
-          // Attempt to extract just the specification section for display
-          const specMatch = form.plan.spec.match(
-            /<specification>([\s\S]*?)<\/specification>/,
-          );
-
-          let parsedSpec = "";
-          if (specMatch && specMatch[1]) {
-            parsedSpec = specMatch[1].trim();
-          } else {
-            // If can't extract, use the full spec but remove the XML tags
-            parsedSpec = form.plan.spec.replace(/<\/?[^>]+(>|$)/g, "").trim();
-          }
-
-          console.log(
-            "Setting spec content:",
-            parsedSpec.substring(0, 50) + "...",
-          );
-          setPreviewSpec(parsedSpec);
-
-          // Ensure progress is updated
-          setTimeout(() => {
-            setProgress((prev) => {
-              const newProgress = { ...prev, spec: true };
-              console.log("Updated progress to include spec:", newProgress);
-              return newProgress;
-            });
-          }, 50);
-        } catch (e) {
-          // If parsing fails, just use the raw spec
-          console.log("Error parsing spec, using raw content:", e);
-          setPreviewSpec(form.plan.spec);
-          setProgress((prev) => ({ ...prev, spec: true }));
-        }
-      } else {
-        setPreviewSpec("");
-        // Mark spec as complete even if empty
-        setProgress((prev) => ({ ...prev, spec: true }));
-      }
 
       // Record this successful text for future comparison
       setLastSuccessfulText(text);
@@ -401,21 +273,27 @@ export function useLiveSpecPreview(
   // Generate preview when input changes
   useEffect(() => {
     console.log("debouncedInput changed:", debouncedInput);
-    if (debouncedInput && debouncedInput.trim().length >= 10 && enabled) {
-      console.log("Generating preview for:", debouncedInput);
-      generatePreview(debouncedInput);
-    } else {
-      console.log(
-        "Not generating preview. Length:",
-        debouncedInput?.trim().length,
-        "Enabled:",
-        enabled,
-      );
+
+    async function fx() {
+      const { text } = await parseComposerDocument(debouncedInput);
+      if (text && text.trim().length >= 10 && enabled) {
+        console.log("Generating preview for:", text);
+        generatePreview(debouncedInput);
+      } else {
+        console.log(
+          "Not generating preview. Length:",
+          text?.trim().length,
+          "Enabled:",
+          enabled,
+        );
+      }
     }
+
+    fx();
   }, [debouncedInput, generatePreview, enabled, charmManager]);
 
   // Function to manually change the workflow type
-  const setWorkflow = useCallback((type: WorkflowType) => {
+  const setWorkflowType = useCallback((type: WorkflowType) => {
     // Create a unique ID for this generation process
     const generationId = Date.now();
     currentGenerationRef.current = generationId;
@@ -425,7 +303,14 @@ export function useLiveSpecPreview(
       currentGenerationRef.current === generationId;
 
     // Update the workflow type state immediately
-    setWorkflowType(type);
+    setPreviewForm({
+      ...previewForm,
+      classification: {
+        workflowType: type,
+        confidence: 1.0,
+        reasoning: "Manual override",
+      },
+    });
 
     // Reset progress states for plan and spec (but keep classification)
     // so that we show the proper loading indicators
@@ -474,61 +359,8 @@ export function useLiveSpecPreview(
           return;
         }
 
-        // PROGRESSIVE REVEAL: First update the plan
-        if (preview.plan && preview.plan.length > 0) {
-          setPreviewPlan(preview.plan);
-        } else {
-          // Default message if no plan is returned
-          setPreviewPlan(["Generate implementation based on specification"]);
-        }
-
         // Update plan progress
         setProgress((prev) => ({ ...prev, plan: true }));
-
-        // Small delay to make the progressive reveal more noticeable
-        await new Promise((resolve) => setTimeout(resolve, 100));
-
-        // PROGRESSIVE REVEAL: Then update the spec
-        // For fix workflows, we preserve the existing spec
-        // For edit/imagine, use the new spec
-        if (type === "fix") {
-          // For fix workflows, we might want to show the original spec but mark it as preserved
-          if (currentCharm) {
-            // Try to get the original spec from the charm
-            const originalSpec = await getOriginalSpecFromCharm(currentCharm);
-            if (originalSpec) {
-              setPreviewSpec(originalSpec);
-            } else {
-              setPreviewSpec(""); // If can't get original, hide spec
-            }
-          } else {
-            setPreviewSpec(""); // No current charm, hide spec
-          }
-        } else if (preview.spec) {
-          // For edit/imagine, show the generated spec
-          try {
-            // Attempt to extract just the specification section for display
-            const specMatch = preview.spec.match(
-              /<specification>([\s\S]*?)<\/specification>/,
-            );
-            if (specMatch && specMatch[1]) {
-              setPreviewSpec(specMatch[1].trim());
-            } else {
-              // If can't extract, use the full spec but remove the XML tags
-              setPreviewSpec(
-                preview.spec.replace(/<\/?[^>]+(>|$)/g, "").trim(),
-              );
-            }
-          } catch (e) {
-            // If parsing fails, just use the raw spec
-            setPreviewSpec(preview.spec);
-          }
-        }
-
-        // Update schema if available
-        if (preview.updatedSchema) {
-          setUpdatedSchema(preview.updatedSchema);
-        }
 
         // Mark spec as complete
         setProgress((prev) => ({ ...prev, spec: true }));
@@ -545,93 +377,52 @@ export function useLiveSpecPreview(
       }
     };
 
-    // Execute the async function
-    if (input && input.trim().length >= 10) {
+    // Execute the async function, only for inputs with sufficient length
+    if (input && input.trim().length >= 16) {
       regeneratePreviewForWorkflow();
     }
   }, [input, currentCharm, model, getModelId, charmManager]);
 
   // Helper function to extract the original spec from a charm
-  const getOriginalSpecFromCharm = (charm: Cell<Charm>) => {
-    try {
-      // Import getIframeRecipe from the charm package if needed
-      // This should extract the spec from the charm
-      const iframeRecipe = getIframeRecipe(charm);
-      return iframeRecipe?.iframe?.spec || "";
-    } catch (error) {
-      console.error("Error getting original spec from charm:", error);
-      return "";
-    }
-  };
+  // const getOriginalSpecFromCharm = (charm: Cell<Charm>) => {
+  //   try {
+  //     // Import getIframeRecipe from the charm package if needed
+  //     // This should extract the spec from the charm
+  //     const iframeRecipe = getIframeRecipe(charm);
+  //     return iframeRecipe?.iframe?.spec || "";
+  //   } catch (error) {
+  //     console.error("Error getting original spec from charm:", error);
+  //     return "";
+  //   }
+  // };
 
-  // Helper function to extract the original argument schema from a charm
-  const getOriginalArgumentSchemaFromCharm = (charm: Cell<Charm>) => {
-    try {
-      const iframeRecipe = getIframeRecipe(charm);
-      return iframeRecipe?.iframe?.argumentSchema || undefined;
-    } catch (error) {
-      console.error(
-        "Error getting original argument schema from charm:",
-        error,
-      );
-      return undefined;
-    }
-  };
+  // // Helper function to extract the original argument schema from a charm
+  // const getOriginalArgumentSchemaFromCharm = (charm: Cell<Charm>) => {
+  //   try {
+  //     const iframeRecipe = getIframeRecipe(charm);
+  //     return iframeRecipe?.iframe?.argumentSchema || undefined;
+  //   } catch (error) {
+  //     console.error(
+  //       "Error getting original argument schema from charm:",
+  //       error,
+  //     );
+  //     return undefined;
+  //   }
+  // };
 
-  let originalSchema;
-  if (currentCharm) {
-    originalSchema = getOriginalArgumentSchemaFromCharm(currentCharm);
-  }
-  const schema = updatedSchema || originalSchema;
-
-  // Create a form data object to expose to parent components
-  const formData: ExecutionPlan | undefined = schema
-    ? {
-      workflowType,
-      steps: previewPlan,
-      spec: previewSpec,
-      schema,
-    }
-    : undefined;
-
-  // Debug logging to verify state
-  console.log("Current state:", {
-    loading,
-    classificationLoading,
-    planLoading,
-    progress,
-    workflowType,
-    planData: previewPlan,
-    planType: typeof previewPlan,
-    isArray: Array.isArray(previewPlan),
-    planLength: Array.isArray(previewPlan) ? previewPlan.length : 0,
-  });
-
-  // Extra debugging for spec content
-  console.log("RETURNING SPEC:", {
-    specContent: previewSpec ? previewSpec.substring(0, 30) + "..." : "none",
-    planContent: Array.isArray(previewPlan)
-      ? previewPlan.slice(0, 2)
-      : previewPlan,
-    progressState: progress,
-  });
+  // let originalSchema;
+  // if (currentCharm) {
+  //   originalSchema = getOriginalArgumentSchemaFromCharm(currentCharm);
+  // }
 
   return {
-    previewSpec,
-    previewPlan,
+    previewForm,
     loading,
     classificationLoading,
     planLoading,
     regenerate: () => generatePreview(input),
     model,
-    workflowType,
-    workflowConfidence,
-    workflowReasoning,
-    schema,
-    setWorkflow,
-    // Include progress state to let components know which parts are ready
+    setWorkflowType,
     progress,
-    // Return the form data for downstream consumers
-    formData,
   };
 }

@@ -7,6 +7,7 @@ import {
   CharmManager,
   compileAndRunRecipe,
   renameCharm,
+  WorkflowForm,
   WorkflowType,
 } from "@commontools/charm";
 import {
@@ -145,7 +146,7 @@ export interface CommandContext {
   addJobMessage: (jobId: string, message: string) => void;
   updateJobProgress: (jobId: string, progress: number) => void;
   commandPathIds: string[];
-  previewPlan?: ExecutionPlan;
+  previewForm?: Partial<WorkflowForm>;
 }
 
 export type CommandMode =
@@ -265,12 +266,6 @@ async function handleImagineOperation(
   try {
     let newCharm;
 
-    // Get workflow data from the deps.workflowForm
-    const formWorkflowType = deps.previewPlan?.workflowType;
-
-    // Use the workflow type from the form or the provided parameter
-    const effectiveWorkflowType = formWorkflowType || workflowType || "edit";
-
     // bf: I suspect this is pointless and already handled in executeWorkflow
     if (deps.focusedCharmId) {
       // Get the current charm
@@ -284,7 +279,7 @@ async function handleImagineOperation(
         deps.charmManager,
         input,
         charm,
-        deps.previewPlan,
+        deps.previewForm,
         model,
       );
     } else {
@@ -292,14 +287,7 @@ async function handleImagineOperation(
         deps.charmManager,
         input,
         {
-          prefill: {
-            classification: {
-              confidence: 1.0,
-              workflowType: effectiveWorkflowType,
-              reasoning: "Pre-determined",
-            },
-            plan: deps.previewPlan,
-          },
+          prefill: deps.previewForm,
           model: model,
         },
       );
