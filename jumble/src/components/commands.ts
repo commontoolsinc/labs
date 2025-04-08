@@ -299,7 +299,7 @@ async function handleModifyCharm(
       throw new Error("Failed to create charm");
     }
 
-    navigateToCharm(ctx, newCharm.get());
+    navigateToCharm(ctx, newCharm);
   } catch (error) {
     console.error("Imagine operation error:", error);
   } finally {
@@ -326,7 +326,7 @@ async function handleNewCharm(
       },
     );
 
-    navigateToCharm(ctx, newCharm.get());
+    navigateToCharm(ctx, newCharm);
   } catch (error) {
     console.error("New charm operation error:", error);
   } finally {
