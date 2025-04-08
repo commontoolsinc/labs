@@ -447,8 +447,8 @@ export class Replica {
     }
 
     // Add notFound entries to the heap and also persist them in the cache.
-    this.heap.merge(notFound, Replica.update);
-    const result = await this.cache.merge(revisions.values(), Replica.update);
+    this.heap.merge(notFound, Replica.put);
+    const result = await this.cache.merge(revisions.values(), Replica.put);
 
     if (result.error) {
       return result;
@@ -771,7 +771,7 @@ export class Provider implements StorageProvider {
     const subscriber = (revision?: Revision<State>) => {
       if (revision) {
         // ⚠️ We may not have a value because fact was retracted or
-        // (less likely) deleted alltogether. I assume we still need to
+        // (less likely) deleted altogether. I assume we still need to
         // call callback but it is not clear what should we pass into it.
         callback(revision?.is as unknown as StorageValue<T>);
       }
