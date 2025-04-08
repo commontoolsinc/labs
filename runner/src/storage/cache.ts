@@ -771,9 +771,11 @@ export class Provider implements StorageProvider {
     const subscriber = (revision?: Revision<State>) => {
       if (revision) {
         // ⚠️ We may not have a value because fact was retracted or
-        // (less likely) deleted altogether. I assume we still need to
-        // call callback but it is not clear what should we pass into it.
-        callback(revision?.is as unknown as StorageValue<T>);
+        // (less likely) deleted altogether. We still need to notify sink
+        // but we do is empty object per
+        // @see https://github.com/commontoolsinc/labs/pull/989#discussion_r2033651935
+        // TODO: Make proper API update instead of workaround
+        callback(revision?.is ?? {} as unknown as StorageValue<T>);
       }
     };
 
