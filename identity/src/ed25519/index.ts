@@ -19,6 +19,15 @@ import {
   toPEM,
 } from "./utils.ts";
 
+// Creation options used in `Ed25519Signer` instantiation.
+export interface Ed25519CreateConfig {
+  // Indicates the preference of implementation to use.
+  // If not specified, "webcrypto" is preferred if supported,
+  // falling back to "noble" otherwise.
+  // If specified, uses that implementation if supported, failing otherwise.
+  implementation?: "webcrypto" | "noble";
+}
+
 // Platform-specific implementation of an ED25519 Keypair.
 //
 // On browsers[0] that implement ed25519, the native Web Crypto
@@ -50,35 +59,32 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
 
   static async fromRaw<ID extends DIDKey>(
     rawPrivateKey: Uint8Array,
+    config: Ed25519CreateConfig = {},
   ): Promise<Ed25519Signer<ID>> {
     return new Ed25519Signer(
-      (await isNativeEd25519Supported())
+      await canUseNative(config)
         ? await NativeEd25519Signer.fromRaw(rawPrivateKey)
         : await NobleEd25519Signer.fromRaw(rawPrivateKey),
     );
   }
 
-  // Like `fromRaw` but forces the usage of `@noble/ed25519`
-  // implementation, making private key material available to the context.
-  static async fromRawFallbackImplementation<ID extends DIDKey>(
-    rawPrivateKey: Uint8Array,
+  static async generate<ID extends DIDKey>(
+    config: Ed25519CreateConfig = {},
   ): Promise<Ed25519Signer<ID>> {
-    return new Ed25519Signer(await NobleEd25519Signer.fromRaw(rawPrivateKey));
-  }
-
-  static async generate<ID extends DIDKey>(): Promise<Ed25519Signer<ID>> {
     return new Ed25519Signer(
-      (await isNativeEd25519Supported())
+      await canUseNative(config)
         ? await NativeEd25519Signer.generate()
         : await NobleEd25519Signer.generate(),
     );
   }
 
-  static async generateMnemonic<ID extends DIDKey>(): Promise<
+  static async generateMnemonic<ID extends DIDKey>(
+    config: Ed25519CreateConfig = {},
+  ): Promise<
     [Ed25519Signer<ID>, string]
   > {
     const mnemonic = bip39.generateMnemonic(wordlist, 256);
-    return [await Ed25519Signer.fromMnemonic(mnemonic), mnemonic];
+    return [await Ed25519Signer.fromMnemonic(mnemonic, config), mnemonic];
   }
 
   static generatePkcs8(): Uint8Array {
@@ -87,25 +93,18 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
 
   static async fromPkcs8<ID extends DIDKey>(
     pkcs8: Uint8Array,
+    config: Ed25519CreateConfig = {},
   ): Promise<Ed25519Signer<ID>> {
     const raw = pkcs8ToEd25519Raw(fromPEM(pkcs8));
-    return await Ed25519Signer.fromRaw(raw);
-  }
-
-  // Like `fromPkcs8` but forces the usage of `@noble/ed25519`
-  // implementation, making private key material available to the context.
-  static async fromPkcs8FallbackImplementation<ID extends DIDKey>(
-    pkcs8: Uint8Array,
-  ): Promise<Ed25519Signer<ID>> {
-    const raw = pkcs8ToEd25519Raw(fromPEM(pkcs8));
-    return await Ed25519Signer.fromRawFallbackImplementation(raw);
+    return await Ed25519Signer.fromRaw(raw, config);
   }
 
   static async fromMnemonic<ID extends DIDKey>(
     mnemonic: string,
+    config: Ed25519CreateConfig = {},
   ): Promise<Ed25519Signer<ID>> {
     const bytes = bip39.mnemonicToEntropy(mnemonic, wordlist);
-    return await Ed25519Signer.fromRaw(bytes);
+    return await Ed25519Signer.fromRaw(bytes, config);
   }
 
   static async deserialize<ID extends DIDKey>(
@@ -139,9 +138,10 @@ export class Ed25519Verifier<ID extends DIDKey> implements Verifier<ID> {
 
   static async fromDid<ID extends DIDKey>(
     did: ID,
+    config: Ed25519CreateConfig = {},
   ): Promise<Ed25519Verifier<ID>> {
     return new Ed25519Verifier(
-      (await isNativeEd25519Supported())
+      await canUseNative(config)
         ? await NativeEd25519Verifier.fromDid(did)
         : await NobleEd25519Verifier.fromDid(did),
     );
@@ -149,11 +149,32 @@ export class Ed25519Verifier<ID extends DIDKey> implements Verifier<ID> {
 
   static async fromRaw<ID extends DIDKey>(
     rawPublicKey: Uint8Array,
+    config: Ed25519CreateConfig = {},
   ): Promise<Ed25519Verifier<ID>> {
     return new Ed25519Verifier(
-      (await isNativeEd25519Supported())
+      await canUseNative(config)
         ? await NativeEd25519Verifier.fromRaw(rawPublicKey)
         : await NobleEd25519Verifier.fromRaw(rawPublicKey),
     );
   }
+}
+
+// Returns `true` if native WebCrypto should be used,
+// or `false` if Noble implementation should be used.
+//
+// If WebCrypto explicitly requested and not supported,
+// throws an error.
+async function canUseNative(config: Ed25519CreateConfig = {}) {
+  if (config.implementation === "webcrypto") {
+    if (!(await isNativeEd25519Supported())) {
+      throw new Error(
+        "Required WebCrypto features are not supported on this platform.",
+      );
+    }
+    return true;
+  }
+  if (config.implementation === "noble") {
+    return false;
+  }
+  return await isNativeEd25519Supported();
 }
