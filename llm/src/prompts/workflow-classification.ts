@@ -292,10 +292,6 @@ export async function generateWorkflowPlan(
       .filter((step) => step.trim().length > 0)
       .map((step) => step.trim());
 
-    // For the spec, we'll combine all parts into a structured XML document
-    // This becomes our full specification that gets saved
-    const fullSpec = response; // Keep the entire response with all XML tags
-
     // Get individual components for specific usage
     let specification = "";
     let dataModel = "";
