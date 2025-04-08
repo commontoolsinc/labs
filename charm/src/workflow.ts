@@ -629,14 +629,14 @@ export async function processWorkflow(
   }
 
   // Step 2: Classification if not already classified
-  if (form.classification?.confidence === 0) {
+  if (!form.classification) {
     form = await fillClassificationSection(form, {
       model: options.model,
     });
   }
 
   // Step 3: Planning if not already planned
-  if (!form.plan || !form.plan.steps || form.plan.steps.length === 0) {
+  if (!form.plan) {
     form = await fillPlanningSection(form);
   }
 

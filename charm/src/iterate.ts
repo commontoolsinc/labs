@@ -5,7 +5,7 @@ import {
   registerNewRecipe,
   tsToExports,
 } from "@commontools/runner";
-import { client as llm } from "@commontools/llm";
+import { client as llm, formatForm } from "@commontools/llm";
 import { isObj } from "@commontools/utils";
 import {
   createJsonSchema,
@@ -228,7 +228,7 @@ export async function castNewRecipe(
 
   // We're goig from loose plan to detailed plan here.
   const newSpec = `<REQUEST>${
-    JSON.stringify(form)
+    formatForm(form)
   }</REQUEST>\n<PLAN>${plan}</PLAN>\n<SPEC>${spec}</SPEC>`;
 
   console.log("newSpec", newSpec);

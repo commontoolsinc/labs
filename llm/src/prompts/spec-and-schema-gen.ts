@@ -172,7 +172,7 @@ IMPORTANT:
 - The user can always iterate and improve the solution later
 `;
 
-function formatForm(form: WorkflowForm) {
+export function formatForm(form: WorkflowForm) {
   return `
 <goal>${form.input.processedInput}</goal>
 <plan>${
