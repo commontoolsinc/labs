@@ -33,7 +33,7 @@ class MockReactHooks {
     return [this.values[key], this.stateSetter[key]];
   }
 
-  useCallback<T extends Function>(callback: T): T {
+  useCallback<T extends (...args: any[]) => any>(callback: T): T {
     return callback;
   }
 

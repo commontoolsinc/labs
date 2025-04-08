@@ -42,7 +42,7 @@ describe("Workflow Commands", () => {
   });
 
   describe("handleImagineOperation with workflow form data", () => {
-    it("should use workflow data from form for commands", async () => {
+    it("should use workflow data from form for commands", () => {
       // This test verifies that handleImagineOperation correctly uses
       // the workflow form data from the context
 

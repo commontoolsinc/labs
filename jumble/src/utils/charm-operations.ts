@@ -9,7 +9,7 @@ import { Cell } from "@commontools/runner";
  * @deprecated Use the extendCharm function from @commontools/charm instead
  * This function is kept for backward compatibility but will be removed in a future version
  */
-export async function extendCharm(
+export function extendCharm(
   charmManager: CharmManager,
   focusedCharmId: string,
   goal: string,
