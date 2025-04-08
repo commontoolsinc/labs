@@ -230,6 +230,8 @@ export async function castNewRecipe(
 
   console.log("resultSchema", resultSchema);
 
+  // TODO(bf): this doesn't seem like it should be needed, or it's named poorly
+  // we seem to be regenerating our plan and spec just before generating the code
   const newSpec =
     `<GOAL>${goal}</GOAL>\n<PLAN>${plan}</PLAN>\n<SPEC>${spec}</SPEC>`;
 

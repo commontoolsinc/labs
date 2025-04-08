@@ -8,7 +8,6 @@ import {
   fillClassificationSection,
   fillPlanningSection,
   formatPromptWithMentions as formatMentions,
-  generateWorkflowPreview,
   parseComposerDocument,
   processInputSection,
   WorkflowForm,

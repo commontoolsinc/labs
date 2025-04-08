@@ -38,7 +38,7 @@ export const WORKFLOWS: Record<WorkflowType, WorkflowConfig> = {
       "Fix issues in the code without changing functionality or spec",
     updateSpec: false,
     updateSchema: false,
-    allowsDataReferences: true,
+    allowsDataReferences: false,
   },
   edit: {
     name: "edit",
@@ -46,7 +46,7 @@ export const WORKFLOWS: Record<WorkflowType, WorkflowConfig> = {
       "Update functionality while maintaining the same core data structure",
     updateSpec: true,
     updateSchema: false,
-    allowsDataReferences: true,
+    allowsDataReferences: false,
   },
   imagine: {
     name: "imagine",
@@ -211,8 +211,7 @@ export async function classifyIntent(
  * @param workflowType The classified workflow type
  * @param currentCharm Current charm context
  * @param model LLM model to use
- * @param dataReferences Referenced charm data
- * @param charmManager CharmManager for processing mentions
+ * @param references Referenced charm data
  * @returns Execution plan with steps, spec, and schema
  */
 export async function generatePlan(
@@ -804,7 +803,7 @@ export async function executeReworkWorkflow(
     updatedSpec?: string;
     updatedSchema?: JSONSchema;
   },
-  dataReferences?: Record<string, Cell<any>>,
+  dataReferences?: Record<string, { name: string; cell: Cell<any> }>,
   currentCharm?: Cell<Charm>,
 ): Promise<Cell<Charm>> {
   console.log("Executing IMAGINE workflow");
@@ -814,8 +813,9 @@ export async function executeReworkWorkflow(
 
   // Add all external references first with validation
   if (dataReferences && Object.keys(dataReferences).length > 0) {
-    for (const [id, cell] of Object.entries(dataReferences)) {
+    for (const [id, reference] of Object.entries(dataReferences)) {
       if (id === "currentCharm") continue;
+      const { cell } = reference;
 
       if (
         !cell || typeof cell !== "object" || !("get" in cell) ||

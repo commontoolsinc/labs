@@ -2,7 +2,6 @@ import { beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { assertSpyCall, spy } from "@std/testing/mock";
 import { useLiveSpecPreview } from "../use-live-spec-preview.ts";
-import { generateWorkflowPreview } from "@commontools/charm";
 
 // We'll need to stub or mock some external dependencies
 // since we can't use Jest mocking in Deno

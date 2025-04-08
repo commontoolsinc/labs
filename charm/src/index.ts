@@ -45,7 +45,6 @@ export {
   formatSpecWithPlanAndPrompt,
   generateCode,
   generatePlan,
-  generateWorkflowPreview,
   type IntentClassificationResult,
   processInputSection,
   processWorkflow,
