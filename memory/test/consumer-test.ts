@@ -6,7 +6,7 @@ import * as Commit from "../commit.ts";
 import * as Provider from "../provider.ts";
 import * as Consumer from "../consumer.ts";
 import * as Selection from "../selection.ts";
-import { CODE, refer } from "merkle-reference";
+import { refer } from "merkle-reference";
 import { alice, bob, space as subject } from "./principal.ts";
 import { UTCUnixTimestampInSeconds } from "../interface.ts";
 

@@ -827,7 +827,6 @@ export class Provider implements StorageProvider {
   }
 
   onReceive(data: string) {
-    console.log("receive", this.parse(data));
     return this.writer.write(
       this.inspect({ receive: this.parse(data) }).receive,
     );
