@@ -361,7 +361,7 @@ export function createWorkflowForm(
 export async function processInputSection(
   charmManager: CharmManager,
   form: WorkflowForm,
-  options: Record<string, never> = {},
+  options: Record<string, unknown> = {},
 ): Promise<WorkflowForm> {
   const newForm = { ...form };
 
@@ -403,7 +403,7 @@ export async function processInputSection(
  */
 export async function fillClassificationSection(
   form: WorkflowForm,
-  options: Record<string, never> = {},
+  options: { model?: string } = {},
 ): Promise<WorkflowForm> {
   const newForm = { ...form };
 
@@ -439,7 +439,7 @@ export async function fillClassificationSection(
  */
 export async function fillPlanningSection(
   form: WorkflowForm,
-  options: Record<string, never> = {},
+  options: Record<string, unknown> = {},
 ): Promise<WorkflowForm> {
   if (!form.classification) {
     throw new Error("Classification is required");
