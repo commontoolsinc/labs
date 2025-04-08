@@ -325,11 +325,7 @@ export class Replica {
      * persisted cache.
      */
     public cache: AsyncStore<Revision<State>, FactAddress> = IDB.available()
-      ? IDB.open({
-        name: "memory",
-        store: space,
-        version: 1,
-      }, {
+      ? IDB.open({ name: space, store: "facts", version: 1 }, {
         key: RevisionAddress,
         address: RevisionAddress,
         value: RevisionCodec,
