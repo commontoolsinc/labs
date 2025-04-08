@@ -165,32 +165,6 @@ ${JSON.stringify(libraries)}
     });
   })();
 
-  window.grabJson = (gstr) => {
-      // Function to extract and parse JSON from a string
-      // This handles both raw JSON strings and code blocks with JSON
-      const jsonRegex = /\`\`\`(?:json)?\s*([\s\S]*?)\s*\`\`\`|({[\s\S]*})/;
-      const match = gstr.match(jsonRegex);
-
-      if (match) {
-        // Use the first matching group that contains content
-        const jsonStr = match[1] || match[2];
-        try {
-          return JSON.parse(jsonStr);
-        } catch (e) {
-          console.error("Failed to parse JSON:", e);
-          return null;
-        }
-      } else {
-        // If no JSON block found, attempt to parse the entire string
-        try {
-          return JSON.parse(gstr);
-        } catch (e) {
-          console.error("No valid JSON found in string");
-          return null;
-        }
-      }
-    }
-
   // Define readWebpage utility with React available
   window.readWebpage = (function() {
     const inflight = [];
@@ -673,10 +647,21 @@ async function fetchLLMResponse() {
     system: 'Translate all the messages to emojis, reply in JSON.',
     messages: ['Hi', 'How can I help you today?', 'tell me a joke']
   };
-  // grabJson is available on the window, string -> JSON
-  const result = grabJson(await llm(promptPayload));
+  const result = await llm(promptPayload)
   console.log('LLM responded:', result);
 }
+\`\`\`
+
+If you need JSON to be returned from the LLM, you can enable the \`mode: 'json'\` in the \`promptPayload\`.
+
+\`\`\`jsx
+const promptPayload = {
+  system: 'Translate all the messages to emojis, reply in JSON.',
+  messages: ['Hi', 'How can I help you today?', 'tell me a joke'],
+  mode: 'json'
+};
+const result = await llm(promptPayload);
+console.log('JSON response from llm:', result);
 \`\`\`
 
 ## 3. readWebpage Function

@@ -1031,6 +1031,16 @@ export function getCommands(deps: CommandContext): CommandItem[] {
           },
         },
         {
+          id: "open-fs-network-inspector",
+          type: "action",
+          title: "Open Network Inspector (new tab)",
+          handler: () => {
+            const url = new URL(globalThis.location.origin);
+            url.pathname = "/inspector";
+            globalThis.open(url.href, "_blank");
+          },
+        },
+        {
           id: "start-counter-job",
           type: "action",
           title: "Start Counter Job",

@@ -1,5 +1,5 @@
 import { BackgroundCharmService } from "./service.ts";
-import { log, getIdentity } from "./utils.ts";
+import { getIdentity, log } from "./utils.ts";
 import { env } from "./env.ts";
 
 const identity = await getIdentity(env.IDENTITY, env.OPERATOR_PASS);

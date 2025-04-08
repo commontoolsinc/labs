@@ -23,6 +23,7 @@ export const LLMRequestSchema = z.object({
   stop_token: z.string().optional(),
   max_completion_tokens: z.number().optional(),
   stream: z.boolean().default(false),
+  mode: z.enum(["json"]).optional(),
 });
 
 export const ModelInfoSchema = z.object({
@@ -111,7 +112,7 @@ export const generateText = createRoute({
         "application/json": {
           schema: LLMRequestSchema.openapi({
             example: {
-              model: "claude-3-5-sonnet",
+              model: "anthropic:claude-3-7-sonnet-latest",
               system: "You are a pirate, make sure you talk like one.",
               stream: false,
               messages: [

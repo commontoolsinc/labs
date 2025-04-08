@@ -6,6 +6,42 @@ import * as cache from "./cache.ts";
 import type { Context } from "@hono/hono";
 import { generateText as generateTextCore } from "./generateText.ts";
 import { findModel } from "./models.ts";
+
+/**
+ * Validates that the model and JSON mode settings are compatible
+ * @returns An error response object if validation fails, or null if validation passes
+ */
+function validateModelAndJsonMode(
+  c: Context,
+  modelString: string | undefined,
+  mode: string | undefined,
+) {
+  const model = modelString ? findModel(modelString) : null;
+
+  if (!model) {
+    return c.json({ error: "Invalid model" }, HttpStatusCodes.BAD_REQUEST);
+  }
+
+  // Validate JSON mode support if requested
+  const isJsonMode = mode === "json";
+
+  // Groq models don't support streaming with JSON mode
+  if (
+    isJsonMode && c.req.query("stream") === "true" &&
+    modelString?.startsWith("groq:")
+  ) {
+    return c.json(
+      {
+        error:
+          "Groq models don't support streaming in JSON mode. Please set stream to false.",
+      },
+      HttpStatusCodes.BAD_REQUEST,
+    );
+  }
+
+  return null;
+}
+
 /**
  * Handler for GET /models endpoint
  * Returns filtered list of available LLM models based on search criteria
@@ -56,34 +92,55 @@ export const getModels: AppRouteHandler<GetModelsRoute> = (c) => {
 export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   const payload = await c.req.json();
 
-  const modelString = payload.model;
-  const model = modelString ? findModel(modelString) : null;
-  const modelDefaultMaxTokens = model?.capabilities.maxOutputTokens || 8000;
-  if (!model) {
-    return c.json({ error: "Invalid model" }, HttpStatusCodes.BAD_REQUEST);
+  // First, check whether the request is cached, if so return the cached result
+  const cacheKey = await cache.hashKey(JSON.stringify(payload));
+  const cachedResult = await cache.loadItem(cacheKey);
+  if (cachedResult) {
+    const lastMessage = cachedResult.messages[cachedResult.messages.length - 1];
+    return c.json(lastMessage);
   }
 
-  try {
-    // Check cache for existing response
-    const cacheKey = await cache.hashKey(JSON.stringify(payload));
-    const cachedResult = await cache.loadItem(cacheKey);
-    if (cachedResult) {
-      const lastMessage =
-        cachedResult.messages[cachedResult.messages.length - 1];
-      return c.json(lastMessage);
+  const persistCache = async (
+    messages: { role: string; content: string }[],
+  ) => {
+    try {
+      await cache.saveItem(cacheKey, {
+        ...payload,
+        messages,
+      });
+    } catch (e) {
+      console.error("Error saving response to cache:", e);
     }
+  };
 
+  const validationError = validateModelAndJsonMode(
+    c,
+    payload.model,
+    payload.mode,
+  );
+  if (validationError) {
+    return validationError;
+  }
+
+  const model = findModel(payload.model);
+  const modelDefaultMaxTokens = model?.capabilities.maxOutputTokens || 8000;
+
+  try {
     const result = await generateTextCore({
       ...payload,
       abortSignal: c.req.raw.signal,
       max_tokens: payload.max_tokens || modelDefaultMaxTokens,
+      // If response is streaming, save to cache after the stream is complete
+      onStreamComplete: payload.stream
+        ? async (result) => {
+          await persistCache(result.messages);
+        }
+        : undefined,
     });
 
+    // If response is not streaming, save to cache and return the message
     if (!payload.stream) {
-      await cache.saveItem(cacheKey, {
-        ...payload,
-        messages: [...payload.messages, result.message],
-      });
+      await persistCache(result.messages);
       return c.json(result.message);
     }
 

@@ -64,7 +64,7 @@ const variantModels = [
   "anthropic:claude-3-5-sonnet-latest",
   "anthropic:claude-3-7-sonnet-latest",
   "groq:llama-3.3-70b-versatile",
-  "google:gemini-2.0-pro",
+  "google:gemini-2.5-pro",
 ] as const;
 
 // =================== Context for Shared State ===================

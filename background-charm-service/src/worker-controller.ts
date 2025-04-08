@@ -1,25 +1,41 @@
-import { BGCharmEntry, sleep } from "@commontools/utils";
+import { BGCharmEntry } from "@commontools/utils";
 import { Cell } from "@commontools/runner";
-import { defer } from "@commontools/utils";
 import { log } from "./utils.ts";
 import { Identity } from "@commontools/identity";
+import { defer, type Deferred } from "@commontools/utils/defer";
+
+const DEFAULT_TASK_TIMEOUT = 60_000;
 
 type PendingResponse = {
   resolve: (result: any) => void;
   reject: (error: any) => void;
 };
 
+export interface WorkerOptions {
+  did: string;
+  toolshedUrl: string;
+  identity: Identity;
+  timeoutMs?: number;
+}
+
 export class WorkerController {
-  private did: string;
   private worker: Worker;
+  private did: string;
+  private toolshedUrl: string;
+  private identity: Identity;
+  private timeoutMs: number;
   private msgId: number = 0;
   private pending = new Map<number, PendingResponse>();
-  private timeoutMs: number = 10000;
-  public ready: boolean = false;
+  private ready: boolean = false;
+  private initDeferred?: Deferred<void>;
 
-  constructor(did: string) {
-    log(`Creating worker controller ${did}`);
-    this.did = did;
+  constructor(options: WorkerOptions) {
+    this.did = options.did;
+    this.identity = options.identity;
+    this.toolshedUrl = options.toolshedUrl;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TASK_TIMEOUT;
+
+    log(`${this.did} Creating worker controller`);
 
     this.worker = new Worker(
       new URL("./worker.ts", import.meta.url).href,
@@ -81,21 +97,42 @@ export class WorkerController {
     };
   }
 
-  public setupWorker(toolshedUrl: string, identity: Identity) {
-    return this.exec("setup", {
-      did: this.did,
-      toolshedUrl,
-      rawIdentity: identity.serialize(),
-    }).catch((err) => {
-      log(
-        `Worker controller ${this.did} worker setup failed:`,
-        { error: true },
-        err,
-      );
-    }).then(() => {
+  async initialize() {
+    if (this.initDeferred) {
+      return this.initDeferred.promise;
+    }
+    this.initDeferred = defer();
+    try {
+      await this.exec("setup", {
+        did: this.did,
+        toolshedUrl: this.toolshedUrl,
+        rawIdentity: this.identity.serialize(),
+      });
+      this.initDeferred.resolve();
       this.ready = true;
-      log(`Worker controller ${this.did} ready for work`);
-    });
+    } catch (e) {
+      this.initDeferred.reject(
+        new Error(`Failed to initialize Worker: ${e ? e.toString() : e}`),
+      );
+    }
+    return this.initDeferred;
+  }
+
+  runCharm(
+    bg: Cell<BGCharmEntry>,
+  ): Promise<{ success: boolean; data?: any; charmId: string }> {
+    return this.exec("runCharm", { charmId: bg.get().charmId });
+  }
+
+  async shutdown() {
+    try {
+      await this.exec("shutdown");
+    } catch (err) {
+      log(
+        "Failed to shutdown worker gracefully, terminating with unknown status.",
+      );
+      this.worker?.terminate();
+    }
   }
 
   // send a message and return a promise that resolves with the response
@@ -119,22 +156,6 @@ export class WorkerController {
     return deferred.promise.finally(() => {
       clearTimeout(timeout);
       this.pending.delete(msgId);
-    });
-  }
-
-  public runCharm(
-    bg: Cell<BGCharmEntry>,
-  ): Promise<{ success: boolean; data?: any; charmId: string }> {
-    return this.exec("runCharm", { charmId: bg.get().charmId });
-  }
-
-  public shutdown() {
-    return this.exec("shutdown").catch(() => {
-      log(
-        "Failed to shutdown worker gracefully, terminating with unknown status.",
-      );
-    }).finally(() => {
-      this.worker?.terminate();
     });
   }
 }

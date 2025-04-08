@@ -62,6 +62,7 @@ export async function generateJSON(
         content: PROMPT,
       },
     ],
+    mode: "json",
   });
 
   const jsonString = parseTagFromResponse(response, "json_blob");

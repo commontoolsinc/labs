@@ -28,6 +28,7 @@ import SpellbookIndexView from "@/views/spellbook/SpellbookIndexView.tsx";
 import SpellbookDetailView from "@/views/spellbook/SpellbookDetailView.tsx";
 import StackedCharmsView from "@/views/StackedCharmsView.tsx";
 import SpellbookLaunchView from "@/views/spellbook/SpellbookLaunchView.tsx";
+import FullscreenInspectorView from "@/views/FullscreenInspectorView.tsx";
 import { ActionManagerProvider } from "@/contexts/ActionManagerContext.tsx";
 import { ROUTES } from "@/routes.ts";
 
@@ -110,7 +111,10 @@ createRoot(document.getElementById("root")!).render(
                       path={ROUTES.root}
                       element={<ReplicaRedirect />}
                     />
-
+                    <Route
+                      path={ROUTES.inspector}
+                      element={<FullscreenInspectorView />}
+                    />
                     <Route
                       path={ROUTES.replicaRoot}
                       element={<Shell />}

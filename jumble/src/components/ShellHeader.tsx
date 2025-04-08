@@ -2,7 +2,6 @@ import { NavLink } from "react-router-dom";
 import ShapeLogo from "@/assets/ShapeLogo.tsx";
 import { NavPath } from "@/components/NavPath.tsx";
 import { User } from "@/components/User.tsx";
-import { useNamedCell } from "@/hooks/use-cell.ts";
 
 type ShellHeaderProps = {
   /**
@@ -12,44 +11,11 @@ type ShellHeaderProps = {
   charmId?: string;
 };
 
-const colorCause = { shell: "header v0" };
-const colorSchema = {
-  type: "object" as const,
-  properties: {
-    color: {
-      type: "string" as const,
-      default: "transparent",
-    },
-  },
-  required: ["color"],
-} as const;
-
 export function ShellHeader(
   { session, charmId }: ShellHeaderProps,
 ) {
-  const colorSpace = session.space;
-
-  const [style, setStyle] = useNamedCell(
-    colorSpace,
-    colorCause,
-    colorSchema,
-  );
-
-  const handleHeaderClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) {
-      const randomColor = `#${
-        Math.floor(Math.random() * 16777215).toString(16)
-      }`;
-      setStyle({ color: randomColor });
-    }
-  };
-
   return (
-    <header
-      className="flex bg-gray-50 items-center justify-between border-b-2 p-2"
-      style={{ backgroundColor: style?.color }}
-      onClick={handleHeaderClick}
-    >
+    <header className="flex bg-gray-50 items-center justify-between border-b-2 p-2">
       <div className="header-start flex items-center gap-2">
         <NavLink
           to={`/${session.name}`}

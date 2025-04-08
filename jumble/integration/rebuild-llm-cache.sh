@@ -1,6 +1,20 @@
 #!/bin/bash
 set -e  # Exit on error
 
+# Function to clean up processes
+cleanup() {
+  echo "Cleaning up processes..."
+  if [ ! -z "$TOOLSHED_PID" ]; then
+    kill $TOOLSHED_PID 2>/dev/null || true
+  fi
+  if [ ! -z "$JUMBLE_PID" ]; then
+    kill $JUMBLE_PID 2>/dev/null || true
+  fi
+}
+
+# Set up trap to call cleanup on script exit (success or failure)
+trap cleanup EXIT
+
 echo "Starting integration test environment..."
 
 # Ensure we're at the root of the repo
@@ -12,15 +26,14 @@ elif [[ "$(basename "$(pwd)")" == "jumble" ]]; then
   cd ..
 fi
 
-# 1. Delete existing cache
-echo "Deleting existing LLM cache..."
-rm -rf jumble/integration/cache/llm-api-cache
-mkdir -p jumble/integration/cache/llm-api-cache
+#1. Create temp cache directory
+echo "Creating temp cache directory..."
+TEMP_CACHE_DIR=$(mktemp -d)
 
 # 2. Start toolshed on port 8000
 echo "Starting toolshed on port 8000..."
 cd toolshed
-deno run dev &
+CACHE_DIR=$TEMP_CACHE_DIR deno run dev &
 TOOLSHED_PID=$!
 cd ..
 
@@ -47,15 +60,21 @@ cd ..
 
 # 5. Copy cache files
 echo "Copying LLM cache files to integration directory..."
-mkdir -p integration/cache/llm-api-cache
-cp -r toolshed/cache/llm-api-cache/* integration/cache/llm-api-cache/
 
-# 6. Clean up processes
-echo "Cleaning up processes..."
-kill $TOOLSHED_PID
-kill $JUMBLE_PID
+echo "List of fresh llm cache artifacts:"
+ls -la $TEMP_CACHE_DIR/llm-api-cache
 
-# 7. Print report and status
+# Ensure target directory exists
+mkdir -p jumble/integration/cache/llm-api-cache
+
+# Copy files from temp cache to integration cache
+cp -r $TEMP_CACHE_DIR/llm-api-cache/* jumble/integration/cache/llm-api-cache/
+
+# Verify files were copied
+echo "Verifying copied files:"
+ls -la jumble/integration/cache/llm-api-cache/
+
+# 6. Print report and status
 echo "==============================================="
 echo "Integration test run complete!"
 echo "Cache files have been copied to integration/cache/llm-api-cache"

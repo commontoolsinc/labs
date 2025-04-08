@@ -1,0 +1,111 @@
+name: Manual Production Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Git commit SHA to deploy"
+        required: true
+        type: string
+
+jobs:
+  deploy-estuary:
+    name: "Deploy to Estuary (Production)"
+    runs-on: ubuntu-latest
+    environment: estuary # Protection rules configured in GitHub repo settings
+
+    steps:
+      - name: 📥 Checkout specific commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.commit_sha }}
+
+      - name: 🔍 Validate commit SHA
+        run: |
+          echo "Deploying commit: ${{ github.event.inputs.commit_sha }}"
+          git rev-parse --verify ${{ github.event.inputs.commit_sha }}
+
+      # Download the artifacts for this specific SHA from the artifact storage
+      - name: 🔑 Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: ⚙️ Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: 📥 Download tarball from GCS
+        run: |
+          mkdir -p downloaded-artifacts
+          gsutil cp gs://commontools-build-artifacts/workspace-artifacts/labs-${{ github.event.inputs.commit_sha }}.tar.gz downloaded-artifacts/
+
+          # Verify the tarball exists
+          if [ ! -f downloaded-artifacts/labs-${{ github.event.inputs.commit_sha }}.tar.gz ]; then
+            echo "::error::Artifact tarball for commit ${{ github.event.inputs.commit_sha }} not found!"
+            echo "Make sure this commit was successfully built and artifacts were uploaded."
+            exit 1
+          fi
+
+      - name: 📥 Download frontend artifacts for Sentry
+        run: |
+          mkdir -p jumble-artifacts
+          # Extract the jumble frontend artifacts from the tarball if they exist
+          # or download them from a known location if stored separately
+          tar -xzf downloaded-artifacts/labs-${{ github.event.inputs.commit_sha }}.tar.gz -C jumble-artifacts || true
+
+      - name: 🦕 Setup Deno 2.2.2
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.2.2"
+
+      - name: 🔽 Pre-download Sentry CLI
+        run: |
+          echo "::group::Downloading Sentry CLI"
+          deno run --allow-all npm:@sentry/cli --version
+          echo "::endgroup::"
+
+      - name: 📊 Create Jumble Sentry release & upload source maps
+        run: |
+          # Create a release with version based on commit SHA
+          deno run --allow-all npm:@sentry/cli releases new ${{ github.event.inputs.commit_sha }}
+
+          # Associate commits with the release
+          deno run --allow-all npm:@sentry/cli releases set-commits ${{ github.event.inputs.commit_sha }} --auto
+
+          # Upload source maps if they exist
+          if [ -d "./jumble-artifacts" ]; then
+            deno run --allow-all npm:@sentry/cli releases files ${{ github.event.inputs.commit_sha }} upload-sourcemaps ./jumble-artifacts --rewrite
+          else
+            echo "No source maps found to upload"
+          fi
+
+          # Finalize the release
+          deno run --allow-all npm:@sentry/cli releases finalize ${{ github.event.inputs.commit_sha }}
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_JUMBLE_PROJECT }}
+
+      - name: 📊 Create Toolshed server Sentry release
+        run: |
+          # Create a release with version based on commit SHA
+          deno run --allow-all npm:@sentry/cli releases new ${{ github.event.inputs.commit_sha }}
+
+          # Associate commits with the release
+          deno run --allow-all npm:@sentry/cli releases set-commits ${{ github.event.inputs.commit_sha }} --auto
+
+          # Finalize the release
+          deno run --allow-all npm:@sentry/cli releases finalize ${{ github.event.inputs.commit_sha }}
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_TOOLSHED_PROJECT }}
+
+      - name: 🚀 Deploy application to Estuary (Production)
+        id: deployment
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.BASTION_HOST }}
+          username: bastion
+          key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
+          script: /opt/ct/deploy.sh ${{ vars.DEPLOYMENT_ENVIRONMENT }} ${{ github.event.inputs.commit_sha }}

@@ -29,8 +29,6 @@ import {
   traverseValue,
 } from "./utils.ts";
 import { SchemaWithoutCell } from "./schema-to-ts.ts";
-import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 
 /** Declare a recipe
  *
@@ -39,27 +37,18 @@ import { zodToJsonSchema } from "zod-to-json-schema";
  *
  * or
  *
- * @param argumentSchema A schema for the recipe inputs, either JSON or Zod
+ * @param argumentSchema A JSONSchema for the recipe inputs
  * @param fn A function that creates the recipe graph
  *
  * or
  *
- * @param argumentSchema A schema for the recipe inputs, either JSON or Zod
- * @param resultSchema A schema for the recipe outputs, either JSON or Zod
+ * @param argumentSchema A JSONSchema for the recipe inputs
+ * @param resultSchema A JSONSchema for the recipe outputs
  * @param fn A function that creates the recipe graph
  *
  * @returns A recipe node factory that also serializes as recipe.
  */
 
-export function recipe<T extends z.ZodTypeAny>(
-  argumentSchema: T,
-  fn: (input: OpaqueRef<Required<z.infer<T>>>) => any,
-): RecipeFactory<z.infer<T>, ReturnType<typeof fn>>;
-export function recipe<T extends z.ZodTypeAny, R extends z.ZodTypeAny>(
-  argumentSchema: T,
-  resultSchema: R,
-  fn: (input: OpaqueRef<Required<z.infer<T>>>) => Opaque<z.infer<R>>,
-): RecipeFactory<z.infer<T>, z.infer<R>>;
 export function recipe<T>(
   argumentSchema: string | JSONSchema,
   fn: (input: OpaqueRef<Required<T>>) => any,
@@ -89,10 +78,9 @@ export function recipe<S extends JSONSchema, RS extends JSONSchema>(
   ) => Opaque<SchemaWithoutCell<RS>>,
 ): RecipeFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
 export function recipe<T, R>(
-  argumentSchema: string | JSONSchema | z.ZodTypeAny,
+  argumentSchema: string | JSONSchema,
   resultSchema:
     | JSONSchema
-    | z.ZodTypeAny
     | undefined
     | ((input: OpaqueRef<Required<T>>) => Opaque<R>),
   fn?: (input: OpaqueRef<Required<T>>) => Opaque<R>,
@@ -108,11 +96,10 @@ export function recipe<T, R>(
   // values.
   const frame = pushFrame();
 
-  const jsonSchema = argumentSchema instanceof z.ZodType
-    ? (zodToJsonSchema(argumentSchema) as JSONSchema)
-    : argumentSchema as JSONSchema | undefined;
-
-  const inputs = opaqueRef<Required<T>>(undefined, jsonSchema);
+  const inputs = opaqueRef<Required<T>>(
+    undefined,
+    argumentSchema as JSONSchema | undefined,
+  );
 
   const outputs = fn!(inputs);
 
@@ -128,22 +115,21 @@ export function recipe<T, R>(
 
 // Same as above, but assumes the caller manages the frame
 export function recipeFromFrame<T, R>(
-  argumentSchema: string | JSONSchema | z.ZodTypeAny,
-  resultSchema: JSONSchema | z.ZodTypeAny | undefined,
+  argumentSchema: string | JSONSchema,
+  resultSchema: JSONSchema | undefined,
   fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
 ): RecipeFactory<T, R> {
-  const jsonSchema = argumentSchema instanceof z.ZodType
-    ? (zodToJsonSchema(argumentSchema) as JSONSchema)
-    : argumentSchema as JSONSchema | undefined;
-
-  const inputs = opaqueRef<Required<T>>(undefined, jsonSchema);
+  const inputs = opaqueRef<Required<T>>(
+    undefined,
+    argumentSchema as JSONSchema | undefined,
+  );
   const outputs = fn(inputs);
   return factoryFromRecipe<T, R>(argumentSchema, resultSchema, inputs, outputs);
 }
 
 function factoryFromRecipe<T, R>(
-  argumentSchemaArg: string | JSONSchema | z.ZodTypeAny,
-  resultSchemaArg: JSONSchema | z.ZodTypeAny | undefined,
+  argumentSchemaArg: string | JSONSchema,
+  resultSchemaArg: JSONSchema | undefined,
   inputs: OpaqueRef<T>,
   outputs: Opaque<R>,
 ): RecipeFactory<T, R> {
@@ -274,34 +260,31 @@ function factoryFromRecipe<T, R>(
     if (external) setValueAtPath(initial, paths.get(cell)!, external);
   });
 
-  let argumentSchema: JSONSchemaWritable;
+  let argumentSchema: JSONSchema;
 
   if (typeof argumentSchemaArg === "string") {
-    // TODO(seefeld): We still need a derived schema for the result
-    argumentSchema = createJsonSchema(defaults, true);
-    argumentSchema.description = argumentSchemaArg;
+    // Create a writable schema
+    const writableSchema: JSONSchemaWritable = createJsonSchema(defaults, true);
+    writableSchema.description = argumentSchemaArg;
 
-    delete (argumentSchema.properties as any)?.[UI]; // TODO(seefeld): This should be a schema for views
-    if (argumentSchema.properties?.internal?.properties) {
+    delete (writableSchema.properties as any)?.[UI]; // TODO(seefeld): This should be a schema for views
+    if (writableSchema.properties?.internal?.properties) {
       for (
         const key of Object.keys(
-          argumentSchema.properties.internal.properties as any,
+          writableSchema.properties.internal.properties as any,
         )
       ) {
         if (key.startsWith("__#")) {
-          delete (argumentSchema as any).properties.internal.properties[key];
+          delete (writableSchema as any).properties.internal.properties[key];
         }
       }
     }
-  } else if (argumentSchemaArg instanceof z.ZodType) {
-    argumentSchema = zodToJsonSchema(argumentSchemaArg) as JSONSchema;
+    argumentSchema = writableSchema;
   } else {
     argumentSchema = argumentSchemaArg;
   }
 
-  const resultSchema: JSONSchema = resultSchemaArg instanceof z.ZodType
-    ? (zodToJsonSchema(resultSchemaArg) as JSONSchema)
-    : (resultSchemaArg ?? ({} as JSONSchema));
+  const resultSchema: JSONSchema = resultSchemaArg || { type: "object" };
 
   const serializedNodes = Array.from(nodes).map((node) => {
     const module = toJSONWithAliases(node.module, paths) as unknown as Module;

@@ -1,14 +1,7 @@
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
-import {
-  ConsumerCommandInvocation,
-  Protocol,
-  ProviderCommand,
-  UCAN,
-} from "@commontools/memory";
-import * as Inspector from "@commontools/runner/storage/inspector";
 import { FaArrowDown, FaArrowUp, FaExclamationTriangle } from "react-icons/fa";
-
-import { useCallback, useEffect, useRef, useState } from "react";
+import { storage } from "@commontools/runner";
+import { useEffect, useRef, useState } from "react";
 import {
   useStatusMonitor,
   useStorageBroadcast,
@@ -21,8 +14,6 @@ const COLORS = {
   GREEN: "#00BF57",
   RED: "#FF0000",
 };
-
-const MIN_ANIMATION_DURATION = 800;
 
 // Safe palette colors (avoiding red and green)
 const AVATAR_COLORS = [
@@ -172,7 +163,7 @@ export function User() {
   const easedPullCountRef = useRef(0);
 
   // Use our shared animation smoothing hook
-  const { updateValue, getValue, rafRef } = useAnimationSmoothing();
+  const { updateValue, rafRef } = useAnimationSmoothing();
 
   // Get DID from session
   useEffect(() => {
@@ -183,7 +174,9 @@ export function User() {
   }, [session]);
 
   // Listen for events
-  useStorageBroadcast(updateStatus);
+  // Use storage-scope, since, if we've authenticated,
+  // we're using a space-scoped inspector
+  useStorageBroadcast(storage.id, updateStatus);
 
   // Animation logic
   useEffect(() => {

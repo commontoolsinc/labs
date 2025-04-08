@@ -7,11 +7,8 @@ import type {
   MemorySpace,
   Protocol,
   Query,
-  Result,
   SchemaContext,
   SchemaQuery,
-  Subscribe,
-  Transaction,
   UCAN,
 } from "@commontools/memory/interface";
 import * as Memory from "@commontools/memory/consumer";
@@ -19,6 +16,9 @@ import { assert } from "@commontools/memory/fact";
 import * as Changes from "@commontools/memory/changes";
 export * from "@commontools/memory/interface";
 import * as Codec from "@commontools/memory/codec";
+import { Channel, RawCommand } from "./inspector.ts";
+import { isBrowser } from "@commontools/utils/env";
+import type { JSONValue as BuilderJSONValue } from "@commontools/builder";
 
 /**
  * Represents a state of the memory space.
@@ -67,7 +67,7 @@ export interface RemoteStorageProviderSettings {
 
 export interface RemoteStorageProviderOptions {
   /**
-   * Unique identifier of the storage. Used as name of the `BroadcastChannel`
+   * Unique identifier of the storage. Used as scoping name in `Channel`
    * in order to allow inspection of the storage.
    */
   id: string;
@@ -78,7 +78,7 @@ export interface RemoteStorageProviderOptions {
   the?: string;
   settings?: RemoteStorageProviderSettings;
 
-  inspector?: BroadcastChannel;
+  inspector?: Channel;
 }
 
 const defaultSettings: RemoteStorageProviderSettings = {
@@ -95,7 +95,7 @@ export class RemoteStorageProvider implements StorageProvider {
   session: Memory.MemorySession<MemorySpace>;
   settings: RemoteStorageProviderSettings;
 
-  inspector?: BroadcastChannel;
+  inspector?: Channel;
 
   /**
    * queue that holds commands that we read from the session, but could not
@@ -118,15 +118,16 @@ export class RemoteStorageProvider implements StorageProvider {
     space = HOME,
     the = "application/json",
     settings = defaultSettings,
-    inspector = globalThis.BroadcastChannel
-      ? new BroadcastChannel(id)
-      : undefined,
+    inspector,
   }: RemoteStorageProviderOptions) {
     this.address = address;
     this.workspace = space;
     this.the = the;
     this.settings = settings;
-    this.inspector = inspector;
+    // Do not use a default inspector when in Deno:
+    // Requires `--unstable-broadcast-channel` flags and it is not used
+    // in that environment.
+    this.inspector = isBrowser() ? (inspector ?? new Channel(id)) : undefined;
     this.handleEvent = this.handleEvent.bind(this);
 
     const session = Memory.create({ as });
@@ -336,9 +337,9 @@ export class RemoteStorageProvider implements StorageProvider {
     );
   }
 
-  inspect<T>(
-    message: T,
-  ): T {
+  inspect(
+    message: RawCommand,
+  ): RawCommand {
     this.inspector?.postMessage({
       ...message,
       time: Date.now(),
@@ -422,7 +423,8 @@ export class RemoteStorageProvider implements StorageProvider {
     // If we did have connection
     if (this.connectionCount > 1) {
       for (const local of this.state.values()) {
-        for (const query of local.remote.values()) {
+        const uniqueRemotes = new Set(local.remote.values());
+        for (const query of uniqueRemotes) {
           query.reconnect();
         }
       }
@@ -472,12 +474,21 @@ export class RemoteStorageProvider implements StorageProvider {
     // disconnect.
     if (this.connection === socket) {
       // Report disconnection to inspector
-      this.inspect({
-        disconnect: {
-          reason: event.type,
-          description: `Disconnected because of the ${event.type}`,
-        },
-      });
+      switch (event.type) {
+        case "error":
+        case "timeout":
+        case "close": {
+          this.inspect({
+            disconnect: {
+              reason: event.type,
+              message: `Disconnected because of the ${event.type}`,
+            },
+          });
+          break;
+        }
+        default:
+          throw new Error(`Unknown event type: ${event.type}`);
+      }
 
       this.connect();
     }
@@ -589,7 +600,7 @@ class Subscription<Space extends MemorySpace> {
   static spawn<Space extends MemorySpace>(
     session: Memory.MemorySpaceSession<Space>,
     selector: Query["args"] | SchemaQuery["args"],
-    inspector?: BroadcastChannel,
+    inspector?: Channel,
   ) {
     return new Subscription(
       session,
@@ -604,7 +615,7 @@ class Subscription<Space extends MemorySpace> {
     public selector: Query["args"] | SchemaQuery["args"],
     public subscribers: Map<Entity | "_", Set<Subscriber>>,
     public queryView?: Memory.QueryView<Space, Protocol<Space>>,
-    public inspector?: BroadcastChannel,
+    public inspector?: Channel,
   ) {
     this.connect(queryView);
   }
@@ -637,9 +648,9 @@ class Subscription<Space extends MemorySpace> {
     return this.query.facts.find((fact) => fact.of == of);
   }
 
-  inspect<T>(
-    message: T,
-  ): T {
+  inspect(
+    message: RawCommand,
+  ): RawCommand {
     this.inspector?.postMessage({
       ...message,
       time: Date.now(),
@@ -648,14 +659,16 @@ class Subscription<Space extends MemorySpace> {
   }
 
   broadcast() {
+    // Cast between `memory`'s JSONValue and `builder`'s JSONValue
     const fullSubscribers = this.subscribers.get("_");
     for (const fact of this.query.facts) {
-      const value = fact.is;
+      const value = fact.is as BuilderJSONValue;
       this.inspector?.postMessage({
         integrate: {
           url: this.subscription.toURL(),
           value,
         },
+        time: Date.now(),
       });
 
       const currentSubscribers = this.subscribers.get(fact.of);

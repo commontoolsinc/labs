@@ -11,7 +11,6 @@ import {
 import { handler, lift } from "../src/module.ts";
 import { opaqueRef } from "../src/opaque-ref.ts";
 import { popFrame, pushFrame } from "../src/recipe.ts";
-import { z } from "zod";
 
 type MouseEvent = {
   clientX: number;
@@ -50,11 +49,11 @@ describe("module", () => {
           age: { type: "number" },
         },
         required: ["name"],
-      } as JSONSchema;
+      } as const satisfies JSONSchema;
 
       const greet = lift(
         schema,
-        { type: "string" },
+        { type: "string" } as const satisfies JSONSchema,
         ({ name, age }) => `Hello ${name}${age ? `, age ${age}` : ""}!`,
       );
 
@@ -63,12 +62,21 @@ describe("module", () => {
       expect(module.argumentSchema).toEqual(schema);
     });
 
-    it("supports Zod schema validation", () => {
-      const inputSchema = z.object({
-        name: z.string(),
-        age: z.number().optional(),
-      });
-      const outputSchema = z.string();
+    it("supports schema validation with description", () => {
+      const inputSchema = {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          age: { type: "number" },
+        },
+        required: ["name"],
+        description: "Person information",
+      } as const satisfies JSONSchema;
+
+      const outputSchema = {
+        type: "string",
+        description: "Greeting message",
+      } as const satisfies JSONSchema;
 
       const greet = lift(
         inputSchema,
@@ -80,6 +88,8 @@ describe("module", () => {
       const module = greet as unknown as Module;
       expect(module.argumentSchema).toBeDefined();
       expect(module.resultSchema).toBeDefined();
+      expect(module.argumentSchema?.description).toBe("Person information");
+      expect(module.resultSchema?.description).toBe("Greeting message");
     });
   });
 
@@ -121,7 +131,7 @@ describe("module", () => {
           y: { type: "number" },
         },
         required: ["type", "x", "y"],
-      } as JSONSchema;
+      } as const satisfies JSONSchema;
 
       const stateSchema = {
         type: "object",
@@ -129,7 +139,7 @@ describe("module", () => {
           lastX: { type: "number" },
           lastY: { type: "number" },
         },
-      } as JSONSchema;
+      } as const satisfies JSONSchema;
 
       const mouseHandler = handler(
         eventSchema,
@@ -146,43 +156,30 @@ describe("module", () => {
       expect(module.argumentSchema?.properties?.$event).toEqual(eventSchema);
     });
 
-    it("supports Zod schema for events and state", () => {
-      const eventSchema = z.object({
-        type: z.enum(["click", "hover"]),
-        x: z.number(),
-        y: z.number(),
-      });
+    it("supports schema validation for events and state with enums", () => {
+      const eventSchema = {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["click", "hover"] },
+          target: { type: "string" },
+        },
+        required: ["type", "target"],
+      } as const satisfies JSONSchema;
 
-      const stateSchema = z.object({
-        lastX: z.number(),
-        lastY: z.number(),
-      });
-
-      const mouseHandler = handler(eventSchema, stateSchema, (event, state) => {
-        state.lastX = event.x;
-        state.lastY = event.y;
-      });
-
-      expect(isModule(mouseHandler)).toBe(true);
-      const module = mouseHandler as unknown as Module;
-      expect(module.argumentSchema).toBeDefined();
-      expect(module.argumentSchema?.properties?.$event).toBeDefined();
-    });
-
-    it("creates handler with proper type references", () => {
-      const eventSchema = z.object({
-        type: z.enum(["click", "hover"]),
-        target: z.string(),
-      });
-
-      const stateSchema = z.object({
-        elements: z.record(z.string(), z.boolean()),
-      });
+      const stateSchema = {
+        type: "object",
+        properties: {
+          elements: {
+            type: "object",
+            additionalProperties: { type: "boolean" },
+          },
+        },
+      } as const satisfies JSONSchema;
 
       const toggleHandler = handler(
         eventSchema,
         stateSchema,
-        (event, state) => {
+        (event: any, state: any) => {
           state.elements[event.target] = !state.elements[event.target];
         },
       );
