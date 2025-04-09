@@ -17,7 +17,6 @@ interface SpecPreviewProps {
   visible: boolean;
   floating?: boolean;
   onWorkflowChange?: (workflow: WorkflowType) => void;
-  onFormChange?: (formData: Partial<ExecutionPlan>) => void; // Callback to expose form data
 }
 
 // Accordion component for collapsible sections
@@ -68,12 +67,6 @@ function Accordion(
     },
   });
 
-  // Force update the accordion when content changes
-  React.useEffect(() => {
-    // Intentionally empty, just to trigger a re-render
-    console.log("Accordion content changed:", childrenContentKey);
-  }, [childrenContentKey]);
-
   // Compact accordion with minimal styling
   return (
     <div className="border border-gray-200 rounded-md mb-1 overflow-hidden">
@@ -120,7 +113,6 @@ export function SpecPreview({
   visible,
   floating = false,
   onWorkflowChange,
-  onFormChange,
 }: SpecPreviewProps) {
   const hasContent =
     (loading || form.classification || form.plan?.steps || form.plan?.spec) &&
@@ -137,62 +129,30 @@ export function SpecPreview({
     ? Math.min(260, globalThis.innerHeight * 0.45)
     : 280;
 
-  // Force a re-render when any of these change
-  React.useEffect(() => {
-    // This effect just forces a re-render
-    console.log("Content/Progress changed:", {
-      hasContent,
-      form,
-    });
-
-    // Force a re-render when plan data arrives
-    // if (plan && progress.plan) {
-    //   const forceUpdate = setTimeout(() => {
-    //     console.log("Force updating component due to plan data");
-    //   }, 50);
-    //   return () => clearTimeout(forceUpdate);
-    // }
-  }, [hasContent, form]);
-
   // Directly set the height style without animation
   const containerHeight = React.useMemo(() => {
-    console.log("Recalculating container height", {
-      visible,
-      hasContent,
-      loading,
-      classification: !!form.classification,
-      plan: !!form.plan?.steps,
-      spec: !!form.plan?.spec,
-      maxContentHeight,
-    });
-
     // Never show content if not visible or no actual content to display
     if (!visible || !hasContent) {
-      console.log("Container hidden, height: 0");
       return 0;
     }
 
     // If we're loading and no progress, show minimal height
     if (loading && !form.classification) {
-      console.log("Loading state, height:", loaderHeight);
       return loaderHeight;
     }
 
     // If we have a complete plan, show full height
     if (form.plan && form.plan.steps && form.plan.spec) {
-      console.log("Full plan state, height:", maxContentHeight);
       return maxContentHeight;
     }
 
     // If we only have classification, show half height
     if (form.classification) {
       const height = maxContentHeight / 3 * 2;
-      console.log("Classification only state, height:", height);
       return height;
     }
 
     // Default height for other cases
-    console.log("Default state, height:", maxContentHeight);
     return maxContentHeight;
   }, [
     visible,
@@ -204,8 +164,6 @@ export function SpecPreview({
     loaderHeight,
     maxContentHeight,
   ]);
-
-  console.log("containerHeight", containerHeight);
 
   // Create a key that changes when progress state changes to force re-renders
   const progressKey = `${Boolean(form.classification)}-${
