@@ -9,7 +9,7 @@ import {
   storage,
 } from "@commontools/runner";
 import {
-  createSession,
+  createAdminSession,
   type DID,
   Identity,
   type Session,
@@ -71,19 +71,19 @@ async function main() {
       const pkcs8Key = await Deno.readFile(keyPath);
       identity = await Identity.fromPkcs8(pkcs8Key);
     } catch (e) {
-      throw new Error(`Could not read key at ${keyPath}.`);
+      console.error(`Could not read key at ${keyPath}.`);
+      Deno.exit(1);
     }
   } else {
     identity = await Identity.fromPassphrase(OPERATOR_PASS);
   }
 
-  const session = {
-    private: spaceName?.startsWith("~") ?? false,
+  const session = await createAdminSession({
+    identity,
+    space: spaceDID as DID ?? await identity.derive(spaceName!),
     // TODO(seefeld): See what happens if we don't provide a name.
     name: spaceName ?? undefined as unknown as string,
-    space: spaceDID as DID ?? await identity.derive(spaceName!),
-    as: identity,
-  } satisfies Session;
+  }) satisfies Session;
 
   // TODO(seefeld): It only wants the space, so maybe we simplify the above and just space the space did?
   const manager = new CharmManager(session);
