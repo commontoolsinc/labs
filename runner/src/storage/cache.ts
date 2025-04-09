@@ -818,7 +818,8 @@ export class Provider implements StorageProvider {
       const content = JSON.stringify(value);
 
       const current = workspace.get({ the, of });
-      if (JSON.stringify(current) !== content) {
+
+      if (JSON.stringify(current?.is) !== content) {
         changes.push({
           the,
           of,
