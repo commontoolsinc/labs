@@ -292,38 +292,100 @@ export function findAllAliasedCells(
   return docs;
 }
 
+/**
+ * Track visited cell links and memoize results during path resolution
+ * and link following to prevent redundant work.
+ */
+export interface Visits {
+  /** Tracks visited cell links to detect cycles */
+  seen: CellLink[];
+  /** Cache for resolvePath results */
+  resolvePathCache: Map<string, CellLink>;
+  /** Cache for followLinks results */
+  followLinksCache: Map<string, CellLink>;
+}
+
+/**
+ * Creates a new visits tracking object.
+ */
+export function createVisits(): Visits {
+  return {
+    seen: [],
+    resolvePathCache: new Map(),
+    followLinksCache: new Map(),
+  };
+}
+
+/**
+ * Creates a cache key for a doc and path combination.
+ */
+function createPathCacheKey(doc: DocImpl<any>, path: PropertyKey[]): string {
+  return `${doc.entityId ?? doc}:${path.join(",")}`;
+}
+
+/**
+ * Creates a cache key for a cell link.
+ */
+function createLinkCacheKey(ref: CellLink, onlyAliases: boolean): string {
+  return `${ref.cell.entityId ?? ref.cell}:${
+    ref.path.join(",")
+  }:${onlyAliases}`;
+}
+
 export function resolveLinkToValue(
   doc: DocImpl<any>,
   path: PropertyKey[],
   log?: ReactivityLog,
-  seen: CellLink[] = [],
 ): CellLink {
-  const ref = resolvePath(doc, path, log, seen);
-  return followLinks(ref, seen, log);
+  const visits = createVisits();
+  const ref = resolvePath(doc, path, log, visits);
+  return followLinks(ref, log, visits);
 }
 
 export function resolveLinkToAlias(
   doc: DocImpl<any>,
   path: PropertyKey[],
   log?: ReactivityLog,
-  seen: CellLink[] = [],
 ): CellLink {
-  const ref = resolvePath(doc, path, log, seen);
-  return followLinks(ref, seen, log, true);
+  const visits = createVisits();
+  const ref = resolvePath(doc, path, log, visits);
+  return followLinks(ref, log, visits, true);
 }
 
 function resolvePath(
   doc: DocImpl<any>,
   path: PropertyKey[],
   log?: ReactivityLog,
-  seen: CellLink[] = [],
+  visits: Visits = createVisits(),
 ): CellLink {
+  // Check if we already resolved this exact path
+  const fullPathKey = createPathCacheKey(doc, path);
+  const exactMatch = visits.resolvePathCache.get(fullPathKey);
+  if (exactMatch) return exactMatch;
+
+  // Try to find a cached result for a shorter path
+  let startRef: CellLink = { cell: doc, path: [] };
+  let remainingPath = [...path];
+
+  // Look for the longest matching prefix path in the cache
+  for (let i = path.length - 1; i >= 0; i--) {
+    const prefixPath = path.slice(0, i);
+    const prefixKey = createPathCacheKey(doc, prefixPath);
+    const prefixMatch = visits.resolvePathCache.get(prefixKey);
+
+    if (prefixMatch) {
+      startRef = prefixMatch;
+      remainingPath = path.slice(i);
+      break;
+    }
+  }
+
   // Follow aliases, doc links, etc. in path, so that we end up on the right
   // doc, meaning the one that contains the value we want to access without any
   // redirects in between.
   //
   // If the path points to a redirect itself, we don't want to follow it: Other
-  // functions like followLwill do that. We just want to skip the interim ones.
+  // functions like followLinks will do that. We just want to skip the interim ones.
   //
   // All taken links are logged, but not the final one.
   //
@@ -334,12 +396,19 @@ function resolvePath(
   // Doc: { foo: { link } }, path: ["foo"] --> no change
   // Doc: { foo: { link } }, path: ["foo", "bar"] --> follow link, path: ["bar"]
 
-  let ref: CellLink = { cell: doc, path: [] };
+  let ref = startRef;
 
-  const keys = [...path];
+  const keys = [...remainingPath];
   while (keys.length) {
+    // Store intermediate paths in the cache
+    if (ref.path.length > startRef.path.length) {
+      const intermediatePath = path.slice(0, path.length - keys.length);
+      const intermediateKey = createPathCacheKey(doc, intermediatePath);
+      visits.resolvePathCache.set(intermediateKey, ref);
+    }
+
     // First follow all the aliases and links, _before_ accessing the key.
-    ref = followLinks(ref, seen, log);
+    ref = followLinks(ref, log, visits);
 
     // Now access the key.
     const key = keys.shift()!;
@@ -361,6 +430,8 @@ function resolvePath(
     };
   }
 
+  // Cache the final result
+  visits.resolvePathCache.set(fullPathKey, ref);
   return ref;
 }
 
@@ -369,64 +440,74 @@ function resolvePath(
 // already pointed to a value.
 export function followLinks(
   ref: CellLink,
-  seen: CellLink[] = [],
   log?: ReactivityLog,
+  visits: Visits = createVisits(),
   onlyAliases = false,
 ): CellLink {
+  // Check if we already followed these links
+  const cacheKey = createLinkCacheKey(ref, onlyAliases);
+  const cached = visits.followLinksCache.get(cacheKey);
+  if (cached) return cached;
+
   let nextRef: CellLink | undefined;
+  let result = ref;
 
   do {
     const resolvedRef = resolvePath(
-      ref.cell,
-      ref.path,
+      result.cell,
+      result.path,
       log,
-      seen,
+      visits,
     );
 
     // Add schema back if we didn't get a new one
-    if (!resolvedRef.schema && ref.schema) {
-      ref = { ...resolvedRef, schema: ref.schema };
-      if (ref.rootSchema) resolvedRef.rootSchema = ref.rootSchema;
+    if (!resolvedRef.schema && result.schema) {
+      result = { ...resolvedRef, schema: result.schema };
+      if (result.rootSchema) resolvedRef.rootSchema = result.rootSchema;
     } else {
-      ref = resolvedRef;
+      result = resolvedRef;
     }
 
-    const target = ref.cell.getAtPath(ref.path);
+    const target = result.cell.getAtPath(result.path);
 
     nextRef = !onlyAliases || isAlias(target)
-      ? maybeGetCellLink(target, ref.cell)
+      ? maybeGetCellLink(target, result.cell)
       : undefined;
 
     if (nextRef) {
       // Add schema back if we didn't get a new one
-      if (!nextRef.schema && ref.schema) {
+      if (!nextRef.schema && result.schema) {
         nextRef = {
           ...nextRef,
-          schema: ref.schema,
+          schema: result.schema,
         };
-        if (ref.rootSchema) nextRef.rootSchema = ref.rootSchema;
+        if (result.rootSchema) nextRef.rootSchema = result.rootSchema;
       }
 
       // Log all the refs that were followed, but not the final value they point to.
-      log?.reads.push({ cell: ref.cell, path: ref.path });
+      log?.reads.push({ cell: result.cell, path: result.path });
 
-      ref = nextRef;
+      result = nextRef;
 
       // Detect cycles (at this point these are all references that point to something)
       if (
-        seen.some((r) => r.cell === ref.cell && arrayEqual(r.path, ref.path))
+        visits.seen.some((r) =>
+          r.cell === result.cell && arrayEqual(r.path, result.path)
+        )
       ) {
         throw new Error(
           `Reference cycle detected ${
-            JSON.stringify(ref.cell.entityId ?? "unknown")
-          }/[${ref.path.join(", ")}] ${JSON.stringify(seen)}`,
+            JSON.stringify(result.cell.entityId ?? "unknown")
+          }/[${result.path.join(", ")}] ${JSON.stringify(visits.seen)}`,
         );
       }
-      seen.push(ref);
+      visits.seen.push(result);
     }
   } while (nextRef);
 
-  return ref;
+  // Cache the result
+  visits.followLinksCache.set(cacheKey, result);
+  return result;
 }
 
 export function maybeGetCellLink(
@@ -447,12 +528,12 @@ export function followAliases(
   alias: any,
   doc: DocImpl<any>,
   log?: ReactivityLog,
-  seen: CellLink[] = [],
 ): CellLink {
   if (!isAlias(alias)) {
     throw new Error(`Alias expected: ${JSON.stringify(alias)}`);
   }
-  return followLinks({ cell: doc, ...alias.$alias }, seen, log, true);
+
+  return followLinks({ cell: doc, ...alias.$alias }, log, createVisits(), true);
 }
 
 /**
