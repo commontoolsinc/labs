@@ -243,7 +243,7 @@ function useCodeEditor(
             },
             plan: {
               spec: workingSpec,
-            }
+            },
           },
         }).then((form) => {
           const newCharm = form.generation?.charm;
@@ -255,7 +255,7 @@ function useCodeEditor(
             charmId: charmId(newCharm)!,
             replicaName: replicaName!,
           }));
-        }).catch(error => {
+        }).catch((error) => {
           console.error("Error processing workflow:", error);
         }).finally(() => {
           setLoading(false);
@@ -272,7 +272,7 @@ function useCodeEditor(
             charmId: charmId(newCharm)!,
             replicaName: replicaName!,
           }));
-        }).catch(error => {
+        }).catch((error) => {
           console.error("Error generating new recipe version:", error);
         }).finally(() => {
           setLoading(false);
@@ -992,21 +992,23 @@ const CodeTab = () => {
             disabled={loading}
             className="px-2 py-1 text-xs bg-black text-white border-2 border-black disabled:opacity-50 flex items-center gap-1"
           >
-            {loading ? (
-              <>
-                <span className="inline-block w-3 h-3">
-                  <DitheredCube
-                    width={12}
-                    height={12}
-                    animate
-                    cameraZoom={6}
-                  />
-                </span>
-                <span>Processing...</span>
-              </>
-            ) : (
-              "Save Changes"
-            )}
+            {loading
+              ? (
+                <>
+                  <span className="inline-block w-3 h-3">
+                    <DitheredCube
+                      width={12}
+                      height={12}
+                      animate
+                      cameraZoom={6}
+                    />
+                  </span>
+                  <span>Processing...</span>
+                </>
+              )
+              : (
+                "Save Changes"
+              )}
           </button>
         )}
       </div>
