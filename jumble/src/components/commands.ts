@@ -116,6 +116,7 @@ export function getTitle(
 }
 
 export function getChildren(
+  // TODO(bf): type signature is sus
   children:
     | CommandItem[]
     | ((context: CommandContext) => CommandItem[])
@@ -126,6 +127,7 @@ export function getChildren(
   return typeof children === "function" ? children(context) : children;
 }
 
+// TODO(bf): audit, remove bloat
 export interface CommandContext {
   charmManager: CharmManager;
   navigate: NavigateFunction;
@@ -143,6 +145,7 @@ export interface CommandContext {
   updateJobProgress: (jobId: string, progress: number) => void;
   commandPathIds: string[];
   previewForm?: Partial<WorkflowForm>;
+  onClearAuthentication: () => void;
 }
 
 export type CommandMode =
@@ -679,6 +682,12 @@ async function handleAddRemoteRecipe(
   }
 }
 
+export function handleOpenFullscreenInspector() {
+  const url = new URL(globalThis.location.origin);
+  url.pathname = "/inspector";
+  globalThis.open(url.href, "_blank");
+}
+
 export function getCommands(ctx: CommandContext): CommandItem[] {
   return [
     {
@@ -977,11 +986,7 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
           id: "open-fs-network-inspector",
           type: "action",
           title: "Open Network Inspector (new tab)",
-          handler: () => {
-            const url = new URL(globalThis.location.origin);
-            url.pathname = "/inspector";
-            globalThis.open(url.href, "_blank");
-          },
+          handler: handleOpenFullscreenInspector,
         },
         {
           id: "start-counter-job",
@@ -1101,6 +1106,16 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
           },
         },
       ],
+    },
+    {
+      id: "logout",
+      type: "action",
+      title: "Logout",
+      group: "User",
+      handler: () => {
+        ctx.onClearAuthentication();
+        ctx.setOpen(false);
+      },
     },
   ];
 }
