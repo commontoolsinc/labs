@@ -296,7 +296,7 @@ export function findAllAliasedCells(
  * Track visited cell links and memoize results during path resolution
  * and link following to prevent redundant work.
  */
-export interface Visits {
+interface Visits {
   /** Tracks visited cell links to detect cycles */
   seen: CellLink[];
   /** Cache for resolvePath results */
@@ -308,7 +308,7 @@ export interface Visits {
 /**
  * Creates a new visits tracking object.
  */
-export function createVisits(): Visits {
+function createVisits(): Visits {
   return {
     seen: [],
     resolvePathCache: new Map(),
@@ -345,6 +345,11 @@ export function resolveLinkToAlias(
   const visits = createVisits();
   const ref = resolvePath(doc, path, log, visits);
   return followLinks(ref, log, visits, true);
+}
+
+export function resolveLinks(ref: CellLink, log?: ReactivityLog): CellLink {
+  const visits = createVisits();
+  return followLinks(ref, log, visits);
 }
 
 function resolvePath(
@@ -424,10 +429,10 @@ function resolvePath(
 // Follows links and returns the last one, which is pointing to a value. It'll
 // log all taken links, so not the returned one, and thus nothing if the ref
 // already pointed to a value.
-export function followLinks(
+function followLinks(
   ref: CellLink,
-  log?: ReactivityLog,
-  visits: Visits = createVisits(),
+  log: ReactivityLog | undefined,
+  visits: Visits,
   onlyAliases = false,
 ): CellLink {
   // Check if we already followed these links
