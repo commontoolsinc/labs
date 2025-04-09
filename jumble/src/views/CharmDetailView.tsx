@@ -214,6 +214,7 @@ function useCodeEditor(
   const saveChanges = useCallback(() => {
     const src = showFullCode ? workingSrc : injectUserCode(workingSrc ?? "");
     if (src && iframeRecipe && charm && workingSpec) {
+      // we need to actually trigger re-generation if the spec changed, not just a simple code update
       generateNewRecipeVersion(
         charmManager,
         charm,
