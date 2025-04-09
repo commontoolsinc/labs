@@ -69,9 +69,7 @@ async function main() {
   if (keyPath) {
     try {
       const pkcs8Key = await Deno.readFile(keyPath);
-      identity = await Identity.fromPkcs8(pkcs8Key, {
-        implementation: "noble",
-      });
+      identity = await Identity.fromPkcs8(pkcs8Key);
     } catch (e) {
       throw new Error(`Could not read key at ${keyPath}.`);
     }
