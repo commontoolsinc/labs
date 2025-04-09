@@ -798,10 +798,10 @@ export class Provider implements StorageProvider {
     return entity?.is as StorageValue<T> | undefined;
   }
   async send<T = any>(
-    changes: { entityId: EntityId; value: StorageValue<T> }[],
+    batch: { entityId: EntityId; value: StorageValue<T> }[],
   ): Promise<
     Result<
-      Commit,
+      Unit,
       | ConflictError
       | TransactionError
       | ConnectionError
@@ -810,17 +810,31 @@ export class Provider implements StorageProvider {
       | StoreError
     >
   > {
-    const { the } = this;
+    const { the, workspace } = this;
 
-    const result = await this.workspace.push(changes.map((change) => ({
-      the,
-      of: Provider.toEntity(change.entityId),
-      // ⚠️ We do JSON roundtrips to strip of the undefined values that
-      // cause problems with serialization.
-      is: JSON.parse(JSON.stringify(change.value)),
-    })));
+    const changes = [];
+    for (const { entityId, value } of batch) {
+      const of = Provider.toEntity(entityId);
+      const content = JSON.stringify(value);
 
-    return result;
+      const current = workspace.get({ the, of });
+      if (JSON.stringify(current) !== content) {
+        changes.push({
+          the,
+          of,
+          // ⚠️ We do JSON roundtrips to strip of the undefined values that
+          // cause problems with serialization.
+          is: JSON.parse(content) as JSONValue,
+        });
+      }
+    }
+
+    if (changes.length > 0) {
+      const result = await this.workspace.push(changes);
+      return result.error ? result : { ok: {} };
+    } else {
+      return { ok: {} };
+    }
   }
 
   parse(source: string): Memory.ProviderCommand<Memory.Protocol> {
