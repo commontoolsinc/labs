@@ -381,8 +381,6 @@ function createRegularCell<T>(
   schema?: JSONSchema,
   rootSchema?: JSONSchema,
 ): Cell<T> {
-  if (schema) doc.registerSchemaUse(path, schema, rootSchema);
-
   const self = {
     get: () => validateAndTransform(doc, path, schema, log, rootSchema),
     set: (newValue: Cellify<T>) =>
