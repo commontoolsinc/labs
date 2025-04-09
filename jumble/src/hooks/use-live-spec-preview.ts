@@ -10,6 +10,7 @@ import {
   formatPromptWithMentions as formatMentions,
   parseComposerDocument,
   processInputSection,
+  processWorkflow,
   WorkflowForm,
   WorkflowType,
 } from "@commontools/charm";
@@ -52,21 +53,11 @@ export function useLiveSpecPreview(
   const [planLoading, setPlanLoading] = useState(false);
   const [loading, setLoading] = useState(false); // Combined loading state for compatibility
 
-  // Track which parts of the preview have been generated
-  const [progress, setProgress] = useState<PreviewProgress>({
-    classification: false,
-    plan: false,
-    spec: false,
-  });
-
   // Track the current generation process to cancel outdated requests
   const currentGenerationRef = useRef<number>(0);
 
   // Track the text input that generated the current displayed results
   const [lastSuccessfulText, setLastSuccessfulText] = useState<string>("");
-
-  // Track if input is a completely new topic vs. refinement of existing one
-  const isCompleteTopic = useRef<boolean>(true);
 
   // Preview content state
   const [previewForm, setPreviewForm] = useState<Partial<WorkflowForm>>({});
@@ -82,7 +73,7 @@ export function useLiveSpecPreview(
   const generatePreview = useCallback(async (text: string) => {
     console.log(
       "generatePreview called with:",
-      text?.substring(0, 30),
+      text,
       "enabled:",
       enabled,
     );
@@ -90,56 +81,32 @@ export function useLiveSpecPreview(
     // Create a unique ID for this generation process
     const generationId = Date.now();
     currentGenerationRef.current = generationId;
+    console.groupCollapsed("generatePreview[" + generationId + "]");
 
     // Reset states based on whether this is a refinement or new topic
     const resetState = () => {
       const textInvalid = !text || !text.trim() || text.trim().length < 10 ||
         !enabled;
-      const isNewTopic = isCompleteTopic.current;
 
       console.log("Reset state check:", {
         textInvalid,
-        isNewTopic,
         lastSuccessfulText: lastSuccessfulText.substring(0, 20) + "...",
         currentText: text.substring(0, 20) + "...",
       });
 
-      // Always reset content when starting a completely new topic
-      if (isNewTopic) {
-        console.log("Resetting preview content - new topic detected");
-        setPreviewForm({});
-      }
-
-      // Always reset loading states
+      setPreviewForm({});
       setClassificationLoading(false);
       setPlanLoading(false);
       setLoading(false);
-
-      // Only reset progress flags if:
-      // 1. Text is invalid (too short/empty/disabled) OR
-      // 2. This is a completely new topic (not a refinement)
-      if (textInvalid || isNewTopic) {
-        console.log(
-          "Full reset of progress flags - " +
-            (textInvalid ? "invalid input" : "new topic"),
-        );
-        setProgress({
-          classification: false,
-          plan: false,
-          spec: false,
-        });
-      } else {
-        console.log("Preserving progress state - refinement of existing text");
-      }
     };
 
     // Helper function to check if this generation process is still current
     const isCurrentGeneration = () =>
       currentGenerationRef.current === generationId;
 
-    // Don't generate previews for short inputs (less than 16 chars) or if disabled
+    // Don't generate previews for short inputs (less than 8 chars) or if disabled
     // This helps prevent unnecessary API calls and LLM requests
-    if (!text || !text.trim() || text.trim().length < 16 || !enabled) {
+    if (!text || !text.trim() || text.trim().length < 8 || !enabled) {
       console.log("Skipping preview generation - text too short or disabled");
       resetState();
       return;
@@ -153,64 +120,42 @@ export function useLiveSpecPreview(
     setPlanLoading(true);
     setLoading(true);
 
-    // IMPORTANT: We're NOT resetting progress flags here anymore
-    // Only show loading indicators but keep any existing progress
-    console.log(
-      "Starting new request but preserving progress state:",
-      progress,
-    );
-
     // Instead, set loading without touching progress
     // If previous sections completed, they should stay completed
 
     try {
       // Define a shared model ID for both calls
       const modelId = getModelId(model);
+      const cancellation = { cancelled: false };
 
-      let form = createWorkflowForm({
-        input: text,
-        charm: currentCharm,
-        modelId,
+      const form = await processWorkflow(text, true, {
+        charmManager,
+        existingCharm: currentCharm,
+        model: modelId,
+        onProgress: (f) => {
+          // Check if this is still the current generation before proceeding
+          if (!isCurrentGeneration()) {
+            cancellation.cancelled = true;
+            console.log(generationId, "Abandoning outdated generation process");
+            return;
+          }
+
+          setPreviewForm(f);
+        },
+        cancellation: cancellation,
       });
-      setPreviewForm(form);
-
-      form = await processInputSection(charmManager, form);
-      setPreviewForm(form);
-      console.log("formatted input", form);
 
       // Check if this is still the current generation before proceeding
       if (!isCurrentGeneration()) {
-        console.log("Abandoning outdated generation process");
+        cancellation.cancelled = true;
+        console.log(generationId, "Abandoning outdated generation process");
         return;
       }
-
-      form = await fillClassificationSection(form);
-      setPreviewForm(form);
-      setClassificationLoading(false);
-      setProgress((prev) => ({ ...prev, classification: true }));
 
       // Important: Turn off the main loading state after classification
       // so UI can show partial results while plan and spec are loading
       setLoading(false);
-
-      console.log("classified task", form);
-
-      // Check if this is still the current generation before proceeding
-      if (!isCurrentGeneration()) {
-        console.log("Abandoning outdated generation process");
-        return;
-      }
-
-      form = await fillPlanningSection(form);
-      setPreviewForm(form);
-
-      console.log("got plan", form);
-
-      // Record this successful text for future comparison
       setLastSuccessfulText(text);
-
-      // Clear any remaining loading states
-      setLoading(false);
     } catch (error) {
       console.error("Error generating preview:", error);
     } finally {
@@ -221,72 +166,16 @@ export function useLiveSpecPreview(
         setClassificationLoading(false);
         setPlanLoading(false);
       }
+      console.groupEnd();
     }
   }, [enabled, model, getModelId, currentCharm, charmManager]);
 
-  // Check if input is a significant change from previous content
-  useEffect(() => {
-    if (!lastSuccessfulText || !debouncedInput) return;
-
-    // Determine if this is a refinement of the same topic or a completely new topic
-    // A simple heuristic: if 50% or more of the content has changed, consider it a new topic
-    const similarity = calculateTextSimilarity(
-      lastSuccessfulText,
-      debouncedInput,
-    );
-    isCompleteTopic.current = similarity < 0.5;
-
-    console.log(
-      "Text similarity:",
-      similarity,
-      isCompleteTopic.current
-        ? "NEW TOPIC - Will reset all progress"
-        : "Refinement - Will preserve progress",
-    );
-  }, [debouncedInput, lastSuccessfulText]);
-
-  // Calculate text similarity as a rough percentage of how much text is preserved
-  const calculateTextSimilarity = (textA: string, textB: string): number => {
-    if (!textA || !textB) return 0;
-
-    // Use a simple character-based comparison for efficiency
-    const lengthA = textA.length;
-    const lengthB = textB.length;
-    const maxLength = Math.max(lengthA, lengthB);
-
-    // Early exit for empty strings
-    if (maxLength === 0) return 1;
-
-    // If lengths are very different, likely a new topic
-    if (Math.abs(lengthA - lengthB) / maxLength > 0.5) return 0.25;
-
-    // Simple character-based similarity for quick comparison
-    let commonChars = 0;
-    const minLength = Math.min(lengthA, lengthB);
-
-    for (let i = 0; i < minLength; i++) {
-      if (textA[i] === textB[i]) commonChars++;
-    }
-
-    return commonChars / maxLength;
-  };
-
   // Generate preview when input changes
   useEffect(() => {
-    console.log("debouncedInput changed:", debouncedInput);
-
     async function fx() {
       const { text } = await parseComposerDocument(debouncedInput);
-      if (text && text.trim().length >= 10 && enabled) {
-        console.log("Generating preview for:", text);
+      if (text && text.trim().length >= 8 && enabled) {
         generatePreview(debouncedInput);
-      } else {
-        console.log(
-          "Not generating preview. Length:",
-          text?.trim().length,
-          "Enabled:",
-          enabled,
-        );
       }
     }
 
@@ -299,10 +188,6 @@ export function useLiveSpecPreview(
     const generationId = Date.now();
     currentGenerationRef.current = generationId;
 
-    // Helper function to check if this generation process is still current
-    const isCurrentGeneration = () =>
-      currentGenerationRef.current === generationId;
-
     // Update the workflow type state immediately
     setPreviewForm({
       ...previewForm,
@@ -312,6 +197,8 @@ export function useLiveSpecPreview(
         reasoning: "Manual override",
       },
     });
+
+    generatePreview(input);
   }, [input, currentCharm, model, getModelId, charmManager]);
 
   return {
@@ -319,9 +206,7 @@ export function useLiveSpecPreview(
     loading,
     classificationLoading,
     planLoading,
-    regenerate: () => generatePreview(input),
     model,
     setWorkflowType,
-    progress,
   };
 }

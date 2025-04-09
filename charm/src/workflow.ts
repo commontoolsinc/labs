@@ -630,49 +630,91 @@ export async function processWorkflow(
     existingCharm?: Cell<Charm>;
     prefill?: Partial<WorkflowForm>;
     model?: string;
+    onProgress?: (form: WorkflowForm) => void;
+    cancellation?: { cancelled: boolean };
   } = {},
 ): Promise<WorkflowForm> {
+  console.groupCollapsed("processWorkflow");
   // Create a new form or use prefilled form
   let form = createWorkflowForm({
     input,
     charm: options.existingCharm,
     modelId: options.model,
   });
+  console.log("creating form", form);
 
-  if (options.prefill) {
-    form = { ...form, ...options.prefill };
-  }
+  try {
+    // Function to check if the workflow has been cancelled
+    const checkCancellation = () => {
+      if (options.cancellation?.cancelled) {
+        console.log("cancelled workflow");
+        throw new Error("cancelled workflow");
+      }
+    };
 
-  // Step 1: Process input (mentions, references, etc.) if not already processed
-  if (
-    !form.input?.processedInput ||
-    form.input?.processedInput === form.input?.rawInput
-  ) {
-    if (!options.charmManager) {
-      throw new Error("charmManager required to format input");
+    // Check for cancellation before starting work
+    checkCancellation();
+
+    if (options.prefill) {
+      console.log("prefilling form", options.prefill);
+      form = { ...form, ...options.prefill };
     }
 
-    form = await processInputSection(options.charmManager, form);
-  }
+    // Step 1: Process input (mentions, references, etc.) if not already processed
+    if (
+      !form.input?.processedInput ||
+      form.input?.processedInput === form.input?.rawInput
+    ) {
+      if (!options.charmManager) {
+        throw new Error("charmManager required to format input");
+      }
 
-  // Step 2: Classification if not already classified
-  if (!form.classification) {
-    form = await fillClassificationSection(form, {
-      model: options.model,
-    });
-  }
+      console.log("processing input");
+      form = await processInputSection(options.charmManager, form);
+      options.onProgress?.(form);
+      console.log("processed input!", form);
+    }
 
-  // Step 3: Planning if not already planned
-  if (!form.plan) {
-    form = await fillPlanningSection(form);
-  }
+    checkCancellation();
 
-  // Step 4: Generation (if not a dry run and not already generated)
-  if (!dryRun && options.charmManager && !form.generation?.charm) {
-    form = await generateCode(form);
-  }
+    // Step 2: Classification if not already classified
+    if (!form.classification) {
+      console.log("classifying task");
+      form = await fillClassificationSection(form, {
+        model: options.model,
+      });
+      options.onProgress?.(form);
+      console.log("classified task!", form);
+    }
 
-  return form;
+    checkCancellation();
+
+    // Step 3: Planning if not already planned
+    if (!form.plan) {
+      console.log("planning task");
+      form = await fillPlanningSection(form);
+      options.onProgress?.(form);
+      console.log("planned task!", form);
+    }
+
+    checkCancellation();
+
+    // Step 4: Generation (if not a dry run and not already generated)
+    if (!dryRun && options.charmManager && !form.generation?.charm) {
+      console.log("generating code");
+      form = await generateCode(form);
+      options.onProgress?.(form);
+      console.log("generated code!", form);
+    }
+
+    console.log("completed workflow!");
+    console.groupEnd();
+    return form;
+  } catch (error) {
+    console.warn("workflow failed:", error);
+    console.groupEnd();
+    return form;
+  }
 }
 
 /**
