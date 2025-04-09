@@ -27,6 +27,8 @@ import * as IDB from "./idb.ts";
 import * as Memory from "@commontools/memory/consumer";
 export * from "@commontools/memory/interface";
 import * as Codec from "@commontools/memory/codec";
+import { Channel, RawCommand } from "./inspector.ts";
+import { isBrowser } from "@commontools/utils/env";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -662,7 +664,7 @@ export interface RemoteStorageProviderOptions {
   the?: string;
   settings?: RemoteStorageProviderSettings;
 
-  inspector?: BroadcastChannel;
+  inspector?: Channel;
 }
 
 const defaultSettings: RemoteStorageProviderSettings = {
@@ -682,7 +684,7 @@ export class Provider implements StorageProvider {
   subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
     new Map();
 
-  inspector?: BroadcastChannel;
+  inspector?: Channel;
 
   /**
    * queue that holds commands that we read from the session, but could not
@@ -705,14 +707,15 @@ export class Provider implements StorageProvider {
     space,
     the = "application/json",
     settings = defaultSettings,
-    inspector = globalThis.BroadcastChannel
-      ? new BroadcastChannel(id)
-      : undefined,
+    inspector,
   }: RemoteStorageProviderOptions) {
     this.address = address;
     this.the = the;
     this.settings = settings;
-    this.inspector = inspector;
+    // Do not use a default inspector when in Deno:
+    // Requires `--unstable-broadcast-channel` flags and it is not used
+    // in that environment.
+    this.inspector = isBrowser() ? (inspector ?? new Channel(id)) : undefined;
     this.handleEvent = this.handleEvent.bind(this);
 
     const session = Memory.create({ as });
