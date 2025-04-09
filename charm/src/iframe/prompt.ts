@@ -23,12 +23,14 @@ export const buildPrompt = ({
   spec,
   newSpec,
   schema,
+  steps,
   model,
 }: {
   src?: string;
   spec?: string;
   newSpec: string;
   schema: JSONSchema;
+  steps?: string[];
   model?: string;
 }): LLMRequest => {
   const messages: string[] = [];
@@ -48,7 +50,14 @@ export const buildPrompt = ({
     } the source code with the following specification:
 \`\`\`
 ${newSpec}
-\`\`\``,
+\`\`\`${
+      steps && steps.length
+        ? `
+
+by following the following steps:
+${steps.map((step, index) => `${index + 1}. ${step}`).join("\n")}`
+        : ""
+    }`,
   );
 
   messages.push(RESPONSE_PREFILL);
