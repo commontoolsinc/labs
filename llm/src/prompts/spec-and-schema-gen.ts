@@ -176,7 +176,7 @@ export function formatForm(form: WorkflowForm) {
   return `
 <goal>${form.input.processedInput}</goal>
 <plan>${
-    form.plan?.steps.map((step) => `<step>${step}</step>`).join("\n")
+    (form.plan?.steps ?? []).map((step) => `<step>${step}</step>`).join("\n")
   }</plan>
 <description>${form.plan?.spec}</description>
 <data>${JSON.stringify(form.plan?.dataModel)}</data>

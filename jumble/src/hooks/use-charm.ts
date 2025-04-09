@@ -39,12 +39,8 @@ const createCharmChangeEffect = (
 
 export const useCharm = (charmId: string | undefined) => {
   const { charmManager } = useCharmManager();
-  const [currentFocus, setCurrentFocus] = React.useState<Cell<Charm> | null>(
-    null,
-  );
-  const [iframeRecipe, setIframeRecipe] = React.useState<IFrameRecipe | null>(
-    null,
-  );
+  const [currentFocus, setCurrentFocus] = React.useState<Cell<Charm>>();
+  const [iframeRecipe, setIframeRecipe] = React.useState<IFrameRecipe>();
 
   React.useEffect(() => {
     async function loadCharm() {
@@ -52,8 +48,8 @@ export const useCharm = (charmId: string | undefined) => {
         charmId,
         charmManager,
       );
-      setCurrentFocus(charm);
-      setIframeRecipe(recipe);
+      if (charm) setCurrentFocus(charm);
+      if (recipe) setIframeRecipe(recipe);
     }
 
     loadCharm();
