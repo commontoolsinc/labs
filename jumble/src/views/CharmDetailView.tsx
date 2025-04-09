@@ -9,6 +9,7 @@ import {
   injectUserCode,
   iterate,
   modifyCharm,
+  processWorkflow,
   WorkflowForm,
   WorkflowType,
 } from "@commontools/charm";
@@ -36,6 +37,7 @@ import { LoadingSpinner } from "@/components/Loader.tsx";
 import { useCharm } from "@/hooks/use-charm.ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
+import { markdown } from "@codemirror/lang-markdown";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
 import { charmId } from "@/utils/charms.ts";
 import { DitheredCube } from "@/components/DitherCube.tsx";
@@ -56,6 +58,7 @@ import {
   SpecPreviewModel,
   useLiveSpecPreview,
 } from "@/hooks/use-live-spec-preview.ts";
+import { EditorView } from "@codemirror/view";
 
 type Tab = "iterate" | "code" | "data";
 type OperationType = "iterate" | "extend";
@@ -143,7 +146,7 @@ function useTabNavigation() {
 }
 
 // Hook for managing suggestions
-function useSuggestions(charm: Cell<Charm> | null) {
+function useSuggestions(charm: Cell<Charm> | undefined) {
   const [suggestions, setSuggestions] = useState<CharmSuggestion[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const suggestionsLoadedRef = useRef(false);
@@ -184,14 +187,15 @@ function useSuggestions(charm: Cell<Charm> | null) {
 
 // Hook for code editing
 function useCodeEditor(
-  charm: Cell<Charm> | null,
-  iframeRecipe: IFrameRecipe | null,
+  charm?: Cell<Charm>,
+  iframeRecipe?: IFrameRecipe,
   showFullCode: boolean = false,
 ) {
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
-  const [workingSrc, setWorkingSrc] = useState<string | undefined>(undefined);
-  const [workingSpec, setWorkingSpec] = useState<string | undefined>(undefined);
+  const [workingSrc, setWorkingSrc] = useState<string>();
+  const [workingSpec, setWorkingSpec] = useState<string>();
+  const [initialSpec, setInitialSpec] = useState<string>();
   const { replicaName } = useParams<CharmRouteParams>();
 
   useEffect(() => {
@@ -202,40 +206,76 @@ function useCodeEditor(
         setWorkingSrc(extractUserCode(iframeRecipe.src ?? "") ?? "");
       }
       setWorkingSpec(iframeRecipe.spec);
+      setInitialSpec(iframeRecipe.spec);
     }
   }, [iframeRecipe, charm, showFullCode]);
 
   const hasSourceChanges = showFullCode
     ? workingSrc !== iframeRecipe?.src
     : injectUserCode(workingSrc ?? "") !== iframeRecipe?.src;
-  const hasSpecChanges = workingSpec !== iframeRecipe?.spec;
+  const hasSpecChanges = workingSpec !== initialSpec;
   const hasUnsavedChanges = hasSourceChanges || hasSpecChanges;
 
   const saveChanges = useCallback(() => {
     const src = showFullCode ? workingSrc : injectUserCode(workingSrc ?? "");
     if (src && iframeRecipe && charm && workingSpec) {
-      // we need to actually trigger re-generation if the spec changed, not just a simple code update
-      generateNewRecipeVersion(
-        charmManager,
-        charm,
-        src,
-        workingSpec, // Use the edited spec
-      ).then((newCharm) => {
-        navigate(createPath("charmShow", {
-          charmId: charmId(newCharm)!,
-          replicaName: replicaName!,
-        }));
-      });
+      if (hasSpecChanges) {
+        // CASE 1: Spec has changed
+        console.log(
+          "Spec has changed, using current behavior with future possibility for regeneration",
+        );
+
+        processWorkflow(workingSpec, false, {
+          charmManager,
+          existingCharm: charm,
+          prefill: {
+            classification: {
+              workflowType: "edit",
+              confidence: 1.0,
+              reasoning: "spec edited",
+            },
+            plan: {
+              spec: workingSpec,
+            }
+          },
+        }).then((form) => {
+          const newCharm = form.generation?.charm;
+          if (!newCharm) {
+            throw new Error("no charm generated after spec edit");
+          }
+
+          navigate(createPath("charmShow", {
+            charmId: charmId(newCharm)!,
+            replicaName: replicaName!,
+          }));
+        });
+      } else {
+        // CASE 2: Only source code changes - simpler update path
+        generateNewRecipeVersion(
+          charmManager,
+          charm,
+          src,
+          workingSpec,
+        ).then((newCharm) => {
+          navigate(createPath("charmShow", {
+            charmId: charmId(newCharm)!,
+            replicaName: replicaName!,
+          }));
+        });
+      }
     }
   }, [
     workingSrc,
     workingSpec,
+    initialSpec,
     iframeRecipe,
     charm,
     navigate,
     replicaName,
     showFullCode,
     charmManager,
+    hasSpecChanges,
+    hasSourceChanges,
   ]);
 
   return {
@@ -244,6 +284,9 @@ function useCodeEditor(
     setWorkingSrc,
     workingSpec,
     setWorkingSpec,
+    initialSpec,
+    hasSpecChanges,
+    hasSourceChanges,
     hasUnsavedChanges,
     saveChanges,
   };
@@ -286,11 +329,11 @@ function useCharmOperation() {
     setWorkflowType,
   } = useLiveSpecPreview(
     input,
-    charmManager, // Explicitly pass CharmManager instance
+    charmManager,
     showPreview,
     250,
     previewModel,
-    charm || undefined,
+    charm,
   );
 
   // Function that performs the selected operation using modifyCharm
@@ -752,6 +795,39 @@ const Suggestions = () => {
   );
 };
 
+export const ModelSelector = ({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) => {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="p-1 border-2 border-black bg-white text-xs"
+    >
+      <option value="anthropic:claude-3-7-sonnet-latest">
+        Claude 3.7 ✨
+      </option>
+      <option value="google:gemini-2.5-pro">Gemini 2.5 ✨</option>
+      <option value="anthropic:claude-3-5-sonnet-latest">
+        Claude 3.5
+      </option>
+      <option value="groq:qwen-qwq-32b">Qwen QwQ 32B 🧠</option>
+      <option value="groq:llama-3.3-70b-versatile">Llama 3.3 🔥</option>
+      <option value="openai:o3-mini-low-latest">o3-mini-low</option>
+      <option value="openai:o3-mini-medium-latest">
+        o3-mini-medium
+      </option>
+      <option value="openai:o3-mini-high-latest">o3-mini-high</option>
+      <option value="google:gemini-2.0-pro">Gemini 2.0</option>
+      <option value="perplexity:sonar-pro">Sonar Pro 🌐</option>
+    </select>
+  );
+};
+
 // Operation Tab Component (formerly IterateTab)
 const OperationTab = () => {
   const {
@@ -772,7 +848,6 @@ const OperationTab = () => {
   } = useCharmOperationContext();
 
   const mentions = useCharmMentions();
-  const { charmManager } = useCharmManager();
 
   return (
     <div className="flex flex-col p-4">
@@ -807,28 +882,10 @@ const OperationTab = () => {
               onChange={setShowVariants}
             />
 
-            <select
+            <ModelSelector
               value={selectedModel}
-              onChange={(e) => setSelectedModel(e.target.value)}
-              className="p-1 border-2 border-black bg-white text-xs"
-            >
-              <option value="anthropic:claude-3-7-sonnet-latest">
-                Claude 3.7 ✨
-              </option>
-              <option value="google:gemini-2.5-pro">Gemini 2.5 ✨</option>
-              <option value="anthropic:claude-3-5-sonnet-latest">
-                Claude 3.5
-              </option>
-              <option value="groq:qwen-qwq-32b">Qwen QwQ 32B 🧠</option>
-              <option value="groq:llama-3.3-70b-versatile">Llama 3.3 🔥</option>
-              <option value="openai:o3-mini-low-latest">o3-mini-low</option>
-              <option value="openai:o3-mini-medium-latest">
-                o3-mini-medium
-              </option>
-              <option value="openai:o3-mini-high-latest">o3-mini-high</option>
-              <option value="google:gemini-2.0-pro">Gemini 2.0</option>
-              <option value="perplexity:sonar-pro">Sonar Pro 🌐</option>
-            </select>
+              onChange={setSelectedModel}
+            />
           </ComposerSubmitBar>
         </div>
       </div>
@@ -926,15 +983,11 @@ const CodeTab = () => {
         {activeEditor === "code" && (
           <div className="flex-grow overflow-hidden border-black border-2 h-full">
             <CodeMirror
+              key="source"
               value={workingSrc || ""}
               theme="dark"
               extensions={[javascript()]}
               onChange={setWorkingSrc}
-              basicSetup={{
-                lineNumbers: true,
-                foldGutter: true,
-                indentOnInput: true,
-              }}
               style={{ height: "100%", overflow: "auto" }}
             />
           </div>
@@ -942,10 +995,23 @@ const CodeTab = () => {
 
         {activeEditor === "spec" && (
           <div className="flex-grow overflow-hidden border border-black h-full">
-            <textarea
+            {
+              /* <textarea
               value={workingSpec || ""}
               onChange={(e) => setWorkingSpec(e.target.value)}
               className="w-full h-full p-4 font-mono text-sm resize-none"
+              style={{ height: "100%", overflow: "auto" }}
+            /> */
+            }
+            <CodeMirror
+              key="spec"
+              value={workingSpec || ""}
+              theme="light"
+              extensions={[markdown(), EditorView.lineWrapping]}
+              onChange={setWorkingSpec}
+              basicSetup={{
+                wordWrap: true,
+              }}
               style={{ height: "100%", overflow: "auto" }}
             />
           </div>

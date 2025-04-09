@@ -332,7 +332,7 @@ export interface WorkflowForm {
 
   // Planning information
   plan: {
-    steps: string[];
+    steps?: string[];
     spec?: string;
     dataModel?: string;
   } | null;
@@ -427,7 +427,6 @@ export async function processInputSection(
  */
 export async function fillClassificationSection(
   form: WorkflowForm,
-  options: { model?: string } = {},
 ): Promise<WorkflowForm> {
   const newForm = { ...form };
 
@@ -463,7 +462,6 @@ export async function fillClassificationSection(
  */
 export async function fillPlanningSection(
   form: WorkflowForm,
-  options: Record<string, unknown> = {},
 ): Promise<WorkflowForm> {
   if (!form.classification) {
     throw new Error("Classification is required");
@@ -484,16 +482,14 @@ export async function fillPlanningSection(
   if (
     form.classification.workflowType === "fix" && form.input.existingCharm
   ) {
-    // For fix workflow, preserve existing spec
-    let existingSpec: string | undefined;
-    let existingSchema: JSONSchema | undefined;
-    let existingCode: string | undefined;
-
     if (form.input.existingCharm) {
       const { spec, schema, code } = extractContext(form.input.existingCharm);
-      existingSpec = spec;
-      existingSchema = schema;
-      existingCode = code;
+
+      if (!form.plan) {
+        form.plan = { spec };
+      } else {
+        form.plan.spec = spec;
+      }
     }
 
     // Generate just the plan without updating spec
@@ -508,7 +504,7 @@ export async function fillPlanningSection(
 
     planningResult = {
       steps: executionPlan.steps,
-      spec: existingSpec, // Use existing spec for fix workflow
+      spec: form.plan?.spec, // Use existing spec for fix workflow
       dataModel: "",
     };
   } else {
@@ -524,7 +520,7 @@ export async function fillPlanningSection(
 
     planningResult = {
       steps: executionPlan.steps,
-      spec: executionPlan.spec,
+      spec: form.plan?.spec ?? executionPlan.spec, // if we have a prefilled spec, prefer that
       dataModel: executionPlan.dataModel,
     };
   }
@@ -680,9 +676,7 @@ export async function processWorkflow(
     // Step 2: Classification if not already classified
     if (!form.classification) {
       console.log("classifying task");
-      form = await fillClassificationSection(form, {
-        model: options.model,
-      });
+      form = await fillClassificationSection(form);
       options.onProgress?.(form);
       console.log("classified task!", form);
     }
@@ -690,7 +684,7 @@ export async function processWorkflow(
     checkCancellation();
 
     // Step 3: Planning if not already planned
-    if (!form.plan) {
+    if (!form.plan || !form.plan.spec || !form.plan.steps) {
       console.log("planning task");
       form = await fillPlanningSection(form);
       options.onProgress?.(form);

@@ -119,6 +119,7 @@ export async function parseComposerDocument(
     }
 
     const document = JSON.parse(serializedDocument) as Descendant[];
+
     let fullText = "";
     const mentions: string[] = [];
     const sources: {
@@ -231,8 +232,8 @@ export async function parseComposerDocument(
       sources,
     };
   } catch (error) {
-    console.error("Failed to parse document:", error);
-    return { text: "", mentions: [], sources: {} };
+    console.warn("Failed to parse document, treating as plain text:", error);
+    return { text: serializedDocument, mentions: [], sources: {} };
   }
 }
 
