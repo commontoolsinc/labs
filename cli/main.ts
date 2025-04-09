@@ -116,19 +116,21 @@ async function main() {
   }
 
   let inputValue: unknown;
-
   if (input !== undefined && input !== "") {
     // Find all `@#<hex hash>[/<url escaoped path[/<more paths>[/...]]]`
     // and replace them with the corresponding JSON object.
     //
     // Example: "@#bafed0de/path/to/value" and "{ foo: @#bafed0de/a/path }"
     const regex = /(?<!"[^"]*?)@#([a-f0-9]+)((?:\/[^\/\s"',}]+)*?)(?![^"]*?")/g;
-    inputValue = input.replace(regex, (_, hash, path) =>
-      JSON.stringify({
-        cell: { "/": hash, path: path.split("/").map(decodeURIComponent) },
-      }));
+    const inputTransformed = input.replace(
+      regex,
+      (_, hash, path) =>
+        JSON.stringify({
+          cell: { "/": hash, path: path.split("/").map(decodeURIComponent) },
+        }),
+    );
     try {
-      inputValue = JSON.parse(inputValue);
+      inputValue = JSON.parse(inputTransformed);
     } catch (error) {
       console.error("Error parsing input:", error);
       Deno.exit(1);
