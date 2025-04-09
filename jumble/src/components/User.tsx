@@ -7,6 +7,7 @@ import {
   useStorageBroadcast,
 } from "@/components/NetworkInspector.tsx";
 import { useAnimationSmoothing } from "@/hooks/use-animation-smoothing.ts";
+import { handleOpenFullscreenInspector } from "@/components/commands.ts";
 
 // Constants
 const COLORS = {
@@ -134,7 +135,7 @@ const applyCircleStyle = (circle: SVGElement, style: {
 
 // Main component
 export function User() {
-  const { session, clearAuthentication } = useAuthentication();
+  const { session } = useAuthentication();
   const [did, setDid] = useState<string | undefined>(undefined);
   const { status, updateStatus } = useStatusMonitor();
   const { avatarShape } = useAvatarGenerator(did);
@@ -481,7 +482,7 @@ export function User() {
       {/* User Avatar Container */}
       <div
         id="user-avatar"
-        onClick={clearAuthentication}
+        onClick={handleOpenFullscreenInspector}
         className="relative group cursor-pointer"
         style={{ width: `${AVATAR_SIZE}px`, height: `${AVATAR_SIZE}px` }}
       >

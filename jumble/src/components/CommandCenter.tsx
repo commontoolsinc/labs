@@ -32,6 +32,7 @@ import {
 } from "@/hooks/use-live-spec-preview.ts";
 import { SpecPreview } from "@/components/SpecPreview.tsx";
 import { ToggleButton } from "@/components/common/CommonToggle.tsx";
+import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
 
 function CommandProcessor({
   mode,
@@ -268,6 +269,7 @@ export function useCharmMentions() {
 }
 
 export function CommandCenter() {
+  const { clearAuthentication } = useAuthentication();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<CommandMode>({ type: "main" });
@@ -311,6 +313,7 @@ export function CommandCenter() {
         listJobs,
         updateJobProgress,
         commandPathIds,
+        onClearAuthentication: clearAuthentication,
       }),
     [
       charmManager,
@@ -442,6 +445,7 @@ export function CommandCenter() {
     };
   }, [focusedCharmId, allCommands]);
 
+  // TODO(bf): this is duplicated from the use in allCommands
   const context: CommandContext = {
     charmManager,
     navigate,
@@ -463,6 +467,7 @@ export function CommandCenter() {
     listJobs,
     updateJobProgress,
     commandPathIds,
+    onClearAuthentication: clearAuthentication,
   };
 
   const handleBack = () => {
