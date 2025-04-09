@@ -130,7 +130,7 @@ async function main() {
         cell: { "/": hash, path: path.split("/").map(decodeURIComponent) },
       }));
     try {
-      inputValue = JSON.parse(input);
+      inputValue = JSON.parse(inputValue);
     } catch (error) {
       console.error("Error parsing input:", error);
       Deno.exit(1);
