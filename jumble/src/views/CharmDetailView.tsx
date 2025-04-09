@@ -85,6 +85,9 @@ interface CharmOperationContextType {
   setShowVariants: (show: boolean) => void;
   showPreview: boolean;
   setShowPreview: (show: boolean) => void;
+  // Global loading state used across all tabs (Operation, Code, Data)
+  // This controls the main overlay and should be used for any operation
+  // that requires user feedback about processing
   loading: boolean;
   setLoading: (loading: boolean) => void;
   variants: Cell<Charm>[];
@@ -198,6 +201,8 @@ function useCodeEditor(
   const [initialSpec, setInitialSpec] = useState<string>();
   const { replicaName } = useParams<CharmRouteParams>();
 
+  const { setLoading } = useCharmOperationContext();
+
   useEffect(() => {
     if (charm && iframeRecipe) {
       if (showFullCode) {
@@ -219,6 +224,8 @@ function useCodeEditor(
   const saveChanges = useCallback(() => {
     const src = showFullCode ? workingSrc : injectUserCode(workingSrc ?? "");
     if (src && iframeRecipe && charm && workingSpec) {
+      setLoading(true);
+
       if (hasSpecChanges) {
         // CASE 1: Spec has changed
         console.log(
@@ -248,6 +255,10 @@ function useCodeEditor(
             charmId: charmId(newCharm)!,
             replicaName: replicaName!,
           }));
+        }).catch(error => {
+          console.error("Error processing workflow:", error);
+        }).finally(() => {
+          setLoading(false);
         });
       } else {
         // CASE 2: Only source code changes - simpler update path
@@ -261,6 +272,10 @@ function useCodeEditor(
             charmId: charmId(newCharm)!,
             replicaName: replicaName!,
           }));
+        }).catch(error => {
+          console.error("Error generating new recipe version:", error);
+        }).finally(() => {
+          setLoading(false);
         });
       }
     }
@@ -276,6 +291,7 @@ function useCodeEditor(
     charmManager,
     hasSpecChanges,
     hasSourceChanges,
+    setLoading,
   ]);
 
   return {
@@ -913,6 +929,7 @@ const CodeTab = () => {
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
   const [showFullCode, setShowFullCode] = useState(false);
   const [activeEditor, setActiveEditor] = useState<"code" | "spec">("code");
+  const { loading } = useCharmOperationContext();
 
   const {
     fullSrc,
@@ -933,7 +950,7 @@ const CodeTab = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
-        if (hasUnsavedChanges) {
+        if (hasUnsavedChanges && !loading) {
           saveChanges();
         }
       }
@@ -941,7 +958,7 @@ const CodeTab = () => {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [hasUnsavedChanges, saveChanges]);
+  }, [hasUnsavedChanges, saveChanges, loading]);
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -972,9 +989,24 @@ const CodeTab = () => {
           <button
             type="button"
             onClick={saveChanges}
-            className="px-2 py-1 text-xs bg-black text-white border-2 border-black disabled:opacity-50"
+            disabled={loading}
+            className="px-2 py-1 text-xs bg-black text-white border-2 border-black disabled:opacity-50 flex items-center gap-1"
           >
-            Save Changes
+            {loading ? (
+              <>
+                <span className="inline-block w-3 h-3">
+                  <DitheredCube
+                    width={12}
+                    height={12}
+                    animate
+                    cameraZoom={6}
+                  />
+                </span>
+                <span>Processing...</span>
+              </>
+            ) : (
+              "Save Changes"
+            )}
           </button>
         )}
       </div>
@@ -989,6 +1021,7 @@ const CodeTab = () => {
               extensions={[javascript()]}
               onChange={setWorkingSrc}
               style={{ height: "100%", overflow: "auto" }}
+              readOnly={loading}
             />
           </div>
         )}
@@ -1013,6 +1046,7 @@ const CodeTab = () => {
                 wordWrap: true,
               }}
               style={{ height: "100%", overflow: "auto" }}
+              readOnly={loading}
             />
           </div>
         )}
@@ -1387,9 +1421,10 @@ function CharmDetailView() {
       <div className="detail-view h-full flex flex-col">
         {/* Main Content Area */}
         <div className="flex-grow overflow-hidden relative">
+          {/* Content Area Loading Overlay */}
           {operationContextValue.loading && (
             <div
-              className="absolute inset-0 backdrop-blur-sm bg-white/60 flex flex-col items-center justify-center z-10 transition-opacity duration-300 ease-in-out"
+              className="absolute inset-0 backdrop-blur-sm bg-white/60 flex flex-col items-center justify-center z-20 transition-opacity duration-300 ease-in-out"
               style={{ opacity: operationContextValue.loading ? 1 : 0 }}
             >
               <div className="text-lg font-bold">thinking</div>
