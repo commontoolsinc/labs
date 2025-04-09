@@ -8,7 +8,7 @@ import {
   isCellLink,
 } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { followLinks, resolveLinkToAlias } from "./utils.ts";
+import { resolveLinks, resolveLinkToAlias } from "./utils.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -329,7 +329,7 @@ export function validateAndTransform(
   // and `path` will still point to the parent, as in e.g. the `anyOf` case
   // below we might still create a new Cell and it should point to the top of
   // this set of links.
-  const ref = followLinks({ cell: doc, path }, [], log);
+  const ref = resolveLinks({ cell: doc, path }, log);
   let value = ref.cell.getAtPath(ref.path);
   log?.reads.push({ cell: ref.cell, path: ref.path });
 
