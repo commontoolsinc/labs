@@ -751,7 +751,6 @@ export function executeFixWorkflow(
 ): Promise<Cell<Charm>> {
   console.log("Executing FIX workflow");
 
-  // Call iterate with the existing spec to ensure it's preserved
   return iterate(
     charmManager,
     currentCharm,
@@ -775,8 +774,6 @@ export function executeEditWorkflow(
 ): Promise<Cell<Charm>> {
   console.log("Executing EDIT workflow");
 
-  // For edit workflow, we use the updated spec but pass shiftKey as true
-  // to ensure it preserves compatibility with existing data
   return iterate(
     charmManager,
     currentCharm,
