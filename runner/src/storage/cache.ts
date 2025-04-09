@@ -967,12 +967,21 @@ export class Provider implements StorageProvider {
     // disconnect.
     if (this.connection === socket) {
       // Report disconnection to inspector
-      this.inspect({
-        disconnect: {
-          reason: event.type,
-          description: `Disconnected because of the ${event.type}`,
-        },
-      });
+      switch (event.type) {
+        case "error":
+        case "timeout":
+        case "close": {
+          this.inspect({
+            disconnect: {
+              reason: event.type,
+              message: `Disconnected because of the ${event.type}`,
+            },
+          });
+          break;
+        }
+        default:
+          throw new Error(`Unknown event type: ${event.type}`);
+      }
 
       this.connect();
     }
