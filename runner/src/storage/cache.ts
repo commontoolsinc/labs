@@ -833,9 +833,9 @@ export class Provider implements StorageProvider {
     );
   }
 
-  inspect<T>(
-    message: T,
-  ): T {
+  inspect(
+    message: RawCommand,
+  ): RawCommand {
     this.inspector?.postMessage({
       ...message,
       time: Date.now(),
