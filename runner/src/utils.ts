@@ -319,17 +319,12 @@ export function createVisits(): Visits {
 /**
  * Creates a cache key for a doc and path combination.
  */
-function createPathCacheKey(doc: DocImpl<any>, path: PropertyKey[]): string {
-  return `${doc.entityId ?? doc}:${path.join(",")}`;
-}
-
-/**
- * Creates a cache key for a cell link.
- */
-function createLinkCacheKey(ref: CellLink, onlyAliases: boolean): string {
-  return `${ref.cell.entityId ?? ref.cell}:${
-    ref.path.join(",")
-  }:${onlyAliases}`;
+function createPathCacheKey(
+  doc: DocImpl<any>,
+  path: PropertyKey[],
+  aliases: boolean = false,
+): string {
+  return JSON.stringify([doc.space, doc.toJSON(), path, aliases]);
 }
 
 export function resolveLinkToValue(
@@ -357,30 +352,7 @@ function resolvePath(
   path: PropertyKey[],
   log?: ReactivityLog,
   visits: Visits = createVisits(),
-): CellLink {
-  // Check if we already resolved this exact path
-  const fullPathKey = createPathCacheKey(doc, path);
-  const exactMatch = visits.resolvePathCache.get(fullPathKey);
-  if (exactMatch) return exactMatch;
-
-  // Try to find a cached result for a shorter path
-  let startRef: CellLink = { cell: doc, path: [] };
-  let remainingPath = [...path];
-
-  // Look for the longest matching prefix path in the cache
-  for (let i = path.length - 1; i >= 0; i--) {
-    const prefixPath = path.slice(0, i);
-    const prefixKey = createPathCacheKey(doc, prefixPath);
-    const prefixMatch = visits.resolvePathCache.get(prefixKey);
-
-    if (prefixMatch) {
-      startRef = prefixMatch;
-      remainingPath = path.slice(i);
-      break;
-    }
-  }
-
-  // Follow aliases, doc links, etc. in path, so that we end up on the right
+): CellLink { // Follow aliases, doc links, etc. in path, so that we end up on the right
   // doc, meaning the one that contains the value we want to access without any
   // redirects in between.
   //
@@ -396,17 +368,31 @@ function resolvePath(
   // Doc: { foo: { link } }, path: ["foo"] --> no change
   // Doc: { foo: { link } }, path: ["foo", "bar"] --> follow link, path: ["bar"]
 
+  // Check if we already resolved this exact path
+  const fullPathKey = createPathCacheKey(doc, path);
+  const exactMatch = visits.resolvePathCache.get(fullPathKey);
+  if (exactMatch) return exactMatch;
+
+  // Try to find a cached result for a shorter path
+  let startRef: CellLink = { cell: doc, path: [] };
+  let keys = [...path];
+
+  // Look for the longest matching prefix path in the cache
+  for (let i = path.length - 1; i >= 0; i--) {
+    const prefixPath = path.slice(0, i);
+    const prefixKey = createPathCacheKey(doc, prefixPath);
+    const prefixMatch = visits.resolvePathCache.get(prefixKey);
+
+    if (prefixMatch) {
+      startRef = prefixMatch;
+      keys = [...path.slice(i)];
+      break;
+    }
+  }
+
   let ref = startRef;
 
-  const keys = [...remainingPath];
   while (keys.length) {
-    // Store intermediate paths in the cache
-    if (ref.path.length > startRef.path.length) {
-      const intermediatePath = path.slice(0, path.length - keys.length);
-      const intermediateKey = createPathCacheKey(doc, intermediatePath);
-      visits.resolvePathCache.set(intermediateKey, ref);
-    }
-
     // First follow all the aliases and links, _before_ accessing the key.
     ref = followLinks(ref, log, visits);
 
@@ -445,7 +431,7 @@ export function followLinks(
   onlyAliases = false,
 ): CellLink {
   // Check if we already followed these links
-  const cacheKey = createLinkCacheKey(ref, onlyAliases);
+  const cacheKey = createPathCacheKey(ref.cell, ref.path, onlyAliases);
   const cached = visits.followLinksCache.get(cacheKey);
   if (cached) return cached;
 
