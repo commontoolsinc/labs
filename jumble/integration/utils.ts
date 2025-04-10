@@ -128,7 +128,7 @@ export const addCharm = async (toolshedUrl: string) => {
     args: [
       "task",
       "start",
-      "--name",
+      "--spaceName",
       name,
       "--recipeFile",
       "../recipes/simpleValue.tsx",
@@ -163,7 +163,7 @@ export const inspectCharm = async (
     args: [
       "task",
       "start",
-      "--name",
+      "--spaceName",
       name,
       "--charmId",
       charmId,
