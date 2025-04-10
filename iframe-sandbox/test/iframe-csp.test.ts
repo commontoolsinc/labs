@@ -59,11 +59,21 @@ const SCRIPT_URL = "https://common.tools/static/sketch.js";
 const STYLE_URL = "https://common.tools/static/main.css";
 const IMG_URL = "https://common.tools/static/text.png";
 const ORIGIN_URL = new URL(globalThis.location.href).origin;
+const BASE64_IMG_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
 
 function openWindow(target: any) {
   return `<script>
     let win = window.open("${HTML_URL}", "${target}");
     if (win) throw new Error("Window Opened");</script>`;
+}
+
+function clickAnchor(target: string) {
+  return `
+<a id="anchor-test" href="${HTML_URL}" target="${target}">
+<script>
+const anchor = document.querySelector("#anchor-test");
+anchor.click();
+</script>`;
 }
 
 const cases = [[
@@ -77,6 +87,10 @@ const cases = [[
 ], [
   "allows 1P img",
   `<img src="${ORIGIN_URL}/foo.jpg" />`,
+  null,
+], [
+  "allows data: img",
+  `<img src="${BASE64_IMG_URL}" />`,
   null,
 ], [
   "allows 1P CSS",
@@ -97,6 +111,18 @@ const cases = [[
 ], [
   "disallows opening windows (_top)",
   openWindow("_top"),
+  null,
+], [
+  "disallows anchor link target (_parent)",
+  clickAnchor("_parent"),
+  null,
+], [
+  "disallows anchor link target (_self)",
+  clickAnchor("_self"),
+  null,
+], [
+  "disallows anchor link target (_top)",
+  clickAnchor("_top"),
   null,
 ], [
   "disallows fetch",
@@ -161,6 +187,15 @@ const falseNegatives = [[
   "CSP:default-src",
 ]];
 
+// /!\ These tests do not report correctly.
+// /!\ Not sure why! But they appear to be allowed
+// /!\ but are not in practice.
+const falsePositives = [[
+  "Allows anchor link target (_blank)",
+  clickAnchor("_blank"),
+  null,
+]];
+
 const unknownStatuses = [
   [
     // `prerender` is a Chrome-only feature-flagged
@@ -176,6 +211,9 @@ for (const [name, html, expected] of cases) {
   defineTest(name, html, expected);
 }
 for (const [name, html, expected] of falseNegatives) {
+  definePending(name, html, expected);
+}
+for (const [name, html, expected] of falsePositives) {
   definePending(name, html, expected);
 }
 for (const [name, html, expected] of unknownStatuses) {

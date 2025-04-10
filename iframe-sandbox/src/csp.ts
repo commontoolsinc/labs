@@ -31,8 +31,8 @@ export const CSP = `` +
   `style-src ${HOST_ORIGIN} 'unsafe-inline' ${STYLE_CDNS.join(" ")};` +
   // Fonts: Allow 1P, inline.
   `font-src ${HOST_ORIGIN} 'unsafe-inline' ${FONT_CDNS.join(" ")};` +
-  // Images: Allow 1P, inline.
-  `img-src ${HOST_ORIGIN} 'unsafe-inline';` +
+  // Images: Allow 1P, data URIs.
+  `img-src ${HOST_ORIGIN} data:;` +
   // Disabling until we have a concrete case.
   `form-action 'none';` +
   // Disable <base> element
