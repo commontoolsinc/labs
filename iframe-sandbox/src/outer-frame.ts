@@ -4,8 +4,8 @@ export default `
 <!DOCTYPE html>
 <html>
 <head>
-	<meta http-equiv="Content-Security-Policy" content="${CSP}" \/>
-  <style>
+<meta http-equiv="Content-Security-Policy" content="${CSP}" \/>
+<style>
 html, body {
   padding: 0;
   margin: 0;
@@ -30,7 +30,7 @@ iframe {
 <body>
 <iframe
   allow="clipboard-write"
-  sandbox="allow-scripts allow-modals"><\/iframe>
+  sandbox="allow-popups allow-popups-to-escape-sandbox allow-scripts allow-modals"><\/iframe>
 <script>
 const iframe = document.querySelector("iframe");
 const HOST_ORIGIN = "${HOST_ORIGIN}";
