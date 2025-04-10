@@ -15,6 +15,12 @@ import {
   Identity,
   KeyPairRaw,
 } from "@commontools/identity";
+import {
+  InitializationData,
+  isWorkerIPCRequest,
+  RunData,
+  WorkerIPCMessageType,
+} from "./worker-ipc.ts";
 
 let initialized = false;
 let spaceId: DID;
@@ -28,25 +34,15 @@ onError((e: Error) => {
   latestError = e;
 });
 
-async function setup(
-  data: { did: string; toolshedUrl: string; rawIdentity: KeyPairRaw },
-) {
+async function initialize(
+  data: InitializationData,
+): Promise<void> {
   if (initialized) {
-    console.log(`Worker: Already initialized, skipping setup`);
-    return { setup: true, alreadyInitialized: true };
+    console.log(`Worker: Already initialized, skipping initialize`);
+    return;
   }
 
-  const { did, toolshedUrl, rawIdentity } = data || {};
-  if (!did) {
-    throw new Error("Worker missing did");
-  }
-  if (!toolshedUrl) {
-    throw new Error("Worker missing toolshedUrl");
-  }
-  if (!rawIdentity) {
-    throw new Error("Worker missing rawIdentity");
-  }
-
+  const { did, toolshedUrl, rawIdentity } = data;
   const identity = await Identity.deserialize(rawIdentity);
   const apiUrl = new URL(toolshedUrl);
   // Initialize storage and remote connection
@@ -70,14 +66,13 @@ async function setup(
 
   console.log(`Worker: ${did} initialized`);
   initialized = true;
-  return { setup: true };
 }
 
 // FIXME(ja) should we make sure we kill the worker?
-async function shutdown() {
+async function cleanup(): Promise<void> {
   if (!initialized) {
-    console.log(`Worker: Not initialized, skipping shutdown`);
-    return { shutdown: true };
+    console.log(`Worker: Not initialized, skipping cleanup`);
+    return;
   }
   console.log(`Worker: Shutting down execution environment`);
 
@@ -85,25 +80,20 @@ async function shutdown() {
   currentSession = null;
   manager = null;
 
-  // Ensure storage is synced before shutdown
+  // Ensure storage is synced before cleanup
   await storage.synced();
 
   initialized = false;
-  return { shutdown: true };
 }
 
-async function runCharm(data: { charmId: string }) {
+async function runCharm(data: RunData): Promise<void> {
   if (!manager) {
     throw new Error("Worker session not initialized");
   }
 
-  const { charmId } = data || {};
-  if (!charmId) {
-    throw new Error("Missing required parameter: charm");
-  }
+  const { charmId } = data;
 
   console.log(`Worker: Running charm ${spaceId}/${charmId}`);
-
   try {
     // Reset error tracking
     latestError = null;
@@ -143,7 +133,7 @@ async function runCharm(data: { charmId: string }) {
     }
 
     console.log(`Worker: Successfully executed charm ${spaceId}/${charmId}`);
-    return { success: true, charmId };
+    return;
   } catch (error) {
     const errorMessage = isErrorWithContext(error)
       ? `${error.message} @ ${error.space}:${error.charmId} running ${error.recipeId}`
@@ -155,36 +145,45 @@ async function runCharm(data: { charmId: string }) {
     // FIXME(ja): this isn't enough to ensure we reload/stop the charm
     loadedCharms.delete(charmId);
 
-    return {
-      success: false,
-      charmId,
-      error: errorMessage,
-    };
+    throw new Error(errorMessage);
   }
 }
 
-self.onmessage = async (event: MessageEvent) => {
-  const { msgId, type, data } = event.data || {};
+self.addEventListener("unhandledrejection", (e: PromiseRejectionEvent) => {
+  // Throw this so that `WorkerController`'s `error` handler can handle
+  // unhandled rejections the same way unhandled errors are handled.
+  throw e.reason;
+});
+
+self.addEventListener("message", async (event: MessageEvent) => {
+  const message = event.data;
 
   try {
-    if (type === "setup") {
-      const result = await setup(data);
-      self.postMessage({ msgId, result });
-    } else if (type === "runCharm") {
-      const result = await runCharm(data);
-      self.postMessage({ msgId, result });
-    } else if (type === "shutdown") {
-      const result = await shutdown();
-      self.postMessage({ msgId, result });
-      self.close(); // terminates the worker
-    } else {
-      throw new Error(`Unknown message type: ${type}`);
+    if (!isWorkerIPCRequest(message)) {
+      throw new Error("Invalid IPC request.");
     }
+    switch (message.type) {
+      case WorkerIPCMessageType.Initialize: {
+        await initialize(message.data);
+        break;
+      }
+      case WorkerIPCMessageType.Run: {
+        await runCharm(message.data);
+        break;
+      }
+      case WorkerIPCMessageType.Cleanup: {
+        await cleanup();
+        break;
+      }
+      default:
+        throw new Error("Unknown message type.");
+    }
+    self.postMessage({ msgId: message.msgId });
   } catch (error) {
     console.error(`Worker error:`, error);
     self.postMessage({
-      msgId,
+      msgId: message.msgId,
       error: error instanceof Error ? error.message : String(error),
     });
   }
-};
+});

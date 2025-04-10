@@ -1,15 +1,24 @@
 import { BGCharmEntry } from "@commontools/utils";
 import { Cell } from "@commontools/runner";
-import { log } from "./utils.ts";
 import { Identity } from "@commontools/identity";
 import { defer, type Deferred } from "@commontools/utils/defer";
+import {
+  isWorkerIPCResponse,
+  WorkerIPCMessageType,
+  WorkerIPCRequest,
+  WorkerIPCResponse,
+} from "./worker-ipc.ts";
 
 const DEFAULT_TASK_TIMEOUT = 60_000;
 
-type PendingResponse = {
-  resolve: (result: any) => void;
-  reject: (error: any) => void;
-};
+export enum WorkerState {
+  Uninitialized = "uninitialized",
+  Initializing = "initializing",
+  Ready = "ready",
+  Terminating = "terminating",
+  Terminated = "terminated",
+  Error = "error",
+}
 
 export interface WorkerOptions {
   did: string;
@@ -18,24 +27,35 @@ export interface WorkerOptions {
   timeoutMs?: number;
 }
 
-export class WorkerController {
+export class WorkerControllerErrorEvent extends Event {
+  error?: ErrorEvent;
+  constructor(cause?: ErrorEvent) {
+    super("error");
+    this.error = cause;
+  }
+}
+
+/**
+ * @event error A terminal error occurred in the worker.
+ */
+export class WorkerController extends EventTarget {
   private worker: Worker;
   private did: string;
   private toolshedUrl: string;
   private identity: Identity;
   private timeoutMs: number;
   private msgId: number = 0;
-  private pending = new Map<number, PendingResponse>();
-  private ready: boolean = false;
-  private initDeferred?: Deferred<void>;
+  private pending = new Map<number, Deferred<void>>();
+  private state = WorkerState.Uninitialized;
 
   constructor(options: WorkerOptions) {
+    super();
     this.did = options.did;
     this.identity = options.identity;
     this.toolshedUrl = options.toolshedUrl;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TASK_TIMEOUT;
 
-    log(`${this.did} Creating worker controller`);
+    console.log(`${this.did}: Creating worker controller`);
 
     this.worker = new Worker(
       new URL("./worker.ts", import.meta.url).href,
@@ -44,118 +64,128 @@ export class WorkerController {
         name: `worker-${this.did}`,
       },
     );
-    this.connectWorker();
-  }
-
-  private connectWorker() {
-    this.worker.onmessage = (event: MessageEvent) => {
-      const data = event.data as { msgId: number; result: any } | {
-        msgId: number;
-        error: string;
-      } | undefined;
-      if (!data) {
-        log(`${this.did}: Received response with no data`, {
-          error: true,
-        });
-        return;
-      }
-      if (typeof data.msgId !== "number") {
-        log(
-          `${this.did}: Received response with no msgId ${
-            JSON.stringify(data)
-          }`,
-          {
-            error: true,
-          },
-        );
-        return;
-      }
-      const pending = this.pending.get(data.msgId);
-      if (!pending) {
-        log(
-          `${this.did}: Received response with missing pending promise ${data.msgId}`,
-          {
-            error: true,
-          },
-        );
-        return;
-      }
-      if ("error" in data) {
-        pending.reject(new Error(data.error));
-      } else {
-        pending.resolve(data.result);
-      }
-      this.pending.delete(data.msgId);
-    };
-
-    // FIXME(ja): what should we do if the worker is erroring?
-    // perhaps restart the worker?
-    this.worker.onerror = (err) => {
-      log(`${this.did}: Worker error:`, { error: true }, err);
-      // If not prevented, error is rethrown in this context.
-      err.preventDefault();
-    };
+    this.worker.addEventListener("message", this.onWorkerMessage);
+    this.worker.addEventListener("error", this.onWorkerError);
   }
 
   async initialize() {
-    if (this.initDeferred) {
-      return this.initDeferred.promise;
+    if (this.state !== WorkerState.Uninitialized) {
+      throw new Error("Worker is not uninitialized.");
     }
-    this.initDeferred = defer();
+    this.state = WorkerState.Initializing;
     try {
-      await this.exec("setup", {
+      await this.exec(WorkerIPCMessageType.Initialize, {
         did: this.did,
         toolshedUrl: this.toolshedUrl,
         rawIdentity: this.identity.serialize(),
       });
-      this.initDeferred.resolve();
-      this.ready = true;
+      this.state = WorkerState.Ready;
     } catch (e) {
-      this.initDeferred.reject(
-        new Error(`Failed to initialize Worker: ${e ? e.toString() : e}`),
-      );
+      this.state = WorkerState.Error;
+      throw e;
     }
-    return this.initDeferred;
   }
 
-  runCharm(
+  async runCharm(
     bg: Cell<BGCharmEntry>,
-  ): Promise<{ success: boolean; data?: any; charmId: string }> {
-    return this.exec("runCharm", { charmId: bg.get().charmId });
+  ): Promise<void> {
+    if (this.state !== WorkerState.Ready) {
+      throw new Error("Worker not ready.");
+    }
+    return await this.exec(WorkerIPCMessageType.Run, {
+      charmId: bg.get().charmId,
+    });
   }
 
   async shutdown() {
-    try {
-      await this.exec("shutdown");
-    } catch (err) {
-      log(
-        "Failed to shutdown worker gracefully, terminating with unknown status.",
-      );
-      this.worker?.terminate();
+    if (
+      this.state === WorkerState.Terminating ||
+      this.state === WorkerState.Terminated
+    ) {
+      throw new Error(`Worker is already ${this.state}.`);
     }
+    this.state = WorkerState.Terminating;
+
+    for (const [_, deferred] of this.pending.entries()) {
+      deferred.reject(new Error("Worker shutting down."));
+    }
+    this.pending.clear();
+
+    try {
+      await this.exec(WorkerIPCMessageType.Cleanup);
+    } catch (err) {
+      console.warn(
+        `Failed to shutdown worker gracefully: ${err}`,
+      );
+    }
+    this.worker.terminate();
+    this.state = WorkerState.Terminated;
+  }
+
+  isReady(): boolean {
+    return this.state === WorkerState.Ready;
   }
 
   // send a message and return a promise that resolves with the response
-  private exec(type: string, data?: any): Promise<any> {
-    // Only allow "setup" calls when not ready
-    if (type !== "setup" && !this.ready) {
-      return Promise.reject(new Error("Worker not initialized"));
-    }
+  private exec(type: WorkerIPCMessageType, data?: any): Promise<void> {
     const msgId = this.msgId++;
+    const message: WorkerIPCRequest = {
+      msgId,
+      type,
+      data,
+    };
 
-    const deferred = defer<any, Error>();
+    const deferred = defer<void, Error>();
 
     const timeout = setTimeout(() => {
+      // The request has timed out. This is most likely unexpected.
+      // Whatever processing is occurring in the worker graph should be
+      // terminated and recreated in the future.
       deferred.reject(new Error(`Worker timed out after ${this.timeoutMs}ms`));
     }, this.timeoutMs);
 
     this.pending.set(msgId, deferred);
 
-    this.worker.postMessage({ msgId, type, data });
+    this.worker.postMessage(message);
 
     return deferred.promise.finally(() => {
       clearTimeout(timeout);
       this.pending.delete(msgId);
     });
   }
+
+  private onWorkerMessage = (event: MessageEvent) => {
+    const response = event.data;
+    if (!isWorkerIPCResponse(response)) {
+      console.error(
+        `${this.did}: Received malformed WorkerIPCResponse: ${response}`,
+      );
+      return;
+    }
+    const pending = this.pending.get(response.msgId);
+    if (!pending) {
+      console.error(
+        `${this.did}: WorkerIPCResponse does not match a request: ${response.msgId}`,
+      );
+      return;
+    }
+    if ("error" in response) {
+      pending.reject(new Error(response.error));
+    } else {
+      pending.resolve();
+    }
+    this.pending.delete(response.msgId);
+  };
+
+  private onWorkerError = (err: ErrorEvent) => {
+    console.error(`${this.did}: Worker error:`, err);
+    // If not prevented, error is rethrown in this context.
+    err.preventDefault();
+
+    // Set state to `Error`, terminating the worker immediately
+    this.state = WorkerState.Error;
+    this.worker.terminate();
+
+    this.dispatchEvent(new WorkerControllerErrorEvent(err));
+  };
 }

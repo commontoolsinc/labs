@@ -76,10 +76,7 @@ export class BackgroundCharmService {
           identity: this.identity,
         });
         this.charmSchedulers.set(did, scheduler);
-        scheduler.start().catch((err) => {
-          log(`${did} Scheduler failed to initialize: ${err}`);
-          this.charmSchedulers.delete(did);
-        });
+        scheduler.start();
       }
 
       // we are only filtering charms because until the FIXME above is fixed
