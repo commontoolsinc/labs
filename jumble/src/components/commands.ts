@@ -797,7 +797,7 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
       title: "Duplicate Charm",
       "group": "Charm",
       handler: async () => {
-        if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
+        if (!ctx.focusedCharmId) {
           ctx.setOpen(false);
           return;
         }
