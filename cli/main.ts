@@ -23,7 +23,8 @@ const {
   recipeFile,
   cause,
   input,
-  keyPath,
+  userKey,
+  adminKey,
   quit,
 } = parseArgs(Deno.args, {
   string: [
@@ -33,7 +34,8 @@ const {
     "recipeFile",
     "cause",
     "input",
-    "keyPath",
+    "userKey",
+    "adminKey",
   ],
   boolean: ["quit"],
   default: { quit: false },
@@ -66,23 +68,29 @@ async function main() {
   }
 
   let identity: Identity;
-  if (keyPath) {
+  if (adminKey || userKey) {
     try {
-      const pkcs8Key = await Deno.readFile(keyPath);
+      const pkcs8Key = await Deno.readFile(adminKey ?? userKey!);
       identity = await Identity.fromPkcs8(pkcs8Key);
     } catch (e) {
-      console.error(`Could not read key at ${keyPath}.`);
+      console.error(`Could not read key at ${adminKey ?? userKey}.`);
       Deno.exit(1);
     }
   } else {
     identity = await Identity.fromPassphrase(OPERATOR_PASS);
   }
 
+  // Actual identity is derived from space name if no admin key is provided.
+  if (!adminKey && spaceName !== undefined) {
+    identity = await identity.derive(spaceName);
+  }
+
+  const space: DID = spaceDID as DID ?? identity.did();
+
   const session = await createAdminSession({
     identity,
-    space: spaceDID as DID ?? await identity.derive(spaceName!),
-    // TODO(seefeld): See what happens if we don't provide a name.
-    name: spaceName ?? undefined as unknown as string,
+    space,
+    name: spaceName ?? "unknown",
   }) satisfies Session;
 
   // TODO(seefeld): It only wants the space, so maybe we simplify the above and just space the space did?
