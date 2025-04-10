@@ -778,7 +778,7 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
       id: "rename-charm",
       type: "input",
       title: "Rename Charm",
-      group: "Edit",
+      group: "Charm",
       predicate: !!ctx.focusedCharmId,
       handler: (input) => handleRenameCharm(ctx, input),
     },
@@ -786,16 +786,42 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
       id: "edit-recipe",
       type: "input",
       title: `Modify Charm`,
-      group: "Edit",
+      group: "Charm",
       predicate: !!ctx.focusedCharmId,
       placeholder: "What would you like to change?",
       handler: (input) => handleModifyCharm(ctx, input),
     },
     {
+      id: "duplicate-charm",
+      type: "action",
+      title: "Duplicate Charm",
+      "group": "Charm",
+      handler: async () => {
+        if (!ctx.focusedCharmId) {
+          ctx.setOpen(false);
+          return;
+        }
+
+        ctx.setLoading(true);
+
+        const charm = await ctx.charmManager.get(ctx.focusedCharmId);
+        if (!charm) {
+          ctx.setLoading(false);
+          console.error("Failed to load charm", ctx.focusedCharmId);
+          return;
+        }
+
+        const newCharm = await ctx.charmManager.duplicate(charm);
+        navigateToCharm(ctx, newCharm);
+        ctx.setLoading(false);
+        ctx.setOpen(false);
+      },
+    },
+    {
       id: "delete-charm",
       type: "confirm",
       title: "Delete Charm",
-      group: "Edit",
+      group: "Charm",
       predicate: !!ctx.focusedCharmId,
       message: "Are you sure you want to delete this charm?",
       handler: () => handleDeleteCharm(ctx),
