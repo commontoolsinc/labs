@@ -802,14 +802,18 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
           return;
         }
 
+        ctx.setLoading(true);
+
         const charm = await ctx.charmManager.get(ctx.focusedCharmId);
         if (!charm) {
+          ctx.setLoading(false);
           console.error("Failed to load charm", ctx.focusedCharmId);
           return;
         }
 
         const newCharm = await ctx.charmManager.duplicate(charm);
         navigateToCharm(ctx, newCharm);
+        ctx.setLoading(false);
         ctx.setOpen(false);
       },
     },
