@@ -5,6 +5,8 @@ import { WorkflowForm } from "@commontools/charm";
 import { systemMdConcise } from "../../../charm/src/iframe/static.ts";
 import { formatForm } from "./spec-and-schema-gen.ts";
 
+// This is for the 'imagine-single-phase' workflow
+
 // Prompt for generating schema and specification from a goal
 export const SCHEMA_AND_CODE_FROM_GOAL_PROMPT = `
 You are creating a simple minimal viable product (MVP) based on a user's goal. Focus on the simplest implementation that works.
