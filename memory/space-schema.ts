@@ -346,14 +346,10 @@ export const selectSchema = <Space extends MemorySpace>(
             selector.schemaContext.rootSchema,
             tracker,
           );
-          // We don't actually care about the result here
+          // We don't actually use the return value here, but we've built up
+          // a list of all the documents we need to watch.
           traverser.traverse(newDoc, newDocRoot, newValue);
         }
-        // copy our expanded object into the top level of our result
-        // const resultEntry = (result !== undefined)
-        //   ? { is: { value: result }, since: factEntry.since }
-        //   : { since: factEntry.since };
-        // set(includedFacts, ["_", the], cause, resultEntry);
       }
     }
   }

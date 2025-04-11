@@ -214,6 +214,7 @@ export class RemoteStorageProvider implements StorageProvider {
     entityId: EntityId,
     callback: (value: StorageValue<T>) => void,
   ): Cancel {
+    console.log("Loading ", entityId, " from sink");
     const subscription = this.subscribe(entityId);
     if (subscription) {
       const of = RemoteStorageProvider.toEntity(entityId);
@@ -232,6 +233,7 @@ export class RemoteStorageProvider implements StorageProvider {
     _expectedInStorage: boolean = false,
     schemaContext?: SchemaContext,
   ): Promise<Result<Unit, Error>> {
+    console.log("Loading ", entityId, " from sync ", schemaContext);
     const subscription = this.subscribe(entityId, schemaContext);
     if (subscription) {
       const of = RemoteStorageProvider.toEntity(entityId);
