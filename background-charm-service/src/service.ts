@@ -1,13 +1,20 @@
 import { Identity } from "@commontools/identity";
-import { type Cell, storage } from "@commontools/runner";
-import { type BGCharmEntry, getBGUpdaterCharmsCell } from "@commontools/utils";
-import { log } from "./utils.ts";
+import { type Cell, type Storage } from "@commontools/runner";
+import {
+  BG_CELL_CAUSE,
+  BG_SYSTEM_SPACE_ID,
+  type BGCharmEntry,
+} from "./schema.ts";
+import { getBGCharms, log } from "./utils.ts";
 import { SpaceManager } from "./space-manager.ts";
 import { useCancelGroup } from "@commontools/runner";
 
 export interface BackgroundCharmServiceOptions {
   identity: Identity;
   toolshedUrl: string;
+  storage: Storage;
+  bgSpace?: string;
+  bgCause?: string;
 }
 
 export class BackgroundCharmService {
@@ -16,18 +23,24 @@ export class BackgroundCharmService {
   private charmSchedulers: Map<string, SpaceManager> = new Map();
   private identity: Identity;
   private toolshedUrl: string;
+  private storage: Storage;
+  private bgSpace: string;
+  private bgCause: string;
 
   constructor(options: BackgroundCharmServiceOptions) {
     this.identity = options.identity;
     this.toolshedUrl = options.toolshedUrl;
+    this.storage = options.storage;
+    this.bgSpace = options.bgSpace ?? BG_SYSTEM_SPACE_ID;
+    this.bgCause = options.bgCause ?? BG_CELL_CAUSE;
   }
 
   async initialize() {
-    storage.setRemoteStorage(new URL(this.toolshedUrl));
-    storage.setSigner(this.identity);
-    this.charmsCell = await getBGUpdaterCharmsCell();
-    await storage.syncCell(this.charmsCell, true);
-    await storage.synced();
+    this.storage.setRemoteStorage(new URL(this.toolshedUrl));
+    this.storage.setSigner(this.identity);
+    this.charmsCell = await getBGCharms({ bgSpace: this.bgSpace, bgCause: this.bgCause, storage: this.storage });
+    await this.storage.syncCell(this.charmsCell, true);
+    await this.storage.synced();
 
     if (this.isRunning) {
       log("Service is already running");
