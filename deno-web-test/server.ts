@@ -26,6 +26,11 @@ export class TestServer {
     this.server.unref();
   }
 
+  // Returns the listening port, if server running.
+  port(): number | undefined {
+    return this.server?.addr?.port;
+  }
+
   async stop() {
     if (this.server) {
       await this.server.shutdown();

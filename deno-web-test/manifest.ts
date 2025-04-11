@@ -10,8 +10,9 @@ export class Manifest {
   readonly tests: string[];
   // The root directory path of the static server.
   readonly serverDir: string;
-  // The port the static server is being served on.
-  readonly port: number;
+  // The requested port the static server is being served on.
+  // If `0` (the default), the actual listening port will be different.
+  readonly requestedPort: number;
   // Configuration defined via `deno-web-test.config.ts`
   readonly config: Config;
 
@@ -24,7 +25,7 @@ export class Manifest {
     this.projectDir = projectDir;
     this.tests = tests;
     this.serverDir = serverDir;
-    this.port = 8000;
+    this.requestedPort = 0;
     this.config = config;
   }
 

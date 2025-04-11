@@ -9,16 +9,18 @@ export class BrowserController extends EventTarget {
   private manifest: Manifest;
   private page: Page | null;
   private browser: Browser | null;
+  private serverPort: number;
 
-  constructor(manifest: Manifest) {
+  constructor(manifest: Manifest, serverPort: number) {
     super();
     this.manifest = manifest;
     this.browser = null;
     this.page = null;
+    this.serverPort = serverPort;
   }
 
   async load(filePath: string) {
-    const rootUrl = `http://localhost:${this.manifest.port}`;
+    const rootUrl = `http://localhost:${this.serverPort}`;
     const jsTestPath = tsToJs(filePath);
     const testUrl = `${rootUrl}/?test=/${jsTestPath}`;
     const config = this.manifest.config;

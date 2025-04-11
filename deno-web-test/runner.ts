@@ -11,11 +11,11 @@ export class Runner {
   browser: BrowserController;
   results: TestFileResults[];
 
-  constructor(manifest: Manifest) {
+  constructor(manifest: Manifest, serverPort: number) {
     this.manifest = manifest;
     this.reporter = new Reporter();
     this.results = [];
-    this.browser = new BrowserController(manifest);
+    this.browser = new BrowserController(manifest, serverPort);
     this.browser.addEventListener(
       "console",
       (e: Event) => this.onConsole(e as ConsoleEvent),
