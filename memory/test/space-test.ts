@@ -1747,9 +1747,9 @@ test(
         "value": {
           "offices": {
             "main": {
-              "name": "Bob Hope Airport",
-              "street": "2627 N Hollywood Way",
-              "city": "Burbank",
+              "$alias": {
+                "path": ["employees", "0", "addresses", "work"],
+              },
             },
           },
           "employees": [
@@ -1762,9 +1762,9 @@ test(
                   "city": "Palm Springs",
                 },
                 "work": {
-                  "$alias": {
-                    "path": ["offices", "main"],
-                  },
+                  "name": "Bob Hope Airport",
+                  "street": "2627 N Hollywood Way",
+                  "city": "Burbank",
                 },
               },
             },
@@ -1779,63 +1779,48 @@ test(
       is: {
         "value": {
           "offices": {
-            "main": {
-              "$alias": {
-                "path": ["offices", "main"],
+            "$alias": {
+              "cell": {
+                "/": doc1.slice(3), // strip off 'of:'
               },
+              "path": ["offices"],
             },
           },
-          "employees": [
-            {
-              "name": "Bob",
-              "addresses": {
-                "home": {
-                  "name": "Mr. Bob Hope",
-                  "street": "2466 Southridge Drive",
-                  "city": "Palm Springs",
-                },
-                "work": {
-                  "$alias": {
-                    "path": ["offices", "main"],
-                  },
-                },
-              },
-            },
-          ],
         },
       },
     });
 
-    const tr = Transaction.create({
+    const tr1 = Transaction.create({
       issuer: alice.did(),
       subject: space.did(),
       changes: Changes.from([v1]),
     });
-    const write = await session.transact(tr);
-    assert(write.ok);
-    const commit = Commit.toRevision(write.ok);
+    const write1 = await session.transact(tr1);
+    assert(write1.ok);
+    const tr2 = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v2]),
+    });
+    const write2 = await session.transact(tr2);
+    assert(write2.ok);
 
+    // Without the local alias in doc1, the address would not match the schema
     // We'll use a schema selector to grab Bob's name and work address
     const schemaSelector: SchemaSelector = {
-      [doc]: {
+      [doc2]: {
         [the]: {
           _: {
-            path: ["employees", "0"],
+            path: ["offices", "main"],
             schemaContext: {
               schema: {
                 "type": "object",
                 "properties": {
                   "name": { "type": "string" },
-                  "addresses": {
-                    "type": "object",
-                    "properties": {
-                      "work": {
-                        "type": "object",
-                        "additionalProperties": true,
-                      },
-                    },
-                  },
+                  "street": { "type": "string" },
+                  "city": { "type": "string" },
                 },
+                "required": ["name", "street", "city"],
               },
               rootSchema: {}, // not bothering with this spec
             },
@@ -1854,7 +1839,8 @@ test(
       prf: [],
     });
 
-    assertEquals(getResultForDoc(result, space.did(), "_"), filteredFact);
+    assertExists(getResultForDoc(result, space.did(), doc1));
+    assertExists(getResultForDoc(result, space.did(), doc2));
   },
 );
 
