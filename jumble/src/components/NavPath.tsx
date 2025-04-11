@@ -12,7 +12,7 @@ type NavPathProps = {
 export function NavPath({ replicaId, charmId }: NavPathProps) {
   const { charmManager } = useCharmManager();
 
-  const [charmName, setCharmName] = React.useState<string | null>(null);
+  const [charmName, setCharmName] = React.useState<string | null>("Loading...");
 
   useEffect(() => {
     let mounted = true;
@@ -30,6 +30,7 @@ export function NavPath({ replicaId, charmId }: NavPathProps) {
 
     return () => {
       mounted = false;
+      setCharmName(" ");
       cancel?.();
     };
   }, [charmId, charmManager]);
