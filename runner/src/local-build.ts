@@ -8,6 +8,18 @@ import turndown from "turndown";
 
 let DOMParser: any;
 
+type TypeScriptAPI = typeof import("typescript");
+const getTSCompiler = (() => {
+  let ts: Promise<TypeScriptAPI> | void;
+  return function getTSCompiler(): Promise<TypeScriptAPI> {
+    if (ts) {
+      return ts;
+    }
+    ts = import("typescript").then((exports) => exports.default);
+    return ts;
+  };
+})();
+
 // NOTE(ja): importing JSDOM in browser throws an error :(
 async function getDOMParser() {
   if (DOMParser) {
@@ -62,6 +74,7 @@ const ensureRequires = async (js: string): Promise<Record<string, any>> => {
 export const tsToExports = async (
   src: string,
 ): Promise<{ exports?: any; errors?: string }> => {
+  const ts = await getTSCompiler();
   // Add error handling for compilation
   const result = ts.transpileModule(src, {
     compilerOptions: {
