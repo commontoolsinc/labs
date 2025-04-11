@@ -7,14 +7,6 @@ import {
 } from "./worker-controller.ts";
 import { type Cancel, useCancelGroup } from "@commontools/runner";
 
-// We have a handful of old recipes that do things like make
-// async requests without handling, or embedding within a handled
-// promise chain. Restarting workers in ops frequently demands
-// too many resources.
-// In lieu of removing old, invalid recipes, allow the worker
-// JS environment to continue in possibly an unknown state.
-const RESTART_ON_TERMINAL_ERROR = false;
-
 export interface CharmSchedulerOptions extends WorkerOptions {
   pollingIntervalMs?: number;
   deactivationTimeoutMs?: number;
@@ -261,14 +253,24 @@ export class SpaceManager {
   // This is fired from `WorkerController` when an terminal error
   // occurs (e.g. outside of the graph), and may happen at any point
   // during execution.
+  // Because this can occur from a charm calling `setTimeout(() => throw new Error(""), timeout)`
+  // we cannot determine the offending charm. Because this should not occur frequently,
+  // and happening currently due to older, misbehaving charms, this should flush out
+  // those misbehaving charms.
+  //
+  // Attempt to recreate the worker environment, which should only occur once per
+  // space-wide disabling.
   private onTerminalError = (event: WorkerControllerErrorEvent) => {
     console.error(
       `${this.did} Terminal error received: ${event.error?.message}`,
     );
 
-    if (RESTART_ON_TERMINAL_ERROR) {
-      this.setupWorkerController();
+    const reason =
+      `TerminalError: All charms in this space have been disabled: ${event.error?.message}`;
+    for (const [charmId, entry] of this.enabledCharms.entries()) {
+      this.disableCharm(charmId, entry, reason);
     }
+    this.setupWorkerController();
   };
 
   private async setupWorkerController() {
