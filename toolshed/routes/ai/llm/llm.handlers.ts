@@ -1,11 +1,16 @@
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import type { AppRouteHandler } from "@/lib/types.ts";
-import type { GenerateTextRoute, GetModelsRoute } from "./llm.routes.ts";
+import type {
+  FeedbackRoute,
+  GenerateTextRoute,
+  GetModelsRoute,
+} from "./llm.routes.ts";
 import { ALIAS_NAMES, ModelList, MODELS, TASK_MODELS } from "./models.ts";
 import * as cache from "./cache.ts";
 import type { Context } from "@hono/hono";
 import { generateText as generateTextCore } from "./generateText.ts";
 import { findModel } from "./models.ts";
+import env from "@/env.ts";
 
 const withoutMetadata = (obj: any) => {
   const { metadata, ...rest } = obj;
@@ -113,10 +118,10 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
     JSON.stringify(withoutMetadata(payload)),
   );
   const cachedResult = await cache.loadItem(cacheKey);
-  if (cachedResult) {
-    const lastMessage = cachedResult.messages[cachedResult.messages.length - 1];
-    return c.json(lastMessage);
-  }
+  // if (cachedResult) {
+  //   const lastMessage = cachedResult.messages[cachedResult.messages.length - 1];
+  //   return c.json(lastMessage);
+  // }
 
   const persistCache = async (
     messages: { role: string; content: string }[],
@@ -160,7 +165,11 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
     // If response is not streaming, save to cache and return the message
     if (!payload.stream) {
       await persistCache(result.messages);
-      return c.json(result.message);
+      const response = c.json(result.message);
+      if (result.spanId) {
+        response.headers.set("x-ct-llm-trace-id", result.spanId);
+      }
+      return response;
     }
 
     return new Response(result.stream, {
@@ -169,10 +178,57 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
         "Transfer-Encoding": "chunked",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
+        ...(result.spanId ? { "x-ct-llm-trace-id": result.spanId } : {}),
       },
     });
   } catch (error) {
     console.error("Error in generateText:", error);
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return c.json({ error: message }, HttpStatusCodes.BAD_REQUEST);
+  }
+};
+
+/**
+ * Handler for POST /feedback endpoint
+ * Submits user feedback on an LLM response to Phoenix
+ */
+export const submitFeedback: AppRouteHandler<FeedbackRoute> = async (c) => {
+  const payload = await c.req.json();
+
+  try {
+    const phoenixPayload = {
+      data: [
+        {
+          span_id: payload.span_id,
+          name: payload.name || "user feedback",
+          annotator_kind: payload.annotator_kind || "HUMAN",
+          result: payload.result,
+          metadata: payload.metadata || {},
+        },
+      ],
+    };
+
+    const response = await fetch(
+      `${env.CTTS_AI_LLM_PHOENIX_API_URL}/span_annotations?sync=false`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "api_key": env.CTTS_AI_LLM_PHOENIX_API_KEY,
+        },
+        body: JSON.stringify(phoenixPayload),
+      },
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Phoenix API error: ${response.status} ${errorText}`);
+    }
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("Error submitting feedback:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
     return c.json({ error: message }, HttpStatusCodes.BAD_REQUEST);
   }

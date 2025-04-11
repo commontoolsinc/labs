@@ -1,4 +1,5 @@
 import { streamText } from "ai";
+import { trace } from "@opentelemetry/api";
 
 import { findModel, TASK_MODELS } from "./models.ts";
 
@@ -36,6 +37,7 @@ export interface GenerateTextResult {
   message: { role: "user" | "assistant"; content: string };
   messages: { role: "user" | "assistant"; content: string }[];
   stream?: ReadableStream;
+  spanId?: string;
 }
 
 // Configure the model parameters for JSON mode based on provider
@@ -202,7 +204,11 @@ export async function generateText(
     metadata: params.metadata,
   };
 
+  // This is where the LLM API call is made
   const llmStream = await streamText(streamParams as any);
+
+  // Get the active span ID from OpenTelemetry
+  const spanId = trace.getActiveSpan()?.spanContext().spanId;
 
   // If not streaming, handle regular response
   if (!params.stream) {
@@ -237,6 +243,7 @@ export async function generateText(
     return {
       message: messages[messages.length - 1],
       messages: [...messages],
+      spanId,
     };
   }
 
@@ -300,5 +307,6 @@ export async function generateText(
     message: messages[messages.length - 1],
     messages: [...messages],
     stream,
+    spanId,
   };
 }
