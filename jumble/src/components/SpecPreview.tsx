@@ -8,6 +8,7 @@ import type {
   WorkflowType,
 } from "@commontools/charm";
 import { JSONSchema } from "@commontools/builder";
+import { WORKFLOWS } from "../../../charm/src/workflow.ts";
 
 interface SpecPreviewProps {
   form: Partial<WorkflowForm>;
@@ -297,11 +298,12 @@ export function SpecPreview({
                           <div className="flex flex-col gap-1">
                             <div className="flex items-center w-full mb-0.5">
                               <ToggleButton
-                                options={[
-                                  { value: "fix", label: "FIX" },
-                                  { value: "edit", label: "EDIT" },
-                                  { value: "imagine", label: "IMAGINE" },
-                                ]}
+                                options={Object.values(WORKFLOWS).map((
+                                  workflow,
+                                ) => ({
+                                  value: workflow.name,
+                                  label: workflow.label
+                                }))}
                                 value={form.classification?.workflowType}
                                 onChange={(value) =>
                                   onWorkflowChange?.(value as WorkflowType)}
@@ -309,18 +311,6 @@ export function SpecPreview({
                                 className="w-full"
                               />
                             </div>
-
-                            {/* Compact workflow explanation */}
-                            {
-                              /* <div className="text-[10px] text-gray-600 mb-1">
-                              {workflowType === "fix" &&
-                                "🛠️ Preserves existing spec, only modifies code"}
-                              {workflowType === "edit" &&
-                                "✏️ Preserves data structure, updates functionality"}
-                              {workflowType === "imagine" &&
-                                "🔄 Creates new spec with potentially different schema"}
-                            </div> */
-                            }
                           </div>
 
                           {/* Show plan and spec in a 2-column layout */}

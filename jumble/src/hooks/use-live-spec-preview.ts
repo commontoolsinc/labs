@@ -70,105 +70,113 @@ export function useLiveSpecPreview(
       : "anthropic:claude-3-7-sonnet-latest";
   }, []);
 
-  const generatePreview = useCallback(async (text: string) => {
-    console.log(
-      "generatePreview called with:",
-      text,
-      "enabled:",
-      enabled,
-    );
+  const generatePreview = useCallback(
+    async (text: string, prefill?: Partial<WorkflowForm>) => {
+      console.log(
+        "generatePreview called with:",
+        text,
+        "enabled:",
+        enabled,
+      );
 
-    // Create a unique ID for this generation process
-    const generationId = Date.now();
-    currentGenerationRef.current = generationId;
-    console.groupCollapsed("generatePreview[" + generationId + "]");
+      // Create a unique ID for this generation process
+      const generationId = Date.now();
+      currentGenerationRef.current = generationId;
+      console.groupCollapsed("generatePreview[" + generationId + "]");
 
-    // Reset states based on whether this is a refinement or new topic
-    const resetState = () => {
-      const textInvalid = !text || !text.trim() || text.trim().length < 10 ||
-        !enabled;
+      // Reset states based on whether this is a refinement or new topic
+      const resetState = () => {
+        const textInvalid = !text || !text.trim() || text.trim().length < 10 ||
+          !enabled;
 
-      console.log("Reset state check:", {
-        textInvalid,
-        lastSuccessfulText: lastSuccessfulText.substring(0, 20) + "...",
-        currentText: text.substring(0, 20) + "...",
-      });
+        console.log("Reset state check:", {
+          textInvalid,
+          lastSuccessfulText: lastSuccessfulText.substring(0, 20) + "...",
+          currentText: text.substring(0, 20) + "...",
+        });
 
-      setPreviewForm({});
-      setClassificationLoading(false);
-      setPlanLoading(false);
-      setLoading(false);
-    };
+        setPreviewForm({});
+        setClassificationLoading(false);
+        setPlanLoading(false);
+        setLoading(false);
+      };
 
-    // Helper function to check if this generation process is still current
-    const isCurrentGeneration = () =>
-      currentGenerationRef.current === generationId;
+      // Helper function to check if this generation process is still current
+      const isCurrentGeneration = () =>
+        currentGenerationRef.current === generationId;
 
-    // Don't generate previews for short inputs (less than 8 chars) or if disabled
-    // This helps prevent unnecessary API calls and LLM requests
-    if (!text || !text.trim() || text.trim().length < 8 || !enabled) {
-      console.log("Skipping preview generation - text too short or disabled");
-      resetState();
-      return;
-    }
-
-    console.log("Starting preview generation...");
-
-    // Set loading states to true at the start, but DON'T reset progress states
-    // This is critical to prevent erasing progress when user is typing quickly
-    setClassificationLoading(true);
-    setPlanLoading(true);
-    setLoading(true);
-
-    // Instead, set loading without touching progress
-    // If previous sections completed, they should stay completed
-
-    try {
-      // Define a shared model ID for both calls
-      const modelId = getModelId(model);
-      const cancellation = { cancelled: false };
-
-      const form = await processWorkflow(text, true, {
-        charmManager,
-        existingCharm: currentCharm,
-        model: modelId,
-        onProgress: (f) => {
-          // Check if this is still the current generation before proceeding
-          if (!isCurrentGeneration()) {
-            cancellation.cancelled = true;
-            console.log(generationId, "Abandoning outdated generation process");
-            return;
-          }
-
-          setPreviewForm(f);
-        },
-        cancellation: cancellation,
-      });
-
-      // Check if this is still the current generation before proceeding
-      if (!isCurrentGeneration()) {
-        cancellation.cancelled = true;
-        console.log(generationId, "Abandoning outdated generation process");
+      // Don't generate previews for short inputs (less than 8 chars) or if disabled
+      // This helps prevent unnecessary API calls and LLM requests
+      if (!text || !text.trim() || text.trim().length < 8 || !enabled) {
+        console.log("Skipping preview generation - text too short or disabled");
+        resetState();
         return;
       }
 
-      // Important: Turn off the main loading state after classification
-      // so UI can show partial results while plan and spec are loading
-      setLoading(false);
-      setLastSuccessfulText(text);
-    } catch (error) {
-      console.error("Error generating preview:", error);
-    } finally {
-      // Only reset loading states if this is still the current generation
-      if (isCurrentGeneration()) {
+      console.log("Starting preview generation...");
+
+      // Set loading states to true at the start, but DON'T reset progress states
+      // This is critical to prevent erasing progress when user is typing quickly
+      setClassificationLoading(true);
+      setPlanLoading(true);
+      setLoading(true);
+
+      // Instead, set loading without touching progress
+      // If previous sections completed, they should stay completed
+
+      try {
+        // Define a shared model ID for both calls
+        const modelId = getModelId(model);
+        const cancellation = { cancelled: false };
+
+        const form = await processWorkflow(text, true, {
+          charmManager,
+          existingCharm: currentCharm,
+          model: modelId,
+          prefill: prefill,
+          onProgress: (f) => {
+            // Check if this is still the current generation before proceeding
+            if (!isCurrentGeneration()) {
+              cancellation.cancelled = true;
+              console.log(
+                generationId,
+                "Abandoning outdated generation process",
+              );
+              return;
+            }
+
+            setPreviewForm(f);
+          },
+          cancellation: cancellation,
+        });
+        setPreviewForm(form);
+
+        // Check if this is still the current generation before proceeding
+        if (!isCurrentGeneration()) {
+          cancellation.cancelled = true;
+          console.log(generationId, "Abandoning outdated generation process");
+          return;
+        }
+
+        // Important: Turn off the main loading state after classification
+        // so UI can show partial results while plan and spec are loading
         setLoading(false);
-        // Reset any lingering loading states to ensure UI doesn't get stuck
-        setClassificationLoading(false);
-        setPlanLoading(false);
+        setLastSuccessfulText(text);
+      } catch (error) {
+        console.error("Error generating preview:", error);
+      } finally {
+        // Only reset loading states if this is still the current generation
+        if (isCurrentGeneration()) {
+          setLoading(false);
+          // Reset any lingering loading states to ensure UI doesn't get stuck
+          setClassificationLoading(false);
+          setPlanLoading(false);
+        }
+        console.groupEnd();
       }
-      console.groupEnd();
-    }
-  }, [enabled, model, getModelId, currentCharm, charmManager]);
+    },
+    [enabled, model, getModelId, currentCharm, charmManager],
+  );
 
   // Generate preview when input changes
   useEffect(() => {
@@ -189,16 +197,15 @@ export function useLiveSpecPreview(
     currentGenerationRef.current = generationId;
 
     // Update the workflow type state immediately
-    setPreviewForm({
-      ...previewForm,
+    const form = {
       classification: {
         workflowType: type,
         confidence: 1.0,
         reasoning: "Manual override",
       },
-    });
-
-    generatePreview(input);
+    };
+    setPreviewForm(form);
+    generatePreview(input, form);
   }, [input, currentCharm, model, getModelId, charmManager]);
 
   return {

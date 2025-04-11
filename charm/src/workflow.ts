@@ -20,11 +20,16 @@ import { formatPromptWithMentions } from "./format.ts";
 import { castNewRecipe } from "./iterate.ts";
 
 // Types for workflow classification
-export type WorkflowType = "fix" | "edit" | "imagine";
+export type WorkflowType =
+  | "fix"
+  | "edit"
+  | "imagine"
+  | "imagine-single-phase";
 
 // Configuration for each workflow type
 export interface WorkflowConfig {
   name: WorkflowType;
+  label: string;
   description: string;
   updateSpec: boolean;
   updateSchema: boolean;
@@ -34,6 +39,7 @@ export interface WorkflowConfig {
 export const WORKFLOWS: Record<WorkflowType, WorkflowConfig> = {
   fix: {
     name: "fix",
+    label: "FIX",
     description:
       "Fix issues in the code without changing functionality or spec",
     updateSpec: false,
@@ -42,6 +48,7 @@ export const WORKFLOWS: Record<WorkflowType, WorkflowConfig> = {
   },
   edit: {
     name: "edit",
+    label: "EDIT",
     description:
       "Update functionality while maintaining the same core data structure",
     updateSpec: true,
@@ -50,7 +57,16 @@ export const WORKFLOWS: Record<WorkflowType, WorkflowConfig> = {
   },
   imagine: {
     name: "imagine",
+    label: "IMAGINE",
     description: "Create a new charm with a potentially different data schema",
+    updateSpec: true,
+    updateSchema: true,
+    allowsDataReferences: true,
+  },
+  "imagine-single-phase": {
+    name: "imagine-single-phase",
+    label: "IMAGINE (SINGLE PHASE)",
+    description: "IN DEVELOPMENT",
     updateSpec: true,
     updateSchema: true,
     allowsDataReferences: true,
@@ -587,6 +603,7 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
       break;
 
     case "imagine":
+    case "imagine-single-phase":
       charm = await executeImagineWorkflow(
         newForm.meta.charmManager,
         form,
@@ -609,7 +626,6 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
 
   return newForm;
 }
-
 /**
  * Process a workflow request from start to finish or just fill the form
  *
@@ -631,6 +647,9 @@ export async function processWorkflow(
   } = {},
 ): Promise<WorkflowForm> {
   console.groupCollapsed("processWorkflow");
+  const startTime = performance.now();
+  const timings: Record<string, number> = {};
+
   // Create a new form or use prefilled form
   let form = createWorkflowForm({
     input,
@@ -666,7 +685,9 @@ export async function processWorkflow(
       }
 
       console.log("processing input");
+      const stepStartTime = performance.now();
       form = await processInputSection(options.charmManager, form);
+      timings.processInput = performance.now() - stepStartTime;
       options.onProgress?.(form);
       console.log("processed input!", form);
     }
@@ -676,7 +697,9 @@ export async function processWorkflow(
     // Step 2: Classification if not already classified
     if (!form.classification) {
       console.log("classifying task");
+      const stepStartTime = performance.now();
       form = await fillClassificationSection(form);
+      timings.classification = performance.now() - stepStartTime;
       options.onProgress?.(form);
       console.log("classified task!", form);
     }
@@ -686,7 +709,9 @@ export async function processWorkflow(
     // Step 3: Planning if not already planned
     if (!form.plan || !form.plan.spec || !form.plan.steps) {
       console.log("planning task");
+      const stepStartTime = performance.now();
       form = await fillPlanningSection(form);
+      timings.planning = performance.now() - stepStartTime;
       options.onProgress?.(form);
       console.log("planned task!", form);
     }
@@ -696,16 +721,31 @@ export async function processWorkflow(
     // Step 4: Generation (if not a dry run and not already generated)
     if (!dryRun && options.charmManager && !form.generation?.charm) {
       console.log("generating code");
+      const stepStartTime = performance.now();
       form = await generateCode(form);
+      timings.generation = performance.now() - stepStartTime;
       options.onProgress?.(form);
       console.log("generated code!", form);
     }
+
+    const totalTime = performance.now() - startTime;
+    console.log("Workflow timing summary:");
+    console.log(`Total duration: ${totalTime.toFixed(2)}ms`);
+    Object.entries(timings).forEach(([step, duration]) => {
+      console.log(
+        `  - ${step}: ${duration.toFixed(2)}ms (${
+          ((duration / totalTime) * 100).toFixed(1)
+        }%)`,
+      );
+    });
 
     console.log("completed workflow!");
     console.groupEnd();
     return form;
   } catch (error) {
+    const totalTime = performance.now() - startTime;
     console.warn("workflow failed:", error);
+    console.log(`Workflow failed after ${totalTime.toFixed(2)}ms`);
     console.groupEnd();
     return form;
   }

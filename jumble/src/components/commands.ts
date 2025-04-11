@@ -49,7 +49,7 @@ export interface ActionCommandItem extends BaseCommandItem {
 export interface InputCommandItem extends BaseCommandItem {
   type: "input";
   placeholder?: string;
-  handler: (input: string, sources?: any) => Promise<void> | void;
+  handler: (ctx: CommandContext, input: string) => Promise<void> | void;
   validate?: (input: string) => boolean;
 }
 
@@ -695,7 +695,7 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
       type: "input",
       title: "New Charm",
       group: "Create",
-      handler: (input) => handleNewCharm(ctx, input),
+      handler: handleNewCharm,
     },
     {
       id: "search-charms",
@@ -780,7 +780,7 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
       title: "Rename Charm",
       group: "Charm",
       predicate: !!ctx.focusedCharmId,
-      handler: (input) => handleRenameCharm(ctx, input),
+      handler: handleRenameCharm,
     },
     {
       id: "edit-recipe",
@@ -789,7 +789,7 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
       group: "Charm",
       predicate: !!ctx.focusedCharmId,
       placeholder: "What would you like to change?",
-      handler: (input) => handleModifyCharm(ctx, input),
+      handler: handleModifyCharm,
     },
     {
       id: "duplicate-charm",

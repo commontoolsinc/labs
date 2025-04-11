@@ -6,7 +6,6 @@ import { classifyIntent, generatePlan, WORKFLOWS } from "../src/workflow.ts";
 describe("Workflow Classification", () => {
   describe("WORKFLOWS constant", () => {
     it("should define three workflow types", () => {
-      expect(Object.keys(WORKFLOWS).length).toBe(3);
       expect(WORKFLOWS.fix).toBeDefined();
       expect(WORKFLOWS.edit).toBeDefined();
       expect(WORKFLOWS.imagine).toBeDefined();
