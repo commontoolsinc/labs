@@ -1,4 +1,5 @@
 {
+  "name": "@commontools/background-charm",
   "tasks": {
     "start": "deno run -A --unstable-worker-options src/main.ts",
     "help": "deno run -A src/main.ts --help",
@@ -8,5 +9,9 @@
     "lint": "deno lint",
     "fmt": "deno fmt"
   },
-  "imports": {}
+  "imports": {},
+  "exports": {
+    ".": "./src/lib.ts",
+    "./schema": "./src/schema.ts"
+  }
 }

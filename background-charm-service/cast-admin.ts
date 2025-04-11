@@ -6,13 +6,13 @@ import {
   setBobbyServerUrl,
   storage,
 } from "@commontools/runner";
-import { type DID, Identity } from "@commontools/identity";
+import { type DID } from "@commontools/identity";
 import { createAdminSession } from "@commontools/identity";
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,
-  bgUpdaterCharmsSchema,
-} from "@commontools/utils";
+  BGCharmEntriesSchema,
+} from "./src/schema.ts";
 import { getIdentity } from "./src/utils.ts";
 
 const { recipePath, quit } = parseArgs(
@@ -79,7 +79,7 @@ async function castRecipe() {
     const targetCell = getCell(
       spaceId as DID,
       cause,
-      bgUpdaterCharmsSchema,
+      BGCharmEntriesSchema,
     );
 
     // Ensure the cell is synced
