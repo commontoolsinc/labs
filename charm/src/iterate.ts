@@ -16,7 +16,7 @@ import {
 import { Charm, CharmManager, charmSourceCellSchema } from "./charm.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
-import { generateSpecAndSchema } from "@commontools/llm";
+import { generateCodeAndSchema, generateSpecAndSchema } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
 import { WorkflowForm } from "./index.ts";
 
@@ -198,26 +198,83 @@ function turnCellsIntoAliases(data: any): any {
   } else return data;
 }
 
-/**
- * Cast a new recipe from a goal and data
- *
- * @param charmManager Charm manager representing the space this will be generated in
- * @param goal A user level goal for the new recipe, can reference specific data via `key`
- * @param data Data passed to the recipe, can be a combination of data and cells
- * @returns A new recipe cell
- */
-export async function castNewRecipe(
-  charmManager: CharmManager,
+async function singlePhaseCodeGeneration(
   form: WorkflowForm,
-): Promise<Cell<Charm>> {
-  console.log("Processing form:", form);
+  existingSchema?: JSONSchema,
+) {
+  console.log("using singlePhaseCodeGeneration");
+  // Phase 1: Generate spec/plan and schema based on goal and possibly existing schema
+  const {
+    sourceCode,
+    resultSchema,
+    title,
+    description,
+  } = await generateCodeAndSchema(form, existingSchema);
 
-  // Remove $UI, $NAME, and any streams from the cells
-  const scrubbed = scrub(form.input.references);
+  console.log("resultSchema", resultSchema);
 
-  // First, extract any existing schema if we have data
-  const existingSchema = createJsonSchema(scrubbed);
+  // NOTE(ja): we put the result schema in the argument schema
+  // as a hack to work around iframes not supporting results schemas
+  const schema = {
+    ...existingSchema,
+    title: title || "missing",
+    description,
+  } as Writable<JSONSchema>;
 
+  if (!schema.type) {
+    schema.type = "object";
+  }
+
+  if (schema.type === "object" && !schema.properties) {
+    schema.properties = {};
+  }
+
+  // FIXME(ja): we shouldn't just throw results into the argument schema
+  // as this is a hack...
+  if (schema.type === "object") {
+    const props = resultSchema.properties ?? {};
+    Object.keys(props).forEach((key) => {
+      if (schema.properties && schema.properties[key]) {
+        console.error(`skipping ${key} already in the argument schema`);
+      } else {
+        (schema.properties as Record<string, JSONSchema>)[key] = props[key];
+      }
+    });
+  }
+
+  if (!form.plan?.spec || !form.plan?.steps) {
+    throw new Error("Plan is missing spec or steps");
+  }
+
+  const fullCode = injectUserCode(sourceCode);
+
+  const name = extractTitle(sourceCode, title); // Use the generated title as fallback
+  const newRecipeSrc = buildFullRecipe({
+    src: fullCode,
+    spec: form.plan.spec,
+    plan: Array.isArray(form.plan.steps)
+      ? form.plan.steps.map((step, index) => `${index + 1}. ${step}`).join("\n")
+      : form.plan.steps,
+    goal: form.input.processedInput,
+    argumentSchema: schema,
+    resultSchema,
+    name,
+  });
+
+  return {
+    newSpec: form.plan.spec,
+    newIFrameSrc: fullCode,
+    newRecipeSrc,
+    name,
+    schema,
+  };
+}
+
+async function twoPhaseCodeGeneration(
+  form: WorkflowForm,
+  existingSchema?: JSONSchema,
+) {
+  console.log("using twoPhaseCodeGeneration");
   // Phase 1: Generate spec/plan and schema based on goal and possibly existing schema
   const {
     spec,
@@ -229,7 +286,7 @@ export async function castNewRecipe(
 
   console.log("resultSchema", resultSchema);
 
-  // We're goig from loose plan to detailed plan here.
+  // We're going from loose plan to detailed plan here.
   const newSpec = `<REQUEST>${
     formatForm(form)
   }</REQUEST>\n<PLAN>${plan}</PLAN>\n<SPEC>${spec}</SPEC>`;
@@ -281,6 +338,41 @@ export async function castNewRecipe(
     resultSchema,
     name,
   });
+
+  return {
+    newSpec,
+    newIFrameSrc,
+    newRecipeSrc,
+    name,
+    schema,
+  };
+}
+
+/**
+ * Cast a new recipe from a goal and data
+ *
+ * @param charmManager Charm manager representing the space this will be generated in
+ * @param goal A user level goal for the new recipe, can reference specific data via `key`
+ * @param data Data passed to the recipe, can be a combination of data and cells
+ * @returns A new recipe cell
+ */
+export async function castNewRecipe(
+  charmManager: CharmManager,
+  form: WorkflowForm,
+): Promise<Cell<Charm>> {
+  console.log("Processing form:", form);
+
+  // Remove $UI, $NAME, and any streams from the cells
+  const scrubbed = scrub(form.input.references);
+
+  // First, extract any existing schema if we have data
+  const existingSchema = createJsonSchema(scrubbed);
+
+  // Prototype workflow: combine steps
+  const { newIFrameSrc, newSpec, newRecipeSrc, name, schema } =
+    form.classification?.workflowType === "imagine-combined-code-schema"
+      ? await singlePhaseCodeGeneration(form, existingSchema)
+      : await twoPhaseCodeGeneration(form, existingSchema);
 
   const input = turnCellsIntoAliases(scrubbed);
 
