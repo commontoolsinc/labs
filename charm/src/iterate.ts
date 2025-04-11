@@ -370,7 +370,7 @@ export async function castNewRecipe(
 
   // Prototype workflow: combine steps
   const { newIFrameSrc, newSpec, newRecipeSrc, name, schema } =
-    form.classification?.workflowType === "imagine-combined-code-schema"
+    form.classification?.workflowType === "imagine-single-phase"
       ? await singlePhaseCodeGeneration(form, existingSchema)
       : await twoPhaseCodeGeneration(form, existingSchema);
 
