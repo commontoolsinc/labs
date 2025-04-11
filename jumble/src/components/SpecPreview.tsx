@@ -302,7 +302,7 @@ export function SpecPreview({
                                   workflow,
                                 ) => ({
                                   value: workflow.name,
-                                  label: workflow.name.toUpperCase(),
+                                  label: workflow.label
                                 }))}
                                 value={form.classification?.workflowType}
                                 onChange={(value) =>

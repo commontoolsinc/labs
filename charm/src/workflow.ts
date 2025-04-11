@@ -24,11 +24,12 @@ export type WorkflowType =
   | "fix"
   | "edit"
   | "imagine"
-  | "imagine-combined-code-schema";
+  | "imagine-single-phase";
 
 // Configuration for each workflow type
 export interface WorkflowConfig {
   name: WorkflowType;
+  label: string;
   description: string;
   updateSpec: boolean;
   updateSchema: boolean;
@@ -38,6 +39,7 @@ export interface WorkflowConfig {
 export const WORKFLOWS: Record<WorkflowType, WorkflowConfig> = {
   fix: {
     name: "fix",
+    label: "FIX",
     description:
       "Fix issues in the code without changing functionality or spec",
     updateSpec: false,
@@ -46,6 +48,7 @@ export const WORKFLOWS: Record<WorkflowType, WorkflowConfig> = {
   },
   edit: {
     name: "edit",
+    label: "EDIT",
     description:
       "Update functionality while maintaining the same core data structure",
     updateSpec: true,
@@ -54,13 +57,15 @@ export const WORKFLOWS: Record<WorkflowType, WorkflowConfig> = {
   },
   imagine: {
     name: "imagine",
+    label: "IMAGINE",
     description: "Create a new charm with a potentially different data schema",
     updateSpec: true,
     updateSchema: true,
     allowsDataReferences: true,
   },
-  "imagine-combined-code-schema": {
-    name: "imagine-combined-code-schema",
+  "imagine-single-phase": {
+    name: "imagine-single-phase",
+    label: "IMAGINE (SINGLE PHASE)",
     description: "IN DEVELOPMENT",
     updateSpec: true,
     updateSchema: true,
@@ -598,7 +603,7 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
       break;
 
     case "imagine":
-    case "imagine-combined-code-schema":
+    case "imagine-single-phase":
       charm = await executeImagineWorkflow(
         newForm.meta.charmManager,
         form,
