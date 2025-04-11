@@ -9,7 +9,7 @@ import {
   UI,
 } from "@commontools/builder";
 
-// NOTE(ja): this must be the same as the schema in utils/src/updaters.ts
+// NOTE(ja): this must be the same as the schema in background-charm-service/src/schema.ts
 const BGCharmEntrySchema = {
   type: "object",
   properties: {
@@ -71,6 +71,38 @@ const toggleCharm = handler<never, { charm: BGCharmEntry }>((_, { charm }) => {
   charm.disabledAt = charm.disabledAt ? undefined : Date.now();
 });
 
+// Minimal "moment" style formatting to get a string
+// representation of an (older) date relative to now,
+// e.g. "5 seconds ago".
+// * Renders "in the future" for all times in the future,
+//   we don't currently need e.g. "5 seconds from now".
+// * Disregard plural units, "1 minutes ago" is fine.
+// * Timezones are hard. Could maybe render "0 years ago".
+function fromNow(then: Date): string {
+  const now = new Date();
+  const diffSeconds = Math.floor((now.getTime() - then.getTime()) / 1000);
+  if (diffSeconds < 0) return "in the future";
+  if (diffSeconds === 0) return "now";
+  if (diffSeconds < 60) return `${diffSeconds} seconds ago`;
+
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes} minutes ago`;
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours} hours ago`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 365) return `${Math.floor(diffDays)} days ago`;
+
+  return `${Math.floor(then.getFullYear() - now.getFullYear())} `;
+}
+
+const css = `
+table th {
+  padding: 10px;
+}
+`;
+
 export default recipe(
   InputSchema,
   ResultSchema,
@@ -79,87 +111,122 @@ export default recipe(
       console.log("bg charm list:", charms);
     });
     return {
-      [NAME]: "BG Updater Management",
+      [NAME]: "BG Updater Management New",
       [UI]: (
-        <os-container>
-          <table>
-            <thead>
-              <tr>
-                <th style="padding: 10px;">Space</th>
-                <th style="padding: 10px;">Charm ID</th>
-                <th style="padding: 10px;">Integration</th>
-                <th style="padding: 10px;">Created At</th>
-                <th style="padding: 10px;">Updated At</th>
-                <th style="padding: 10px;">Last Run</th>
-                <th style="padding: 10px;">Status</th>
-                <th style="padding: 10px;">Disabled</th>
-                <th style="padding: 10px;">Delete</th>
-              </tr>
-            </thead>
-            <tbody>
-              {charms.map((charm) => (
+        <div>
+          <style>{css}</style>
+          <os-container>
+            <table>
+              <thead>
                 <tr>
-                  <td style="padding: 10px;">
-                    #{derive(charm, (charm) => charm.space.slice(-4))}
-                  </td>
-                  <td style="padding: 10px;">
-                    #{derive(charm, (charm) => charm.charmId.slice(-4))}
-                  </td>
-                  <td style="padding: 10px;">{charm.integration}</td>
-                  <td style="padding: 10px;">
-                    {derive(
-                      charm,
-                      (charm) => new Date(charm.createdAt).toLocaleString(),
-                    )}
-                  </td>
-                  <td style="padding: 10px;">
-                    {derive(
-                      charm,
-                      (charm) => new Date(charm.updatedAt).toLocaleString(),
-                    )}
-                  </td>
-
-                  <td style="padding: 10px;">
-                    {derive(
-                      charm,
-                      (charm) =>
-                        charm.lastRun
-                          ? new Date(charm.lastRun).toLocaleString()
-                          : "never",
-                    )}
-                  </td>
-                  <td style="padding: 10px;">{charm.status}</td>
-                  <td style="padding: 10px;">
-                    {derive(
-                      charm,
-                      (charm) =>
-                        charm.disabledAt
-                          ? new Date(charm.disabledAt).toLocaleString()
-                          : "enabled",
-                    )}&nbsp;
-                    <button
-                      onClick={toggleCharm({ charm })}
-                      type="button"
+                  <th>Space</th>
+                  <th>Charm ID</th>
+                  <th>Integration</th>
+                  <th>Created At</th>
+                  <th>Updated At</th>
+                  <th>Last Run</th>
+                  <th>Status</th>
+                  <th>Disabled</th>
+                  <th>Delete</th>
+                </tr>
+              </thead>
+              <tbody>
+                {charms.map((charm) => (
+                  <tr>
+                    <td>
+                      #{derive(charm, (charm) => charm.space.slice(-4))}
+                    </td>
+                    <td>
+                      #{derive(charm, (charm) => charm.charmId.slice(-4))}
+                    </td>
+                    <td>{charm.integration}</td>
+                    <td
+                      title={derive(
+                        charm,
+                        (charm) => new Date(charm.createdAt).toLocaleString(),
+                      )}
                     >
                       {derive(
                         charm,
-                        (charm) => charm.disabledAt ? "enable" : "disable",
+                        (charm) => fromNow(new Date(charm.createdAt)),
                       )}
-                    </button>
-                  </td>
-                  <td style="padding: 10px;">
-                    <button
-                      onClick={deleteCharm({ charm, charms })}
-                      type="button"
+                    </td>
+                    <td
+                      title={derive(
+                        charm,
+                        (charm) => new Date(charm.updatedAt).toLocaleString(),
+                      )}
                     >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </os-container>
+                      {derive(
+                        charm,
+                        (charm) => fromNow(new Date(charm.updatedAt)),
+                      )}
+                    </td>
+
+                    <td
+                      title={derive(
+                        charm,
+                        (charm) => new Date(charm.lastRun).toLocaleString(),
+                      )}
+                    >
+                      {derive(
+                        charm,
+                        (charm) =>
+                          charm.lastRun
+                            ? fromNow(new Date(charm.lastRun))
+                            : "never",
+                      )}
+                    </td>
+                    <td>{charm.status}</td>
+                    <td
+                      title={derive(
+                        charm,
+                        (charm) =>
+                          charm.disabledAt
+                            ? new Date(charm.disabledAt).toLocaleString()
+                            : undefined,
+                      )}
+                    >
+                      {derive(
+                        charm,
+                        (charm) =>
+                          charm.disabledAt
+                            ? fromNow(new Date(charm.disabledAt))
+                            : "enabled",
+                      )}&nbsp;
+                      <button
+                        onClick={toggleCharm({ charm })}
+                        type="button"
+                      >
+                        {derive(
+                          charm,
+                          (charm) => charm.disabledAt ? "enable" : "disable",
+                        )}
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        onClick={deleteCharm({ charm, charms })}
+                        type="button"
+                      >
+                        {/* https://fonts.google.com/icons?selected=Material+Symbols+Outlined:delete */}
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          height="24px"
+                          viewBox="0 -960 960 960"
+                          width="24px"
+                          fill="#e3e3e3"
+                        >
+                          <path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z" />
+                        </svg>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </os-container>
+        </div>
       ),
       charms,
     };

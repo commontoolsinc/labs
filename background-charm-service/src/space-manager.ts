@@ -1,11 +1,12 @@
-import { BGCharmEntry, sleep } from "@commontools/utils";
+import { sleep } from "@commontools/utils";
 import { Cell } from "@commontools/runner";
+import { type Cancel, useCancelGroup } from "@commontools/runner";
 import {
   WorkerController,
   WorkerControllerErrorEvent,
   type WorkerOptions,
 } from "./worker-controller.ts";
-import { type Cancel, useCancelGroup } from "@commontools/runner";
+import { type BGCharmEntry } from "./schema.ts";
 
 export interface CharmSchedulerOptions extends WorkerOptions {
   pollingIntervalMs?: number;

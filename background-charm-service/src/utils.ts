@@ -1,6 +1,18 @@
 import { Charm } from "@commontools/charm";
-import { Cell, getEntityId } from "@commontools/runner";
+import {
+  type Cell,
+  getCell,
+  getEntityId,
+  type Storage,
+} from "@commontools/runner";
 import { Identity, type IdentityCreateConfig } from "@commontools/identity";
+import { ID, type JSONSchema } from "@commontools/builder";
+import {
+  BG_CELL_CAUSE,
+  BG_SYSTEM_SPACE_ID,
+  type BGCharmEntry,
+  BGCharmEntrySchema,
+} from "./schema.ts";
 
 /**
  * Custom logger that includes timestamp and optionally charm ID
@@ -86,4 +98,109 @@ export async function getIdentity(
     return await Identity.fromPassphrase(operatorPass, keyConfig);
   }
   throw new Error("No IDENTITY or OPERATOR_PASS environemnt set.");
+}
+
+export async function setBGCharm({
+  space,
+  charmId,
+  integration,
+  storage,
+  bgSpace,
+  bgCause,
+}: {
+  space: string;
+  charmId: string;
+  integration: string;
+  storage: Storage;
+  bgSpace?: string;
+  bgCause?: string;
+}): Promise<boolean> {
+  const charmsCell = await getBGCharms({
+    bgSpace,
+    bgCause,
+    storage,
+  });
+
+  console.log(
+    "charmsCell",
+    JSON.stringify(charmsCell.getAsCellLink(), null, 2),
+  );
+
+  const charms = charmsCell.get() || [];
+
+  const existingCharmIndex = charms.findIndex(
+    (charm: Cell<BGCharmEntry>) =>
+      charm.get().space === space && charm.get().charmId === charmId,
+  );
+
+  if (existingCharmIndex === -1) {
+    console.log("Adding charm to BGUpdater charms cell");
+    charmsCell.push({
+      [ID]: `${space}/${charmId}`,
+      space,
+      charmId,
+      integration,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      disabledAt: undefined,
+      lastRun: 0,
+      status: "Initializing",
+    } as unknown as Cell<BGCharmEntry>);
+
+    // Ensure changes are synced
+    await storage.synced();
+
+    return true;
+  } else {
+    console.log("Charm already exists in BGUpdater charms cell, re-enabling");
+    const existingCharm = charms[existingCharmIndex];
+    existingCharm.update({
+      disabledAt: 0,
+      updatedAt: Date.now(),
+      status: "Re-initializing",
+    });
+
+    await storage.synced();
+
+    return false;
+  }
+}
+
+export async function getBGCharms(
+  { bgSpace, bgCause, storage }: {
+    bgSpace?: string;
+    bgCause?: string;
+    storage: Storage;
+  },
+): Promise<
+  Cell<Cell<BGCharmEntry>[]>
+> {
+  bgSpace = bgSpace ?? BG_SYSTEM_SPACE_ID;
+  bgCause = bgCause ?? BG_CELL_CAUSE;
+
+  if (!storage.hasSigner()) {
+    throw new Error("Storage has no signer");
+  }
+
+  if (!storage.hasRemoteStorage()) {
+    throw new Error("Storage has no remote storage");
+  }
+  const schema = {
+    type: "array",
+    items: {
+      ...BGCharmEntrySchema,
+      asCell: true,
+    },
+    default: [],
+  } as const satisfies JSONSchema;
+
+  const charmsCell = getCell(bgSpace, bgCause, schema);
+
+  // Ensure the cell is synced
+  // FIXME(ja): does True do the right thing here? Does this mean: I REALLY REALLY
+  // INSIST THAT YOU HAVE THIS CELL ON THE SERVER!
+  await storage.syncCell(charmsCell, true);
+  await storage.synced();
+
+  return charmsCell;
 }

@@ -10,7 +10,6 @@ import {
   type AuthData,
   type CallbackResult,
   clearAuthData,
-  codeVerifiers,
   createBackgroundIntegrationErrorResponse,
   createBackgroundIntegrationSuccessResponse,
   createCallbackResponse,
@@ -25,9 +24,8 @@ import {
   getBaseUrl,
   persistTokens,
 } from "./google-oauth.utils.ts";
-import { addOrUpdateBGCharm } from "@commontools/utils";
-
-import { type CellLink } from "@commontools/runner";
+import { setBGCharm } from "@commontools/background-charm";
+import { type CellLink, storage } from "@commontools/runner";
 
 /**
  * Google OAuth Login Handler
@@ -195,10 +193,11 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
           "Adding Google integration charm to Gmail integrations",
         );
 
-        await addOrUpdateBGCharm({
+        await setBGCharm({
           space,
           charmId: integrationCharmId,
           integration: "google",
+          storage,
         });
       } else {
         logger.warn(
@@ -357,10 +356,11 @@ export const backgroundIntegration: AppRouteHandler<
   try {
     const payload = await c.req.json();
 
-    await addOrUpdateBGCharm({
+    await setBGCharm({
       space: payload.space,
       charmId: payload.charmId,
       integration: payload.integration,
+      storage,
     });
 
     return createBackgroundIntegrationSuccessResponse(c, "success");
