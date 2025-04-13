@@ -24,6 +24,7 @@ export const LLMRequestSchema = z.object({
   max_completion_tokens: z.number().optional(),
   stream: z.boolean().default(false),
   mode: z.enum(["json"]).optional(),
+  metadata: z.record(z.string()).optional(),
 });
 
 export const ModelInfoSchema = z.object({
@@ -37,6 +38,7 @@ export const ModelInfoSchema = z.object({
     prefill: z.boolean(),
     images: z.boolean(),
   }),
+  name: z.string(),
   aliases: z.array(z.string()),
 });
 
@@ -81,6 +83,7 @@ export const getModels = createRoute({
       ModelsResponseSchema.openapi({
         example: {
           "claude-3-5-sonnet": {
+            name: "claude-3-5-sonnet",
             capabilities: {
               contextWindow: 200000,
               maxOutputTokens: 8192,

@@ -28,6 +28,7 @@ export type LLMRequest = {
   stream?: boolean;
   stop?: string;
   mode?: "json";
+  metadata?: Record<string, string>;
 };
 
 export class LLMClient {
@@ -53,7 +54,6 @@ export class LLMClient {
         model,
         stream: partialCB ? true : false,
         messages: userRequest.messages.map(processMessage),
-        max_tokens: userRequest.max_tokens,
       };
 
       try {

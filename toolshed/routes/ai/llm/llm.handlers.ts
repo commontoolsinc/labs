@@ -100,6 +100,9 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   if (!payload.metadata) {
     payload.metadata = {};
   }
+
+  payload.metadata.json_mode = payload.mode === "json";
+
   const user = c.req.header("Tailscale-User-Login");
   if (user) {
     payload.metadata.user = user;

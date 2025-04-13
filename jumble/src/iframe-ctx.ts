@@ -240,6 +240,7 @@ export const setupIframe = () =>
     },
     async onLLMRequest(_context: any, payload: string) {
       console.log("onLLMRequest", payload);
+      // FIXME(ja): how do we get the context of space/charm id here
       const jsonPayload = JSON.parse(payload);
       if (!jsonPayload.model) {
         jsonPayload.model = [
@@ -247,6 +248,10 @@ export const setupIframe = () =>
           "groq:llama-3.3-70b-versatile",
         ];
       }
+      jsonPayload.metadata = {
+        ...jsonPayload.metadata,
+        context: "iframe",
+      };
 
       const res = await llm.sendRequest(jsonPayload);
       console.log("onLLMRequest res", res);
