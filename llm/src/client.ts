@@ -28,6 +28,7 @@ export type LLMRequest = {
   stream?: boolean;
   stop?: string;
   mode?: "json";
+  metadata?: Record<string, string>;
 };
 
 export class LLMClient {
