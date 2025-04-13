@@ -93,6 +93,7 @@ export function llm(
 
     type O1Params = BaseParams;
 
+    // FIXME(ja): how do we get the context of space/charm id here
     let llmParams: StandardParams | O1Params = {
       system: system ?? "",
       messages: messages ?? [],
