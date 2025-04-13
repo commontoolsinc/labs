@@ -219,22 +219,23 @@ async function processCommand(
   }
 }
 
-function checkForErrors() {
-  const errorLogs = consoleLogs.filter((log) =>
-    log.detail.type === "error" &&
-    log.detail.text.startsWith("charm-runtime-error")
-  );
-  consoleLogs.length = 0;
-  if (errorLogs.length > 0) {
-    const errorText = errorLogs[0].detail.text;
-    // Remove the "charm-runtime-error" prefix
-    const jsonText = errorText.replace("charm-runtime-error", "").trim();
-    try {
-      return JSON.parse(jsonText)["description"];
-    } catch (e) {
-      return errorText;
-    }
-  }
+function addErrorListeners() {
+  page.evaluate(() => {
+    // @ts-ignore: typescript doesn't realize this is the browser context
+    window["charmRuntimeErrors"] = [];
+    // @ts-ignore: typescript doesn't realize this is the browser context
+    window["addEventListener"]("common-iframe-error", (e) => {
+      // @ts-ignore: typescript doesn't realize this is the browser context
+      window["charmRuntimeErrors"].push(e.detail.description);
+    });
+  });
+}
+
+async function checkForErrors() {
+  return await page.evaluate(() => {
+    // @ts-ignore: I don't know what happens if we use typescript here
+    return window["charmRuntimeErrors"];
+  });
 }
 
 async function screenshot(id: string) {
@@ -506,22 +507,19 @@ async function generateReport() {
 async function verifyCharm(id: string, prompt: string): Promise<string> {
   // FIXME(ja): can we navigate without causing a page reload?
   await page.goto(new URL(`/${name}/${id}`, toolshedUrl).toString());
+  addErrorListeners();
   await sleep(5000);
   const filename = await screenshot(id);
-  const error = checkForErrors();
-  if (error) {
-    console.error("Error:", error);
-    // Add failed result to charmResults
+  const errors = await checkForErrors();
+  if (errors.length > 0) {
     charmResults.push({
       id,
       prompt,
       screenshotPath: filename,
       status: "FAIL",
-      summary: `Error: ${
-        typeof error === "string" ? error : JSON.stringify(error)
-      }`,
+      summary: `Errors: ${errors.join("\n")}`,
     });
-    return `Error: ${error}`;
+    return `Error: ${errors.join("\n")}`;
   }
 
   const verdict = await llmVerifyCharm(prompt, filename);
