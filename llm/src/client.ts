@@ -54,7 +54,6 @@ export class LLMClient {
         model,
         stream: partialCB ? true : false,
         messages: userRequest.messages.map(processMessage),
-        max_tokens: userRequest.max_tokens,
       };
 
       try {
