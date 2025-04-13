@@ -7,6 +7,11 @@ import type { Context } from "@hono/hono";
 import { generateText as generateTextCore } from "./generateText.ts";
 import { findModel } from "./models.ts";
 
+const withoutMetadata = (obj: any) => {
+  const { metadata, ...rest } = obj;
+  return rest;
+};
+
 /**
  * Validates that the model and JSON mode settings are compatible
  * @returns An error response object if validation fails, or null if validation passes
@@ -69,6 +74,7 @@ export const getModels: AppRouteHandler<GetModelsRoute> = (c) => {
         // Include model if it passes all filters
         if (nameMatches && capabilitiesMatch && taskMatches) {
           acc[name] = {
+            name,
             model: modelConfig.model,
             capabilities: modelConfig.capabilities,
             aliases: Object.entries(MODELS)
@@ -91,9 +97,18 @@ export const getModels: AppRouteHandler<GetModelsRoute> = (c) => {
  */
 export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   const payload = await c.req.json();
+  if (!payload.metadata) {
+    payload.metadata = {};
+  }
+  const user = c.req.header("Tailscale-User-Login");
+  if (user) {
+    payload.metadata.user = user;
+  }
 
   // First, check whether the request is cached, if so return the cached result
-  const cacheKey = await cache.hashKey(JSON.stringify(payload));
+  const cacheKey = await cache.hashKey(
+    JSON.stringify(withoutMetadata(payload)),
+  );
   const cachedResult = await cache.loadItem(cacheKey);
   if (cachedResult) {
     const lastMessage = cachedResult.messages[cachedResult.messages.length - 1];
@@ -105,7 +120,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   ) => {
     try {
       await cache.saveItem(cacheKey, {
-        ...payload,
+        ...withoutMetadata(payload),
         messages,
       });
     } catch (e) {
@@ -123,6 +138,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   }
 
   const model = findModel(payload.model);
+  payload.metadata.model = model.name;
   const modelDefaultMaxTokens = model?.capabilities.maxOutputTokens || 8000;
 
   try {
