@@ -63,6 +63,10 @@ export async function generateJSON(
       },
     ],
     mode: "json",
+    metadata: {
+      context: "workflow",
+      workflow: "json-gen",
+    },
   });
 
   const jsonString = parseTagFromResponse(response, "json_blob");

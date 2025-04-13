@@ -10,7 +10,6 @@ import { isObj } from "@commontools/utils";
 import {
   createJsonSchema,
   JSONSchema,
-  schema,
   type Writable,
 } from "@commontools/builder";
 import { Charm, CharmManager, charmSourceCellSchema } from "./charm.ts";
@@ -40,7 +39,13 @@ export const genSrc = async ({
 }) => {
   const request = buildPrompt({ src, spec, newSpec, schema, model, steps });
 
-  let response = await llm.sendRequest(request);
+  let response = await llm.sendRequest({
+    ...request,
+    metadata: {
+      context: "workflow",
+      workflow: "genSrc",
+    },
+  });
 
   // FIXME(ja): this is a hack to get the prefill to work
   if (!response.startsWith(RESPONSE_PREFILL)) {

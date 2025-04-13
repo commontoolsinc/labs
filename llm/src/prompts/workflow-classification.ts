@@ -169,6 +169,10 @@ export async function classifyWorkflow(
       "You are a helpful AI assistant tasked with classifying user intents for code generation",
     messages: [{ role: "user", content: prompt }],
     model: model || "anthropic:claude-3-7-sonnet-latest",
+    metadata: {
+      context: "workflow",
+      workflow: "classification",
+    },
   });
 
   try {
@@ -282,6 +286,10 @@ export async function generateWorkflowPlan(
       "You are a helpful AI assistant tasked with planning code generation workflows",
     messages: [{ role: "user", content: prompt }],
     model: model || "anthropic:claude-3-7-sonnet-latest",
+    metadata: {
+      context: "workflow",
+      workflow: workflowType.toLowerCase(),
+    },
   });
 
   try {
