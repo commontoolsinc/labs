@@ -22,6 +22,7 @@ export interface GenerateTextParams {
   stop_token?: string;
   abortSignal?: AbortSignal;
   max_tokens?: number;
+  metadata?: Record<string, string>;
   mode?: "json";
   // Updated callback to receive complete data for caching
   onStreamComplete?: (result: {
@@ -195,6 +196,11 @@ export async function generateText(
   if (modelConfig.model) {
     streamParams.model = modelConfig.model;
   }
+
+  streamParams.experimental_telemetry = {
+    isEnabled: true,
+    metadata: params.metadata,
+  };
 
   const llmStream = await streamText(streamParams as any);
 
