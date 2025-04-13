@@ -110,6 +110,10 @@ export async function generateCharmSuggestions(
         content: prompt,
       },
     ],
+    metadata: {
+      context: "workflow",
+      workflow: "charm-suggestions",
+    },
   });
 
   const jsonString = parseTagFromResponse(response, "output");

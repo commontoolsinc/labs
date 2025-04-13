@@ -94,6 +94,10 @@ export async function fixRecipePrompt(
         content: prompt,
       },
     ],
+    metadata: {
+      context: "workflow",
+      workflow: "recipe-fix",
+    },
   });
 
   // console.log("RESPONSE", parseTagFromResponse(response, "fixed_code"));

@@ -63,6 +63,10 @@ export async function describeCharm(
         content: prompt,
       },
     ],
+    metadata: {
+      context: "workflow",
+      workflow: "charm-describe",
+    },
   });
 
   console.log("RESPONSE", parseTagFromResponse(response, "description"));

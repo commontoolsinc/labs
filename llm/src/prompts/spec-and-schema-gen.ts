@@ -237,6 +237,10 @@ Based on this goal and the existing schema, please provide a title, description,
         content: userContent,
       },
     ],
+    metadata: {
+      context: "workflow",
+      workflow: "spec-and-schema-gen",
+    },
   });
 
   // Extract sections from the response
@@ -338,6 +342,10 @@ Based on this goal and the existing schema, please provide a title, description 
         content: userContent,
       },
     ],
+    metadata: {
+      context: "workflow",
+      workflow: "spec-and-schema-gen",
+    },
   });
 
   // Extract sections from the response
