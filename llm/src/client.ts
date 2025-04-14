@@ -78,7 +78,8 @@ export class LLMClient {
 
         const traceSpanID = response.headers.get("x-ct-llm-trace-id") as string;
         if (traceSpanID) {
-          localStorage.setItem("traceSpanID", traceSpanID);
+          // @ts-ignore: this is a hack until we send this through workflow
+          globalThis.lastTraceSpanID = traceSpanID;
         }
 
         // the server might return cached data instead of a stream

@@ -4,7 +4,8 @@ import { submitFeedback } from "@/services/feedback.ts";
 import { MdThumbDownOffAlt, MdThumbUpOffAlt } from "react-icons/md";
 
 const getCurrentSpanID = (): string => {
-  const traceSpanID = localStorage.getItem("traceSpanID");
+  // @ts-ignore: we set the lastTraceSpanID in llm client
+  const traceSpanID = globalThis.lastTraceSpanID;
   if (!traceSpanID) {
     return "";
   }
