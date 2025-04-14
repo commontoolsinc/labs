@@ -100,9 +100,9 @@ export default function CharmList() {
   const [charms] = useCell(charmManager.getCharms());
   const [trash] = useCell(charmManager.getTrash());
 
-  const { lastSyncTime } = useSyncedStatus();
+  const { hasConnected } = useSyncedStatus();
 
-  if (lastSyncTime == null) {
+  if (!hasConnected) {
     return (
       <div className="flex flex-col items-center justify-center h-[70vh] text-center p-8">
         <div className="mb-6">
