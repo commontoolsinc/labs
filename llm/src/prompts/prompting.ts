@@ -29,10 +29,7 @@ export function hydratePrompt(
   // Add all context values used in the prompt as dependencies
   for (const key in context) {
     const value = context[key];
-    // Only include dependencies that were actually used in the prompt
-    if (prompt.text.includes(`{{${key}}}`)) {
-      dependencies[key] = value;
-    }
+    dependencies[key] = value;
   }
 
   return { version: prompt.version, text, dependencies };
