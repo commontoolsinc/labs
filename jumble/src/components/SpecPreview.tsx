@@ -93,7 +93,7 @@ function Accordion(
       {/* Simplified rendering that doesn't use react-spring for height */}
       {isOpen && (
         <div
-          className="p-1 bg-white"
+          className="p-1"
           style={{
             opacity: isOpen ? 1 : 0,
             transition: "opacity 200ms ease-in-out",
@@ -302,7 +302,7 @@ export function SpecPreview({
                                   workflow,
                                 ) => ({
                                   value: workflow.name,
-                                  label: workflow.label
+                                  label: workflow.label,
                                 }))}
                                 value={form.classification?.workflowType}
                                 onChange={(value) =>
@@ -313,62 +313,64 @@ export function SpecPreview({
                             </div>
                           </div>
 
-                          {/* Show plan and spec in a 2-column layout */}
-                          {
+                          {/* Spec as full-width section */}
+                          <div className="w-full space-y-1">
+                            {/* Spec Section */}
+                            {form.classification?.workflowType !== "fix"
+                              ? (
+                                <div className="p-1">
+                                  <div className="text-xs font-bold mb-1">
+                                    SPEC
+                                  </div>
+                                  {/* Show spec when available, otherwise loading */}
+                                  {form.plan?.spec
+                                    ? (
+                                      <div className="font-mono text-[10px] whitespace-pre-wrap overflow-y-auto">
+                                        {form.plan?.spec}
+                                      </div>
+                                    )
+                                    : (
+                                      <div className="flex items-center py-1">
+                                        <DitheredCube
+                                          animationSpeed={2}
+                                          width={20}
+                                          height={20}
+                                          animate
+                                          cameraZoom={12}
+                                        />
+                                        <span className="ml-1 text-[10px]">
+                                          Generating...
+                                        </span>
+                                      </div>
+                                    )}
+                                </div>
+                              )
+                              : (
+                                <div className="p-1">
+                                  <div className="text-xs font-bold mb-1">
+                                    ORIGINAL SPEC{" "}
+                                    <span className="text-[10px] text-blue-600">
+                                      (preserved)
+                                    </span>
+                                  </div>
+                                  {form.plan?.spec
+                                    ? (
+                                      <div className="font-mono text-[10px] whitespace-pre-wrap overflow-y-auto">
+                                        {form.plan?.spec}
+                                      </div>
+                                    )
+                                    : (
+                                      <div className="text-[10px] text-gray-500 italic">
+                                        Loading original specification...
+                                      </div>
+                                    )}
+                                </div>
+                              )}
+
+                            {/* Plan and Data Model in 2-column layout */}
                             <div className="grid grid-cols-2 gap-1">
-                              {/* Spec Section */}
-                              {form.classification?.workflowType !== "fix"
-                                ? (
-                                  <div className="bg-gray-50 rounded p-1">
-                                    <div className="text-xs font-bold mb-1">
-                                      SPEC
-                                    </div>
-                                    {/* Show spec when available, otherwise loading */}
-                                    {form.plan?.spec
-                                      ? (
-                                        <div className="font-mono text-[10px] whitespace-pre-wrap overflow-y-auto">
-                                          {form.plan?.spec}
-                                        </div>
-                                      )
-                                      : (
-                                        <div className="flex items-center py-1">
-                                          <DitheredCube
-                                            animationSpeed={2}
-                                            width={20}
-                                            height={20}
-                                            animate
-                                            cameraZoom={12}
-                                          />
-                                          <span className="ml-1 text-[10px]">
-                                            Generating...
-                                          </span>
-                                        </div>
-                                      )}
-                                  </div>
-                                )
-                                : (
-                                  <div className="bg-gray-50 rounded p-1">
-                                    <div className="text-xs font-bold mb-1">
-                                      ORIGINAL SPEC{" "}
-                                      <span className="text-[10px] text-blue-600">
-                                        (preserved)
-                                      </span>
-                                    </div>
-                                    {form.plan?.spec
-                                      ? (
-                                        <div className="font-mono text-[10px] whitespace-pre-wrap overflow-y-auto">
-                                          {form.plan?.spec}
-                                        </div>
-                                      )
-                                      : (
-                                        <div className="text-[10px] text-gray-500 italic">
-                                          Loading original specification...
-                                        </div>
-                                      )}
-                                  </div>
-                                )}
                               {/* Plan Section */}
-                              <div className="bg-gray-50 rounded p-1">
+                              <div className="p-1">
                                 <div className="text-xs font-bold mb-1">
                                   PLAN
                                 </div>
@@ -410,8 +412,26 @@ export function SpecPreview({
                                     </div>
                                   )}
                               </div>
+
+                              {/* Data Model Section (conditional based on availability) */}
+                              <div className="p-1">
+                                <div className="text-xs font-bold mb-1">
+                                  DATA MODEL
+                                </div>
+                                {form.plan?.dataModel
+                                  ? (
+                                    <pre className="text-[10px] text-gray-700 leading-tight max-h-full overflow-y-auto whitespace-pre-wrap">
+                                    {form.plan.dataModel}
+                                    </pre>
+                                  )
+                                  : (
+                                    <div className="text-[10px] text-gray-500 italic">
+                                      Data model will appear here...
+                                    </div>
+                                  )}
+                              </div>
                             </div>
-                          }
+                          </div>
                         </>
                       )}
 
@@ -444,17 +464,7 @@ export function SpecPreview({
                       </Accordion>
                     )}
 
-                    {form.plan?.dataModel && (
-                      <Accordion
-                        title={<span className="text-[10px]">Data Model</span>}
-                        defaultOpen={false}
-                        badge={null}
-                      >
-                        <pre className="text-[10px] text-gray-700 leading-tight max-h-32 overflow-y-auto">
-                          {form.plan.dataModel}
-                        </pre>
-                      </Accordion>
-                    )}
+                    {/* Data Model is now shown in the two-column layout */}
 
                     {/* Empty state message */}
                     {!form.plan?.spec && !form.plan?.steps &&

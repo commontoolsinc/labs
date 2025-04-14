@@ -88,10 +88,12 @@ For EDIT and IMAGINE, explain how it builds upon or differs from the existing ch
 </specification>
 
 <data_model>
-Sketch key entity types as type signature.
-Explain how data is processed and output with arrow diagrams.
-For EDIT and IMAGINE, explain any changes to the existing data model.
-Include how this charm uses any referenced data from other charms.
+List key actions and the data types they affect.
+e.g add(title, description) -> TodoItem(title, description, completed)
+edit(item: TodoItem, { description, title, completed }) -> TodoItem(title, description, completed)
+delete(item: TodoItem) -> void
+
+Include how this charm uses any referenced data.
 </data_model>
 
 DO NOT GENERATE A SCHEMA.
