@@ -76,13 +76,17 @@ export class LLMClient {
           throw new Error("No response body");
         }
 
+        const traceSpanID = response.headers.get("x-ct-llm-trace-id") as string;
+        if (traceSpanID) {
+          localStorage.setItem("traceSpanID", traceSpanID);
+        }
+
         // the server might return cached data instead of a stream
         if (response.headers.get("content-type") === "application/json") {
           const data = (await response.json()) as SimpleMessage;
           // FIXME(ja): can the LLM ever return anything other than a string?
           return data.content as string;
         }
-
         // FIXME(ja): this doesn't handle falling back to other models
         // if we fail during streaming
         return await this.stream(response.body, partialCB);

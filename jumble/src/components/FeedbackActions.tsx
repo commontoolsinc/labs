@@ -6,7 +6,15 @@ import { MdSend, MdThumbDownOffAlt, MdThumbUpOffAlt } from "react-icons/md";
 
 // FIXME(jake): This is for demo purposes... ideally we could just get the llm
 // span from the persisted blobby blob of the charm recipe, but none of that is hooked up yet.
-const CURRENT_SPAN_ID = "48fc49c695cdc4f3";
+// const CURRENT_SPAN_ID = "48fc49c695cdc4f3";
+
+const getCurrentSpanID = (): string => {
+  const traceSpanID = localStorage.getItem("traceSpanID");
+  if (!traceSpanID) {
+    return "";
+  }
+  return traceSpanID as string;
+};
 
 export function FeedbackActions() {
   // States for the feedback dialog
@@ -45,7 +53,7 @@ export function FeedbackActions() {
         {
           score: data.score,
           explanation: data.explanation,
-          spanId: CURRENT_SPAN_ID,
+          spanId: getCurrentSpanID(),
         },
         data.userInfo,
       );
