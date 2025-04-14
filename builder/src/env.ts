@@ -30,3 +30,15 @@ export function setRecipeEnvironment(env: RecipeEnvironment) {
 export function getRecipeEnvironment(): RecipeEnvironment {
   return globalEnv;
 }
+
+// until we thread the trace IDs through the entire workflow/recipe/...
+
+let lastTraceSpanID: string | undefined;
+
+export function setLastTraceSpanID(spanID: string) {
+  lastTraceSpanID = spanID;
+}
+
+export function getLastTraceSpanID(): string | undefined {
+  return lastTraceSpanID;
+}

@@ -1,16 +1,8 @@
 import { useEffect, useState } from "react";
 import { FeedbackDialog } from "@/components/FeedbackDialog.tsx";
 import { submitFeedback } from "@/services/feedback.ts";
+import { getLastTraceSpanID } from "@commontools/builder";
 import { MdThumbDownOffAlt, MdThumbUpOffAlt } from "react-icons/md";
-
-const getCurrentSpanID = (): string => {
-  // @ts-ignore: we set the lastTraceSpanID in llm client
-  const traceSpanID = globalThis.lastTraceSpanID;
-  if (!traceSpanID) {
-    return "";
-  }
-  return traceSpanID as string;
-};
 
 export function FeedbackActions() {
   // States for the feedback dialog
@@ -56,7 +48,7 @@ export function FeedbackActions() {
         {
           score: data.score,
           explanation: data.explanation,
-          spanId: getCurrentSpanID(),
+          spanId: getLastTraceSpanID() as string,
         },
         data.userInfo,
       );
