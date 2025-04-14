@@ -22,7 +22,7 @@ export function hydratePrompt(
     const key = p1.trim();
     return typeof context[key] === "string"
       ? context[key] || match
-      : context[key].text || match;
+      : context[key]?.text || match;
   });
 
   const dependencies = prompt.dependencies || [];
