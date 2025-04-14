@@ -1,15 +1,19 @@
 import { client } from "../client.ts";
+import { llmPrompt } from "../index.ts";
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { recipeGuidePrompt } from "./recipe-guide.ts";
 
-const SYSTEM_PROMPT = `
+const SYSTEM_PROMPT = hydratePrompt(
+  llmPrompt(
+    "0.0.1",
+    `
 You are a code debugging and fixing assistant. Your task is to analyze buggy code that has caused errors and crashes, and then generate fixed code based on the original specifications. The code runs inside an iframe, and errors bubble up from there.
 
 IMPORTANT: The code provided is ONLY THE USER CODE PORTION of a larger template. You must ONLY return the user code portion, NOT a complete HTML page or iframe template. Your fixed code should be a direct replacement for just the user code region.
 
 The code running inside the iframe is a "recipe", which must follow the following guide:
 
-${recipeGuidePrompt}
+{{RECIPE_GUIDE}}
 
 ----
 
@@ -58,7 +62,12 @@ CRITICAL:
 - ONLY include the JavaScript code that defines onLoad, onReady, and title functions.
 - Your response will be injected into an existing template structure.
 
-Remember to consider the context of the code running inside an iframe and ensure your solution is compatible with this environment. Your goal is to provide a working solution that resolves the error while maintaining the intended functionality described in the SPEC.`;
+Remember to consider the context of the code running inside an iframe and ensure your solution is compatible with this environment. Your goal is to provide a working solution that resolves the error while maintaining the intended functionality described in the SPEC.`,
+  ),
+  {
+    RECIPE_GUIDE: recipeGuidePrompt,
+  },
+);
 
 /**
  * Given a broken charm, an error, and a model, returns a recipe with the fixed code.
@@ -82,21 +91,25 @@ export async function fixRecipePrompt(
     SCHEMA: schema,
     ERROR: error,
   });
-  const prompt =
-    `Please fix the code. Remember to only return the user code portion, not the full template. Do not include any HTML, head, or body tags - just the JavaScript functions.`;
+  const prompt = llmPrompt(
+    "0.0.1",
+    `Please fix the code. Remember to only return the user code portion, not the full template. Do not include any HTML, head, or body tags - just the JavaScript functions.`,
+  );
   const response = await client.sendRequest({
     model,
-    system,
+    system: system.text,
     stream: false,
     messages: [
       {
         role: "user",
-        content: prompt,
+        content: prompt.text,
       },
     ],
     metadata: {
       context: "workflow",
       workflow: "recipe-fix",
+      systemPrompt: system,
+      userPrompt: prompt,
     },
   });
 

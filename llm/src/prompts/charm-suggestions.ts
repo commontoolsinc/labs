@@ -2,8 +2,11 @@ import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { client } from "../client.ts";
 import JSON5 from "json5";
 import { describeCharm } from "./charm-describe.ts";
+import { llmPrompt } from "../index.ts";
 
-const SYSTEM_PROMPT = `
+const SYSTEM_PROMPT = llmPrompt(
+  "0.0.1",
+  `
 You are tasked with generating prompt suggestions to iterate on web app functionality in new and interesting directions.
 
 You will be provided with three inputs: a SPEC (text description of the functionality), CODE (React app implementation), and SCHEMA (JSON schema). Your goal is to analyze these inputs and generate potential prompt suggestions for incremental updates and tweaks to the web app.
@@ -62,7 +65,8 @@ Your final output should be wrapped in <output> tags as follows:
 </output>
 
 Remember to be creative and think outside the box while still maintaining relevance to the original web app functionality.
-`;
+`,
+);
 
 export interface CharmSuggestion {
   prompt: string;
@@ -98,20 +102,22 @@ export async function generateCharmSuggestions(
     SCHEMA: schema,
   });
 
-  const prompt = `Give me ${count} charm suggestions`;
+  const prompt = llmPrompt("0.0.1", `Give me ${count} charm suggestions`);
 
   const response = await client.sendRequest({
     model,
-    system,
+    system: system.text,
     stream: false,
     messages: [
       {
         role: "user",
-        content: prompt,
+        content: prompt.text,
       },
     ],
     metadata: {
       context: "charm-suggestions",
+      systemPrompt: system,
+      userPrompt: prompt,
     },
   });
 

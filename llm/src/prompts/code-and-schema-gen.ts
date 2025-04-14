@@ -4,11 +4,15 @@ import type { JSONSchema, JSONSchemaWritable } from "@commontools/builder";
 import { WorkflowForm } from "@commontools/charm";
 import { systemMdConcise } from "../../../charm/src/iframe/static.ts";
 import { formatForm } from "./spec-and-schema-gen.ts";
+import { llmPrompt } from "../index.ts";
 
 // This is for the 'imagine-single-phase' workflow
 
 // Prompt for generating schema and specification from a goal
-export const SCHEMA_AND_CODE_FROM_GOAL_PROMPT = `
+export const SCHEMA_AND_CODE_FROM_GOAL_PROMPT = hydratePrompt(
+  llmPrompt(
+    "0.0.1",
+    `
 You are creating a simple minimal viable product (MVP) based on a user's goal. Focus on the simplest implementation that works.
 
 Given a user's feature request, you will:
@@ -79,17 +83,25 @@ SCHEMA GUIDELINES:
 }
 \`\`\`
 
-${systemMdConcise}
+{{SYSTEM_MD_CONCISE}}
 
 IMPORTANT:
 - Focus on the simplest working version
 - Aim for fewer fields rather than more
 - But still capture all the important state the user is creating
 - Remember, the user can always iterate and improve the solution later
-`;
+`,
+  ),
+  {
+    SYSTEM_MD_CONCISE: systemMdConcise,
+  },
+);
 
 // Prompt for generating specification from a goal and existing schema
-export const CODE_FROM_SCHEMA_PROMPT = `
+export const CODE_FROM_SCHEMA_PROMPT = hydratePrompt(
+  llmPrompt(
+    "0.0.1",
+    `
 You are creating a simple MVP based on the user's goal, using an existing data schema. Focus on the simplest implementation that works with the provided schema.
 
 Given a user's feature request and an existing data schema, you will:
@@ -155,7 +167,7 @@ SCHEMA GUIDELINES:
   "required": ["title", "content"]
 }
 
-${systemMdConcise}
+{{SYSTEM_MD_CONCISE}}
 
 GUIDELINES:
 - Aim for the simplest possible solution that works with the existing schema
@@ -170,7 +182,12 @@ IMPORTANT:
 - The user can always iterate and improve the solution later
 
 Return ONLY the requested XML tags, no other commentary.
-`;
+`,
+  ),
+  {
+    SYSTEM_MD_CONCISE: systemMdConcise,
+  },
+);
 
 /**
  * Generates a schema and code from a goal.
@@ -198,37 +215,48 @@ export async function generateCodeAndSchema(
   if (existingSchema && Object.keys(existingSchema).length > 0) {
     // When we have an existing schema, focus on generating specification
     systemPrompt = CODE_FROM_SCHEMA_PROMPT;
-    userContent = `
-${formatForm(form)}
+    userContent = hydratePrompt(
+      llmPrompt(
+        "0.0.1",
+        `
+{{FORM}}
 
 Existing Schema:
 \`\`\`json
-${JSON.stringify(existingSchema, null, 2)}
+{{EXISTING_SCHEMA}}
 \`\`\`
 
 Based on this goal and the existing schema, please provide a title, description, any additional schema and the source code.
-`;
+`,
+      ),
+      {
+        FORM: formatForm(form),
+        EXISTING_SCHEMA: JSON.stringify(existingSchema, null, 2),
+      },
+    );
   } else {
     // When generating from scratch, use the full schema generation prompt
     systemPrompt = SCHEMA_AND_CODE_FROM_GOAL_PROMPT;
-    userContent = formatForm(form);
+    userContent = llmPrompt("0.0.1", formatForm(form));
   }
 
   // Send the request to the LLM using the specified model or default
   const response = await client.sendRequest({
     model: model,
-    system: systemPrompt,
+    system: systemPrompt.text,
     stream: false,
     messages: [
       {
         role: "user",
-        content: userContent,
+        content: userContent.text,
       },
     ],
     metadata: {
       context: "workflow",
       workflow: "code-and-schema-gen",
-      generationId: form.meta.generationId
+      generationId: form.meta.generationId,
+      systemPrompt,
+      userPrompt: userContent,
     },
   });
 
