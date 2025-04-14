@@ -208,17 +208,19 @@ export const submitFeedback: AppRouteHandler<FeedbackRoute> = async (c) => {
       ],
     };
 
+    const phoenixAnnotationPayload = {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": `Bearer ${env.CTTS_AI_LLM_PHOENIX_API_KEY}`,
+      },
+      body: JSON.stringify(phoenixPayload),
+    };
+
     const response = await fetch(
       `${env.CTTS_AI_LLM_PHOENIX_API_URL}/span_annotations?sync=false`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "api_key": env.CTTS_AI_LLM_PHOENIX_API_KEY,
-        },
-        body: JSON.stringify(phoenixPayload),
-      },
+      phoenixAnnotationPayload,
     );
 
     if (!response.ok) {
