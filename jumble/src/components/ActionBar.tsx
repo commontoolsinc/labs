@@ -39,7 +39,7 @@ export function ActionBar() {
             <NavLink
               key={action.id}
               to={action.to}
-              className={actionButtonStyles}
+              className={`${actionButtonStyles} ${action.className || ""}`}
               style={actionButtonInlineStyles}
             >
               <ActionButton label={action.label}>
@@ -52,7 +52,7 @@ export function ActionBar() {
         return (
           <animated.button
             key={action.id}
-            className={actionButtonStyles}
+            className={`${actionButtonStyles} ${action.className || ""}`}
             style={actionButtonInlineStyles}
             onClick={action.onClick}
           >
