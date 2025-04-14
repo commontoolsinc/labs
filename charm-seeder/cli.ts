@@ -221,20 +221,19 @@ async function processCommand(
 
 function addErrorListeners() {
   page.evaluate(() => {
-    // @ts-ignore: typescript doesn't realize this is the browser context
-    window["charmRuntimeErrors"] = [];
-    // @ts-ignore: typescript doesn't realize this is the browser context
-    window["addEventListener"]("common-iframe-error", (e) => {
-      // @ts-ignore: typescript doesn't realize this is the browser context
-      window["charmRuntimeErrors"].push(e.detail.description);
+    // @ts-ignore: this code is stringified and sent to browser context
+    globalThis.charmRuntimeErrors = [];
+    globalThis.addEventListener("common-iframe-error", (e) => {
+      // @ts-ignore: this code is stringified and sent to browser context
+      globalThis.charmRuntimeErrors.push(e.detail.description);
     });
   });
 }
 
 async function checkForErrors() {
   return await page.evaluate(() => {
-    // @ts-ignore: I don't know what happens if we use typescript here
-    return window["charmRuntimeErrors"];
+    // @ts-ignore: this code is stringified and sent to browser context
+    return globalThis.charmRuntimeErrors;
   });
 }
 
