@@ -1,5 +1,5 @@
-import React, { useRef } from "react";
-import { render } from "@commontools/html";
+import React, { useMemo, useRef } from "react";
+import { render, type VNode } from "@commontools/html";
 import { UI } from "@commontools/builder";
 import { charmSchema, fixItCharm } from "@commontools/charm";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
@@ -7,7 +7,8 @@ import { useNavigate } from "react-router-dom";
 import { LuX } from "react-icons/lu";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import { createPath } from "@/routes.ts";
-import { charmId } from "@/utils/charms.ts";
+import { Cell, Charm, charmId } from "@/utils/charms.ts";
+
 interface CharmLoaderProps {
   charmImport: () => Promise<any>;
   argument?: any;
@@ -16,7 +17,7 @@ interface CharmLoaderProps {
 }
 
 interface CharmRendererProps {
-  charm: any;
+  charm: Cell<Charm>;
   argument?: any;
   className?: string;
 }
@@ -81,10 +82,11 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
   const [runtimeError, setRuntimeError] = React.useState<Error | null>(null);
   const [isFixing, setIsFixing] = React.useState(false);
   const { charmManager, currentReplica } = useCharmManager();
+  const id = useMemo(() => charmId(charm), [charm]);
   const navigate = useNavigate();
 
   // Store a reference to the current charm to detect changes
-  const prevCharmRef = useRef(charm);
+  const prevCharmRef = useRef<Charm | null>(null);
 
   // Clear error when charm changes
   React.useEffect(() => {
@@ -92,7 +94,7 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
       setRuntimeError(null);
       prevCharmRef.current = charm;
     }
-  }, [charm]);
+  }, [id]);
 
   const handleFixIt = React.useCallback(async () => {
     if (!runtimeError || isFixing) return;
@@ -111,7 +113,7 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
     } finally {
       setIsFixing(false);
     }
-  }, [runtimeError, isFixing, charmManager, charm, currentReplica, navigate]);
+  }, [runtimeError, isFixing, charmManager, id, currentReplica, navigate]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -127,7 +129,10 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
 
     container.addEventListener("common-iframe-error", handleIframeError);
 
-    const cleanup = render(container, charm.asSchema(charmSchema).key(UI));
+    const cleanup = render(
+      container,
+      charm.asSchema(charmSchema).key(UI) as Cell<VNode>,
+    );
 
     return () => {
       cleanup();
@@ -136,7 +141,7 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
         container.innerHTML = "";
       }
     };
-  }, [charm]);
+  }, [id]);
 
   return (
     <>
