@@ -51,7 +51,7 @@ export function useLiveSpecPreview(
   const [loading, setLoading] = useState(false); // Combined loading state for compatibility
 
   // Track the current generation process to cancel outdated requests
-  const currentGenerationRef = useRef<number>(0);
+  const currentGenerationRef = useRef<string>("0");
 
   // Track the text input that generated the current displayed results
   const [lastSuccessfulText, setLastSuccessfulText] = useState<string>("");
@@ -77,7 +77,7 @@ export function useLiveSpecPreview(
       );
 
       // Create a unique ID for this generation process
-      const generationId = Date.now();
+      const generationId = Date.now() + "";
       currentGenerationRef.current = generationId;
       console.groupCollapsed("generatePreview[" + generationId + "]");
 
