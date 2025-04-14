@@ -4,10 +4,6 @@ import { FeedbackDialog } from "@/components/FeedbackDialog.tsx";
 import { submitFeedback } from "@/services/feedback.ts";
 import { MdSend, MdThumbDownOffAlt, MdThumbUpOffAlt } from "react-icons/md";
 
-// FIXME(jake): This is for demo purposes... ideally we could just get the llm
-// span from the persisted blobby blob of the charm recipe, but none of that is hooked up yet.
-// const CURRENT_SPAN_ID = "48fc49c695cdc4f3";
-
 const getCurrentSpanID = (): string => {
   const traceSpanID = localStorage.getItem("traceSpanID");
   if (!traceSpanID) {
