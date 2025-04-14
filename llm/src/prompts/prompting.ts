@@ -1,7 +1,6 @@
 export type LlmPrompt = {
   version: string;
   text: string;
-  dependencies?: Record<string, LlmPrompt | string>;
 };
 
 async function sha256(source: string) {
@@ -11,8 +10,8 @@ async function sha256(source: string) {
   return resultBytes.map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
-export function llmPrompt(id: string, text: string): LlmPrompt {
-  const hash = sha256(text);
+export async function llmPrompt(id: string, text: string): Promise<LlmPrompt> {
+  const hash = await sha256(text);
 
   return { version: `${id}@${hash}`, text };
 }
@@ -34,14 +33,19 @@ export function hydratePrompt(
       : context[key]?.text || match;
   });
 
-  const dependencies = prompt.dependencies || {};
+  const dependencies: string[] = [prompt.version];
   // Add all context values used in the prompt as dependencies
   for (const key in context) {
     const value = context[key];
-    dependencies[key] = value;
+    if (typeof value != "string") {
+      dependencies.push(value.version);
+    }
   }
 
-  return { version: prompt.version, text, dependencies };
+  return {
+    version: dependencies.join("+"),
+    text,
+  };
 }
 
 /**

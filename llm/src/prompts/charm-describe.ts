@@ -2,8 +2,8 @@ import { client } from "../client.ts";
 import { llmPrompt } from "../index.ts";
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 
-const SYSTEM_PROMPT = llmPrompt(
-  "0.0.1",
+const SYSTEM_PROMPT = await llmPrompt(
+  "charm-describe-system",
   `
 You are tasked with generating a concise, one-sentence description of a web application based on its specification, code, and schema. Your goal is to capture the essence of what the app does in a clear and informative manner.
 
@@ -56,8 +56,8 @@ export async function describeCharm(
     CODE: code,
     SCHEMA: schema,
   });
-  const prompt = llmPrompt(
-    "0.0.1",
+  const prompt = await llmPrompt(
+    "charm-describe-user",
     `Describe the functionality of this app in a single sentence`,
   );
   const response = await client.sendRequest({
@@ -72,8 +72,8 @@ export async function describeCharm(
     ],
     metadata: {
       context: "charm-describe",
-      systemPrompt: system,
-      userPrompt: prompt,
+      systemPrompt: system.version,
+      userPrompt: prompt.version,
     },
   });
 

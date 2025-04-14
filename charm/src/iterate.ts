@@ -29,7 +29,7 @@ export const genSrc = async ({
   schema,
   steps,
   model,
-  generationId
+  generationId,
 }: {
   src?: string;
   spec?: string;
@@ -44,6 +44,7 @@ export const genSrc = async ({
   let response = await llm.sendRequest({
     ...request,
     metadata: {
+      ...request.metadata,
       context: "workflow",
       workflow: "genSrc",
       generationId,
@@ -88,7 +89,7 @@ export async function iterate(
     schema: iframe.argumentSchema,
     steps: plan?.steps,
     model,
-    generationId
+    generationId,
   });
 
   return generateNewRecipeVersion(charmManager, charm, newIFrameSrc, newSpec);
@@ -337,7 +338,7 @@ async function twoPhaseCodeGeneration(
     newSpec,
     schema,
     steps: form.plan?.steps,
-    generationId: form.meta.generationId
+    generationId: form.meta.generationId,
   });
   const name = extractTitle(newIFrameSrc, title); // Use the generated title as fallback
   const newRecipeSrc = buildFullRecipe({

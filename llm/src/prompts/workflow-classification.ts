@@ -7,8 +7,8 @@ import { llmPrompt } from "../index.ts";
 /**
  * Basic prompt for classifying user intent into a workflow type
  */
-export const WORKFLOW_CLASSIFICATION_PROMPT = llmPrompt(
-  "0.0.1",
+export const WORKFLOW_CLASSIFICATION_PROMPT = await llmPrompt(
+  "workflow-classification",
   `
 You are analyzing a user's request to determine the most appropriate workflow for code generation.
 Based on the user's request, classify it into one of the following workflows:
@@ -42,8 +42,8 @@ Please analyze this request and respond in the following format:
 /**
  * Prompt for generating an execution plan with comprehensive specification
  */
-export const PLAN_GENERATION_PROMPT = llmPrompt(
-  "0.0.1",
+export const PLAN_GENERATION_PROMPT = await llmPrompt(
+  "plan-generation",
   `
 You are creating a brief execution plan and specification for a tool to fulfill a user's intent.
 The user's request has been classified as a {{ WORKFLOW_TYPE }} operation.
@@ -174,8 +174,8 @@ export async function classifyWorkflow(
     CONTEXT: context,
   });
 
-  const systemPrompt = llmPrompt(
-    "0.0.1",
+  const systemPrompt = await llmPrompt(
+    "classify-system",
     "You are a helpful AI assistant tasked with classifying user intents for code generation",
   );
 
@@ -187,8 +187,8 @@ export async function classifyWorkflow(
       context: "workflow",
       workflow: "classification",
       generationId,
-      systemPrompt,
-      userPrompt: prompt,
+      systemPrompt: systemPrompt.version,
+      userPrompt: prompt.version,
     },
   });
 
@@ -299,8 +299,8 @@ export async function generateWorkflowPlan(
     CONTEXT: context,
   });
 
-  const systemPrompt = llmPrompt(
-    "0.0.1",
+  const systemPrompt = await llmPrompt(
+    "plan-generation-system",
     "You are a helpful AI assistant tasked with planning code generation workflows",
   );
 
@@ -312,8 +312,8 @@ export async function generateWorkflowPlan(
       context: "workflow",
       workflow: workflowType.toLowerCase(),
       generationId,
-      systemPrompt,
-      userPrompt: prompt,
+      systemPrompt: systemPrompt.version,
+      userPrompt: prompt.version,
     },
   });
 

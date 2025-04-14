@@ -535,8 +535,8 @@ const security = () =>
 `;
 
 // Update the system message to reflect the new interface
-export const systemMd = llmPrompt(
-  "0.0.1",
+export const systemMd = await llmPrompt(
+  "iframe-react-system",
   `# React Component Builder
 
 Create an interactive React component that fulfills the user's request. Focus on delivering a clean, useful implementation with appropriate features.
@@ -921,8 +921,8 @@ function onReady(mount, sourceData, libs) {
 );
 
 // Update the system message to reflect the new interface
-export const systemMdConcise = llmPrompt(
-  "0.0.1",
+export const systemMdConcise = await llmPrompt(
+  "iframe-react-system-concise",
   `# Source Code Generation
 
 Create an interactive React component that fulfills the user's request. Focus on delivering a clean, useful implementation with appropriate features:
