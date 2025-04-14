@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import { Action, useActionManager } from "@/contexts/ActionManagerContext.tsx";
 import { FeedbackDialog } from "@/components/FeedbackDialog.tsx";
 import { submitFeedback } from "@/services/feedback.ts";
-import { MdSend, MdThumbDownOffAlt, MdThumbUpOffAlt } from "react-icons/md";
+import { MdThumbDownOffAlt, MdThumbUpOffAlt } from "react-icons/md";
 
 const getCurrentSpanID = (): string => {
   const traceSpanID = localStorage.getItem("traceSpanID");
@@ -18,13 +17,20 @@ export function FeedbackActions() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [initialScore, setInitialScore] = useState<number>(1);
   const [showFeedbackButtons, setShowFeedbackButtons] = useState(false);
-  const { registerAction } = useActionManager();
+
+  // Listen for toggle-feedback event
+  useEffect(() => {
+    const handleToggleFeedback = () => {
+      setShowFeedbackButtons((prev) => !prev);
+    };
+
+    globalThis.addEventListener("toggle-feedback", handleToggleFeedback);
+    return () => {
+      globalThis.removeEventListener("toggle-feedback", handleToggleFeedback);
+    };
+  }, []);
 
   // Handler functions for feedback actions
-  const toggleFeedbackButtons = () => {
-    setShowFeedbackButtons((prev) => !prev);
-  };
-
   const handleOpenFeedback = (score: number) => {
     console.log(
       `Opening ${score === 1 ? "positive" : "negative"} feedback dialog`,
@@ -66,32 +72,6 @@ export function FeedbackActions() {
       setIsSubmitting(false);
     }
   };
-
-  // Register all actions
-  useEffect(() => {
-    // Create actions array for batch registration
-    const actions: Action[] = [];
-
-    // Register the main feedback toggle button
-    const toggleAction: Action = {
-      id: "feedback-toggle",
-      label: "Feedback",
-      icon: <MdSend size={24} />,
-      onClick: toggleFeedbackButtons,
-      priority: 30,
-      className: showFeedbackButtons ? "bg-blue-100" : "",
-    };
-
-    actions.push(toggleAction);
-
-    // Register all actions and collect unregister functions
-    const unregisterFunctions = actions.map((action) => registerAction(action));
-
-    // Return combined cleanup function
-    return () => {
-      unregisterFunctions.forEach((unregister) => unregister());
-    };
-  }, [showFeedbackButtons, registerAction]);
 
   // Render feedback dialog and the popup buttons
   return (
