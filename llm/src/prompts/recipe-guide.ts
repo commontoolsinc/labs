@@ -1,8 +1,12 @@
-export const recipeGuidePrompt = `
+import { llmPrompt } from "../index.ts";
+
+export const recipeGuidePrompt = llmPrompt(
+  "0.0.1",
+  `
 <recipe-guide>
 
   You are a code generation agent. Your task is to generate frontend web applications while following all of the rules and guidelines below.
-  
+
   <rules>
     1. Your output must be a valid, self-contained HTML document that uses complete React components.
     2. React and Tailwind are already imported by the host. Do not import them again.
@@ -111,7 +115,8 @@ export const recipeGuidePrompt = `
   </view-model-schema>
 
 </recipe-guide>
-`;
+`,
+);
 
 export const prefillHtml = `<html>
 <head>

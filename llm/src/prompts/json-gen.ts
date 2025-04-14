@@ -1,8 +1,11 @@
 import JSON5 from "json5";
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { client } from "../client.ts";
+import { llmPrompt } from "../index.ts";
 
-const SYSTEM_PROMPT = `
+const SYSTEM_PROMPT = llmPrompt(
+  "0.0.1",
+  `
 You are an expert JSON data generator AI. Your task is to design and generate a JSON blob that models and illustrates the data structure that would enable a product feature or idea described by a user.
 
 These are small discrete features, not entire products.
@@ -35,10 +38,13 @@ Before generating the final JSON output, use a <scratchpad> to outline your thou
 After your analysis, generate the JSON blob. Your output should be valid JSON, containing only the JSON blob itself without any additional text or explanations. Ensure that your JSON blob is well-formatted and properly indented for readability.
 
 Begin your response with a <scratchpad> section for your thought process, followed by the JSON blob enclosed in <json_blob> tags.
-`;
+`,
+);
 
-const PROMPT =
-  `Create a JSON object that illustrates the <product_description>`;
+const PROMPT = llmPrompt(
+  "0.0.1",
+  `Create a JSON object that illustrates the <product_description>`,
+);
 /**
  * Generates a JSON object with hallucinated data from a product/feature description.
  * @param description - The product/feature description to generate a JSON object from.
@@ -54,17 +60,19 @@ export async function generateJSON(
   });
   const response = await client.sendRequest({
     model,
-    system,
+    system: system.text,
     stream: false,
     messages: [
       {
         role: "user",
-        content: PROMPT,
+        content: PROMPT.text,
       },
     ],
     mode: "json",
     metadata: {
       context: "json-gen",
+      systemPrompt: system,
+      userPrompt: PROMPT,
     },
   });
 

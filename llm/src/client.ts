@@ -1,3 +1,5 @@
+import { LlmPrompt } from "./prompts/prompting.ts";
+
 export type SimpleMessage = {
   role: "user" | "assistant";
   content: SimpleContent;
@@ -28,7 +30,7 @@ export type LLMRequest = {
   stream?: boolean;
   stop?: string;
   mode?: "json";
-  metadata?: Record<string, string | undefined>;
+  metadata?: Record<string, string | undefined | LlmPrompt>;
 };
 
 export class LLMClient {

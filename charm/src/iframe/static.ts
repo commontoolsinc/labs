@@ -1,4 +1,5 @@
 import { CSP } from "@commontools/iframe-sandbox";
+import { llmPrompt } from "../../../llm/src/prompts/prompting.ts";
 
 const libraries = {
   "imports": {
@@ -534,7 +535,9 @@ const security = () =>
 `;
 
 // Update the system message to reflect the new interface
-export const systemMd = `# React Component Builder
+export const systemMd = llmPrompt(
+  "0.0.1",
+  `# React Component Builder
 
 Create an interactive React component that fulfills the user's request. Focus on delivering a clean, useful implementation with appropriate features.
 
@@ -586,7 +589,7 @@ Create an interactive React component that fulfills the user's request. Focus on
 ${security()}
 
 <view-model-schema>
-SCHEMA
+{{SCHEMA}}
 </view-model-schema>
 
 <guide>
@@ -914,10 +917,13 @@ function onReady(mount, sourceData, libs) {
 }
 \`\`\`
 </guide>
-`;
+`,
+);
 
 // Update the system message to reflect the new interface
-export const systemMdConcise = `# Source Code Generation
+export const systemMdConcise = llmPrompt(
+  "0.0.1",
+  `# Source Code Generation
 
 Create an interactive React component that fulfills the user's request. Focus on delivering a clean, useful implementation with appropriate features:
   - Implement the UI exactly according to the specification
@@ -1231,4 +1237,5 @@ function onReady(mount, sourceData, libs) {
 }
 \`\`\`
 </guide>
-`;
+`,
+);

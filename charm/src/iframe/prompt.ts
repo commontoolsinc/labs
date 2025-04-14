@@ -1,5 +1,5 @@
 import { JSONSchema } from "@commontools/builder";
-import { type LLMRequest } from "@commontools/llm";
+import { hydratePrompt, type LLMRequest } from "@commontools/llm";
 
 import { extractUserCode, systemMd } from "./static.ts";
 
@@ -62,12 +62,17 @@ ${steps.map((step, index) => `${index + 1}. ${step}`).join("\n")}`
 
   messages.push(RESPONSE_PREFILL);
 
-  const system = systemMd.replace("SCHEMA", JSON.stringify(schema, null, 2));
+  const system = hydratePrompt(systemMd, {
+    SCHEMA: JSON.stringify(schema, null, 2),
+  });
 
   return {
     model: model || SELECTED_MODEL,
-    system,
+    system: system.text,
     messages,
     stop: "\n```",
+    metadata: {
+      systemPrompt: system,
+    },
   };
 };
