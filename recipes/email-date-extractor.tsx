@@ -488,7 +488,7 @@ export default recipe(
                 <label>Context length</label>
                 <common-input
                   type="number"
-                  value={settings.contextLength.toString()}
+                  value={settings.contextLength}
                   oncommon-input={contextLengthHandler}
                 />
               </div>
@@ -500,7 +500,7 @@ export default recipe(
                   step="0.1"
                   min="0"
                   max="1"
-                  value={settings.minConfidence.toString()}
+                  value={settings.minConfidence}
                   oncommon-input={minConfidenceHandler}
                 />
               </div>
@@ -533,10 +533,14 @@ export default recipe(
                       null,
                     )}
                     <td>{date.context}</td>
-                    <td>{(date.confidence * 100).toFixed(0)}%</td>
                     <td>
-                      {emailsWithDates.find((e) => e.dates.includes(date))
-                        ?.email.subject || ""}
+                      {derive(date, (d) => (d.confidence * 100).toFixed(0))}%
+                    </td>
+                    <td>
+                      {derive(emailsWithDates, (items) =>
+                        items.find((e) => e.dates.includes(date))?.email
+                          .subject ||
+                        "")}
                     </td>
                   </tr>
                 ))}
@@ -546,8 +550,10 @@ export default recipe(
 
           <div>
             <h3>Dates by Email</h3>
-            {emailsWithDates
-              .filter((item) => item.dates && item.dates.length > 0)
+            {derive(emailsWithDates, (items) =>
+              items.filter((item) =>
+                item.dates && item.dates.length > 0
+              ))
               .map((item) => (
                 <div>
                   <h4>{item.email.subject}</h4>
@@ -578,7 +584,12 @@ export default recipe(
                             null,
                           )}
                           <td>{date.context}</td>
-                          <td>{(date.confidence * 100).toFixed(0)}%</td>
+                          <td>
+                            {derive(
+                              date,
+                              (d) => (d.confidence * 100).toFixed(0),
+                            )}%
+                          </td>
                         </tr>
                       ))}
                     </tbody>
