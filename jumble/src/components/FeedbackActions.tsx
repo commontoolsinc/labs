@@ -4,7 +4,8 @@ import { FeedbackDialog } from "@/components/FeedbackDialog.tsx";
 import { submitFeedback } from "@/services/feedback.ts";
 import { MdSend, MdThumbDownOffAlt, MdThumbUpOffAlt } from "react-icons/md";
 
-// For demo purposes - in a real app, this would come from the current response or context
+// FIXME(jake): This is for demo purposes... ideally we could just get the llm
+// span from the persisted blobby blob of the charm recipe, but none of that is hooked up yet.
 const CURRENT_SPAN_ID = "48fc49c695cdc4f3";
 
 export function FeedbackActions() {
@@ -26,7 +27,6 @@ export function FeedbackActions() {
     );
     setInitialScore(score);
     setIsFeedbackDialogOpen(true);
-    // Hide the feedback buttons when opening the modal
     setShowFeedbackButtons(false);
   };
 
@@ -104,12 +104,13 @@ export function FeedbackActions() {
       {/* Popup buttons that appear when feedback button is clicked */}
       {showFeedbackButtons && (
         <div className="fixed z-[100] bottom-2 right-2 flex flex-col-reverse gap-2 pointer-events-none">
-          {/* This spacer accounts for the main button height */}
-          <div className="h-16"></div>
+          {/* This spacer places the thumbs buttons just above the feedback button */}
+          <div className="h-12"></div>
 
           {/* Thumbs down button */}
           <div className="pointer-events-auto">
             <button
+              type="button"
               className="w-12 h-12 cursor-pointer flex items-center justify-center border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] bg-red-50 hover:translate-y-[-2px] relative group"
               onClick={() => handleOpenFeedback(0)}
             >
@@ -123,6 +124,7 @@ export function FeedbackActions() {
           {/* Thumbs up button */}
           <div className="pointer-events-auto">
             <button
+              type="button"
               className="w-12 h-12 cursor-pointer flex items-center justify-center border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] bg-green-50 hover:translate-y-[-2px] relative group"
               onClick={() => handleOpenFeedback(1)}
             >
