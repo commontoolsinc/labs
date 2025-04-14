@@ -111,8 +111,7 @@ export async function generateCharmSuggestions(
       },
     ],
     metadata: {
-      context: "workflow",
-      workflow: "charm-suggestions",
+      context: "charm-suggestions",
     },
   });
 

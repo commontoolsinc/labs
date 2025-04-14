@@ -240,6 +240,7 @@ Based on this goal and the existing schema, please provide a title, description,
     metadata: {
       context: "workflow",
       workflow: "spec-and-schema-gen",
+      generationId: form.meta.generationId,
     },
   });
 
@@ -345,6 +346,7 @@ Based on this goal and the existing schema, please provide a title, description 
     metadata: {
       context: "workflow",
       workflow: "spec-and-schema-gen",
+      generationId: form.meta.generationId,
     },
   });
 
