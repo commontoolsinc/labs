@@ -226,7 +226,7 @@ export const submitFeedback: AppRouteHandler<FeedbackRoute> = async (c) => {
       throw new Error(`Phoenix API error: ${response.status} ${errorText}`);
     }
 
-    return c.json({ success: true });
+    return c.json({ success: true }, HttpStatusCodes.OK);
   } catch (error) {
     console.error("Error submitting feedback:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
