@@ -1044,9 +1044,6 @@ const CodeTab = () => {
               theme="light"
               extensions={[markdown(), EditorView.lineWrapping]}
               onChange={setWorkingSpec}
-              basicSetup={{
-                wordWrap: true,
-              }}
               style={{ height: "100%", overflow: "auto" }}
               readOnly={loading}
             />

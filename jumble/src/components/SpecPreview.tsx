@@ -7,8 +7,11 @@ import type {
   WorkflowForm,
   WorkflowType,
 } from "@commontools/charm";
-import { JSONSchema } from "@commontools/builder";
+import JsonView from "@uiw/react-json-view";
 import { WORKFLOWS } from "../../../charm/src/workflow.ts";
+import CodeMirror from "@uiw/react-codemirror";
+import { javascript } from "@codemirror/lang-javascript";
+import { EditorView } from "@codemirror/view";
 
 interface SpecPreviewProps {
   form: Partial<WorkflowForm>;
@@ -72,7 +75,7 @@ function Accordion(
   return (
     <div className="border border-gray-200 rounded-md mb-1 overflow-hidden">
       <button
-        className="w-full px-1.5 py-0.5 bg-gray-50 text-left flex items-center justify-between text-[10px] font-medium"
+        className="w-full px-1.5 py-0.5 bg-gray-50 text-left flex items-center justify-between text-xs font-medium"
         onClick={() => setIsOpen(!isOpen)}
         type="button"
         aria-expanded={isOpen}
@@ -125,10 +128,10 @@ export function SpecPreview({
   // Calculate different heights for different states (more compact)
   const loaderHeight = 60; // Height for just the loader (smaller cube + padding)
   const maxContentHeight = floating
-    ? 280
+    ? 360
     : typeof window !== "undefined"
-    ? Math.min(260, globalThis.innerHeight * 0.45)
-    : 280;
+    ? Math.min(360, globalThis.innerHeight * 0.5)
+    : 360;
 
   // Directly set the height style without animation
   const containerHeight = React.useMemo(() => {
@@ -208,6 +211,23 @@ export function SpecPreview({
     ? "preview-container border border-2 fixed z-50 bg-gray-200"
     : "preview-container border-t-2 border-black pt-2 bg-gray-200 ";
 
+  // Detect mobile viewport with responsive handling
+  const [isMobile, setIsMobile] = useState(
+    typeof globalThis !== "undefined" && globalThis.innerWidth <= 768,
+  );
+
+  // Update mobile state on window resize
+  React.useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(globalThis.innerWidth <= 768);
+    };
+
+    if (typeof globalThis !== "undefined") {
+      globalThis.addEventListener("resize", handleResize);
+      return () => globalThis.removeEventListener("resize", handleResize);
+    }
+  }, []);
+
   // Format the confidence as a percentage
   const confidencePercentage = Math.round(
     (form.classification?.confidence ?? 0) * 100,
@@ -228,12 +248,15 @@ export function SpecPreview({
         ...containerSpring,
         ...(floating
           ? {
-            width: "calc(100% - 2rem)",
-            left: "1rem",
+            width: isMobile ? "100vw" : "calc(100% + 2rem)",
+            left: isMobile ? "50%" : "-1rem",
+            transform: isMobile ? "translateX(-50%)" : undefined,
+            maxWidth: isMobile ? "100vw" : undefined,
             bottom: "calc(100% + 0.5rem)",
             overflowY: "auto",
           }
           : {
+            maxWidth: isMobile ? "100%" : undefined,
             overflowY: "auto",
           }),
         // Use visibility to completely hide when not visible
@@ -288,29 +311,63 @@ export function SpecPreview({
                             animate
                             cameraZoom={12}
                           />
-                          <span className="ml-2 text-xs">
+                          <span className="ml-2 text-sm">
                             Classifying workflow...
                           </span>
                         </div>
                       )
                       : (
                         <>
-                          <div className="flex flex-col gap-1">
-                            <div className="flex items-center w-full mb-0.5">
-                              <ToggleButton
-                                options={Object.values(WORKFLOWS).map((
-                                  workflow,
-                                ) => ({
-                                  value: workflow.name,
-                                  label: workflow.label,
-                                }))}
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="flex items-center">
+                              <select
+                                className="text-sm py-0.5 px-1 border border-gray-300 rounded bg-white"
                                 value={form.classification?.workflowType}
-                                onChange={(value) =>
-                                  onWorkflowChange?.(value as WorkflowType)}
-                                size="small"
-                                className="w-full"
-                              />
+                                onChange={(e) =>
+                                  onWorkflowChange?.(
+                                    e.target.value as WorkflowType,
+                                  )}
+                              >
+                                {Object.values(WORKFLOWS).map((workflow) => (
+                                  <option
+                                    key={workflow.name}
+                                    value={workflow.name}
+                                  >
+                                    {workflow.label}
+                                  </option>
+                                ))}
+                              </select>
+                              {form.classification?.confidence > 0 && (
+                                <span
+                                  className={`text-xs ml-2 ${
+                                    form.classification?.confidence > 0.7
+                                      ? "text-green-700"
+                                      : "text-amber-600"
+                                  }`}
+                                >
+                                  ({confidencePercentage}% confidence)
+                                </span>
+                              )}
                             </div>
+
+                            {/* Add reasoning accordion inline */}
+                            {form.classification?.reasoning && (
+                              <div className="flex-1 ml-2">
+                                <Accordion
+                                  title={
+                                    <span className="text-xs">
+                                      Reasoning
+                                    </span>
+                                  }
+                                  defaultOpen={false}
+                                  badge={null}
+                                >
+                                  <div className="text-xs text-gray-700 leading-tight max-h-12 overflow-y-auto">
+                                    {form.classification?.reasoning}
+                                  </div>
+                                </Accordion>
+                              </div>
+                            )}
                           </div>
 
                           {/* Spec as full-width section */}
@@ -319,13 +376,13 @@ export function SpecPreview({
                             {form.classification?.workflowType !== "fix"
                               ? (
                                 <div className="p-1">
-                                  <div className="text-xs font-bold mb-1">
+                                  <div className="text-sm font-bold mb-1">
                                     SPEC
                                   </div>
                                   {/* Show spec when available, otherwise loading */}
                                   {form.plan?.spec
                                     ? (
-                                      <div className="font-mono text-[10px] whitespace-pre-wrap overflow-y-auto">
+                                      <div className="font-mono text-xs whitespace-pre-wrap overflow-y-auto">
                                         {form.plan?.spec}
                                       </div>
                                     )
@@ -338,7 +395,7 @@ export function SpecPreview({
                                           animate
                                           cameraZoom={12}
                                         />
-                                        <span className="ml-1 text-[10px]">
+                                        <span className="ml-1 text-xs">
                                           Generating...
                                         </span>
                                       </div>
@@ -347,20 +404,20 @@ export function SpecPreview({
                               )
                               : (
                                 <div className="p-1">
-                                  <div className="text-xs font-bold mb-1">
+                                  <div className="text-sm font-bold mb-1">
                                     ORIGINAL SPEC{" "}
-                                    <span className="text-[10px] text-blue-600">
+                                    <span className="text-xs text-blue-600">
                                       (preserved)
                                     </span>
                                   </div>
                                   {form.plan?.spec
                                     ? (
-                                      <div className="font-mono text-[10px] whitespace-pre-wrap overflow-y-auto">
+                                      <div className="font-mono text-xs whitespace-pre-wrap overflow-y-auto">
                                         {form.plan?.spec}
                                       </div>
                                     )
                                     : (
-                                      <div className="text-[10px] text-gray-500 italic">
+                                      <div className="text-xs text-gray-500 italic">
                                         Loading original specification...
                                       </div>
                                     )}
@@ -371,7 +428,7 @@ export function SpecPreview({
                             <div className="grid grid-cols-2 gap-1">
                               {/* Plan Section */}
                               <div className="p-1">
-                                <div className="text-xs font-bold mb-1">
+                                <div className="text-sm font-bold mb-1">
                                   PLAN
                                 </div>
                                 {/* Show loading spinner whenever plan is still loading */}
@@ -385,14 +442,14 @@ export function SpecPreview({
                                         animate
                                         cameraZoom={12}
                                       />
-                                      <span className="ml-1 text-[10px]">
+                                      <span className="ml-1 text-xs">
                                         Generating...
                                       </span>
                                     </div>
                                   )
                                   : form.plan?.steps
                                   ? (
-                                    <div className="font-mono text-[10px] whitespace-pre-wrap">
+                                    <div className="font-mono text-xs whitespace-pre-wrap">
                                       {form.plan?.steps.map((step, index) => (
                                         <div
                                           key={index}
@@ -407,7 +464,7 @@ export function SpecPreview({
                                     </div>
                                   )
                                   : (
-                                    <div className="text-[10px] text-gray-500 italic">
+                                    <div className="text-xs text-gray-500 italic">
                                       Plan will appear here...
                                     </div>
                                   )}
@@ -415,17 +472,28 @@ export function SpecPreview({
 
                               {/* Data Model Section (conditional based on availability) */}
                               <div className="p-1">
-                                <div className="text-xs font-bold mb-1">
+                                <div className="text-sm font-bold mb-1">
                                   DATA MODEL
                                 </div>
                                 {form.plan?.dataModel
                                   ? (
-                                    <pre className="text-[10px] text-gray-700 leading-tight max-h-full overflow-y-auto whitespace-pre-wrap">
-                                    {form.plan.dataModel}
-                                    </pre>
+                                    <CodeMirror
+                                      key="source"
+                                      value={form.plan.dataModel || ""}
+                                      theme="light"
+                                      extensions={[
+                                        javascript(),
+                                        EditorView.lineWrapping,
+                                      ]}
+                                      style={{
+                                        height: "100%",
+                                        overflow: "auto",
+                                      }}
+                                      readOnly
+                                    />
                                   )
                                   : (
-                                    <div className="text-[10px] text-gray-500 italic">
+                                    <div className="text-xs text-gray-500 italic">
                                       Data model will appear here...
                                     </div>
                                   )}
@@ -435,34 +503,7 @@ export function SpecPreview({
                         </>
                       )}
 
-                    {/* Classification Reasoning Accordion */}
-                    {form.classification?.reasoning && (
-                      <Accordion
-                        title={
-                          <div className="text-[10px] inline-flex gap-1">
-                            <span>Reasoning</span>
-
-                            {form.classification?.confidence > 0 && (
-                              <span
-                                className={`text-[10px] ${
-                                  form.classification?.confidence > 0.7
-                                    ? "text-green-700"
-                                    : "text-amber-600"
-                                }`}
-                              >
-                                ({confidencePercentage}% confidence)
-                              </span>
-                            )}
-                          </div>
-                        }
-                        defaultOpen={false}
-                        badge={null}
-                      >
-                        <div className="text-[10px] text-gray-700 leading-tight max-h-16 overflow-y-auto">
-                          {form.classification?.reasoning}
-                        </div>
-                      </Accordion>
-                    )}
+                    {/* Classification Reasoning moved to be inline with dropdown */}
 
                     {/* Data Model is now shown in the two-column layout */}
 
@@ -471,7 +512,7 @@ export function SpecPreview({
                       !classificationLoading && !planLoading &&
                       (
                         <animated.div
-                          className="text-xs text-gray-500 italic py-4 text-center"
+                          className="text-sm text-gray-500 italic py-4 text-center"
                           style={textSpring}
                         >
                           Your preview will appear here as you type...
