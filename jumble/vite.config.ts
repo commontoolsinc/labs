@@ -18,6 +18,7 @@ export default defineConfig({
       "localhost",
       "127.0.0.1",
       "bens-macbook-pro.saga-castor.ts.net",
+      "jake.saga-castor.ts.net",
     ],
     proxy: {
       "/api/integrations": {

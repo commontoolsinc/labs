@@ -24,6 +24,7 @@ export type Action = {
   priority?: number;
   to?: string; // For NavLink actions
   keyCombo?: KeyCombo; // Keyboard shortcut
+  className?: string; // Optional CSS class for styling the button
 };
 
 type ActionManagerContextType = {
