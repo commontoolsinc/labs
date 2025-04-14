@@ -22,7 +22,7 @@ export interface GenerateTextParams {
   stop_token?: string;
   abortSignal?: AbortSignal;
   max_tokens?: number;
-  metadata?: Record<string, string>;
+  metadata?: Record<string, string | object>;
   mode?: "json";
   // Updated callback to receive complete data for caching
   onStreamComplete?: (result: {
