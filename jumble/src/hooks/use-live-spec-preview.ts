@@ -77,7 +77,7 @@ export function useLiveSpecPreview(
       );
 
       // Create a unique ID for this generation process
-      const generationId = Date.now() + "";
+      const generationId = crypto.randomUUID();
       currentGenerationRef.current = generationId;
       console.groupCollapsed("generatePreview[" + generationId + "]");
 
@@ -191,7 +191,7 @@ export function useLiveSpecPreview(
   // Function to manually change the workflow type
   const setWorkflowType = useCallback((type: WorkflowType) => {
     // Create a unique ID for this generation process
-    const generationId = Date.now();
+    const generationId = crypto.randomUUID();
     currentGenerationRef.current = generationId;
 
     // Update the workflow type state immediately
