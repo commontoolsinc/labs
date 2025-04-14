@@ -1,7 +1,7 @@
 export type LlmPrompt = {
   version: string;
   text: string;
-  dependencies?: LlmPrompt[];
+  dependencies?: Record<string, LlmPrompt | string>;
 };
 
 export function llmPrompt(version: string, text: string): LlmPrompt {
@@ -25,11 +25,13 @@ export function hydratePrompt(
       : context[key]?.text || match;
   });
 
-  const dependencies = prompt.dependencies || [];
-  // Add all context items that are LlmPrompts as dependencies
+  const dependencies = prompt.dependencies || {};
+  // Add all context values used in the prompt as dependencies
   for (const key in context) {
-    if (typeof context[key] !== "string" && "version" in context[key]) {
-      dependencies.push(context[key] as LlmPrompt);
+    const value = context[key];
+    // Only include dependencies that were actually used in the prompt
+    if (prompt.text.includes(`{{${key}}}`)) {
+      dependencies[key] = value;
     }
   }
 
