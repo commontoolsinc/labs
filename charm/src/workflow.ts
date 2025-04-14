@@ -18,7 +18,6 @@ import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode } from "./iframe/static.ts";
 import { formatPromptWithMentions } from "./format.ts";
 import { castNewRecipe } from "./iterate.ts";
-import { generateKey } from "node:crypto";
 
 // Types for workflow classification
 export type WorkflowType =
