@@ -10,19 +10,12 @@ a sandboxed iframe to execute arbitrary code.
 ## Goals
 
 To run untrusted code within an iframe, with the ability to communicate with
-host to read, write, and subscribe to values in a key value store.
-
-Code within an iframe **MUST NOT** be able to communicate with any third party.
-
-For example, private data could be added to query parameters in a background
-image or JS module URL.
-
-In the future, there could be verified authors and domains per frame.
+host to read, write, and subscribe to values in a key value store, not allowing
+code to communicate with any external third party.
 
 > [!CAUTION]
-> During experimental development, there are currently hardcoded CDNs that are
-> accessible in the iframe context. Data could be exfiltrated this way to those
-> CDNs.
+> During experimental development, there are intentional gaps in the sandboxing
+> to enable product features where data within the sandbox may be exfiltrated.
 
 ## Usage
 
@@ -70,9 +63,11 @@ frame that propagates to the inner (untrusted) frame across browsers.
 
 ## Incomplete Security Considerations
 
-- Currently, the hardcoded CDNs (and their logging services) **MAY** receive
-  exfiltrated data. We should only allow 1P mediated communications in the
-  future.
+Some of these are shortcomings of implementation, and some are intentional
+product decisisons during experimentation.
+
+- Hardcoded CDNs (and their logging services) are an exfiltration vector.
+- Allowing anchor elements with `target="_blank"` is an exfiltration vector.
 - `document.baseURI` is accessible in an iframe, leaking the parent URL
 - Currently without CFC, data can be written in the iframe containing other
   sensitive data, or newly synthesized fingerprinting via capabilities

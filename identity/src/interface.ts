@@ -108,3 +108,7 @@ export function isInsecureCryptoKeyPair(input: any): input is CryptoKeyPair {
     input.publicKey instanceof Uint8Array
   );
 }
+
+export function isKeyPairRaw(value: any): value is KeyPairRaw {
+  return isCryptoKeyPair(value) || isInsecureCryptoKeyPair(value);
+}

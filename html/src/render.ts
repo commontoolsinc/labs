@@ -207,11 +207,6 @@ const bindProps = (element: HTMLElement, props: Props): Cancel => {
     if (isCell(propValue) || isStream(propValue)) {
       // If prop is an event, we need to add an event listener
       if (isEventProp(propKey)) {
-        if (!isStream(propValue)) {
-          throw new TypeError(
-            `Event prop "${propKey}" does not have a send method`,
-          );
-        }
         const key = cleanEventProp(propKey);
         if (key != null) {
           const cancel = listen(element, key, (event) => {

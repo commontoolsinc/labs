@@ -29,6 +29,8 @@ import * as IDB from "./idb.ts";
 import * as Memory from "@commontools/memory/consumer";
 export * from "@commontools/memory/interface";
 import * as Codec from "@commontools/memory/codec";
+import { Channel, RawCommand } from "./inspector.ts";
+import { isBrowser } from "@commontools/utils/env";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -330,11 +332,7 @@ export class Replica {
      * persisted cache.
      */
     public cache: AsyncStore<Revision<State>, FactAddress> = IDB.available()
-      ? IDB.open({
-        name: "memory",
-        store: space,
-        version: 1,
-      }, {
+      ? IDB.open({ name: space, store: "facts", version: 1 }, {
         key: RevisionAddress,
         address: RevisionAddress,
         value: RevisionCodec,
@@ -721,7 +719,7 @@ export interface RemoteStorageProviderOptions {
   the?: string;
   settings?: RemoteStorageProviderSettings;
 
-  inspector?: BroadcastChannel;
+  inspector?: Channel;
 }
 
 const defaultSettings: RemoteStorageProviderSettings = {
@@ -741,7 +739,7 @@ export class Provider implements StorageProvider {
   subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
     new Map();
 
-  inspector?: BroadcastChannel;
+  inspector?: Channel;
 
   /**
    * queue that holds commands that we read from the session, but could not
@@ -764,14 +762,15 @@ export class Provider implements StorageProvider {
     space,
     the = "application/json",
     settings = defaultSettings,
-    inspector = globalThis.BroadcastChannel
-      ? new BroadcastChannel(id)
-      : undefined,
+    inspector,
   }: RemoteStorageProviderOptions) {
     this.address = address;
     this.the = the;
     this.settings = settings;
-    this.inspector = inspector;
+    // Do not use a default inspector when in Deno:
+    // Requires `--unstable-broadcast-channel` flags and it is not used
+    // in that environment.
+    this.inspector = isBrowser() ? (inspector ?? new Channel(id)) : undefined;
     this.handleEvent = this.handleEvent.bind(this);
 
     const session = Memory.create({ as });
@@ -860,10 +859,10 @@ export class Provider implements StorageProvider {
     return entity?.is as StorageValue<T> | undefined;
   }
   async send<T = any>(
-    changes: { entityId: EntityId; value: StorageValue<T> }[],
+    batch: { entityId: EntityId; value: StorageValue<T> }[],
   ): Promise<
     Result<
-      Commit,
+      Unit,
       | ConflictError
       | TransactionError
       | ConnectionError
@@ -872,17 +871,32 @@ export class Provider implements StorageProvider {
       | StoreError
     >
   > {
-    const { the } = this;
+    const { the, workspace } = this;
 
-    const result = await this.workspace.push(changes.map((change) => ({
-      the,
-      of: Provider.toEntity(change.entityId),
-      // ⚠️ We do JSON roundtrips to strip of the undefined values that
-      // cause problems with serialization.
-      is: JSON.parse(JSON.stringify(change.value)),
-    })));
+    const changes = [];
+    for (const { entityId, value } of batch) {
+      const of = Provider.toEntity(entityId);
+      const content = JSON.stringify(value);
 
-    return result;
+      const current = workspace.get({ the, of });
+
+      if (JSON.stringify(current?.is) !== content) {
+        changes.push({
+          the,
+          of,
+          // ⚠️ We do JSON roundtrips to strip of the undefined values that
+          // cause problems with serialization.
+          is: JSON.parse(content) as JSONValue,
+        });
+      }
+    }
+
+    if (changes.length > 0) {
+      const result = await this.workspace.push(changes);
+      return result.error ? result : { ok: {} };
+    } else {
+      return { ok: {} };
+    }
   }
 
   parse(source: string): Memory.ProviderCommand<Memory.Protocol> {
@@ -895,9 +909,9 @@ export class Provider implements StorageProvider {
     );
   }
 
-  inspect<T>(
-    message: T,
-  ): T {
+  inspect(
+    message: RawCommand,
+  ): RawCommand {
     this.inspector?.postMessage({
       ...message,
       time: Date.now(),
@@ -1029,12 +1043,21 @@ export class Provider implements StorageProvider {
     // disconnect.
     if (this.connection === socket) {
       // Report disconnection to inspector
-      this.inspect({
-        disconnect: {
-          reason: event.type,
-          description: `Disconnected because of the ${event.type}`,
-        },
-      });
+      switch (event.type) {
+        case "error":
+        case "timeout":
+        case "close": {
+          this.inspect({
+            disconnect: {
+              reason: event.type,
+              message: `Disconnected because of the ${event.type}`,
+            },
+          });
+          break;
+        }
+        default:
+          throw new Error(`Unknown event type: ${event.type}`);
+      }
 
       this.connect();
     }

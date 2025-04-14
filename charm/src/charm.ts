@@ -256,6 +256,52 @@ export class CharmManager {
     await idle();
   }
 
+  // copies the recipe for a charm but clones the argument cell
+  // creating a branch of the data disconnected from its source
+  public async duplicate(charm: Charm) {
+    // Get the ID of the charm to duplicate
+    const id = getEntityId(charm);
+    if (!id) throw new Error("Cannot duplicate charm: missing ID");
+
+    // Get the recipe ID from the source cell
+    const sourceCell = charm.getSourceCell(processSchema);
+    const recipeId = sourceCell?.get()?.[TYPE];
+    if (!recipeId) throw new Error("Cannot duplicate charm: missing recipe ID");
+
+    // Get the recipe
+    const recipe = getRecipe(recipeId);
+    if (!recipe) throw new Error("Cannot duplicate charm: recipe not found");
+
+    // Get the original inputs
+    const originalInputs = sourceCell?.key("argument").get();
+
+    // Create a new deep clone of the inputs
+    const duplicateInputs = JSON.parse(JSON.stringify(originalInputs));
+
+    // Create a new charm with the cloned inputs
+    const duplicatedCharm = await this.runPersistent(
+      recipe,
+      duplicateInputs,
+      { relation: "duplicate", origin: id },
+    );
+
+    // Add a lineage record to track the relationship to the original
+    const lineage = duplicatedCharm.getSourceCell(charmSourceCellSchema)?.key(
+      "lineage",
+    );
+    if (lineage) {
+      lineage.push({
+        charm: charm,
+        relation: "duplicate",
+        timestamp: Date.now(),
+      });
+    }
+
+    await this.add([duplicatedCharm]);
+
+    return duplicatedCharm;
+  }
+
   // FIXME(ja): if we are already running the charm, can we just return it?
   // if a charm has sideeffects we might multiple versions...
   async get<T = Charm>(

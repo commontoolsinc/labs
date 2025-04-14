@@ -2,11 +2,14 @@ import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { client } from "../client.ts";
 import type { JSONSchema } from "@commontools/builder";
 import { WorkflowType } from "@commontools/charm";
+import { llmPrompt } from "../index.ts";
 
 /**
  * Basic prompt for classifying user intent into a workflow type
  */
-export const WORKFLOW_CLASSIFICATION_PROMPT = `
+export const WORKFLOW_CLASSIFICATION_PROMPT = llmPrompt(
+  "0.0.1",
+  `
 You are analyzing a user's request to determine the most appropriate workflow for code generation.
 Based on the user's request, classify it into one of the following workflows:
 
@@ -33,12 +36,15 @@ Please analyze this request and respond in the following format:
 <confidence>0.0-1.0</confidence>
 <reasoning>Brief explanation of your classification</reasoning>
 <enhanced_prompt>Optional improved or clarified version of the user's request</enhanced_prompt>
-`;
+`,
+);
 
 /**
  * Prompt for generating an execution plan with comprehensive specification
  */
-export const PLAN_GENERATION_PROMPT = `
+export const PLAN_GENERATION_PROMPT = llmPrompt(
+  "0.0.1",
+  `
 You are creating a brief execution plan and specification for a tool to fulfill a user's intent.
 The user's request has been classified as a {{ WORKFLOW_TYPE }} operation.
 
@@ -88,14 +94,17 @@ For EDIT and IMAGINE, explain how it builds upon or differs from the existing ch
 </specification>
 
 <data_model>
-Sketch key entity types as type signature.
-Explain how data is processed and output with arrow diagrams.
-For EDIT and IMAGINE, explain any changes to the existing data model.
-Include how this charm uses any referenced data from other charms.
+List key actions and the data types they affect.
+e.g add(title, description) -> TodoItem(title, description, completed)
+edit(item: TodoItem, { description, title, completed }) -> TodoItem(title, description, completed)
+delete(item: TodoItem) -> void
+
+Include how this charm uses any referenced data.
 </data_model>
 
 DO NOT GENERATE A SCHEMA.
-`;
+`,
+);
 
 /**
  * Generate the context section for a charm
@@ -147,6 +156,7 @@ export async function classifyWorkflow(
   existingSchema?: JSONSchema,
   existingCode?: string,
   model?: string,
+  generationId?: string,
 ): Promise<{
   workflowType: WorkflowType;
   confidence: number;
@@ -164,11 +174,22 @@ export async function classifyWorkflow(
     CONTEXT: context,
   });
 
+  const systemPrompt = llmPrompt(
+    "0.0.1",
+    "You are a helpful AI assistant tasked with classifying user intents for code generation",
+  );
+
   const response = await client.sendRequest({
-    system:
-      "You are a helpful AI assistant tasked with classifying user intents for code generation",
-    messages: [{ role: "user", content: prompt }],
+    system: systemPrompt.text,
+    messages: [{ role: "user", content: prompt.text }],
     model: model || "anthropic:claude-3-7-sonnet-latest",
+    metadata: {
+      context: "workflow",
+      workflow: "classification",
+      generationId,
+      systemPrompt,
+      userPrompt: prompt,
+    },
   });
 
   try {
@@ -260,6 +281,7 @@ export async function generateWorkflowPlan(
   existingSchema?: JSONSchema,
   existingCode?: string,
   model?: string,
+  generationId?: string,
 ): Promise<{
   steps: string[];
   spec: string;
@@ -277,11 +299,22 @@ export async function generateWorkflowPlan(
     CONTEXT: context,
   });
 
+  const systemPrompt = llmPrompt(
+    "0.0.1",
+    "You are a helpful AI assistant tasked with planning code generation workflows",
+  );
+
   const response = await client.sendRequest({
-    system:
-      "You are a helpful AI assistant tasked with planning code generation workflows",
-    messages: [{ role: "user", content: prompt }],
+    system: systemPrompt.text,
+    messages: [{ role: "user", content: prompt.text }],
     model: model || "anthropic:claude-3-7-sonnet-latest",
+    metadata: {
+      context: "workflow",
+      workflow: workflowType.toLowerCase(),
+      generationId,
+      systemPrompt,
+      userPrompt: prompt,
+    },
   });
 
   try {

@@ -44,7 +44,7 @@ class FrontendCache {
       return cached;
     }
     const staticPath = path.join(this.staticRoot, reqPath);
-    if (await exists(staticPath)) {
+    if (await exists(staticPath, { isFile: true })) {
       const buffer = await Deno.readFile(staticPath);
       const mimeType = getMimeType(reqPath);
       const rep = { mimeType, buffer };

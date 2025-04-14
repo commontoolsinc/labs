@@ -1,3 +1,6 @@
+import { LlmPrompt } from "./prompts/prompting.ts";
+import { setLastTraceSpanID } from "@commontools/builder";
+
 export type SimpleMessage = {
   role: "user" | "assistant";
   content: SimpleContent;
@@ -28,6 +31,7 @@ export type LLMRequest = {
   stream?: boolean;
   stop?: string;
   mode?: "json";
+  metadata?: Record<string, string | undefined | LlmPrompt>;
 };
 
 export class LLMClient {
@@ -53,7 +57,6 @@ export class LLMClient {
         model,
         stream: partialCB ? true : false,
         messages: userRequest.messages.map(processMessage),
-        max_tokens: userRequest.max_tokens,
       };
 
       try {
@@ -74,13 +77,17 @@ export class LLMClient {
           throw new Error("No response body");
         }
 
+        const traceSpanID = response.headers.get("x-ct-llm-trace-id") as string;
+        if (traceSpanID) {
+          setLastTraceSpanID(traceSpanID);
+        }
+
         // the server might return cached data instead of a stream
         if (response.headers.get("content-type") === "application/json") {
           const data = (await response.json()) as SimpleMessage;
           // FIXME(ja): can the LLM ever return anything other than a string?
           return data.content as string;
         }
-
         // FIXME(ja): this doesn't handle falling back to other models
         // if we fail during streaming
         return await this.stream(response.body, partialCB);

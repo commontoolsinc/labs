@@ -18,7 +18,8 @@ export type Capabilities = {
 };
 
 type ModelConfig = {
-  model: string;
+  model: string; // FIXME(ja): this type is wrong! it isn't a string
+  name: string;
   capabilities: Capabilities;
   aliases: string[];
 };
@@ -33,7 +34,7 @@ export const TASK_MODELS = {
   coding: "anthropic:claude-3-5-sonnet-20241022", // Best for code
   json: "anthropic:claude-3-5-sonnet-20241022", // Fast & good at structured output
   creative: "openai:gpt-4o-2024-08-06", // Best for creative tasks
-  vision: "google:gemini-1.5-pro-002", // Best for vision tasks
+  vision: "google:gemini-2.5-pro", // Best for vision tasks
 } as const;
 
 export type TaskType = keyof typeof TASK_MODELS;
@@ -73,7 +74,8 @@ const addModel = ({
     : provider(modelName);
 
   const config: ModelConfig = {
-    model: model as unknown as string,
+    model: model as unknown as string, // FIXME(ja): this type is wrong! it isn't a string
+    name,
     capabilities,
     aliases,
   };
@@ -386,6 +388,21 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
     aliases: ["google:gemini-2.0-flash", "gemini-2.0-flash"],
     capabilities: {
       contextWindow: 1_048_576,
+      maxOutputTokens: 8_191,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
+
+  addModel({
+    provider: vertexProvider,
+    name: "google:gemini-2.0-flash-lite",
+    aliases: ["google:gemini-2.0-flash-lite-001", "gemini-2.0-flash-lite"],
+    capabilities: {
+      contextWindow: 1_048_575,
       maxOutputTokens: 8_191,
       images: true,
       prefill: true,

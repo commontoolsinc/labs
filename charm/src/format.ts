@@ -102,6 +102,123 @@ type Descendant = {
   children?: Descendant[];
 };
 
+// Helper to add markdown styling based on node type
+async function processNode(
+  node: any,
+  state: {
+    fullText: string;
+    mentions: string[];
+    sources: {
+      [id: string]: { name: string; cell: Cell<any>; recipe?: Recipe | Module };
+    };
+    mentionIndices: Record<string, number>;
+  },
+  charmManager?: CharmManager,
+  currentList: { type: string | null; level: number } = {
+    type: null,
+    level: 0,
+  },
+): Promise<void> {
+  if (node.type === "mention") {
+    if (node.id) {
+      // Add to mentions list if not already present
+      if (!state.mentionIndices[node.id]) {
+        state.mentions.push(node.id);
+
+        // Create bibliography entry if charmManager is provided
+        const bibIndex = Object.keys(state.sources).length + 1;
+
+        if (charmManager) {
+          const charm = await charmManager.get(node.id);
+          if (charm) {
+            state.sources[node.id] = {
+              name: node.character || `Reference ${bibIndex}`,
+              cell: charm,
+            };
+
+            state.mentionIndices[node.id] = bibIndex;
+          }
+        }
+      }
+
+      // Add reference in markdown format
+      state.fullText += `[${node.character}](charm://${node.id})`;
+    } else {
+      // Handle mentions without explicit IDs (plain text mentions)
+      state.fullText += `@${node.character}`;
+    }
+  } else if (node.text !== undefined) {
+    // Handle text with formatting
+    let textContent = node.text;
+    if (node.bold) textContent = `**${textContent}**`;
+    if (node.italic) textContent = `*${textContent}*`;
+    state.fullText += textContent;
+  } else if (node.children) {
+    // Handle block elements with markdown syntax
+    switch (node.type) {
+      case "heading-one": {
+        state.fullText += "# ";
+        break;
+      }
+      case "heading-two": {
+        state.fullText += "## ";
+        break;
+      }
+      case "heading-three": {
+        state.fullText += "### ";
+        break;
+      }
+      case "heading-four": {
+        state.fullText += "#### ";
+        break;
+      }
+      case "heading-five": {
+        state.fullText += "##### ";
+        break;
+      }
+      case "heading-six": {
+        state.fullText += "###### ";
+        break;
+      }
+      case "block-quote": {
+        state.fullText += "> ";
+        break;
+      }
+      case "bulleted-list": {
+        // Just process children - the list items will add the markers
+        for (const child of node.children) {
+          await processNode(
+            child,
+            state,
+            charmManager,
+            {
+              type: "bulleted-list",
+              level: currentList.level + 1,
+            },
+          );
+        }
+        return; // Skip the default children processing below
+      }
+      case "list-item": {
+        state.fullText += "* ";
+        break;
+      }
+    }
+
+    // Process children
+    for (const child of node.children) {
+      await processNode(child, state, charmManager, currentList);
+    }
+
+    // Add appropriate line breaks after block elements
+    if (node.type && node.type !== "list-item") {
+      state.fullText += "\n\n";
+    } else if (node.type === "list-item") {
+      state.fullText += "\n";
+    }
+  }
+}
+
 // Function to parse Slate document and extract mention references
 export async function parseComposerDocument(
   serializedDocument: string,
@@ -118,121 +235,48 @@ export async function parseComposerDocument(
       return { text: "", mentions: [], sources: {} };
     }
 
-    const document = JSON.parse(serializedDocument) as Descendant[];
-    let fullText = "";
-    const mentions: string[] = [];
-    const sources: {
-      [id: string]: { name: string; cell: Cell<any> };
-    } = {};
-    const mentionIndices: Record<string, number> = {};
+    let document: Descendant[];
 
-    // Helper to add markdown styling based on node type
-    const processNode = async (
-      node: any,
-      currentList: { type: string | null; level: number } = {
-        type: null,
-        level: 0,
+    try {
+      document = JSON.parse(serializedDocument) as Descendant[];
+    } catch (error) {
+      console.warn(
+        "Failed to parse JSON compose document, assuming plain text:",
+      );
+      return {
+        text: serializedDocument,
+        mentions: [],
+        sources: {},
+      };
+    }
+
+    // Create a state object to track changes
+    const state = {
+      fullText: "",
+      mentions: [] as string[],
+      sources: {} as {
+        [id: string]: {
+          name: string;
+          cell: Cell<any>;
+          recipe?: Recipe | Module;
+        };
       },
-    ) => {
-      if (node.type === "mention") {
-        if (node.id) {
-          // Add to mentions list if not already present
-          if (!mentionIndices[node.id]) {
-            mentions.push(node.id);
-
-            // Create bibliography entry if charmManager is provided
-            const bibIndex = Object.keys(sources).length + 1;
-
-            if (charmManager) {
-              const charm = await charmManager.get(node.id);
-              if (charm) {
-                sources[node.id] = {
-                  name: node.character || `Reference ${bibIndex}`,
-                  cell: charm,
-                };
-
-                mentionIndices[node.id] = bibIndex;
-              }
-            }
-          }
-
-          // Add reference in markdown format
-          fullText += `[${node.character}](charm://${node.id})`;
-        } else {
-          // Handle mentions without explicit IDs (plain text mentions)
-          fullText += `@${node.character}`;
-        }
-      } else if (node.text !== undefined) {
-        // Handle text with formatting
-        let textContent = node.text;
-        if (node.bold) textContent = `**${textContent}**`;
-        if (node.italic) textContent = `*${textContent}*`;
-        fullText += textContent;
-      } else if (node.children) {
-        // Handle block elements with markdown syntax
-        switch (node.type) {
-          case "heading-one":
-            fullText += "# ";
-            break;
-          case "heading-two":
-            fullText += "## ";
-            break;
-          case "heading-three":
-            fullText += "### ";
-            break;
-          case "heading-four":
-            fullText += "#### ";
-            break;
-          case "heading-five":
-            fullText += "##### ";
-            break;
-          case "heading-six":
-            fullText += "###### ";
-            break;
-          case "block-quote":
-            fullText += "> ";
-            break;
-          case "bulleted-list":
-            // Just process children - the list items will add the markers
-            for (const child of node.children) {
-              await processNode(child, {
-                type: "bulleted-list",
-                level: currentList.level + 1,
-              });
-            }
-            return; // Skip the default children processing below
-          case "list-item":
-            fullText += "* ";
-            break;
-        }
-
-        // Process children
-        for (const child of node.children) {
-          await processNode(child, currentList);
-        }
-
-        // Add appropriate line breaks after block elements
-        if (node.type && node.type !== "list-item") {
-          fullText += "\n\n";
-        } else if (node.type === "list-item") {
-          fullText += "\n";
-        }
-      }
+      mentionIndices: {} as Record<string, number>,
     };
 
     // Process each node sequentially with await
     for (const node of document) {
-      await processNode(node);
+      await processNode(node, state, charmManager);
     }
 
     return {
-      text: fullText.trim(), // Remove extra whitespace
-      mentions,
-      sources,
+      text: state.fullText.trim(), // Remove extra whitespace
+      mentions: state.mentions,
+      sources: state.sources,
     };
   } catch (error) {
-    console.error("Failed to parse document:", error);
-    return { text: "", mentions: [], sources: {} };
+    console.warn("Failed to parse document, treating as plain text:", error);
+    return { text: serializedDocument, mentions: [], sources: {} };
   }
 }
 

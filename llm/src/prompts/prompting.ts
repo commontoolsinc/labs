@@ -1,14 +1,41 @@
+export type LlmPrompt = {
+  version: string;
+  text: string;
+  dependencies?: Record<string, LlmPrompt | string>;
+};
+
+export function llmPrompt(version: string, text: string): LlmPrompt {
+  return { version, text };
+}
+
 /**
  * Hydrates a prompt template from a context object of key-value pairs.
  * @param prompt - The prompt template, with `{{ EXAMPLE }}` placeholders.
  * @param context - The context to hydrate the prompt with.
  * @returns The hydrated prompt string
  */
-export function hydratePrompt(prompt: string, context: any): string {
-  return prompt.replace(/\{\{\s*([^}]+)\s*\}\}/g, (match, p1) => {
+export function hydratePrompt(
+  prompt: LlmPrompt,
+  context: Record<string, string | LlmPrompt>,
+): LlmPrompt {
+  const text = prompt.text.replace(/\{\{\s*([^}]+)\s*\}\}/g, (match, p1) => {
     const key = p1.trim();
-    return context[key] || match;
+    return typeof context[key] === "string"
+      ? context[key] || match
+      : context[key]?.text || match;
   });
+
+  const dependencies = prompt.dependencies || {};
+  // Add all context values used in the prompt as dependencies
+  for (const key in context) {
+    const value = context[key];
+    // Only include dependencies that were actually used in the prompt
+    if (prompt.text.includes(`{{${key}}}`)) {
+      dependencies[key] = value;
+    }
+  }
+
+  return { version: prompt.version, text, dependencies };
 }
 
 /**

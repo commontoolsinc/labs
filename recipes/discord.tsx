@@ -16,7 +16,7 @@ import { Cell } from "@commontools/runner";
 // README:
 // sudo tailscale serve --https=443 localhost:8080
 // you need OPERATOR_PASS set so that it doesn't default to "implicit trust"
-// OPERATOR_PASS="common user" TOOLSHED_API_URL=https://toolshed.saga-castor.ts.net deno task start --name discordstuff --cause 420 --recipeFile ../recipes/discord.tsx
+// OPERATOR_PASS="common user" TOOLSHED_API_URL=https://toolshed.saga-castor.ts.net deno task start --spaceName discordstuff --cause 420 --recipeFile ../recipes/discord.tsx
 // then you go to
 // TOOLSHED_URL/discordstuff
 

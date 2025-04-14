@@ -83,6 +83,7 @@ export function llm(
       model: string;
       messages: SimpleContent[] | SimpleMessage[];
       max_tokens: number;
+      metadata?: Record<string, string>;
     };
 
     type StandardParams = BaseParams & {
@@ -100,8 +101,14 @@ export function llm(
       stop: stop ?? "",
       max_tokens: max_tokens ?? 4096,
       model: model ?? "claude-3-5-sonnet",
+      metadata: {
+        // FIXME(ja): how do we get the context of space/charm id here
+        context: "charm",
+      },
     } as StandardParams;
 
+    // FIXME(ja): look at if model supports system messages instead...
+    // or perhaps we do this in the toolshed handler instead?
     if (model?.startsWith("openai:o1")) {
       const combinedMessage = system && prompt
         ? (`${system}\n\n${prompt}` as SimpleContent)
@@ -111,6 +118,7 @@ export function llm(
         messages: messages ?? (combinedMessage ? [combinedMessage] : []),
         model: model,
         max_tokens: max_tokens ?? 4096,
+        metadata: llmParams.metadata,
       };
     }
 

@@ -24,6 +24,7 @@ export const LLMRequestSchema = z.object({
   max_completion_tokens: z.number().optional(),
   stream: z.boolean().default(false),
   mode: z.enum(["json"]).optional(),
+  metadata: z.record(z.union([z.string(), z.any()])).optional(),
 });
 
 export const ModelInfoSchema = z.object({
@@ -37,6 +38,7 @@ export const ModelInfoSchema = z.object({
     prefill: z.boolean(),
     images: z.boolean(),
   }),
+  name: z.string(),
   aliases: z.array(z.string()),
 });
 
@@ -70,6 +72,18 @@ export type GetModelsRouteQueryParams = z.infer<
   typeof GetModelsRouteQueryParams
 >;
 
+export const FeedbackSchema = z.object({
+  span_id: z.string(),
+  name: z.string().default("user feedback"),
+  annotator_kind: z.enum(["HUMAN", "LLM"]).default("HUMAN"),
+  result: z.object({
+    label: z.string().optional(),
+    score: z.number().optional(),
+    explanation: z.string().optional(),
+  }),
+  metadata: z.record(z.unknown()).optional(),
+});
+
 // Route definitions
 export const getModels = createRoute({
   path: "/api/ai/llm/models",
@@ -81,6 +95,7 @@ export const getModels = createRoute({
       ModelsResponseSchema.openapi({
         example: {
           "claude-3-5-sonnet": {
+            name: "claude-3-5-sonnet",
             capabilities: {
               contextWindow: 200000,
               maxOutputTokens: 8192,
@@ -154,5 +169,54 @@ export const generateText = createRoute({
   },
 });
 
+export const feedback = createRoute({
+  path: "/api/ai/llm/feedback",
+  method: "post",
+  tags,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: FeedbackSchema.openapi({
+            example: {
+              span_id: "67f6740bbe1ddc3f",
+              name: "correctness",
+              annotator_kind: "HUMAN",
+              result: {
+                label: "correct",
+                score: 1,
+                explanation: "The response answered the question I asked",
+              },
+            },
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      z.object({
+        success: z.boolean(),
+      }).openapi({
+        example: {
+          success: true,
+        },
+      }),
+      "Feedback submitted successfully",
+    ),
+    [HttpStatusCodes.BAD_REQUEST]: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            error: z.string(),
+          }),
+        },
+      },
+      description: "Invalid request parameters",
+    },
+  },
+});
+
 export type GetModelsRoute = typeof getModels;
 export type GenerateTextRoute = typeof generateText;
+export type FeedbackRoute = typeof feedback;

@@ -464,6 +464,13 @@ export function Composer({
           event.preventDefault();
           onSubmit();
         }
+      } else if (
+        event.key === "ArrowUp" || event.key === "ArrowDown" ||
+        event.key === "ArrowLeft" || event.key === "ArrowRight"
+      ) {
+        // For arrow key events in the main composer, ensure they don't
+        // get captured by parent components (like CommandCenter)
+        event.stopPropagation();
       }
     },
     [filteredMentions, editor, index, target, onSubmit, disabled],

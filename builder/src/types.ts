@@ -103,12 +103,23 @@ export type HandlerFactory<T, R> =
   & toJSON;
 
 export type JSONValue =
-  | string
-  | number
-  | boolean
   | null
-  | JSONValue[]
-  | { [key: string]: JSONValue } & { [ID]?: any; [ID_FIELD]?: any };
+  | boolean
+  | number
+  | string
+  | JSONArray
+  | JSONObject & IDFields;
+
+export interface JSONArray extends ArrayLike<JSONValue> {}
+
+export interface JSONObject extends Record<string, JSONValue> {}
+
+// Annotations when writing data that help determine the entity id. They are
+// removed before sending to storage.
+export interface IDFields {
+  [ID]?: any;
+  [ID_FIELD]?: any;
+}
 
 // TODO(@ubik2) When specifying a JSONSchema, you can often use a boolean
 // This is particularly useful for specifying the schema of a property.

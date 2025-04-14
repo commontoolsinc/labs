@@ -20,11 +20,16 @@ import { formatPromptWithMentions } from "./format.ts";
 import { castNewRecipe } from "./iterate.ts";
 
 // Types for workflow classification
-export type WorkflowType = "fix" | "edit" | "imagine";
+export type WorkflowType =
+  | "fix"
+  | "edit"
+  | "imagine"
+  | "imagine-single-phase";
 
 // Configuration for each workflow type
 export interface WorkflowConfig {
   name: WorkflowType;
+  label: string;
   description: string;
   updateSpec: boolean;
   updateSchema: boolean;
@@ -34,6 +39,7 @@ export interface WorkflowConfig {
 export const WORKFLOWS: Record<WorkflowType, WorkflowConfig> = {
   fix: {
     name: "fix",
+    label: "FIX",
     description:
       "Fix issues in the code without changing functionality or spec",
     updateSpec: false,
@@ -42,6 +48,7 @@ export const WORKFLOWS: Record<WorkflowType, WorkflowConfig> = {
   },
   edit: {
     name: "edit",
+    label: "EDIT",
     description:
       "Update functionality while maintaining the same core data structure",
     updateSpec: true,
@@ -50,7 +57,16 @@ export const WORKFLOWS: Record<WorkflowType, WorkflowConfig> = {
   },
   imagine: {
     name: "imagine",
+    label: "IMAGINE",
     description: "Create a new charm with a potentially different data schema",
+    updateSpec: true,
+    updateSchema: true,
+    allowsDataReferences: true,
+  },
+  "imagine-single-phase": {
+    name: "imagine-single-phase",
+    label: "IMAGINE (SINGLE PHASE)",
+    description: "IN DEVELOPMENT",
     updateSpec: true,
     updateSchema: true,
     allowsDataReferences: true,
@@ -114,6 +130,7 @@ export async function classifyIntent(
   currentCharm?: Cell<Charm>,
   model?: string,
   references?: Record<string, Cell<any>>,
+  generationId?: string,
 ): Promise<IntentClassificationResult> {
   // Process the input for @mentions if a CharmManager is provided
   // Extract context from the current charm if available
@@ -165,6 +182,7 @@ export async function classifyIntent(
       existingSchema,
       existingCode,
       model,
+      generationId,
     );
 
     return {
@@ -246,11 +264,12 @@ function extractContext(charm: Cell<Charm>) {
  * @returns Execution plan with steps, spec, and schema
  */
 export async function generatePlan(
-  { input, workflowType, currentCharm, model }: {
+  { input, workflowType, currentCharm, model, generationId }: {
     input: string;
     workflowType: WorkflowType;
     currentCharm?: Cell<Charm>;
     model?: string;
+    generationId?: string;
   },
 ): Promise<ExecutionPlan> {
   // Extract context from the current charm if available
@@ -273,6 +292,7 @@ export async function generatePlan(
       existingSchema,
       existingCode,
       model,
+      generationId,
     );
 
     return {
@@ -332,7 +352,7 @@ export interface WorkflowForm {
 
   // Planning information
   plan: {
-    steps: string[];
+    steps?: string[];
     spec?: string;
     dataModel?: string;
   } | null;
@@ -347,6 +367,7 @@ export interface WorkflowForm {
     isComplete: boolean;
     isFilled: boolean;
     modelId?: string;
+    generationId?: string;
     charmManager?: CharmManager;
   };
 }
@@ -355,10 +376,11 @@ export interface WorkflowForm {
  * Create a new workflow form with default values
  */
 export function createWorkflowForm(
-  { input, modelId, charm }: {
+  { input, modelId, charm, generationId }: {
     input: string;
     modelId?: string;
     charm?: Cell<Charm>;
+    generationId?: string;
   },
 ): WorkflowForm {
   return {
@@ -374,6 +396,7 @@ export function createWorkflowForm(
       isComplete: false,
       isFilled: false,
       modelId,
+      generationId: generationId ?? crypto.randomUUID(),
     },
   };
 }
@@ -427,7 +450,6 @@ export async function processInputSection(
  */
 export async function fillClassificationSection(
   form: WorkflowForm,
-  options: { model?: string } = {},
 ): Promise<WorkflowForm> {
   const newForm = { ...form };
 
@@ -446,6 +468,7 @@ export async function fillClassificationSection(
     form.input.existingCharm,
     form.meta.modelId,
     form.input.references,
+    form.meta.generationId,
   );
 
   // Update classification in the form
@@ -463,7 +486,6 @@ export async function fillClassificationSection(
  */
 export async function fillPlanningSection(
   form: WorkflowForm,
-  options: Record<string, unknown> = {},
 ): Promise<WorkflowForm> {
   if (!form.classification) {
     throw new Error("Classification is required");
@@ -484,16 +506,14 @@ export async function fillPlanningSection(
   if (
     form.classification.workflowType === "fix" && form.input.existingCharm
   ) {
-    // For fix workflow, preserve existing spec
-    let existingSpec: string | undefined;
-    let existingSchema: JSONSchema | undefined;
-    let existingCode: string | undefined;
-
     if (form.input.existingCharm) {
       const { spec, schema, code } = extractContext(form.input.existingCharm);
-      existingSpec = spec;
-      existingSchema = schema;
-      existingCode = code;
+
+      if (!form.plan) {
+        form.plan = { spec };
+      } else {
+        form.plan.spec = spec;
+      }
     }
 
     // Generate just the plan without updating spec
@@ -503,12 +523,13 @@ export async function fillPlanningSection(
         workflowType: form.classification.workflowType,
         currentCharm: form.input.existingCharm,
         model: form.meta.modelId,
+        generationId: form.meta.generationId,
       },
     );
 
     planningResult = {
       steps: executionPlan.steps,
-      spec: existingSpec, // Use existing spec for fix workflow
+      spec: form.plan?.spec, // Use existing spec for fix workflow
       dataModel: "",
     };
   } else {
@@ -519,12 +540,13 @@ export async function fillPlanningSection(
         workflowType: form.classification.workflowType,
         currentCharm: form.input.existingCharm,
         model: form.meta.modelId,
+        generationId: form.meta.generationId,
       },
     );
 
     planningResult = {
       steps: executionPlan.steps,
-      spec: executionPlan.spec,
+      spec: form.plan?.spec ?? executionPlan.spec, // if we have a prefilled spec, prefer that
       dataModel: executionPlan.dataModel,
     };
   }
@@ -591,6 +613,7 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
       break;
 
     case "imagine":
+    case "imagine-single-phase":
       charm = await executeImagineWorkflow(
         newForm.meta.charmManager,
         form,
@@ -613,7 +636,6 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
 
   return newForm;
 }
-
 /**
  * Process a workflow request from start to finish or just fill the form
  *
@@ -630,49 +652,115 @@ export async function processWorkflow(
     existingCharm?: Cell<Charm>;
     prefill?: Partial<WorkflowForm>;
     model?: string;
+    generationId?: string;
+    onProgress?: (form: WorkflowForm) => void;
+    cancellation?: { cancelled: boolean };
   } = {},
 ): Promise<WorkflowForm> {
+  console.groupCollapsed("processWorkflow");
+  const startTime = performance.now();
+  const timings: Record<string, number> = {};
+
   // Create a new form or use prefilled form
   let form = createWorkflowForm({
     input,
     charm: options.existingCharm,
     modelId: options.model,
+    generationId: options.generationId,
   });
+  console.log("creating form", form);
 
-  if (options.prefill) {
-    form = { ...form, ...options.prefill };
-  }
+  try {
+    // Function to check if the workflow has been cancelled
+    const checkCancellation = () => {
+      if (options.cancellation?.cancelled) {
+        console.log("cancelled workflow");
+        throw new Error("cancelled workflow");
+      }
+    };
 
-  // Step 1: Process input (mentions, references, etc.) if not already processed
-  if (
-    !form.input?.processedInput ||
-    form.input?.processedInput === form.input?.rawInput
-  ) {
-    if (!options.charmManager) {
-      throw new Error("charmManager required to format input");
+    // Check for cancellation before starting work
+    checkCancellation();
+
+    if (options.prefill) {
+      console.log("prefilling form", options.prefill);
+      form = { ...form, ...options.prefill };
     }
 
-    form = await processInputSection(options.charmManager, form);
-  }
+    // Step 1: Process input (mentions, references, etc.) if not already processed
+    if (
+      !form.input?.processedInput ||
+      form.input?.processedInput === form.input?.rawInput
+    ) {
+      if (!options.charmManager) {
+        throw new Error("charmManager required to format input");
+      }
 
-  // Step 2: Classification if not already classified
-  if (!form.classification) {
-    form = await fillClassificationSection(form, {
-      model: options.model,
+      console.log("processing input");
+      const stepStartTime = performance.now();
+      form = await processInputSection(options.charmManager, form);
+      timings.processInput = performance.now() - stepStartTime;
+      options.onProgress?.(form);
+      console.log("processed input!", form);
+    }
+
+    checkCancellation();
+
+    // Step 2: Classification if not already classified
+    if (!form.classification) {
+      console.log("classifying task");
+      const stepStartTime = performance.now();
+      form = await fillClassificationSection(form);
+      timings.classification = performance.now() - stepStartTime;
+      options.onProgress?.(form);
+      console.log("classified task!", form);
+    }
+
+    checkCancellation();
+
+    // Step 3: Planning if not already planned
+    if (!form.plan || !form.plan.spec || !form.plan.steps) {
+      console.log("planning task");
+      const stepStartTime = performance.now();
+      form = await fillPlanningSection(form);
+      timings.planning = performance.now() - stepStartTime;
+      options.onProgress?.(form);
+      console.log("planned task!", form);
+    }
+
+    checkCancellation();
+
+    // Step 4: Generation (if not a dry run and not already generated)
+    if (!dryRun && options.charmManager && !form.generation?.charm) {
+      console.log("generating code");
+      const stepStartTime = performance.now();
+      form = await generateCode(form);
+      timings.generation = performance.now() - stepStartTime;
+      options.onProgress?.(form);
+      console.log("generated code!", form);
+    }
+
+    const totalTime = performance.now() - startTime;
+    console.log("Workflow timing summary:");
+    console.log(`Total duration: ${totalTime.toFixed(2)}ms`);
+    Object.entries(timings).forEach(([step, duration]) => {
+      console.log(
+        `  - ${step}: ${duration.toFixed(2)}ms (${
+          ((duration / totalTime) * 100).toFixed(1)
+        }%)`,
+      );
     });
-  }
 
-  // Step 3: Planning if not already planned
-  if (!form.plan) {
-    form = await fillPlanningSection(form);
+    console.log("completed workflow!");
+    console.groupEnd();
+    return form;
+  } catch (error) {
+    const totalTime = performance.now() - startTime;
+    console.warn("workflow failed:", error);
+    console.log(`Workflow failed after ${totalTime.toFixed(2)}ms`);
+    console.groupEnd();
+    return form;
   }
-
-  // Step 4: Generation (if not a dry run and not already generated)
-  if (!dryRun && options.charmManager && !form.generation?.charm) {
-    form = await generateCode(form);
-  }
-
-  return form;
 }
 
 /**
@@ -715,7 +803,6 @@ export function executeFixWorkflow(
 ): Promise<Cell<Charm>> {
   console.log("Executing FIX workflow");
 
-  // Call iterate with the existing spec to ensure it's preserved
   return iterate(
     charmManager,
     currentCharm,
@@ -739,8 +826,6 @@ export function executeEditWorkflow(
 ): Promise<Cell<Charm>> {
   console.log("Executing EDIT workflow");
 
-  // For edit workflow, we use the updated spec but pass shiftKey as true
-  // to ensure it preserves compatibility with existing data
   return iterate(
     charmManager,
     currentCharm,

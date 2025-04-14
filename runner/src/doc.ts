@@ -27,82 +27,6 @@ import { arrayEqual } from "./utils.ts";
 import { refer } from "@commontools/memory/reference";
 
 /**
- * Just capturing type of what is being represented as a string.
- */
-export type AsString<T> = string & { valueOf(): AsString<T> };
-
-export type DocumentPathEntry = string | number;
-export type DocumentPath = AsString<DocumentPathEntry[]>;
-
-export type SchemaGroup = {
-  [key: AsString<DocumentSchema>]: MemberSchema;
-};
-
-export type MemberSchema = {
-  /**
-   * Schema for the actual member.
-   */
-  schema: JSONSchema;
-
-  /**
-   * Sometimes schema may have a reference type which is resolved in this
-   * JSON schema.
-   */
-  context?: JSONSchema;
-};
-
-export type DocumentSchema = {
-  [key: DocumentPath]: SchemaGroup;
-};
-
-const JSONSchemaForNever = {
-  "enum": [],
-};
-
-/**
- * Tracks schema usage by path and stores groups of schemas per path.
- */
-class DocumentSchemaBuilder {
-  constructor(private model: DocumentSchema = {}) {
-  }
-  build() {
-    return this.model;
-  }
-
-  /**
-   * Registers access pattern for the path.
-   *
-   * @param path
-   * @param schema
-   * @param context
-   */
-  register(
-    path: DocumentPathEntry[],
-    schema: JSONSchema,
-    context: JSONSchema = JSONSchemaForNever,
-  ) {
-    // Create a consistent key by normalizing the path components
-    // Convert numbers to strings to ensure '0' and 0 are treated the same
-    const normalizedPath = path.map((key) => String(key));
-    // Use JSON.stringify to create a unique representation of the path
-    const pathKey = JSON.stringify(normalizedPath);
-
-    let group = this.model[pathKey];
-    if (!group) {
-      group = Object.create(null);
-      this.model[pathKey] = group;
-    }
-
-    const member = { schema, context };
-
-    const memberID = refer(member).toString() as string;
-    group[memberID] = member;
-
-    return this;
-  }
-}
-
-/**
  * Lowest level cell implementation.
  *
  * Exposes the raw value, which can contain queries (currently those are
@@ -296,20 +220,6 @@ export type DocImpl<T> = {
    * Internal only: Trap for copy operations.
    */
   copyTrap: boolean;
-
-  /**
-   * Register schema usage for a specific path in the document.
-   * Used for validating data against schemas and maintaining schema references.
-   *
-   * @param path - Path where schema is applied
-   * @param schema - JSON Schema to apply
-   * @param rootSchema - Optional root schema for recursive validation
-   */
-  registerSchemaUse(
-    path: PropertyKey[],
-    schema: JSONSchema,
-    rootSchema?: JSONSchema,
-  ): void;
 };
 
 export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
@@ -338,8 +248,6 @@ export function createDoc<T>(
   let readOnly = false;
   let sourceCell: DocImpl<any> | undefined;
   let ephemeral = false;
-
-  const schemaBuilder = new DocumentSchemaBuilder();
 
   const self: DocImpl<T> = {
     get: () => value as T,
@@ -436,13 +344,6 @@ export function createDoc<T>(
     [isDocMarker]: true,
     get copyTrap(): boolean {
       throw new Error("Copy trap: Don't copy cells, create references instead");
-    },
-    registerSchemaUse(
-      path: DocumentPathEntry[],
-      schema: JSONSchema,
-      context?: JSONSchema,
-    ): void {
-      schemaBuilder.register(path, schema, context);
     },
   };
 

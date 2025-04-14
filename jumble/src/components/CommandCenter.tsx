@@ -18,7 +18,7 @@ import {
   SelectCommandItem,
   TranscribeCommandItem,
 } from "./commands.ts";
-import { formatPromptWithMentions } from "@commontools/charm";
+import { formatPromptWithMentions, WorkflowForm } from "@commontools/charm";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
 import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
@@ -32,17 +32,20 @@ import {
 } from "@/hooks/use-live-spec-preview.ts";
 import { SpecPreview } from "@/components/SpecPreview.tsx";
 import { ToggleButton } from "@/components/common/CommonToggle.tsx";
+import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
 
 function CommandProcessor({
   mode,
   command,
   context,
   onComplete,
+  onPreviewUpdated,
 }: {
   mode: CommandMode;
   command: CommandItem;
   context: CommandContext;
   onComplete: () => void;
+  onPreviewUpdated: (model: Partial<WorkflowForm>) => void;
 }) {
   const { charmManager } = context;
   const [inputValue, setInputValue] = useState("");
@@ -90,8 +93,13 @@ function CommandProcessor({
     focusedCharm, // Pass the current charm for context
   );
 
-  // Update the command context with the current workflow form data
-  context.previewForm = previewForm;
+  useEffect(() => {
+    if (previewForm) {
+      console.log("Preview form updated:", previewForm);
+      onPreviewUpdated(previewForm);
+      context.previewForm = previewForm;
+    }
+  }, [previewForm, onPreviewUpdated]);
 
   if (context.loading && mode.type !== "input") {
     return (
@@ -108,9 +116,10 @@ function CommandProcessor({
       return;
     }
     if ((mode.command as InputCommandItem).handler) {
-      (mode.command as InputCommandItem).handler(inputValue);
+      (mode.command as InputCommandItem).handler(context, inputValue);
     }
   }, [
+    context,
     mode,
     inputValue,
     charmManager,
@@ -268,6 +277,7 @@ export function useCharmMentions() {
 }
 
 export function CommandCenter() {
+  const { clearAuthentication } = useAuthentication();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<CommandMode>({ type: "main" });
@@ -288,44 +298,54 @@ export function CommandCenter() {
 
   const charmMentions = useCharmMentions();
 
+  const [previewForm, setPreviewForm] = useState<Partial<WorkflowForm>>();
+
+  // TODO(bf): this is duplicated from the use in allCommands
+  const context = useMemo<CommandContext>(() => ({
+    charmManager,
+    navigate,
+    focusedCharmId,
+    focusedReplicaId,
+    setOpen,
+    setMode,
+    loading,
+    setLoading,
+    setModeWithInput: (mode: CommandMode, initialInput: string) => {
+      Promise.resolve().then(() => {
+        setMode(mode);
+        setSearch(initialInput);
+      });
+    },
+    stopJob,
+    startJob,
+    addJobMessage,
+    listJobs,
+    updateJobProgress,
+    commandPathIds,
+    onClearAuthentication: clearAuthentication,
+    previewForm,
+  }), [
+    charmManager,
+    navigate,
+    focusedCharmId,
+    focusedReplicaId,
+    setOpen,
+    setMode,
+    loading,
+    setLoading,
+    stopJob,
+    startJob,
+    addJobMessage,
+    listJobs,
+    updateJobProgress,
+    commandPathIds,
+    clearAuthentication,
+    previewForm,
+  ]);
+
   const allCommands = useMemo(
-    () =>
-      getCommands({
-        charmManager,
-        navigate,
-        focusedCharmId,
-        focusedReplicaId,
-        setOpen,
-        setMode,
-        loading,
-        setLoading,
-        setModeWithInput: (mode: CommandMode, initialInput: string) => {
-          Promise.resolve().then(() => {
-            setMode(mode);
-            setSearch(initialInput);
-          });
-        },
-        stopJob,
-        startJob,
-        addJobMessage,
-        listJobs,
-        updateJobProgress,
-        commandPathIds,
-      }),
-    [
-      charmManager,
-      navigate,
-      focusedCharmId,
-      focusedReplicaId,
-      loading,
-      commandPathIds,
-      setMode,
-      stopJob,
-      startJob,
-      addJobMessage,
-      listJobs,
-      updateJobProgress,
-    ],
+    () => getCommands(context),
+    [context],
   );
 
   const getCommandById = useCallback(
@@ -441,29 +461,6 @@ export function CommandCenter() {
       );
     };
   }, [focusedCharmId, allCommands]);
-
-  const context: CommandContext = {
-    charmManager,
-    navigate,
-    focusedCharmId,
-    focusedReplicaId,
-    setOpen,
-    setMode,
-    loading,
-    setLoading,
-    setModeWithInput: (mode: CommandMode, initialInput: string) => {
-      Promise.resolve().then(() => {
-        setMode(mode);
-        setSearch(initialInput);
-      });
-    },
-    stopJob,
-    startJob,
-    addJobMessage,
-    listJobs,
-    updateJobProgress,
-    commandPathIds,
-  };
 
   const handleBack = () => {
     if (commandPathIds.length === 1) {
@@ -679,6 +676,7 @@ export function CommandCenter() {
                 ? mode.command
                 : currentCommandPath[currentCommandPath.length - 1]}
               context={context}
+              onPreviewUpdated={setPreviewForm}
               onComplete={() => {
                 setMode({
                   type: "menu",

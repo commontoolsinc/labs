@@ -3,14 +3,40 @@ import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
 import {
   getEntityId,
+  idle,
   isStream,
   setBobbyServerUrl,
   storage,
 } from "@commontools/runner";
-import { createSession, Identity } from "@commontools/identity";
+import {
+  createAdminSession,
+  type DID,
+  Identity,
+  type Session,
+} from "@commontools/identity";
+import { assert } from "@commontools/memory/fact";
 
-const { name, charmId, recipeFile, cause, quit } = parseArgs(Deno.args, {
-  string: ["name", "charmId", "recipeFile", "cause"],
+const {
+  spaceName,
+  spaceDID,
+  charmId,
+  recipeFile,
+  cause,
+  input,
+  userKey,
+  adminKey,
+  quit,
+} = parseArgs(Deno.args, {
+  string: [
+    "spaceName",
+    "spaceDID",
+    "charmId",
+    "recipeFile",
+    "cause",
+    "input",
+    "userKey",
+    "adminKey",
+  ],
   boolean: ["quit"],
   default: { quit: false },
 });
@@ -24,20 +50,50 @@ storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
 
 async function main() {
-  const identity = await Identity.fromPassphrase(OPERATOR_PASS);
-  const session = await createSession({
-    identity,
-    name: name!,
-  });
+  if (!spaceName && !spaceDID) {
+    console.error("No space name or space DID provided");
+    Deno.exit(1);
+  }
 
-  console.log("params:", {
-    session,
-    charmId,
-    recipeFile,
-    cause,
-    quit,
-    toolshedUrl,
-  });
+  if (spaceName?.startsWith("~") && !spaceDID) {
+    console.error(
+      "If space name starts with ~, then space DID must be provided",
+    );
+    Deno.exit(1);
+  }
+
+  if (spaceDID && !spaceDID.startsWith("did:key:")) {
+    console.error("Space DID must start with did:key:");
+    Deno.exit(1);
+  }
+
+  let identity: Identity;
+  if (adminKey || userKey) {
+    try {
+      const pkcs8Key = await Deno.readFile(adminKey ?? userKey!);
+      identity = await Identity.fromPkcs8(pkcs8Key);
+    } catch (e) {
+      console.error(`Could not read key at ${adminKey ?? userKey}.`);
+      Deno.exit(1);
+    }
+  } else {
+    identity = await Identity.fromPassphrase(OPERATOR_PASS);
+  }
+
+  // Actual identity is derived from space name if no admin key is provided.
+  if (!adminKey && spaceName !== undefined) {
+    identity = await identity.derive(spaceName);
+  }
+
+  const space: DID = spaceDID as DID ?? identity.did();
+
+  const session = await createAdminSession({
+    identity,
+    space,
+    name: spaceName ?? "unknown",
+  }) satisfies Session;
+
+  // TODO(seefeld): It only wants the space, so maybe we simplify the above and just space the space did?
   const manager = new CharmManager(session);
   const charms = manager.getCharms();
   charms.sink((charms) => {
@@ -67,11 +123,33 @@ async function main() {
     });
   }
 
+  let inputValue: unknown;
+  if (input !== undefined && input !== "") {
+    // Find all `@#<hex hash>[/<url escaoped path[/<more paths>[/...]]]`
+    // and replace them with the corresponding JSON object.
+    //
+    // Example: "@#bafed0de/path/to/value" and "{ foo: @#bafed0de/a/path }"
+    const regex = /(?<!"[^"]*?)@#([a-f0-9]+)((?:\/[^\/\s"',}]+)*?)(?![^"]*?")/g;
+    const inputTransformed = input.replace(
+      regex,
+      (_, hash, path) =>
+        JSON.stringify({
+          cell: { "/": hash, path: path.split("/").map(decodeURIComponent) },
+        }),
+    );
+    try {
+      inputValue = JSON.parse(inputTransformed);
+    } catch (error) {
+      console.error("Error parsing input:", error);
+      Deno.exit(1);
+    }
+  }
+
   if (recipeFile) {
     try {
       const recipeSrc = await Deno.readTextFile(recipeFile);
       const recipe = await compileRecipe(recipeSrc, "recipe", []);
-      const charm = await manager.runPersistent(recipe, undefined, cause);
+      const charm = await manager.runPersistent(recipe, inputValue, cause);
       const charmWithSchema = (await manager.get(charm))!;
       charmWithSchema.sink((value) => {
         console.log("running charm:", getEntityId(charm), value);
@@ -82,6 +160,7 @@ async function main() {
         updater.send({ newValues: ["test"] });
       }
       if (quit) {
+        await idle();
         await storage.synced();
         Deno.exit(0);
       }

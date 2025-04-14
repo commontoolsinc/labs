@@ -131,6 +131,7 @@ jobs:
         env:
           VITE_COMMIT_SHA: ${{ github.sha }}
           VITE_BUILD_SOURCEMAPS: "true"
+          VITE_STORAGE_TYPE: "cached"
 
       # Archive source maps for later use in deployments
       - name: 📤 Archive Jumble frontend artifacts
@@ -139,6 +140,30 @@ jobs:
         with:
           name: jumble-artifacts
           path: ./toolshed/jumble-frontend
+
+      # NOTE(jake): We need to upload the frontend artifacts to R2, to enable
+      # localhost:8000 toolshed proxying of jumble.
+      - name: 📤 Upload frontend artifacts to R2 /jumble/latest
+        uses: ryand56/r2-upload-action@v1.4
+        if: github.ref == 'refs/heads/main'
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-bucket: ${{ secrets.R2_BUCKET }}
+          source-dir: ./toolshed/jumble-frontend
+          destination-dir: jumble/latest
+
+      - name: 📤 Upload backend artifacts to R2 /jumble/${{ github.sha }}
+        uses: ryand56/r2-upload-action@v1.4
+        if: github.ref == 'refs/heads/main'
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-bucket: ${{ secrets.R2_BUCKET }}
+          source-dir: ./toolshed/jumble-frontend
+          destination-dir: jumble/${{ github.sha }}
 
       - name: 🔐 Process & sign binaries
         if: github.ref == 'refs/heads/main'
