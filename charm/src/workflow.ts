@@ -18,6 +18,7 @@ import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode } from "./iframe/static.ts";
 import { formatPromptWithMentions } from "./format.ts";
 import { castNewRecipe } from "./iterate.ts";
+import { generateKey } from "node:crypto";
 
 // Types for workflow classification
 export type WorkflowType =
@@ -130,6 +131,7 @@ export async function classifyIntent(
   currentCharm?: Cell<Charm>,
   model?: string,
   references?: Record<string, Cell<any>>,
+  generationId?: string,
 ): Promise<IntentClassificationResult> {
   // Process the input for @mentions if a CharmManager is provided
   // Extract context from the current charm if available
@@ -181,6 +183,7 @@ export async function classifyIntent(
       existingSchema,
       existingCode,
       model,
+      generationId,
     );
 
     return {
@@ -262,11 +265,12 @@ function extractContext(charm: Cell<Charm>) {
  * @returns Execution plan with steps, spec, and schema
  */
 export async function generatePlan(
-  { input, workflowType, currentCharm, model }: {
+  { input, workflowType, currentCharm, model, generationId }: {
     input: string;
     workflowType: WorkflowType;
     currentCharm?: Cell<Charm>;
     model?: string;
+    generationId?: string;
   },
 ): Promise<ExecutionPlan> {
   // Extract context from the current charm if available
@@ -289,6 +293,7 @@ export async function generatePlan(
       existingSchema,
       existingCode,
       model,
+      generationId,
     );
 
     return {
@@ -363,6 +368,7 @@ export interface WorkflowForm {
     isComplete: boolean;
     isFilled: boolean;
     modelId?: string;
+    generationId?: string;
     charmManager?: CharmManager;
   };
 }
@@ -371,10 +377,11 @@ export interface WorkflowForm {
  * Create a new workflow form with default values
  */
 export function createWorkflowForm(
-  { input, modelId, charm }: {
+  { input, modelId, charm, generationId }: {
     input: string;
     modelId?: string;
     charm?: Cell<Charm>;
+    generationId?: string;
   },
 ): WorkflowForm {
   return {
@@ -390,6 +397,7 @@ export function createWorkflowForm(
       isComplete: false,
       isFilled: false,
       modelId,
+      generationId: generationId ?? crypto.randomUUID(),
     },
   };
 }
@@ -461,6 +469,7 @@ export async function fillClassificationSection(
     form.input.existingCharm,
     form.meta.modelId,
     form.input.references,
+    form.meta.generationId,
   );
 
   // Update classification in the form
@@ -515,6 +524,7 @@ export async function fillPlanningSection(
         workflowType: form.classification.workflowType,
         currentCharm: form.input.existingCharm,
         model: form.meta.modelId,
+        generationId: form.meta.generationId,
       },
     );
 
@@ -531,6 +541,7 @@ export async function fillPlanningSection(
         workflowType: form.classification.workflowType,
         currentCharm: form.input.existingCharm,
         model: form.meta.modelId,
+        generationId: form.meta.generationId,
       },
     );
 
@@ -642,6 +653,7 @@ export async function processWorkflow(
     existingCharm?: Cell<Charm>;
     prefill?: Partial<WorkflowForm>;
     model?: string;
+    generationId?: string;
     onProgress?: (form: WorkflowForm) => void;
     cancellation?: { cancelled: boolean };
   } = {},
@@ -655,6 +667,7 @@ export async function processWorkflow(
     input,
     charm: options.existingCharm,
     modelId: options.model,
+    generationId: options.generationId,
   });
   console.log("creating form", form);
 

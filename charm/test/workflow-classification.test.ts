@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { classifyIntent, generatePlan, WORKFLOWS } from "../src/workflow.ts";
+import { WORKFLOWS } from "../src/workflow.ts";
 
 describe("Workflow Classification", () => {
   describe("WORKFLOWS constant", () => {

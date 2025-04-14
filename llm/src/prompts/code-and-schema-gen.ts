@@ -228,6 +228,7 @@ Based on this goal and the existing schema, please provide a title, description,
     metadata: {
       context: "workflow",
       workflow: "code-and-schema-gen",
+      generationId: form.meta.generationId
     },
   });
 

@@ -29,6 +29,7 @@ export const genSrc = async ({
   schema,
   steps,
   model,
+  generationId
 }: {
   src?: string;
   spec?: string;
@@ -36,6 +37,7 @@ export const genSrc = async ({
   schema: JSONSchema;
   steps?: string[];
   model?: string;
+  generationId?: string;
 }) => {
   const request = buildPrompt({ src, spec, newSpec, schema, model, steps });
 
@@ -44,6 +46,7 @@ export const genSrc = async ({
     metadata: {
       context: "workflow",
       workflow: "genSrc",
+      generationId,
     },
   });
 
@@ -67,6 +70,7 @@ export async function iterate(
   charm: Cell<Charm>,
   plan: WorkflowForm["plan"],
   model?: string,
+  generationId?: string,
 ): Promise<Cell<Charm>> {
   const { iframe } = getIframeRecipe(charm);
   if (!iframe) {
@@ -83,7 +87,8 @@ export async function iterate(
     newSpec,
     schema: iframe.argumentSchema,
     steps: plan?.steps,
-    model: model,
+    model,
+    generationId
   });
 
   return generateNewRecipeVersion(charmManager, charm, newIFrameSrc, newSpec);
@@ -332,6 +337,7 @@ async function twoPhaseCodeGeneration(
     newSpec,
     schema,
     steps: form.plan?.steps,
+    generationId: form.meta.generationId
   });
   const name = extractTitle(newIFrameSrc, title); // Use the generated title as fallback
   const newRecipeSrc = buildFullRecipe({

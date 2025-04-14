@@ -50,9 +50,9 @@ Your task is to:
 When writing your response:
 
 1. First, provide a brief explanation of the error and its likely cause inside <error_analysis> tags.
-2. Then, write the new, fixed USER CODE inside <fixed_code> tags. Ensure that this code resolves the error and meets the requirements specified in the original SPEC. 
+2. Then, write the new, fixed USER CODE inside <fixed_code> tags. Ensure that this code resolves the error and meets the requirements specified in the original SPEC.
 
-CRITICAL: 
+CRITICAL:
 - Your fixed code should ONLY include the user code portion, NOT a complete HTML document or template.
 - Do NOT include any <html>, <head>, <body> tags or other template elements.
 - ONLY include the JavaScript code that defines onLoad, onReady, and title functions.

@@ -64,8 +64,7 @@ export async function describeCharm(
       },
     ],
     metadata: {
-      context: "workflow",
-      workflow: "charm-describe",
+      context: "charm-describe",
     },
   });
 

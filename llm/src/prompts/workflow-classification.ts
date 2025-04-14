@@ -147,6 +147,7 @@ export async function classifyWorkflow(
   existingSchema?: JSONSchema,
   existingCode?: string,
   model?: string,
+  generationId?: string,
 ): Promise<{
   workflowType: WorkflowType;
   confidence: number;
@@ -172,6 +173,7 @@ export async function classifyWorkflow(
     metadata: {
       context: "workflow",
       workflow: "classification",
+      generationId,
     },
   });
 
@@ -264,6 +266,7 @@ export async function generateWorkflowPlan(
   existingSchema?: JSONSchema,
   existingCode?: string,
   model?: string,
+  generationId?: string,
 ): Promise<{
   steps: string[];
   spec: string;
@@ -289,6 +292,7 @@ export async function generateWorkflowPlan(
     metadata: {
       context: "workflow",
       workflow: workflowType.toLowerCase(),
+      generationId,
     },
   });
 

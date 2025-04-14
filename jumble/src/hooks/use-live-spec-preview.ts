@@ -4,9 +4,6 @@ import { useDebounce } from "./use-debounce.ts";
 import { useRef } from "react";
 import {
   CharmManager,
-  createWorkflowForm,
-  fillClassificationSection,
-  fillPlanningSection,
   formatPromptWithMentions as formatMentions,
   parseComposerDocument,
   processInputSection,
@@ -133,6 +130,7 @@ export function useLiveSpecPreview(
           charmManager,
           existingCharm: currentCharm,
           model: modelId,
+          generationId,
           prefill: prefill,
           onProgress: (f) => {
             // Check if this is still the current generation before proceeding

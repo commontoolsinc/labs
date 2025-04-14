@@ -64,8 +64,7 @@ export async function generateJSON(
     ],
     mode: "json",
     metadata: {
-      context: "workflow",
-      workflow: "json-gen",
+      context: "json-gen",
     },
   });
 
