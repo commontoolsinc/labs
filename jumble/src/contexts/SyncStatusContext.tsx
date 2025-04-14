@@ -11,6 +11,7 @@ import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 interface SyncStatusContextType {
   isSyncing: boolean;
   lastSyncTime: Date | null;
+  hasConnected: boolean;
 }
 
 const SyncStatusContext = createContext<SyncStatusContextType | undefined>(
