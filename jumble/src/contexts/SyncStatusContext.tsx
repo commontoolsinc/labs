@@ -11,6 +11,7 @@ import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 interface SyncStatusContextType {
   isSyncing: boolean;
   lastSyncTime: Date | null;
+  hasConnected: boolean;
 }
 
 const SyncStatusContext = createContext<SyncStatusContextType | undefined>(
@@ -27,7 +28,8 @@ export function SyncStatusProvider({
   intervalMs = 50,
 }: SyncStatusProviderProps) {
   const [isSyncing, setIsSyncing] = useState(true);
-  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+  const lastSyncTimeRef = useRef<Date | null>(null);
+  const [hasConnected, setHasConnected] = useState(false);
   const { charmManager } = useCharmManager();
   const isCheckingSyncRef = useRef(false);
 
@@ -44,7 +46,10 @@ export function SyncStatusProvider({
         await charmManager.synced();
 
         if (isMounted) {
-          setLastSyncTime(new Date());
+          lastSyncTimeRef.current = new Date();
+          if (!hasConnected) {
+            setHasConnected(true);
+          }
         }
       } catch (error) {
         console.error("Sync error:", error);
@@ -68,7 +73,7 @@ export function SyncStatusProvider({
     };
   }, [charmManager, intervalMs]);
 
-  const value = { isSyncing, lastSyncTime };
+  const value = { isSyncing, lastSyncTime: lastSyncTimeRef.current, hasConnected };
 
   return (
     <SyncStatusContext.Provider value={value}>
