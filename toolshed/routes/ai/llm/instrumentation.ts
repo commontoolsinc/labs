@@ -27,7 +27,13 @@ export function register() {
           },
         }),
         spanFilter: (span) => {
-          return isOpenInferenceSpan(span);
+          // console.log("SPAN", span);
+          const includeSpanCriteria = [
+            isOpenInferenceSpan(span),
+            span.attributes["http.route"] == "/api/ai/llm", // Include the root span, which is in the hono app
+            span.instrumentationLibrary.name.includes("@vercel/otel"), // Include the actual LLM API fetch span
+          ];
+          return includeSpanCriteria.some((c) => c);
         },
       }),
     ],

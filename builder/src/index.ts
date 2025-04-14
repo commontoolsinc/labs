@@ -10,8 +10,10 @@ export {
   render,
 } from "./module.ts";
 export {
+  getLastTraceSpanID,
   getRecipeEnvironment,
   type RecipeEnvironment,
+  setLastTraceSpanID,
   setRecipeEnvironment,
 } from "./env.ts";
 export {

@@ -56,4 +56,7 @@ declare module "react-icons/md" {
   export const MdOutlineStar: React.FC<IconProps>;
   export const MdOutlineStarBorder: React.FC<IconProps>;
   export const MdShare: React.FC<IconProps>;
+  export const MdSend: React.FC<IconProps>;
+  export const MdThumbDownOffAlt: React.FC<IconProps>;
+  export const MdThumbUpOffAlt: React.FC<IconProps>;
 }

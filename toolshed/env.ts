@@ -44,6 +44,7 @@ const EnvSchema = z.object({
   // LLM Observability Tool
   CTTS_AI_LLM_PHOENIX_PROJECT: z.string().default(""),
   CTTS_AI_LLM_PHOENIX_URL: z.string().default(""),
+  CTTS_AI_LLM_PHOENIX_API_URL: z.string().default(""),
   CTTS_AI_LLM_PHOENIX_API_KEY: z.string().default(""),
   // ===========================================================================
 
