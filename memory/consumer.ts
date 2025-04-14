@@ -14,6 +14,7 @@ import {
   ConsumerResultFor,
   DID,
   Entity,
+  Fact,
   InferOf,
   Invocation,
   InvocationURL,
@@ -26,6 +27,9 @@ import {
   QueryError,
   Reference,
   Result,
+  Revision,
+  SchemaContext,
+  SchemaPathSelector,
   SchemaQuery,
   SchemaSelector,
   Seconds,
@@ -41,7 +45,7 @@ import {
 import { refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
 import * as ChangesBuilder from "./changes.ts";
-import * as Fact from "./fact.ts";
+import * as FactModule from "./fact.ts";
 import * as Access from "./access.ts";
 import * as Subscription from "./subscription.ts";
 import { toStringStream } from "./ucan.ts";
@@ -432,8 +436,14 @@ class QueryView<
     }
   }
 
-  get facts() {
-    return [...Fact.iterate(this.selection[this.space])];
+  get facts(): Revision<Fact>[] {
+    return [...FactModule.iterate(this.selection[this.space])];
+  }
+
+  // Get the facts returned by the query, together with the associated
+  // schema context used to query
+  get schemaFacts(): [Revision<Fact>, SchemaContext | undefined][] {
+    return this.facts.map((fact) => [fact, this.getSchema(fact)]);
   }
 
   subscribe() {
@@ -483,6 +493,22 @@ class QueryView<
     subQueryView.selector = subSelector;
     subQueryView.promise = Promise.resolve({ ok: subQueryView });
     return subQueryView;
+  }
+
+  // Get the schema context used to fetch the specified fact.
+  // If the fact was included from another fact, it will not have a schemaContext.
+  getSchema(fact: Revision<Fact>): SchemaContext | undefined {
+    const factSelector = this.selector;
+    const attributes = factSelector[fact.of];
+    if (attributes !== undefined) {
+      const causes = attributes[fact.the] as Record<Cause, SchemaPathSelector>;
+      if (causes !== undefined) {
+        for (const [_cause, selector] of Object.entries(causes)) {
+          return selector.schemaContext;
+        }
+      }
+    }
+    return undefined;
   }
 }
 

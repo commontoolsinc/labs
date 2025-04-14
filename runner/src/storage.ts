@@ -17,8 +17,13 @@ import { Signer } from "@commontools/identity";
 import { isBrowser } from "@commontools/utils/env";
 import { sleep } from "@commontools/utils/sleep";
 import { TransactionResult } from "@commontools/memory";
+import { refer } from "@commontools/memory/reference";
 import { defer } from "@commontools/utils";
-import { SchemaContext } from "@commontools/memory/interface";
+import {
+  Entity,
+  SchemaContext,
+  SchemaNone,
+} from "@commontools/memory/interface";
 
 export function log(fn: () => any[]) {
   debug(() => {
@@ -189,7 +194,7 @@ class StorageImpl implements Storage {
   // Any doc here is being synced or in the process of spinning up syncing.
   // See also docIsLoading, which is a promise while the document is loading,
   // and is deleted after it is loaded.
-  private docIsSyncing = new Set<DocImpl<any>>();
+  private docIsSyncing = new Map<Entity, Set<string>>();
 
   // Map from doc to promise of loading doc, set at stage 2. Resolves when
   // doc and all it's dependencies are loaded.
@@ -306,7 +311,7 @@ class StorageImpl implements Storage {
       // environment variable override this.
       const type = this.remoteStorageUrl?.protocol === "volatile:"
         ? "volatile"
-        : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "remote");
+        : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "cached");
 
       if (type === "remote") {
         if (!this.remoteStorageUrl) {
@@ -363,6 +368,10 @@ class StorageImpl implements Storage {
     if (!doc.entityId) throw new Error("Doc has no entity ID");
 
     const entityId = JSON.stringify(doc.entityId);
+    const entity = `of:${doc.entityId["/"]}` as Entity;
+    const schemaRef = schemaContext === undefined
+      ? SchemaNoneRef
+      : refer(schemaContext).toString();
 
     // If the doc is ephemeral, we don't need to load it from storage. We still
     // add it to the map of known docs, so that we don't try to keep loading
@@ -370,14 +379,19 @@ class StorageImpl implements Storage {
     if (doc.ephemeral) return doc;
 
     // If the doc is already loaded or loading, return immediately.
-    if (this.docIsSyncing.has(doc)) return doc;
+    if (!this.docIsSyncing.has(entity)) {
+      this.docIsSyncing.set(entity, new Set<string>());
+    }
+    const syncingSchemas = this.docIsSyncing.get(entity)!;
+    if (syncingSchemas.has(schemaRef)) return doc;
 
     // Important that we set this _before_ the doc is loaded, as we can already
     // populate the doc when loading dependencies and thus avoid circular
     // references.
-    this.docIsSyncing.add(doc);
+    syncingSchemas.add(schemaRef);
 
     // Start loading the doc and safe the promise for processBatch to await for
+    console.log("Called StorageProvider.sync for ", entityId, schemaContext);
     const loadingPromise = this._getStorageProviderForSpace(doc.space)
       .sync(doc.entityId!, expectedInStorage, schemaContext)
       .then(() => doc);
@@ -928,3 +942,4 @@ class StorageImpl implements Storage {
 }
 
 export const storage = new StorageImpl();
+const SchemaNoneRef = refer(SchemaNone).toString();

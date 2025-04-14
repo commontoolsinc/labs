@@ -1,4 +1,4 @@
-import type { Reference } from "merkle-reference";
+import { refer, type Reference } from "merkle-reference";
 import { JSONSchema } from "../builder/src/types.ts";
 
 export type { Reference };
@@ -750,7 +750,7 @@ export type SchemaSelector = Select<
 
 export type SchemaPathSelector = {
   path: string[];
-  schemaContext: SchemaContext;
+  schemaContext?: SchemaContext;
 };
 
 // This is a schema, together with its rootSchema for resolving $ref entries
@@ -964,3 +964,9 @@ export type Variant<U extends Record<string, unknown>> = {
       [K in Key]: U[Key];
     };
 }[keyof U];
+
+// This will match every doc reachable by the specified set of documents
+export const SchemaAll: SchemaContext = { schema: true, rootSchema: true };
+
+// This is equivalent to a standard query, and will only match the specified documents
+export const SchemaNone: SchemaContext = { schema: false, rootSchema: false };

@@ -10,6 +10,7 @@ import type {
   QueryError,
   Result,
   Revision,
+  SchemaContext,
   SchemaPathSelector,
   State,
   The,
@@ -28,7 +29,6 @@ import * as IDB from "./idb.ts";
 import * as Memory from "@commontools/memory/consumer";
 export * from "@commontools/memory/interface";
 import * as Codec from "@commontools/memory/codec";
-import { SchemaContext } from "./remote.ts";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -355,12 +355,14 @@ export class Replica {
       `idb:${space}`,
     ),
     public pullRetryLimit: number = 100,
+    public schemaTracker = new Map<string, Set<string>>(),
   ) {
     channel.addEventListener("message", this);
     this.pull = this.pull.bind(this);
   }
 
   async poll() {
+    // Poll re-fetches the commit log, then subscribes to that
     const query = this.remote.query({
       select: {
         [this.space]: {
@@ -425,10 +427,9 @@ export class Replica {
     for (const [{ the, of }, schemaContext] of entries) {
       // TODO: Env var to disable
       if (hasSchema) {
-        const match: SchemaPathSelector = {
-          path: [],
-          schemaContext: schemaContext ?? { schema: true, rootSchema: true },
-        };
+        const match: SchemaPathSelector = schemaContext === undefined
+          ? { path: [] }
+          : { path: [], schemaContext: schemaContext };
         // TODO: need to handle cause free queries on the server
         Changes.set(selector, [of, the], "_", match);
       } else {
@@ -447,7 +448,8 @@ export class Replica {
     }
 
     // We store fetched entries into the heap.
-    const fetched = query.facts;
+    const fetchedEntries = query.schemaFacts;
+    const fetched = fetchedEntries.map(([fact, _schema]) => fact);
     this.heap.merge(fetched, Replica.put);
 
     // Remote may not have all the requested entries. We denitrify them by
@@ -467,8 +469,18 @@ export class Replica {
       }
     }
 
-    for (const revision of fetched) {
-      revisions.set({ the: revision.the, of: revision.of }, revision);
+    for (const [revision, schema] of fetchedEntries) {
+      const factAddress = { the: revision.the, of: revision.of };
+      revisions.set(factAddress, revision);
+      if (schema !== undefined) {
+        console.log("Ran a schema query: ", revision, schema);
+        const schemaRef = refer(schema).toString();
+        const factKey = toKey(factAddress);
+        if (!this.schemaTracker.has(factKey)) {
+          this.schemaTracker.set(factKey, new Set<string>());
+        }
+        this.schemaTracker.get(factKey)?.add(schemaRef);
+      }
     }
 
     // Add notFound entries to the heap and also persist them in the cache.
@@ -500,12 +512,17 @@ export class Replica {
     for (const [address, schema] of entries) {
       if (!this.get(address)) {
         need.push([address, schema]);
+      } else if (schema !== undefined) {
+        // Even though we have our root doc in local store, we may need
+        // to re-issue our query, since our cached copy may have been run with a
+        // different schema, and thus have different linked documents.
+        const schemaRef = refer(schema).toString();
+        const key = toKey(address);
+        if (!this.schemaTracker.get(key)?.has(schemaRef)) {
+          need.push([address, schema]);
+        }
       }
     }
-
-    // TODO(@ubik2) - even though we have our root doc in local store, we need
-    // to re-issue our query, since our cached copy may have been run with a
-    // different schema, and thus have different linked documents.
 
     // We also include the commit entity to keep track of the current head.
     if (!this.get({ the, of: this.space })) {
@@ -519,9 +536,12 @@ export class Replica {
     }
 
     // Otherwise we attempt pull needed entries from the local store.
-    const { ok: pulled, error } = await this.cache.pull(
-      need.map(([addr, _schema]) => addr),
-    );
+    // We only do this for entries without a schema, since we'll want the server
+    // to track our subscription for the entries with a schema.
+    const schemaless = need
+      .filter(([_addr, schema]) => schema === undefined)
+      .map(([addr, _schema]) => addr);
+    const { ok: pulled, error } = await this.cache.pull(schemaless);
 
     if (error) {
       return { error };
@@ -532,6 +552,7 @@ export class Replica {
       // If number of items pulled from cache is less than number of needed items
       // we did not have everything we needed in cache, in which case we will
       // have to wait until fetch is complete.
+      // TODO: still need to add since field
       if (pulled.size < need.length) {
         return await this.pull(need);
       } //

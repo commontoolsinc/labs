@@ -340,15 +340,20 @@ export const selectSchema = <Space extends MemorySpace>(
           if (newValue === undefined) {
             continue;
           }
-          const traverser = new SchemaObjectTraverser(
-            helper,
-            selector.schemaContext,
-            selector.schemaContext.rootSchema,
-            tracker,
-          );
-          // We don't actually use the return value here, but we've built up
-          // a list of all the documents we need to watch.
-          traverser.traverse(newDoc, newDocRoot, newValue);
+          if (selector.schemaContext !== undefined) {
+            // We've provided a schema context for this, so traverse it
+            // If we didn't provide a schema context, we still have the selected
+            // object in our helper, from the getAtPath above.ctEntry.cause,
+            const traverser = new SchemaObjectTraverser(
+              helper,
+              selector.schemaContext,
+              selector.schemaContext.rootSchema,
+              tracker,
+            );
+            // We don't actually use the return value here, but we've built up
+            // a list of all the documents we need to watch.
+            traverser.traverse(newDoc, newDocRoot, newValue);
+          }
         }
       }
     }
