@@ -33,22 +33,6 @@ export function useGlobalActions() {
     ),
   );
 
-  // Feedback action (always available)
-  useAction(
-    useMemo(
-      () => ({
-        id: "feedback-toggle",
-        label: "Feedback",
-        icon: <MdSend size={24} />,
-        onClick: () => {
-          globalThis.dispatchEvent(new CustomEvent("toggle-feedback"));
-        },
-        priority: 30,
-      }),
-      [],
-    ),
-  );
-
   const hasCharmId = useCallback(() => Boolean(charmId), [charmId]);
 
   const { charmManager } = useCharmManager();
@@ -106,6 +90,23 @@ export function useGlobalActions() {
         priority: 50,
       }),
       [hasCharmId, togglePath],
+    ),
+  );
+
+  // Feedback action (available only when a charm is open)
+  useAction(
+    useMemo(
+      () => ({
+        id: "feedback-toggle",
+        label: "Feedback",
+        icon: <MdSend size={24} />,
+        onClick: () => {
+          globalThis.dispatchEvent(new CustomEvent("toggle-feedback"));
+        },
+        priority: 30,
+        predicate: hasCharmId,
+      }),
+      [hasCharmId],
     ),
   );
 }
