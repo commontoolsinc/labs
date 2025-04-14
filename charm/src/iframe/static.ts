@@ -589,7 +589,7 @@ Create an interactive React component that fulfills the user's request. Focus on
 ${security()}
 
 <view-model-schema>
-SCHEMA
+{{SCHEMA}}
 </view-model-schema>
 
 <guide>
