@@ -158,7 +158,11 @@ export type Protocol<Space extends MemorySpace = MemorySpace> = {
       };
       graph: {
         query(
-          schemaQuery: { selectSchema: SchemaSelector; since?: number },
+          schemaQuery: {
+            selectSchema: SchemaSelector;
+            since?: number;
+            subscribe?: boolean;
+          },
         ): Task<
           Result<Selection<Space>, AuthorizationError | QueryError>
         >;
@@ -714,7 +718,7 @@ export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
 export type SchemaQuery<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/graph/query",
   Space,
-  { selectSchema: SchemaSelector; since?: number }
+  { selectSchema: SchemaSelector; since?: number; subscribe?: boolean }
 >;
 
 // A normal Selector looks like this (with _ as wildcard cause):
