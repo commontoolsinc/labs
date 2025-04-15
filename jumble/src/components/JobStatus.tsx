@@ -40,6 +40,7 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
     showCompleted,
     setShowCompleted,
     isVisible,
+    setIsVisible,
   } = useJobContext();
 
   const navigate = useNavigate();
@@ -86,31 +87,12 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
     return null;
   };
 
-  // Progress indicator component
-  const ProgressIndicator = ({ progress }: { progress?: number }) => {
-    if (progress === undefined) return null;
-
-    return (
-      <div className="flex items-center mr-2 w-[60px]">
-        <div className="flex-1 h-1 bg-gray-200 rounded overflow-hidden mr-1">
-          <div
-            className="h-full bg-blue-500 transition-[width] duration-300 ease-in-out"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-        <span className="text-[10px] text-gray-500 whitespace-nowrap">
-          {progress.toFixed(0)}%
-        </span>
-      </div>
-    );
-  };
-
   // JobRow component for displaying job information
   const JobRow = ({ job }: { job: Job }) => (
     <div
       className={`flex items-center px-3 py-2 h-9 border-b border-gray-200 ${
         job.state === "running"
-          ? "bg-grey-200"
+          ? "bg-grey-50"
           : job.state === "completed"
           ? "bg-green-50"
           : "bg-red-50"
@@ -125,7 +107,6 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
           {job.status}
         </div>
       </div>
-      {job.state === "running" && <ProgressIndicator progress={job.progress} />}
       {job.state === "running" && <ElapsedTime startTime={job.startedAt} />}
       {job.state === "completed" && job.result?.generation?.charm && (
         <button
@@ -161,13 +142,25 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
     >
       {/* Active Jobs Section - Always Visible */}
       <div className="flex-none">
-        {runningJobs.length > 0 && (
-          <div className="px-3 py-2 border-b border-gray-300 bg-gray-50">
-            <h4 className="m-0 text-sm font-medium text-gray-800">
-              Active Jobs
-            </h4>
-          </div>
-        )}
+        {/* Header with title and close button */}
+        <div className="px-3 py-2 border-b border-gray-300 bg-gray-50 flex justify-between items-center">
+          <h4 className="m-0 text-sm font-medium text-gray-800">
+            {runningJobs.length > 0 ? "Active Jobs" : "Jobs"}
+          </h4>
+          <button
+            type="button"
+            onClick={() => setIsVisible(false)}
+            className="text-gray-500 hover:text-gray-800 transition-colors cursor-pointer bg-transparent border-none p-0 flex items-center"
+            aria-label="Close panel"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <path
+                fill="currentColor"
+                d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"
+              />
+            </svg>
+          </button>
+        </div>
 
         <div className="max-h-48 overflow-y-auto">
           {runningJobs.map((job) => <JobRow key={job.jobId} job={job} />)}
