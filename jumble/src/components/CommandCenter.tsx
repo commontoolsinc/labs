@@ -18,9 +18,8 @@ import {
   SelectCommandItem,
   TranscribeCommandItem,
 } from "./commands.ts";
-import { formatPromptWithMentions, WorkflowForm } from "@commontools/charm";
+import { WorkflowForm } from "@commontools/charm";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
-import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
 import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { charmId, getMentionableCharms } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
@@ -285,8 +284,6 @@ export function CommandCenter() {
   const [mode, setMode] = useState<CommandMode>({ type: "main" });
   const [commandPathIds, setCommandPathIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
-  const { stopJob, startJob, addJobMessage, listJobs, updateJobProgress } =
-    useBackgroundTasks();
 
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
@@ -318,11 +315,6 @@ export function CommandCenter() {
         setSearch(initialInput);
       });
     },
-    stopJob,
-    startJob,
-    addJobMessage,
-    listJobs,
-    updateJobProgress,
     commandPathIds,
     onClearAuthentication: clearAuthentication,
     previewForm,
@@ -335,11 +327,6 @@ export function CommandCenter() {
     setMode,
     loading,
     setLoading,
-    stopJob,
-    startJob,
-    addJobMessage,
-    listJobs,
-    updateJobProgress,
     commandPathIds,
     clearAuthentication,
     previewForm,

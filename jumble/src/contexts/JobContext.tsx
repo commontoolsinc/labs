@@ -31,11 +31,7 @@ interface JobUpdateEvent extends BaseJobEvent {
 interface JobCompleteEvent extends BaseJobEvent {
   type: "job-complete";
   status: string;
-  result?: unknown;
-  viewAction?: {
-    label: string;
-    action: () => void;
-  };
+  result?: WorkflowForm;
   payload?: Record<string, unknown>;
 }
 
@@ -141,7 +137,6 @@ export const JobProvider: React.FC<JobProviderProps> = ({ children }) => {
                 status,
                 state: "completed",
                 result: detail.result,
-                viewAction: detail.viewAction,
                 completedAt: new Date(),
                 updatedAt: new Date(),
               };

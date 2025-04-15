@@ -16,8 +16,6 @@ import type { NavigateFunction } from "react-router-dom";
 import { charmId } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
 import { EntityId, isStream } from "@commontools/runner";
-import { BackgroundJob } from "@/contexts/BackgroundTaskContext.tsx";
-import { startCharmIndexing } from "@/utils/indexing.ts";
 import { createPath, createPathWithHash, ROUTES } from "@/routes.ts";
 import { grabCells, SourceSet } from "@/utils/format.ts";
 
@@ -138,11 +136,6 @@ export interface CommandContext {
   loading: boolean;
   setLoading: (loading: boolean) => void;
   setModeWithInput: (mode: CommandMode, initialInput: string) => void;
-  listJobs: () => BackgroundJob[];
-  startJob: (name: string) => string;
-  stopJob: (jobId: string) => void;
-  addJobMessage: (jobId: string, message: string) => void;
-  updateJobProgress: (jobId: string, progress: number) => void;
   commandPathIds: string[];
   previewForm?: Partial<WorkflowForm>;
   onClearAuthentication: () => void;
@@ -242,10 +235,6 @@ async function handleExecuteCharmAction(ctx: CommandContext) {
     });
   } catch (error) {
     console.error("Error fetching charm actions:", error);
-    ctx.addJobMessage(
-      ctx.startJob("Action Error"),
-      `Error: ${error instanceof Error ? error.message : String(error)}`,
-    );
   } finally {
     ctx.setLoading(false);
   }
@@ -388,42 +377,6 @@ async function handleDeleteCharm(ctx: CommandContext) {
   else ctx.setOpen(false);
 }
 
-function handleStartCounterJob(ctx: CommandContext) {
-  const jobId = ctx.startJob("Counter Job");
-  console.log("Started counter job with ID:", jobId);
-
-  const interval = setInterval(() => {
-    const job = ctx.listJobs().find((j) => j.id === jobId);
-    console.log("Current job state:", job);
-
-    if (!job || job.status !== "running") {
-      console.log("Job stopped or not found, clearing interval");
-      clearInterval(interval);
-      return;
-    }
-
-    const currentCount = parseInt(
-      job.messages[job.messages.length - 1]?.split(": ")[1] || "0",
-    );
-    const newCount = currentCount + 1;
-    console.log("Updating count from", currentCount, "to", newCount);
-
-    ctx.addJobMessage(jobId, `Count: ${newCount}`);
-    console.log(`Count: ${newCount}`);
-    ctx.updateJobProgress(jobId, (newCount % 100) / 100);
-
-    if (newCount >= 1000) {
-      console.log("Reached max count, stopping job");
-      ctx.stopJob(jobId);
-      clearInterval(interval);
-    }
-  }, 1000);
-
-  console.log("Adding initial message");
-  ctx.addJobMessage(jobId, "Count: 0");
-  ctx.setOpen(false);
-}
-
 async function handleImportJSON(ctx: CommandContext) {
   ctx.setLoading(true);
   try {
@@ -488,17 +441,6 @@ async function handleLoadRecipe(ctx: CommandContext) {
     ctx.setLoading(false);
     ctx.setOpen(false);
   }
-}
-
-function handleIndexCharms(ctx: CommandContext) {
-  startCharmIndexing(ctx.charmManager, {
-    startJob: ctx.startJob,
-    stopJob: ctx.stopJob,
-    addJobMessage: ctx.addJobMessage,
-    updateJobProgress: ctx.updateJobProgress,
-    listJobs: ctx.listJobs,
-  });
-  ctx.setOpen(false);
 }
 
 async function handleUseDataInSpell(ctx: CommandContext) {
@@ -1011,18 +953,6 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
           handler: handleOpenFullscreenInspector,
         },
         {
-          id: "start-counter-job",
-          type: "action",
-          title: "Start Counter Job",
-          handler: () => handleStartCounterJob(ctx),
-        },
-        {
-          id: "index-charms",
-          type: "action",
-          title: "Index Charms",
-          handler: () => handleIndexCharms(ctx),
-        },
-        {
           id: "import-json",
           type: "action",
           title: "Import JSON",
@@ -1065,67 +995,6 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
           type: "action",
           title: "Add RSS Importer",
           handler: () => handleAddRemoteRecipe(ctx, "rss.tsx", "RSS Importer"),
-        },
-      ],
-    },
-    {
-      id: "background-jobs",
-      type: "menu",
-      title: `Background Jobs (${ctx.listJobs().length})`,
-      group: "Other",
-      children: [
-        ...ctx.listJobs().map(
-          (job): CommandItem => ({
-            id: `job-${job.id}`,
-            type: "menu",
-            title: `${job.name} (${job.status})`,
-            children: [
-              {
-                id: `job-${job.id}-toggle`,
-                type: "action",
-                title: job.status === "running" ? "Pause" : "Resume",
-                handler: () => {
-                  if (job.status === "running") {
-                    ctx.stopJob(job.id);
-                  } else {
-                    // ctx.resumeJob(job.id);
-                  }
-                  ctx.setMode({ type: "main" });
-                },
-              },
-              {
-                id: `job-${job.id}-cancel`,
-                type: "action",
-                title: "Stop",
-                handler: () => {
-                  ctx.stopJob(job.id);
-                  ctx.setMode({ type: "main" });
-                },
-              },
-              {
-                id: `job-${job.id}-messages`,
-                type: "menu",
-                title: "View Messages",
-                children: job.messages.map(
-                  (msg, i): CommandItem => ({
-                    id: `msg-${job.id}-${i}`,
-                    type: "action",
-                    title: msg,
-                    handler: () => {},
-                  }),
-                ),
-              },
-            ],
-          }),
-        ),
-        {
-          id: "clear-completed-jobs",
-          type: "action",
-          title: "Clear Completed Jobs",
-          handler: () => {
-            // ctx.clearCompletedJobs();
-            ctx.setMode({ type: "main" });
-          },
         },
       ],
     },
