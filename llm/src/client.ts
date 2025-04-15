@@ -23,23 +23,15 @@ export const DEFAULT_LLM_URL = typeof globalThis.location !== "undefined"
     "/api/ai/llm"
   : "//api/ai/llm";
 
-/**
- * Represents a request to the LLM service.
- */
 export type LLMRequest = {
-  /** The model(s) to use for the request. Can be a single string or an array for fallback. */
-  model?: string | string[];
-  /** The system prompt to guide the model's behavior. */
+  messages: SimpleMessage[] | SimpleContent[];
   system?: string;
-  /** An array of messages forming the conversation history. */
-  messages: LlmPrompt[];
-  /** An optional stop sequence to end generation. */
+  model: string | string[];
+  max_tokens?: number;
+  stream?: boolean;
   stop?: string;
-  /** Specifies the output mode, e.g., "json" for JSON output. */
   mode?: "json";
-  /** Optional metadata to associate with the request. */
   metadata?: Record<string, string | undefined | LlmPrompt>;
-  /** Optional flag to skip the LLM cache for this request. Defaults to false. */
   skip_cache?: boolean;
 };
 
