@@ -8,6 +8,8 @@ import {
 import { type Action, idle } from "../scheduler.ts";
 import { refer } from "merkle-reference";
 import { type ReactivityLog } from "../scheduler.ts";
+import { isObj } from "@commontools/utils";
+
 // TODO(ja): investigate if generateText should be replaced by
 // fetchData with streaming support
 
@@ -115,7 +117,7 @@ export function llm(
     const hash = refer(JSON.stringify(llmParams)).toString();
 
     // Add after hashing, since this will change a lot, but doesn't affect the request.
-    llmParams.metadata = { ...context, charmId };
+    llmParams.metadata = { ...isObj(context) ? context : {}, charmId };
 
     // Return if the same request is being made again, either concurrently (same
     // as previousCallHash) or when rehydrated from storage (same as the
