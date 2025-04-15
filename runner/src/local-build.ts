@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { RawSourceMap, SourceMapConsumer } from "source-map-js";
 import * as commonHtml from "@commontools/html";
 import * as commonBuilder from "@commontools/builder";
 import * as zod from "zod";
@@ -35,12 +36,44 @@ async function getDOMParser() {
   return DOMParser;
 }
 
-// NOTE(ja): this isn't currently doing typechecking, but it could...
+const stackTracePattern =
+  /at eval \(eval at .+?\), (?:eval|<anonymous>|Function):(\d+):(\d+)\)/;
 
-// NOTE(ja): we should probably send JSON of graph, not the function... but...
-// 1. unsure how to run a JSON graph from a recipe
-// 2. converting to JSON loses closures (which is we will want, but we
-//    currently use closures to get around gaps in the current implementation)
+// Deno and browser compatible source map processing
+// Maps JavaScript error locations back to TypeScript source code
+const extractSourceLocation = (
+  stack: string | undefined,
+  sourceMapData: RawSourceMap | null,
+): string => {
+  if (!stack) return "Unknown error";
+  if (!sourceMapData) return stack;
+
+  const consumer = new SourceMapConsumer(sourceMapData);
+
+  // Simple sourcemap parser that works across Deno and browsers
+  // without external dependencies
+  const lines = stack.split("\n");
+  const mappedLines = lines.map((line) => {
+    const match = line.match(stackTracePattern);
+
+    if (match) {
+      const lineNum = parseInt(match[1], 10);
+      const columnNum = parseInt(match[2], 10);
+
+      const originalPosition = consumer.originalPositionFor({
+        line: lineNum,
+        column: columnNum,
+      });
+
+      // Replace the original line with the mapped position information
+      return `    at ${originalPosition.source}:${originalPosition.line}:${originalPosition.column} /* Mapped from eval line ${lineNum}, column ${columnNum} */`;
+    } else {
+      return line;
+    }
+  });
+
+  return mappedLines.join("\n");
+};
 
 const importCache: Record<string, any> = {};
 
@@ -75,6 +108,7 @@ export const tsToExports = async (
   src: string,
 ): Promise<{ exports?: any; errors?: string }> => {
   const ts = await getTSCompiler();
+
   // Add error handling for compilation
   const result = ts.transpileModule(src, {
     compilerOptions: {
@@ -85,8 +119,12 @@ export const tsToExports = async (
       jsxFactory: "h",
       jsxFragmentFactory: "Fragment",
       esModuleInterop: true,
+      sourceMap: true, // Enable source map generation
+      inlineSources: true, // Include original source in source maps
+      inlineSourceMap: false, // Generate separate source map instead of inline
     },
     reportDiagnostics: true,
+    fileName: "input.tsx", // Add a filename for better source mapping
   });
 
   // Check for compilation errors
@@ -115,16 +153,29 @@ export const tsToExports = async (
 
   const js = result.outputText;
 
+  // Parse source map if available - sourceMapText is already a JSON string
+  let sourceMapData: RawSourceMap | null = null;
+  try {
+    if (result.sourceMapText) {
+      sourceMapData = JSON.parse(result.sourceMapText);
+    }
+  } catch (e) {
+    console.warn("Failed to parse source map", e);
+  }
+
   let localImports: Record<string, any> | undefined;
   try {
     localImports = await ensureRequires(js);
   } catch (e) {
-    return { errors: (e as Error).message };
+    const error = e as Error;
+    // Add source location context if possible
+    const errorWithContext = extractSourceLocation(error.stack, sourceMapData);
+    return { errors: errorWithContext };
   }
 
   // Custom module resolution
   const customRequire = (moduleName: string) => {
-    if (localImports[moduleName]) {
+    if (localImports && localImports[moduleName]) {
       return localImports[moduleName];
     }
     switch (moduleName) {
@@ -145,21 +196,27 @@ export const tsToExports = async (
     }
   };
 
-  const DOMParser = await getDOMParser();
+  globalThis.DOMParser ??= await getDOMParser();
 
-  const wrappedCode = `
-    (async function(require) {
-        const exports = {};
-        globalThis.DOMParser = DOMParser;
-        ${js}
-        return exports;
-    })`;
+  // Important that ${js} is on the first line, so that the source map is accurate
+  const wrappedCode = `(async function(require) { const exports = {}; ${js}
+return exports;
+})
+//# ${"sourceMappingURL"}=data:application/json;base64,${
+    btoa(JSON.stringify(sourceMapData))
+  }`;
 
   try {
     const exports = await eval(wrappedCode)(customRequire);
     return { exports };
   } catch (e) {
-    return { errors: (e as Error).message };
+    const error = e as Error;
+    // Add source location context if possible
+    const errorWithContext = extractSourceLocation(
+      error.stack,
+      sourceMapData,
+    );
+    return { errors: errorWithContext };
   }
 };
 

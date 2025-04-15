@@ -81,6 +81,7 @@
     "merkle-reference": "npm:merkle-reference@^2.0.1",
     "multiformats": "npm:multiformats@^13.3.2",
     "react": "npm:react@^18.3.1",
+    "source-map-js": "npm:source-map-js@^1.2.1",
     "turndown": "npm:turndown@^7.1.2",
     "typescript": "npm:typescript",
     "vite": "npm:vite@^6.2.1",
