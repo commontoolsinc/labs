@@ -1,11 +1,26 @@
 export type LlmPrompt = {
   version: string;
   text: string;
-  dependencies?: Record<string, LlmPrompt | string>;
 };
 
-export function llmPrompt(version: string, text: string): LlmPrompt {
-  return { version, text };
+function hash(source: string): string {
+  // Create a simple hash function that doesn't require async/await
+  let hash = 0;
+  for (let i = 0; i < source.length; i++) {
+    const char = source.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+
+  // Convert to hex string and ensure it's positive
+  const hashHex = (hash >>> 0).toString(16).padStart(8, "0");
+
+  // Make it look more like a SHA hash with more characters
+  return hashHex;
+}
+
+export function llmPrompt(id: string, text: string): LlmPrompt {
+  return { version: `${id}@${hash(text)}`, text };
 }
 
 /**
@@ -25,17 +40,19 @@ export function hydratePrompt(
       : context[key]?.text || match;
   });
 
-  const dependencies = prompt.dependencies || {};
+  const dependencies: string[] = [prompt.version];
   // Add all context values used in the prompt as dependencies
   for (const key in context) {
     const value = context[key];
-    // Only include dependencies that were actually used in the prompt
-    if (prompt.text.includes(`{{${key}}}`)) {
-      dependencies[key] = value;
+    if (typeof value != "string") {
+      dependencies.push(value.version);
     }
   }
 
-  return { version: prompt.version, text, dependencies };
+  return {
+    version: dependencies.join("+"),
+    text,
+  };
 }
 
 /**

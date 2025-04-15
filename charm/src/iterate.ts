@@ -44,6 +44,7 @@ export const genSrc = async ({
   let response = await llm.sendRequest({
     ...request,
     metadata: {
+      ...request.metadata,
       context: "workflow",
       workflow: "genSrc",
       generationId,
