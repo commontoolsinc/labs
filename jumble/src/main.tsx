@@ -30,6 +30,7 @@ import StackedCharmsView from "@/views/StackedCharmsView.tsx";
 import SpellbookLaunchView from "@/views/spellbook/SpellbookLaunchView.tsx";
 import FullscreenInspectorView from "@/views/FullscreenInspectorView.tsx";
 import { ActionManagerProvider } from "@/contexts/ActionManagerContext.tsx";
+import { JobProvider } from "@/contexts/JobContext.tsx";
 import { ROUTES } from "@/routes.ts";
 
 // Determine environment based on hostname
@@ -102,61 +103,63 @@ createRoot(document.getElementById("root")!).render(
       <AuthenticationProvider>
         <CharmsProvider>
           <ActionManagerProvider>
-            <BackgroundTaskProvider>
-              <LanguageModelProvider>
-                <Router>
-                  <SentryRoutes>
-                    {/* Redirect root to saved replica or default */}
-                    <Route
-                      path={ROUTES.root}
-                      element={<ReplicaRedirect />}
-                    />
-                    <Route
-                      path={ROUTES.inspector}
-                      element={<FullscreenInspectorView />}
-                    />
-                    <Route
-                      path={ROUTES.replicaRoot}
-                      element={<Shell />}
-                    >
-                      <Route index element={<CharmList />} />
+            <JobProvider>
+              <BackgroundTaskProvider>
+                <LanguageModelProvider>
+                  <Router>
+                    <SentryRoutes>
+                      {/* Redirect root to saved replica or default */}
                       <Route
-                        path={ROUTES.charmShow}
-                        element={<CharmShowView />}
+                        path={ROUTES.root}
+                        element={<ReplicaRedirect />}
                       />
                       <Route
-                        path={ROUTES.charmDetail}
-                        element={<CharmDetailView />}
+                        path={ROUTES.inspector}
+                        element={<FullscreenInspectorView />}
                       />
                       <Route
-                        path={ROUTES.stackedCharms}
-                        element={<StackedCharmsView />}
-                      />
-                    </Route>
+                        path={ROUTES.replicaRoot}
+                        element={<Shell />}
+                      >
+                        <Route index element={<CharmList />} />
+                        <Route
+                          path={ROUTES.charmShow}
+                          element={<CharmShowView />}
+                        />
+                        <Route
+                          path={ROUTES.charmDetail}
+                          element={<CharmDetailView />}
+                        />
+                        <Route
+                          path={ROUTES.stackedCharms}
+                          element={<StackedCharmsView />}
+                        />
+                      </Route>
 
-                    {/* Spellbook routes */}
-                    <Route
-                      path={ROUTES.spellbookIndex}
-                      element={<SpellbookIndexView />}
-                    />
-                    <Route
-                      path={ROUTES.spellbookDetail}
-                      element={<SpellbookDetailView />}
-                    />
-                    <Route
-                      path={ROUTES.spellbookLaunch}
-                      element={<SpellbookLaunchView />}
-                    />
+                      {/* Spellbook routes */}
+                      <Route
+                        path={ROUTES.spellbookIndex}
+                        element={<SpellbookIndexView />}
+                      />
+                      <Route
+                        path={ROUTES.spellbookDetail}
+                        element={<SpellbookDetailView />}
+                      />
+                      <Route
+                        path={ROUTES.spellbookLaunch}
+                        element={<SpellbookLaunchView />}
+                      />
 
-                    {/* internal tools / experimental routes */}
-                    <Route
-                      path={ROUTES.utilityJsonGen}
-                      element={<GenerateJSONView />}
-                    />
-                  </SentryRoutes>
-                </Router>
-              </LanguageModelProvider>
-            </BackgroundTaskProvider>
+                      {/* internal tools / experimental routes */}
+                      <Route
+                        path={ROUTES.utilityJsonGen}
+                        element={<GenerateJSONView />}
+                      />
+                    </SentryRoutes>
+                  </Router>
+                </LanguageModelProvider>
+              </BackgroundTaskProvider>
+            </JobProvider>
           </ActionManagerProvider>
         </CharmsProvider>
       </AuthenticationProvider>
