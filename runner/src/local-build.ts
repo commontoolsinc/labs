@@ -205,7 +205,7 @@ return exports;
 
   if (result.sourceMapText) {
     // `sourceMapping" + "URL` prevents confusion with this file's source map
-    wrappedCode += "//# sourceMapping" + "URL=data:application/json;base64," +
+    wrappedCode += "\n//# sourceMapping" + "URL=data:application/json;base64," +
       btoa(result.sourceMapText);
   }
 
