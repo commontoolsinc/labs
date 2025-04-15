@@ -357,7 +357,7 @@ export function isPointer(value: any): boolean {
  * @returns {boolean}
  */
 function isJSONCellLink(value: any): value is JSONCellLink {
-  return (isObject(value.cell) && "/" in value.cell &&
+  return (isObject(value) && isObject(value.cell) && "/" in value.cell &&
     Array.isArray(value.path));
 }
 

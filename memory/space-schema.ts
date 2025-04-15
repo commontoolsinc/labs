@@ -325,25 +325,24 @@ export const selectSchema = <Space extends MemorySpace>(
           continue;
         }
         if (isObject(factEntry.is)) {
-          const factValue = (factEntry.is as JSONObject).value;
-          const [newDoc, newDocRoot, newValue] = getAtPath<
-            FactAddress,
-            FullFactAddress
-          >(
-            helper,
-            { the: the, of: of as Entity },
-            factValue,
-            factValue,
-            selector.path,
-            tracker,
-          );
-          if (newValue === undefined) {
-            continue;
-          }
+          const factAddress = { the: the, of: of as Entity };
           if (selector.schemaContext !== undefined) {
+            const factValue = (factEntry.is as JSONObject).value;
+            const [newDoc, newDocRoot, newValue] = getAtPath<
+              FactAddress,
+              FullFactAddress
+            >(
+              helper,
+              factAddress,
+              factValue,
+              factValue,
+              selector.path,
+              tracker,
+            );
+            if (newValue === undefined) {
+              continue;
+            }
             // We've provided a schema context for this, so traverse it
-            // If we didn't provide a schema context, we still have the selected
-            // object in our helper, from the getAtPath above.ctEntry.cause,
             const traverser = new SchemaObjectTraverser(
               helper,
               selector.schemaContext,
@@ -353,6 +352,10 @@ export const selectSchema = <Space extends MemorySpace>(
             // We don't actually use the return value here, but we've built up
             // a list of all the documents we need to watch.
             traverser.traverse(newDoc, newDocRoot, newValue);
+          } else {
+            // If we didn't provide a schema context, we still want the selected
+            // object in our helper, so load it directly.
+            helper.load(factAddress);
           }
         }
       }
