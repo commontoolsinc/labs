@@ -50,6 +50,8 @@ const extractSourceLocation = (
 
   const consumer = new SourceMapConsumer(sourceMapData);
 
+  // Simple sourcemap parser that works across Deno and browsers
+  // without external dependencies
   const lines = stack.split("\n");
   const mappedLines = lines.map((line) => {
     const match = line.match(stackTracePattern);
@@ -64,7 +66,7 @@ const extractSourceLocation = (
       });
 
       // Replace the original line with the mapped position information
-      return `    at ${originalPosition.source}:${originalPosition.line}:${originalPosition.column}`;
+      return `    at ${originalPosition.source}:${originalPosition.line}:${originalPosition.column} /* Mapped from eval line ${lineNum}, column ${columnNum} */`;
     } else {
       return line;
     }
@@ -88,7 +90,7 @@ const ensureRequires = async (js: string): Promise<Record<string, any>> => {
       if (!importCache[modulePath]) {
         // Fetch and compile the module
         const importSrc = await fetch(modulePath).then((resp) => resp.text());
-        const importedModule = await tsToExports(importSrc, modulePath);
+        const importedModule = await tsToExports(importSrc);
         if (importedModule.errors) {
           throw new Error(
             `Failed to import ${modulePath}: ${importedModule.errors}`,
@@ -104,7 +106,6 @@ const ensureRequires = async (js: string): Promise<Record<string, any>> => {
 
 export const tsToExports = async (
   src: string,
-  fileName?: string,
 ): Promise<{ exports?: any; errors?: string }> => {
   const ts = await getTSCompiler();
 
@@ -119,11 +120,11 @@ export const tsToExports = async (
       jsxFragmentFactory: "Fragment",
       esModuleInterop: true,
       sourceMap: true, // Enable source map generation
-      inlineSources: true, // Include original source in source maps
+      inlineSources: false, // Don't include original source in source maps
       inlineSourceMap: false, // Generate separate source map instead of inline
     },
     reportDiagnostics: true,
-    fileName: fileName ?? `${merkleReference.refer(src)}.tsx`, // Add a filename for better source mapping
+    fileName: "input.tsx", // Add a filename for better source mapping
   });
 
   // Check for compilation errors
@@ -197,7 +198,9 @@ export const tsToExports = async (
 
   globalThis.DOMParser ??= await getDOMParser();
 
-  // Important that ${js} is on the first line, so that the source map is accurate
+  // Important:
+  //  - ${js} is on the first line, so that the source map is accurate
+  //  - ${"sourceMappingURL"} prevents confusion with this file's source map
   const wrappedCode = `(async function(require) { const exports = {}; ${js}
 return exports;
 })
