@@ -198,15 +198,16 @@ export const tsToExports = async (
 
   globalThis.DOMParser ??= await getDOMParser();
 
-  // Important:
-  //  - ${js} is on the first line, so that the source map is accurate
-  //  - ${"sourceMappingURL"} prevents confusion with this file's source map
-  const wrappedCode = `(async function(require) { const exports = {}; ${js}
+  // Important: ${js} is on the first line, so that the source map is accurate
+  let wrappedCode = `(async function(require) { const exports = {}; ${js}
 return exports;
-})
-//# ${"sourceMappingURL"}=data:application/json;base64,${
-    btoa(JSON.stringify(sourceMapData))
-  }`;
+})`;
+
+  if (result.sourceMapText) {
+    // `sourceMapping" + "URL` prevents confusion with this file's source map
+    wrappedCode += "//# sourceMapping" + "URL=data:application/json;base64," +
+      btoa(result.sourceMapText);
+  }
 
   try {
     const exports = await eval(wrappedCode)(customRequire);
