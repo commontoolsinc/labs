@@ -1,4 +1,9 @@
-import { IPC, setIframeContextHandler } from "@commontools/iframe-sandbox";
+import {
+  type CommonIframeSandboxElement,
+  IPC,
+  setIframeContextHandler,
+} from "@commontools/iframe-sandbox";
+import { components } from "@commontools/ui";
 import {
   Action,
   addAction,
@@ -10,6 +15,8 @@ import {
 } from "@commontools/runner";
 import { client as llm } from "@commontools/llm";
 import { isObj } from "@commontools/utils";
+
+const CommonCharmElement = components.CommonCharm.CommonCharmElement;
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 // This is to prepare Proxy objects to be serialized
@@ -154,7 +161,7 @@ function setPreviousValue(context: any, key: string, value: any) {
 
 export const setupIframe = () =>
   setIframeContextHandler({
-    read(context: any, key: string): any {
+    read(_element: CommonIframeSandboxElement, context: any, key: string): any {
       const data = key === "*"
         ? isCell(context) ? context.get() : context
         : isCell(context)
@@ -165,7 +172,12 @@ export const setupIframe = () =>
       setPreviousValue(context, key, JSON.stringify(serialized));
       return serialized;
     },
-    write(context: any, key: string, value: any) {
+    write(
+      _element: CommonIframeSandboxElement,
+      context: any,
+      key: string,
+      value: any,
+    ) {
       setPreviousValue(context, key, JSON.stringify(value));
       throttle(context, key, () => {
         console.log("write", key, value, JSON.stringify(value));
@@ -199,6 +211,7 @@ export const setupIframe = () =>
       });
     },
     subscribe(
+      _element: CommonIframeSandboxElement,
       context: any,
       key: string,
       callback: (key: string, value: any) => void,
@@ -235,11 +248,23 @@ export const setupIframe = () =>
       addAction(action);
       return action;
     },
-    unsubscribe(_context: any, receipt: any) {
+    unsubscribe(
+      _element: CommonIframeSandboxElement,
+      _context: any,
+      receipt: any,
+    ) {
       removeAction(receipt);
     },
-    async onLLMRequest(_context: any, payload: string) {
-      console.log("onLLMRequest", payload);
+    async onLLMRequest(
+      element: CommonIframeSandboxElement,
+      _context: any,
+      payload: string,
+    ) {
+      const container = CommonCharmElement.findCharmContainer(element);
+      const { charmId, spaceName } = container ??
+        { charmId: null, spaceName: null };
+
+      console.log("onLLMRequest", payload, charmId, spaceName);
       // FIXME(ja): how do we get the context of space/charm id here
       const jsonPayload = JSON.parse(payload);
       if (!jsonPayload.model) {
@@ -248,20 +273,22 @@ export const setupIframe = () =>
           "groq:llama-3.3-70b-versatile",
         ];
       }
-      // FIXME(ja): how can we get this from the system not the url?
-      const parts = globalThis.location.pathname.split("/");
       jsonPayload.metadata = {
         ...jsonPayload.metadata,
         context: "iframe",
-        spaceName: parts[1] ?? "fixme",
-        charmId: parts[2] ?? "fixme",
+        spaceName: spaceName ?? "fixme",
+        charmId: charmId ?? "fixme",
       };
 
       const res = await llm.sendRequest(jsonPayload);
       console.log("onLLMRequest res", res);
       return res as any;
     },
-    async onReadWebpageRequest(_context: any, payload: string) {
+    async onReadWebpageRequest(
+      _element: CommonIframeSandboxElement,
+      _context: any,
+      payload: string,
+    ) {
       console.log("onReadWebpageRequest", payload);
       const res = await fetch(
         `/api/ai/webreader/${encodeURIComponent(payload)}`,
@@ -270,6 +297,7 @@ export const setupIframe = () =>
       return await res.json();
     },
     async onPerform(
+      _element: CommonIframeSandboxElement,
       context: unknown,
       command: IPC.TaskPerform,
     ): Promise<{ ok: object; error?: void } | { ok?: void; error: Error }> {
