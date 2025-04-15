@@ -89,7 +89,7 @@ async function login() {
   // Click the first button, "register with passphrase"
   await waitForSelectorClick(
     page,
-    "button[aria-label='method-passphrase']",
+    "button[aria-label='register-with-passphrase']",
   );
 
   // Get the mnemonic from textarea.
