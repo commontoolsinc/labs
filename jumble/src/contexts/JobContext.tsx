@@ -1,16 +1,23 @@
-import React, { createContext, useContext, useEffect, useState, useRef } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { WorkflowForm } from "@commontools/charm";
 
 // Type definitions for our job events
 type JobId = string;
 
 interface BaseJobEvent {
   jobId: JobId;
-  title: string;
 }
 
 interface JobStartEvent extends BaseJobEvent {
   type: "job-start";
   status: string;
+  title: string;
   payload?: Record<string, unknown>;
 }
 
@@ -53,11 +60,7 @@ export interface Job {
   state: "running" | "completed" | "failed";
   progress?: number;
   error?: string;
-  result?: unknown;
-  viewAction?: {
-    label: string;
-    action: () => void;
-  };
+  result?: WorkflowForm;
   updatedAt: Date;
   startedAt: Date;
   completedAt?: Date;
@@ -85,7 +88,7 @@ export const JobProvider: React.FC<JobProviderProps> = ({ children }) => {
   const [jobs, setJobs] = useState<Record<JobId, Job>>({});
   const [showCompleted, setShowCompleted] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
-  
+
   // Reference to keep track of the auto-hide timer
   const hideTimerRef = useRef<number | null>(null);
 
@@ -93,11 +96,11 @@ export const JobProvider: React.FC<JobProviderProps> = ({ children }) => {
     // Handler for job events
     const handleJobEvent = (event: CustomEvent<JobEvent>) => {
       const { detail } = event;
-      const { jobId, title, type, status } = detail;
+      const { jobId, type, status } = detail;
 
       // Always make panel visible when a job event occurs
       setIsVisible(true);
-      
+
       // Clear any existing hide timer
       if (hideTimerRef.current) {
         clearTimeout(hideTimerRef.current);
@@ -112,7 +115,7 @@ export const JobProvider: React.FC<JobProviderProps> = ({ children }) => {
           case "job-start": {
             updatedJobs[jobId] = {
               jobId,
-              title,
+              title: detail.title,
               status,
               state: "running",
               startedAt: new Date(),
@@ -204,7 +207,7 @@ export const JobProvider: React.FC<JobProviderProps> = ({ children }) => {
   const failedJobs = Object.values(jobs).filter((job) =>
     job.state === "failed"
   );
-  
+
   // Effect to handle auto-hiding when there are no active jobs
   useEffect(() => {
     // If there are running jobs, make sure panel is visible and clear any hide timer
@@ -226,7 +229,7 @@ export const JobProvider: React.FC<JobProviderProps> = ({ children }) => {
       // No jobs at all, hide immediately
       setIsVisible(false);
     }
-    
+
     // Cleanup timer on unmount
     return () => {
       if (hideTimerRef.current) {

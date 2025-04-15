@@ -117,6 +117,8 @@ function CommandProcessor({
     }
     if ((mode.command as InputCommandItem).handler) {
       (mode.command as InputCommandItem).handler(context, inputValue);
+      // Close the command center after submitting
+      context.setOpen(false);
     }
   }, [
     context,

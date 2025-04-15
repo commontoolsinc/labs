@@ -652,7 +652,6 @@ export async function processWorkflow(
     existingCharm?: Cell<Charm>;
     prefill?: Partial<WorkflowForm>;
     model?: string;
-    generationId?: string;
     onProgress?: (form: WorkflowForm) => void;
     cancellation?: { cancelled: boolean };
   } = {},
@@ -666,19 +665,9 @@ export async function processWorkflow(
     input,
     charm: options.existingCharm,
     modelId: options.model,
-    generationId: options.generationId,
   });
   console.log("creating form", form);
-  globalThis.dispatchEvent(
-    new CustomEvent("job-start", {
-      detail: {
-        type: "job-start",
-        jobId: form.meta.generationId,
-        title: form.input.processedInput,
-        status: "Initializing...",
-      },
-    }),
-  );
+
 
   try {
     // Function to check if the workflow has been cancelled
@@ -694,7 +683,9 @@ export async function processWorkflow(
 
     if (options.prefill) {
       console.log("prefilling form", options.prefill);
-      form = { ...form, ...options.prefill };
+      // do not prefill the meta
+      delete options.prefill.meta;
+      form = { ...options.prefill, ...form };
     }
 
     // Step 1: Process input (mentions, references, etc.) if not already processed
@@ -707,22 +698,23 @@ export async function processWorkflow(
       }
 
       console.log("processing input...");
-      globalThis.dispatchEvent(
-        new CustomEvent("job-update", {
-          detail: {
-            type: "job-update",
-            jobId: form.meta.generationId,
-            title: form.input.processedInput,
-            status: "Processing input...",
-          },
-        }),
-      );
       const stepStartTime = performance.now();
       form = await processInputSection(options.charmManager, form);
       timings.processInput = performance.now() - stepStartTime;
       options.onProgress?.(form);
       console.log("processed input!", form);
     }
+
+    globalThis.dispatchEvent(
+      new CustomEvent("job-start", {
+        detail: {
+          type: "job-start",
+          jobId: form.meta.generationId,
+          title: form.input.processedInput,
+          status: "Initializing...",
+        },
+      }),
+    );
 
     checkCancellation();
 
@@ -809,10 +801,14 @@ export async function processWorkflow(
           title: form.input.processedInput,
           status: "Completed successfully",
           result: form,
-          viewAction: {
-            label: "View Results",
-            action: () => {/* Navigate to results or show modal */},
-          },
+          viewAction: form.generation?.charm
+            ? {
+              label: "View Results",
+              action: () => {
+                console.log("made", form.generation?.charm);
+              },
+            }
+            : undefined,
         },
       }),
     );

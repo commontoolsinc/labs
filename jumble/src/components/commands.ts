@@ -274,7 +274,6 @@ async function handleModifyCharm(
   options?: { model: string },
 ) {
   if (!input) return;
-  ctx.setLoading(true);
 
   try {
     let newCharm;
@@ -306,7 +305,6 @@ async function handleModifyCharm(
   } catch (error) {
     console.error("Imagine operation error:", error);
   } finally {
-    ctx.setLoading(false);
     ctx.setOpen(false);
   }
 }
@@ -317,7 +315,6 @@ async function handleNewCharm(
   options?: { model: string },
 ) {
   if (!input) return;
-  ctx.setLoading(true);
 
   try {
     const newCharm = await executeWorkflow(
@@ -333,7 +330,6 @@ async function handleNewCharm(
   } catch (error) {
     console.error("New charm operation error:", error);
   } finally {
-    ctx.setLoading(false);
     ctx.setOpen(false);
   }
 }

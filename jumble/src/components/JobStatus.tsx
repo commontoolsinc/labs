@@ -1,5 +1,9 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { getElapsedTime, Job, useJobContext } from "@/contexts/JobContext.tsx";
+import { useNavigate } from "react-router-dom";
+import { createPath } from "@/routes.ts";
+import { charmId } from "@/utils/charms.ts";
+import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 
 interface JobStatusProps {
   // Optional className for styling the container
@@ -17,6 +21,25 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
     setShowCompleted,
     isVisible,
   } = useJobContext();
+
+  const navigate = useNavigate();
+  const { charmManager } = useCharmManager();
+
+  // Add a refresh counter to trigger re-renders every second
+  const [refreshCounter, setRefreshCounter] = useState(0);
+
+  // Setup an interval to refresh timestamps every second
+  useEffect(() => {
+    // Only setup the interval if there are running jobs
+    if (runningJobs.length === 0) return;
+
+    const intervalId = setInterval(() => {
+      setRefreshCounter((prev) => prev + 1);
+    }, 1000);
+
+    // Cleanup the interval when the component unmounts or running jobs change
+    return () => clearInterval(intervalId);
+  }, [runningJobs.length]);
 
   // Function to get appropriate icon for job state
   const getJobIcon = (job: Job) => {
@@ -73,6 +96,7 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
   };
 
   // Job row component for consistent rendering
+  // Using refreshCounter as a dependency to ensure timestamps update
   const JobRow = ({ job }: { job: Job }) => (
     <div
       className={`flex items-center px-3 py-2 h-9 border-b border-gray-200 ${
@@ -95,16 +119,26 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
       {job.state === "running" && <ProgressIndicator progress={job.progress} />}
       {job.state === "running" && (
         <span className="text-[11px] text-gray-500 whitespace-nowrap">
-          {getElapsedTime(job.startedAt)}
+          {
+            getElapsedTime(
+              job.startedAt,
+            ) /* refreshCounter ensures this updates every second */
+          }
         </span>
       )}
-      {job.state === "completed" && job.viewAction && (
+      {job.state === "completed" && job.result?.generation?.charm && (
         <button
           type="button"
-          onClick={job.viewAction.action}
+          onClick={() => {
+            // bf: gnarly
+            navigate(createPath("charmShow", {
+              charmId: charmId(job.result!.generation!.charm)!,
+              replicaName: charmManager.getSpace(),
+            }));
+          }}
           className="bg-blue-500 text-white border-none rounded px-2 py-0.5 text-[10px] cursor-pointer whitespace-nowrap hover:bg-blue-600"
         >
-          {job.viewAction.label}
+          View Charm
         </button>
       )}
     </div>
@@ -117,6 +151,8 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
   if (Object.keys(jobs).length === 0 || !isVisible) {
     return null;
   }
+
+  console.log(jobs);
 
   return (
     <div
@@ -163,19 +199,21 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
       {showCompleted && finishedJobCount > 0 && (
         <div className="max-h-44 overflow-y-auto border-t border-gray-300">
           {/* First show completed jobs with view actions */}
-          {completedJobs.filter((job) => job.viewAction).length > 0 && (
+          {completedJobs.filter((job) => job.result?.generation?.charm).length >
+              0 && (
             <div>
               {completedJobs
-                .filter((job) => job.viewAction)
+                .filter((job) => job.result?.generation?.charm)
                 .map((job) => <JobRow key={job.jobId} job={job} />)}
             </div>
           )}
 
           {/* Then show other completed jobs */}
-          {completedJobs.filter((job) => !job.viewAction).length > 0 && (
+          {completedJobs.filter((job) => !job.result?.generation?.charm)
+                .length > 0 && (
             <div>
               {completedJobs
-                .filter((job) => !job.viewAction)
+                .filter((job) => !job.result?.generation?.charm)
                 .map((job) => <JobRow key={job.jobId} job={job} />)}
             </div>
           )}
