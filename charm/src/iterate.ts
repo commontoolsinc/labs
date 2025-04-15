@@ -322,6 +322,15 @@ async function twoPhaseCodeGeneration(
   existingSchema?: JSONSchema,
 ) {
   console.log("using twoPhaseCodeGeneration");
+  globalThis.dispatchEvent(
+    new CustomEvent("job-update", {
+      detail: {
+        type: "job-update",
+        jobId: form.meta.generationId,
+        status: "Generating spec and schema...",
+      },
+    }),
+  );
   // Phase 1: Generate spec/plan and schema based on goal and possibly existing schema
   const {
     spec,

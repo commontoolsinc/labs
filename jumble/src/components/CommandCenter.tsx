@@ -90,7 +90,7 @@ function CommandProcessor({
     true,
     1000,
     previewModel,
-    focusedCharm, // Pass the current charm for context
+    command.id == "new-charm" ? undefined : focusedCharm, // Pass the current charm for context
   );
 
   useEffect(() => {
