@@ -68,7 +68,7 @@ async function main() {
       models = args.variety.split(",").map((m: string) => m.trim());
     } else {
       models = [
-        "google:gemini-2.0-flash-lite",
+        // "google:gemini-2.0-flash-lite",
         // "google:gemini-2.0-flash",
         // "gemini-2.0-flash-thinking",
         // "gemini-2.0-pro",
@@ -85,6 +85,9 @@ async function main() {
         // "cerebras:llama-3.3-70b",
         // "groq:deepseek-r1-distill-qwen-32b",
         // "groq:deepseek-r1-distill-llama-70b",
+        "openai:gpt-4.1",
+        "openai:gpt-4.1-mini",
+        "openai:gpt-4.1-nano",
       ];
     }
   } else if (args._ && args._[0]) {
