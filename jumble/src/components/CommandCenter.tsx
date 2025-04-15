@@ -18,9 +18,8 @@ import {
   SelectCommandItem,
   TranscribeCommandItem,
 } from "./commands.ts";
-import { formatPromptWithMentions, WorkflowForm } from "@commontools/charm";
+import { WorkflowForm } from "@commontools/charm";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
-import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext.tsx";
 import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { charmId, getMentionableCharms } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
@@ -90,7 +89,7 @@ function CommandProcessor({
     true,
     1000,
     previewModel,
-    focusedCharm, // Pass the current charm for context
+    command.id == "new-charm" ? undefined : focusedCharm, // Pass the current charm for context
   );
 
   useEffect(() => {
@@ -117,6 +116,8 @@ function CommandProcessor({
     }
     if ((mode.command as InputCommandItem).handler) {
       (mode.command as InputCommandItem).handler(context, inputValue);
+      // Close the command center after submitting
+      context.setOpen(false);
     }
   }, [
     context,
@@ -283,8 +284,6 @@ export function CommandCenter() {
   const [mode, setMode] = useState<CommandMode>({ type: "main" });
   const [commandPathIds, setCommandPathIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
-  const { stopJob, startJob, addJobMessage, listJobs, updateJobProgress } =
-    useBackgroundTasks();
 
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
@@ -316,11 +315,6 @@ export function CommandCenter() {
         setSearch(initialInput);
       });
     },
-    stopJob,
-    startJob,
-    addJobMessage,
-    listJobs,
-    updateJobProgress,
     commandPathIds,
     onClearAuthentication: clearAuthentication,
     previewForm,
@@ -333,11 +327,6 @@ export function CommandCenter() {
     setMode,
     loading,
     setLoading,
-    stopJob,
-    startJob,
-    addJobMessage,
-    listJobs,
-    updateJobProgress,
     commandPathIds,
     clearAuthentication,
     previewForm,
