@@ -669,6 +669,16 @@ export async function processWorkflow(
     generationId: options.generationId,
   });
   console.log("creating form", form);
+  globalThis.dispatchEvent(
+    new CustomEvent("job-start", {
+      detail: {
+        type: "job-start",
+        jobId: form.meta.generationId,
+        title: form.input.processedInput,
+        status: "Initializing...",
+      },
+    }),
+  );
 
   try {
     // Function to check if the workflow has been cancelled
@@ -696,7 +706,17 @@ export async function processWorkflow(
         throw new Error("charmManager required to format input");
       }
 
-      console.log("processing input");
+      console.log("processing input...");
+      globalThis.dispatchEvent(
+        new CustomEvent("job-update", {
+          detail: {
+            type: "job-update",
+            jobId: form.meta.generationId,
+            title: form.input.processedInput,
+            status: "Processing input...",
+          },
+        }),
+      );
       const stepStartTime = performance.now();
       form = await processInputSection(options.charmManager, form);
       timings.processInput = performance.now() - stepStartTime;
@@ -709,6 +729,16 @@ export async function processWorkflow(
     // Step 2: Classification if not already classified
     if (!form.classification) {
       console.log("classifying task");
+      globalThis.dispatchEvent(
+        new CustomEvent("job-update", {
+          detail: {
+            type: "job-update",
+            jobId: form.meta.generationId,
+            title: form.input.processedInput,
+            status: "Classifying task...",
+          },
+        }),
+      );
       const stepStartTime = performance.now();
       form = await fillClassificationSection(form);
       timings.classification = performance.now() - stepStartTime;
@@ -721,6 +751,16 @@ export async function processWorkflow(
     // Step 3: Planning if not already planned
     if (!form.plan || !form.plan.spec || !form.plan.steps) {
       console.log("planning task");
+      globalThis.dispatchEvent(
+        new CustomEvent("job-update", {
+          detail: {
+            type: "job-update",
+            jobId: form.meta.generationId,
+            title: form.input.processedInput,
+            status: "Planning task...",
+          },
+        }),
+      );
       const stepStartTime = performance.now();
       form = await fillPlanningSection(form);
       timings.planning = performance.now() - stepStartTime;
@@ -733,6 +773,16 @@ export async function processWorkflow(
     // Step 4: Generation (if not a dry run and not already generated)
     if (!dryRun && options.charmManager && !form.generation?.charm) {
       console.log("generating code");
+      globalThis.dispatchEvent(
+        new CustomEvent("job-update", {
+          detail: {
+            type: "job-update",
+            jobId: form.meta.generationId,
+            title: form.input.processedInput,
+            status: "Generating charm...",
+          },
+        }),
+      );
       const stepStartTime = performance.now();
       form = await generateCode(form);
       timings.generation = performance.now() - stepStartTime;
@@ -751,6 +801,22 @@ export async function processWorkflow(
       );
     });
 
+    globalThis.dispatchEvent(
+      new CustomEvent("job-complete", {
+        detail: {
+          type: "job-complete",
+          jobId: form.meta.generationId,
+          title: form.input.processedInput,
+          status: "Completed successfully",
+          result: form,
+          viewAction: {
+            label: "View Results",
+            action: () => {/* Navigate to results or show modal */},
+          },
+        },
+      }),
+    );
+
     console.log("completed workflow!");
     console.groupEnd();
     return form;
@@ -758,6 +824,19 @@ export async function processWorkflow(
     const totalTime = performance.now() - startTime;
     console.warn("workflow failed:", error);
     console.log(`Workflow failed after ${totalTime.toFixed(2)}ms`);
+
+    globalThis.dispatchEvent(
+      new CustomEvent("job-failed", {
+        detail: {
+          type: "job-failed",
+          jobId: form.meta.generationId,
+          title: form.input.processedInput,
+          error,
+          duration: totalTime,
+        },
+      }),
+    );
+
     console.groupEnd();
     return form;
   }
