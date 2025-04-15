@@ -15,3 +15,4 @@ _deno.lock
 .claude-prompt.tmp
 .pr-desc.tmp
 dist/
+charm-seeder/results
