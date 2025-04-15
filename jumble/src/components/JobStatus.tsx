@@ -4,6 +4,26 @@ import { useNavigate } from "react-router-dom";
 import { createPath } from "@/routes.ts";
 import { charmId } from "@/utils/charms.ts";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { DitheredCube } from "@/components/DitherCube.tsx";
+
+// Isolated component for elapsed time that handles its own refresh
+const ElapsedTime = ({ startTime }: { startTime: Date }) => {
+  const [, setRefresh] = useState(0);
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setRefresh((prev) => prev + 1);
+    }, 1000);
+
+    return () => clearInterval(intervalId);
+  }, []);
+
+  return (
+    <span className="text-[11px] text-gray-500 whitespace-nowrap">
+      {getElapsedTime(startTime)}
+    </span>
+  );
+};
 
 interface JobStatusProps {
   // Optional className for styling the container
@@ -25,29 +45,19 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
   const navigate = useNavigate();
   const { charmManager } = useCharmManager();
 
-  // Add a refresh counter to trigger re-renders every second
-  const [refreshCounter, setRefreshCounter] = useState(0);
-
-  // Setup an interval to refresh timestamps every second
-  useEffect(() => {
-    // Only setup the interval if there are running jobs
-    if (runningJobs.length === 0) return;
-
-    const intervalId = setInterval(() => {
-      setRefreshCounter((prev) => prev + 1);
-    }, 1000);
-
-    // Cleanup the interval when the component unmounts or running jobs change
-    return () => clearInterval(intervalId);
-  }, [runningJobs.length]);
-
   // Function to get appropriate icon for job state
   const getJobIcon = (job: Job) => {
     if (job.state === "running") {
       return (
-        <div className="mr-2.5 w-4 h-4 flex items-center justify-center relative">
-          <div className="w-4 h-4 border-2 border-gray-200 border-t-blue-500 rounded-full animate-[spin_1s_linear_infinite]">
-          </div>
+        <div className="w-10 h-10 flex-shrink-0">
+          <DitheredCube
+            key={job.jobId}
+            animationSpeed={2}
+            width={40}
+            height={40}
+            animate
+            cameraZoom={12}
+          />
         </div>
       );
     } else if (job.state === "completed") {
@@ -95,13 +105,12 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
     );
   };
 
-  // Job row component for consistent rendering
-  // Using refreshCounter as a dependency to ensure timestamps update
+  // JobRow component for displaying job information
   const JobRow = ({ job }: { job: Job }) => (
     <div
       className={`flex items-center px-3 py-2 h-9 border-b border-gray-200 ${
         job.state === "running"
-          ? "bg-blue-50"
+          ? "bg-grey-200"
           : job.state === "completed"
           ? "bg-green-50"
           : "bg-red-50"
@@ -117,15 +126,7 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
         </div>
       </div>
       {job.state === "running" && <ProgressIndicator progress={job.progress} />}
-      {job.state === "running" && (
-        <span className="text-[11px] text-gray-500 whitespace-nowrap">
-          {
-            getElapsedTime(
-              job.startedAt,
-            ) /* refreshCounter ensures this updates every second */
-          }
-        </span>
-      )}
+      {job.state === "running" && <ElapsedTime startTime={job.startedAt} />}
       {job.state === "completed" && job.result?.generation?.charm && (
         <button
           type="button"
@@ -136,7 +137,7 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
               replicaName: charmManager.getSpace(),
             }));
           }}
-          className="bg-blue-500 text-white border-none rounded px-2 py-0.5 text-[10px] cursor-pointer whitespace-nowrap hover:bg-blue-600"
+          className="bg-black text-white border-none px-2 py-0.5 text-[10px] cursor-pointer whitespace-nowrap "
         >
           View Charm
         </button>
