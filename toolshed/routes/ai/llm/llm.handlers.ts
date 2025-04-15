@@ -118,7 +118,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
     JSON.stringify(withoutMetadata(payload)),
   );
   const cachedResult = await cache.loadItem(cacheKey);
-  if (cachedResult) {
+  if (cachedResult && !payload.disable_cache) {
     const lastMessage = cachedResult.messages[cachedResult.messages.length - 1];
     return c.json(lastMessage);
   }
