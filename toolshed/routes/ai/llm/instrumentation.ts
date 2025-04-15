@@ -10,6 +10,20 @@ import env from "@/env.ts";
 
 diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.ERROR);
 
+const isLLMProviderFetch = (span: any) => {
+  const aiProviderHostnames = [
+    "openai.com",
+    "anthropic.com",
+    "claude.ai",
+    "groq.com",
+    "aiplatform.googleapis.com",
+  ];
+
+  return aiProviderHostnames.some((hostname) =>
+    span.attributes["http.url"]?.toString().includes(hostname)
+  );
+};
+
 export function register() {
   registerOTel({
     serviceName: env.CTTS_AI_LLM_PHOENIX_PROJECT,
@@ -29,9 +43,9 @@ export function register() {
         spanFilter: (span) => {
           // console.log("SPAN", span);
           const includeSpanCriteria = [
-            isOpenInferenceSpan(span),
             span.attributes["http.route"] == "/api/ai/llm", // Include the root span, which is in the hono app
-            span.instrumentationLibrary.name.includes("@vercel/otel"), // Include the actual LLM API fetch span
+            isOpenInferenceSpan(span),
+            isLLMProviderFetch(span), // Include fetch spans to LLM providers
           ];
           return includeSpanCriteria.some((c) => c);
         },
