@@ -153,8 +153,6 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
     return null;
   }
 
-  console.log(jobs);
-
   return (
     <div
       className={`fixed bottom-16 right-2 w-80 bg-white text-xs text-gray-700 max-h-[calc(100vh-100px)] overflow-hidden flex flex-col z-50 border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] hover:translate-y-[-2px] hover:shadow-[2px_4px_0px_0px_rgba(0,0,0,0.7)] transition-[border,box-shadow,transform,opacity] duration-100 ease-in-out ${
@@ -182,7 +180,6 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
         </div>
       </div>
 
-      {/* Toggle for completed/failed jobs */}
       {finishedJobCount > 0 && (
         <button
           type="button"
@@ -196,7 +193,6 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
         </button>
       )}
 
-      {/* Completed/Failed Jobs Section - Collapsible */}
       {showCompleted && finishedJobCount > 0 && (
         <div className="max-h-44 overflow-y-auto border-t border-gray-300">
           {/* First show completed jobs with view actions */}
@@ -209,7 +205,6 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
             </div>
           )}
 
-          {/* Then show other completed jobs */}
           {completedJobs.filter((job) => !job.result?.generation?.charm)
                 .length > 0 && (
             <div>
@@ -219,7 +214,6 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
             </div>
           )}
 
-          {/* Show failed jobs */}
           {failedJobs.length > 0 && (
             <div>
               {failedJobs.map((job) => <JobRow key={job.jobId} job={job} />)}
@@ -227,15 +221,6 @@ const JobStatus: React.FC<JobStatusProps> = ({ className }) => {
           )}
         </div>
       )}
-
-      {/* Keyframes for spinner animation */}
-      <style>
-        {`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-      `}
-      </style>
     </div>
   );
 };
