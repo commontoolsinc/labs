@@ -23,15 +23,24 @@ export const DEFAULT_LLM_URL = typeof globalThis.location !== "undefined"
     "/api/ai/llm"
   : "//api/ai/llm";
 
+/**
+ * Represents a request to the LLM service.
+ */
 export type LLMRequest = {
-  messages: SimpleMessage[] | SimpleContent[];
+  /** The model(s) to use for the request. Can be a single string or an array for fallback. */
+  model?: string | string[];
+  /** The system prompt to guide the model's behavior. */
   system?: string;
-  model: string | string[];
-  max_tokens?: number;
-  stream?: boolean;
+  /** An array of messages forming the conversation history. */
+  messages: LlmPrompt[];
+  /** An optional stop sequence to end generation. */
   stop?: string;
+  /** Specifies the output mode, e.g., "json" for JSON output. */
   mode?: "json";
+  /** Optional metadata to associate with the request. */
   metadata?: Record<string, string | undefined | LlmPrompt>;
+  /** Optional flag to skip the LLM cache for this request. Defaults to false. */
+  skip_cache?: boolean;
 };
 
 export class LLMClient {
@@ -41,9 +50,19 @@ export class LLMClient {
     this.serverUrl = new URL("/api/ai/llm", toolshedUrl).toString();
   }
 
+  /**
+   * Sends a request to the LLM service.
+   *
+   * @param userRequest The LLM request object.
+   * @param partialCB Optional callback for streaming responses.
+   * @param skipCache Optional flag to skip the LLM cache for this request. Defaults to false.
+   * @returns The full LLM response as a string.
+   * @throws If the request fails after retrying with fallback models.
+   */
   async sendRequest(
     userRequest: LLMRequest,
     partialCB?: (text: string) => void,
+    skipCache = false,
   ): Promise<string> {
     const models = Array.isArray(userRequest.model)
       ? userRequest.model
@@ -57,6 +76,7 @@ export class LLMClient {
         model,
         stream: partialCB ? true : false,
         messages: userRequest.messages.map(processMessage),
+        skip_cache: skipCache,
       };
 
       try {
