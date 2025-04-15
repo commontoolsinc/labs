@@ -36,37 +36,45 @@ async function getDOMParser() {
   return DOMParser;
 }
 
-const stackTracePattern =
-  /at (?:Object\.)?eval \(eval at .+?\), (?:eval|<anonymous>|Function):(\d+):(\d+)\)/;
+const stackTracePattern = /at (?:Object\.)?eval \((.+):(\d+):(\d+)\)/;
 
-// Deno and browser compatible source map processing
-// Maps JavaScript error locations back to TypeScript source code
-const extractSourceLocation = (
+const sourceMaps = new Map<string, RawSourceMap>();
+const sourceMapConsumers = new Map<string, SourceMapConsumer>();
+
+// Fixes stack traces to use source map from eval. Strangely, both Deno and
+// Chrome at least only observe `sourceURL` but not the source map, so we can
+// use the former to find the right source map and then apply this.
+export const mapSourceMapsOnStacktrace = (
   stack: string | undefined,
-  sourceMapData: RawSourceMap | null,
 ): string => {
   if (!stack) return "Unknown error";
-  if (!sourceMapData) return stack;
 
-  const consumer = new SourceMapConsumer(sourceMapData);
-
-  // Simple sourcemap parser that works across Deno and browsers
-  // without external dependencies
   const lines = stack.split("\n");
   const mappedLines = lines.map((line) => {
     const match = line.match(stackTracePattern);
 
     if (match) {
-      const lineNum = parseInt(match[1], 10);
-      const columnNum = parseInt(match[2], 10);
+      const fileName = match[1];
+      const lineNum = parseInt(match[2], 10);
+      const columnNum = parseInt(match[3], 10);
 
-      const originalPosition = consumer.originalPositionFor({
-        line: lineNum,
-        column: columnNum,
-      });
+      if (!sourceMaps.has(fileName)) return line;
+
+      if (!sourceMapConsumers.has(fileName)) {
+        sourceMapConsumers.set(
+          fileName,
+          new SourceMapConsumer(sourceMaps.get(fileName)!),
+        );
+      }
+
+      const originalPosition = sourceMapConsumers.get(fileName)!
+        .originalPositionFor({
+          line: lineNum,
+          column: columnNum,
+        });
 
       // Replace the original line with the mapped position information
-      return `    at ${originalPosition.source}:${originalPosition.line}:${originalPosition.column} /* Mapped from eval line ${lineNum}, column ${columnNum} */`;
+      return `    at ${originalPosition.source}:${originalPosition.line}:${originalPosition.column}`;
     } else {
       return line;
     }
@@ -90,7 +98,7 @@ const ensureRequires = async (js: string): Promise<Record<string, any>> => {
       if (!importCache[modulePath]) {
         // Fetch and compile the module
         const importSrc = await fetch(modulePath).then((resp) => resp.text());
-        const importedModule = await tsToExports(importSrc);
+        const importedModule = await tsToExports(importSrc, modulePath);
         if (importedModule.errors) {
           throw new Error(
             `Failed to import ${modulePath}: ${importedModule.errors}`,
@@ -106,8 +114,11 @@ const ensureRequires = async (js: string): Promise<Record<string, any>> => {
 
 export const tsToExports = async (
   src: string,
+  fileName?: string,
 ): Promise<{ exports?: any; errors?: string }> => {
   const ts = await getTSCompiler();
+
+  if (!fileName) fileName = merkleReference.refer(src).toString() + ".tsx";
 
   // Add error handling for compilation
   const result = ts.transpileModule(src, {
@@ -124,7 +135,7 @@ export const tsToExports = async (
       inlineSourceMap: false, // Generate separate source map instead of inline
     },
     reportDiagnostics: true,
-    fileName: "input.tsx", // Add a filename for better source mapping
+    fileName, // Add a filename for better source mapping
   });
 
   // Check for compilation errors
@@ -154,10 +165,10 @@ export const tsToExports = async (
   const js = result.outputText;
 
   // Parse source map if available - sourceMapText is already a JSON string
-  let sourceMapData: RawSourceMap | null = null;
   try {
     if (result.sourceMapText) {
-      sourceMapData = JSON.parse(result.sourceMapText);
+      const sourceMapData = JSON.parse(result.sourceMapText);
+      if (sourceMapData) sourceMaps.set(fileName, sourceMapData);
     }
   } catch (e) {
     console.warn("Failed to parse source map", e);
@@ -169,7 +180,7 @@ export const tsToExports = async (
   } catch (e) {
     const error = e as Error;
     // Add source location context if possible
-    const errorWithContext = extractSourceLocation(error.stack, sourceMapData);
+    const errorWithContext = mapSourceMapsOnStacktrace(error.stack);
     return { errors: errorWithContext };
   }
 
@@ -204,9 +215,13 @@ return exports;
 })`;
 
   if (result.sourceMapText) {
-    // `sourceMapping" + "URL` prevents confusion with this file's source map
-    wrappedCode += "\n//# sourceMapping" + "URL=data:application/json;base64," +
-      btoa(result.sourceMapText);
+    // ${"sourceMappingURL"} prevents confusion with this file's source map
+    wrappedCode += `
+//# ${"sourceMappingURL"}=data:application/json;base64,${
+      btoa(result.sourceMapText)
+    }
+//# ${"sourceURL"}=${fileName}
+`;
   }
 
   try {
@@ -215,10 +230,7 @@ return exports;
   } catch (e) {
     const error = e as Error;
     // Add source location context if possible
-    const errorWithContext = extractSourceLocation(
-      error.stack,
-      sourceMapData,
-    );
+    const errorWithContext = mapSourceMapsOnStacktrace(error.stack);
     return { errors: errorWithContext };
   }
 };
