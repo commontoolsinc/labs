@@ -15,6 +15,7 @@ import {
   DocImpl,
   EntityId,
   followAliases,
+  getCell,
   getCellFromEntityId,
   getDoc,
   getEntityId,
@@ -110,9 +111,6 @@ function filterOutEntity(
 
 export class CharmManager {
   private space: string;
-  private charmsDoc: DocImpl<CellLink[]>;
-  private pinned: DocImpl<CellLink[]>;
-  private trash: DocImpl<CellLink[]>;
 
   private charms: Cell<Cell<Charm>[]>;
   private pinnedCharms: Cell<Cell<Charm>[]>;
@@ -121,32 +119,24 @@ export class CharmManager {
   /**
    * Promise resolved when the charm manager gets the charm list.
    */
-  ready: Promise<void>;
+  ready: Promise<any>;
 
   constructor(
     private session: Session,
   ) {
     this.space = this.session.space;
-    this.charmsDoc = getDoc<CellLink[]>([], "charms", this.space);
-    this.pinned = getDoc<CellLink[]>([], "pinned-charms", this.space);
-    this.trash = getDoc<CellLink[]>([], "trash", this.space);
-    this.charms = this.charmsDoc.asCell([], undefined, charmListSchema);
 
     storage.setSigner(session.as);
-    this.pinnedCharms = this.pinned.asCell([], undefined, charmListSchema);
-    this.trashedCharms = this.trash.asCell([], undefined, charmListSchema);
 
-    this.ready = Promise.all(
-      this.primaryDocs.map((doc) => storage.syncCell(doc)),
-    ).then();
-  }
+    this.charms = getCell(this.space, "charms", charmListSchema);
+    this.pinnedCharms = getCell(this.space, "pinned-charms", charmListSchema);
+    this.trashedCharms = getCell(this.space, "trash", charmListSchema);
 
-  get primaryDocs() {
-    return [
-      this.charmsDoc,
-      this.pinned,
-      this.trash,
-    ];
+    this.ready = Promise.all([
+      storage.syncCell(this.charms),
+      storage.syncCell(this.pinnedCharms),
+      storage.syncCell(this.trashedCharms),
+    ]);
   }
 
   getSpace(): string {
@@ -159,7 +149,7 @@ export class CharmManager {
   }
 
   async pin(charm: Cell<Charm>) {
-    await storage.syncCell(this.pinned);
+    await storage.syncCell(this.pinnedCharms);
     // Check if already pinned
     if (
       !filterOutEntity(this.pinnedCharms, charm).some((c) =>
@@ -172,7 +162,7 @@ export class CharmManager {
   }
 
   async unpinById(charmId: EntityId) {
-    await storage.syncCell(this.pinned);
+    await storage.syncCell(this.pinnedCharms);
     const newPinnedCharms = filterOutEntity(this.pinnedCharms, charmId);
 
     if (newPinnedCharms.length !== this.pinnedCharms.get().length) {
@@ -192,18 +182,18 @@ export class CharmManager {
   }
 
   getPinned(): Cell<Cell<Charm>[]> {
-    storage.syncCell(this.pinned);
+    storage.syncCell(this.pinnedCharms);
     return this.pinnedCharms;
   }
 
   getTrash(): Cell<Cell<Charm>[]> {
-    storage.syncCell(this.trash);
+    storage.syncCell(this.trashedCharms);
     return this.trashedCharms;
   }
 
   async restoreFromTrash(idOrCharm: string | EntityId | Cell<Charm>) {
-    await storage.syncCell(this.trash);
-    await storage.syncCell(this.charmsDoc);
+    await storage.syncCell(this.trashedCharms);
+    await storage.syncCell(this.charms);
 
     const id = getEntityId(idOrCharm);
     if (!id) return false;
@@ -227,7 +217,7 @@ export class CharmManager {
   }
 
   async emptyTrash() {
-    await storage.syncCell(this.trash);
+    await storage.syncCell(this.trashedCharms);
     this.trashedCharms.set([]);
     await idle();
     return true;
@@ -239,12 +229,12 @@ export class CharmManager {
   getCharms(): Cell<Cell<Charm>[]> {
     // Start syncing if not already syncing. Will trigger a change to the list
     // once loaded.
-    storage.syncCell(this.charmsDoc);
+    storage.syncCell(this.charms);
     return this.charms;
   }
 
   private async add(newCharms: Cell<Charm>[]) {
-    await storage.syncCell(this.charmsDoc);
+    await storage.syncCell(this.charms);
     await idle();
 
     newCharms.forEach((charm) => {
@@ -1152,9 +1142,11 @@ export class CharmManager {
   // note: removing a charm doesn't clean up the charm's cells
   // Now moves the charm to trash instead of just removing it
   async remove(idOrCharm: string | EntityId | Cell<Charm>) {
-    await storage.syncCell(this.charmsDoc);
-    await storage.syncCell(this.pinned);
-    await storage.syncCell(this.trash);
+    await Promise.all([
+      storage.syncCell(this.charms),
+      storage.syncCell(this.pinnedCharms),
+      storage.syncCell(this.trashedCharms),
+    ]);
 
     const id = getEntityId(idOrCharm);
     if (!id) return false;
@@ -1183,7 +1175,7 @@ export class CharmManager {
 
   // Permanently delete a charm (from trash or directly)
   async permanentlyDelete(idOrCharm: string | EntityId | Cell<Charm>) {
-    await storage.syncCell(this.trash);
+    await storage.syncCell(this.trashedCharms);
 
     const id = getEntityId(idOrCharm);
     if (!id) return false;
