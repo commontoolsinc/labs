@@ -37,7 +37,7 @@ async function getDOMParser() {
 }
 
 const stackTracePattern =
-  /at eval \(eval at .+?\), (?:eval|<anonymous>|Function):(\d+):(\d+)\)/;
+  /at (?:Object\.)?eval \(eval at .+?\), (?:eval|<anonymous>|Function):(\d+):(\d+)\)/;
 
 // Deno and browser compatible source map processing
 // Maps JavaScript error locations back to TypeScript source code
