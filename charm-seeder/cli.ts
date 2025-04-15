@@ -7,7 +7,7 @@ import { client as llm } from "@commontools/llm";
 import { charmSchema, processWorkflow } from "@commontools/charm";
 import { NAME } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
-import { scenarios, Step } from "./scenarios.ts";
+import { scenarios, Step, Scenario } from "./scenarios.ts";
 import { CommandType } from "./commands.ts";
 import { generateObject } from "ai";
 import { openai } from "@ai-sdk/openai";
@@ -61,10 +61,10 @@ export async function waitForSelectorClick(
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function login() {
-  await page.goto(new URL(`/${name}`, toolshedUrl).toString());
+async function loginWithPage(targetPage: Page) {
+  await targetPage.goto(new URL(`/${name}`, toolshedUrl).toString());
   await sleep(1000);
-  const avatar = await page.$("#user-avatar");
+  const avatar = await targetPage.$("#user-avatar");
   if (avatar) {
     console.log("Already logged in");
     return;
@@ -73,7 +73,7 @@ async function login() {
   // If not logged in, see if any credential data is
   // persisting. If so, destroy local data.
   await sleep(500);
-  const clearCredsButton = await page.$(
+  const clearCredsButton = await targetPage.$(
     "button[aria-label='clear-credentials']",
   );
   if (clearCredsButton) {
@@ -84,52 +84,101 @@ async function login() {
   console.log("Logging in");
 
   // Click the first button, "register"
-  await waitForSelectorClick(page, "button[aria-label='register']");
+  await waitForSelectorClick(targetPage, "button[aria-label='register']");
 
   // Click the first button, "register with passphrase"
   await waitForSelectorClick(
-    page,
+    targetPage,
     "button[aria-label='register-with-passphrase']",
   );
 
   // Get the mnemonic from textarea.
-  let input = await page.waitForSelector("textarea[aria-label='mnemonic']");
+  let input = await targetPage.waitForSelector("textarea[aria-label='mnemonic']");
   const mnemonic = await input!.evaluate((textarea: HTMLInputElement) =>
     textarea.value
   );
 
   // Click the SECOND button, "continue to login"
-  await waitForSelectorClick(page, "button[aria-label='continue-login']");
+  await waitForSelectorClick(targetPage, "button[aria-label='continue-login']");
 
   // Paste the mnemonic in the input.
-  input = await page.waitForSelector("input[aria-label='enter-passphrase']");
+  input = await targetPage.waitForSelector("input[aria-label='enter-passphrase']");
   await input!.evaluate(
     (input: HTMLInputElement, mnemonic: string) => input.value = mnemonic,
     { args: [mnemonic] },
   );
 
   // Click the only button, "login"
-  await waitForSelectorClick(page, "button[aria-label='login']");
+  await waitForSelectorClick(targetPage, "button[aria-label='login']");
 
-  await page.waitForSelector("#user-avatar");
+  await targetPage.waitForSelector("#user-avatar");
+}
+
+async function login() {
+  await loginWithPage(page);
 }
 
 async function processPrompts() {
   let promptCount = 0;
   console.log(`Processing prompts...`);
 
-  for (const scenario of scenarios) {
-    await page.goto(toolshedUrl);
-    await sleep(1000);
-    let lastCharmId: string | undefined = undefined;
-    for (const step of scenario.steps) {
-      promptCount++;
-      const newCharmId = await processCommand(step, lastCharmId);
-      if (newCharmId) {
-        lastCharmId = newCharmId;
+  // Create a function that processes a single scenario
+  async function processScenario(scenario: Scenario, index: number): Promise<void> {
+    console.log(`[Scenario ${index}] Starting: ${scenario.name}`);
+    
+    // Create a new browser instance for each scenario
+    const scenarioBrowser = await launch({
+      args: ["--window-size=1280,1024"],
+      headless: HEADLESS,
+    });
+    
+    const scenarioPage = await scenarioBrowser.newPage();
+    
+    // Set up console logs capture
+    const scenarioConsoleLogs: ConsoleEvent[] = [];
+    scenarioPage.addEventListener("console", (e: ConsoleEvent) => {
+      scenarioConsoleLogs.push(e);
+      console.log(`[Scenario ${index}] ${e.detail?.type || 'log'}: ${e.detail?.text || ''}`);
+    });
+    
+    try {
+      // Login for this scenario's browser instance
+      await loginWithPage(scenarioPage);
+      
+      await scenarioPage.goto(toolshedUrl);
+      await sleep(1000);
+      
+      let lastCharmId: string | undefined = undefined;
+      
+      for (const step of scenario.steps) {
+        promptCount++;
+        const newCharmId = await processCommandWithPage(step, lastCharmId, scenarioPage, scenarioConsoleLogs);
+        if (newCharmId) {
+          lastCharmId = newCharmId;
+        }
       }
+      
+      console.log(`[Scenario ${index}] Completed: ${scenario.name}`);
+    } catch (error) {
+      console.error(`[Scenario ${index}] Error in ${scenario.name}:`, error);
+    } finally {
+      await scenarioBrowser.close();
     }
   }
+  
+  // Process scenarios with concurrency limit
+  const MAX_CONCURRENT = 3;
+  
+  for (let i = 0; i < scenarios.length; i += MAX_CONCURRENT) {
+    const batch = scenarios.slice(i, i + MAX_CONCURRENT);
+    const batchPromises = batch.map((scenario, batchIndex) => 
+      processScenario(scenario, i + batchIndex)
+    );
+    
+    // Wait for current batch to complete before starting next batch
+    await Promise.all(batchPromises);
+  }
+  
   console.log(`Successfully processed ${promptCount} prompts.`);
 }
 
@@ -158,11 +207,21 @@ export function getCharmNameAsCamelCase(
   return toCamelCase(cell.asSchema(charmSchema).key(NAME).get());
 }
 
-async function processCommand(
+function processCommand(
   step: Step,
   lastCharmId: string | undefined,
 ): Promise<string | undefined> {
   consoleLogs.length = 0;
+  return processCommandWithPage(step, lastCharmId, page, consoleLogs);
+}
+
+async function processCommandWithPage(
+  step: Step,
+  lastCharmId: string | undefined,
+  targetPage: Page,
+  targetConsoleLogs: ConsoleEvent[],
+): Promise<string | undefined> {
+  targetConsoleLogs.length = 0;
   const { type, prompt } = step;
   switch (type) {
     case CommandType.New: {
@@ -181,7 +240,7 @@ async function processCommand(
       const id = getEntityId(charm);
       if (id) {
         console.log(`Charm added: ${id["/"]}`);
-        await verifyCharm(id["/"], prompt);
+        await verifyCharmWithPage(id["/"], prompt, targetPage);
         return id["/"];
       }
       break;
@@ -208,7 +267,7 @@ async function processCommand(
       const id = getEntityId(charm);
       if (id) {
         console.log(`Charm added: ${id["/"]}`);
-        await verifyCharm(id["/"], prompt);
+        await verifyCharmWithPage(id["/"], prompt, targetPage);
         return id["/"];
       }
       break;
@@ -220,7 +279,11 @@ async function processCommand(
 }
 
 function addErrorListeners() {
-  page.evaluate(() => {
+  return addErrorListenersToPage(page);
+}
+
+function addErrorListenersToPage(targetPage: Page) {
+  targetPage.evaluate(() => {
     // @ts-ignore: this code is stringified and sent to browser context
     globalThis.charmRuntimeErrors = [];
     globalThis.addEventListener("common-iframe-error", (e) => {
@@ -230,15 +293,23 @@ function addErrorListeners() {
   });
 }
 
-async function checkForErrors() {
-  return await page.evaluate(() => {
+function checkForErrors() {
+  return checkForErrorsInPage(page);
+}
+
+async function checkForErrorsInPage(targetPage: Page) {
+  return await targetPage.evaluate(() => {
     // @ts-ignore: this code is stringified and sent to browser context
     return globalThis.charmRuntimeErrors;
   });
 }
 
-async function screenshot(id: string) {
-  const screenshot = await page.screenshot();
+function screenshot(id: string) {
+  return screenshotWithPage(id, page);
+}
+
+async function screenshotWithPage(id: string, targetPage: Page) {
+  const screenshot = await targetPage.screenshot();
   // Create directory if it doesn't exist
   const dirPath = `results/${name}`;
   try {
@@ -503,13 +574,17 @@ async function generateReport() {
   console.log(`Report generated: ${reportPath}`);
 }
 
-async function verifyCharm(id: string, prompt: string): Promise<string> {
+function verifyCharm(id: string, prompt: string): Promise<string> {
+  return verifyCharmWithPage(id, prompt, page);
+}
+
+async function verifyCharmWithPage(id: string, prompt: string, targetPage: Page): Promise<string> {
   // FIXME(ja): can we navigate without causing a page reload?
-  await page.goto(new URL(`/${name}/${id}`, toolshedUrl).toString());
-  addErrorListeners();
+  await targetPage.goto(new URL(`/${name}/${id}`, toolshedUrl).toString());
+  addErrorListenersToPage(targetPage);
   await sleep(5000);
-  const filename = await screenshot(id);
-  const errors = await checkForErrors();
+  const filename = await screenshotWithPage(id, targetPage);
+  const errors = await checkForErrorsInPage(targetPage);
   if (errors.length > 0) {
     charmResults.push({
       id,
