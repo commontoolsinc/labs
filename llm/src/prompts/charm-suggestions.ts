@@ -4,7 +4,7 @@ import JSON5 from "json5";
 import { describeCharm } from "./charm-describe.ts";
 import { llmPrompt } from "../index.ts";
 
-const SYSTEM_PROMPT = await llmPrompt(
+const SYSTEM_PROMPT = llmPrompt(
   "charm-suggestions-system",
   `
 You are tasked with generating prompt suggestions to iterate on web app functionality in new and interesting directions.
@@ -102,7 +102,7 @@ export async function generateCharmSuggestions(
     SCHEMA: schema,
   });
 
-  const prompt = await llmPrompt(
+  const prompt = llmPrompt(
     "charm-suggestions-user",
     `Give me ${count} charm suggestions`,
   );

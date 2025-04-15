@@ -10,7 +10,7 @@ import { llmPrompt } from "../index.ts";
 
 // Prompt for generating schema and specification from a goal
 export const SCHEMA_AND_CODE_FROM_GOAL_PROMPT = hydratePrompt(
-  await llmPrompt(
+  llmPrompt(
     "schema-and-code-from-goal",
     `
 You are creating a simple minimal viable product (MVP) based on a user's goal. Focus on the simplest implementation that works.
@@ -99,7 +99,7 @@ IMPORTANT:
 
 // Prompt for generating specification from a goal and existing schema
 export const CODE_FROM_SCHEMA_PROMPT = hydratePrompt(
-  await llmPrompt(
+  llmPrompt(
     "code-from-schema",
     `
 You are creating a simple MVP based on the user's goal, using an existing data schema. Focus on the simplest implementation that works with the provided schema.
@@ -216,7 +216,7 @@ export async function generateCodeAndSchema(
     // When we have an existing schema, focus on generating specification
     systemPrompt = CODE_FROM_SCHEMA_PROMPT;
     userContent = hydratePrompt(
-      await llmPrompt(
+      llmPrompt(
         "code-and-schema-user",
         `
 {{FORM}}
@@ -237,7 +237,7 @@ Based on this goal and the existing schema, please provide a title, description,
   } else {
     // When generating from scratch, use the full schema generation prompt
     systemPrompt = SCHEMA_AND_CODE_FROM_GOAL_PROMPT;
-    userContent = await llmPrompt(
+    userContent = llmPrompt(
       "schema-and-code-from-goal-user",
       formatForm(form),
     );

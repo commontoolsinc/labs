@@ -535,7 +535,7 @@ const security = () =>
 `;
 
 // Update the system message to reflect the new interface
-export const systemMd = await llmPrompt(
+export const systemMd = llmPrompt(
   "iframe-react-system",
   `# React Component Builder
 
@@ -921,7 +921,7 @@ function onReady(mount, sourceData, libs) {
 );
 
 // Update the system message to reflect the new interface
-export const systemMdConcise = await llmPrompt(
+export const systemMdConcise = llmPrompt(
   "iframe-react-system-concise",
   `# Source Code Generation
 

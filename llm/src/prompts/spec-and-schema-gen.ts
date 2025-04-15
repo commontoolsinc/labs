@@ -4,7 +4,7 @@ import type { JSONSchema, JSONSchemaWritable } from "@commontools/builder";
 import { WorkflowForm } from "@commontools/charm";
 
 // Prompt for generating schema and specification from a goal
-export const SCHEMA_FROM_GOAL_PROMPT = await llmPrompt(
+export const SCHEMA_FROM_GOAL_PROMPT = llmPrompt(
   "schema-from-goal",
   `
 You are creating a simple minimal viable product (MVP) based on a user's goal. Focus on the simplest implementation that works.
@@ -91,7 +91,7 @@ IMPORTANT:
 );
 
 // Prompt for generating specification from a goal and existing schema
-export const SPEC_FROM_SCHEMA_PROMPT = await llmPrompt(
+export const SPEC_FROM_SCHEMA_PROMPT = llmPrompt(
   "spec-from-schema",
   `
 You are creating a simple MVP based on the user's goal, using an existing data schema. Focus on the simplest implementation that works with the provided schema.
@@ -217,7 +217,7 @@ export async function generateSpecAndSchema(
     // When we have an existing schema, focus on generating specification
     systemPrompt = SPEC_FROM_SCHEMA_PROMPT;
     userContent = hydratePrompt(
-      await llmPrompt(
+      llmPrompt(
         "spec-from-schema-user",
         `
 {{FORM}}
@@ -238,7 +238,7 @@ Based on this goal and the existing schema, please provide a title, description,
   } else {
     // When generating from scratch, use the full schema generation prompt
     systemPrompt = SCHEMA_FROM_GOAL_PROMPT;
-    userContent = await llmPrompt("schema-from-goal-user", formatForm(form));
+    userContent = llmPrompt("schema-from-goal-user", formatForm(form));
   }
 
   // Send the request to the LLM using the specified model or default
@@ -334,7 +334,7 @@ export async function generateSpecAndSchemaAndCode(
     // When we have an existing schema, focus on generating specification
     systemPrompt = SPEC_FROM_SCHEMA_PROMPT;
     userContent = hydratePrompt(
-      await llmPrompt(
+      llmPrompt(
         "spec-and-code-from-schema-user",
         `
 {{FORM}}
@@ -355,7 +355,7 @@ Based on this goal and the existing schema, please provide a title, description,
   } else {
     // When generating from scratch, use the full schema generation prompt
     systemPrompt = SCHEMA_FROM_GOAL_PROMPT;
-    userContent = await llmPrompt("schema-from-goal-user", formatForm(form));
+    userContent = llmPrompt("schema-from-goal-user", formatForm(form));
   }
 
   // Send the request to the LLM using the specified model or default

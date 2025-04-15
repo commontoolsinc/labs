@@ -7,7 +7,7 @@ import { llmPrompt } from "../index.ts";
 /**
  * Basic prompt for classifying user intent into a workflow type
  */
-export const WORKFLOW_CLASSIFICATION_PROMPT = await llmPrompt(
+export const WORKFLOW_CLASSIFICATION_PROMPT = llmPrompt(
   "workflow-classification",
   `
 You are analyzing a user's request to determine the most appropriate workflow for code generation.
@@ -42,7 +42,7 @@ Please analyze this request and respond in the following format:
 /**
  * Prompt for generating an execution plan with comprehensive specification
  */
-export const PLAN_GENERATION_PROMPT = await llmPrompt(
+export const PLAN_GENERATION_PROMPT = llmPrompt(
   "plan-generation",
   `
 You are creating a brief execution plan and specification for a tool to fulfill a user's intent.
@@ -174,7 +174,7 @@ export async function classifyWorkflow(
     CONTEXT: context,
   });
 
-  const systemPrompt = await llmPrompt(
+  const systemPrompt = llmPrompt(
     "classify-system",
     "You are a helpful AI assistant tasked with classifying user intents for code generation",
   );
@@ -299,7 +299,7 @@ export async function generateWorkflowPlan(
     CONTEXT: context,
   });
 
-  const systemPrompt = await llmPrompt(
+  const systemPrompt = llmPrompt(
     "plan-generation-system",
     "You are a helpful AI assistant tasked with planning code generation workflows",
   );

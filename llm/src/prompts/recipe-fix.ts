@@ -4,7 +4,7 @@ import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { recipeGuidePrompt } from "./recipe-guide.ts";
 
 const SYSTEM_PROMPT = hydratePrompt(
-  await llmPrompt(
+  llmPrompt(
     "recipe-fix-system",
     `
 You are a code debugging and fixing assistant. Your task is to analyze buggy code that has caused errors and crashes, and then generate fixed code based on the original specifications. The code runs inside an iframe, and errors bubble up from there.
@@ -91,7 +91,7 @@ export async function fixRecipePrompt(
     SCHEMA: schema,
     ERROR: error,
   });
-  const prompt = await llmPrompt(
+  const prompt = llmPrompt(
     "recipe-fix-user",
     `Please fix the code. Remember to only return the user code portion, not the full template. Do not include any HTML, head, or body tags - just the JavaScript functions.`,
   );

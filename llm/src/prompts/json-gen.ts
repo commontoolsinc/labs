@@ -3,7 +3,7 @@ import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { client } from "../client.ts";
 import { llmPrompt } from "../index.ts";
 
-const SYSTEM_PROMPT = await llmPrompt(
+const SYSTEM_PROMPT = llmPrompt(
   "json-gen-system",
   `
 You are an expert JSON data generator AI. Your task is to design and generate a JSON blob that models and illustrates the data structure that would enable a product feature or idea described by a user.
@@ -41,7 +41,7 @@ Begin your response with a <scratchpad> section for your thought process, follow
 `,
 );
 
-const PROMPT = await llmPrompt(
+const PROMPT = llmPrompt(
   "json-gen-user",
   `Create a JSON object that illustrates the <product_description>`,
 );

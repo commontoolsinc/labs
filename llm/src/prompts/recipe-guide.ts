@@ -1,6 +1,6 @@
 import { llmPrompt } from "../index.ts";
 
-export const recipeGuidePrompt = await llmPrompt(
+export const recipeGuidePrompt = llmPrompt(
   "recipe-guide",
   `
 <recipe-guide>
