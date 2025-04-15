@@ -11,7 +11,7 @@ import { llmPrompt } from "../index.ts";
 // Prompt for generating schema and specification from a goal
 export const SCHEMA_AND_CODE_FROM_GOAL_PROMPT = hydratePrompt(
   llmPrompt(
-    "0.0.1",
+    "schema-and-code-from-goal",
     `
 You are creating a simple minimal viable product (MVP) based on a user's goal. Focus on the simplest implementation that works.
 
@@ -100,7 +100,7 @@ IMPORTANT:
 // Prompt for generating specification from a goal and existing schema
 export const CODE_FROM_SCHEMA_PROMPT = hydratePrompt(
   llmPrompt(
-    "0.0.1",
+    "code-from-schema",
     `
 You are creating a simple MVP based on the user's goal, using an existing data schema. Focus on the simplest implementation that works with the provided schema.
 
@@ -217,7 +217,7 @@ export async function generateCodeAndSchema(
     systemPrompt = CODE_FROM_SCHEMA_PROMPT;
     userContent = hydratePrompt(
       llmPrompt(
-        "0.0.1",
+        "code-and-schema-user",
         `
 {{FORM}}
 
@@ -237,7 +237,10 @@ Based on this goal and the existing schema, please provide a title, description,
   } else {
     // When generating from scratch, use the full schema generation prompt
     systemPrompt = SCHEMA_AND_CODE_FROM_GOAL_PROMPT;
-    userContent = llmPrompt("0.0.1", formatForm(form));
+    userContent = llmPrompt(
+      "schema-and-code-from-goal-user",
+      formatForm(form),
+    );
   }
 
   // Send the request to the LLM using the specified model or default
@@ -255,8 +258,8 @@ Based on this goal and the existing schema, please provide a title, description,
       context: "workflow",
       workflow: "code-and-schema-gen",
       generationId: form.meta.generationId,
-      systemPrompt,
-      userPrompt: userContent,
+      systemPrompt: systemPrompt.version,
+      userPrompt: userContent.version,
     },
   });
 

@@ -4,7 +4,7 @@ import { client } from "../client.ts";
 import { llmPrompt } from "../index.ts";
 
 const SYSTEM_PROMPT = llmPrompt(
-  "0.0.1",
+  "json-gen-system",
   `
 You are an expert JSON data generator AI. Your task is to design and generate a JSON blob that models and illustrates the data structure that would enable a product feature or idea described by a user.
 
@@ -42,7 +42,7 @@ Begin your response with a <scratchpad> section for your thought process, follow
 );
 
 const PROMPT = llmPrompt(
-  "0.0.1",
+  "json-gen-user",
   `Create a JSON object that illustrates the <product_description>`,
 );
 /**
@@ -71,8 +71,8 @@ export async function generateJSON(
     mode: "json",
     metadata: {
       context: "json-gen",
-      systemPrompt: system,
-      userPrompt: PROMPT,
+      systemPrompt: system.version,
+      userPrompt: PROMPT.version,
     },
   });
 

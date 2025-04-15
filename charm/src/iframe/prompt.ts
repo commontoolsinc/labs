@@ -72,7 +72,7 @@ ${steps.map((step, index) => `${index + 1}. ${step}`).join("\n")}`
     messages,
     stop: "\n```",
     metadata: {
-      systemPrompt: system,
+      systemPrompt: system.version,
     },
   };
 };
