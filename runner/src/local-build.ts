@@ -36,7 +36,8 @@ async function getDOMParser() {
   return DOMParser;
 }
 
-const stackTracePattern = /at (?:Object\.)?eval \((.+):(\d+):(\d+)\)/;
+const stackTracePattern =
+  /at (?:Object\.)?eval \((.+?)(?:, <anonymous>)?(?:\):|\:)(\d+):(\d+)\)/;
 
 const sourceMaps = new Map<string, RawSourceMap>();
 const sourceMapConsumers = new Map<string, SourceMapConsumer>();
