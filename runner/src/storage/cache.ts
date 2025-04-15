@@ -354,6 +354,7 @@ export class Replica {
     ),
     public pullRetryLimit: number = 100,
     public schemaTracker = new Map<string, Set<string>>(),
+    public useSchemaQueries: boolean = false,
   ) {
     channel.addEventListener("message", this);
     this.pull = this.pull.bind(this);
@@ -375,6 +376,7 @@ export class Replica {
       if (next.done) {
         break;
       }
+      console.log("Merging commits from poll");
       this.merge(next.value[this.space] as unknown as Commit);
     }
   }
@@ -388,6 +390,7 @@ export class Replica {
   onMessage(event: MessageEvent) {
     const { put } = event.data;
     if (put) {
+      console.log("Merging commits from onMessage");
       this.heap.merge(put, Replica.put);
     }
   }
@@ -412,7 +415,8 @@ export class Replica {
       return { ok: new Map() };
     }
 
-    console.log(entries);
+    // TODO: remove this
+    console.log("Pulled entries in cache: ", entries);
 
     // Otherwise we build a query selector to fetch requested entries from the
     // remote.
@@ -423,18 +427,16 @@ export class Replica {
         schemaContext !== undefined
       ) !== undefined;
     for (const [{ the, of }, schemaContext] of entries) {
-      // TODO: Env var to disable
-      if (hasSchema) {
+      if (hasSchema && this.useSchemaQueries) {
         const match: SchemaPathSelector = schemaContext === undefined
           ? { path: [] }
           : { path: [], schemaContext: schemaContext };
-        // TODO: need to handle cause free queries on the server
         Changes.set(selector, [of, the], "_", match);
       } else {
         Changes.set(selector, [of], the, {});
       }
     }
-    const queryParam = hasSchema
+    const queryParam = hasSchema && this.useSchemaQueries
       ? { selectSchema: selector }
       : { select: selector };
     const query = this.remote.query(queryParam);
@@ -677,6 +679,8 @@ export class Replica {
       { the, of, cause, is: { since: is.since }, since },
       ...toChanges(commit),
     ];
+    // TODO: Remove log
+    console.log("merging revisions", revisions);
 
     // Store newer revisions into the heap,
     this.heap.merge(revisions, Replica.update);
@@ -704,6 +708,11 @@ export interface RemoteStorageProviderSettings {
    * abort.
    */
   connectionTimeout: number;
+
+  /**
+   * Flag to enable or disable remote schema subscriptions
+   */
+  useSchemaQueries: boolean;
 }
 
 export interface RemoteStorageProviderOptions {
@@ -725,6 +734,7 @@ export interface RemoteStorageProviderOptions {
 const defaultSettings: RemoteStorageProviderSettings = {
   maxSubscriptionsPerSpace: 50_000,
   connectionTimeout: 30_000,
+  useSchemaQueries: false,
 };
 
 export class Provider implements StorageProvider {
@@ -791,6 +801,7 @@ export class Provider implements StorageProvider {
     } else {
       const session = this.session.mount(space);
       const replica = new Replica(space, session);
+      replica.useSchemaQueries = this.settings.useSchemaQueries;
       replica.poll();
       this.spaces.set(space, replica);
       return replica;

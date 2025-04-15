@@ -10,7 +10,10 @@ import { idle } from "./scheduler.ts";
 import { isStatic, markAsStatic } from "@commontools/builder";
 import { StorageProvider, StorageValue } from "./storage/base.ts";
 import { RemoteStorageProvider } from "./storage/remote.ts";
-import { Provider as CachedStorageProvider } from "./storage/cache.ts";
+import {
+  Provider as CachedStorageProvider,
+  RemoteStorageProviderSettings,
+} from "./storage/cache.ts";
 import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
 import { VolatileStorageProvider } from "./storage/volatile.ts";
 import { Signer } from "@commontools/identity";
@@ -311,7 +314,7 @@ class StorageImpl implements Storage {
       // environment variable override this.
       const type = this.remoteStorageUrl?.protocol === "volatile:"
         ? "volatile"
-        : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "cached");
+        : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "schema");
 
       if (type === "remote") {
         if (!this.remoteStorageUrl) {
@@ -336,6 +339,22 @@ class StorageImpl implements Storage {
           address: new URL("/api/storage/memory", this.remoteStorageUrl!),
           space: space as `did:${string}:${string}`,
           as: this.signer,
+        });
+      } else if (type === "schema") {
+        if (!this.remoteStorageUrl) {
+          throw new Error("No remote storage URL set");
+        }
+        const settings: RemoteStorageProviderSettings = {
+          maxSubscriptionsPerSpace: 50_000,
+          connectionTimeout: 30_000,
+          useSchemaQueries: true,
+        };
+        provider = new CachedStorageProvider({
+          id: this.id,
+          address: new URL("/api/storage/memory", this.remoteStorageUrl!),
+          space: space as `did:${string}:${string}`,
+          as: this.signer,
+          settings: settings,
         });
       } else {
         throw new Error(`Unknown storage type: ${type}`);

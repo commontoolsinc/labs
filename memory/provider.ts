@@ -45,9 +45,12 @@ export * as Memory from "./memory.ts";
 export * as Subscription from "./subscription.ts";
 import { refer } from "./reference.ts";
 import * as Access from "./access.ts";
-import { CommitBuilder, Fact as FactModule } from "./lib.ts";
+import { Fact as FactModule } from "./lib.ts";
 import { assert } from "@std/assert/assert";
 import * as ChangesBuilder from "./changes.ts";
+
+// Convenient shorthand so I don't need this long type for this string
+type JobId = InvocationURL<Reference<ConsumerCommandInvocation<Protocol>>>;
 
 export const open = async (
   options: Memory.Options,
@@ -140,10 +143,7 @@ class MemoryProviderSession<
     | undefined;
 
   channels: Map<InvocationURL<Reference<Subscribe>>, Set<string>> = new Map();
-  schemaChannels: Map<
-    InvocationURL<Reference<ConsumerCommandInvocation<MemoryProtocol>>>,
-    SchemaSubscription
-  > = new Map();
+  schemaChannels: Map<JobId, SchemaSubscription> = new Map();
 
   constructor(
     public memory: MemorySession,
@@ -233,21 +233,7 @@ class MemoryProviderSession<
       case "/memory/graph/query": {
         const result = await this.memory.querySchema(invocation);
         if (invocation.args.subscribe && result.ok !== undefined) {
-          const factSelection = result.ok[invocation.sub];
-          const factVersions = Array.from(FactModule.iterate(factSelection));
-          const includedFacts = new Set(
-            factVersions.map((fv) => Subscription.formatAddress(fv)),
-          );
-          const since = factVersions.reduce(
-            (acc, cur, _i) => cur.since > acc ? cur.since : acc,
-            -1,
-          );
-          const subscription = new SchemaSubscription(
-            invocation,
-            includedFacts,
-            since,
-          );
-          this.schemaChannels.set(of, subscription);
+          this.addSchemaSubscription(of, invocation, result.ok);
         }
         return this.perform({
           the: "task/return",
@@ -306,19 +292,20 @@ class MemoryProviderSession<
 
   async commit(commit: Commit<Space>) {
     // First, we check our schemaChannels, since these are more complex
-    const delta = this._getCommitData(commit);
+    const delta = this.getCommitData(commit);
     if (delta === undefined) {
       console.log("This is probably an error");
       return { ok: {} };
     }
 
     // First, check to see if any of our schema queries need to be notified
-    const [lastId, maxSince, changes] = await this
-      ._getSchemaSubscriptionMatches(commit);
-    this._setCommitData(commit, maxSince, changes);
+    const [lastId, maxSince, changes] = await this.getSchemaSubscriptionMatches(
+      commit,
+    );
     // It doesn't really matter who we say we're responding to
     // as long as we return all the relevant objects, the client will dispatch.
     if (lastId !== undefined) {
+      this.setCommitData(commit, maxSince, changes);
       return this.perform({
         the: "task/effect",
         of: lastId,
@@ -347,7 +334,7 @@ class MemoryProviderSession<
     return { ok: {} };
   }
 
-  _getCommitData(
+  private getCommitData(
     commit: Commit<Space>,
   ): { since: number; changes: Changes } | undefined {
     const commitObj = commit as Select<
@@ -366,7 +353,11 @@ class MemoryProviderSession<
     }
   }
 
-  _setCommitData(commit: Commit<Space>, since: number, changes: Changes) {
+  private setCommitData(
+    commit: Commit<Space>,
+    since: number,
+    changes: Changes,
+  ) {
     const commitObj = commit as Select<
       Space,
       Select<The, Select<Cause, { is: CommitData }>>
@@ -382,16 +373,31 @@ class MemoryProviderSession<
     return commit;
   }
 
-  async _getSchemaSubscriptionMatches(
+  private addSchemaSubscription<Space extends MemorySpace>(
+    of: JobId,
+    invocation: SchemaQuery<Space>,
+    result: Selection<Space>,
+  ) {
+    const factSelection = result[invocation.sub];
+    const factVersions = Array.from(FactModule.iterate(factSelection));
+    const includedFacts = new Set(
+      factVersions.map((fv) => Subscription.formatAddress(fv)),
+    );
+    const since = factVersions.reduce(
+      (acc, cur, _i) => cur.since > acc ? cur.since : acc,
+      -1,
+    );
+    const subscription = new SchemaSubscription(
+      invocation,
+      includedFacts,
+      since,
+    );
+    this.schemaChannels.set(of, subscription);
+  }
+
+  private async getSchemaSubscriptionMatches(
     commit: Commit<Space>,
-  ): Promise<
-    [
-      | InvocationURL<Reference<ConsumerCommandInvocation<MemoryProtocol>>>
-      | undefined,
-      number,
-      Changes,
-    ]
-  > {
+  ): Promise<[JobId | undefined, number, Changes]> {
     const schemaMatches = new Map<string, Revision<Fact>>();
     let maxSince = -1;
     let lastId;
@@ -425,8 +431,8 @@ class MemoryProviderSession<
         maxSince = since > maxSince ? since : maxSince;
       }
     }
-    // TODO: Need to package the new facts as Transactions to fit as a commit effect
-    const existing = this._getCommitData(commit);
+    // We will package the new facts as Transactions to fit as a commit effect
+    const existing = this.getCommitData(commit);
     const updates = ChangesBuilder.from(schemaMatches.values());
     if (existing === undefined) {
       return [lastId, maxSince, updates];
