@@ -1,6 +1,7 @@
 import { type DocImpl, getDoc } from "../doc.ts";
 import {
   client,
+  type LLMRequest,
   type SimpleContent,
   type SimpleMessage,
 } from "@commontools/llm";
@@ -16,15 +17,16 @@ import { type ReactivityLog } from "../scheduler.ts";
  * Returns the complete result as `result` and the incremental result as
  * `partial`. `pending` is true while a request is pending.
  *
- * @param prompt - A doc to store the prompt message - if you only have a single message
- * @param messages - list of messages to send to the LLM. - alternating user and assistant messages.
+ * @param prompt - The prompt message to send to the LLM - if you only have a single message
+ * @param messages - List of messages to send to the LLM - alternating user and assistant messages.
  *  - if you end with an assistant message, the LLM will continue from there.
  *  - if both prompt and messages are empty, no LLM call will be made,
  *    result and partial will be undefined.
- * @param model - A doc to store the model to use.
- * @param system - A doc to store the system message.
- * @param stop - A doc to store (optional) stop sequence.
- * @param max_tokens - A doc to store the maximum number of tokens to generate.
+ * @param model - The LLM model to use
+ * @param system - The system message to set context for the LLM
+ * @param stop - Optional sequence that will stop generation when encountered
+ * @param max_tokens - Maximum number of tokens to generate
+ * @param mode - Optional, can be "json"
  *
  * @returns { pending: boolean, result?: string, partial?: string } - As individual
  *   docs, representing `pending` state, final `result` and incrementally
@@ -38,6 +40,8 @@ export function llm(
     system?: string;
     max_tokens?: number;
     model?: string;
+    mode?: "json";
+    context?: Record<string, string>;
   }>,
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
@@ -72,40 +76,30 @@ export function llm(
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
 
+  // HACK(seefeld): This is break abstractions to find what in the UI is the
+  // charm. This layer of the code should be unaware of this, but this is only
+  // for logging purposes.
+  let topSource = parentDoc;
+  while (topSource.sourceCell) topSource = topSource.sourceCell;
+  const charm = topSource.get().resultRef?.cell as DocImpl<any> | undefined;
+  const charmId = charm
+    ? `${charm.space}/${JSON.parse(JSON.stringify(charm?.entityId))?.["/"]}`
+    : undefined;
+
   return (log: ReactivityLog) => {
     const thisRun = ++currentRun;
 
-    const { system, messages, prompt, stop, max_tokens, model } =
+    const { system, messages, prompt, stop, max_tokens, model, mode, context } =
       inputsCell.getAsQueryResult([], log) ?? {};
 
-    // Define types for our parameters
-    type BaseParams = {
-      model: string;
-      messages: SimpleContent[] | SimpleMessage[];
-      max_tokens: number;
-      metadata?: Record<string, string>;
-    };
-
-    type StandardParams = BaseParams & {
-      system: string;
-      prompt: string;
-      stop: string;
-    };
-
-    type O1Params = BaseParams;
-
-    let llmParams: StandardParams | O1Params = {
+    const llmParams: LLMRequest = {
       system: system ?? "",
-      messages: messages ?? [],
-      prompt: prompt ?? "",
+      messages: messages ?? [prompt],
       stop: stop ?? "",
       max_tokens: max_tokens ?? 4096,
-      model: model ?? "claude-3-5-sonnet",
-      metadata: {
-        // FIXME(ja): how do we get the context of space/charm id here
-        context: "charm",
-      },
-    } as StandardParams;
+      model: model ?? "google:gemini-2.0-flash",
+      mode,
+    };
 
     // FIXME(ja): look at if model supports system messages instead...
     // or perhaps we do this in the toolshed handler instead?
@@ -114,15 +108,14 @@ export function llm(
         ? (`${system}\n\n${prompt}` as SimpleContent)
         : ((system || prompt) as SimpleContent);
 
-      llmParams = {
-        messages: messages ?? (combinedMessage ? [combinedMessage] : []),
-        model: model,
-        max_tokens: max_tokens ?? 4096,
-        metadata: llmParams.metadata,
-      };
+      llmParams.messages = messages ??
+        (combinedMessage ? [combinedMessage] : []);
     }
 
-    const hash = refer(llmParams).toString();
+    const hash = refer(JSON.stringify(llmParams)).toString();
+
+    // Add after hashing, since this will change a lot, but doesn't affect the request.
+    llmParams.metadata = { ...context, charmId };
 
     // Return if the same request is being made again, either concurrently (same
     // as previousCallHash) or when rehydrated from storage (same as the
