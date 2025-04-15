@@ -16,8 +16,9 @@ import { z } from "zod";
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
 
-const { name } = parseArgs(Deno.args, {
+const { name, "skip-cache": skipCache } = parseArgs(Deno.args, {
   string: ["name"],
+  boolean: ["skip-cache"],
 });
 
 if (!name) {
@@ -124,7 +125,7 @@ async function processPrompts() {
     let lastCharmId: string | undefined = undefined;
     for (const step of scenario.steps) {
       promptCount++;
-      const newCharmId = await processCommand(step, lastCharmId);
+      const newCharmId = await processCommand(step, lastCharmId, skipCache);
       if (newCharmId) {
         lastCharmId = newCharmId;
       }
@@ -161,6 +162,7 @@ export function getCharmNameAsCamelCase(
 async function processCommand(
   step: Step,
   lastCharmId: string | undefined,
+  skipCache = false,
 ): Promise<string | undefined> {
   consoleLogs.length = 0;
   const { type, prompt } = step;
@@ -169,6 +171,7 @@ async function processCommand(
       console.log(`Adding: "${prompt}"`);
       const form = await processWorkflow(prompt, false, {
         charmManager,
+        skipCache,
         prefill: {
           classification: {
             workflowType: "imagine",
@@ -195,6 +198,7 @@ async function processCommand(
       const form = await processWorkflow(prompt, false, {
         charmManager,
         existingCharm: charm,
+        skipCache,
         prefill: {
           classification: {
             workflowType: "imagine",
