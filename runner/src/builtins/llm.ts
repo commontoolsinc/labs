@@ -29,6 +29,7 @@ import { isObj } from "@commontools/utils";
  * @param stop - Optional sequence that will stop generation when encountered
  * @param max_tokens - Maximum number of tokens to generate
  * @param mode - Optional, can be "json"
+ * @param context - Optional, can be used to pass in context for logging only
  *
  * @returns { pending: boolean, result?: string, partial?: string } - As individual
  *   docs, representing `pending` state, final `result` and incrementally
@@ -117,7 +118,7 @@ export function llm(
     const hash = refer(JSON.stringify(llmParams)).toString();
 
     // Add after hashing, since this will change a lot, but doesn't affect the request.
-    llmParams.metadata = { ...isObj(context) ? context : {}, charmId };
+    llmParams.metadata = { ...(isObj(context) ? context : {}), charmId };
 
     // Return if the same request is being made again, either concurrently (same
     // as previousCallHash) or when rehydrated from storage (same as the
