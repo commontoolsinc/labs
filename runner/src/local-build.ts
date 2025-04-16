@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { RawSourceMap, SourceMapConsumer } from "source-map-js";
 import * as commonHtml from "@commontools/html";
 import * as commonBuilder from "@commontools/builder";
 import * as zod from "zod";
@@ -35,12 +36,53 @@ async function getDOMParser() {
   return DOMParser;
 }
 
-// NOTE(ja): this isn't currently doing typechecking, but it could...
+const stackTracePattern =
+  /at (?:Object\.)?eval \((.+?)(?:, <anonymous>)?(?:\):|\:)(\d+):(\d+)\)/;
 
-// NOTE(ja): we should probably send JSON of graph, not the function... but...
-// 1. unsure how to run a JSON graph from a recipe
-// 2. converting to JSON loses closures (which is we will want, but we
-//    currently use closures to get around gaps in the current implementation)
+const sourceMaps = new Map<string, RawSourceMap>();
+const sourceMapConsumers = new Map<string, SourceMapConsumer>();
+
+// Fixes stack traces to use source map from eval. Strangely, both Deno and
+// Chrome at least only observe `sourceURL` but not the source map, so we can
+// use the former to find the right source map and then apply this.
+export const mapSourceMapsOnStacktrace = (
+  stack: string | undefined,
+): string => {
+  if (!stack) return "Unknown error";
+
+  const lines = stack.split("\n");
+  const mappedLines = lines.map((line) => {
+    const match = line.match(stackTracePattern);
+
+    if (match) {
+      const fileName = match[1];
+      const lineNum = parseInt(match[2], 10);
+      const columnNum = parseInt(match[3], 10);
+
+      if (!sourceMaps.has(fileName)) return line;
+
+      if (!sourceMapConsumers.has(fileName)) {
+        sourceMapConsumers.set(
+          fileName,
+          new SourceMapConsumer(sourceMaps.get(fileName)!),
+        );
+      }
+
+      const originalPosition = sourceMapConsumers.get(fileName)!
+        .originalPositionFor({
+          line: lineNum,
+          column: columnNum,
+        });
+
+      // Replace the original line with the mapped position information
+      return `    at ${originalPosition.source}:${originalPosition.line}:${originalPosition.column}`;
+    } else {
+      return line;
+    }
+  });
+
+  return mappedLines.join("\n");
+};
 
 const importCache: Record<string, any> = {};
 
@@ -57,7 +99,7 @@ const ensureRequires = async (js: string): Promise<Record<string, any>> => {
       if (!importCache[modulePath]) {
         // Fetch and compile the module
         const importSrc = await fetch(modulePath).then((resp) => resp.text());
-        const importedModule = await tsToExports(importSrc);
+        const importedModule = await tsToExports(importSrc, modulePath);
         if (importedModule.errors) {
           throw new Error(
             `Failed to import ${modulePath}: ${importedModule.errors}`,
@@ -73,8 +115,12 @@ const ensureRequires = async (js: string): Promise<Record<string, any>> => {
 
 export const tsToExports = async (
   src: string,
+  fileName?: string,
 ): Promise<{ exports?: any; errors?: string }> => {
   const ts = await getTSCompiler();
+
+  if (!fileName) fileName = merkleReference.refer(src).toString() + ".tsx";
+
   // Add error handling for compilation
   const result = ts.transpileModule(src, {
     compilerOptions: {
@@ -85,8 +131,12 @@ export const tsToExports = async (
       jsxFactory: "h",
       jsxFragmentFactory: "Fragment",
       esModuleInterop: true,
+      sourceMap: true, // Enable source map generation
+      inlineSources: false, // Don't include original source in source maps
+      inlineSourceMap: false, // Generate separate source map instead of inline
     },
     reportDiagnostics: true,
+    fileName, // Add a filename for better source mapping
   });
 
   // Check for compilation errors
@@ -115,16 +165,29 @@ export const tsToExports = async (
 
   const js = result.outputText;
 
+  // Parse source map if available - sourceMapText is already a JSON string
+  try {
+    if (result.sourceMapText) {
+      const sourceMapData = JSON.parse(result.sourceMapText);
+      if (sourceMapData) sourceMaps.set(fileName, sourceMapData);
+    }
+  } catch (e) {
+    console.warn("Failed to parse source map", e);
+  }
+
   let localImports: Record<string, any> | undefined;
   try {
     localImports = await ensureRequires(js);
   } catch (e) {
-    return { errors: (e as Error).message };
+    const error = e as Error;
+    // Add source location context if possible
+    const errorWithContext = mapSourceMapsOnStacktrace(error.stack);
+    return { errors: errorWithContext };
   }
 
   // Custom module resolution
   const customRequire = (moduleName: string) => {
-    if (localImports[moduleName]) {
+    if (localImports && localImports[moduleName]) {
       return localImports[moduleName];
     }
     switch (moduleName) {
@@ -145,21 +208,31 @@ export const tsToExports = async (
     }
   };
 
-  const DOMParser = await getDOMParser();
+  globalThis.DOMParser ??= await getDOMParser();
 
-  const wrappedCode = `
-    (async function(require) {
-        const exports = {};
-        globalThis.DOMParser = DOMParser;
-        ${js}
-        return exports;
-    })`;
+  // Important: ${js} is on the first line, so that the source map is accurate
+  let wrappedCode = `(async function(require) { const exports = {}; ${js}
+return exports;
+})`;
+
+  if (result.sourceMapText) {
+    // ${"sourceMappingURL"} prevents confusion with this file's source map
+    wrappedCode += `
+//# ${"sourceMappingURL"}=data:application/json;base64,${
+      btoa(result.sourceMapText)
+    }
+//# ${"sourceURL"}=${fileName}
+`;
+  }
 
   try {
     const exports = await eval(wrappedCode)(customRequire);
     return { exports };
   } catch (e) {
-    return { errors: (e as Error).message };
+    const error = e as Error;
+    // Add source location context if possible
+    const errorWithContext = mapSourceMapsOnStacktrace(error.stack);
+    return { errors: errorWithContext };
   }
 };
 

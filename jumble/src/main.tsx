@@ -91,7 +91,9 @@ setupIframe();
 let errorCount = 0;
 onError((error: Error) => {
   !errorCount++ &&
-    globalThis.alert("Uncaught error in recipe: " + error.message);
+    globalThis.alert(
+      "Uncaught error in recipe: " + error.message + "\n" + error.stack,
+    );
   // Also send to Sentry
   Sentry.captureException(error);
 });
