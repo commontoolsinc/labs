@@ -40,16 +40,9 @@ export function useLiveSpecPreview(
   model: LanguageModelId = "think",
   currentCharm?: Cell<Charm>,
 ) {
-  // Track loading states separately for classification and plan generation
-  const [classificationLoading, setClassificationLoading] = useState(false);
-  const [planLoading, setPlanLoading] = useState(false);
-  const [loading, setLoading] = useState(false); // Combined loading state for compatibility
-
+  const [loading, setLoading] = useState(false);
   // Track the current generation process to cancel outdated requests
   const currentGenerationRef = useRef<string>("0");
-
-  // Track the text input that generated the current displayed results
-  const [lastSuccessfulText, setLastSuccessfulText] = useState<string>("");
 
   // Preview content state
   const [previewForm, setPreviewForm] = useState<Partial<WorkflowForm>>({});
@@ -69,45 +62,11 @@ export function useLiveSpecPreview(
       currentGenerationRef.current = generationId;
       console.groupCollapsed("generatePreview[" + generationId + "]");
 
-      // Reset states based on whether this is a refinement or new topic
-      const resetState = () => {
-        const textInvalid = !text || !text.trim() || text.trim().length < 10 ||
-          !enabled;
-
-        console.log("Reset state check:", {
-          textInvalid,
-          lastSuccessfulText: lastSuccessfulText.substring(0, 20) + "...",
-          currentText: text.substring(0, 20) + "...",
-        });
-
-        setPreviewForm({});
-        setClassificationLoading(false);
-        setPlanLoading(false);
-        setLoading(false);
-      };
-
       // Helper function to check if this generation process is still current
       const isCurrentGeneration = () =>
         currentGenerationRef.current === generationId;
 
-      // Don't generate previews for short inputs (less than 8 chars) or if disabled
-      // This helps prevent unnecessary API calls and LLM requests
-      if (!text || !text.trim() || text.trim().length < 8 || !enabled) {
-        console.log("Skipping preview generation - text too short or disabled");
-        resetState();
-        return;
-      }
-
-      console.log("Starting preview generation...");
-
-      // Set loading states to true at the start, but DON'T reset progress states
-      // This is critical to prevent erasing progress when user is typing quickly
-      setClassificationLoading(true);
-      setPlanLoading(true);
       setLoading(true);
-
-      // Instead, set loading without touching progress
-      // If previous sections completed, they should stay completed
 
       try {
         const cancellation = { cancelled: false };
@@ -134,27 +93,13 @@ export function useLiveSpecPreview(
           cache: true,
         });
         setPreviewForm(form);
-
-        // Check if this is still the current generation before proceeding
-        if (!isCurrentGeneration()) {
-          cancellation.cancelled = true;
-          console.log(generationId, "Abandoning outdated generation process");
-          return;
-        }
-
-        // Important: Turn off the main loading state after classification
-        // so UI can show partial results while plan and spec are loading
         setLoading(false);
-        setLastSuccessfulText(text);
       } catch (error) {
         console.error("Error generating preview:", error);
       } finally {
         // Only reset loading states if this is still the current generation
         if (isCurrentGeneration()) {
           setLoading(false);
-          // Reset any lingering loading states to ensure UI doesn't get stuck
-          setClassificationLoading(false);
-          setPlanLoading(false);
         }
         console.groupEnd();
       }
@@ -174,13 +119,11 @@ export function useLiveSpecPreview(
     fx();
   }, [debouncedInput, generatePreview, enabled, charmManager]);
 
-  // Function to manually change the workflow type
+  // Used from the UI to change the workflow
   const setWorkflowType = useCallback((type: WorkflowType) => {
-    // Create a unique ID for this generation process
     const generationId = crypto.randomUUID();
     currentGenerationRef.current = generationId;
 
-    // Update the workflow type state immediately
     const form = {
       classification: {
         workflowType: type,
@@ -195,8 +138,6 @@ export function useLiveSpecPreview(
   return {
     previewForm,
     loading,
-    classificationLoading,
-    planLoading,
     model,
     setWorkflowType,
   };

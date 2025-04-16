@@ -86,8 +86,6 @@ function CommandProcessor({
   const {
     previewForm,
     loading: isPreviewLoading,
-    classificationLoading,
-    planLoading,
     setWorkflowType, // Add the setter function to allow changing workflow type manually
   } = useLiveSpecPreview(
     inputValue,
@@ -142,8 +140,6 @@ function CommandProcessor({
             <SpecPreview
               form={previewForm}
               loading={isPreviewLoading}
-              classificationLoading={classificationLoading}
-              planLoading={planLoading}
               visible
               floating
               onWorkflowChange={setWorkflowType}

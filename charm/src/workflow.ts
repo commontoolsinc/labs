@@ -383,11 +383,10 @@ export interface WorkflowForm {
 
   // Metadata and workflow state
   meta: {
-    isComplete: boolean;
-    isFilled: boolean;
-    modelId?: string;
+    charmManager: CharmManager;
     generationId?: string;
-    charmManager?: CharmManager;
+    modelId?: string;
+    isComplete: boolean;
     cache: boolean;
   };
 }
@@ -403,12 +402,13 @@ export interface WorkflowForm {
  * @returns A new workflow form object
  */
 export function createWorkflowForm(
-  { input, modelId, charm, generationId, cache = true }: {
+  { input, modelId, charm, generationId, charmManager, cache = true }: {
     input: string;
     modelId?: string;
     charm?: Cell<Charm>;
     generationId?: string;
     cache: boolean;
+    charmManager: CharmManager;
   },
 ): WorkflowForm {
   return {
@@ -422,10 +422,10 @@ export function createWorkflowForm(
     plan: null,
     meta: {
       isComplete: false,
-      isFilled: false,
       modelId,
       generationId: generationId ?? crypto.randomUUID(),
       cache,
+      charmManager,
     },
   };
 }
@@ -600,9 +600,6 @@ export async function fillPlanningSection(
     dataModel: planningResult.dataModel,
   };
 
-  // Mark the form as filled (ready for generation) once we have a plan
-  newForm.meta.isFilled = true;
-
   return newForm;
 }
 
@@ -616,11 +613,6 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
   }
 
   const newForm = { ...form };
-
-  // Check if the form is filled properly
-  if (!newForm.meta.isFilled) {
-    throw new Error("Cannot generate code from an incomplete workflow form");
-  }
 
   if (!newForm.meta.charmManager) {
     throw new Error("CharmManager is required for code generation");
@@ -703,6 +695,7 @@ export async function processWorkflow(
     charm: options.existingCharm,
     modelId: options.model,
     cache: options.cache,
+    charmManager,
   });
   console.log("creating form", form);
 
@@ -720,9 +713,8 @@ export async function processWorkflow(
 
     if (options.prefill) {
       console.log("prefilling form", options.prefill);
-      // do not prefill the meta
-      delete options.prefill.meta;
       // Only use prefill values for fields that aren't null or undefined in the prefill
+      // Intentionally omit the meta
       form = {
         ...form,
         input: options.prefill?.input
