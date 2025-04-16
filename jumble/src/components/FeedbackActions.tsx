@@ -54,13 +54,8 @@ export function FeedbackActions() {
       );
 
       setIsFeedbackDialogOpen(false);
-      alert("Feedback submitted successfully! Thank you for your input.");
     } catch (error) {
-      alert(
-        `Error submitting feedback: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+      console.error("Error submitting feedback:", error);
     } finally {
       setIsSubmitting(false);
     }
