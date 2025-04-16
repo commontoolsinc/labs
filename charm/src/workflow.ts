@@ -290,11 +290,6 @@ export async function generatePlan(
     existingCode = code;
   }
 
-  console.log({ skipCache, generatePlan: true });
-  if (!skipCache) {
-    Deno.exit(0);
-  }
-
   try {
     const result = await generateWorkflowPlan(
       input,
@@ -527,11 +522,6 @@ export async function fillPlanningSection(
 
   const newForm = { ...form };
 
-  console.log({ skipCache: form.meta.skipCache, fillPlanningSection: true });
-  if (!form.meta.skipCache) {
-    Deno.exit(0);
-  }
-
   // Skip for empty inputs
   if (!form.input.rawInput || form.input.rawInput.trim().length === 0) {
     newForm.plan = {
@@ -633,32 +623,19 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
       if (!form.input.existingCharm) {
         throw new Error("Fix workflow requires an existing charm");
       }
-      charm = await executeFixWorkflow(
-        newForm.meta.charmManager,
-        form.input.existingCharm,
-        form.plan,
-        form.meta.modelId,
-      );
+      charm = await executeFixWorkflow(newForm.meta.charmManager, form);
       break;
 
     case "edit":
       if (!form.input.existingCharm) {
         throw new Error("Edit workflow requires an existing charm");
       }
-      charm = await executeEditWorkflow(
-        newForm.meta.charmManager,
-        form.input.existingCharm,
-        form.plan,
-        form.meta.modelId,
-      );
+      charm = await executeEditWorkflow(newForm.meta.charmManager, form);
       break;
 
     case "imagine":
     case "imagine-single-phase":
-      charm = await executeImagineWorkflow(
-        newForm.meta.charmManager,
-        form,
-      );
+      charm = await executeImagineWorkflow(newForm.meta.charmManager, form);
       break;
 
     default:
@@ -702,11 +679,6 @@ export async function processWorkflow(
   console.groupCollapsed("processWorkflow");
   const startTime = performance.now();
   const timings: Record<string, number> = {};
-
-  console.log({ skipCache: options.skipCache });
-  if (!options.skipCache) {
-    Deno.exit(0);
-  }
 
   // Create a new form or use prefilled form
   let form = createWorkflowForm({
@@ -920,19 +892,17 @@ ${userPrompt}
  */
 export function executeFixWorkflow(
   charmManager: CharmManager,
-  currentCharm: Cell<Charm>,
-  plan: WorkflowForm["plan"],
-  model?: string,
-  skipCache?: boolean,
+  form: WorkflowForm,
 ): Promise<Cell<Charm>> {
   console.log("Executing FIX workflow");
 
   return iterate(
     charmManager,
-    currentCharm,
-    plan,
-    model,
-    skipCache,
+    form.input.existingCharm!,
+    form.plan,
+    form.meta.modelId,
+    form.meta.generationId,
+    form.meta.skipCache,
   );
 }
 
@@ -945,17 +915,17 @@ export function executeFixWorkflow(
  */
 export function executeEditWorkflow(
   charmManager: CharmManager,
-  currentCharm: Cell<Charm>,
-  plan: WorkflowForm["plan"],
-  model?: string,
+  form: WorkflowForm,
 ): Promise<Cell<Charm>> {
   console.log("Executing EDIT workflow");
 
   return iterate(
     charmManager,
-    currentCharm,
-    plan,
-    model,
+    form.input.existingCharm!,
+    form.plan,
+    form.meta.modelId,
+    form.meta.generationId,
+    form.meta.skipCache,
   );
 }
 

@@ -324,11 +324,6 @@ export async function generateWorkflowPlan(
     "You are a helpful AI assistant tasked with planning code generation workflows",
   );
 
-  console.log({ skipCache, generateWorkflowPlan: true });
-  if (!skipCache) {
-    Deno.exit(0);
-  }
-
   const response = await client.sendRequest({
     system: systemPrompt.text,
     messages: [{ role: "user", content: prompt.text }],

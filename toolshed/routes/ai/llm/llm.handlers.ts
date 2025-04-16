@@ -13,7 +13,7 @@ import { findModel } from "./models.ts";
 import env from "@/env.ts";
 
 const withoutMetadataSkipCache = (obj: any) => {
-  const { skipCache, metadata, ...rest } = obj;
+  const { skip_cache, metadata, ...rest } = obj;
   return rest;
 };
 
@@ -105,11 +105,6 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
 
   // If skip_cache is true, we don't want to use the cache
   const skipCache = payload.skip_cache ?? false;
-
-  if (!skipCache) {
-    console.log(payload);
-    Deno.exit(0);
-  }
 
   if (!payload.metadata) {
     payload.metadata = {};

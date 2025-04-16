@@ -241,11 +241,6 @@ Based on this goal and the existing schema, please provide a title, description,
     userContent = llmPrompt("schema-from-goal-user", formatForm(form));
   }
 
-  console.log({ skipCache: form.meta.skipCache, generateSpecAndSchema: true });
-  if (!form.meta.skipCache) {
-    Deno.exit(0);
-  }
-
   // Send the request to the LLM using the specified model or default
   const response = await client.sendRequest({
     model: model,
@@ -362,14 +357,6 @@ Based on this goal and the existing schema, please provide a title, description,
     // When generating from scratch, use the full schema generation prompt
     systemPrompt = SCHEMA_FROM_GOAL_PROMPT;
     userContent = llmPrompt("schema-from-goal-user", formatForm(form));
-  }
-
-  console.log({
-    skipCache: form.meta.skipCache,
-    generateSpecAndSchemaAndCode: 1234,
-  });
-  if (!form.meta.skipCache) {
-    Deno.exit(0);
   }
 
   // Send the request to the LLM using the specified model or default

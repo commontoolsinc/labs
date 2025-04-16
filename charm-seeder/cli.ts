@@ -69,10 +69,7 @@ async function processCommand(
   skipCache = false,
 ): Promise<string | undefined> {
   const { type, prompt } = step;
-  console.log({ skipCache, "processCommand": true });
-  if (!skipCache) {
-    Deno.exit(0);
-  }
+
   switch (type) {
     case CommandType.New: {
       console.log(`Adding: "${prompt}"`);
@@ -87,9 +84,6 @@ async function processCommand(
           },
         },
       });
-      if (!form.meta.skipCache) {
-        Deno.exit(0);
-      }
       const charm = await castNewRecipe(charmManager, form);
       const id = getEntityId(charm);
       if (id) {
@@ -137,9 +131,10 @@ const charmResults: CharmResult[] = [];
 
 async function verifyCharm(id: string, prompt: string): Promise<string> {
   // FIXME(ja): can we navigate without causing a page reload?
-  await goto(`/${name}/${id}`);
+  await goto(`/${name!}/${id}`);
   addErrorListeners();
   await sleep(5000);
+  await ensureReportDir(name!);
   const screenshotPath = `results/${name}/${id}.png`;
   await screenshot(id, screenshotPath);
   const errors = await checkForErrors();
@@ -171,9 +166,9 @@ async function verifyCharm(id: string, prompt: string): Promise<string> {
 }
 
 try {
-  await ensureReportDir(name);
   await login(name);
   await processPrompts(tag);
+  await ensureReportDir(name);
   await generateReport(name, charmResults, toolshedUrl, scenarios);
 } catch (e) {
   console.error(e);

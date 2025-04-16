@@ -47,14 +47,12 @@ export class LLMClient {
    *
    * @param userRequest The LLM request object.
    * @param partialCB Optional callback for streaming responses.
-   * @param skipCache Optional flag to skip the LLM cache for this request. Defaults to false.
    * @returns The full LLM response as a string.
    * @throws If the request fails after retrying with fallback models.
    */
   async sendRequest(
     userRequest: LLMRequest,
     partialCB?: (text: string) => void,
-    skipCache = false,
   ): Promise<string> {
     const models = Array.isArray(userRequest.model)
       ? userRequest.model
@@ -68,7 +66,7 @@ export class LLMClient {
         model,
         stream: partialCB ? true : false,
         messages: userRequest.messages.map(processMessage),
-        skip_cache: skipCache,
+        skip_cache: userRequest.skip_cache,
       };
 
       try {

@@ -43,11 +43,6 @@ export const genSrc = async ({
 }) => {
   const request = buildPrompt({ src, spec, newSpec, schema, model, steps });
 
-  console.log({ skipCache, genSrc: true });
-  if (!skipCache) {
-    Deno.exit(0);
-  }
-
   globalThis.dispatchEvent(
     new CustomEvent("job-update", {
       detail: {
@@ -386,11 +381,6 @@ async function twoPhaseCodeGeneration(
         (schema.properties as Record<string, JSONSchema>)[key] = props[key];
       }
     });
-  }
-
-  console.log({ skipCache: form.meta.skipCache, genSrc: true });
-  if (!form.meta.skipCache) {
-    Deno.exit(0);
   }
 
   // Phase 2: Generate UI code using the schema and enhanced spec

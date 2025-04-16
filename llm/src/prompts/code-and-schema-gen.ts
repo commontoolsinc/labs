@@ -243,11 +243,6 @@ Based on this goal and the existing schema, please provide a title, description,
     );
   }
 
-  console.log({ skipCache: form.meta.skipCache, generateCodeAndSchema: 1 });
-  if (!form.meta.skipCache) {
-    Deno.exit(0);
-  }
-
   // Send the request to the LLM using the specified model or default
   const response = await client.sendRequest({
     model: model,
