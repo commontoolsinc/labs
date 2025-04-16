@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { DitheredCube } from "./DitherCube.tsx";
 import { animated, useSpring, useTransition } from "@react-spring/web";
 import { ToggleButton } from "./common/CommonToggle.tsx";
@@ -155,6 +155,16 @@ export function SpecPreview({
   // Get the current generation ID from the form metadata
   const generationId = form.meta?.generationId;
 
+  // Local state for workflow type to make the select behave properly
+  const [localWorkflowType, setLocalWorkflowType] = useState<WorkflowType | undefined>(form.classification?.workflowType);
+
+  // Sync local state with form data when it changes
+  useEffect(() => {
+    if (form.classification?.workflowType !== localWorkflowType) {
+      setLocalWorkflowType(form.classification?.workflowType);
+    }
+  }, [form.classification?.workflowType]);
+
   // Create a reference to measure content height
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -209,27 +219,22 @@ export function SpecPreview({
     Boolean(form.plan?.spec)
   }`;
 
-  // Container animation that handles visibility only
-  const containerSpring = useSpring({
+  // Create springs for animation with proper types
+  const springs = useSpring({
     opacity: visible && hasContent ? 1 : 0,
-    transform: visible && hasContent ? "translateY(0%)" : "translateY(-20%)",
-    width: visible && hasContent ? "100%" : "95%",
-    height: containerHeight,
+    y: visible && hasContent ? 0 : -20,
     config: {
       tension: 280,
       friction: 24,
     },
     // Don't reset on height changes to allow smooth transitions
     reset: false,
-    // Remove key dependency on progressKey to prevent animation resets
   });
-
+  
   // Text reveal animation - updates based on progress state not just loading
   const textSpring = useSpring({
     opacity: (visible && (!loading || form.classification)) ? 1 : 0,
-    transform: (visible && (!loading || form.classification))
-      ? "translateY(0)"
-      : "translateY(10px)",
+    y: (visible && (!loading || form.classification)) ? 0 : 10,
     config: {
       tension: 300,
       friction: 20,
@@ -273,37 +278,30 @@ export function SpecPreview({
   ) {
     return null;
   }
+  
+  // Create static styles
+  const containerStyle = {
+    width: floating ? (isMobile ? "100vw" : "calc(100% + 2rem)") : "100%",
+    left: floating ? (isMobile ? "50%" : "-1rem") : undefined,
+    maxWidth: floating ? (isMobile ? "100vw" : undefined) : (isMobile ? "100%" : undefined),
+    bottom: floating ? "calc(100% + 0.5rem)" : undefined,
+    overflowY: "auto" as const,
+    height: containerHeight,
+    transition: "height 500ms ease-in-out",
+    display: !visible || !hasContent ? "none" : "block",
+  };
+
+
 
   return (
-    <animated.div
+    <div
       className={containerClasses}
       style={{
-        ...containerSpring,
-        ...(floating
-          ? {
-            width: isMobile ? "100vw" : "calc(100% + 2rem)",
-            left: isMobile ? "50%" : "-1rem",
-            transform: isMobile ? "translateX(-50%)" : undefined,
-            maxWidth: isMobile ? "100vw" : undefined,
-            bottom: "calc(100% + 0.5rem)",
-            overflowY: "auto",
-          }
-          : {
-            maxWidth: isMobile ? "100%" : undefined,
-            overflowY: "auto",
-          }),
-        // Use visibility to completely hide when not visible
-        display: !visible || !hasContent ? "none" : "block",
-        visibility: containerSpring.opacity.to((o) =>
-          o === 0 ? "hidden" : "visible"
-        ),
-        pointerEvents: containerSpring.opacity.to((o) =>
-          o === 0 ? "none" : "auto"
-        ),
-        // Set an explicit height to override the reactive value if needed
-        height: containerHeight,
-        // Add explicit transition for height - this is key to smooth animation
-        transition: "height 500ms ease-in-out, opacity 300ms ease-in-out",
+        ...containerStyle,
+        opacity: springs.opacity.get(),
+        transform: `translateY(${springs.y.get()}%)`,
+        visibility: springs.opacity.get() === 0 ? "hidden" : "visible",
+        pointerEvents: springs.opacity.get() === 0 ? "none" : "auto"
       }}
     >
       <div className="p-2 relative" ref={contentRef}>
@@ -357,11 +355,12 @@ export function SpecPreview({
                             <div className="flex items-center">
                               <select
                                 className="text-sm py-0.5 px-1 border border-gray-300 rounded bg-white"
-                                value={form.classification?.workflowType}
-                                onChange={(e) =>
-                                  onWorkflowChange?.(
-                                    e.target.value as WorkflowType,
-                                  )}
+                                value={localWorkflowType || ""}
+                                onChange={(e) => {
+                                  const newValue = e.target.value as WorkflowType;
+                                  setLocalWorkflowType(newValue);
+                                  onWorkflowChange?.(newValue);
+                                }}
                               >
                                 {Object.values(WORKFLOWS).map((workflow) => (
                                   <option
@@ -552,12 +551,16 @@ export function SpecPreview({
                     {!form.plan?.spec && !form.plan?.steps &&
                       !classificationLoading && !planLoading &&
                       (
-                        <animated.div
+                        <div
                           className="text-sm text-gray-500 italic py-4 text-center"
-                          style={textSpring}
+                          style={{
+                            opacity: textSpring.opacity.get(),
+                            transform: `translateY(${textSpring.y.get()}px)`,
+                            transition: "opacity 300ms, transform 300ms"
+                          }}
                         >
                           Your preview will appear here as you type...
-                        </animated.div>
+                        </div>
                       )}
                   </div>
                 )}
@@ -565,6 +568,6 @@ export function SpecPreview({
           )}
         </div>
       </div>
-    </animated.div>
+    </div>
   );
 }

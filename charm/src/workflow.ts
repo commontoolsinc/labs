@@ -722,7 +722,16 @@ export async function processWorkflow(
       console.log("prefilling form", options.prefill);
       // do not prefill the meta
       delete options.prefill.meta;
-      form = { ...options.prefill, ...form };
+      // Only use prefill values for fields that aren't null or undefined in the prefill
+      form = {
+        ...form,
+        input: options.prefill?.input
+          ? { ...form.input, ...options.prefill.input }
+          : form.input,
+        classification: options.prefill?.classification || form.classification,
+        plan: options.prefill?.plan || form.plan,
+        generation: options.prefill?.generation || form.generation,
+      };
     }
 
     // Step 1: Process input (mentions, references, etc.) if not already processed
