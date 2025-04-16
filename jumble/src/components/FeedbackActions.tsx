@@ -4,6 +4,7 @@ import { submitFeedback } from "@/services/feedback.ts";
 import { getLastTraceSpanID } from "@commontools/builder";
 import { MdThumbDownOffAlt, MdThumbUpOffAlt } from "react-icons/md";
 import { notify } from "@/contexts/ActivityContext.tsx";
+import { useLocation } from "react-router-dom";
 
 export function FeedbackActions() {
   // States for the feedback dialog
@@ -11,6 +12,13 @@ export function FeedbackActions() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [initialScore, setInitialScore] = useState<number>(1);
   const [showFeedbackButtons, setShowFeedbackButtons] = useState(false);
+
+  // Close dialog & hide buttons when the user navigates to a different route
+  const location = useLocation();
+  useEffect(() => {
+    setIsFeedbackDialogOpen(false);
+    setShowFeedbackButtons(false);
+  }, [location.pathname]);
 
   // Listen for toggle-feedback event
   useEffect(() => {
