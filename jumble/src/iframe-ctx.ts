@@ -15,6 +15,12 @@ import {
 } from "@commontools/runner";
 import { client as llm } from "@commontools/llm";
 import { isObj } from "@commontools/utils";
+import {
+  completeJob,
+  failJob,
+  startJob,
+  updateJob,
+} from "@/contexts/JobContext.tsx";
 
 const CommonCharmElement = components.CommonCharm.CommonCharmElement;
 
@@ -260,6 +266,8 @@ export const setupIframe = () =>
       _context: any,
       payload: string,
     ) {
+      const jobId = crypto.randomUUID();
+      startJob(jobId, "Charm LLM Request", "Generating...");
       const container = CommonCharmElement.findCharmContainer(element);
       const { charmId, spaceName } = container ??
         { charmId: null, spaceName: null };
@@ -273,6 +281,7 @@ export const setupIframe = () =>
           "groq:llama-3.3-70b-versatile",
         ];
       }
+      updateJob(jobId, "Using " + jsonPayload.model);
       jsonPayload.metadata = {
         ...jsonPayload.metadata,
         context: "iframe",
@@ -282,6 +291,7 @@ export const setupIframe = () =>
 
       const res = await llm.sendRequest(jsonPayload);
       console.log("onLLMRequest res", res);
+      completeJob(jobId, res ?? "Completed!");
       return res as any;
     },
     async onReadWebpageRequest(
@@ -289,11 +299,14 @@ export const setupIframe = () =>
       _context: any,
       payload: string,
     ) {
+      const jobId = crypto.randomUUID();
+      startJob(jobId, "Reading Webpage", payload);
       console.log("onReadWebpageRequest", payload);
       const res = await fetch(
         `/api/ai/webreader/${encodeURIComponent(payload)}`,
       );
       console.log("onReadWebpageRequest res", res);
+      completeJob(jobId, res.status === 200 ? "Completed!" : "Failed!");
       return await res.json();
     },
     async onPerform(

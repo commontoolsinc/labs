@@ -56,13 +56,23 @@ export async function submitFeedback(
     });
 
     console.log("Feedback API response status:", response.status);
-
     if (!response.ok) {
       const errorData = await response.json();
       console.error("Feedback API error response:", errorData);
-      throw new Error(
-        errorData.error || `Failed to submit feedback: ${response.status}`,
-      );
+
+      let errorMessage = `Failed to submit feedback: ${response.status}`;
+      if (errorData.error) {
+        if (typeof errorData.error === "object") {
+          // Handle Zod errors or other object errors with proper formatting
+          errorMessage = `${
+            errorData.error.message || JSON.stringify(errorData.error)
+          }`;
+        } else {
+          errorMessage = errorData.error;
+        }
+      }
+
+      throw new Error(errorMessage);
     }
 
     const responseData = await response.json();

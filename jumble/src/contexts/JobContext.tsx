@@ -7,11 +7,17 @@ import React, {
 } from "react";
 import { WorkflowForm } from "@commontools/charm";
 
-// Type definitions for our job events
-type JobId = string;
+// Type definitions for our activity events
+type ActivityId = string;
 
-interface BaseJobEvent {
-  jobId: JobId;
+// Base interfaces for all activities
+interface BaseActivityEvent {
+  id: ActivityId;
+}
+
+// Job-specific events
+interface BaseJobEvent extends BaseActivityEvent {
+  jobId: ActivityId; // For backward compatibility
 }
 
 interface JobStartEvent extends BaseJobEvent {
@@ -19,6 +25,7 @@ interface JobStartEvent extends BaseJobEvent {
   status: string;
   title: string;
   payload?: Record<string, unknown>;
+  silent: boolean;
 }
 
 interface JobUpdateEvent extends BaseJobEvent {
@@ -42,59 +49,274 @@ interface JobFailedEvent extends BaseJobEvent {
   payload?: Record<string, unknown>;
 }
 
-type JobEvent =
+// Notification-specific event
+interface NotificationEvent extends BaseActivityEvent {
+  type: "notification";
+  title: string;
+  message: string;
+  level?: "info" | "success" | "warning" | "error";
+  action?: {
+    label: string;
+    onClick: () => void;
+  };
+  payload?: Record<string, unknown>;
+}
+
+type ActivityEvent =
   | JobStartEvent
   | JobUpdateEvent
   | JobCompleteEvent
-  | JobFailedEvent;
+  | JobFailedEvent
+  | NotificationEvent;
+
+// Base activity interface
+export interface Activity {
+  id: ActivityId;
+  type: "job" | "notification";
+  title: string;
+  createdAt: Date;
+  updatedAt: Date;
+  isArchived?: boolean;
+}
 
 // Job state maintained in the component
-export interface Job {
-  jobId: JobId;
-  title: string;
+export interface Job extends Activity {
+  type: "job";
+  jobId: ActivityId;
   status: string;
   state: "running" | "completed" | "failed";
   progress?: number;
   error?: string;
   result?: WorkflowForm;
-  updatedAt: Date;
   startedAt: Date;
   completedAt?: Date;
 }
 
-interface JobContextType {
-  jobs: Record<JobId, Job>;
+// Notification state
+export interface Notification extends Activity {
+  type: "notification";
+  message: string;
+  level: "info" | "success" | "warning" | "error";
+  action?: {
+    label: string;
+    onClick: () => void;
+  };
+}
+
+export function notify(
+  title: string,
+  message: string,
+  level: "info" | "success" | "warning" | "error",
+  action?: { label: string; onClick: () => void },
+) {
+  const id = crypto.randomUUID();
+  const notification: Notification = {
+    title,
+    id,
+    type: "notification",
+    message,
+    level,
+    action,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    isArchived: false,
+  };
+
+  globalThis.dispatchEvent(
+    new CustomEvent("notification", { detail: notification }),
+  );
+}
+
+export function startJob(
+  id: string,
+  title: string,
+  status: string,
+  payload?: Record<string, unknown>,
+  silent = false,
+) {
+  const jobEvent: JobStartEvent = {
+    id,
+    jobId: id,
+    type: "job-start",
+    title,
+    status,
+    payload,
+    silent,
+  };
+
+  globalThis.dispatchEvent(
+    new CustomEvent("job-start", { detail: jobEvent }),
+  );
+
+  return id;
+}
+
+export function updateJob(
+  id: string,
+  status: string,
+  progress?: number,
+  payload?: Record<string, unknown>,
+) {
+  const jobEvent: JobUpdateEvent = {
+    id,
+    jobId: id,
+    type: "job-update",
+    status,
+    progress,
+    payload,
+  };
+
+  globalThis.dispatchEvent(
+    new CustomEvent("job-update", { detail: jobEvent }),
+  );
+}
+
+export function completeJob(
+  id: string,
+  status: string,
+  result?: WorkflowForm,
+  payload?: Record<string, unknown>,
+) {
+  const jobEvent: JobCompleteEvent = {
+    id,
+    jobId: id,
+    type: "job-complete",
+    status,
+    result,
+    payload,
+  };
+
+  globalThis.dispatchEvent(
+    new CustomEvent("job-complete", { detail: jobEvent }),
+  );
+}
+
+export function failJob(
+  id: string,
+  status: string,
+  error: string,
+  payload?: Record<string, unknown>,
+) {
+  const jobEvent: JobFailedEvent = {
+    id,
+    jobId: id,
+    type: "job-failed",
+    status,
+    error,
+    payload,
+  };
+
+  globalThis.dispatchEvent(
+    new CustomEvent("job-failed", { detail: jobEvent }),
+  );
+}
+
+interface ActivityContextType {
+  activities: Record<ActivityId, Activity>;
+  jobs: Record<ActivityId, Job>;
+  notifications: Record<ActivityId, Notification>;
+  activeItems: Activity[];
+  archivedItems: Activity[];
   runningJobs: Job[];
   completedJobs: Job[];
   failedJobs: Job[];
-  showCompleted: boolean;
-  setShowCompleted: (show: boolean) => void;
+  showArchived: boolean;
+  setShowArchived: (show: boolean) => void;
   isVisible: boolean;
   setIsVisible: (visible: boolean) => void;
+  archiveActivity: (id: ActivityId) => void;
+  archiveAllCompleted: () => void;
+  clearAllArchived: () => void;
 }
 
-const JobContext = createContext<JobContextType | undefined>(undefined);
+const ActivityContext = createContext<ActivityContextType | undefined>(
+  undefined,
+);
 
-interface JobProviderProps {
+interface ActivityProviderProps {
   children: React.ReactNode;
 }
 
-export const JobProvider: React.FC<JobProviderProps> = ({ children }) => {
-  // State to track all jobs and UI state
-  const [jobs, setJobs] = useState<Record<JobId, Job>>({});
-  const [showCompleted, setShowCompleted] = useState(false);
+export const ActivityProvider: React.FC<ActivityProviderProps> = (
+  { children },
+) => {
+  // State to track all activities and UI state
+  const [activities, setActivities] = useState<Record<ActivityId, Activity>>(
+    {},
+  );
+  const [showArchived, setShowArchived] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
 
   // Reference to keep track of the auto-hide timer
   const hideTimerRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    // Handler for job events
-    const handleJobEvent = (event: CustomEvent<JobEvent>) => {
-      const { detail } = event;
-      const { jobId, type, status } = detail;
+  // Derived states for different activity types
+  const jobs = Object.values(activities)
+    .filter((activity): activity is Job => activity.type === "job")
+    .reduce(
+      (acc, job) => ({ ...acc, [job.id]: job }),
+      {} as Record<ActivityId, Job>,
+    );
 
-      // Always make panel visible when a job event occurs
+  const notifications = Object.values(activities)
+    .filter((activity): activity is Notification =>
+      activity.type === "notification"
+    )
+    .reduce(
+      (acc, notification) => ({ ...acc, [notification.id]: notification }),
+      {} as Record<ActivityId, Notification>,
+    );
+
+  // Functions for archiving activities
+  const archiveActivity = (id: ActivityId) => {
+    setActivities((prev) => {
+      if (!prev[id]) return prev;
+      return {
+        ...prev,
+        [id]: { ...prev[id], isArchived: true, updatedAt: new Date() },
+      };
+    });
+  };
+
+  const archiveAllCompleted = () => {
+    setActivities((prev) => {
+      const updated = { ...prev };
+      Object.values(updated).forEach((activity) => {
+        if (
+          activity.type === "job" && (activity as Job).state === "completed" ||
+          (activity as Job).state === "failed"
+        ) {
+          updated[activity.id] = {
+            ...activity,
+            isArchived: true,
+            updatedAt: new Date(),
+          };
+        }
+      });
+      return updated;
+    });
+  };
+
+  const clearAllArchived = () => {
+    setActivities((prev) => {
+      const result: Record<ActivityId, Activity> = {};
+      Object.values(prev).forEach((activity) => {
+        if (!activity.isArchived) {
+          result[activity.id] = activity;
+        }
+      });
+      return result;
+    });
+  };
+
+  useEffect(() => {
+    // Handler for activity events
+    const handleActivityEvent = (event: CustomEvent<ActivityEvent>) => {
+      const { detail } = event;
+      const id = detail.id || (detail as any).jobId; // Support both formats
+      const type = detail.type;
+
+      // Always make panel visible when an activity event occurs
       setIsVisible(true);
 
       // Clear any existing hide timer
@@ -103,91 +325,131 @@ export const JobProvider: React.FC<JobProviderProps> = ({ children }) => {
         hideTimerRef.current = null;
       }
 
-      setJobs((prevJobs) => {
-        // Create a copy of the current jobs
-        const updatedJobs = { ...prevJobs };
+      setActivities((prevActivities) => {
+        // Create a copy of the current activities
+        const updatedActivities = { ...prevActivities };
+        const now = new Date();
 
-        switch (type) {
-          case "job-start": {
-            updatedJobs[jobId] = {
-              jobId,
-              title: detail.title,
-              status,
-              state: "running",
-              startedAt: new Date(),
-              updatedAt: new Date(),
-            };
-            break;
-          }
-          case "job-update": {
-            if (updatedJobs[jobId]) {
-              updatedJobs[jobId] = {
-                ...updatedJobs[jobId],
-                status,
-                progress: detail.progress,
-                updatedAt: new Date(),
+        if (type === "notification") {
+          const notification = detail as NotificationEvent;
+          const notificationObj: Notification = {
+            id,
+            type: "notification",
+            title: notification.title,
+            message: notification.message,
+            level: notification.level || "info",
+            action: notification.action,
+            createdAt: now,
+            updatedAt: now,
+            isArchived: false,
+          };
+          updatedActivities[id] = notificationObj;
+        } else if (type === "job-start") {
+          const jobDetail = detail as JobStartEvent;
+          const jobObj: Job = {
+            id,
+            jobId: id,
+            type: "job",
+            title: jobDetail.title,
+            status: jobDetail.status,
+            state: "running",
+            startedAt: now,
+            createdAt: now,
+            updatedAt: now,
+            isArchived: jobDetail.silent,
+          };
+          updatedActivities[id] = jobObj;
+        } else if (prevActivities[id] && prevActivities[id].type === "job") {
+          const existingJob = prevActivities[id] as Job;
+
+          switch (type) {
+            case "job-update": {
+              const jobDetail = detail as JobUpdateEvent;
+              const updatedJob: Job = {
+                ...existingJob,
+                status: jobDetail.status,
+                progress: jobDetail.progress,
+                updatedAt: now,
               };
+              updatedActivities[id] = updatedJob;
+              break;
             }
-            break;
-          }
-          case "job-complete": {
-            if (updatedJobs[jobId]) {
-              updatedJobs[jobId] = {
-                ...updatedJobs[jobId],
-                status,
+            case "job-complete": {
+              const jobDetail = detail as JobCompleteEvent;
+              const completedJob: Job = {
+                ...existingJob,
+                status: jobDetail.status,
                 state: "completed",
-                result: detail.result,
-                completedAt: new Date(),
-                updatedAt: new Date(),
+                result: jobDetail.result,
+                completedAt: now,
+                updatedAt: now,
               };
+              updatedActivities[id] = completedJob;
+              break;
             }
-            break;
-          }
-          case "job-failed": {
-            if (updatedJobs[jobId]) {
-              updatedJobs[jobId] = {
-                ...updatedJobs[jobId],
-                status,
+            case "job-failed": {
+              const jobDetail = detail as JobFailedEvent;
+              const failedJob: Job = {
+                ...existingJob,
+                status: jobDetail.status,
                 state: "failed",
-                error: detail.error,
-                completedAt: new Date(),
-                updatedAt: new Date(),
+                error: jobDetail.error,
+                completedAt: now,
+                updatedAt: now,
               };
+              updatedActivities[id] = failedJob;
+              break;
             }
-            break;
           }
         }
 
-        return updatedJobs;
+        return updatedActivities;
       });
     };
 
-    // Add event listeners for all job event types
-    globalThis.addEventListener("job-start", handleJobEvent as EventListener);
-    globalThis.addEventListener("job-update", handleJobEvent as EventListener);
+    // Add event listeners for all activity event types
+    globalThis.addEventListener(
+      "job-start",
+      handleActivityEvent as EventListener,
+    );
+    globalThis.addEventListener(
+      "job-update",
+      handleActivityEvent as EventListener,
+    );
     globalThis.addEventListener(
       "job-complete",
-      handleJobEvent as EventListener,
+      handleActivityEvent as EventListener,
     );
-    globalThis.addEventListener("job-failed", handleJobEvent as EventListener);
+    globalThis.addEventListener(
+      "job-failed",
+      handleActivityEvent as EventListener,
+    );
+    globalThis.addEventListener(
+      "notification",
+      handleActivityEvent as EventListener,
+    );
 
     // Clean up listeners on unmount
     return () => {
       globalThis.removeEventListener(
         "job-start",
-        handleJobEvent as EventListener,
+        handleActivityEvent as EventListener,
       );
       globalThis.removeEventListener(
         "job-update",
-        handleJobEvent as EventListener,
+        handleActivityEvent as EventListener,
       );
       globalThis.removeEventListener(
         "job-complete",
-        handleJobEvent as EventListener,
+        handleActivityEvent as EventListener,
       );
       globalThis.removeEventListener(
         "job-failed",
-        handleJobEvent as EventListener,
+        handleActivityEvent as EventListener,
+      );
+      globalThis.removeEventListener(
+        "notification",
+        handleActivityEvent as EventListener,
       );
     };
   }, []);
@@ -203,7 +465,16 @@ export const JobProvider: React.FC<JobProviderProps> = ({ children }) => {
     job.state === "failed"
   );
 
-  // Effect to handle auto-hiding when there are no active jobs
+  // Split activities into active and archived for rendering
+  const activeItems = Object.values(activities)
+    .filter((activity) => !activity.isArchived)
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+  const archivedItems = Object.values(activities)
+    .filter((activity) => activity.isArchived)
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+  // Effect to handle auto-hiding when there are no active items
   useEffect(() => {
     // If there are running jobs, make sure panel is visible and clear any hide timer
     if (runningJobs.length > 0) {
@@ -212,8 +483,8 @@ export const JobProvider: React.FC<JobProviderProps> = ({ children }) => {
         clearTimeout(hideTimerRef.current);
         hideTimerRef.current = null;
       }
-    } else if (Object.keys(jobs).length > 0) {
-      // If there are no running jobs but there are completed/failed jobs, start the hide timer
+    } else if (activeItems.length > 0) {
+      // If there are no running jobs but there are active items, start the hide timer
       if (hideTimerRef.current === null) {
         hideTimerRef.current = setTimeout(() => {
           setIsVisible(false);
@@ -221,7 +492,7 @@ export const JobProvider: React.FC<JobProviderProps> = ({ children }) => {
         }, 30000); // 30 seconds
       }
     } else {
-      // No jobs at all, hide immediately
+      // No active items at all, hide immediately
       setIsVisible(false);
     }
 
@@ -231,30 +502,50 @@ export const JobProvider: React.FC<JobProviderProps> = ({ children }) => {
         clearTimeout(hideTimerRef.current);
       }
     };
-  }, [runningJobs.length, jobs]);
+  }, [runningJobs.length, activeItems.length]);
 
   const value = {
+    activities,
     jobs,
+    notifications,
+    activeItems,
+    archivedItems,
     runningJobs,
     completedJobs,
     failedJobs,
-    showCompleted,
-    setShowCompleted,
+    showArchived,
+    setShowArchived,
     isVisible,
     setIsVisible,
+    archiveActivity,
+    archiveAllCompleted,
+    clearAllArchived,
   };
 
-  return <JobContext.Provider value={value}>{children}</JobContext.Provider>;
+  return (
+    <ActivityContext.Provider value={value}>
+      {children}
+    </ActivityContext.Provider>
+  );
 };
 
-// Custom hook to access the job context
-export const useJobContext = () => {
-  const context = useContext(JobContext);
+// Backward compatibility for existing code
+const JobContext = ActivityContext;
+export { JobContext };
+
+// Custom hook to access the activity context
+export const useActivityContext = () => {
+  const context = useContext(ActivityContext);
   if (context === undefined) {
-    throw new Error("useJobContext must be used within a JobProvider");
+    throw new Error(
+      "useActivityContext must be used within an ActivityProvider",
+    );
   }
   return context;
 };
+
+// Maintain backward compatibility with existing code
+export const useJobContext = useActivityContext;
 
 // Helper function to format time differences
 export const getElapsedTime = (startDate: Date, endDate?: Date) => {

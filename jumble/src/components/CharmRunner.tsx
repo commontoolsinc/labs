@@ -8,6 +8,7 @@ import { LuX } from "react-icons/lu";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import { createPath } from "@/routes.ts";
 import { Cell, Charm, charmId } from "@/utils/charms.ts";
+import { notify } from "@/contexts/JobContext.tsx";
 
 interface CharmLoaderProps {
   charmImport: () => Promise<any>;
@@ -124,6 +125,7 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
 
     function handleIframeError(event: Event) {
       const customEvent = event as CustomEvent<Error>;
+      notify("Charm Error!", customEvent.detail.message, "error");
       setRuntimeError(customEvent.detail);
     }
 

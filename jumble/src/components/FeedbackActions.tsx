@@ -3,6 +3,7 @@ import { FeedbackDialog } from "@/components/FeedbackDialog.tsx";
 import { submitFeedback } from "@/services/feedback.ts";
 import { getLastTraceSpanID } from "@commontools/builder";
 import { MdThumbDownOffAlt, MdThumbUpOffAlt } from "react-icons/md";
+import { notify } from "@/contexts/JobContext.tsx";
 
 export function FeedbackActions() {
   // States for the feedback dialog
@@ -54,8 +55,18 @@ export function FeedbackActions() {
       );
 
       setIsFeedbackDialogOpen(false);
+      notify("Feedback Submitted", "Thank you for your input!", "success");
     } catch (error) {
-      console.error("Error submitting feedback:", error);
+      notify(
+        "Error submitting feedback",
+        error instanceof Error
+          ? (typeof error.message === "object"
+            ? JSON.stringify(error.message)
+            : error.message)
+          : JSON.stringify(error),
+        "error",
+      );
+      console.error(error);
     } finally {
       setIsSubmitting(false);
     }
