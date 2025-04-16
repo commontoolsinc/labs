@@ -833,6 +833,9 @@ export const ModelSelector = ({
       </option>
       <option value="groq:qwen-qwq-32b">Qwen QwQ 32B 🧠</option>
       <option value="groq:llama-3.3-70b-versatile">Llama 3.3 🔥</option>
+      <option value="openai:gpt-4.1">gpt-4.1</option>
+      <option value="openai:gpt-4.1-mini">gpt-4.1-mini</option>
+      <option value="openai:gpt-4.1-nano">gpt-4.1-nano</option>
       <option value="openai:o3-mini-low-latest">o3-mini-low</option>
       <option value="openai:o3-mini-medium-latest">
         o3-mini-medium

@@ -6,6 +6,7 @@ import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
+import { mapSourceMapsOnStacktrace } from "./local-build.ts";
 
 export type Action = (log: ReactivityLog) => any;
 export type EventHandler = (event: any) => any;
@@ -175,6 +176,9 @@ export function isErrorWithContext(error: unknown): error is ErrorWithContext {
 }
 
 function handleError(error: Error, action: any) {
+  // Since most errors come from `eval`ed code, let's fix the stack trace.
+  if (error.stack) error.stack = mapSourceMapsOnStacktrace(error.stack);
+
   // TODO(seefeld): This is a rather hacky way to get the context, based on the
   // unsafe_binding pattern. Once we replace that mechanism, let's add nicer
   // abstractions for context here as well.

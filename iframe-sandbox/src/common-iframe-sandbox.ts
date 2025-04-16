@@ -186,7 +186,7 @@ export class CommonIframeSandboxElement extends LitElement {
 
       case IPC.GuestMessageType.Read: {
         const key = message.data;
-        const value = IframeHandler.read(this.context, key);
+        const value = IframeHandler.read(this, this.context, key);
         this.toGuest({
           id: this.frameId,
           type: IPC.IPCHostMessageType.Passthrough,
@@ -200,7 +200,7 @@ export class CommonIframeSandboxElement extends LitElement {
 
       case IPC.GuestMessageType.Write: {
         const [key, value] = message.data;
-        IframeHandler.write(this.context, key, value);
+        IframeHandler.write(this, this.context, key, value);
         return;
       }
 
@@ -222,6 +222,7 @@ export class CommonIframeSandboxElement extends LitElement {
             continue;
           }
           const receipt = IframeHandler.subscribe(
+            this,
             this.context,
             key,
             (key, value) => this.notifySubscribers(key, value),
@@ -242,7 +243,7 @@ export class CommonIframeSandboxElement extends LitElement {
           if (!receipt) {
             continue;
           }
-          IframeHandler.unsubscribe(this.context, receipt);
+          IframeHandler.unsubscribe(this, this.context, receipt);
           this.subscriptions.delete(key);
         }
         return;
@@ -250,7 +251,7 @@ export class CommonIframeSandboxElement extends LitElement {
 
       case IPC.GuestMessageType.LLMRequest: {
         const payload = message.data;
-        const promise = IframeHandler.onLLMRequest(this.context, payload);
+        const promise = IframeHandler.onLLMRequest(this, this.context, payload);
         const instanceId = this.instanceId;
         promise.then((result: object) => {
           if (!this.ensureSameDocument(instanceId)) {
@@ -291,6 +292,7 @@ export class CommonIframeSandboxElement extends LitElement {
         let result, error;
         try {
           result = await IframeHandler.onReadWebpageRequest(
+            this,
             this.context,
             payload,
           );
@@ -317,21 +319,23 @@ export class CommonIframeSandboxElement extends LitElement {
 
       case IPC.GuestMessageType.Perform: {
         const instanceId = this.instanceId;
-        IframeHandler.onPerform(this.context, message.data).then((result) => {
-          if (!this.ensureSameDocument(instanceId)) {
-            return;
-          }
+        IframeHandler.onPerform(this, this.context, message.data).then(
+          (result) => {
+            if (!this.ensureSameDocument(instanceId)) {
+              return;
+            }
 
-          this.toGuest({
-            id: this.frameId,
-            type: IPC.IPCHostMessageType.Passthrough,
-            data: {
-              type: IPC.HostMessageType.Effect,
-              id: message.data.id,
-              result,
-            },
-          });
-        });
+            this.toGuest({
+              id: this.frameId,
+              type: IPC.IPCHostMessageType.Passthrough,
+              data: {
+                type: IPC.HostMessageType.Effect,
+                id: message.data.id,
+                result,
+              },
+            });
+          },
+        );
         return;
       }
       case IPC.GuestMessageType.Pong: {
@@ -350,7 +354,7 @@ export class CommonIframeSandboxElement extends LitElement {
     const IframeHandler = getIframeContextHandler();
     if (IframeHandler != null) {
       for (const [_, receipt] of this.subscriptions) {
-        IframeHandler.unsubscribe(this.context, receipt);
+        IframeHandler.unsubscribe(this, this.context, receipt);
       }
       this.subscriptions.clear();
     }

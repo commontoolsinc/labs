@@ -352,6 +352,51 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       reasoningEffort: "high",
     },
   });
+
+  addModel({
+    provider: openAIProvider,
+    name: "openai:gpt-4.1-2025-04-14",
+    aliases: ["openai:gpt-4.1", "gpt-4.1"],
+    capabilities: {
+      contextWindow: 1_047_575,
+      maxOutputTokens: 32_767,
+      images: true,
+      prefill: false,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
+
+  addModel({
+    provider: openAIProvider,
+    name: "openai:gpt-4.1-mini-2025-04-14",
+    aliases: ["openai:gpt-4.1-mini", "gpt-4.1-mini"],
+    capabilities: {
+      contextWindow: 1_047_575,
+      maxOutputTokens: 32_767,
+      images: true,
+      prefill: false,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
+
+  addModel({
+    provider: openAIProvider,
+    name: "openai:gpt-4.1-nano-2025-04-14", // gpt-4.1-2025-04-14
+    aliases: ["openai:gpt-4.1-nano", "gpt-4.1-nano"],
+    capabilities: {
+      contextWindow: 1_047_575,
+      maxOutputTokens: 32_767,
+      images: true,
+      prefill: false,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
 }
 
 if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {

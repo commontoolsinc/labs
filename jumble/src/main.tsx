@@ -29,7 +29,7 @@ import StackedCharmsView from "@/views/StackedCharmsView.tsx";
 import SpellbookLaunchView from "@/views/spellbook/SpellbookLaunchView.tsx";
 import FullscreenInspectorView from "@/views/FullscreenInspectorView.tsx";
 import { ActionManagerProvider } from "@/contexts/ActionManagerContext.tsx";
-import { JobProvider } from "@/contexts/JobContext.tsx";
+import { ActivityProvider } from "@/contexts/ActivityContext.tsx";
 import { ROUTES } from "@/routes.ts";
 
 // Determine environment based on hostname
@@ -91,7 +91,9 @@ setupIframe();
 let errorCount = 0;
 onError((error: Error) => {
   !errorCount++ &&
-    globalThis.alert("Uncaught error in recipe: " + error.message);
+    globalThis.alert(
+      "Uncaught error in recipe: " + error.message + "\n" + error.stack,
+    );
   // Also send to Sentry
   Sentry.captureException(error);
 });
@@ -102,7 +104,7 @@ createRoot(document.getElementById("root")!).render(
       <AuthenticationProvider>
         <CharmsProvider>
           <ActionManagerProvider>
-            <JobProvider>
+            <ActivityProvider>
               <LanguageModelProvider>
                 <Router>
                   <SentryRoutes>
@@ -156,7 +158,7 @@ createRoot(document.getElementById("root")!).render(
                   </SentryRoutes>
                 </Router>
               </LanguageModelProvider>
-            </JobProvider>
+            </ActivityProvider>
           </ActionManagerProvider>
         </CharmsProvider>
       </AuthenticationProvider>

@@ -1,24 +1,33 @@
 import { TaskPerform } from "./ipc.ts";
+import { CommonIframeSandboxElement } from "./common-iframe-sandbox.ts";
 
 // An `IframeContextHandler` is used by consumers to
 // register how read/writing values from frames are handled.
 export interface IframeContextHandler {
-  read(context: any, key: string): any;
-  write(context: any, key: string, value: any): void;
+  read(element: CommonIframeSandboxElement, context: any, key: string): any;
+  write(element: CommonIframeSandboxElement, context: any, key: string, value: any): void;
   subscribe(
+    element: CommonIframeSandboxElement,
     context: any,
     key: string,
     callback: (key: string, value: any) => void,
     doNotSendMyDataBack: boolean,
   ): any;
-  unsubscribe(context: any, receipt: any): void;
-  onLLMRequest(context: any, payload: string): Promise<object>;
-  onReadWebpageRequest(context: any, payload: string): Promise<object>;
+  unsubscribe(
+    element: CommonIframeSandboxElement,
+    context: any, receipt: any): void;
+  onLLMRequest(
+    element: CommonIframeSandboxElement,
+    context: any, payload: string): Promise<object>;
+  onReadWebpageRequest(
+    element: CommonIframeSandboxElement,
+    context: any, payload: string): Promise<object>;
 
   /**
    * Guest may send a command it wishes system to perform.
    */
   onPerform(
+    element: CommonIframeSandboxElement,
     context: unknown,
     command: TaskPerform,
   ): Promise<{ ok: object; error?: void } | { ok?: void; error: Error }>;
