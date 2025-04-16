@@ -1,5 +1,6 @@
 export * as CommonAudioRecorder from "./common-audio-recorder.ts";
 export * as CommonButton from "./common-button.ts";
+export * as CommonCharm from "./common-charm.ts";
 export * as CommonDatatable from "./common-datatable.ts";
 export * as CommonDict from "./common-dict.ts";
 export * as CommonForm from "./common-form.ts";

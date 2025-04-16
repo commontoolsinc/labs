@@ -17,7 +17,7 @@ export class ContextShim {
     this.callbacks = [];
     this.receiptIds = 0;
   }
-  set(key: string, value: any) {
+  set(_element: CommonIframeSandboxElement, key: string, value: any) {
     this.data[key] = value;
     for (let i = 0; i < this.callbacks.length; i++) {
       const [_, callback_key, callback] = this.callbacks[i];
@@ -27,17 +27,21 @@ export class ContextShim {
     }
   }
 
-  get(key: string): any {
+  get(_element: CommonIframeSandboxElement, key: string): any {
     return this.data[key];
   }
 
-  subscribe(key: string, callback: Callback): number {
+  subscribe(
+    _element: CommonIframeSandboxElement,
+    key: string,
+    callback: Callback,
+  ): number {
     const id = this.receiptIds++;
     this.callbacks.push([id, key, callback]);
     return id;
   }
 
-  unsubscribe(receipt: number) {
+  unsubscribe(_element: CommonIframeSandboxElement, receipt: number) {
     for (let i = 0; i < this.callbacks.length; i++) {
       const [id, ...rest] = this.callbacks[i];
       if (id === receipt) {
@@ -50,27 +54,27 @@ export class ContextShim {
 
 export function setIframeTestHandler() {
   setIframeContextHandler({
-    read(context, key) {
-      return context.get(key);
+    read(element, context, key) {
+      return context.get(element, key);
     },
-    write(context, key, value) {
-      context.set(key, value);
+    write(element, context, key, value) {
+      context.set(element, key, value);
     },
-    subscribe(context, key, callback) {
-      return context.subscribe(key, callback);
+    subscribe(element, context, key, callback) {
+      return context.subscribe(element, key, callback);
     },
-    unsubscribe(context, receipt) {
-      context.unsubscribe(receipt);
+    unsubscribe(element, context, receipt) {
+      context.unsubscribe(element, receipt);
     },
-    onLLMRequest(context, payload) {
+    onLLMRequest(element, context, payload) {
       // Not implemented
       return Promise.resolve({});
     },
-    onReadWebpageRequest(context, payload) {
+    onReadWebpageRequest(element, context, payload) {
       // Not implemented
       return Promise.resolve({});
     },
-    async onPerform(context, command) {
+    async onPerform(element, context, command) {
       return await { error: new Error(`Not implemented`) };
     },
   });
@@ -89,11 +93,11 @@ export function assertEquals(a: any, b: any) {
 }
 
 const FIXTURE_ID = "common-iframe-csp-fixture-container";
-export function render(src: string, context = {}): Promise<HTMLElement> {
+export function render(src: string, context = {}): Promise<CommonIframeSandboxElement> {
   return new Promise((resolve) => {
     const parent = document.createElement("div");
     parent.id = `${FIXTURE_ID}-${(Math.random() * 1_000_000).toFixed(0)}`;
-    const iframe = document.createElement("common-iframe-sandbox");
+    const iframe = document.createElement("common-iframe-sandbox") as CommonIframeSandboxElement;
     // @ts-ignore This is a lit property.
     iframe.context = context;
     iframe.addEventListener("load", (_) => {

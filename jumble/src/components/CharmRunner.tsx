@@ -31,7 +31,7 @@ function useCharmLoader({
   const [error, setError] = React.useState<Error | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
   const mountingKey = useRef(0);
-  const { charmManager } = useCharmManager();
+  const { charmManager, currentReplica } = useCharmManager();
 
   const onCharmReadyCallback = React.useCallback(onCharmReady, [onCharmReady]);
 
@@ -144,7 +144,8 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
   }, [id]);
 
   return (
-    <>
+    // @ts-ignore Ignore typechecking for custom element.
+    <common-charm charm-id={charmId(charm)} space-name={currentReplica}>
       {runtimeError
         ? (
           <div className="bg-red-500 text-white p-4">
@@ -188,7 +189,8 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
         aria-label="charm-content"
       >
       </div>
-    </>
+      {/* @ts-ignore Ignore typechecking for custom element. */}
+    </common-charm>
   );
 }
 
