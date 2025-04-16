@@ -11,7 +11,8 @@ if (env.CTTS_AI_LLM_PHOENIX_PROJECT) {
 
 const router = createRouter()
   .openapi(routes.getModels, handlers.getModels)
-  .openapi(routes.generateText, handlers.generateText);
+  .openapi(routes.generateText, handlers.generateText)
+  .openapi(routes.feedback, handlers.submitFeedback);
 
 router.use(
   "/api/ai/llm/*",

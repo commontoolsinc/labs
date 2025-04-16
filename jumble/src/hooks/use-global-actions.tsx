@@ -1,7 +1,7 @@
 import "@commontools/ui";
 import { useLocation, useParams } from "react-router-dom";
 import { type CharmRouteParams } from "@/routes.ts";
-import { MdEdit, MdOutlineStar, MdShare } from "react-icons/md";
+import { MdEdit, MdOutlineStar, MdSend, MdShare } from "react-icons/md";
 
 import { useAction } from "@/contexts/ActionManagerContext.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -90,6 +90,23 @@ export function useGlobalActions() {
         priority: 50,
       }),
       [hasCharmId, togglePath],
+    ),
+  );
+
+  // Feedback action (available only when a charm is open)
+  useAction(
+    useMemo(
+      () => ({
+        id: "feedback-toggle",
+        label: "Feedback",
+        icon: <MdSend size={24} />,
+        onClick: () => {
+          globalThis.dispatchEvent(new CustomEvent("toggle-feedback"));
+        },
+        priority: 30,
+        predicate: hasCharmId,
+      }),
+      [hasCharmId],
     ),
   );
 }

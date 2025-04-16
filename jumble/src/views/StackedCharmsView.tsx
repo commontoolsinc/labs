@@ -2,7 +2,7 @@ import React from "react";
 import { useParams } from "react-router-dom";
 import { type StackedCharmsRouteParams } from "@/routes.ts";
 import { LoadingSpinner } from "@/components/Loader.tsx";
-import { useCharm, useCharms } from "@/hooks/use-charm.ts";
+import { useCharms } from "@/hooks/use-charm.ts";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
 import { charmId } from "@/utils/charms.ts";
 

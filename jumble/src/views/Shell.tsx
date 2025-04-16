@@ -12,6 +12,8 @@ import { useGlobalActions } from "@/hooks/use-global-actions.tsx";
 import { SyncStatusProvider } from "@/contexts/SyncStatusContext.tsx";
 import { ToggleableNetworkInspector } from "@/components/NetworkInspector.tsx";
 import { NetworkInspectorProvider } from "@/contexts/NetworkInspectorContext.tsx";
+import { FeedbackActions } from "@/components/FeedbackActions.tsx";
+import JobStatus from "@/components/JobStatus.tsx";
 
 export default function Shell() {
   const { charmId } = useParams<CharmRouteParams>();
@@ -36,10 +38,12 @@ export default function Shell() {
             <ActionBar />
             <CharmPublisher />
             <CommandCenter />
+            <FeedbackActions />
             <ToggleableNetworkInspector
               visible={localStorage.getItem("networkInspectorVisible") ===
                 "true"}
             />
+            <JobStatus className="floating-panel" />
           </div>
         </NetworkInspectorProvider>
       </SyncStatusProvider>

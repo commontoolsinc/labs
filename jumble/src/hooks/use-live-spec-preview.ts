@@ -12,8 +12,7 @@ import {
   WorkflowType,
 } from "@commontools/charm";
 import { Cell } from "@commontools/runner";
-import { Charm, formatPromptWithMentions } from "@commontools/charm";
-import { JSONSchema } from "@commontools/builder";
+import { Charm } from "@commontools/charm";
 
 export type SpecPreviewModel = "fast" | "think";
 
@@ -39,9 +38,9 @@ export interface PreviewProgress {
  */
 export function useLiveSpecPreview(
   input: string,
-  charmManager: CharmManager, // Properly typed CharmManager instance
+  charmManager: CharmManager,
   enabled: boolean = true,
-  debounceTime: number = 300, // Increased to 300ms as requested
+  debounceTime: number = 300,
   model: SpecPreviewModel = "think",
   currentCharm?: Cell<Charm>,
 ) {
@@ -130,7 +129,6 @@ export function useLiveSpecPreview(
           charmManager,
           existingCharm: currentCharm,
           model: modelId,
-          generationId,
           prefill: prefill,
           onProgress: (f) => {
             // Check if this is still the current generation before proceeding

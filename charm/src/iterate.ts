@@ -29,7 +29,7 @@ export const genSrc = async ({
   schema,
   steps,
   model,
-  generationId
+  generationId,
 }: {
   src?: string;
   spec?: string;
@@ -41,9 +41,20 @@ export const genSrc = async ({
 }) => {
   const request = buildPrompt({ src, spec, newSpec, schema, model, steps });
 
+  globalThis.dispatchEvent(
+    new CustomEvent("job-update", {
+      detail: {
+        type: "job-update",
+        jobId: generationId,
+        status: "Generating source code...",
+      },
+    }),
+  );
+
   let response = await llm.sendRequest({
     ...request,
     metadata: {
+      ...request.metadata,
       context: "workflow",
       workflow: "genSrc",
       generationId,
@@ -88,10 +99,16 @@ export async function iterate(
     schema: iframe.argumentSchema,
     steps: plan?.steps,
     model,
-    generationId
+    generationId,
   });
 
-  return generateNewRecipeVersion(charmManager, charm, newIFrameSrc, newSpec);
+  return generateNewRecipeVersion(
+    charmManager,
+    charm,
+    newIFrameSrc,
+    newSpec,
+    generationId,
+  );
 }
 
 export function extractTitle(src: string, defaultTitle: string): string {
@@ -105,6 +122,7 @@ export const generateNewRecipeVersion = async (
   parent: Cell<Charm>,
   newIFrameSrc: string,
   newSpec: string,
+  generationId?: string,
 ) => {
   const { recipeId, iframe } = getIframeRecipe(parent);
 
@@ -119,6 +137,16 @@ export const generateNewRecipeVersion = async (
     spec: newSpec,
     name,
   });
+
+  globalThis.dispatchEvent(
+    new CustomEvent("job-update", {
+      detail: {
+        type: "job-update",
+        jobId: generationId,
+        status: "Compiling recipe...",
+      },
+    }),
+  );
 
   // Pass the newSpec so it's properly persisted and can be displayed/edited
   const newCharm = await compileAndRunRecipe(
@@ -213,6 +241,15 @@ async function singlePhaseCodeGeneration(
   existingSchema?: JSONSchema,
 ) {
   console.log("using singlePhaseCodeGeneration");
+  globalThis.dispatchEvent(
+    new CustomEvent("job-update", {
+      detail: {
+        type: "job-update",
+        jobId: form.meta.generationId,
+        status: "Generating code and schema...",
+      },
+    }),
+  );
   // Phase 1: Generate spec/plan and schema based on goal and possibly existing schema
   const {
     sourceCode,
@@ -285,6 +322,15 @@ async function twoPhaseCodeGeneration(
   existingSchema?: JSONSchema,
 ) {
   console.log("using twoPhaseCodeGeneration");
+  globalThis.dispatchEvent(
+    new CustomEvent("job-update", {
+      detail: {
+        type: "job-update",
+        jobId: form.meta.generationId,
+        status: "Generating spec and schema...",
+      },
+    }),
+  );
   // Phase 1: Generate spec/plan and schema based on goal and possibly existing schema
   const {
     spec,
@@ -337,7 +383,7 @@ async function twoPhaseCodeGeneration(
     newSpec,
     schema,
     steps: form.plan?.steps,
-    generationId: form.meta.generationId
+    generationId: form.meta.generationId,
   });
   const name = extractTitle(newIFrameSrc, title); // Use the generated title as fallback
   const newRecipeSrc = buildFullRecipe({
@@ -386,6 +432,16 @@ export async function castNewRecipe(
       : await twoPhaseCodeGeneration(form, existingSchema);
 
   const input = turnCellsIntoAliases(scrubbed);
+
+  globalThis.dispatchEvent(
+    new CustomEvent("job-update", {
+      detail: {
+        type: "job-update",
+        jobId: form.meta.generationId,
+        status: "Compiling recipe...",
+      },
+    }),
+  );
 
   return compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, input);
 }
