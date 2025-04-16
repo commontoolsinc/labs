@@ -20,7 +20,7 @@ import {
   failJob,
   startJob,
   updateJob,
-} from "@/contexts/JobContext.tsx";
+} from "@/contexts/ActivityContext.tsx";
 
 const CommonCharmElement = components.CommonCharm.CommonCharmElement;
 

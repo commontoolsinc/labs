@@ -3,7 +3,7 @@ import { FeedbackDialog } from "@/components/FeedbackDialog.tsx";
 import { submitFeedback } from "@/services/feedback.ts";
 import { getLastTraceSpanID } from "@commontools/builder";
 import { MdThumbDownOffAlt, MdThumbUpOffAlt } from "react-icons/md";
-import { notify } from "@/contexts/JobContext.tsx";
+import { notify } from "@/contexts/ActivityContext.tsx";
 
 export function FeedbackActions() {
   // States for the feedback dialog

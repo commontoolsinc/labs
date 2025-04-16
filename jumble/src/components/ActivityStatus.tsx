@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { 
-  getElapsedTime, 
-  Job, 
-  Notification,
+import {
   Activity,
-  useActivityContext 
-} from "@/contexts/JobContext.tsx";
+  getElapsedTime,
+  Job,
+  Notification,
+  useActivityContext,
+} from "@/contexts/ActivityContext.tsx";
 import { useNavigate } from "react-router-dom";
 import { createPath } from "@/routes.ts";
 import { charmId } from "@/utils/charms.ts";
@@ -48,7 +48,7 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
     setIsVisible,
     archiveActivity,
     archiveAllCompleted,
-    clearAllArchived
+    clearAllArchived,
   } = useActivityContext();
 
   const navigate = useNavigate();
@@ -96,17 +96,21 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
       }
     } else if (activity.type === "notification") {
       const notification = activity as Notification;
-      const iconColor = {
-        info: "text-blue-500",
-        success: "text-green-500",
-        warning: "text-yellow-500",
-        error: "text-red-500"
-      }[notification.level];
-      
+      let iconColor = "text-blue-500";
+      if (notification.level === "success") {
+        iconColor = "text-green-500";
+      } else if (notification.level === "warning") {
+        iconColor = "text-yellow-500";
+      } else if (notification.level === "error") {
+        iconColor = "text-red-500";
+      }
+
       // Different icons based on notification level
       if (notification.level === "info" || notification.level === "success") {
         return (
-          <div className={`mr-2.5 w-4 h-4 flex items-center justify-center ${iconColor}`}>
+          <div
+            className={`mr-2.5 w-4 h-4 flex items-center justify-center ${iconColor}`}
+          >
             <svg viewBox="0 0 24 24" width="16" height="16">
               <path
                 fill="currentColor"
@@ -117,7 +121,9 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
         );
       } else {
         return (
-          <div className={`mr-2.5 w-4 h-4 flex items-center justify-center ${iconColor}`}>
+          <div
+            className={`mr-2.5 w-4 h-4 flex items-center justify-center ${iconColor}`}
+          >
             <svg viewBox="0 0 24 24" width="16" height="16">
               <path
                 fill="currentColor"
@@ -137,19 +143,22 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
     let bgColor = "bg-grey-50";
     if (activity.type === "job") {
       const job = activity as Job;
-      bgColor = job.state === "running" 
-        ? "bg-grey-50" 
+      bgColor = job.state === "running"
+        ? "bg-grey-50"
         : job.state === "completed"
-          ? "bg-green-50"
-          : "bg-red-50";
+        ? "bg-green-50"
+        : "bg-red-50";
     } else if (activity.type === "notification") {
       const notification = activity as Notification;
-      bgColor = {
-        info: "bg-blue-50",
-        success: "bg-green-50",
-        warning: "bg-yellow-50",
-        error: "bg-red-50"
-      }[notification.level];
+      if (notification.level === "info") {
+        bgColor = "bg-blue-50";
+      } else if (notification.level === "success") {
+        bgColor = "bg-green-50";
+      } else if (notification.level === "warning") {
+        bgColor = "bg-yellow-50";
+      } else if (notification.level === "error") {
+        bgColor = "bg-red-50";
+      }
     }
 
     return (
@@ -177,8 +186,8 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
             {activity.title}
           </div>
           <div className="text-[11px] text-gray-600 whitespace-nowrap overflow-hidden text-ellipsis">
-            {activity.type === "job" 
-              ? (activity as Job).status 
+            {activity.type === "job"
+              ? (activity as Job).status
               : (activity as Notification).message}
           </div>
         </div>
@@ -187,11 +196,11 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
         {activity.type === "job" && (activity as Job).state === "running" && (
           <ElapsedTime startTime={(activity as Job).startedAt} />
         )}
-        
+
         {/* Action buttons for different activity types */}
-        {activity.type === "job" && 
-         (activity as Job).state === "completed" && 
-         (activity as Job).result?.generation?.charm && (
+        {activity.type === "job" &&
+          (activity as Job).state === "completed" &&
+          (activity as Job).result?.generation?.charm && (
           <button
             type="button"
             onClick={() => {
@@ -205,9 +214,10 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
             View Charm
           </button>
         )}
-        
+
         {/* Show action button for notifications if provided */}
-        {activity.type === "notification" && (activity as Notification).action && (
+        {activity.type === "notification" &&
+          (activity as Notification).action && (
           <button
             type="button"
             onClick={() => (activity as Notification).action?.onClick()}
@@ -230,16 +240,18 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
 
   return (
     <div
-      className={`fixed bottom-16 right-2 w-80 bg-white text-xs text-gray-700 max-h-[calc(100vh-100px)] overflow-hidden flex flex-col z-50 border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] hover:translate-y-[-2px] hover:shadow-[2px_4px_0px_0px_rgba(0,0,0,0.7)] transition-[border,box-shadow,transform,opacity] duration-100 ease-in-out ${className || ""}`}
+      className={`fixed bottom-16 right-2 w-80 bg-white text-xs text-gray-700 max-h-[calc(100vh-100px)] overflow-hidden flex flex-col z-50 border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] hover:translate-y-[-2px] hover:shadow-[2px_4px_0px_0px_rgba(0,0,0,0.7)] transition-[border,box-shadow,transform,opacity] duration-100 ease-in-out ${
+        className || ""
+      }`}
     >
       {/* Header with title and close button */}
       <div className="px-3 py-2 border-b border-gray-300 bg-gray-50 flex justify-between items-center">
         <h4 className="m-0 text-sm font-medium text-gray-800">
-          {runningJobs.length > 0 ? "Active Jobs" : "Activity"}
+          Activity
         </h4>
         <div className="flex">
-          {activeItems.length > 0 && activeItems.some(a => 
-            a.type === "job" && 
+          {activeItems.length > 0 && activeItems.some((a: Activity) =>
+            a.type === "job" &&
             ((a as Job).state === "completed" || (a as Job).state === "failed")
           ) && (
             <button
@@ -276,7 +288,7 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
       {/* Active Items Section - Always Visible */}
       <div className="flex-none">
         <div className="max-h-48 overflow-y-auto">
-          {activeItems.map((activity) => (
+          {activeItems.map((activity: Activity) => (
             <ActivityRow key={activity.id} activity={activity} />
           ))}
 
@@ -305,7 +317,7 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
           {showArchived && archivedItemCount > 0 && (
             <div className="relative">
               <div className="max-h-44 overflow-y-auto border-t border-gray-300">
-                {archivedItems.map((activity) => (
+                {archivedItems.map((activity: Activity) => (
                   <ActivityRow key={activity.id} activity={activity} />
                 ))}
               </div>

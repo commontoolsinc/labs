@@ -8,7 +8,7 @@ import { LuX } from "react-icons/lu";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import { createPath } from "@/routes.ts";
 import { Cell, Charm, charmId } from "@/utils/charms.ts";
-import { notify } from "@/contexts/JobContext.tsx";
+import { notify } from "@/contexts/ActivityContext.tsx";
 
 interface CharmLoaderProps {
   charmImport: () => Promise<any>;

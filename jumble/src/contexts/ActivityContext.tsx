@@ -529,10 +529,6 @@ export const ActivityProvider: React.FC<ActivityProviderProps> = (
   );
 };
 
-// Backward compatibility for existing code
-const JobContext = ActivityContext;
-export { JobContext };
-
 // Custom hook to access the activity context
 export const useActivityContext = () => {
   const context = useContext(ActivityContext);
@@ -543,9 +539,6 @@ export const useActivityContext = () => {
   }
   return context;
 };
-
-// Maintain backward compatibility with existing code
-export const useJobContext = useActivityContext;
 
 // Helper function to format time differences
 export const getElapsedTime = (startDate: Date, endDate?: Date) => {
