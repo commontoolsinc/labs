@@ -12,8 +12,8 @@ import { generateText as generateTextCore } from "./generateText.ts";
 import { findModel } from "./models.ts";
 import env from "@/env.ts";
 
-const withoutMetadata = (obj: any) => {
-  const { metadata, ...rest } = obj;
+const withoutMetadataSkipCache = (obj: any) => {
+  const { skipCache, metadata, ...rest } = obj;
   return rest;
 };
 
@@ -102,6 +102,10 @@ export const getModels: AppRouteHandler<GetModelsRoute> = (c) => {
  */
 export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   const payload = await c.req.json();
+
+  // If skip_cache is true, we don't want to use the cache
+  const skipCache = payload.skip_cache ?? false;
+
   if (!payload.metadata) {
     payload.metadata = {};
   }
@@ -115,10 +119,10 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
 
   // First, check whether the request is cached, if so return the cached result
   const cacheKey = await cache.hashKey(
-    JSON.stringify(withoutMetadata(payload)),
+    JSON.stringify(withoutMetadataSkipCache(payload)),
   );
-  const cachedResult = await cache.loadItem(cacheKey);
-  if (cachedResult && !payload.skip_cache) {
+  const cachedResult = !skipCache && await cache.loadItem(cacheKey);
+  if (cachedResult) {
     const lastMessage = cachedResult.messages[cachedResult.messages.length - 1];
     return c.json(lastMessage);
   }
@@ -126,9 +130,12 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   const persistCache = async (
     messages: { role: string; content: string }[],
   ) => {
+    if (skipCache) {
+      return;
+    }
     try {
       await cache.saveItem(cacheKey, {
-        ...withoutMetadata(payload),
+        ...withoutMetadataSkipCache(payload),
         messages,
       });
     } catch (e) {
