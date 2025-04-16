@@ -7,6 +7,7 @@ import {
   CharmManager,
   compileAndRunRecipe,
   createWorkflowForm,
+  processWorkflow,
   renameCharm,
   WorkflowForm,
 } from "@commontools/charm";
@@ -378,7 +379,6 @@ async function handleDeleteCharm(ctx: CommandContext) {
 }
 
 async function handleImportJSON(ctx: CommandContext) {
-  ctx.setLoading(true);
   try {
     const input = document.createElement("input");
     input.type = "file";
@@ -397,15 +397,22 @@ async function handleImportJSON(ctx: CommandContext) {
     const title = prompt("Enter a title for your imported recipe:");
     if (!title) return;
 
-    const form = createWorkflowForm({ input: title });
-    form.input.references = data;
+    ctx.setOpen(false);
+    const form = await processWorkflow(
+      `${title}\n\n Look at the attached JSON data and use it to create a new charm.\n\n${
+        JSON.stringify(data)
+      }`,
+      false,
+      {
+        charmManager: ctx.charmManager,
+      },
+    );
 
-    const newCharm = await castNewRecipe(ctx.charmManager, form);
+    const newCharm = form.generation?.charm;
     if (!newCharm) throw new Error("Failed to create new charm");
 
     navigateToCharm(ctx, newCharm);
   } finally {
-    ctx.setLoading(false);
     ctx.setOpen(false);
   }
 }
