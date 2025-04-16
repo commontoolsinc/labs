@@ -30,6 +30,7 @@ export const genSrc = async ({
   steps,
   model,
   generationId,
+  skipCache,
 }: {
   src?: string;
   spec?: string;
@@ -38,8 +39,14 @@ export const genSrc = async ({
   steps?: string[];
   model?: string;
   generationId?: string;
+  skipCache?: boolean;
 }) => {
   const request = buildPrompt({ src, spec, newSpec, schema, model, steps });
+
+  console.log({ skipCache, genSrc: true });
+  if (!skipCache) {
+    Deno.exit(0);
+  }
 
   globalThis.dispatchEvent(
     new CustomEvent("job-update", {
@@ -59,6 +66,7 @@ export const genSrc = async ({
       workflow: "genSrc",
       generationId,
     },
+    skip_cache: skipCache,
   });
 
   // FIXME(ja): this is a hack to get the prefill to work
@@ -82,6 +90,7 @@ export async function iterate(
   plan: WorkflowForm["plan"],
   model?: string,
   generationId?: string,
+  skipCache?: boolean,
 ): Promise<Cell<Charm>> {
   const { iframe } = getIframeRecipe(charm);
   if (!iframe) {
@@ -100,6 +109,7 @@ export async function iterate(
     steps: plan?.steps,
     model,
     generationId,
+    skipCache,
   });
 
   return generateNewRecipeVersion(
@@ -378,12 +388,18 @@ async function twoPhaseCodeGeneration(
     });
   }
 
+  console.log({ skipCache: form.meta.skipCache, genSrc: true });
+  if (!form.meta.skipCache) {
+    Deno.exit(0);
+  }
+
   // Phase 2: Generate UI code using the schema and enhanced spec
   const newIFrameSrc = await genSrc({
     newSpec,
     schema,
     steps: form.plan?.steps,
     generationId: form.meta.generationId,
+    skipCache: form.meta.skipCache,
   });
   const name = extractTitle(newIFrameSrc, title); // Use the generated title as fallback
   const newRecipeSrc = buildFullRecipe({

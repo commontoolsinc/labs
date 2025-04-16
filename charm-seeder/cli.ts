@@ -69,6 +69,10 @@ async function processCommand(
   skipCache = false,
 ): Promise<string | undefined> {
   const { type, prompt } = step;
+  console.log({ skipCache, "processCommand": true });
+  if (!skipCache) {
+    Deno.exit(0);
+  }
   switch (type) {
     case CommandType.New: {
       console.log(`Adding: "${prompt}"`);
@@ -83,6 +87,9 @@ async function processCommand(
           },
         },
       });
+      if (!form.meta.skipCache) {
+        Deno.exit(0);
+      }
       const charm = await castNewRecipe(charmManager, form);
       const id = getEntityId(charm);
       if (id) {

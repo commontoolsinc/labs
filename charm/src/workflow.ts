@@ -290,6 +290,11 @@ export async function generatePlan(
     existingCode = code;
   }
 
+  console.log({ skipCache, generatePlan: true });
+  if (!skipCache) {
+    Deno.exit(0);
+  }
+
   try {
     const result = await generateWorkflowPlan(
       input,
@@ -522,6 +527,11 @@ export async function fillPlanningSection(
 
   const newForm = { ...form };
 
+  console.log({ skipCache: form.meta.skipCache, fillPlanningSection: true });
+  if (!form.meta.skipCache) {
+    Deno.exit(0);
+  }
+
   // Skip for empty inputs
   if (!form.input.rawInput || form.input.rawInput.trim().length === 0) {
     newForm.plan = {
@@ -553,6 +563,7 @@ export async function fillPlanningSection(
         currentCharm: form.input.existingCharm,
         model: form.meta.modelId,
         generationId: form.meta.generationId,
+        skipCache: form.meta.skipCache,
       },
     );
 
@@ -570,6 +581,7 @@ export async function fillPlanningSection(
         currentCharm: form.input.existingCharm,
         model: form.meta.modelId,
         generationId: form.meta.generationId,
+        skipCache: form.meta.skipCache,
       },
     );
 
@@ -691,6 +703,11 @@ export async function processWorkflow(
   const startTime = performance.now();
   const timings: Record<string, number> = {};
 
+  console.log({ skipCache: options.skipCache });
+  if (!options.skipCache) {
+    Deno.exit(0);
+  }
+
   // Create a new form or use prefilled form
   let form = createWorkflowForm({
     input,
@@ -766,7 +783,7 @@ export async function processWorkflow(
       form = await fillClassificationSection(form);
       timings.classification = performance.now() - stepStartTime;
       options.onProgress?.(form);
-      console.log("classified task!", form);
+      // console.log("classified task!", form);
     }
 
     checkCancellation();
@@ -906,6 +923,7 @@ export function executeFixWorkflow(
   currentCharm: Cell<Charm>,
   plan: WorkflowForm["plan"],
   model?: string,
+  skipCache?: boolean,
 ): Promise<Cell<Charm>> {
   console.log("Executing FIX workflow");
 
@@ -914,6 +932,7 @@ export function executeFixWorkflow(
     currentCharm,
     plan,
     model,
+    skipCache,
   );
 }
 

@@ -9,15 +9,25 @@ export function pinoLogger() {
     pino: pino({
       level: env.LOG_LEVEL || "info",
       serializers: {
+        res: (res) => {
+          if (env.DISABLE_LOG_REQ_RES) {
+            return undefined;
+          }
+          return {
+            status: res.statusCode,
+            headers: JSON.stringify(res.headers),
+          };
+        },
         req: (req) => {
-          // Log only minimal request info
+          if (env.DISABLE_LOG_REQ_RES) {
+            return undefined;
+          }
           return {
             method: req.method,
             url: req.url,
             headers: env.ENV === "production"
               ? req.headers
               : JSON.stringify(req.headers),
-            // Omit other details
           };
         },
       },

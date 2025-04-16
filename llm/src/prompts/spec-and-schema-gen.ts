@@ -241,6 +241,11 @@ Based on this goal and the existing schema, please provide a title, description,
     userContent = llmPrompt("schema-from-goal-user", formatForm(form));
   }
 
+  console.log({ skipCache: form.meta.skipCache, generateSpecAndSchema: true });
+  if (!form.meta.skipCache) {
+    Deno.exit(0);
+  }
+
   // Send the request to the LLM using the specified model or default
   const response = await client.sendRequest({
     model: model,
@@ -252,6 +257,7 @@ Based on this goal and the existing schema, please provide a title, description,
         content: userContent.text,
       },
     ],
+    skip_cache: form.meta.skipCache,
     metadata: {
       context: "workflow",
       workflow: "spec-and-schema-gen",
@@ -358,6 +364,14 @@ Based on this goal and the existing schema, please provide a title, description,
     userContent = llmPrompt("schema-from-goal-user", formatForm(form));
   }
 
+  console.log({
+    skipCache: form.meta.skipCache,
+    generateSpecAndSchemaAndCode: 1234,
+  });
+  if (!form.meta.skipCache) {
+    Deno.exit(0);
+  }
+
   // Send the request to the LLM using the specified model or default
   const response = await client.sendRequest({
     model: model,
@@ -369,6 +383,7 @@ Based on this goal and the existing schema, please provide a title, description,
         content: userContent.text,
       },
     ],
+    skip_cache: form.meta.skipCache,
     metadata: {
       context: "workflow",
       workflow: "spec-and-schema-gen",
