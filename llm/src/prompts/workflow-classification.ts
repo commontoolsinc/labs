@@ -154,7 +154,7 @@ function generateCharmContext(
  * @param existingCode Optional existing code snippet for context.
  * @param model Optional specific LLM model to use.
  * @param generationId Optional identifier for the generation process.
- * @param skipCache Optional flag to skip LLM cache.
+ * @param cache Optional flag to enable/disable LLM cache.
  * @returns A promise resolving to an object containing the classified workflow type and confidence score.
  */
 export async function classifyWorkflow(
@@ -164,7 +164,7 @@ export async function classifyWorkflow(
   existingCode?: string,
   model?: string,
   generationId?: string,
-  skipCache = false,
+  cache?: boolean,
 ): Promise<{
   workflowType: WorkflowType;
   confidence: number;
@@ -191,7 +191,7 @@ export async function classifyWorkflow(
     system: systemPrompt.text,
     messages: [{ role: "user", content: prompt.text }],
     model: model || "anthropic:claude-3-7-sonnet-latest",
-    skip_cache: skipCache,
+    cache,
     metadata: {
       context: "workflow",
       workflow: "classification",
@@ -290,7 +290,7 @@ function cleanJsonString(jsonStr: string): string {
  * @param existingCode Optional existing code snippet for context.
  * @param model Optional specific LLM model to use.
  * @param generationId Optional identifier for the generation process.
- * @param skipCache Optional flag to skip LLM cache.
+ * @param cache Optional flag to enable/disable LLM cache.
  * @returns A promise resolving to an object containing the generation steps and schema specification.
  */
 export async function generateWorkflowPlan(
@@ -301,7 +301,7 @@ export async function generateWorkflowPlan(
   existingCode?: string,
   model?: string,
   generationId?: string,
-  skipCache?: boolean,
+  cache?: boolean,
 ): Promise<{
   steps: string[];
   spec: string;
@@ -328,7 +328,7 @@ export async function generateWorkflowPlan(
     system: systemPrompt.text,
     messages: [{ role: "user", content: prompt.text }],
     model: model || "anthropic:claude-3-7-sonnet-latest",
-    skip_cache: skipCache,
+    cache,
     metadata: {
       context: "workflow",
       workflow: workflowType.toLowerCase(),

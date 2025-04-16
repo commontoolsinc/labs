@@ -6,14 +6,14 @@ import type {
   GetModelsRoute,
 } from "./llm.routes.ts";
 import { ALIAS_NAMES, ModelList, MODELS, TASK_MODELS } from "./models.ts";
-import * as cache from "./cache.ts";
+import { hashKey, loadFromCache, saveToCache } from "./cache.ts";
 import type { Context } from "@hono/hono";
 import { generateText as generateTextCore } from "./generateText.ts";
 import { findModel } from "./models.ts";
 import env from "@/env.ts";
 
-const withoutMetadataSkipCache = (obj: any) => {
-  const { skip_cache, metadata, ...rest } = obj;
+const removeNonCacheableFields = (obj: any) => {
+  const { cache, metadata, ...rest } = obj;
   return rest;
 };
 
@@ -103,8 +103,7 @@ export const getModels: AppRouteHandler<GetModelsRoute> = (c) => {
 export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   const payload = await c.req.json();
 
-  // If skip_cache is true, we don't want to use the cache
-  const skipCache = payload.skip_cache ?? false;
+  const cache = payload.cache;
 
   if (!payload.metadata) {
     payload.metadata = {};
@@ -118,10 +117,10 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   }
 
   // First, check whether the request is cached, if so return the cached result
-  const cacheKey = await cache.hashKey(
-    JSON.stringify(withoutMetadataSkipCache(payload)),
+  const cacheKey = await hashKey(
+    JSON.stringify(removeNonCacheableFields(payload)),
   );
-  const cachedResult = !skipCache && await cache.loadItem(cacheKey);
+  const cachedResult = cache && await loadFromCache(cacheKey);
   if (cachedResult) {
     const lastMessage = cachedResult.messages[cachedResult.messages.length - 1];
     return c.json(lastMessage);
@@ -130,12 +129,12 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   const persistCache = async (
     messages: { role: string; content: string }[],
   ) => {
-    if (skipCache) {
+    if (!cache) {
       return;
     }
     try {
-      await cache.saveItem(cacheKey, {
-        ...withoutMetadataSkipCache(payload),
+      await saveToCache(cacheKey, {
+        ...removeNonCacheableFields(payload),
         messages,
       });
     } catch (e) {

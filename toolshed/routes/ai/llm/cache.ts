@@ -19,17 +19,13 @@ export async function hashKey(key: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export async function loadItem(key: string): Promise<CacheItem | null> {
+export async function loadFromCache(key: string): Promise<CacheItem | null> {
   const hash = await hashKey(key);
   const filePath = `${CACHE_DIR}/${hash}.json`;
   try {
     const cacheData = await Deno.readTextFile(filePath);
     console.log(
-      `${timestamp()} ${colors.green}📦 Cache loaded:${colors.reset} ${
-        filePath.slice(
-          -12,
-        )
-      }`,
+      `${timestamp()} ${colors.green}📦 Cache loaded:${colors.reset} ${filePath}`,
     );
     return JSON.parse(cacheData);
   } catch {
@@ -37,7 +33,7 @@ export async function loadItem(key: string): Promise<CacheItem | null> {
   }
 }
 
-export async function saveItem(key: string, data: CacheItem): Promise<void> {
+export async function saveToCache(key: string, data: CacheItem): Promise<void> {
   const hash = await hashKey(key);
   const filePath = `${CACHE_DIR}/${hash}.json`;
   console.log(

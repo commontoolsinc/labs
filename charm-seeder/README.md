@@ -37,6 +37,8 @@ To run the seeder with a specific tag, use the `--tag` flag.
 
     deno task start --name blue42 --tag smol
 
+To run the seeder with cache enabled, use the `--cache` flag.
+
 ## Adding more scenarios / prompts
 
 You can add new flows to `scenarios.ts`.

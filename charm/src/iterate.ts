@@ -30,7 +30,7 @@ export const genSrc = async ({
   steps,
   model,
   generationId,
-  skipCache,
+  cache,
 }: {
   src?: string;
   spec?: string;
@@ -39,7 +39,7 @@ export const genSrc = async ({
   steps?: string[];
   model?: string;
   generationId?: string;
-  skipCache?: boolean;
+  cache?: boolean;
 }) => {
   const request = buildPrompt({ src, spec, newSpec, schema, model, steps });
 
@@ -61,7 +61,7 @@ export const genSrc = async ({
       workflow: "genSrc",
       generationId,
     },
-    skip_cache: skipCache,
+    cache,
   });
 
   // FIXME(ja): this is a hack to get the prefill to work
@@ -85,7 +85,7 @@ export async function iterate(
   plan: WorkflowForm["plan"],
   model?: string,
   generationId?: string,
-  skipCache?: boolean,
+  cache?: boolean,
 ): Promise<Cell<Charm>> {
   const { iframe } = getIframeRecipe(charm);
   if (!iframe) {
@@ -104,7 +104,7 @@ export async function iterate(
     steps: plan?.steps,
     model,
     generationId,
-    skipCache,
+    cache,
   });
 
   return generateNewRecipeVersion(
@@ -389,7 +389,7 @@ async function twoPhaseCodeGeneration(
     schema,
     steps: form.plan?.steps,
     generationId: form.meta.generationId,
-    skipCache: form.meta.skipCache,
+    cache: form.meta.cache,
   });
   const name = extractTitle(newIFrameSrc, title); // Use the generated title as fallback
   const newRecipeSrc = buildFullRecipe({

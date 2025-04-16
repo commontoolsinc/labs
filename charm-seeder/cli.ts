@@ -18,9 +18,9 @@ import {
   screenshot,
 } from "./jumble.ts";
 
-const { name, "skip-cache": skipCache, tag } = parseArgs(Deno.args, {
+const { name, "cache": cache, tag } = parseArgs(Deno.args, {
   string: ["name", "tag"],
-  boolean: ["skip-cache"],
+  boolean: ["cache"],
 });
 
 if (!name) {
@@ -54,7 +54,7 @@ async function processPrompts(tag: string | undefined) {
     let lastCharmId: string | undefined = undefined;
     for (const step of scenario.steps) {
       promptCount++;
-      const newCharmId = await processCommand(step, lastCharmId, skipCache);
+      const newCharmId = await processCommand(step, lastCharmId, cache);
       if (newCharmId) {
         lastCharmId = newCharmId;
       }
@@ -66,7 +66,7 @@ async function processPrompts(tag: string | undefined) {
 async function processCommand(
   step: Step,
   lastCharmId: string | undefined,
-  skipCache = false,
+  cache = true,
 ): Promise<string | undefined> {
   const { type, prompt } = step;
 
@@ -75,7 +75,7 @@ async function processCommand(
       console.log(`Adding: "${prompt}"`);
       const form = await processWorkflow(prompt, false, {
         charmManager,
-        skipCache,
+        cache,
         prefill: {
           classification: {
             workflowType: "imagine",
@@ -102,7 +102,7 @@ async function processCommand(
       const form = await processWorkflow(prompt, false, {
         charmManager,
         existingCharm: charm,
-        skipCache,
+        cache,
         prefill: {
           classification: {
             workflowType: "imagine",
@@ -173,7 +173,7 @@ try {
 } catch (e) {
   console.error(e);
 } finally {
-  await sleep(500);
+  await sleep(100);
   await browser.close();
   Deno.exit(0);
 }

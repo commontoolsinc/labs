@@ -1,12 +1,9 @@
-import { generateSpecAndSchema } from "@commontools/llm";
 import { useCallback, useEffect, useState } from "react";
 import { useDebounce } from "./use-debounce.ts";
 import { useRef } from "react";
 import {
   CharmManager,
-  formatPromptWithMentions as formatMentions,
   parseComposerDocument,
-  processInputSection,
   processWorkflow,
   WorkflowForm,
   WorkflowType,

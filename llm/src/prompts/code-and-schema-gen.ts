@@ -254,7 +254,7 @@ Based on this goal and the existing schema, please provide a title, description,
         content: userContent.text,
       },
     ],
-    skip_cache: form.meta.skipCache,
+    cache: form.meta.cache,
     metadata: {
       context: "workflow",
       workflow: "code-and-schema-gen",

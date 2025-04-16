@@ -124,7 +124,7 @@ export interface ProcessedPrompt {
  * @param model LLM model to use
  * @param references Referenced charm data
  * @param generationId Optional ID for tracking generation
- * @param skipCache Optional flag to skip LLM cache
+ * @param cache Optional flag to enable/disable LLM cache
  * @returns Classification result
  */
 export async function classifyIntent(
@@ -133,7 +133,7 @@ export async function classifyIntent(
   model?: string,
   references?: Record<string, Cell<any>>,
   generationId?: string,
-  skipCache?: boolean,
+  cache?: boolean,
 ): Promise<IntentClassificationResult> {
   // Process the input for @mentions if a CharmManager is provided
   // Extract context from the current charm if available
@@ -186,7 +186,7 @@ export async function classifyIntent(
       existingCode,
       model,
       generationId,
-      skipCache,
+      cache,
     );
 
     return {
@@ -265,17 +265,17 @@ function extractContext(charm: Cell<Charm>) {
  * @param currentCharm Current charm context
  * @param model LLM model to use
  * @param generationId Optional ID for tracking generation
- * @param skipCache Optional flag to skip LLM cache
+ * @param cache Optional flag to enable/disable LLM cache
  * @returns Execution plan with steps, spec, and schema
  */
 export async function generatePlan(
-  { input, workflowType, currentCharm, model, generationId, skipCache }: {
+  { input, workflowType, currentCharm, model, generationId, cache }: {
     input: string;
     workflowType: WorkflowType;
     currentCharm?: Cell<Charm>;
     model?: string;
     generationId?: string;
-    skipCache?: boolean;
+    cache?: boolean;
   },
 ): Promise<ExecutionPlan> {
   // Extract context from the current charm if available
@@ -299,7 +299,7 @@ export async function generatePlan(
       existingCode,
       model,
       generationId,
-      skipCache,
+      cache,
     );
 
     return {
@@ -376,7 +376,7 @@ export interface WorkflowForm {
     modelId?: string;
     generationId?: string;
     charmManager?: CharmManager;
-    skipCache?: boolean;
+    cache?: boolean;
   };
 }
 
@@ -387,16 +387,16 @@ export interface WorkflowForm {
  * @param modelId Optional model ID
  * @param charm Optional existing charm
  * @param generationId Optional generation ID
- * @param skipCache Optional flag to skip LLM cache
+ * @param cache Optional flag to enable/disable LLM cache
  * @returns A new workflow form object
  */
 export function createWorkflowForm(
-  { input, modelId, charm, generationId, skipCache }: {
+  { input, modelId, charm, generationId, cache }: {
     input: string;
     modelId?: string;
     charm?: Cell<Charm>;
     generationId?: string;
-    skipCache?: boolean;
+    cache?: boolean;
   },
 ): WorkflowForm {
   return {
@@ -413,7 +413,7 @@ export function createWorkflowForm(
       isFilled: false,
       modelId,
       generationId: generationId ?? crypto.randomUUID(),
-      skipCache,
+      cache,
     },
   };
 }
@@ -430,13 +430,12 @@ export function createWorkflowForm(
  * @param options.model Optional LLM model override
  * @param options.onProgress Optional callback for progress updates
  * @param options.cancellation Optional object to signal cancellation
- * @param options.skipCache Optional flag to skip LLM cache
+ * @param options.cache Optional flag to enable/disable LLM cache
  * @returns The processed workflow form
  */
 export async function processInputSection(
   charmManager: CharmManager,
   form: WorkflowForm,
-  options: Record<string, unknown> = {},
 ): Promise<WorkflowForm> {
   const newForm = { ...form };
 
@@ -497,7 +496,7 @@ export async function fillClassificationSection(
     form.meta.modelId,
     form.input.references,
     form.meta.generationId,
-    form.meta.skipCache,
+    form.meta.cache,
   );
 
   // Update classification in the form
@@ -553,7 +552,7 @@ export async function fillPlanningSection(
         currentCharm: form.input.existingCharm,
         model: form.meta.modelId,
         generationId: form.meta.generationId,
-        skipCache: form.meta.skipCache,
+        cache: form.meta.cache,
       },
     );
 
@@ -571,7 +570,7 @@ export async function fillPlanningSection(
         currentCharm: form.input.existingCharm,
         model: form.meta.modelId,
         generationId: form.meta.generationId,
-        skipCache: form.meta.skipCache,
+        cache: form.meta.cache,
       },
     );
 
@@ -673,7 +672,7 @@ export async function processWorkflow(
     model?: string;
     onProgress?: (form: WorkflowForm) => void;
     cancellation?: { cancelled: boolean };
-    skipCache?: boolean;
+    cache?: boolean;
   } = {},
 ): Promise<WorkflowForm> {
   console.groupCollapsed("processWorkflow");
@@ -685,7 +684,7 @@ export async function processWorkflow(
     input,
     charm: options.existingCharm,
     modelId: options.model,
-    skipCache: options.skipCache,
+    cache: options.cache,
   });
   console.log("creating form", form);
 
@@ -902,7 +901,7 @@ export function executeFixWorkflow(
     form.plan,
     form.meta.modelId,
     form.meta.generationId,
-    form.meta.skipCache,
+    form.meta.cache,
   );
 }
 
@@ -925,7 +924,7 @@ export function executeEditWorkflow(
     form.plan,
     form.meta.modelId,
     form.meta.generationId,
-    form.meta.skipCache,
+    form.meta.cache,
   );
 }
 

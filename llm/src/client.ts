@@ -32,7 +32,7 @@ export type LLMRequest = {
   stop?: string;
   mode?: "json";
   metadata?: Record<string, string | undefined | LlmPrompt>;
-  skip_cache?: boolean;
+  cache?: boolean; // defaults to true if not specified
 };
 
 export class LLMClient {
@@ -66,7 +66,7 @@ export class LLMClient {
         model,
         stream: partialCB ? true : false,
         messages: userRequest.messages.map(processMessage),
-        skip_cache: userRequest.skip_cache,
+        cache: userRequest.cache ?? true,
       };
 
       try {
