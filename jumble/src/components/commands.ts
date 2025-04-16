@@ -662,6 +662,7 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
       type: "action",
       title: "Open in Stack",
       group: "Navigation",
+      predicate: !!ctx.focusedCharmId,
       handler: async () => {
         ctx.setLoading(true);
         try {
