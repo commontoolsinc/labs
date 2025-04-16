@@ -5,7 +5,6 @@ import {
   registerNewRecipe,
   tsToExports,
 } from "@commontools/runner";
-import { client as llm, formatForm } from "@commontools/llm";
 import { isObj } from "@commontools/utils";
 import {
   createJsonSchema,
@@ -15,9 +14,16 @@ import {
 import { Charm, CharmManager, charmSourceCellSchema } from "./charm.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
-import { generateCodeAndSchema, generateSpecAndSchema } from "@commontools/llm";
+import {
+  formatForm,
+  generateCodeAndSchema,
+  generateSpecAndSchema,
+  LLMClient,
+} from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
 import { WorkflowForm } from "./index.ts";
+
+const llm = new LLMClient();
 
 /**
  * Generate source code for a charm based on its specification, schema, and optional existing source
@@ -40,7 +46,7 @@ export const genSrc = async ({
   model?: string;
   generationId?: string;
   cache: boolean;
-}) => {
+}): Promise<string> => {
   const request = buildPrompt({
     src,
     spec,
@@ -61,7 +67,7 @@ export const genSrc = async ({
     }),
   );
 
-  let response = await llm.sendRequest({
+  const response = await llm.sendRequest({
     ...request,
     metadata: {
       ...request.metadata,
@@ -72,12 +78,12 @@ export const genSrc = async ({
   });
 
   // FIXME(ja): this is a hack to get the prefill to work
-  if (!response.startsWith(RESPONSE_PREFILL)) {
-    response = RESPONSE_PREFILL + response;
+  if (!response.content.startsWith(RESPONSE_PREFILL)) {
+    response.content = RESPONSE_PREFILL + response.content;
   }
 
   const source = injectUserCode(
-    response.split(RESPONSE_PREFILL)[1].split("\n```")[0],
+    response.content.split(RESPONSE_PREFILL)[1].split("\n```")[0],
   );
   return source;
 };
@@ -184,7 +190,6 @@ export const generateNewRecipeVersion = async (
 // return { calendar: scrub(result1), email: scrub(result2) }
 // FIXME(seefeld): might be able to use asSchema here...
 export function scrub(data: any): any {
-  console.log("scrubbing", data);
   if (isCell(data)) {
     if (data.schema?.type === "object" && data.schema.properties) {
       // If there are properties, remove $UI and $NAME and any streams

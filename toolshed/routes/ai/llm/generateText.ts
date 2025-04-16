@@ -1,7 +1,7 @@
 import { streamText } from "ai";
 import { trace } from "@opentelemetry/api";
-
-import { findModel, TASK_MODELS } from "./models.ts";
+import { type LLMMessage, type LLMRequest } from "@commontools/llm/types";
+import { findModel } from "./models.ts";
 
 // Constants for JSON mode
 const JSON_SYSTEM_PROMPTS = {
@@ -14,28 +14,19 @@ const JSON_SYSTEM_PROMPTS = {
 };
 
 // Core generation logic separated from HTTP handling
-export interface GenerateTextParams {
-  model?: string;
-  task?: string;
-  messages: { role: "user" | "assistant"; content: string }[];
-  system?: string;
-  stream?: boolean;
-  stop_token?: string;
+export interface GenerateTextParams extends LLMRequest {
   abortSignal?: AbortSignal;
-  max_tokens?: number;
-  metadata?: Record<string, string | object>;
-  mode?: "json";
   // Updated callback to receive complete data for caching
   onStreamComplete?: (result: {
-    message: { role: "user" | "assistant"; content: string };
-    messages: { role: "user" | "assistant"; content: string }[];
+    message: LLMMessage;
+    messages: LLMMessage[];
     originalRequest: GenerateTextParams;
   }) => void;
 }
 
 export interface GenerateTextResult {
-  message: { role: "user" | "assistant"; content: string };
-  messages: { role: "user" | "assistant"; content: string }[];
+  message: LLMMessage;
+  messages: LLMMessage[];
   stream?: ReadableStream;
   spanId?: string;
 }
@@ -44,7 +35,7 @@ export interface GenerateTextResult {
 export function configureJsonMode(
   streamParams: Record<string, any>,
   modelName: string,
-  messages: { role: "user" | "assistant"; content: string }[],
+  messages: LLMMessage[],
   isStreaming: boolean,
 ): void {
   // Default to using the generic JSON mode
@@ -135,51 +126,35 @@ export function cleanJsonResponse(text: string): string {
 export async function generateText(
   params: GenerateTextParams,
 ): Promise<GenerateTextResult> {
-  // Validate required model or task parameter
-  if (!params.model && !params.task) {
-    throw new Error("You must specify a `model` or `task`.");
-  }
-
-  let modelName = params.model;
-
-  // If task specified, lookup corresponding model
-  if (params.task) {
-    const taskModel = TASK_MODELS[params.task as keyof typeof TASK_MODELS];
-    if (!taskModel) {
-      throw new Error(`Unsupported task: ${params.task}`);
-    }
-    modelName = taskModel;
-  }
-
   // Validate and configure model
-  const modelConfig = findModel(modelName!);
+  const modelConfig = findModel(params.model!);
   if (!modelConfig) {
-    console.error("Unsupported model:", modelName);
-    throw new Error(`Unsupported model: ${modelName}`);
+    console.error("Unsupported model:", params.model);
+    throw new Error(`Unsupported model: ${params.model}`);
   }
 
   // Groq models don't support streaming in JSON mode
-  if (params.mode && params.stream && modelName?.startsWith("groq:")) {
+  if (params.mode && params.stream && params.model?.startsWith("groq:")) {
     throw new Error("Groq models don't support streaming in JSON mode");
   }
 
   const messages = params.messages;
   const streamParams: Record<string, any> = {
-    model: modelConfig.model || modelName!,
+    model: modelConfig.model || params.model,
     messages,
     stream: params.stream,
     system: params.system,
-    stopSequences: params.stop_token ? [params.stop_token] : undefined,
+    stopSequences: params.stop ? [params.stop] : undefined,
     abortSignal: params.abortSignal,
     experimental_telemetry: { isEnabled: true },
-    maxTokens: params.max_tokens,
+    maxTokens: params.maxTokens,
   };
 
   // Apply JSON mode configuration if requested
   if (params.mode) {
     configureJsonMode(
       streamParams,
-      modelName!,
+      params.model,
       messages,
       params.stream || false,
     );
@@ -228,10 +203,10 @@ export async function generateText(
 
     // Only add stop token if not in JSON mode to avoid breaking JSON structure
     if (
-      (await llmStream.finishReason) === "stop" && params.stop_token &&
+      (await llmStream.finishReason) === "stop" && params.stop &&
       !params.mode
     ) {
-      result += params.stop_token;
+      result += params.stop;
     }
 
     if (messages[messages.length - 1].role === "user") {
@@ -253,7 +228,12 @@ export async function generateText(
       let result = "";
       // If last message was from assistant, send it first
       if (messages[messages.length - 1].role === "assistant") {
-        result = messages[messages.length - 1].content;
+        const content = messages[messages.length - 1].content;
+        // This `content` could be a `LLMTypedContent`, which isn't supported here.
+        if (typeof content !== "string") {
+          throw new Error("LLMTypedContent not supported in responses.");
+        }
+        result = content;
         controller.enqueue(
           new TextEncoder().encode(JSON.stringify(result) + "\n"),
         );
@@ -269,12 +249,12 @@ export async function generateText(
 
       // Only add stop token if not in JSON mode to avoid breaking JSON structure
       if (
-        (await llmStream.finishReason) === "stop" && params.stop_token &&
+        (await llmStream.finishReason) === "stop" && params.stop &&
         !params.mode
       ) {
-        result += params.stop_token;
+        result += params.stop;
         controller.enqueue(
-          new TextEncoder().encode(JSON.stringify(params.stop_token) + "\n"),
+          new TextEncoder().encode(JSON.stringify(params.stop) + "\n"),
         );
       }
 

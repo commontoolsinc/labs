@@ -1,6 +1,7 @@
 import { AppType } from "@/app.ts";
 import { hc } from "@hono/hono/client";
 import env from "@/env.ts";
+import { LLMContent } from "@commontools/llm/types";
 // NOTE(jake): Ideally this would be exposed via the hono client, but I wasn't
 // able to get it all wired up. Importing the route definition is fine for now.
 import type { GetModelsRouteQueryParams } from "@/routes/ai/llm/llm.routes.ts";
@@ -24,7 +25,7 @@ export async function listAvailableModels({
 
 export async function generateText(
   query: Parameters<typeof client.api.ai.llm.$post>[0]["json"],
-): Promise<string> {
+): Promise<LLMContent> {
   const res = await client.api.ai.llm.$post({ json: query });
   const data = await res.json();
 

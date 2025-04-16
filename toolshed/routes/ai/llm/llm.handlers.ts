@@ -11,6 +11,7 @@ import type { Context } from "@hono/hono";
 import { generateText as generateTextCore } from "./generateText.ts";
 import { findModel } from "./models.ts";
 import env from "@/env.ts";
+import { isLLMRequest, type LLMMessage } from "@commontools/llm/types";
 
 const removeNonCacheableFields = (obj: any) => {
   const { cache, metadata, ...rest } = obj;
@@ -102,34 +103,36 @@ export const getModels: AppRouteHandler<GetModelsRoute> = (c) => {
  */
 export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   const payload = await c.req.json();
-
-  const cache = payload.cache;
+  if (!isLLMRequest(payload)) {
+    return c.json({ error: "Malformed request." }, HttpStatusCodes.BAD_REQUEST);
+  }
 
   if (!payload.metadata) {
     payload.metadata = {};
   }
-
-  payload.metadata.json_mode = payload.mode === "json";
 
   const user = c.req.header("Tailscale-User-Login");
   if (user) {
     payload.metadata.user = user;
   }
 
-  // First, check whether the request is cached, if so return the cached result
   const cacheKey = await hashKey(
     JSON.stringify(removeNonCacheableFields(payload)),
   );
-  const cachedResult = cache && await loadFromCache(cacheKey);
-  if (cachedResult) {
-    const lastMessage = cachedResult.messages[cachedResult.messages.length - 1];
-    return c.json(lastMessage);
+  // First, check whether the request is cached, if so return the cached result
+  if (payload.cache) {
+    const cachedResult = await loadFromCache(cacheKey);
+    if (cachedResult) {
+      const lastMessage =
+        cachedResult.messages[cachedResult.messages.length - 1];
+      return c.json(lastMessage);
+    }
   }
 
   const persistCache = async (
-    messages: { role: string; content: string }[],
+    messages: LLMMessage[],
   ) => {
-    if (!cache) {
+    if (!payload.cache) {
       return;
     }
     try {
@@ -153,19 +156,15 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
 
   const model = findModel(payload.model);
   payload.metadata.model = model.name;
-  const modelDefaultMaxTokens = model?.capabilities.maxOutputTokens || 8000;
+  payload.maxTokens = payload.maxTokens ||
+    model?.capabilities.maxOutputTokens || 8000;
 
   try {
     const result = await generateTextCore({
       ...payload,
       abortSignal: c.req.raw.signal,
-      max_tokens: payload.max_tokens || modelDefaultMaxTokens,
       // If response is streaming, save to cache after the stream is complete
-      onStreamComplete: payload.stream
-        ? async (result) => {
-          await persistCache(result.messages);
-        }
-        : undefined,
+      onStreamComplete: async (result) => await persistCache(result.messages),
     });
 
     // If response is not streaming, save to cache and return the message

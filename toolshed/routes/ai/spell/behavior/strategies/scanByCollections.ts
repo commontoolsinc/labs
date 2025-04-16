@@ -2,13 +2,14 @@ import { SearchResult } from "../search.ts";
 import { Logger, PrefixedLogger } from "@/lib/prefixed-logger.ts";
 import { getBlob } from "../effects.ts";
 import { generateText } from "@/lib/llm.ts";
+import { type LLMRequest } from "@commontools/llm/types";
 
 async function generateKeywords(
   query: string,
   logger: Logger,
 ): Promise<string[]> {
   logger.info(`Generating keywords for query: ${query}`);
-  const keywordPrompt = {
+  const keywordPrompt: LLMRequest = {
     model: "claude-3-7-sonnet",
     messages: [
       {
@@ -19,8 +20,13 @@ async function generateKeywords(
     system:
       "Generate exactly 3 single-word collection names that would be relevant for organizing content related to this query. Return only a JSON array of 3 strings.",
     stream: false,
+    cache: true,
   };
   const keywordText = await generateText(keywordPrompt);
+  // Currently only handle string responses
+  if (typeof keywordText !== "string") {
+    throw new Error("Received unsupported LLM typed content.");
+  }
   const keywords = JSON.parse(keywordText);
 
   // Add original query if it's a single word

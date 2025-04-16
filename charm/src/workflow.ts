@@ -308,8 +308,11 @@ export async function generatePlan(
       spec: result.spec,
       dataModel: result.dataModel,
     };
-  } catch (error) {
-    console.error("Error during plan generation:", error);
+  } catch (error: any) {
+    console.error(
+      "Error during plan generation:",
+      error && ("message" in error) ? error.message : error,
+    );
 
     // Fallback to a simple plan if LLM generation fails
     const steps: string[] = [];
@@ -622,14 +625,20 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
       if (!form.input.existingCharm) {
         throw new Error("Fix workflow requires an existing charm");
       }
-      charm = await executeFixWorkflow(newForm.meta.charmManager, form);
+      charm = await executeFixWorkflow(
+        newForm.meta.charmManager,
+        form,
+      );
       break;
 
     case "edit":
       if (!form.input.existingCharm) {
         throw new Error("Edit workflow requires an existing charm");
       }
-      charm = await executeEditWorkflow(newForm.meta.charmManager, form);
+      charm = await executeEditWorkflow(
+        newForm.meta.charmManager,
+        form,
+      );
       break;
 
     case "imagine":

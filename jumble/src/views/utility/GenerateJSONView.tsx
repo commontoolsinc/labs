@@ -2,18 +2,17 @@ import { useState } from "react";
 import { generateJSON } from "@commontools/llm";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
+import { DEFAULT_MODEL_NAME } from "@commontools/llm/types";
 
 export default function LLMTestView() {
   const [prompt, setPrompt] = useState("");
   const [result, setResult] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const MODEL = "anthropic:claude-3-7-sonnet-latest";
-
   const handleSubmit = async () => {
     setLoading(true);
     try {
-      const response = await generateJSON(prompt, MODEL);
+      const response = await generateJSON(prompt, DEFAULT_MODEL_NAME);
       setResult(JSON.stringify(response, null, 2));
     } catch (error) {
       console.error("Error generating JSON:", error);

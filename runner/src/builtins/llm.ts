@@ -1,12 +1,12 @@
 import { type DocImpl, getDoc } from "../doc.ts";
-import {
-  client,
-  type SimpleContent,
-  type SimpleMessage,
-} from "@commontools/llm";
+import { DEFAULT_MODEL_NAME, LLMClient, LLMRequest } from "@commontools/llm";
 import { type Action, idle } from "../scheduler.ts";
 import { refer } from "merkle-reference";
 import { type ReactivityLog } from "../scheduler.ts";
+import { BuiltInLLMParams, BuiltInLLMState } from "@commontools/builder";
+
+const client = new LLMClient();
+
 // TODO(ja): investigate if generateText should be replaced by
 // fetchData with streaming support
 
@@ -16,7 +16,6 @@ import { type ReactivityLog } from "../scheduler.ts";
  * Returns the complete result as `result` and the incremental result as
  * `partial`. `pending` is true while a request is pending.
  *
- * @param prompt - A doc to store the prompt message - if you only have a single message
  * @param messages - list of messages to send to the LLM. - alternating user and assistant messages.
  *  - if you end with an assistant message, the LLM will continue from there.
  *  - if both prompt and messages are empty, no LLM call will be made,
@@ -24,21 +23,14 @@ import { type ReactivityLog } from "../scheduler.ts";
  * @param model - A doc to store the model to use.
  * @param system - A doc to store the system message.
  * @param stop - A doc to store (optional) stop sequence.
- * @param max_tokens - A doc to store the maximum number of tokens to generate.
+ * @param maxTokens - A doc to store the maximum number of tokens to generate.
  *
  * @returns { pending: boolean, result?: string, partial?: string } - As individual
  *   docs, representing `pending` state, final `result` and incrementally
  *   updating `partial` result.
  */
 export function llm(
-  inputsCell: DocImpl<{
-    messages?: SimpleContent[] | SimpleMessage[];
-    prompt?: SimpleContent;
-    stop?: string;
-    system?: string;
-    max_tokens?: number;
-    model?: string;
-  }>,
+  inputsCell: DocImpl<BuiltInLLMParams>,
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: any,
@@ -75,55 +67,25 @@ export function llm(
   return (log: ReactivityLog) => {
     const thisRun = ++currentRun;
 
-    const { system, messages, prompt, stop, max_tokens, model } =
+    const { system, messages, stop, maxTokens, model } =
       inputsCell.getAsQueryResult([], log) ?? {};
 
-    // Define types for our parameters
-    type BaseParams = {
-      model: string;
-      messages: SimpleContent[] | SimpleMessage[];
-      max_tokens: number;
-      metadata?: Record<string, string>;
-      cache: boolean;
-    };
-
-    type StandardParams = BaseParams & {
-      system: string;
-      prompt: string;
-      stop: string;
-    };
-
-    type O1Params = BaseParams;
-
-    let llmParams: StandardParams | O1Params = {
+    const llmParams: LLMRequest = {
       system: system ?? "",
-      messages: messages ?? [],
-      prompt: prompt ?? "",
+      messages: (messages ?? []).map((content: string, index: number) => ({
+        role: index % 2 ? "user" : "assistant",
+        content,
+      })),
       stop: stop ?? "",
-      max_tokens: max_tokens ?? 4096,
-      model: model ?? "claude-3-5-sonnet",
+      maxTokens: maxTokens ?? 4096,
+      stream: true,
+      model: model ?? DEFAULT_MODEL_NAME,
       metadata: {
         // FIXME(ja): how do we get the context of space/charm id here
         context: "charm",
       },
       cache: true,
-    } as StandardParams;
-
-    // FIXME(ja): look at if model supports system messages instead...
-    // or perhaps we do this in the toolshed handler instead?
-    if (model?.startsWith("openai:o1")) {
-      const combinedMessage = system && prompt
-        ? (`${system}\n\n${prompt}` as SimpleContent)
-        : ((system || prompt) as SimpleContent);
-
-      llmParams = {
-        messages: messages ?? (combinedMessage ? [combinedMessage] : []),
-        model: model,
-        max_tokens: max_tokens ?? 4096,
-        metadata: llmParams.metadata,
-        cache: true,
-      };
-    }
+    };
 
     const hash = refer(llmParams).toString();
 
@@ -154,7 +116,8 @@ export function llm(
     const resultPromise = client.sendRequest(llmParams, updatePartial);
 
     resultPromise
-      .then(async (text) => {
+      .then(async (llmResult) => {
+        const text = llmResult.content;
         if (thisRun !== currentRun) return;
 
         //normalizeToCells(text, undefined, log);

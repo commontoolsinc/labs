@@ -1,5 +1,6 @@
 import { hydratePrompt, llmPrompt, parseTagFromResponse } from "./prompting.ts";
-import { client } from "../client.ts";
+import { LLMClient } from "../client.ts";
+import { DEFAULT_MODEL_NAME } from "../types.ts";
 import type { JSONSchema, JSONSchemaWritable } from "@commontools/builder";
 import { WorkflowForm } from "@commontools/charm";
 
@@ -242,7 +243,7 @@ Based on this goal and the existing schema, please provide a title, description,
   }
 
   // Send the request to the LLM using the specified model or default
-  const response = await client.sendRequest({
+  const response = await new LLMClient().sendRequest({
     model: model,
     system: systemPrompt.text,
     stream: false,
@@ -263,17 +264,20 @@ Based on this goal and the existing schema, please provide a title, description,
   });
 
   // Extract sections from the response
-  const title = parseTagFromResponse(response, "title") || "New Charm";
-  const description = parseTagFromResponse(response, "description");
-  const spec = parseTagFromResponse(response, "spec");
-  const plan = parseTagFromResponse(response, "plan");
+  const title = parseTagFromResponse(response.content, "title") || "New Charm";
+  const description = parseTagFromResponse(response.content, "description");
+  const spec = parseTagFromResponse(response.content, "spec");
+  const plan = parseTagFromResponse(response.content, "plan");
 
   // If we have an existing schema, use it; otherwise parse the generated schema
   let resultSchema: JSONSchemaWritable;
   let argumentSchema: JSONSchemaWritable;
 
   try {
-    const resultSchemaJson = parseTagFromResponse(response, "result_schema");
+    const resultSchemaJson = parseTagFromResponse(
+      response.content,
+      "result_schema",
+    );
     resultSchema = resultSchemaJson ? JSON.parse(resultSchemaJson) : {};
   } catch (error) {
     console.warn("Error parsing schema:", error);
@@ -283,7 +287,7 @@ Based on this goal and the existing schema, please provide a title, description,
 
   try {
     const argumentSchemaJson = parseTagFromResponse(
-      response,
+      response.content,
       "argument_schema",
     );
     argumentSchema = argumentSchemaJson ? JSON.parse(argumentSchemaJson) : {};
@@ -317,7 +321,7 @@ Based on this goal and the existing schema, please provide a title, description,
 export async function generateSpecAndSchemaAndCode(
   form: WorkflowForm,
   existingSchema?: JSONSchema,
-  model: string = "anthropic:claude-3-7-sonnet-latest",
+  model: string = DEFAULT_MODEL_NAME,
 ): Promise<{
   spec: string;
   plan: string;
@@ -360,7 +364,7 @@ Based on this goal and the existing schema, please provide a title, description,
   }
 
   // Send the request to the LLM using the specified model or default
-  const response = await client.sendRequest({
+  const response = await new LLMClient().sendRequest({
     model: model,
     system: systemPrompt.text,
     stream: false,
@@ -381,17 +385,20 @@ Based on this goal and the existing schema, please provide a title, description,
   });
 
   // Extract sections from the response
-  const title = parseTagFromResponse(response, "title") || "New Charm";
-  const description = parseTagFromResponse(response, "description");
-  const spec = parseTagFromResponse(response, "spec");
-  const plan = parseTagFromResponse(response, "plan");
+  const title = parseTagFromResponse(response.content, "title") || "New Charm";
+  const description = parseTagFromResponse(response.content, "description");
+  const spec = parseTagFromResponse(response.content, "spec");
+  const plan = parseTagFromResponse(response.content, "plan");
 
   // If we have an existing schema, use it; otherwise parse the generated schema
   let resultSchema: JSONSchemaWritable;
   let argumentSchema: JSONSchemaWritable;
 
   try {
-    const resultSchemaJson = parseTagFromResponse(response, "result_schema");
+    const resultSchemaJson = parseTagFromResponse(
+      response.content,
+      "result_schema",
+    );
     resultSchema = resultSchemaJson ? JSON.parse(resultSchemaJson) : {};
   } catch (error) {
     console.warn("Error parsing schema:", error);
@@ -401,7 +408,7 @@ Based on this goal and the existing schema, please provide a title, description,
 
   try {
     const argumentSchemaJson = parseTagFromResponse(
-      response,
+      response.content,
       "argument_schema",
     );
     argumentSchema = argumentSchemaJson ? JSON.parse(argumentSchemaJson) : {};
