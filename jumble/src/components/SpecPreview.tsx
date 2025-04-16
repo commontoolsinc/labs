@@ -12,7 +12,7 @@ import { WORKFLOWS } from "../../../charm/src/workflow.ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { EditorView } from "@codemirror/view";
-import { useJobContext } from "@/contexts/JobContext.tsx";
+import { useActivityContext } from "@/contexts/ActivityContext.tsx";
 
 interface SpecPreviewProps {
   form: Partial<WorkflowForm>;
@@ -112,7 +112,7 @@ function Accordion(
 
 // JobStatusIndicator component to display job status based on generationId
 const JobStatusIndicator = ({ generationId }: { generationId?: string }) => {
-  const { jobs } = useJobContext();
+  const { jobs } = useActivityContext();
   
   if (!generationId || !jobs[generationId]) {
     return null;

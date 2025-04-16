@@ -13,7 +13,7 @@ import { SyncStatusProvider } from "@/contexts/SyncStatusContext.tsx";
 import { ToggleableNetworkInspector } from "@/components/NetworkInspector.tsx";
 import { NetworkInspectorProvider } from "@/contexts/NetworkInspectorContext.tsx";
 import { FeedbackActions } from "@/components/FeedbackActions.tsx";
-import JobStatus from "@/components/JobStatus.tsx";
+import ActivityStatus from "@/components/ActivityStatus.tsx";
 
 export default function Shell() {
   const { charmId } = useParams<CharmRouteParams>();
@@ -43,7 +43,7 @@ export default function Shell() {
               visible={localStorage.getItem("networkInspectorVisible") ===
                 "true"}
             />
-            <JobStatus className="floating-panel" />
+            <ActivityStatus className="floating-panel" />
           </div>
         </NetworkInspectorProvider>
       </SyncStatusProvider>
