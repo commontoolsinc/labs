@@ -24,7 +24,8 @@ export type WorkflowType =
   | "fix"
   | "edit"
   | "imagine"
-  | "imagine-single-phase";
+  | "imagine-single-phase"
+  | "cast-spell";
 
 // Configuration for each workflow type
 export interface WorkflowConfig {
@@ -67,6 +68,14 @@ export const WORKFLOWS: Record<WorkflowType, WorkflowConfig> = {
     name: "imagine-single-phase",
     label: "IMAGINE (SINGLE PHASE)",
     description: "IN DEVELOPMENT",
+    updateSpec: true,
+    updateSchema: true,
+    allowsDataReferences: true,
+  },
+  "cast-spell": {
+    name: "cast-spell",
+    label: "CAST",
+    description: "Cast a spell from the spellbook",
     updateSpec: true,
     updateSchema: true,
     allowsDataReferences: true,
@@ -673,9 +682,9 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
  */
 export async function processWorkflow(
   input: string,
-  dryRun: boolean = false,
+  charmManager: CharmManager,
   options: {
-    charmManager?: CharmManager;
+    dryRun?: boolean;
     existingCharm?: Cell<Charm>;
     prefill?: Partial<WorkflowForm>;
     model?: string;
@@ -721,13 +730,9 @@ export async function processWorkflow(
       !form.input?.processedInput ||
       form.input?.processedInput === form.input?.rawInput
     ) {
-      if (!options.charmManager) {
-        throw new Error("charmManager required to format input");
-      }
-
       console.log("processing input...");
       const stepStartTime = performance.now();
-      form = await processInputSection(options.charmManager, form);
+      form = await processInputSection(charmManager, form);
       timings.processInput = performance.now() - stepStartTime;
       options.onProgress?.(form);
       console.log("processed input!", form);
@@ -791,7 +796,7 @@ export async function processWorkflow(
     checkCancellation();
 
     // Step 4: Generation (if not a dry run and not already generated)
-    if (!dryRun && options.charmManager && !form.generation?.charm) {
+    if (!options.dryRun && !form.generation?.charm) {
       console.log("generating code");
       globalThis.dispatchEvent(
         new CustomEvent("job-update", {
@@ -1050,39 +1055,4 @@ export function executeImagineWorkflow(
     charmManager,
     form,
   );
-}
-
-/**
- * Main entry point for all workflow processing
- *
- * This function orchestrates the entire workflow process:
- * 1. Input processing and mention detection
- * 2. Classification (if not overridden)
- * 3. Plan generation
- * 4. Code generation
- */
-export async function executeWorkflow(
-  charmManager: CharmManager,
-  input: string,
-  context: {
-    currentCharm?: Cell<Charm>;
-    prefill?: Partial<WorkflowForm>;
-    model?: string;
-  },
-): Promise<Cell<Charm>> {
-  // Process the workflow with dryRun=false to fully execute and generate code
-  const form = await processWorkflow(input, false, {
-    charmManager,
-    existingCharm: context.currentCharm,
-    model: context.model,
-    prefill: context.prefill,
-    cache: true,
-  });
-
-  // A completed form should have a generated charm
-  if (!form.generation?.charm) {
-    throw new Error("Workflow execution failed to create a charm");
-  }
-
-  return form.generation.charm;
 }

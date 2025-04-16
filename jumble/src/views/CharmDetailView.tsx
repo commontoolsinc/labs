@@ -232,8 +232,8 @@ function useCodeEditor(
           "Spec has changed, using current behavior with future possibility for regeneration",
         );
 
-        processWorkflow(workingSpec, false, {
-          charmManager,
+        processWorkflow(workingSpec, charmManager, {
+          dryRun: false,
           existingCharm: charm,
           prefill: {
             classification: {

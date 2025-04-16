@@ -21,7 +21,6 @@ export {
 export {
   addGithubRecipe,
   castSpellAsCharm,
-  extendCharm,
   fixItCharm,
   modifyCharm,
   renameCharm,
@@ -36,8 +35,7 @@ export {
   createWorkflowForm,
   executeEditWorkflow,
   executeFixWorkflow,
-  executeImagineWorkflow as executeReworkWorkflow,
-  executeWorkflow,
+  executeImagineWorkflow,
   type ExecutionPlan,
   fillClassificationSection,
   fillPlanningSection,

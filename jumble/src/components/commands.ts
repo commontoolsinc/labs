@@ -11,7 +11,7 @@ import {
   renameCharm,
   WorkflowForm,
 } from "@commontools/charm";
-import { executeWorkflow, modifyCharm } from "@commontools/charm";
+import { modifyCharm, processWorkflow } from "@commontools/charm";
 import type { NavigateFunction } from "react-router-dom";
 import { charmId } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
@@ -267,7 +267,7 @@ async function handleModifyCharm(
   try {
     let newCharm;
 
-    // bf: I suspect this is pointless and already handled in executeWorkflow
+    // bf: I suspect this is pointless and already handled in processWorkflow
     if (ctx.focusedCharmId) {
       // Get the current charm
       const charm = await ctx.charmManager.get(ctx.focusedCharmId, false);
@@ -305,9 +305,9 @@ async function handleNewCharm(
   if (!input) return;
 
   try {
-    const newCharm = await executeWorkflow(
-      ctx.charmManager,
+    const newCharm = await processWorkflow(
       input,
+      ctx.charmManager,
       {
         prefill: ctx.previewForm,
         model: ctx.userPreferredModel,

@@ -3,18 +3,10 @@ import { Cell, getRecipe } from "@commontools/runner";
 import { Charm, CharmManager } from "./charm.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode, injectUserCode } from "./iframe/static.ts";
-import {
-  castNewRecipe,
-  compileAndRunRecipe,
-  generateNewRecipeVersion,
-} from "./iterate.ts";
+import { compileAndRunRecipe, generateNewRecipeVersion } from "./iterate.ts";
 import { NAME } from "@commontools/builder";
-import { executeWorkflow } from "./imagine.ts";
-import {
-  ExecutionPlan,
-  formatPromptWithMentions,
-  WorkflowForm,
-} from "./index.ts";
+import { WorkflowForm } from "./index.ts";
+import { processWorkflow } from "./workflow.ts";
 
 export const castSpellAsCharm = async (
   charmManager: CharmManager,
@@ -118,7 +110,7 @@ export async function addGithubRecipe(
  * @param previewPlan Optional: Pass through a pre-generated plan
  * @returns A new or modified charm
  */
-export function modifyCharm(
+export async function modifyCharm(
   charmManager: CharmManager,
   promptText: string,
   currentCharm: Cell<Charm>,
@@ -132,56 +124,16 @@ export function modifyCharm(
     model,
   };
 
-  return executeWorkflow(
-    charmManager,
+  const form = await processWorkflow(
     promptText,
+    charmManager,
     context,
   );
-}
 
-/**
- * This function is equivalent to calling modifyCharm with workflowType="rework"
- * It exists for backward compatibility and clarity in code
- *
- * @param charmManager CharmManager instance
- * @param currentCharmId ID of the charm to extend from
- * @param goal The prompt text describing what to create
- * @param cells Optional additional data references to include
- * @returns A new charm that extends from the current charm
- */
-export async function extendCharm(
-  charmManager: CharmManager,
-  currentCharmId: string,
-  goal: string,
-  cells?: Record<string, Cell<any>>,
-  cache: boolean = true,
-): Promise<Cell<Charm>> {
-  const charm = (await charmManager.get(currentCharmId, false))!;
-
-  // Process any cells to include as references
-  const additionalReferences: Record<string, Cell<any>> = {};
-
-  if (cells && Object.keys(cells).length > 0) {
-    // Add cells to additionalReferences
-    for (const [id, cell] of Object.entries(cells)) {
-      additionalReferences[id] = cell;
-    }
+  if (!form.generation) {
+    throw new Error("Modify charm failed");
   }
 
-  const classification: WorkflowForm["classification"] = {
-    confidence: 1.0,
-    workflowType: "imagine",
-    reasoning: "Extend is always imagining since it changes argument schema",
-  };
-
-  const context = {
-    currentCharm: charm,
-    dataReferences: additionalReferences,
-    prefill: {
-      classification,
-    },
-    cache,
-  };
-
-  return executeWorkflow(charmManager, goal, context);
+  return form.generation?.charm;
+>>>>>>> a8814500 (Clean up workflow API usage)
 }

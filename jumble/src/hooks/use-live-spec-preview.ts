@@ -112,8 +112,8 @@ export function useLiveSpecPreview(
       try {
         const cancellation = { cancelled: false };
 
-        const form = await processWorkflow(text, true, {
-          charmManager,
+        const form = await processWorkflow(text, charmManager, {
+          dryRun: true,
           existingCharm: currentCharm,
           model,
           prefill: prefill,
