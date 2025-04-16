@@ -197,7 +197,10 @@ class StorageImpl implements Storage {
   // Any doc here is being synced or in the process of spinning up syncing.
   // See also docIsLoading, which is a promise while the document is loading,
   // and is deleted after it is loaded.
-  private docIsSyncing = new Map<Entity, Set<string>>();
+  // FIXME: All four of these should probably be keyed by a combination of a doc and a schema
+  // If we load the same entity with different schemas, we want to track their resolution
+  // differently. If we only use one schema per doc, this will work ok.
+  private docIsSyncing = new Set<DocImpl<any>>();
 
   // Map from doc to promise of loading doc, set at stage 2. Resolves when
   // doc and all it's dependencies are loaded.
@@ -314,7 +317,7 @@ class StorageImpl implements Storage {
       // environment variable override this.
       const type = this.remoteStorageUrl?.protocol === "volatile:"
         ? "volatile"
-        : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "schema");
+        : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "cached");
 
       if (type === "remote") {
         if (!this.remoteStorageUrl) {
@@ -398,16 +401,12 @@ class StorageImpl implements Storage {
     if (doc.ephemeral) return doc;
 
     // If the doc is already loaded or loading, return immediately.
-    if (!this.docIsSyncing.has(entity)) {
-      this.docIsSyncing.set(entity, new Set<string>());
-    }
-    const syncingSchemas = this.docIsSyncing.get(entity)!;
-    if (syncingSchemas.has(schemaRef)) return doc;
+    if (this.docIsSyncing.has(doc)) return doc;
 
     // Important that we set this _before_ the doc is loaded, as we can already
     // populate the doc when loading dependencies and thus avoid circular
     // references.
-    syncingSchemas.add(schemaRef);
+    this.docIsSyncing.add(doc);
 
     // Start loading the doc and safe the promise for processBatch to await for
     console.log("Called StorageProvider.sync for ", entityId, schemaContext);
