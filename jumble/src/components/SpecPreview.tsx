@@ -12,6 +12,7 @@ import { WORKFLOWS } from "../../../charm/src/workflow.ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { EditorView } from "@codemirror/view";
+import { useActivityContext } from "@/contexts/ActivityContext.tsx";
 
 interface SpecPreviewProps {
   form: Partial<WorkflowForm>;
@@ -109,6 +110,34 @@ function Accordion(
   );
 }
 
+// JobStatusIndicator component to display job status based on generationId
+const JobStatusIndicator = ({ generationId }: { generationId?: string }) => {
+  const { jobs } = useActivityContext();
+  
+  if (!generationId || !jobs[generationId]) {
+    return null;
+  }
+  
+  const job = jobs[generationId];
+  
+  return (
+    <div className="text-xs ml-2 flex items-center">
+      {job.state === "running" && (
+        <>
+          <div className="w-2 h-2 mr-1 bg-blue-500 rounded-full animate-pulse"></div>
+          <span className="text-blue-600">{job.status}</span>
+        </>
+      )}
+      {job.state === "completed" && (
+        <span className="text-green-600">{job.status}</span>
+      )}
+      {job.state === "failed" && (
+        <span className="text-red-600">{job.status}</span>
+      )}
+    </div>
+  );
+};
+
 export function SpecPreview({
   form,
   loading,
@@ -121,6 +150,9 @@ export function SpecPreview({
   const hasContent =
     (loading || form.classification || form.plan?.steps || form.plan?.spec) &&
     visible;
+  
+  // Get the current generation ID from the form metadata
+  const generationId = form.meta?.generationId;
 
   // Create a reference to measure content height
   const contentRef = useRef<HTMLDivElement>(null);
@@ -295,6 +327,7 @@ export function SpecPreview({
                       animate
                       cameraZoom={12}
                     />
+                    <JobStatusIndicator generationId={generationId} />
                   </div>
                 )
                 : (
@@ -314,6 +347,7 @@ export function SpecPreview({
                           <span className="ml-2 text-sm">
                             Classifying workflow...
                           </span>
+                          <JobStatusIndicator generationId={generationId} />
                         </div>
                       )
                       : (
@@ -398,6 +432,7 @@ export function SpecPreview({
                                         <span className="ml-1 text-xs">
                                           Generating...
                                         </span>
+                                        <JobStatusIndicator generationId={generationId} />
                                       </div>
                                     )}
                                 </div>
@@ -445,6 +480,7 @@ export function SpecPreview({
                                       <span className="ml-1 text-xs">
                                         Generating...
                                       </span>
+                                      <JobStatusIndicator generationId={generationId} />
                                     </div>
                                   )
                                   : form.plan?.steps

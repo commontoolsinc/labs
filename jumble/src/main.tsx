@@ -20,7 +20,6 @@ import CharmList from "@/views/CharmList.tsx";
 import CharmShowView from "@/views/CharmShowView.tsx";
 import CharmDetailView from "@/views/CharmDetailView.tsx";
 import { LanguageModelProvider } from "@/contexts/LanguageModelContext.tsx";
-import { BackgroundTaskProvider } from "@/contexts/BackgroundTaskContext.tsx";
 import { AuthenticationProvider } from "@/contexts/AuthenticationContext.tsx";
 import { setupIframe } from "@/iframe-ctx.ts";
 import GenerateJSONView from "@/views/utility/GenerateJSONView.tsx";
@@ -30,6 +29,7 @@ import StackedCharmsView from "@/views/StackedCharmsView.tsx";
 import SpellbookLaunchView from "@/views/spellbook/SpellbookLaunchView.tsx";
 import FullscreenInspectorView from "@/views/FullscreenInspectorView.tsx";
 import { ActionManagerProvider } from "@/contexts/ActionManagerContext.tsx";
+import { ActivityProvider } from "@/contexts/ActivityContext.tsx";
 import { ROUTES } from "@/routes.ts";
 
 // Determine environment based on hostname
@@ -91,7 +91,9 @@ setupIframe();
 let errorCount = 0;
 onError((error: Error) => {
   !errorCount++ &&
-    globalThis.alert("Uncaught error in recipe: " + error.message);
+    globalThis.alert(
+      "Uncaught error in recipe: " + error.message + "\n" + error.stack,
+    );
   // Also send to Sentry
   Sentry.captureException(error);
 });
@@ -102,7 +104,7 @@ createRoot(document.getElementById("root")!).render(
       <AuthenticationProvider>
         <CharmsProvider>
           <ActionManagerProvider>
-            <BackgroundTaskProvider>
+            <ActivityProvider>
               <LanguageModelProvider>
                 <Router>
                   <SentryRoutes>
@@ -156,7 +158,7 @@ createRoot(document.getElementById("root")!).render(
                   </SentryRoutes>
                 </Router>
               </LanguageModelProvider>
-            </BackgroundTaskProvider>
+            </ActivityProvider>
           </ActionManagerProvider>
         </CharmsProvider>
       </AuthenticationProvider>

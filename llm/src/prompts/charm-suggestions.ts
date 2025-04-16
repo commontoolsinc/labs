@@ -5,7 +5,7 @@ import { describeCharm } from "./charm-describe.ts";
 import { llmPrompt } from "../index.ts";
 
 const SYSTEM_PROMPT = llmPrompt(
-  "0.0.1",
+  "charm-suggestions-system",
   `
 You are tasked with generating prompt suggestions to iterate on web app functionality in new and interesting directions.
 
@@ -102,7 +102,10 @@ export async function generateCharmSuggestions(
     SCHEMA: schema,
   });
 
-  const prompt = llmPrompt("0.0.1", `Give me ${count} charm suggestions`);
+  const prompt = llmPrompt(
+    "charm-suggestions-user",
+    `Give me ${count} charm suggestions`,
+  );
 
   const response = await client.sendRequest({
     model,
@@ -116,8 +119,8 @@ export async function generateCharmSuggestions(
     ],
     metadata: {
       context: "charm-suggestions",
-      systemPrompt: system,
-      userPrompt: prompt,
+      systemPrompt: system.version,
+      userPrompt: prompt.version,
     },
   });
 

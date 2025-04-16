@@ -45,7 +45,7 @@ export function FeedbackDialog({
         onClose();
       } else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
-        if (!isSubmitting && explanation.trim()) {
+        if (!isSubmitting) {
           submitFeedback();
         }
       }
@@ -58,8 +58,6 @@ export function FeedbackDialog({
   if (!isOpen) return null;
 
   const submitFeedback = async () => {
-    if (!explanation.trim()) return;
-
     console.log("Submitting feedback form with explanation:", explanation);
 
     // Fetch user info only when submitting
@@ -107,7 +105,6 @@ export function FeedbackDialog({
               placeholder={initialScore === 1
                 ? "What aspects were helpful or well done?"
                 : "What would make this response more useful?"}
-              required
             />
           </div>
 
@@ -123,7 +120,7 @@ export function FeedbackDialog({
             <button
               type="submit"
               className="px-4 py-2 bg-black text-white border-2 border-black hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              disabled={isSubmitting || !explanation.trim()}
+              disabled={isSubmitting}
             >
               {isSubmitting ? "Submitting..." : (
                 <span>
