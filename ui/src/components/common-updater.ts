@@ -1,6 +1,8 @@
 import { css, html, LitElement } from "lit";
 import { baseStyles } from "./style.ts";
+import { CommonCharmElement } from "./common-charm.ts";
 import { Cell } from "@commontools/runner";
+
 export class CommonUpdaterElement extends LitElement {
   static override styles = [
     baseStyles,
@@ -59,8 +61,11 @@ export class CommonUpdaterElement extends LitElement {
     this.updateState = "pending";
     this.requestUpdate();
 
-    const charmId = globalThis.location.pathname.split("/")[2];
-    const cleanCharmId = charmId?.split(/[-?/]/)[0];
+    const container = CommonCharmElement.findCharmContainer(this);
+    if (!container) {
+      throw new Error("No <common-charm> container.");
+    }
+    const { charmId } = container;
     const space = this.state.getAsCellLink().space;
     const payload = {
       charmId,

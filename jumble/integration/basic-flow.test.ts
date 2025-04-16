@@ -10,14 +10,16 @@ import {
 import { assert } from "@std/assert";
 import {
   addCharm,
-  copyLLMCache,
   inspectCharm,
   login,
   Mutable,
   snapshot,
   waitForSelectorClick,
   waitForSelectorWithText,
-} from "./utils.ts";
+} from "@commontools/utils/integration";
+import * as path from "@std/path";
+import { ensureDirSync } from "@std/fs";
+import { join } from "@std/path";
 
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
   "http://localhost:8000/";
@@ -267,3 +269,16 @@ Deno.test({
     }
   },
 });
+
+function copyLLMCache() {
+  const base = path.dirname(path.fromFileUrl(import.meta.url));
+  const dest = join(base, "../../toolshed", "cache", "llm-api-cache");
+  ensureDirSync(dest);
+  console.log("Copying LLM cache to", dest);
+  // list files in cache and copy each to dest
+  const src = join(base, "cache", "llm-api-cache");
+  for (const file of Deno.readDirSync(src)) {
+    console.log("Copying", file.name);
+    Deno.copyFileSync(join(src, file.name), join(dest, file.name));
+  }
+}

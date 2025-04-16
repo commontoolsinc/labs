@@ -66,7 +66,7 @@ export const scenarios: Scenario[] = [
       prompt:
         `this is a summer coordination calendar, make it clean like an apple interface. 
 
-it shows variable 3 compact month views at the top (default June, July, August 2025) and allows participants (default Zora) to pick a color and indicate their availability for a given activity. 
+it shows variable 3 compact month views at the top (default June, July, August 2025) and allows participants (default Alice) to pick a color and indicate their availability for a given activity. 
 
 when new activities are added, all participants see them and can add their availability. when creating a new activity the active user can specify details like title, description, location, and duration. when a given user is in control, the other users colors become lighter shades, and they click calendar dates to indicate their availability with a colored circle. when a day is selected by multiple participants, place the active participant color behind the others and divide the colors evenly (like a pie chart) to show them all within the circle.
 
@@ -74,7 +74,7 @@ Recommend the 3 best timeframes for the trip based on degree of overlap relative
 
 double clicking toggles the entire week's availability (Sunday through Saturday)
 
-default participants: zora, casey, lauren
+default participants: alice, bob, eve
 
 default activities: Summer Camp (duration 5 days), Monterey Bay Aquarium (duration 1 day), Lake Tahoe (duration 3 days), Beach Day (duration 1 day), Zoo (duration 1 day) 
 

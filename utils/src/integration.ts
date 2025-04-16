@@ -184,16 +184,3 @@ export const inspectCharm = async (
 
   return decode(stdout);
 };
-
-export const copyLLMCache = () => {
-  const base = path.dirname(path.fromFileUrl(import.meta.url));
-  const dest = join(base, "../../toolshed", "cache", "llm-api-cache");
-  ensureDirSync(dest);
-  console.log("Copying LLM cache to", dest);
-  // list files in cache and copy each to dest
-  const src = join(base, "cache", "llm-api-cache");
-  for (const file of Deno.readDirSync(src)) {
-    console.log("Copying", file.name);
-    Deno.copyFileSync(join(src, file.name), join(dest, file.name));
-  }
-};
