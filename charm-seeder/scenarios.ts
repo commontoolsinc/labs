@@ -7,6 +7,7 @@ export const scenarios: Scenario[] = [
       type: CommandType.New,
       prompt: "a 2048 game",
     }],
+    tags: ["smol"],
   },
   {
     name: "2048 Game Short",

@@ -33,6 +33,10 @@ estuary:
 
     TOOLSHED_API_URL=https://estuary.saga-castor.ts.net deno task start --name blue42
 
+To run the seeder with a specific tag, use the `--tag` flag.
+
+    deno task start --name blue42 --tag smol
+
 ## Adding more scenarios / prompts
 
 You can add new flows to `scenarios.ts`.

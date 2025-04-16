@@ -18,8 +18,8 @@ import {
   screenshot,
 } from "./jumble.ts";
 
-const { name, "skip-cache": skipCache } = parseArgs(Deno.args, {
-  string: ["name"],
+const { name, "skip-cache": skipCache, tag } = parseArgs(Deno.args, {
+  string: ["name", "tag"],
   boolean: ["skip-cache"],
 });
 
@@ -41,11 +41,14 @@ const charmManager = new CharmManager(
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function processPrompts() {
+async function processPrompts(tag: string | undefined) {
   let promptCount = 0;
   console.log(`Processing prompts...`);
 
   for (const scenario of scenarios) {
+    if (tag && (scenario.tags === undefined || !scenario.tags.includes(tag))) {
+      continue;
+    }
     await goto(toolshedUrl);
     await sleep(1000);
     let lastCharmId: string | undefined = undefined;
@@ -163,7 +166,7 @@ async function verifyCharm(id: string, prompt: string): Promise<string> {
 try {
   await ensureReportDir(name);
   await login(name);
-  await processPrompts();
+  await processPrompts(tag);
   await generateReport(name, charmResults, toolshedUrl, scenarios);
 } catch (e) {
   console.error(e);

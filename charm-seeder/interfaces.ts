@@ -30,4 +30,5 @@ export type Step = {
 export type Scenario = {
   name: string;
   steps: Step[];
+  tags?: string[];
 };
