@@ -256,6 +256,7 @@ const send = (
       return state;
     }
     case "/memory/graph/query": {
+      state.pull[url] = { ok: { invocation, authorization } };
       if (invocation.args.subscribe) {
         state.subscriptions[url] = {
           source: invocation,
@@ -263,8 +264,6 @@ const send = (
           updated: undefined,
           value: undefined,
         };
-      } else {
-        state.pull[url] = { ok: { invocation, authorization } };
       }
       return state;
     }
