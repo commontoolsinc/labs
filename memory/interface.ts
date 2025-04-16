@@ -144,7 +144,8 @@ export type Protocol<Space extends MemorySpace = MemorySpace> = {
       >;
       query: {
         (query: { select: Selector; since?: number }): Task<
-          Result<Selection<Space>, AuthorizationError | QueryError>
+          Result<Selection<Space>, AuthorizationError | QueryError>,
+          Selection<Space>
         >;
         subscribe(
           source: Subscribe<Space>["args"],
@@ -164,7 +165,8 @@ export type Protocol<Space extends MemorySpace = MemorySpace> = {
             subscribe?: boolean;
           },
         ): Task<
-          Result<Selection<Space>, AuthorizationError | QueryError>
+          Result<Selection<Space>, AuthorizationError | QueryError>,
+          Selection<Space>
         >;
       };
     };

@@ -25,6 +25,7 @@ export const from = <
               span.setAttribute("socket.message_count", messageCount);
               controller.enqueue(event.data);
             } catch (error) {
+              console.log("Got socket error", error);
               controller.error(error);
             }
           };
@@ -33,12 +34,14 @@ export const from = <
               span.setAttribute("socket.final_state", "closed");
               controller.close();
             } catch (error) {
+              console.log("Got socket error", error);
               controller.error(error);
             }
           };
           socket.onerror = (event) => {
             span.setAttribute("socket.error", true);
             socket.onclose = null;
+            console.log("Got socket error event", event);
             controller.error(event);
           };
         },

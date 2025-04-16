@@ -1,5 +1,6 @@
 import {
   Abilities,
+  AuthorizationError,
   Await,
   Cause,
   Changes,
@@ -52,8 +53,8 @@ import { toStringStream } from "./ucan.ts";
 import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
 export * from "./interface.ts";
-import { the as commitType, toRevision } from "./commit.ts";
-export { ChangesBuilder };
+import { toRevision } from "./commit.ts";
+import { isObj } from "../utils/src/isObj.ts";
 
 export const connect = ({
   address,
@@ -149,7 +150,15 @@ class MemoryConsumerSession<
     const id = command.of;
     if (command.the === "task/return") {
       const invocation = this.invocations.get(id);
-      this.invocations.delete(id);
+      if (
+        invocation !== undefined && "args" in invocation &&
+        isObj(invocation.args) && "subscribe" in invocation.args &&
+        invocation.args.subscribe
+      ) {
+        console.log("Skipping delete");
+      } else {
+        this.invocations.delete(id);
+      }
       invocation?.return(command.is as NonNullable<unknown>);
     } // If it is an effect it can be for one specific subscription, yet we may
     // have other subscriptions that will be affected. There for we simply
@@ -157,9 +166,13 @@ class MemoryConsumerSession<
     // ℹ️ We could optimize this in the future and try indexing subscriptions
     // so we don't have to broadcast to all.
     else if (command.the === "task/effect") {
-      for (const [, invocation] of this.invocations) {
-        invocation.perform(command.is);
-      }
+      const invocation = this.invocations.get(id);
+      invocation?.perform(command.is);
+
+      // TODO: revisit
+      // for (const [, invocation] of this.invocations) {
+      //   invocation.perform(command.is);
+      // }
     }
   }
 
@@ -272,7 +285,7 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
         args: source,
       });
       return QueryView.create(this.session, query);
-    } else {
+    } else { // selectSchema
       const query = this.session.invoke({
         cmd: "/memory/graph/query" as const,
         sub: this.space,
@@ -398,6 +411,11 @@ class QueryView<
       Result<QueryView<Space, MemoryProtocol>, QueryError | ConnectionError>
     >,
   ) {
+    invocation.perform = (
+      effect:
+        | ConsumerEffectFor<"/memory/query", MemoryProtocol>
+        | ConsumerEffectFor<"/memory/graph/query", MemoryProtocol>,
+    ) => this.perform(effect as any);
     this.selection = { [this.space]: {} } as Selection<InferOf<Protocol>>;
     this.selector = ("select" in this.invocation.args)
       ? (this.invocation.args as { select?: Selector }).select as Selector
@@ -407,6 +425,20 @@ class QueryView<
 
   return(selection: Selection<InferOf<Protocol>>) {
     this.selection = selection;
+  }
+
+  perform(effect: Selection<Space>) {
+    // This effect may not be intended for us, since any effect is sent to all
+    // invocations. If not, ignore it.
+    console.log("In QueryView.perform", effect);
+    if (effect[this.space] && this.space in effect[this.space]) {
+      // This is the commit+json subscription, and it's not for us
+      console.log("Ignoring", effect);
+      return { ok: {} };
+    }
+    const differential = { ...effect[this.space] } as Selection<Space>;
+    this.integrate(differential);
+    return { ok: effect };
   }
 
   then<T, X>(
@@ -457,6 +489,7 @@ class QueryView<
   // Since we already have these results, we don't want to re-fetch them, so
   // make a QueryView available for subscriptions to use that lets us skip
   // that step when we subscribe.
+  // TODO: Remove this code when we remove the rest of remote.ts
   includedQueryView(): QueryView<MemorySpace, MemoryProtocol> | undefined {
     const factSelection = this.selection[this.space];
     const subSelector: Selector = {};
@@ -558,6 +591,13 @@ class QuerySubscriptionInvocation<
     await unsubscribe;
   }
   override perform(commit: Commit<Space>) {
+    if (
+      !(this.space in commit) ||
+      !("application/commit+json" in commit[this.space])
+    ) {
+      console.log("QSI ignoring non-commit");
+      return { ok: {} };
+    }
     const selection = this.selection[this.space];
     // Here we will collect subset of changes that match the query.
     let differential = null;

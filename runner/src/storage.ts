@@ -413,7 +413,10 @@ class StorageImpl implements Storage {
     console.log("Called StorageProvider.sync for ", entityId, schemaContext);
     const loadingPromise = this._getStorageProviderForSpace(doc.space)
       .sync(doc.entityId!, expectedInStorage, schemaContext)
-      .then(() => doc);
+      .then(() => {
+        console.log("got doc", JSON.stringify(doc.entityId));
+        return doc;
+      });
     this.loadingPromises.set(doc, loadingPromise);
 
     // Create a promise that gets resolved once the doc and all its

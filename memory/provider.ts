@@ -12,6 +12,7 @@ import type {
   ConsumerInvocationFor,
   ConsumerResultFor,
   Fact,
+  FactSelection,
   Invocation,
   InvocationURL,
   MemorySession,
@@ -45,9 +46,8 @@ export * as Memory from "./memory.ts";
 export * as Subscription from "./subscription.ts";
 import { refer } from "./reference.ts";
 import * as Access from "./access.ts";
-import { Fact as FactModule } from "./lib.ts";
+import { Fact as FactModule, SelectionBuilder } from "./lib.ts";
 import { assert } from "@std/assert/assert";
-import * as ChangesBuilder from "./changes.ts";
 
 // Convenient shorthand so I don't need this long type for this string
 type JobId = InvocationURL<Reference<ConsumerCommandInvocation<Protocol>>>;
@@ -252,6 +252,7 @@ class MemoryProviderSession<
         const selector = ("select") in invocation.args
           ? invocation.args.select
           : invocation.args.selectSchema;
+        console.log("Setting up subscription for", of);
         this.channels.set(
           of,
           new Set(
@@ -292,24 +293,26 @@ class MemoryProviderSession<
 
   async commit(commit: Commit<Space>) {
     // First, we check our schemaChannels, since these are more complex
-    const delta = this.getCommitData(commit);
-    if (delta === undefined) {
-      console.log("This is probably an error");
-      return { ok: {} };
-    }
+    // const delta = this.getCommitData(commit);
+    // if (delta === undefined) {
+    //   console.log("This is probably an error");
+    //   return { ok: {} };
+    // }
 
     // First, check to see if any of our schema queries need to be notified
-    const [lastId, maxSince, changes] = await this.getSchemaSubscriptionMatches(
+    const [lastId, maxSince, facts] = await this.getSchemaSubscriptionMatches(
       commit,
     );
-    // It doesn't really matter who we say we're responding to
-    // as long as we return all the relevant objects, the client will dispatch.
+    // It doesn't really matter who we say we're responding to as long as we
+    // return all the relevant objects, the client will dispatch.
+    // It is important that we send it to the right kind of listener.
     if (lastId !== undefined) {
-      this.setCommitData(commit, maxSince, changes);
-      return this.perform({
+      //this.setCommitData(commit, maxSince, changes);
+      console.log("Sending facts", facts, "to", lastId);
+      this.perform({
         the: "task/effect",
         of: lastId,
-        is: commit,
+        is: facts,
       });
     }
 
@@ -323,7 +326,9 @@ class MemoryProviderSession<
         // want to send same transaction multiple times to the same consumer.
         // Consumer does it's own bookkeeping of all the subscriptions and will
         // distribute transaction to all of them locally.
-        return this.perform({
+        console.log("Sending commit", commit, "to", id);
+        // TODO: Revisit
+        this.perform({
           the: "task/effect",
           of: id,
           is: commit,
@@ -332,45 +337,6 @@ class MemoryProviderSession<
     }
 
     return { ok: {} };
-  }
-
-  private getCommitData(
-    commit: Commit<Space>,
-  ): { since: number; changes: Changes } | undefined {
-    const commitObj = commit as Select<
-      Space,
-      Select<The, Select<Cause, { is: CommitData }>>
-    >;
-    for (const [_of, attributes] of Object.entries(commitObj)) {
-      for (const [_the, causes] of Object.entries(attributes)) {
-        for (const [_cause, assertion] of Object.entries(causes)) {
-          return {
-            since: assertion.is.since,
-            changes: assertion.is.transaction.args.changes,
-          };
-        }
-      }
-    }
-  }
-
-  private setCommitData(
-    commit: Commit<Space>,
-    since: number,
-    changes: Changes,
-  ) {
-    const commitObj = commit as Select<
-      Space,
-      Select<The, Select<Cause, { is: CommitData }>>
-    >;
-    for (const [_of, attributes] of Object.entries(commitObj)) {
-      for (const [_the, causes] of Object.entries(attributes)) {
-        for (const [_cause, assertion] of Object.entries(causes)) {
-          assertion.is.since = since;
-          assertion.is.transaction.args.changes = changes;
-        }
-      }
-    }
-    return commit;
   }
 
   private addSchemaSubscription<Space extends MemorySpace>(
@@ -397,15 +363,22 @@ class MemoryProviderSession<
 
   private async getSchemaSubscriptionMatches(
     commit: Commit<Space>,
-  ): Promise<[JobId | undefined, number, Changes]> {
+  ): Promise<[JobId | undefined, number, Selection<Space>]> {
     const schemaMatches = new Map<string, Revision<Fact>>();
     let maxSince = -1;
     let lastId;
+    const [[space, _attributes]] = Object.entries(commit);
+    // Eventually, we should support multiple spaces, but currently the since handling is per-space
+    // Our websockets are also per-space, so there's larger issues involved.
     for (const [id, subscription] of this.schemaChannels) {
       if (Subscription.match(commit, subscription.watchedObjects)) {
+        if (space != subscription.invocation.sub) {
+          console.warn("Unexpected space for subscription", subscription);
+          continue;
+        }
         const result = await this.memory.querySchema(subscription.invocation);
         assert(result.ok);
-        const factSelection = result.ok[subscription.invocation.sub];
+        const factSelection = result.ok[space as Space];
         const factVersions = Array.from(FactModule.iterate(factSelection));
         const includedFacts = new Map(
           factVersions.map((fv) => [Subscription.formatAddress(fv), fv]),
@@ -431,22 +404,11 @@ class MemoryProviderSession<
         maxSince = since > maxSince ? since : maxSince;
       }
     }
-    // We will package the new facts as Transactions to fit as a commit effect
-    const existing = this.getCommitData(commit);
-    const updates = ChangesBuilder.from(schemaMatches.values());
-    if (existing === undefined) {
-      return [lastId, maxSince, updates];
-    }
-    maxSince = existing.since > maxSince ? existing.since : maxSince;
-    // Merge the updates into the existing fact selection
-    for (const [of, ofValue] of Object.entries(updates)) {
-      for (const [the, theValue] of Object.entries(ofValue)) {
-        for (const [cause, causeValue] of Object.entries(theValue)) {
-          ChangesBuilder.set(existing, [of, the], cause, causeValue);
-        }
-      }
-    }
-    return [lastId, maxSince, existing];
+    const selection = SelectionBuilder.from(
+      schemaMatches.values().map((item) => [item, item.since]),
+    );
+    const selectionSpace = { [space]: selection } as Selection<Space>;
+    return [lastId, maxSince, selectionSpace];
   }
 }
 

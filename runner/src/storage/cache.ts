@@ -372,6 +372,7 @@ export class Replica {
 
     const reader = query.subscribe().getReader();
     while (true) {
+      console.log("Awaiting reader.read in loop");
       const next = await reader.read();
       if (next.done) {
         break;
@@ -420,36 +421,47 @@ export class Replica {
 
     // Otherwise we build a query selector to fetch requested entries from the
     // remote.
-    const selector = {};
-    // If any of our objects provided a schema context, run the query with that
-    const hasSchema =
-      entries.find(([_address, schemaContext]) =>
-        schemaContext !== undefined
-      ) !== undefined;
+    const schemaSelector = {};
+    const querySelector = {};
     for (const [{ the, of }, schemaContext] of entries) {
-      if (hasSchema && this.useSchemaQueries) {
-        const match: SchemaPathSelector = schemaContext === undefined
-          ? { path: [] }
-          : { path: [], schemaContext: schemaContext };
-        Changes.set(selector, [of, the], "_", match);
+      if (this.useSchemaQueries && schemaContext !== undefined) {
+        Changes.set(schemaSelector, [of, the], "_", {
+          path: [],
+          schemaContext: schemaContext,
+        });
       } else {
-        Changes.set(selector, [of], the, {});
+        Changes.set(querySelector, [of], the, {});
       }
     }
-    const queryParam = hasSchema && this.useSchemaQueries
-      ? { selectSchema: selector }
-      : { select: selector };
-    const query = this.remote.query(queryParam);
 
-    // If query fails we propagate the error.
-    const { error } = await query.promise;
-    if (error) {
-      return { error };
+    let fetchedEntries: [Revision<State>, SchemaContext | undefined][] = [];
+    // Run all our schema queries first
+    if (Object.entries(schemaSelector).length > 0) {
+      const query = this.remote.query({
+        selectSchema: schemaSelector,
+        subscribe: true,
+      });
+      const { error } = await query.promise;
+      // If query fails we propagate the error.
+      if (error) {
+        console.log("Got error");
+        return { error };
+      }
+      fetchedEntries = query.schemaFacts;
     }
-
-    // We store fetched entries into the heap.
-    const fetchedEntries = query.schemaFacts;
+    // Now run our regular queries (this will include our commit+json)
+    if (Object.entries(querySelector).length > 0) {
+      const query = this.remote.query({ select: querySelector });
+      const { error } = await query.promise;
+      // If query fails we propagate the error.
+      if (error) {
+        console.log("Got error");
+        return { error };
+      }
+      fetchedEntries = [...fetchedEntries, ...query.schemaFacts];
+    }
     const fetched = fetchedEntries.map(([fact, _schema]) => fact);
+    console.log("Merging fetched", fetched);
     this.heap.merge(fetched, Replica.put);
 
     // Remote may not have all the requested entries. We denitrify them by
@@ -463,6 +475,7 @@ export class Replica {
         if (!this.get(entry)) {
           // Note we use `-1` as `since` timestamp so that any change will appear greater.
           const revision = { ...unclaimed(entry), since: -1 };
+          console.log("Marking entry unfetched:", entry);
           notFound.push(revision);
           revisions.set(entry, revision);
         }
@@ -488,8 +501,10 @@ export class Replica {
     const result = await this.cache.merge(revisions.values(), Replica.put);
 
     if (result.error) {
+      console.log("Got error:", result.error);
       return result;
     } else {
+      console.log("Returning", revisions);
       return { ok: revisions };
     }
   }
@@ -544,6 +559,7 @@ export class Replica {
     const { ok: pulled, error } = await this.cache.pull(schemaless);
 
     if (error) {
+      console.log("Load returning error");
       return { error };
     } else {
       // If number of pulled records is less than what we requested we have some
@@ -554,14 +570,19 @@ export class Replica {
       // have to wait until fetch is complete.
       // TODO: still need to add since field
       if (pulled.size < need.length) {
-        return await this.pull(need);
+        console.log("Load needs to pull");
+        const rv = await this.pull(need);
+        console.log("Completed pull");
+        return rv;
+        // return await this.pull(need);
       } //
       // Otherwise we are able to complete checkout and we schedule a pull in
       // the background so we can get latest entries if there are some available.
       else {
+        console.log("Adding to queue:", need);
         this.queue.add(need);
         this.sync();
-
+        console.log("queue size", this.queue.members.size);
         return { ok: pulled };
       }
     }
@@ -1019,6 +1040,7 @@ export class Provider implements StorageProvider {
 
       // Next read next command from the session.
       const next = await reader.read();
+
       // If session is closed we're done.
       if (next.done) {
         this.close();
