@@ -127,7 +127,7 @@ export const addCharm = async (toolshedUrl: string) => {
   const { success, stderr } = await (new Deno.Command(Deno.execPath(), {
     args: [
       "task",
-      "start",
+      "start-ci",
       "--spaceName",
       name,
       "--recipeFile",
@@ -162,7 +162,7 @@ export const inspectCharm = async (
   const { success, stdout, stderr } = await (new Deno.Command(Deno.execPath(), {
     args: [
       "task",
-      "start",
+      "start-ci",
       "--spaceName",
       name,
       "--charmId",

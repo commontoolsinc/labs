@@ -1,6 +1,7 @@
 {
   "tasks": {
     "start": "deno run --allow-read --allow-env --allow-net main.ts",
+    "start-ci": "deno run --allow-read --allow-env --allow-net --unstable-broadcast-channel main.ts",
     "google-importer": "deno run --allow-read --allow-env --allow-net google-importer.ts",
     "background-runner": "deno run --allow-read --allow-env --allow-net background-charm-runner.ts",
     "memorydemo": "deno run --allow-read --allow-env --allow-net memory_demo.ts",
