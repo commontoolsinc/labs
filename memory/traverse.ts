@@ -1,7 +1,6 @@
 // This is the same structure as in space.ts, but there's also a different
 // Session interface in memory/interface, so the space version isn't exported.
 
-import { isPartOfTypeOnlyImportOrExportDeclaration } from "typescript";
 import { isAlias } from "../builder/src/index.ts";
 import { JSONObject, JSONValue } from "./consumer.ts";
 import { isObject } from "./provider.ts";

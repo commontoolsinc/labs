@@ -69,7 +69,7 @@ export class ServerTraverseHelper extends BaseObjectManager<
           cause: fact.cause,
           since: fact.since,
         },
-        value: fact.is ? (fact.is as JSONObject)["value"] : undefined,
+        value: fact.is ? (fact.is as JSONObject) : undefined,
       };
       this.readValues.set(doc, valueEntry);
       return valueEntry;
@@ -427,26 +427,4 @@ function loadFacts<Space extends MemorySpace>(
     );
   }
   return selection;
-}
-
-// Gets the value of the first fact in the selection
-// TODO(@ubik2) should this be the last fact?
-function getFact(
-  selection: FactSelection,
-): JSONValue | undefined {
-  for (const [of, ofValue] of Object.entries(selection)) {
-    for (const [the, theValue] of Object.entries(ofValue)) {
-      if (isObject(theValue) && Object.entries(theValue).length > 1) {
-        console.warn("Got more than one fact");
-      }
-      for (const [cause, causeValue] of Object.entries(theValue)) {
-        if (causeValue.is === undefined) {
-          return undefined;
-        } else if (isObject(causeValue.is)) {
-          return (causeValue.is as JSONObject).value;
-        }
-      }
-    }
-  }
-  return undefined;
 }

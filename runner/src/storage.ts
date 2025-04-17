@@ -197,7 +197,7 @@ class StorageImpl implements Storage {
   // Any doc here is being synced or in the process of spinning up syncing.
   // See also docIsLoading, which is a promise while the document is loading,
   // and is deleted after it is loaded.
-  // FIXME: All four of these should probably be keyed by a combination of a doc and a schema
+  // FIXME(@ubik2) All four of these should probably be keyed by a combination of a doc and a schema
   // If we load the same entity with different schemas, we want to track their resolution
   // differently. If we only use one schema per doc, this will work ok.
   private docIsSyncing = new Set<DocImpl<any>>();
@@ -390,10 +390,10 @@ class StorageImpl implements Storage {
     if (!doc.entityId) throw new Error("Doc has no entity ID");
 
     const entityId = JSON.stringify(doc.entityId);
-    const entity = `of:${doc.entityId["/"]}` as Entity;
-    const schemaRef = schemaContext === undefined
-      ? SchemaNoneRef
-      : refer(schemaContext).toString();
+    // const entity = `of:${doc.entityId["/"]}` as Entity;
+    // const schemaRef = schemaContext === undefined
+    //   ? SchemaNoneRef
+    //   : refer(schemaContext).toString();
 
     // If the doc is ephemeral, we don't need to load it from storage. We still
     // add it to the map of known docs, so that we don't try to keep loading
@@ -409,13 +409,9 @@ class StorageImpl implements Storage {
     this.docIsSyncing.add(doc);
 
     // Start loading the doc and safe the promise for processBatch to await for
-    console.log("Called StorageProvider.sync for ", entityId, schemaContext);
     const loadingPromise = this._getStorageProviderForSpace(doc.space)
       .sync(doc.entityId!, expectedInStorage, schemaContext)
-      .then(() => {
-        console.log("got doc", JSON.stringify(doc.entityId));
-        return doc;
-      });
+      .then(() => doc);
     this.loadingPromises.set(doc, loadingPromise);
 
     // Create a promise that gets resolved once the doc and all its

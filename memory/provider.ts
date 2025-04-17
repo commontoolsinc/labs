@@ -252,7 +252,6 @@ class MemoryProviderSession<
         const selector = ("select") in invocation.args
           ? invocation.args.select
           : invocation.args.selectSchema;
-        console.log("Setting up subscription for", of);
         this.channels.set(
           of,
           new Set(
@@ -292,13 +291,6 @@ class MemoryProviderSession<
   }
 
   async commit(commit: Commit<Space>) {
-    // First, we check our schemaChannels, since these are more complex
-    // const delta = this.getCommitData(commit);
-    // if (delta === undefined) {
-    //   console.log("This is probably an error");
-    //   return { ok: {} };
-    // }
-
     // First, check to see if any of our schema queries need to be notified
     const [lastId, maxSince, facts] = await this.getSchemaSubscriptionMatches(
       commit,
@@ -317,17 +309,9 @@ class MemoryProviderSession<
     }
 
     for (const [id, channels] of this.channels) {
-      // TODO: Our transaction probably has a single change, but we want to change it in the result to include all the relevant objects
-      // As before, a single document write means we only need to return once, no matter how many subscriptions match.
-      // However, we need to keep checking with all of our subscriptions, because the set of included docs needs to
-      // include all the linked docs.
       if (Subscription.match(commit, channels)) {
-        // Note that we intentionally exit on the first match because we do not
-        // want to send same transaction multiple times to the same consumer.
-        // Consumer does it's own bookkeeping of all the subscriptions and will
-        // distribute transaction to all of them locally.
-        console.log("Sending commit", commit, "to", id);
-        // TODO: Revisit
+        // Note that we don't exit on the first match anymore because we need
+        // to keep these subscriptions distinct.
         this.perform({
           the: "task/effect",
           of: id,
@@ -372,13 +356,8 @@ class MemoryProviderSession<
     // Our websockets are also per-space, so there's larger issues involved.
     for (const [id, subscription] of this.schemaChannels) {
       if (Subscription.match(commit, subscription.watchedObjects)) {
-        if (space != subscription.invocation.sub) {
-          console.warn("Unexpected space for subscription", subscription);
-          continue;
-        }
         const result = await this.memory.querySchema(subscription.invocation);
-        assert(result.ok);
-        const factSelection = result.ok[space as Space];
+        const factSelection = result.ok![space as Space];
         const factVersions = Array.from(FactModule.iterate(factSelection));
         const includedFacts = new Map(
           factVersions.map((fv) => [Subscription.formatAddress(fv), fv]),

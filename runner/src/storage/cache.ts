@@ -270,7 +270,7 @@ class PullQueue {
   ) {
   }
   add(entries: Iterable<[FactAddress, SchemaContext?]>) {
-    // TODO: Ensure the schema context matches
+    // TODO(@ubik2) Ensure the schema context matches
     for (const [entry, schema] of entries) {
       this.members.set(toKey(entry), [entry, schema]);
     }
@@ -372,12 +372,10 @@ export class Replica {
 
     const reader = query.subscribe().getReader();
     while (true) {
-      console.log("Awaiting reader.read in loop");
       const next = await reader.read();
       if (next.done) {
         break;
       }
-      console.log("Merging commits from poll");
       this.merge(next.value[this.space] as unknown as Commit);
     }
   }
@@ -391,7 +389,6 @@ export class Replica {
   onMessage(event: MessageEvent) {
     const { put } = event.data;
     if (put) {
-      console.log("Merging commits from onMessage");
       this.heap.merge(put, Replica.put);
     }
   }
@@ -415,9 +412,6 @@ export class Replica {
     if (entries.length === 0) {
       return { ok: new Map() };
     }
-
-    // TODO: remove this
-    console.log("Pulled entries in cache: ", entries);
 
     // Otherwise we build a query selector to fetch requested entries from the
     // remote.
@@ -444,7 +438,6 @@ export class Replica {
       const { error } = await query.promise;
       // If query fails we propagate the error.
       if (error) {
-        console.log("Got error");
         return { error };
       }
       fetchedEntries = query.schemaFacts;
@@ -455,13 +448,11 @@ export class Replica {
       const { error } = await query.promise;
       // If query fails we propagate the error.
       if (error) {
-        console.log("Got error");
         return { error };
       }
       fetchedEntries = [...fetchedEntries, ...query.schemaFacts];
     }
     const fetched = fetchedEntries.map(([fact, _schema]) => fact);
-    console.log("Merging fetched", fetched);
     this.heap.merge(fetched, Replica.put);
 
     // Remote may not have all the requested entries. We denitrify them by
@@ -475,7 +466,6 @@ export class Replica {
         if (!this.get(entry)) {
           // Note we use `-1` as `since` timestamp so that any change will appear greater.
           const revision = { ...unclaimed(entry), since: -1 };
-          console.log("Marking entry unfetched:", entry);
           notFound.push(revision);
           revisions.set(entry, revision);
         }
@@ -486,7 +476,6 @@ export class Replica {
       const factAddress = { the: revision.the, of: revision.of };
       revisions.set(factAddress, revision);
       if (schema !== undefined) {
-        console.log("Ran a schema query: ", revision, schema);
         const schemaRef = refer(schema).toString();
         const factKey = toKey(factAddress);
         if (!this.schemaTracker.has(factKey)) {
@@ -501,10 +490,8 @@ export class Replica {
     const result = await this.cache.merge(revisions.values(), Replica.put);
 
     if (result.error) {
-      console.log("Got error:", result.error);
       return result;
     } else {
-      console.log("Returning", revisions);
       return { ok: revisions };
     }
   }
@@ -559,7 +546,6 @@ export class Replica {
     const { ok: pulled, error } = await this.cache.pull(schemaless);
 
     if (error) {
-      console.log("Load returning error");
       return { error };
     } else {
       // If number of pulled records is less than what we requested we have some
@@ -568,21 +554,15 @@ export class Replica {
       // If number of items pulled from cache is less than number of needed items
       // we did not have everything we needed in cache, in which case we will
       // have to wait until fetch is complete.
-      // TODO: still need to add since field
+      // TODO(@ubik2) still need to add since field
       if (pulled.size < need.length) {
-        console.log("Load needs to pull");
-        const rv = await this.pull(need);
-        console.log("Completed pull");
-        return rv;
-        // return await this.pull(need);
+        return await this.pull(need);
       } //
       // Otherwise we are able to complete checkout and we schedule a pull in
       // the background so we can get latest entries if there are some available.
       else {
-        console.log("Adding to queue:", need);
         this.queue.add(need);
         this.sync();
-        console.log("queue size", this.queue.members.size);
         return { ok: pulled };
       }
     }
@@ -700,8 +680,6 @@ export class Replica {
       { the, of, cause, is: { since: is.since }, since },
       ...toChanges(commit),
     ];
-    // TODO: Remove log
-    console.log("merging revisions", revisions);
 
     // Store newer revisions into the heap,
     this.heap.merge(revisions, Replica.update);
@@ -866,7 +844,6 @@ export class Provider implements StorageProvider {
     };
 
     workspace.subscribe(address, subscriber);
-    console.log("Loading ", address, " from sink (no schema)");
     this.workspace.load([[address, undefined]]);
 
     return () => workspace.unsubscribe(address, subscriber);
@@ -878,7 +855,6 @@ export class Provider implements StorageProvider {
   ) {
     const { the } = this;
     const of = Provider.toEntity(entityId);
-    console.log("Loading ", { the, of }, " from sync ", schemaContext);
     return this.workspace.load([[{ the, of }, schemaContext]]);
   }
 
@@ -1040,7 +1016,6 @@ export class Provider implements StorageProvider {
 
       // Next read next command from the session.
       const next = await reader.read();
-
       // If session is closed we're done.
       if (next.done) {
         this.close();

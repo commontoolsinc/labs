@@ -151,28 +151,25 @@ class MemoryConsumerSession<
     if (command.the === "task/return") {
       const invocation = this.invocations.get(id);
       if (
-        invocation !== undefined && "args" in invocation &&
-        isObj(invocation.args) && "subscribe" in invocation.args &&
-        invocation.args.subscribe
+        invocation === undefined || !("args" in invocation) ||
+        !isObj(invocation.args) || !("subscribe" in invocation.args) ||
+        !invocation.args.subscribe
       ) {
-        console.log("Skipping delete");
-      } else {
         this.invocations.delete(id);
       }
       invocation?.return(command.is as NonNullable<unknown>);
     } // If it is an effect it can be for one specific subscription, yet we may
-    // have other subscriptions that will be affected. There for we simply
-    // pass effect to each one and they can detect if it concerns them.
-    // ℹ️ We could optimize this in the future and try indexing subscriptions
-    // so we don't have to broadcast to all.
+    // have other subscriptions that will be affected.
+    // We can't just send one message over, since the client needs to know
+    // about which extra objects are needed for that specific subscription.
+    // There's a chance we'll send the same object over more than once because
+    // of this (in particular, this is almost guaranteed by the cache that
+    // maintains a subscription to every object in the cache).
+    // For now, I think this is the best approach, but we can use the since
+    // fields to remove these later.
     else if (command.the === "task/effect") {
       const invocation = this.invocations.get(id);
       invocation?.perform(command.is);
-
-      // TODO: revisit
-      // for (const [, invocation] of this.invocations) {
-      //   invocation.perform(command.is);
-      // }
     }
   }
 
@@ -428,14 +425,6 @@ class QueryView<
   }
 
   perform(effect: Selection<Space>) {
-    // This effect may not be intended for us, since any effect is sent to all
-    // invocations. If not, ignore it.
-    console.log("In QueryView.perform", effect);
-    if (effect[this.space] && this.space in effect[this.space]) {
-      // This is the commit+json subscription, and it's not for us
-      console.log("Ignoring", effect);
-      return { ok: {} };
-    }
     const differential = { ...effect[this.space] } as Selection<Space>;
     this.integrate(differential);
     return { ok: effect };
@@ -489,7 +478,7 @@ class QueryView<
   // Since we already have these results, we don't want to re-fetch them, so
   // make a QueryView available for subscriptions to use that lets us skip
   // that step when we subscribe.
-  // TODO: Remove this code when we remove the rest of remote.ts
+  // TODO(@ubik2) Remove this code when we remove the rest of remote.ts
   includedQueryView(): QueryView<MemorySpace, MemoryProtocol> | undefined {
     const factSelection = this.selection[this.space];
     const subSelector: Selector = {};
@@ -591,13 +580,6 @@ class QuerySubscriptionInvocation<
     await unsubscribe;
   }
   override perform(commit: Commit<Space>) {
-    if (
-      !(this.space in commit) ||
-      !("application/commit+json" in commit[this.space])
-    ) {
-      console.log("QSI ignoring non-commit");
-      return { ok: {} };
-    }
     const selection = this.selection[this.space];
     // Here we will collect subset of changes that match the query.
     let differential = null;
