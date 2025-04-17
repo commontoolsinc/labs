@@ -85,9 +85,15 @@ async function main() {
         // "cerebras:llama-3.3-70b",
         // "groq:deepseek-r1-distill-qwen-32b",
         // "groq:deepseek-r1-distill-llama-70b",
-        "openai:gpt-4.1",
-        "openai:gpt-4.1-mini",
-        "openai:gpt-4.1-nano",
+        // "openai:gpt-4.1",
+        // "openai:gpt-4.1-mini",
+        // "openai:gpt-4.1-nano",
+        // "openai:o3",
+        // "openai:o4-mini-low",
+        // "openai:o4-mini-medium",
+        // "openai:o4-mini-high",
+        "groq:llama-4-maverick",
+        "groq:llama-4-scout",
       ];
     }
   } else if (args._ && args._[0]) {
