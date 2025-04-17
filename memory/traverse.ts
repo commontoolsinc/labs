@@ -232,7 +232,7 @@ export function getAtPath<K, S>(
   }
   let cursor = fact;
   for (const [index, part] of path.entries()) {
-    //TODO: ubik2 Call toJSON on object if it's a function?
+    // TODO(@ubik2) Call toJSON on object if it's a function?
     if (isPointer(cursor)) {
       [doc, docRoot, cursor] = followPointer(
         traverser,
