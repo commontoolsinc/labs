@@ -300,8 +300,13 @@ function followPointer<K, S>(
       if (valueEntry.value === undefined) {
         return [target, {}, undefined];
       }
-      // Otherwise, we can continue with the target
-      [targetDoc, targetDocRoot] = [target, valueEntry.value];
+      // Otherwise, we can continue with the target.
+      // an assertion fact.is will be an object with a value property, and
+      // that's what our schema is relative to.
+      [targetDoc, targetDocRoot] = [
+        target,
+        (valueEntry.value as JSONObject)["value"],
+      ];
     }
     // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
     const [nextDoc, nextDocRoot, nextObj] = getAtPath(
