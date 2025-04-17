@@ -1,6 +1,5 @@
 import {
   Abilities,
-  AuthorizationError,
   Await,
   Cause,
   Changes,
@@ -54,7 +53,7 @@ import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
 export * from "./interface.ts";
 import { toRevision } from "./commit.ts";
-import { isObj } from "../utils/src/isObj.ts";
+import { isObj } from "@commontools/utils";
 
 export const connect = ({
   address,
