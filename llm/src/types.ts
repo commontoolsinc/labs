@@ -3,6 +3,13 @@ import { LlmPrompt } from "./prompts/prompting.ts";
 export const DEFAULT_MODEL_NAME: ModelName =
   "anthropic:claude-3-7-sonnet-latest";
 
+// NOTE(jake): This is an array of models, the first model will be tried, if it
+// fails, the second model will be tried, etc.
+export const DEFAULT_IFRAME_MODELS: ModelName[] = [
+  "google:gemini-2.0-flash",
+  "groq:llama-3.3-70b-versatile",
+];
+
 export type LLMResponse = {
   content: string;
   // The trace span ID
@@ -22,7 +29,7 @@ export type LLMMessage = {
 };
 export type LLMRequestMetadata = Record<string, string | undefined | object>;
 export interface LLMRequest {
-  cache: boolean;
+  cache?: boolean;
   messages: LLMMessage[];
   model: ModelName;
   system?: string;
