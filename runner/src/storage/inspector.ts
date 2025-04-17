@@ -112,7 +112,11 @@ export class Model {
 
 export type ChannelCallback = (data: BroadcastCommand) => void;
 
-export class Channel extends EventTarget {
+export interface Publisher {
+  postMessage(command: Command): BroadcastCommand;
+}
+
+export class Channel extends EventTarget implements Publisher {
   #scope: string;
   #channel: BroadcastChannel;
   #closed: boolean;

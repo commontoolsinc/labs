@@ -874,7 +874,7 @@ export type Conflict = {
   /**
    * Expected state in the replica.
    */
-  expected: Reference<Fact> | null;
+  expected: Fact | Reference<Fact> | null;
 
   /**
    * Actual memory state in the replica repository.

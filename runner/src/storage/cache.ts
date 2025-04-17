@@ -27,7 +27,7 @@ import * as IDB from "./idb.ts";
 import * as Memory from "@commontools/memory/consumer";
 export * from "@commontools/memory/interface";
 import * as Codec from "@commontools/memory/codec";
-import { Channel, RawCommand } from "./inspector.ts";
+import { Channel, Publisher, RawCommand } from "./inspector.ts";
 import { isBrowser } from "@commontools/utils/env";
 
 export type { Result, Unit };
@@ -549,27 +549,33 @@ export class Replica {
     if (error) {
       return { error };
     } else {
-      // Collect facts so that we can derive desired state and a corresponding
-      // transaction
+      // We derive new facts from the local state and capture their current
+      // state in the expected map so that we can produce enhanced errors.
       const facts: Fact[] = [];
+      const expected = new Map<string, Fact | null>();
+
       for (const { the, of, is } of changes) {
-        const fact = this.get({ the, of });
+        const expect = this.get({ the, of });
         // If `is` is `undefined` we want to retract the fact.
         if (is === undefined) {
           // If local `is` in the local state is also `undefined` desired state
           // matches current state in which case we omit this change from the
           // transaction, otherwise we retract fact.
-          if (fact?.is !== undefined) {
-            facts.push(retract(fact));
+          if (expect?.is !== undefined) {
+            const fact = retract(expect);
+            facts.push(fact);
+            expected.set(`${of}:${the}`, expect);
           }
         } else {
-          facts.push(assert({
+          const fact = assert({
             the,
             of,
             is,
             // If fact has no `cause` it is unclaimed fact.
-            cause: fact?.cause ? fact : null,
-          }));
+            cause: expect?.cause ? expect : null,
+          });
+          facts.push(fact);
+          expected.set(fact.cause.toString(), expect?.cause ? expect : null);
         }
       }
 
@@ -586,6 +592,13 @@ export class Replica {
       // changes will not build upon rejected state. If there are other inflight
       // transactions that already were built upon our facts they will also fail.
       if (result.error) {
+        // If it is a conflict error we update conflict record so expected value
+        // is a fact as opposed to reference to it.
+        if (result.error.name === "ConflictError") {
+          const { conflict } = result.error;
+          const fact = expected.get(`${conflict.of}:${conflict.the}`);
+          conflict.expected = fact ?? conflict.expected;
+        }
         this.nursery.merge(facts, Nursery.delete);
       } //
       // If transaction succeeded we promote facts from nursery into a heap.
@@ -672,6 +685,13 @@ const defaultSettings: RemoteStorageProviderSettings = {
   connectionTimeout: 30_000,
 };
 
+class Ignore {
+  constructor(public sessionId: string) {}
+  postMessage(command: Command) {
+    return { ...command, sessionId: this.sessionId };
+  }
+}
+
 export class Provider implements StorageProvider {
   connection: WebSocket | null = null;
   address: URL;
@@ -684,7 +704,7 @@ export class Provider implements StorageProvider {
   subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
     new Map();
 
-  inspector?: Channel;
+  inspector: Publisher;
 
   /**
    * queue that holds commands that we read from the session, but could not
@@ -715,7 +735,9 @@ export class Provider implements StorageProvider {
     // Do not use a default inspector when in Deno:
     // Requires `--unstable-broadcast-channel` flags and it is not used
     // in that environment.
-    this.inspector = isBrowser() ? (inspector ?? new Channel(id)) : undefined;
+    this.inspector = isBrowser()
+      ? (inspector ?? new Channel(id))
+      : new Ignore(id);
     this.handleEvent = this.handleEvent.bind(this);
 
     const session = Memory.create({ as });
@@ -842,10 +864,13 @@ export class Provider implements StorageProvider {
     return Codec.Receipt.fromString(source);
   }
 
-  onReceive(data: string) {
-    return this.writer.write(
-      this.inspect({ receive: this.parse(data) }).receive,
-    );
+  async onReceive(data: string) {
+    const command = this.parse(data);
+    // We need wait for the write to complete before broadcasting to an
+    // inspector because conflict errors get amended with expected values
+    // so they can be displayed in the inspector.
+    await this.writer.write(command).finally();
+    this.inspect({ receive: command });
   }
 
   inspect(
