@@ -25,7 +25,7 @@ export const LLMRequestSchema = z.object({
   stream: z.boolean().default(false),
   mode: z.enum(["json"]).optional(),
   metadata: z.record(z.union([z.string(), z.any()])).optional(),
-  skip_cache: z.boolean().default(false).optional(),
+  cache: z.boolean().default(false).optional(),
 });
 
 export const ModelInfoSchema = z.object({

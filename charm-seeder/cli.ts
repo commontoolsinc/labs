@@ -18,10 +18,12 @@ import {
   screenshot,
 } from "./jumble.ts";
 
-const { name, "cache": cache, tag } = parseArgs(Deno.args, {
+const { name, tag, "no-cache": noCache } = parseArgs(Deno.args, {
   string: ["name", "tag"],
-  boolean: ["cache"],
+  boolean: ["no-cache"],
 });
+
+const cache = !noCache;
 
 if (!name) {
   console.error("Error: Missing `--name`.");

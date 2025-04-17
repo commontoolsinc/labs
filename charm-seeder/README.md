@@ -37,7 +37,9 @@ To run the seeder with a specific tag, use the `--tag` flag.
 
     deno task start --name blue42 --tag smol
 
-To run the seeder with cache enabled, use the `--cache` flag.
+To run the seeder with cache disabled, use the `--no-cache` flag.
+
+    deno task start --name blue42 --no-cache
 
 ## Adding more scenarios / prompts
 
