@@ -29,7 +29,7 @@ export type LLMMessage = {
 };
 export type LLMRequestMetadata = Record<string, string | undefined | object>;
 export interface LLMRequest {
-  cache: boolean;
+  cache?: boolean;
   messages: LLMMessage[];
   model: ModelName;
   system?: string;
