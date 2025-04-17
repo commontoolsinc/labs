@@ -13,7 +13,7 @@ import { Cell } from "@commontools/runner";
 import { Charm, CharmManager } from "./charm.ts";
 import { JSONSchema } from "@commontools/builder";
 import { classifyWorkflow, generateWorkflowPlan } from "@commontools/llm";
-import { genSrc, iterate } from "./iterate.ts";
+import { iterate } from "./iterate.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode } from "./iframe/static.ts";
 import { formatPromptWithMentions } from "./format.ts";
@@ -668,7 +668,6 @@ export async function processWorkflow(
   });
   console.log("creating form", form);
 
-
   try {
     // Function to check if the workflow has been cancelled
     const checkCancellation = () => {
@@ -727,7 +726,7 @@ export async function processWorkflow(
             type: "job-update",
             jobId: form.meta.generationId,
             title: form.input.processedInput,
-            status: "Classifying task...",
+            status: `Classifying task ${form.meta.modelId}...`,
           },
         }),
       );
@@ -749,7 +748,7 @@ export async function processWorkflow(
             type: "job-update",
             jobId: form.meta.generationId,
             title: form.input.processedInput,
-            status: "Planning task...",
+            status: `Planning task ${form.meta.modelId}...`,
           },
         }),
       );
@@ -771,7 +770,7 @@ export async function processWorkflow(
             type: "job-update",
             jobId: form.meta.generationId,
             title: form.input.processedInput,
-            status: "Generating charm...",
+            status: `Generating charm ${form.meta.modelId}...`,
           },
         }),
       );

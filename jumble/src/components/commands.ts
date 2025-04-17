@@ -12,13 +12,12 @@ import {
   WorkflowForm,
 } from "@commontools/charm";
 import { executeWorkflow, modifyCharm } from "@commontools/charm";
-// Import NavigateFunction from our types rather than directly from react-router-dom
 import type { NavigateFunction } from "react-router-dom";
 import { charmId } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
-import { EntityId, isStream } from "@commontools/runner";
+import { isStream } from "@commontools/runner";
 import { createPath, createPathWithHash, ROUTES } from "@/routes.ts";
-import { grabCells, SourceSet } from "@/utils/format.ts";
+import { LanguageModelId } from "@/components/common/ModelSelector.tsx";
 
 export type CommandType =
   | "action"
@@ -126,9 +125,9 @@ export function getChildren(
   return typeof children === "function" ? children(context) : children;
 }
 
-// TODO(bf): audit, remove bloat
 export interface CommandContext {
   charmManager: CharmManager;
+  userPreferredModel: LanguageModelId;
   navigate: NavigateFunction;
   focusedCharmId: string | null;
   focusedReplicaId: string | null;
@@ -302,7 +301,6 @@ async function handleModifyCharm(
 async function handleNewCharm(
   ctx: CommandContext,
   input: string,
-  options?: { model: string },
 ) {
   if (!input) return;
 
@@ -312,7 +310,7 @@ async function handleNewCharm(
       input,
       {
         prefill: ctx.previewForm,
-        model: options?.model,
+        model: ctx.userPreferredModel,
       },
     );
 
@@ -662,6 +660,7 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
       type: "action",
       title: "Open in Stack",
       group: "Navigation",
+      predicate: !!ctx.focusedCharmId,
       handler: async () => {
         ctx.setLoading(true);
         try {
@@ -683,7 +682,16 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
               type: "select",
               title: "Select Charm for Stack",
               handler: (selected) => {
-                navigateToCharm(ctx, selected);
+                const id = charmId(selected);
+                if (!id || !ctx.focusedReplicaId) {
+                  throw new Error("Missing charm ID or replica name");
+                }
+                // Navigate to stack URL instead of detail page
+                const path = createPath("stackedCharms", {
+                  charmIds: ctx.focusedCharmId + "," + id,
+                  replicaName: ctx.focusedReplicaId,
+                });
+                ctx.navigate(path);
                 ctx.setOpen(false);
               },
             },

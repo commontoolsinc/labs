@@ -1,20 +1,16 @@
-import { generateSpecAndSchema } from "@commontools/llm";
 import { useCallback, useEffect, useState } from "react";
 import { useDebounce } from "./use-debounce.ts";
 import { useRef } from "react";
 import {
   CharmManager,
-  formatPromptWithMentions as formatMentions,
   parseComposerDocument,
-  processInputSection,
   processWorkflow,
   WorkflowForm,
   WorkflowType,
 } from "@commontools/charm";
 import { Cell } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
-
-export type SpecPreviewModel = "fast" | "think";
+import { LanguageModelId } from "@/components/common/ModelSelector.tsx";
 
 /**
  * Progress state for the preview generation
@@ -41,7 +37,7 @@ export function useLiveSpecPreview(
   charmManager: CharmManager,
   enabled: boolean = true,
   debounceTime: number = 300,
-  model: SpecPreviewModel = "think",
+  model: LanguageModelId = "think",
   currentCharm?: Cell<Charm>,
 ) {
   // Track loading states separately for classification and plan generation
@@ -58,13 +54,6 @@ export function useLiveSpecPreview(
   // Preview content state
   const [previewForm, setPreviewForm] = useState<Partial<WorkflowForm>>({});
   const debouncedInput = useDebounce(input, debounceTime);
-
-  // Map the model type to actual model identifiers
-  const getModelId = useCallback((modelType: SpecPreviewModel) => {
-    return modelType === "fast"
-      ? "gemini-2.5-pro"
-      : "anthropic:claude-3-7-sonnet-latest";
-  }, []);
 
   const generatePreview = useCallback(
     async (text: string, prefill?: Partial<WorkflowForm>) => {
@@ -121,14 +110,12 @@ export function useLiveSpecPreview(
       // If previous sections completed, they should stay completed
 
       try {
-        // Define a shared model ID for both calls
-        const modelId = getModelId(model);
         const cancellation = { cancelled: false };
 
         const form = await processWorkflow(text, true, {
           charmManager,
           existingCharm: currentCharm,
-          model: modelId,
+          model,
           prefill: prefill,
           onProgress: (f) => {
             // Check if this is still the current generation before proceeding
@@ -171,7 +158,7 @@ export function useLiveSpecPreview(
         console.groupEnd();
       }
     },
-    [enabled, model, getModelId, currentCharm, charmManager],
+    [enabled, model, currentCharm, charmManager],
   );
 
   // Generate preview when input changes
@@ -202,7 +189,7 @@ export function useLiveSpecPreview(
     };
     setPreviewForm(form);
     generatePreview(input, form);
-  }, [input, currentCharm, model, getModelId, charmManager]);
+  }, [input, currentCharm, model, charmManager]);
 
   return {
     previewForm,

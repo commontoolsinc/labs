@@ -46,7 +46,7 @@ export const genSrc = async ({
       detail: {
         type: "job-update",
         jobId: generationId,
-        status: "Generating source code...",
+        status: `Generating source code ${model}...`,
       },
     }),
   );
@@ -246,7 +246,7 @@ async function singlePhaseCodeGeneration(
       detail: {
         type: "job-update",
         jobId: form.meta.generationId,
-        status: "Generating code and schema...",
+        status: `Generating code and schema ${form.meta.modelId}...`,
       },
     }),
   );
@@ -256,7 +256,7 @@ async function singlePhaseCodeGeneration(
     resultSchema,
     title,
     description,
-  } = await generateCodeAndSchema(form, existingSchema);
+  } = await generateCodeAndSchema(form, existingSchema, form.meta.modelId);
 
   console.log("resultSchema", resultSchema);
 
@@ -327,7 +327,7 @@ async function twoPhaseCodeGeneration(
       detail: {
         type: "job-update",
         jobId: form.meta.generationId,
-        status: "Generating spec and schema...",
+        status: `Generating spec and schema ${form.meta.modelId}...`,
       },
     }),
   );
@@ -338,7 +338,7 @@ async function twoPhaseCodeGeneration(
     title,
     description,
     plan,
-  } = await generateSpecAndSchema(form, existingSchema);
+  } = await generateSpecAndSchema(form, existingSchema, form.meta.modelId);
 
   console.log("resultSchema", resultSchema);
 
@@ -384,6 +384,7 @@ async function twoPhaseCodeGeneration(
     schema,
     steps: form.plan?.steps,
     generationId: form.meta.generationId,
+    model: form.meta.modelId,
   });
   const name = extractTitle(newIFrameSrc, title); // Use the generated title as fallback
   const newRecipeSrc = buildFullRecipe({
