@@ -348,19 +348,10 @@ export class Replica {
      */
     public nursery: Nursery = new Nursery(),
     public queue: PullQueue = new PullQueue(),
-    public channel: BroadcastChannel | undefined = undefined,
     public pullRetryLimit: number = 100,
     public schemaTracker = new Map<string, Set<string>>(),
     public useSchemaQueries: boolean = false,
   ) {
-    // In the deno env, we don't have a broadcast channel.
-    // We also don't need to share data on the "heap" there, so it's ok
-    if (globalThis.BroadcastChannel) {
-      this.channel = new globalThis.BroadcastChannel(
-        `idb:${space}`,
-      );
-      this.channel.addEventListener("message", this);
-    }
     this.pull = this.pull.bind(this);
   }
 
@@ -381,19 +372,6 @@ export class Replica {
         break;
       }
       this.merge(next.value[this.space] as unknown as Commit);
-    }
-  }
-
-  handleEvent(event: Event) {
-    switch (event.type) {
-      case "message":
-        return this.onMessage(event as MessageEvent);
-    }
-  }
-  onMessage(event: MessageEvent) {
-    const { put } = event.data;
-    if (put) {
-      this.heap.merge(put, Replica.put);
     }
   }
 
