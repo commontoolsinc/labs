@@ -94,6 +94,8 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
     apiKey: env.CTTS_AI_LLM_ANTHROPIC_API_KEY,
   });
 
+  console.log(" - 🤖 Adding anthropic models");
+
   addModel({
     provider: anthropicProvider,
     name: "anthropic:claude-3-5-sonnet-20241022",
@@ -154,6 +156,8 @@ if (env.CTTS_AI_LLM_GROQ_API_KEY) {
   const groqProvider = createGroq({
     apiKey: env.CTTS_AI_LLM_GROQ_API_KEY,
   });
+
+  console.log(" - 🤖 Adding groq models");
 
   addModel({
     provider: groqProvider,
@@ -223,6 +227,9 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
   const openAIProvider = createOpenAI({
     apiKey: env.CTTS_AI_LLM_OPENAI_API_KEY,
   });
+
+  console.log(" - 🤖 Adding openai models");
+
   addModel({
     provider: openAIProvider,
     name: "openai:gpt-4o",
@@ -360,6 +367,8 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
     Deno.readTextFileSync(env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS),
   );
 
+  console.log(" - 🤖 Adding google vertex models");
+
   const vertexProvider = createVertex({
     googleAuthOptions: {
       credentials: credentials as any,
@@ -423,6 +432,8 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
     apiKey: env.CTTS_AI_LLM_PERPLEXITY_API_KEY,
     baseURL: "https://api.perplexity.ai/",
   });
+
+  console.log(" - 🤖 Adding perplexity models");
 
   addModel({
     provider: perplexityProvider,
