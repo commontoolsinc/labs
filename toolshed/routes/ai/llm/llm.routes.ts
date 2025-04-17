@@ -131,7 +131,7 @@ export const generateText = createRoute({
               model: "anthropic:claude-3-7-sonnet-latest",
               system: "You are a pirate, make sure you talk like one.",
               stream: false,
-              skip_cache: true,
+              cache: true,
               messages: [
                 {
                   role: "user",
