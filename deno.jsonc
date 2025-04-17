@@ -74,7 +74,7 @@
     "@types/jsdom": "npm:@types/jsdom@^21.1.7",
     "@vercel/otel": "npm:@vercel/otel@^1.10.1",
     "@web/test-runner": "npm:@web/test-runner",
-    "ai": "npm:ai@^4.1.5",
+    "ai": "npm:ai@^4.3.9",
     "esbuild": "npm:esbuild",
     "jsdom": "npm:jsdom",
     "lit": "npm:lit@^3.2.1",

@@ -15,6 +15,7 @@ export type Capabilities = {
   stopSequences: boolean;
   prefill: boolean;
   images: boolean;
+  reasoning: boolean;
 };
 
 type ModelConfig = {
@@ -251,9 +252,10 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
     aliases: ["openai:o3", "o3"],
     capabilities: {
       contextWindow: 200_000,
-      maxOutputTokens: 100_000,
+      maxOutputTokens: 99_999,
       images: true,
       prefill: false,
+      reasoning: true,
       systemPrompt: false,
       stopSequences: true,
       streaming: true,
@@ -269,6 +271,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       maxOutputTokens: 100_000,
       images: true,
       prefill: false,
+      reasoning: true,
       systemPrompt: false,
       stopSequences: true,
       streaming: true,
@@ -285,6 +288,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       maxOutputTokens: 100_000,
       images: true,
       prefill: false,
+      reasoning: true,
       systemPrompt: false,
       stopSequences: true,
       streaming: true,
@@ -301,6 +305,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       maxOutputTokens: 100_000,
       images: true,
       prefill: false,
+      reasoning: true,
       systemPrompt: false,
       stopSequences: true,
       streaming: true,
