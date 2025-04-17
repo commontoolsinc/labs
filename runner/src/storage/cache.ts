@@ -348,14 +348,19 @@ export class Replica {
      */
     public nursery: Nursery = new Nursery(),
     public queue: PullQueue = new PullQueue(),
-    public channel: BroadcastChannel = new globalThis.BroadcastChannel(
-      `idb:${space}`,
-    ),
+    public channel: BroadcastChannel | undefined = undefined,
     public pullRetryLimit: number = 100,
     public schemaTracker = new Map<string, Set<string>>(),
     public useSchemaQueries: boolean = false,
   ) {
-    channel.addEventListener("message", this);
+    // In the deno env, we don't have a broadcast channel.
+    // We also don't need to share data on the "heap" there, so it's ok
+    if (globalThis.BroadcastChannel) {
+      this.channel = new globalThis.BroadcastChannel(
+        `idb:${space}`,
+      );
+      this.channel.addEventListener("message", this);
+    }
     this.pull = this.pull.bind(this);
   }
 
