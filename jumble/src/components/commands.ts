@@ -684,7 +684,16 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
               type: "select",
               title: "Select Charm for Stack",
               handler: (selected) => {
-                navigateToCharm(ctx, selected);
+                const id = charmId(selected);
+                if (!id || !ctx.focusedReplicaId) {
+                  throw new Error("Missing charm ID or replica name");
+                }
+                // Navigate to stack URL instead of detail page
+                const path = createPath("stackedCharms", {
+                  charmIds: ctx.focusedCharmId + "," + id,
+                  replicaName: ctx.focusedReplicaId,
+                });
+                ctx.navigate(path);
                 ctx.setOpen(false);
               },
             },
