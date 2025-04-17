@@ -49,7 +49,7 @@ export {
 } from "./recipe-map.ts";
 // export { addSchema, getSchema, getSchemaId } from "./schema-map.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
-export { storage } from "./storage.ts";
+export { type Storage, storage } from "./storage.ts";
 export { setBobbyServerUrl, syncRecipeBlobby } from "./recipe-sync.ts";
 // export { saveSchema, syncSchemaBlobby } from "./schema-sync.ts";
 export {

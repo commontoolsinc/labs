@@ -1,4 +1,4 @@
-import { BGCharmEntry } from "@commontools/utils";
+import { BGCharmEntry } from "./schema.ts";
 import { Cell } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 import { defer, type Deferred } from "@commontools/utils/defer";
@@ -6,7 +6,6 @@ import {
   isWorkerIPCResponse,
   WorkerIPCMessageType,
   WorkerIPCRequest,
-  WorkerIPCResponse,
 } from "./worker-ipc.ts";
 
 const DEFAULT_TASK_TIMEOUT = 60_000;
