@@ -431,6 +431,7 @@ export interface WorkflowForm {
     modelId?: string;
     isComplete: boolean;
     cache: boolean;
+    llmRequestId?: string;
   };
 }
 
@@ -665,34 +666,41 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
   }
 
   let charm: Cell<Charm>;
+  let llmRequestId: string | undefined;
 
   // Execute the appropriate workflow based on the classification
   switch (form.classification.workflowType) {
-    case "fix":
+    case "fix": {
       if (!form.input.existingCharm) {
         throw new Error("Fix workflow requires an existing charm");
       }
-      charm = await executeFixWorkflow(
+      const res = await executeFixWorkflow(
         newForm.meta.charmManager,
         form,
       );
+      charm = res.cell;
+      llmRequestId = res.llmRequestId;
       break;
-
-    case "edit":
+    }
+    case "edit": {
       if (!form.input.existingCharm) {
         throw new Error("Edit workflow requires an existing charm");
       }
-      charm = await executeEditWorkflow(
+      const res = await executeEditWorkflow(
         newForm.meta.charmManager,
         form,
       );
+      charm = res.cell;
+      llmRequestId = res.llmRequestId;
       break;
-
+    }
     case "imagine":
-    case "imagine-single-phase":
-      charm = await executeImagineWorkflow(newForm.meta.charmManager, form);
+    case "imagine-single-phase": {
+      const res = await executeImagineWorkflow(newForm.meta.charmManager, form);
+      charm = res.cell;
+      llmRequestId = res.llmRequestId;
       break;
-
+    }
     default:
       throw new Error(
         `Unknown workflow type: ${form.classification.workflowType}`,
@@ -706,6 +714,9 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
 
   // Mark the form as complete
   newForm.meta.isComplete = true;
+  if (llmRequestId) {
+    newForm.meta.llmRequestId = llmRequestId;
+  }
 
   return newForm;
 }
@@ -1018,6 +1029,7 @@ export async function processWorkflow(
         detail: {
           type: "job-complete",
           jobId: form.meta.generationId,
+          llmRequestId: form.meta.llmRequestId,
           title: form.input.processedInput,
           status: "Completed successfully",
           result: form.generation?.charm,
@@ -1085,7 +1097,7 @@ ${userPrompt}
 export function executeFixWorkflow(
   charmManager: CharmManager,
   form: WorkflowForm,
-): Promise<Cell<Charm>> {
+): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
   console.log("Executing FIX workflow");
 
   return iterate(
@@ -1108,7 +1120,7 @@ export function executeFixWorkflow(
 export function executeEditWorkflow(
   charmManager: CharmManager,
   form: WorkflowForm,
-): Promise<Cell<Charm>> {
+): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
   console.log("Executing EDIT workflow");
 
   return iterate(
@@ -1153,7 +1165,7 @@ function toCamelCase(input: string): string {
 export function executeImagineWorkflow(
   charmManager: CharmManager,
   form: WorkflowForm,
-): Promise<Cell<Charm>> {
+): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
   console.log("Executing IMAGINE workflow");
 
   // Process references - this allows the new charm to access data from multiple sources

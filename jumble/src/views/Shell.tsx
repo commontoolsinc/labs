@@ -12,7 +12,7 @@ import { useGlobalActions } from "@/hooks/use-global-actions.tsx";
 import { SyncStatusProvider } from "@/contexts/SyncStatusContext.tsx";
 import { ToggleableNetworkInspector } from "@/components/NetworkInspector.tsx";
 import { NetworkInspectorProvider } from "@/contexts/NetworkInspectorContext.tsx";
-import { FeedbackActions } from "@/components/FeedbackActions.tsx";
+import { PrimaryFeedbackActions } from "@/components/FeedbackActions.tsx";
 import ActivityStatus from "@/components/ActivityStatus.tsx";
 
 export default function Shell() {
@@ -38,7 +38,7 @@ export default function Shell() {
             <ActionBar />
             <CharmPublisher />
             <CommandCenter />
-            <FeedbackActions />
+            <PrimaryFeedbackActions />
             <ToggleableNetworkInspector
               visible={localStorage.getItem("networkInspectorVisible") ===
                 "true"}

@@ -207,6 +207,7 @@ export async function generateCodeAndSchema(
   description: string;
   resultSchema: JSONSchema;
   argumentSchema: JSONSchema;
+  llmRequestId?: string;
 }> {
   let systemPrompt, userContent;
   if (!form.plan) {
@@ -308,5 +309,6 @@ Based on this goal and the existing schema, please provide a title, description,
     title,
     description,
     argumentSchema,
+    llmRequestId: response.id,
   };
 }

@@ -281,7 +281,7 @@ export const setupIframe = () =>
       if (!jsonPayload.cache) {
         jsonPayload.cache = true;
       }
-      updateJob(jobId, "Using " + jsonPayload.model);
+      updateJob(jobId, `Using ${jsonPayload.model}`);
       jsonPayload.metadata = {
         ...jsonPayload.metadata,
         context: "iframe",
@@ -291,7 +291,12 @@ export const setupIframe = () =>
 
       const res = await llm.sendRequest(jsonPayload);
       console.log("onLLMRequest res", res);
-      completeJob(jobId, res.content ?? "Completed!");
+      completeJob({
+        id: jobId,
+        result: undefined,
+        status: res.content ?? "Completed!",
+        llmRequestId: res.id
+      });
       return res as any;
     },
     async onReadWebpageRequest(
@@ -306,7 +311,10 @@ export const setupIframe = () =>
         `/api/ai/webreader/${encodeURIComponent(payload)}`,
       );
       console.log("onReadWebpageRequest res", res);
-      completeJob(jobId, res.status === 200 ? "Completed!" : "Failed!");
+      completeJob({
+        id: jobId,
+        status: res.status === 200 ? "Completed!" : "Failed!"
+      });
       return await res.json();
     },
     async onPerform(

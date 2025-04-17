@@ -1,5 +1,6 @@
 import React, {
   createContext,
+  ReactElement,
   useContext,
   useEffect,
   useRef,
@@ -38,6 +39,7 @@ interface JobCompleteEvent extends BaseJobEvent {
   type: "job-complete";
   status: string;
   result?: Cell<Charm>;
+  llmRequestId?: string;
 }
 
 interface JobFailedEvent extends BaseJobEvent {
@@ -82,6 +84,7 @@ export interface Job extends Activity {
   jobId: ActivityId;
   status: string;
   state: "running" | "completed" | "failed";
+  llmRequestId?: string;
   progress?: number;
   error?: string;
   result?: Cell<Charm>;
@@ -164,14 +167,16 @@ export function updateJob(
   );
 }
 
-export function completeJob(
+export function completeJob({ id, status, result, llmRequestId }: {
   id: string,
   status: string,
   result?: Cell<Charm>,
-) {
+  llmRequestId?: string,
+}) {
   const jobEvent: JobCompleteEvent = {
     id,
     jobId: id,
+    llmRequestId,
     type: "job-complete",
     status,
     result,
@@ -224,11 +229,11 @@ const ActivityContext = createContext<ActivityContextType | undefined>(
 );
 
 interface ActivityProviderProps {
-  children: React.ReactNode;
+  children: React.ReactElement;
 }
 
 export const ActivityProvider: React.FC<ActivityProviderProps> = (
-  { children },
+  { children }: { children: ReactElement },
 ) => {
   // State to track all activities and UI state
   const [activities, setActivities] = useState<Record<ActivityId, Activity>>(
@@ -368,6 +373,7 @@ export const ActivityProvider: React.FC<ActivityProviderProps> = (
               const jobDetail = detail as JobCompleteEvent;
               const completedJob: Job = {
                 ...existingJob,
+                llmRequestId: jobDetail.llmRequestId,
                 status: jobDetail.status,
                 state: "completed",
                 result: jobDetail.result,
