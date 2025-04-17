@@ -13,7 +13,7 @@ import { Cell } from "@commontools/runner";
 import { Charm, CharmManager } from "./charm.ts";
 import { JSONSchema } from "@commontools/builder";
 import { classifyWorkflow, generateWorkflowPlan } from "@commontools/llm";
-import { genSrc, iterate } from "./iterate.ts";
+import { iterate } from "./iterate.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode } from "./iframe/static.ts";
 import { formatPromptWithMentions } from "./format.ts";
@@ -667,7 +667,6 @@ export async function processWorkflow(
     modelId: options.model,
   });
   console.log("creating form", form);
-
 
   try {
     // Function to check if the workflow has been cancelled

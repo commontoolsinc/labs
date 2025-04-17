@@ -256,7 +256,7 @@ async function singlePhaseCodeGeneration(
     resultSchema,
     title,
     description,
-  } = await generateCodeAndSchema(form, existingSchema);
+  } = await generateCodeAndSchema(form, existingSchema, form.meta.modelId);
 
   console.log("resultSchema", resultSchema);
 
@@ -338,7 +338,7 @@ async function twoPhaseCodeGeneration(
     title,
     description,
     plan,
-  } = await generateSpecAndSchema(form, existingSchema);
+  } = await generateSpecAndSchema(form, existingSchema, form.meta.modelId);
 
   console.log("resultSchema", resultSchema);
 
@@ -384,6 +384,7 @@ async function twoPhaseCodeGeneration(
     schema,
     steps: form.plan?.steps,
     generationId: form.meta.generationId,
+    model: form.meta.modelId,
   });
   const name = extractTitle(newIFrameSrc, title); // Use the generated title as fallback
   const newRecipeSrc = buildFullRecipe({
