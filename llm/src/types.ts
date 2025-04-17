@@ -2,6 +2,8 @@ import { LlmPrompt } from "./prompts/prompting.ts";
 
 export const DEFAULT_MODEL_NAME: ModelName =
   "anthropic:claude-3-7-sonnet-latest";
+export const DEFAULT_FAST_MODEL_NAME: ModelName =
+  "google:gemini-2.0-flash";
 
 export type LLMResponse = {
   content: string;
