@@ -181,13 +181,13 @@ describe("OpaqueRef Schema Support", () => {
       const schema = {
         type: "object",
         properties: {
-          details: { 
+          details: {
             type: "object",
             properties: {
               name: { type: "string" },
               age: { type: "number" },
-            }
-          }
+            },
+          },
         },
       } as const satisfies JSONSchema;
 
@@ -196,7 +196,7 @@ describe("OpaqueRef Schema Support", () => {
         details: {
           name: string;
           age: number;
-        }
+        };
       }>(undefined, schema);
 
       // Access deeply nested property
@@ -205,12 +205,12 @@ describe("OpaqueRef Schema Support", () => {
       // Check schema was correctly propagated
       const exported = detailsRef.export();
       expect(exported.schema).toBeDefined();
-      expect(exported.schema).toEqual({ 
+      expect(exported.schema).toEqual({
         type: "object",
         properties: {
           name: { type: "string" },
           age: { type: "number" },
-        }
+        },
       });
       expect(exported.rootSchema).toEqual(schema);
     });
@@ -220,22 +220,22 @@ describe("OpaqueRef Schema Support", () => {
       const schema = {
         type: "object",
         properties: {
-          details: { 
+          details: {
             type: "object",
             properties: {
               name: { type: "string" },
               age: { type: "number" },
-            }
-          }
+            },
+          },
         },
       } as const satisfies JSONSchema;
 
       // Create an opaque ref with nested objects, and a property that isn't in the schema
       const ref = opaqueRef<{
         details: {
-            name: string;
-            age: number;
-        },
+          name: string;
+          age: number;
+        };
         nickname: string;
       }>(undefined, schema);
 

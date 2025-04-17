@@ -5,11 +5,11 @@ const SCRIPT_CDNS = [
 ];
 
 const STYLE_CDNS = [
-  "https://fonts.googleapis.com"
+  "https://fonts.googleapis.com",
 ];
 
 const FONT_CDNS = [
-  "https://fonts.gstatic.com"
+  "https://fonts.gstatic.com",
 ];
 
 // In Chromium browsers, "'self'" selects the top frame origin from

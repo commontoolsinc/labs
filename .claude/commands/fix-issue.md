@@ -21,7 +21,8 @@ claude fix-issue <issue-number>
    ```
 
 3. **Present the issue to Claude**:
-   - Format all issue details (title, description, comments, labels, assignees, etc.)
+   - Format all issue details (title, description, comments, labels, assignees,
+     etc.)
    - Ask Claude to analyze the issue and suggest fixes
 
 4. **Implement changes**:

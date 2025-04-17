@@ -9,7 +9,8 @@
      - `iterate()`: Updates existing charms with new specs
      - `castNewRecipe()`: Creates new charms from a goal
      - `genSrc()`: Core function that handles LLM prompting
-   - Flow: user input → prepare prompt → call LLM → process response → compile recipe → run recipe
+   - Flow: user input → prepare prompt → call LLM → process response → compile
+     recipe → run recipe
 
 2. **SpecPreview.tsx**
    - UI component showing live preview of specifications and plans

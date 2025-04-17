@@ -5,7 +5,12 @@ import { CommonIframeSandboxElement } from "./common-iframe-sandbox.ts";
 // register how read/writing values from frames are handled.
 export interface IframeContextHandler {
   read(element: CommonIframeSandboxElement, context: any, key: string): any;
-  write(element: CommonIframeSandboxElement, context: any, key: string, value: any): void;
+  write(
+    element: CommonIframeSandboxElement,
+    context: any,
+    key: string,
+    value: any,
+  ): void;
   subscribe(
     element: CommonIframeSandboxElement,
     context: any,
@@ -15,13 +20,19 @@ export interface IframeContextHandler {
   ): any;
   unsubscribe(
     element: CommonIframeSandboxElement,
-    context: any, receipt: any): void;
+    context: any,
+    receipt: any,
+  ): void;
   onLLMRequest(
     element: CommonIframeSandboxElement,
-    context: any, payload: string): Promise<object>;
+    context: any,
+    payload: string,
+  ): Promise<object>;
   onReadWebpageRequest(
     element: CommonIframeSandboxElement,
-    context: any, payload: string): Promise<object>;
+    context: any,
+    payload: string,
+  ): Promise<object>;
 
   /**
    * Guest may send a command it wishes system to perform.
