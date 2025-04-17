@@ -148,7 +148,14 @@ function generateCharmContext(
 }
 
 /**
- * Classifies the user's intent into a workflow type
+ * Classifies the workflow type based on user prompt and optional existing code context.
+ *
+ * @param input The user's input prompt.
+ * @param existingCode Optional existing code snippet for context.
+ * @param model Optional specific LLM model to use.
+ * @param generationId Optional identifier for the generation process.
+ * @param cache Optional flag to enable/disable LLM cache.
+ * @returns A promise resolving to an object containing the classified workflow type and confidence score.
  */
 export async function classifyWorkflow(
   input: string,
@@ -157,6 +164,7 @@ export async function classifyWorkflow(
   existingCode?: string,
   model?: string,
   generationId?: string,
+  cache = true,
 ): Promise<{
   workflowType: WorkflowType;
   confidence: number;
@@ -183,6 +191,7 @@ export async function classifyWorkflow(
     system: systemPrompt.text,
     messages: [{ role: "user", content: prompt.text }],
     model: model || "anthropic:claude-3-7-sonnet-latest",
+    cache,
     metadata: {
       context: "workflow",
       workflow: "classification",
@@ -273,6 +282,16 @@ function cleanJsonString(jsonStr: string): string {
 
 /**
  * Generates an execution plan for a workflow
+ *
+ * @param input The user's input prompt.
+ * @param workflowType The type of workflow to generate a plan for.
+ * @param existingSpec Optional existing specification for context.
+ * @param existingSchema Optional existing schema for context.
+ * @param existingCode Optional existing code snippet for context.
+ * @param model Optional specific LLM model to use.
+ * @param generationId Optional identifier for the generation process.
+ * @param cache Optional flag to enable/disable LLM cache.
+ * @returns A promise resolving to an object containing the generation steps and schema specification.
  */
 export async function generateWorkflowPlan(
   input: string,
@@ -282,6 +301,7 @@ export async function generateWorkflowPlan(
   existingCode?: string,
   model?: string,
   generationId?: string,
+  cache = true,
 ): Promise<{
   steps: string[];
   spec: string;
@@ -308,6 +328,7 @@ export async function generateWorkflowPlan(
     system: systemPrompt.text,
     messages: [{ role: "user", content: prompt.text }],
     model: model || "anthropic:claude-3-7-sonnet-latest",
+    cache,
     metadata: {
       context: "workflow",
       workflow: workflowType.toLowerCase(),

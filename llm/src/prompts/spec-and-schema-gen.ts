@@ -252,6 +252,7 @@ Based on this goal and the existing schema, please provide a title, description,
         content: userContent.text,
       },
     ],
+    cache: form.meta.cache,
     metadata: {
       context: "workflow",
       workflow: "spec-and-schema-gen",
@@ -376,6 +377,7 @@ Based on this goal and the existing schema, please provide a title, description,
       systemPrompt: systemPrompt.version,
       userPrompt: userContent.version,
     },
+    cache: form.meta.cache,
   });
 
   // Extract sections from the response

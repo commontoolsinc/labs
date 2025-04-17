@@ -84,6 +84,7 @@ export async function fixRecipePrompt(
   schema: string,
   error: string,
   model: string = "anthropic:claude-3-7-sonnet-latest",
+  cache: boolean,
 ) {
   const system = hydratePrompt(SYSTEM_PROMPT, {
     SPEC: spec,
@@ -111,6 +112,7 @@ export async function fixRecipePrompt(
       systemPrompt: system.version,
       userPrompt: prompt.version,
     },
+    cache,
   });
 
   // console.log("RESPONSE", parseTagFromResponse(response, "fixed_code"));

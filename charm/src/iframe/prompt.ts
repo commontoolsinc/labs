@@ -25,6 +25,7 @@ export const buildPrompt = ({
   schema,
   steps,
   model,
+  cache = true,
 }: {
   src?: string;
   spec?: string;
@@ -32,6 +33,7 @@ export const buildPrompt = ({
   schema: JSONSchema;
   steps?: string[];
   model?: string;
+  cache: boolean;
 }): LLMRequest => {
   const messages: string[] = [];
   if (spec && src) {
@@ -74,5 +76,6 @@ ${steps.map((step, index) => `${index + 1}. ${step}`).join("\n")}`
     metadata: {
       systemPrompt: system.version,
     },
+    cache,
   };
 };

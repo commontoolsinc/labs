@@ -25,6 +25,7 @@ export const DEFAULT_LLM_URL = typeof globalThis.location !== "undefined"
 
 export type LLMRequest = {
   messages: SimpleMessage[] | SimpleContent[];
+  cache: boolean;
   system?: string;
   model: string | string[];
   max_tokens?: number;
@@ -41,6 +42,14 @@ export class LLMClient {
     this.serverUrl = new URL("/api/ai/llm", toolshedUrl).toString();
   }
 
+  /**
+   * Sends a request to the LLM service.
+   *
+   * @param userRequest The LLM request object.
+   * @param partialCB Optional callback for streaming responses.
+   * @returns The full LLM response as a string.
+   * @throws If the request fails after retrying with fallback models.
+   */
   async sendRequest(
     userRequest: LLMRequest,
     partialCB?: (text: string) => void,
@@ -57,6 +66,7 @@ export class LLMClient {
         model,
         stream: partialCB ? true : false,
         messages: userRequest.messages.map(processMessage),
+        cache: userRequest.cache,
       };
 
       try {

@@ -84,6 +84,7 @@ export function llm(
       messages: SimpleContent[] | SimpleMessage[];
       max_tokens: number;
       metadata?: Record<string, string>;
+      cache: boolean;
     };
 
     type StandardParams = BaseParams & {
@@ -105,6 +106,7 @@ export function llm(
         // FIXME(ja): how do we get the context of space/charm id here
         context: "charm",
       },
+      cache: true,
     } as StandardParams;
 
     // FIXME(ja): look at if model supports system messages instead...
@@ -119,6 +121,7 @@ export function llm(
         model: model,
         max_tokens: max_tokens ?? 4096,
         metadata: llmParams.metadata,
+        cache: true,
       };
     }
 

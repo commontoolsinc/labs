@@ -123,6 +123,8 @@ export interface ProcessedPrompt {
  * @param currentCharm Current charm context (optional)
  * @param model LLM model to use
  * @param references Referenced charm data
+ * @param generationId Optional ID for tracking generation
+ * @param cache Optional flag to enable/disable LLM cache
  * @returns Classification result
  */
 export async function classifyIntent(
@@ -131,6 +133,7 @@ export async function classifyIntent(
   model?: string,
   references?: Record<string, Cell<any>>,
   generationId?: string,
+  cache = true,
 ): Promise<IntentClassificationResult> {
   // Process the input for @mentions if a CharmManager is provided
   // Extract context from the current charm if available
@@ -183,6 +186,7 @@ export async function classifyIntent(
       existingCode,
       model,
       generationId,
+      cache,
     );
 
     return {
@@ -260,16 +264,18 @@ function extractContext(charm: Cell<Charm>) {
  * @param workflowType The classified workflow type
  * @param currentCharm Current charm context
  * @param model LLM model to use
- * @param references Referenced charm data
+ * @param generationId Optional ID for tracking generation
+ * @param cache Optional flag to enable/disable LLM cache
  * @returns Execution plan with steps, spec, and schema
  */
 export async function generatePlan(
-  { input, workflowType, currentCharm, model, generationId }: {
+  { input, workflowType, currentCharm, model, generationId, cache = true }: {
     input: string;
     workflowType: WorkflowType;
     currentCharm?: Cell<Charm>;
     model?: string;
     generationId?: string;
+    cache: boolean;
   },
 ): Promise<ExecutionPlan> {
   // Extract context from the current charm if available
@@ -293,6 +299,7 @@ export async function generatePlan(
       existingCode,
       model,
       generationId,
+      cache,
     );
 
     return {
@@ -369,18 +376,27 @@ export interface WorkflowForm {
     modelId?: string;
     generationId?: string;
     charmManager?: CharmManager;
+    cache: boolean;
   };
 }
 
 /**
  * Create a new workflow form with default values
+ *
+ * @param input The user's input text
+ * @param modelId Optional model ID
+ * @param charm Optional existing charm
+ * @param generationId Optional generation ID
+ * @param cache Optional flag to enable/disable LLM cache
+ * @returns A new workflow form object
  */
 export function createWorkflowForm(
-  { input, modelId, charm, generationId }: {
+  { input, modelId, charm, generationId, cache = true }: {
     input: string;
     modelId?: string;
     charm?: Cell<Charm>;
     generationId?: string;
+    cache: boolean;
   },
 ): WorkflowForm {
   return {
@@ -397,6 +413,7 @@ export function createWorkflowForm(
       isFilled: false,
       modelId,
       generationId: generationId ?? crypto.randomUUID(),
+      cache,
     },
   };
 }
@@ -404,11 +421,21 @@ export function createWorkflowForm(
 /**
  * Process the input part of the workflow form
  * Handles mentions, references, and sets up the processedInput
+ *
+ * @param charmManager The charm manager
+ * @param form The workflow form
+ * @param options Optional configuration options
+ * @param options.existingCharm Optional existing charm to extend
+ * @param options.prefill Optional prefilled form data
+ * @param options.model Optional LLM model override
+ * @param options.onProgress Optional callback for progress updates
+ * @param options.cancellation Optional object to signal cancellation
+ * @param options.cache Optional flag to enable/disable LLM cache
+ * @returns The processed workflow form
  */
 export async function processInputSection(
   charmManager: CharmManager,
   form: WorkflowForm,
-  options: Record<string, unknown> = {},
 ): Promise<WorkflowForm> {
   const newForm = { ...form };
 
@@ -469,6 +496,7 @@ export async function fillClassificationSection(
     form.meta.modelId,
     form.input.references,
     form.meta.generationId,
+    form.meta.cache,
   );
 
   // Update classification in the form
@@ -524,6 +552,7 @@ export async function fillPlanningSection(
         currentCharm: form.input.existingCharm,
         model: form.meta.modelId,
         generationId: form.meta.generationId,
+        cache: form.meta.cache,
       },
     );
 
@@ -541,6 +570,7 @@ export async function fillPlanningSection(
         currentCharm: form.input.existingCharm,
         model: form.meta.modelId,
         generationId: form.meta.generationId,
+        cache: form.meta.cache,
       },
     );
 
@@ -592,32 +622,19 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
       if (!form.input.existingCharm) {
         throw new Error("Fix workflow requires an existing charm");
       }
-      charm = await executeFixWorkflow(
-        newForm.meta.charmManager,
-        form.input.existingCharm,
-        form.plan,
-        form.meta.modelId,
-      );
+      charm = await executeFixWorkflow(newForm.meta.charmManager, form);
       break;
 
     case "edit":
       if (!form.input.existingCharm) {
         throw new Error("Edit workflow requires an existing charm");
       }
-      charm = await executeEditWorkflow(
-        newForm.meta.charmManager,
-        form.input.existingCharm,
-        form.plan,
-        form.meta.modelId,
-      );
+      charm = await executeEditWorkflow(newForm.meta.charmManager, form);
       break;
 
     case "imagine":
     case "imagine-single-phase":
-      charm = await executeImagineWorkflow(
-        newForm.meta.charmManager,
-        form,
-      );
+      charm = await executeImagineWorkflow(newForm.meta.charmManager, form);
       break;
 
     default:
@@ -636,6 +653,7 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
 
   return newForm;
 }
+
 /**
  * Process a workflow request from start to finish or just fill the form
  *
@@ -654,7 +672,8 @@ export async function processWorkflow(
     model?: string;
     onProgress?: (form: WorkflowForm) => void;
     cancellation?: { cancelled: boolean };
-  } = {},
+    cache: boolean;
+  } = { cache: true },
 ): Promise<WorkflowForm> {
   console.groupCollapsed("processWorkflow");
   const startTime = performance.now();
@@ -665,6 +684,7 @@ export async function processWorkflow(
     input,
     charm: options.existingCharm,
     modelId: options.model,
+    cache: options.cache,
   });
   console.log("creating form", form);
 
@@ -734,7 +754,7 @@ export async function processWorkflow(
       form = await fillClassificationSection(form);
       timings.classification = performance.now() - stepStartTime;
       options.onProgress?.(form);
-      console.log("classified task!", form);
+      // console.log("classified task!", form);
     }
 
     checkCancellation();
@@ -871,17 +891,17 @@ ${userPrompt}
  */
 export function executeFixWorkflow(
   charmManager: CharmManager,
-  currentCharm: Cell<Charm>,
-  plan: WorkflowForm["plan"],
-  model?: string,
+  form: WorkflowForm,
 ): Promise<Cell<Charm>> {
   console.log("Executing FIX workflow");
 
   return iterate(
     charmManager,
-    currentCharm,
-    plan,
-    model,
+    form.input.existingCharm!,
+    form.plan,
+    form.meta.modelId,
+    form.meta.generationId,
+    form.meta.cache,
   );
 }
 
@@ -894,17 +914,17 @@ export function executeFixWorkflow(
  */
 export function executeEditWorkflow(
   charmManager: CharmManager,
-  currentCharm: Cell<Charm>,
-  plan: WorkflowForm["plan"],
-  model?: string,
+  form: WorkflowForm,
 ): Promise<Cell<Charm>> {
   console.log("Executing EDIT workflow");
 
   return iterate(
     charmManager,
-    currentCharm,
-    plan,
-    model,
+    form.input.existingCharm!,
+    form.plan,
+    form.meta.modelId,
+    form.meta.generationId,
+    form.meta.cache,
   );
 }
 
@@ -1047,6 +1067,7 @@ export async function executeWorkflow(
     existingCharm: context.currentCharm,
     model: context.model,
     prefill: context.prefill,
+    cache: true,
   });
 
   // A completed form should have a generated charm
