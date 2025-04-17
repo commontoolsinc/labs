@@ -25,13 +25,14 @@ import { charmId, getMentionableCharms } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
-import {
-  SpecPreviewModel,
-  useLiveSpecPreview,
-} from "@/hooks/use-live-spec-preview.ts";
+import { useLiveSpecPreview } from "@/hooks/use-live-spec-preview.ts";
 import { SpecPreview } from "@/components/SpecPreview.tsx";
-import { ToggleButton } from "@/components/common/CommonToggle.tsx";
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
+import {
+  LanguageModelId as LanguageModelId,
+  ModelSelector,
+  useUserPreferredModel,
+} from "@/components/common/ModelSelector.tsx";
 
 function CommandProcessor({
   mode,
@@ -51,9 +52,14 @@ function CommandProcessor({
   const charmMentions = useCharmMentions();
 
   // State for preview model selection
-  const [previewModel, setPreviewModel] = useState<SpecPreviewModel>(
-    "think",
-  );
+  // const [previewModel, setPreviewModel] = useState<LanguageModelId>(
+  //   "think",
+  // );
+
+  const {
+    userPreferredModel,
+    setUserPreferredModel,
+  } = useUserPreferredModel();
 
   // Get the focused charm if available
   const { focusedCharmId } = context;
@@ -88,7 +94,7 @@ function CommandProcessor({
     charmManager, // Explicitly pass CharmManager instance
     true,
     1000,
-    previewModel,
+    userPreferredModel,
     command.id == "new-charm" ? undefined : focusedCharm, // Pass the current charm for context
   );
 
@@ -166,15 +172,11 @@ function CommandProcessor({
           >
             <div className="flex items-center space-x-2">
               <div className="flex items-center text-xs">
-                <ToggleButton
-                  options={[
-                    { value: "fast", label: "Fast" },
-                    { value: "think", label: "Smart" },
-                  ]}
-                  value={previewModel}
-                  onChange={(value) =>
-                    setPreviewModel(value as SpecPreviewModel)}
+                <ModelSelector
+                  value={userPreferredModel ?? ""}
+                  onChange={(value) => setUserPreferredModel(value)}
                   size="small"
+                  mapPreview
                 />
               </div>
             </div>
@@ -295,13 +297,13 @@ export function CommandCenter() {
   const focusedReplicaId = stackMatch?.params.replicaName ??
     replicaMatch?.params.replicaName ?? null;
 
-  const charmMentions = useCharmMentions();
-
   const [previewForm, setPreviewForm] = useState<Partial<WorkflowForm>>();
+  const { userPreferredModel } = useUserPreferredModel();
 
   // TODO(bf): this is duplicated from the use in allCommands
   const context = useMemo<CommandContext>(() => ({
     charmManager,
+    userPreferredModel,
     navigate,
     focusedCharmId,
     focusedReplicaId,

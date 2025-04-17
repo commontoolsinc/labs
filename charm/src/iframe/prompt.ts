@@ -5,7 +5,7 @@ import { extractUserCode, systemMd } from "./static.ts";
 
 export const RESPONSE_PREFILL = "```javascript\n";
 
-const SELECTED_MODEL = [
+const DEFAULT_MODEL = [
   // "groq:llama-3.3-70b-specdec",
   // "cerebras:llama-3.3-70b",
   // "anthropic:claude-3-5-sonnet-latest",
@@ -69,7 +69,7 @@ ${steps.map((step, index) => `${index + 1}. ${step}`).join("\n")}`
   });
 
   return {
-    model: model || SELECTED_MODEL,
+    model: model || DEFAULT_MODEL,
     system: system.text,
     messages,
     stop: "\n```",

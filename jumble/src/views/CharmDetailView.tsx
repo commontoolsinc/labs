@@ -53,11 +53,13 @@ import { useCharmMentions } from "@/components/CommandCenter.tsx";
 import { formatPromptWithMentions } from "@commontools/charm";
 import { CharmLink } from "@/components/CharmLink.tsx";
 import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
-import { SpecPreview } from "@/components/SpecPreview.tsx";
 import {
-  SpecPreviewModel,
-  useLiveSpecPreview,
-} from "@/hooks/use-live-spec-preview.ts";
+  LanguageModelId,
+  ModelSelector,
+  useUserPreferredModel,
+} from "@/components/common/ModelSelector.tsx";
+import { SpecPreview } from "@/components/SpecPreview.tsx";
+import { useLiveSpecPreview } from "@/hooks/use-live-spec-preview.ts";
 import { EditorView } from "@codemirror/view";
 
 type Tab = "iterate" | "code" | "data";
@@ -76,9 +78,9 @@ const variantModels = [
 interface CharmOperationContextType {
   input: string;
   previewForm: Partial<WorkflowForm>;
+  userPreferredModel: LanguageModelId;
+  setUserPreferredModel: (model: LanguageModelId) => void;
   setInput: (input: string) => void;
-  selectedModel: string;
-  setSelectedModel: (model: string) => void;
   classificationLoading: boolean; // Loading state for workflow classification
   planLoading: boolean; // Loading state for plan generation
   showVariants: boolean;
@@ -97,8 +99,6 @@ interface CharmOperationContextType {
   expectedVariantCount: number;
   setExpectedVariantCount: (count: number) => void;
   isPreviewLoading: boolean;
-  previewModel: SpecPreviewModel;
-  setPreviewModel: (model: SpecPreviewModel) => void;
   handlePerformOperation: () => void;
   handleCancelVariants: () => void;
   setWorkflowType: (workflowType: WorkflowType) => void;
@@ -318,9 +318,7 @@ function useCharmOperation() {
 
   // Shared state
   const [input, setInput] = useState("");
-  const [selectedModel, setSelectedModel] = useState(
-    "anthropic:claude-3-7-sonnet-latest",
-  );
+
   const [showVariants, setShowVariants] = useState(false);
   const [showPreview, setShowPreview] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -334,7 +332,7 @@ function useCharmOperation() {
   const [expectedVariantCount, setExpectedVariantCount] = useState(0);
 
   // Preview model state
-  const [previewModel, setPreviewModel] = useState<SpecPreviewModel>("think");
+  const { userPreferredModel, setUserPreferredModel } = useUserPreferredModel();
 
   // Live preview generation with workflow classification
   const {
@@ -349,7 +347,7 @@ function useCharmOperation() {
     charmManager,
     showPreview,
     250,
-    previewModel,
+    userPreferredModel,
     charm,
   );
 
@@ -420,7 +418,7 @@ function useCharmOperation() {
         const newCharm = await performOperation(
           charmId(charm)!,
           input,
-          selectedModel,
+          userPreferredModel,
         );
         navigate(createPath("charmShow", {
           charmId: charmId(newCharm)!,
@@ -438,7 +436,7 @@ function useCharmOperation() {
     paramCharmId,
     replicaName,
     showVariants,
-    selectedModel,
+    userPreferredModel,
     performOperation,
     charmManager,
     navigate,
@@ -455,8 +453,8 @@ function useCharmOperation() {
   return {
     input,
     setInput,
-    selectedModel,
-    setSelectedModel,
+    userPreferredModel,
+    setUserPreferredModel,
     setWorkflowType,
     classificationLoading, // Add the classification loading state
     planLoading, // Add the plan loading state
@@ -474,8 +472,6 @@ function useCharmOperation() {
     setExpectedVariantCount,
     previewForm,
     isPreviewLoading,
-    previewModel,
-    setPreviewModel,
     handlePerformOperation,
     handleCancelVariants,
     performOperation,
@@ -661,7 +657,7 @@ const Suggestions = () => {
   const { suggestions, loadingSuggestions } = useSuggestions(charm);
   const {
     setInput,
-    selectedModel,
+    userPreferredModel,
     setLoading,
     setVariants,
     setSelectedVariant,
@@ -742,7 +738,7 @@ const Suggestions = () => {
           const newCharm = await performOperation(
             charmId(charm)!,
             selectedSuggestion.prompt,
-            selectedModel,
+            userPreferredModel,
             {}, // No mentions in suggestion text
           );
 
@@ -767,7 +763,7 @@ const Suggestions = () => {
     paramCharmId,
     replicaName,
     showVariants,
-    selectedModel,
+    userPreferredModel,
     performOperation,
     navigate,
     setVariants,
@@ -812,49 +808,15 @@ const Suggestions = () => {
   );
 };
 
-export const ModelSelector = ({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-}) => {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="p-1 border-2 border-black bg-white text-xs"
-    >
-      <option value="anthropic:claude-3-7-sonnet-latest">
-        Claude 3.7 ✨
-      </option>
-      <option value="google:gemini-2.5-pro">Gemini 2.5 ✨</option>
-      <option value="anthropic:claude-3-5-sonnet-latest">
-        Claude 3.5
-      </option>
-      <option value="groq:qwen-qwq-32b">Qwen QwQ 32B 🧠</option>
-      <option value="groq:llama-3.3-70b-versatile">Llama 3.3 🔥</option>
-      <option value="openai:gpt-4.1">gpt-4.1</option>
-      <option value="openai:gpt-4.1-mini">gpt-4.1-mini</option>
-      <option value="openai:gpt-4.1-nano">gpt-4.1-nano</option>
-      <option value="openai:o3-mini-low-latest">o3-mini-low</option>
-      <option value="openai:o3-mini-medium-latest">
-        o3-mini-medium
-      </option>
-      <option value="openai:o3-mini-high-latest">o3-mini-high</option>
-      <option value="google:gemini-2.0-pro">Gemini 2.0</option>
-      <option value="perplexity:sonar-pro">Sonar Pro 🌐</option>
-    </select>
-  );
-};
+// Now using the shared ModelSelector component
 
 // Operation Tab Component (formerly IterateTab)
 const OperationTab = () => {
   const {
     input,
     setInput,
-    selectedModel,
-    setSelectedModel,
+    userPreferredModel,
+    setUserPreferredModel,
     showVariants,
     setShowVariants,
     showPreview,
@@ -903,8 +865,9 @@ const OperationTab = () => {
             />
 
             <ModelSelector
-              value={selectedModel}
-              onChange={setSelectedModel}
+              value={userPreferredModel}
+              onChange={setUserPreferredModel}
+              size="small"
             />
           </ComposerSubmitBar>
         </div>
