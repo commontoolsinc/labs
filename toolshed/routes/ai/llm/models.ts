@@ -247,110 +247,65 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
 
   addModel({
     provider: openAIProvider,
-    name: "openai:o1",
-    aliases: ["openai:o1-low", "o1-low"],
+    name: "openai:o3-2025-04-16",
+    aliases: ["openai:o3", "o3"],
     capabilities: {
       contextWindow: 200_000,
       maxOutputTokens: 100_000,
-      images: false,
+      images: true,
       prefill: false,
       systemPrompt: false,
-      stopSequences: false,
+      stopSequences: true,
       streaming: true,
-    },
-    providerOptions: {
-      reasoningEffort: "low",
     },
   });
 
   addModel({
     provider: openAIProvider,
-    name: "openai:o1",
-    aliases: ["openai:o1-medium", "o1-medium"],
+    name: "openai:o4-mini-2025-04-16",
+    aliases: ["openai:o4-mini-low", "o4-mini-low"],
     capabilities: {
       contextWindow: 200_000,
       maxOutputTokens: 100_000,
-      images: false,
+      images: true,
       prefill: false,
       systemPrompt: false,
-      stopSequences: false,
+      stopSequences: true,
       streaming: true,
     },
-    providerOptions: {
-      reasoningEffort: "medium",
-    },
+    providerOptions: { reasoningEffort: "low" },
   });
 
   addModel({
     provider: openAIProvider,
-    name: "openai:o1",
-    aliases: ["openai:o1-high", "o1-high"],
+    name: "openai:o4-mini-2025-04-16",
+    aliases: ["openai:o4-mini-medium", "o4-mini-medium"],
     capabilities: {
       contextWindow: 200_000,
       maxOutputTokens: 100_000,
-      images: false,
+      images: true,
       prefill: false,
       systemPrompt: false,
-      stopSequences: false,
+      stopSequences: true,
       streaming: true,
     },
-    providerOptions: {
-      reasoningEffort: "high",
-    },
+    providerOptions: { reasoningEffort: "medium" },
   });
 
   addModel({
     provider: openAIProvider,
-    name: "openai:o3-mini",
-    aliases: ["openai:o3-mini-low-latest", "o3-mini-low"],
+    name: "openai:o4-mini-2025-04-16",
+    aliases: ["openai:o4-mini-high", "o4-mini-high"],
     capabilities: {
       contextWindow: 200_000,
       maxOutputTokens: 100_000,
-      images: false,
+      images: true,
       prefill: false,
       systemPrompt: false,
-      stopSequences: false,
+      stopSequences: true,
       streaming: true,
     },
-    providerOptions: {
-      reasoningEffort: "low",
-    },
-  });
-
-  addModel({
-    provider: openAIProvider,
-    name: "openai:o3-mini",
-    aliases: ["openai:o3-mini-medium-latest", "o3-mini-medium"],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 100_000,
-      images: false,
-      prefill: false,
-      systemPrompt: false,
-      stopSequences: false,
-      streaming: true,
-    },
-    providerOptions: {
-      reasoningEffort: "medium",
-    },
-  });
-
-  addModel({
-    provider: openAIProvider,
-    name: "openai:o3-mini",
-    aliases: ["openai:o3-mini-high-latest", "o3-mini-high"],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 100_000,
-      images: false,
-      prefill: false,
-      systemPrompt: false,
-      stopSequences: false,
-      streaming: true,
-    },
-    providerOptions: {
-      reasoningEffort: "high",
-    },
+    providerOptions: { reasoningEffort: "high" },
   });
 
   addModel({
