@@ -11,7 +11,6 @@ import type {
   Result,
   Revision,
   SchemaContext,
-  SchemaPathSelector,
   State,
   The,
   TransactionError,
