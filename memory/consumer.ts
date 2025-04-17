@@ -53,7 +53,6 @@ import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
 export * from "./interface.ts";
 import { toRevision } from "./commit.ts";
-import { isObj } from "@commontools/utils";
 
 export const connect = ({
   address,
@@ -149,10 +148,11 @@ class MemoryConsumerSession<
     const id = command.of;
     if (command.the === "task/return") {
       const invocation = this.invocations.get(id);
+      // TODO(@ubik2) this is really gross.
       if (
         invocation === undefined || !("args" in invocation) ||
-        !isObj(invocation.args) || !("subscribe" in invocation.args) ||
-        !invocation.args.subscribe
+        invocation.args === null || !(typeof invocation.args === "object") ||
+        !("subscribe" in invocation.args) || !invocation.args.subscribe
       ) {
         this.invocations.delete(id);
       }
