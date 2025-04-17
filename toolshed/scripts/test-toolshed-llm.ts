@@ -88,10 +88,12 @@ async function main() {
         // "openai:gpt-4.1",
         // "openai:gpt-4.1-mini",
         // "openai:gpt-4.1-nano",
-        "openai:o3",
-        "openai:o4-mini-low",
-        "openai:o4-mini-medium",
-        "openai:o4-mini-high",
+        // "openai:o3",
+        // "openai:o4-mini-low",
+        // "openai:o4-mini-medium",
+        // "openai:o4-mini-high",
+        "groq:llama-4-maverick",
+        "groq:llama-4-scout",
       ];
     }
   } else if (args._ && args._[0]) {

@@ -106,6 +106,7 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
+      reasoning: false,
     },
   });
   addModel({
@@ -120,6 +121,7 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
+      reasoning: false,
     },
   });
 
@@ -138,6 +140,7 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
+      reasoning: true,
     },
     providerOptions: {
       anthropic: {
@@ -151,48 +154,35 @@ if (env.CTTS_AI_LLM_GROQ_API_KEY) {
   const groqProvider = createGroq({
     apiKey: env.CTTS_AI_LLM_GROQ_API_KEY,
   });
-  addModel({
-    provider: groqProvider,
-    name: "groq:deepseek-r1-distill-llama-70b",
-    aliases: ["groq:deepseek-r1-distill-llama-70b", "r1-llama-70b"],
-    capabilities: {
-      contextWindow: 128_000,
-      maxOutputTokens: 32768,
-      images: false,
-      prefill: false,
-      systemPrompt: false,
-      stopSequences: false,
-      streaming: true,
-    },
-  });
 
   addModel({
     provider: groqProvider,
-    name: "groq:deepseek-r1-distill-qwen-32b",
-    aliases: ["groq:deepseek-r1-distill-qwen-32b", "r1-qwen-32b"],
+    name: "groq:meta-llama/llama-4-maverick-17b-128e-instruct",
+    aliases: ["groq:llama-4-maverick", "llama-4-maverick"],
     capabilities: {
-      contextWindow: 128_000,
-      maxOutputTokens: 32768,
+      contextWindow: 131_072,
+      maxOutputTokens: 8192,
       images: false,
-      prefill: false,
-      systemPrompt: false,
-      stopSequences: false,
-      streaming: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: false,
+      reasoning: false,
     },
   });
-
   addModel({
     provider: groqProvider,
-    name: "groq:qwen-qwq-32b",
-    aliases: ["groq:qwen-qwq-32b", "qwen-qwq-32b"],
+    name: "groq:meta-llama/llama-4-scout-17b-16e-instruct",
+    aliases: ["groq:llama-4-scout", "llama-4-scout"],
     capabilities: {
-      contextWindow: 128_000,
-      maxOutputTokens: 128_000,
+      contextWindow: 131_072,
+      maxOutputTokens: 8192,
       images: false,
-      prefill: false,
-      systemPrompt: false,
-      stopSequences: false,
-      streaming: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: false,
+      reasoning: false,
     },
   });
 
@@ -208,6 +198,7 @@ if (env.CTTS_AI_LLM_GROQ_API_KEY) {
       systemPrompt: true,
       stopSequences: true,
       streaming: false,
+      reasoning: false,
     },
   });
 
@@ -223,6 +214,7 @@ if (env.CTTS_AI_LLM_GROQ_API_KEY) {
       systemPrompt: true,
       stopSequences: true,
       streaming: false,
+      reasoning: false,
     },
   });
 }
@@ -243,6 +235,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
+      reasoning: false,
     },
   });
 
@@ -252,7 +245,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
     aliases: ["openai:o3", "o3"],
     capabilities: {
       contextWindow: 200_000,
-      maxOutputTokens: 99_999,
+      maxOutputTokens: 100_000,
       images: true,
       prefill: false,
       reasoning: true,
@@ -325,6 +318,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
+      reasoning: false,
     },
   });
 
@@ -340,6 +334,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
+      reasoning: false,
     },
   });
 
@@ -355,6 +350,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
+      reasoning: false,
     },
   });
 }
@@ -384,6 +380,7 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
+      reasoning: true,
     },
   });
 
@@ -399,6 +396,7 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
+      reasoning: false,
     },
   });
 
@@ -414,6 +412,7 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
+      reasoning: false,
     },
   });
 }
@@ -437,6 +436,7 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
       systemPrompt: false,
       stopSequences: true,
       streaming: true,
+      reasoning: true,
     },
   });
 
@@ -452,6 +452,7 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
       systemPrompt: false,
       stopSequences: true,
       streaming: true,
+      reasoning: false,
     },
   });
 }
