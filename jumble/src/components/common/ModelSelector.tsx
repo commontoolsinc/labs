@@ -7,12 +7,12 @@ import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 const MODEL_OPTIONS = [
   // Preset section
   {
-    value: "claude-3-7-sonnet-latest",
+    value: "anthropic:claude-3-7-sonnet-latest",
     label: "Default",
     isPreset: true,
   },
-  { value: "gpt-4.1-nano", label: "Fast", isPreset: true },
-  { value: "gemini-2.5-pro", label: "Experimental", isPreset: true },
+  { value: "openai:gpt-4.1-nano", label: "Fast", isPreset: true },
+  { value: "google:gemini-2.5-pro", label: "Experimental", isPreset: true },
   // Full model list
   {
     value: "anthropic:claude-3-7-sonnet-latest",

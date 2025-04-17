@@ -726,7 +726,7 @@ export async function processWorkflow(
             type: "job-update",
             jobId: form.meta.generationId,
             title: form.input.processedInput,
-            status: "Classifying task...",
+            status: `Classifying task ${form.meta.modelId}...`,
           },
         }),
       );
@@ -748,7 +748,7 @@ export async function processWorkflow(
             type: "job-update",
             jobId: form.meta.generationId,
             title: form.input.processedInput,
-            status: "Planning task...",
+            status: `Planning task ${form.meta.modelId}...`,
           },
         }),
       );
@@ -770,7 +770,7 @@ export async function processWorkflow(
             type: "job-update",
             jobId: form.meta.generationId,
             title: form.input.processedInput,
-            status: "Generating charm...",
+            status: `Generating charm ${form.meta.modelId}...`,
           },
         }),
       );

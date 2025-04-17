@@ -46,7 +46,7 @@ export const genSrc = async ({
       detail: {
         type: "job-update",
         jobId: generationId,
-        status: "Generating source code...",
+        status: `Generating source code ${model}...`,
       },
     }),
   );
@@ -246,7 +246,7 @@ async function singlePhaseCodeGeneration(
       detail: {
         type: "job-update",
         jobId: form.meta.generationId,
-        status: "Generating code and schema...",
+        status: `Generating code and schema ${form.meta.modelId}...`,
       },
     }),
   );
@@ -327,7 +327,7 @@ async function twoPhaseCodeGeneration(
       detail: {
         type: "job-update",
         jobId: form.meta.generationId,
-        status: "Generating spec and schema...",
+        status: `Generating spec and schema ${form.meta.modelId}...`,
       },
     }),
   );
