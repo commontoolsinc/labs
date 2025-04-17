@@ -73,7 +73,11 @@ export function SyncStatusProvider({
     };
   }, [charmManager, intervalMs]);
 
-  const value = { isSyncing, lastSyncTime: lastSyncTimeRef.current, hasConnected };
+  const value = {
+    isSyncing,
+    lastSyncTime: lastSyncTimeRef.current,
+    hasConnected,
+  };
 
   return (
     <SyncStatusContext.Provider value={value}>

@@ -113,18 +113,19 @@ function Accordion(
 // JobStatusIndicator component to display job status based on generationId
 const JobStatusIndicator = ({ generationId }: { generationId?: string }) => {
   const { jobs } = useActivityContext();
-  
+
   if (!generationId || !jobs[generationId]) {
     return null;
   }
-  
+
   const job = jobs[generationId];
-  
+
   return (
     <div className="text-xs ml-2 flex items-center">
       {job.state === "running" && (
         <>
-          <div className="w-2 h-2 mr-1 bg-blue-500 rounded-full animate-pulse"></div>
+          <div className="w-2 h-2 mr-1 bg-blue-500 rounded-full animate-pulse">
+          </div>
           <span className="text-blue-600">{job.status}</span>
         </>
       )}
@@ -150,7 +151,7 @@ export function SpecPreview({
   const hasContent =
     (loading || form.classification || form.plan?.steps || form.plan?.spec) &&
     visible;
-  
+
   // Get the current generation ID from the form metadata
   const generationId = form.meta?.generationId;
 
@@ -432,7 +433,9 @@ export function SpecPreview({
                                         <span className="ml-1 text-xs">
                                           Generating...
                                         </span>
-                                        <JobStatusIndicator generationId={generationId} />
+                                        <JobStatusIndicator
+                                          generationId={generationId}
+                                        />
                                       </div>
                                     )}
                                 </div>
@@ -480,7 +483,9 @@ export function SpecPreview({
                                       <span className="ml-1 text-xs">
                                         Generating...
                                       </span>
-                                      <JobStatusIndicator generationId={generationId} />
+                                      <JobStatusIndicator
+                                        generationId={generationId}
+                                      />
                                     </div>
                                   )
                                   : form.plan?.steps

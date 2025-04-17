@@ -2,7 +2,10 @@
 
 ## Overview
 
-The Charm Workflow System provides an LLM-powered approach to charm generation and modification. It analyzes user intent, classifies operations into specific workflows, and generates appropriate code through a structured pipeline. The system is designed to be predictable, maintainable, and extensible.
+The Charm Workflow System provides an LLM-powered approach to charm generation
+and modification. It analyzes user intent, classifies operations into specific
+workflows, and generates appropriate code through a structured pipeline. The
+system is designed to be predictable, maintainable, and extensible.
 
 ## Code Execution Flow
 
@@ -87,7 +90,8 @@ flowchart TD
 
 ### Pipeline Description
 
-The workflow system flows through distinct stages with clear data assembly at each step:
+The workflow system flows through distinct stages with clear data assembly at
+each step:
 
 1. **FORMAT** - Processing input and references
    - `processInputSection` handles raw user input
@@ -108,7 +112,7 @@ The workflow system flows through distinct stages with clear data assembly at ea
 
 4. **GENERATE CODE** - Branching to workflow-specific implementation
    - Routes form to appropriate workflow function:
-   
+
    **4A. ITERATE** (Fix & Edit workflows)
    - Both use `iterate()` but with different parameters
    - Fix: Preserves spec, only updates code
@@ -128,7 +132,9 @@ The workflow system flows through distinct stages with clear data assembly at ea
    - Updates form with the generated charm
    - **Output Packet**: Completed form with charm cell, ready to return
 
-The form object is progressively enriched at each stage, with each stage building on the data packet from the previous stage. The system only branches after the planning stage when the workflow type must be handled differently.
+The form object is progressively enriched at each stage, with each stage
+building on the data packet from the previous stage. The system only branches
+after the planning stage when the workflow type must be handled differently.
 
 ## Entry Points
 
@@ -224,13 +230,15 @@ When a user references another charm with an @mention:
 
 1. The `formatPromptWithMentions()` function processes these references
 2. The system forces a "rework" workflow even if manual override is attempted
-3. The references are processed in `executeReworkWorkflow()` to create a new charm with access to referenced data
+3. The references are processed in `executeReworkWorkflow()` to create a new
+   charm with access to referenced data
 
 ## UI Integration
 
 1. **Live Preview**: The `useLiveSpecPreview` hook:
    - Processes input as the user types
-   - Calls `generateWorkflowPreview()` which runs the workflow process in "dry run" mode
+   - Calls `generateWorkflowPreview()` which runs the workflow process in "dry
+     run" mode
    - Provides dynamic feedback on classification, plan, and spec
    - Manages multiple loading states for different preview components
    - Supports "Fast" vs "Smart" model selection
@@ -283,12 +291,14 @@ The system includes fallbacks at each stage:
 
 The workflow system is designed to be extensible:
 
-1. **New Workflow Types**: The `WorkflowType` type and `WORKFLOWS` record can be expanded
+1. **New Workflow Types**: The `WorkflowType` type and `WORKFLOWS` record can be
+   expanded
    - Add new entries to the `WORKFLOWS` record
    - Update classification logic to recognize new types
    - Implement specialized execution functions
 
-2. **Model Selection**: The system supports different LLM models for different stages
+2. **Model Selection**: The system supports different LLM models for different
+   stages
    - Fast models for classification and preview
    - More powerful models for code generation
    - `getModelId()` function maps user-friendly names to model identifiers
