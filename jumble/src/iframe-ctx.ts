@@ -13,7 +13,7 @@ import {
   ReactivityLog,
   removeAction,
 } from "@commontools/runner";
-import { client as llm } from "@commontools/llm";
+import { LLMClient, DEFAULT_MODEL_NAME } from "@commontools/llm";
 import { isObj } from "@commontools/utils";
 import {
   completeJob,
@@ -23,6 +23,7 @@ import {
 } from "@/contexts/ActivityContext.tsx";
 
 const CommonCharmElement = components.CommonCharm.CommonCharmElement;
+const llm = new LLMClient();
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 // This is to prepare Proxy objects to be serialized
@@ -273,13 +274,9 @@ export const setupIframe = () =>
         { charmId: null, spaceName: null };
 
       console.log("onLLMRequest", payload, charmId, spaceName);
-      // FIXME(ja): how do we get the context of space/charm id here
       const jsonPayload = JSON.parse(payload);
       if (!jsonPayload.model) {
-        jsonPayload.model = [
-          "google:gemini-2.0-flash",
-          "groq:llama-3.3-70b-versatile",
-        ];
+        jsonPayload.model = DEFAULT_MODEL_NAME;
       }
       updateJob(jobId, "Using " + jsonPayload.model);
       jsonPayload.metadata = {
@@ -291,7 +288,7 @@ export const setupIframe = () =>
 
       const res = await llm.sendRequest(jsonPayload);
       console.log("onLLMRequest res", res);
-      completeJob(jobId, res ?? "Completed!");
+      completeJob(jobId, res.content ?? "Completed!");
       return res as any;
     },
     async onReadWebpageRequest(
@@ -311,7 +308,7 @@ export const setupIframe = () =>
     },
     async onPerform(
       _element: CommonIframeSandboxElement,
-      context: unknown,
+      _context: unknown,
       command: IPC.TaskPerform,
     ): Promise<{ ok: object; error?: void } | { ok?: void; error: Error }> {
       console.log("perform", command);

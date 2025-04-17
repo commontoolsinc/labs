@@ -1,6 +1,7 @@
-import { client } from "../client.ts";
+import { LLMClient } from "../client.ts";
 import { llmPrompt } from "../index.ts";
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
+import { DEFAULT_MODEL_NAME } from "../types.ts";
 
 const SYSTEM_PROMPT = llmPrompt(
   "charm-describe-system",
@@ -49,7 +50,7 @@ export async function describeCharm(
   spec: string,
   code: string,
   schema: string,
-  model: string = "anthropic:claude-3-7-sonnet-latest",
+  model: string = DEFAULT_MODEL_NAME,
   cache: boolean = true,
 ) {
   const system = hydratePrompt(SYSTEM_PROMPT, {
@@ -61,7 +62,7 @@ export async function describeCharm(
     "charm-describe-user",
     `Describe the functionality of this app in a single sentence`,
   );
-  const response = await client.sendRequest({
+  const response = await new LLMClient().sendRequest({
     model,
     system: system.text,
     stream: false,
@@ -79,6 +80,9 @@ export async function describeCharm(
     cache,
   });
 
-  console.log("RESPONSE", parseTagFromResponse(response, "description"));
-  return parseTagFromResponse(response, "description");
+  console.log(
+    "RESPONSE",
+    parseTagFromResponse(response.content, "description"),
+  );
+  return parseTagFromResponse(response.content, "description");
 }

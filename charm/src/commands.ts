@@ -1,4 +1,4 @@
-import { fixRecipePrompt } from "@commontools/llm";
+import { fixRecipePrompt, DEFAULT_MODEL_NAME } from "@commontools/llm";
 import { Cell, getRecipe } from "@commontools/runner";
 import { Charm, CharmManager } from "./charm.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
@@ -44,7 +44,7 @@ export async function fixItCharm(
   charmManager: CharmManager,
   charm: Cell<Charm>,
   error: Error,
-  model = "anthropic:claude-3-7-sonnet-20250219-thinking",
+  model = DEFAULT_MODEL_NAME,
 ): Promise<Cell<Charm>> {
   const iframeRecipe = getIframeRecipe(charm);
   if (!iframeRecipe.iframe) {

@@ -1,8 +1,9 @@
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
-import { client } from "../client.ts";
+import { LLMClient } from "../client.ts";
 import JSON5 from "json5";
 import { describeCharm } from "./charm-describe.ts";
 import { llmPrompt } from "../index.ts";
+import { DEFAULT_MODEL_NAME } from "../types.ts";
 
 const SYSTEM_PROMPT = llmPrompt(
   "charm-suggestions-system",
@@ -87,7 +88,7 @@ export async function generateCharmSuggestions(
   code: string,
   schema: string,
   count: number = 3,
-  model: string = "anthropic:claude-3-7-sonnet-latest",
+  model: string = DEFAULT_MODEL_NAME,
   cache: boolean = true,
 ): Promise<CharmSuggestion[]> {
   // FIXME(jake): Currently in jumble, whenever we iterate, we are overwriting
@@ -108,7 +109,7 @@ export async function generateCharmSuggestions(
     `Give me ${count} charm suggestions`,
   );
 
-  const response = await client.sendRequest({
+  const response = await new LLMClient().sendRequest({
     model,
     system: system.text,
     stream: false,
@@ -126,7 +127,7 @@ export async function generateCharmSuggestions(
     cache,
   });
 
-  const jsonString = parseTagFromResponse(response, "output");
+  const jsonString = parseTagFromResponse(response.content, "output");
 
   if (!jsonString) {
     throw new Error("No JSON blob found in response");

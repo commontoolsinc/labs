@@ -2,12 +2,13 @@ import React, { useMemo, useState } from "react";
 import { User } from "@/components/User.tsx";
 import { useCell, useNamedCell } from "@/hooks/use-cell.ts";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { DEFAULT_MODEL_NAME } from "@commontools/llm/types";
 
 // Define the model options - these can be expanded in the future
 const MODEL_OPTIONS = [
   // Preset section
   {
-    value: "anthropic:claude-3-7-sonnet-latest",
+    value: DEFAULT_MODEL_NAME,
     label: "Default",
     isPreset: true,
   },

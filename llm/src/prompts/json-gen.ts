@@ -1,6 +1,6 @@
 import JSON5 from "json5";
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
-import { client } from "../client.ts";
+import { LLMClient } from "../client.ts";
 import { llmPrompt } from "../index.ts";
 
 const SYSTEM_PROMPT = llmPrompt(
@@ -59,7 +59,7 @@ export async function generateJSON(
   const system = hydratePrompt(SYSTEM_PROMPT, {
     PRODUCT_DESCRIPTION: description,
   });
-  const response = await client.sendRequest({
+  const response = await new LLMClient().sendRequest({
     model,
     system: system.text,
     stream: false,
@@ -78,7 +78,7 @@ export async function generateJSON(
     cache,
   });
 
-  const jsonString = parseTagFromResponse(response, "json_blob");
+  const jsonString = parseTagFromResponse(response.content, "json_blob");
 
   if (!jsonString) {
     throw new Error("No JSON blob found in response");

@@ -25,6 +25,8 @@ export {
   recipeFromFrame,
 } from "./recipe.ts";
 export {
+  type BuiltInLLMParams,
+  type BuiltInLLMState,
   fetchData,
   ifElse,
   llm,

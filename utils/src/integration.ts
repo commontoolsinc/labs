@@ -107,10 +107,11 @@ export const waitForSelectorWithText = async (
   page: Page,
   selector: string,
   text: string,
+  config?: { retry?: number, timeoutMs?: number }
 ): Promise<ElementHandle> => {
-  const retries = 60;
-  const timeout = 1000;
-  for (let i = 0; i < retries; i++) {
+  const retry = config?.retry ?? 60;
+  const timeout = config?.timeoutMs ?? 1000;
+  for (let i = 0; i < retry; i++) {
     const el = await page.waitForSelector(selector);
     if ((await el.innerText()) === text) {
       return el;

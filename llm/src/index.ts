@@ -1,4 +1,5 @@
 export * from "./client.ts";
+export * from "./types.ts";
 export * from "./prompts/charm-describe.ts";
 export * from "./prompts/charm-suggestions.ts";
 export * from "./prompts/json-gen.ts";
