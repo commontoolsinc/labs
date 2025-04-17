@@ -1314,8 +1314,6 @@ test(
     assert(write3.ok);
     const c3 = Commit.toRevision(write3.ok);
 
-    // We'll use a schema selector to exclude the name from the address, since we already have that.
-    // This should prevent us from following the name alias of the home address into doc1.
     const schemaSelector: SchemaSelector = {
       [doc3]: {
         [the]: {
