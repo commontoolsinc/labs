@@ -11,6 +11,9 @@ export const llm = createNodeFactory({
     system?: string;
     stop?: string;
     max_tokens?: number;
+    model?: string;
+    mode?: "json";
+    context?: Record<string, string>;
   }>,
 ) => OpaqueRef<{
   pending: boolean;
