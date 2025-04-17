@@ -50,6 +50,7 @@ export async function describeCharm(
   code: string,
   schema: string,
   model: string = "anthropic:claude-3-7-sonnet-latest",
+  cache: boolean = true,
 ) {
   const system = hydratePrompt(SYSTEM_PROMPT, {
     SPEC: spec,
@@ -75,6 +76,7 @@ export async function describeCharm(
       systemPrompt: system.version,
       userPrompt: prompt.version,
     },
+    cache,
   });
 
   console.log("RESPONSE", parseTagFromResponse(response, "description"));

@@ -54,6 +54,7 @@ const PROMPT = llmPrompt(
 export async function generateJSON(
   description: string,
   model: string = "groq:llama-3.3-70b-versatile",
+  cache: boolean = true,
 ): Promise<Record<string, unknown>> {
   const system = hydratePrompt(SYSTEM_PROMPT, {
     PRODUCT_DESCRIPTION: description,
@@ -74,6 +75,7 @@ export async function generateJSON(
       systemPrompt: system.version,
       userPrompt: PROMPT.version,
     },
+    cache,
   });
 
   const jsonString = parseTagFromResponse(response, "json_blob");

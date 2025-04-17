@@ -405,6 +405,7 @@ async function handleImportJSON(ctx: CommandContext) {
       false,
       {
         charmManager: ctx.charmManager,
+        cache: true,
       },
     );
 

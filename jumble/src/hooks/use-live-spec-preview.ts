@@ -141,6 +141,7 @@ export function useLiveSpecPreview(
             setPreviewForm(f);
           },
           cancellation: cancellation,
+          cache: true,
         });
         setPreviewForm(form);
 

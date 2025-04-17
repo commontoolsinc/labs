@@ -133,7 +133,7 @@ export async function classifyIntent(
   model?: string,
   references?: Record<string, Cell<any>>,
   generationId?: string,
-  cache?: boolean,
+  cache = true,
 ): Promise<IntentClassificationResult> {
   // Process the input for @mentions if a CharmManager is provided
   // Extract context from the current charm if available
@@ -269,13 +269,13 @@ function extractContext(charm: Cell<Charm>) {
  * @returns Execution plan with steps, spec, and schema
  */
 export async function generatePlan(
-  { input, workflowType, currentCharm, model, generationId, cache }: {
+  { input, workflowType, currentCharm, model, generationId, cache = true }: {
     input: string;
     workflowType: WorkflowType;
     currentCharm?: Cell<Charm>;
     model?: string;
     generationId?: string;
-    cache?: boolean;
+    cache: boolean;
   },
 ): Promise<ExecutionPlan> {
   // Extract context from the current charm if available
@@ -376,7 +376,7 @@ export interface WorkflowForm {
     modelId?: string;
     generationId?: string;
     charmManager?: CharmManager;
-    cache?: boolean;
+    cache: boolean;
   };
 }
 
@@ -391,12 +391,12 @@ export interface WorkflowForm {
  * @returns A new workflow form object
  */
 export function createWorkflowForm(
-  { input, modelId, charm, generationId, cache }: {
+  { input, modelId, charm, generationId, cache = true }: {
     input: string;
     modelId?: string;
     charm?: Cell<Charm>;
     generationId?: string;
-    cache?: boolean;
+    cache: boolean;
   },
 ): WorkflowForm {
   return {
@@ -672,8 +672,8 @@ export async function processWorkflow(
     model?: string;
     onProgress?: (form: WorkflowForm) => void;
     cancellation?: { cancelled: boolean };
-    cache?: boolean;
-  } = {},
+    cache: boolean;
+  } = { cache: true },
 ): Promise<WorkflowForm> {
   console.groupCollapsed("processWorkflow");
   const startTime = performance.now();
@@ -1067,6 +1067,7 @@ export async function executeWorkflow(
     existingCharm: context.currentCharm,
     model: context.model,
     prefill: context.prefill,
+    cache: true,
   });
 
   // A completed form should have a generated charm

@@ -30,7 +30,7 @@ export const genSrc = async ({
   steps,
   model,
   generationId,
-  cache,
+  cache = true,
 }: {
   src?: string;
   spec?: string;
@@ -39,9 +39,17 @@ export const genSrc = async ({
   steps?: string[];
   model?: string;
   generationId?: string;
-  cache?: boolean;
+  cache: boolean;
 }) => {
-  const request = buildPrompt({ src, spec, newSpec, schema, model, steps });
+  const request = buildPrompt({
+    src,
+    spec,
+    newSpec,
+    schema,
+    model,
+    steps,
+    cache,
+  });
 
   globalThis.dispatchEvent(
     new CustomEvent("job-update", {
@@ -61,7 +69,6 @@ export const genSrc = async ({
       workflow: "genSrc",
       generationId,
     },
-    cache,
   });
 
   // FIXME(ja): this is a hack to get the prefill to work
@@ -85,7 +92,7 @@ export async function iterate(
   plan: WorkflowForm["plan"],
   model?: string,
   generationId?: string,
-  cache?: boolean,
+  cache = true,
 ): Promise<Cell<Charm>> {
   const { iframe } = getIframeRecipe(charm);
   if (!iframe) {

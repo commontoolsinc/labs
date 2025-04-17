@@ -164,7 +164,7 @@ export async function classifyWorkflow(
   existingCode?: string,
   model?: string,
   generationId?: string,
-  cache?: boolean,
+  cache = true,
 ): Promise<{
   workflowType: WorkflowType;
   confidence: number;
@@ -301,7 +301,7 @@ export async function generateWorkflowPlan(
   existingCode?: string,
   model?: string,
   generationId?: string,
-  cache?: boolean,
+  cache = true,
 ): Promise<{
   steps: string[];
   spec: string;

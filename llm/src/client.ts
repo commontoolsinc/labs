@@ -25,6 +25,7 @@ export const DEFAULT_LLM_URL = typeof globalThis.location !== "undefined"
 
 export type LLMRequest = {
   messages: SimpleMessage[] | SimpleContent[];
+  cache: boolean;
   system?: string;
   model: string | string[];
   max_tokens?: number;
@@ -32,7 +33,6 @@ export type LLMRequest = {
   stop?: string;
   mode?: "json";
   metadata?: Record<string, string | undefined | LlmPrompt>;
-  cache?: boolean; // defaults to true if not specified
 };
 
 export class LLMClient {
@@ -66,7 +66,7 @@ export class LLMClient {
         model,
         stream: partialCB ? true : false,
         messages: userRequest.messages.map(processMessage),
-        cache: userRequest.cache ?? true,
+        cache: userRequest.cache,
       };
 
       try {

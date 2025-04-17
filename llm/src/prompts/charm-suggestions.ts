@@ -88,6 +88,7 @@ export async function generateCharmSuggestions(
   schema: string,
   count: number = 3,
   model: string = "anthropic:claude-3-7-sonnet-latest",
+  cache: boolean = true,
 ): Promise<CharmSuggestion[]> {
   // FIXME(jake): Currently in jumble, whenever we iterate, we are overwriting
   // the entire spec, so we lose context of the original spec.
@@ -122,6 +123,7 @@ export async function generateCharmSuggestions(
       systemPrompt: system.version,
       userPrompt: prompt.version,
     },
+    cache,
   });
 
   const jsonString = parseTagFromResponse(response, "output");

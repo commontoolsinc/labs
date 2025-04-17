@@ -245,6 +245,7 @@ function useCodeEditor(
               spec: workingSpec,
             },
           },
+          cache: true,
         }).then((form) => {
           const newCharm = form.generation?.charm;
           if (!newCharm) {
