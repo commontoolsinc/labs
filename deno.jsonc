@@ -50,7 +50,8 @@
     "lineWidth": 80,
     "semiColons": true,
     "singleQuote": false,
-    "proseWrap": "always"
+    "proseWrap": "always",
+    "exclude": ["jumble/integration/cache/llm-api-cache/"]
   },
   "imports": {
     "@astral/astral": "jsr:@astral/astral",
