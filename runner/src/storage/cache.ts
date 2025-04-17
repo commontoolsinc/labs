@@ -27,7 +27,7 @@ import * as IDB from "./idb.ts";
 import * as Memory from "@commontools/memory/consumer";
 export * from "@commontools/memory/interface";
 import * as Codec from "@commontools/memory/codec";
-import { Channel, Publisher, RawCommand } from "./inspector.ts";
+import { Channel, Command, Publisher, RawCommand } from "./inspector.ts";
 import { isBrowser } from "@commontools/utils/env";
 
 export type { Result, Unit };
