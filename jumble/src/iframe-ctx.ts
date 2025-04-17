@@ -13,7 +13,7 @@ import {
   ReactivityLog,
   removeAction,
 } from "@commontools/runner";
-import { DEFAULT_IFRAME_MODEL, LLMClient } from "@commontools/llm";
+import { DEFAULT_IFRAME_MODELS, LLMClient } from "@commontools/llm";
 import { isObj } from "@commontools/utils";
 import {
   completeJob,
@@ -276,7 +276,7 @@ export const setupIframe = () =>
       console.log("onLLMRequest", payload, charmId, spaceName);
       const jsonPayload = JSON.parse(payload);
       if (!jsonPayload.model) {
-        jsonPayload.model = DEFAULT_IFRAME_MODEL;
+        jsonPayload.model = DEFAULT_IFRAME_MODELS;
       }
       if (!jsonPayload.cache) {
         jsonPayload.cache = true;
