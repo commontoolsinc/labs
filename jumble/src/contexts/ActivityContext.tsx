@@ -25,7 +25,7 @@ interface JobStartEvent extends BaseJobEvent {
   type: "job-start";
   status: string;
   title: string;
-  silent: boolean;
+  debug: boolean;
 }
 
 interface JobUpdateEvent extends BaseJobEvent {
@@ -73,6 +73,7 @@ export interface Activity {
   createdAt: Date;
   updatedAt: Date;
   isArchived?: boolean;
+  debug?: boolean;
 }
 
 // Job state maintained in the component
@@ -127,8 +128,7 @@ export function startJob(
   id: string,
   title: string,
   status: string,
-  payload?: Record<string, unknown>,
-  silent = false,
+  debug = false,
 ) {
   const jobEvent: JobStartEvent = {
     id,
@@ -136,7 +136,7 @@ export function startJob(
     type: "job-start",
     title,
     status,
-    silent,
+    debug,
   };
 
   globalThis.dispatchEvent(
@@ -346,7 +346,7 @@ export const ActivityProvider: React.FC<ActivityProviderProps> = (
             startedAt: now,
             createdAt: now,
             updatedAt: now,
-            isArchived: jobDetail.silent,
+            debug: jobDetail.debug,
           };
           updatedActivities[id] = jobObj;
         } else if (prevActivities[id] && prevActivities[id].type === "job") {

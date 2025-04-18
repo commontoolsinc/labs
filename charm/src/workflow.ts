@@ -799,6 +799,7 @@ export async function processWorkflow(
           jobId: form.meta.generationId,
           title: form.input.processedInput,
           status: "Initializing...",
+          debug: options.dryRun,
         },
       }),
     );

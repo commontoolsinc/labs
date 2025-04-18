@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   getElapsedTime,
@@ -39,8 +39,8 @@ interface ActivityStatusProps {
 const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
   // Use the activity context
   const {
-    activeItems,
-    archivedItems,
+    activeItems: unfilteredActiveItems,
+    archivedItems: unfilteredArchivedItems,
     runningJobs,
     showArchived,
     setShowArchived,
@@ -50,6 +50,14 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
     archiveAllCompleted,
     clearAllArchived,
   } = useActivityContext();
+
+  const activeItems = useMemo(() => {
+    return unfilteredActiveItems.filter((item) => !item.debug);
+  }, [unfilteredActiveItems]);
+
+  const archivedItems = useMemo(() => {
+    return unfilteredArchivedItems.filter((item) => !item.debug);
+  }, [unfilteredArchivedItems]);
 
   const navigate = useNavigate();
   const { charmManager } = useCharmManager();
