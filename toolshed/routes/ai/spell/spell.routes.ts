@@ -120,8 +120,8 @@ export const search = createRoute({
 export type SearchSchemaRoute = typeof search;
 
 export const caster = createRoute({
-  description: "OBSELETE: will be removed.",
-  path: "/ai/spell/caster",
+  description: "Get spells by schema.",
+  path: "/api/ai/spell/caster",
   method: "post",
   tags,
   request: {

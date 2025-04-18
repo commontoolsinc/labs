@@ -10,6 +10,7 @@ import { fulfill } from "./handlers/fulfill.ts";
 import { imagine } from "./handlers/imagine.ts";
 import { recast } from "./handlers/recast.ts";
 import { reuse } from "./handlers/reuse.ts";
+import { caster } from "./handlers/caster.ts";
 
 const router = createRouter();
 
@@ -29,6 +30,7 @@ const Router = router
   .openapi(routes.recast, recast)
   .openapi(routes.reuse, reuse)
   .openapi(routes.imagine, imagine)
+  .openapi(routes.caster, caster)
   .openapi(routes.fulfill, fulfill);
 
 export default Router;
