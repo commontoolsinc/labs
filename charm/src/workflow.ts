@@ -728,12 +728,17 @@ export async function processWorkflow(
     model?: string;
     onProgress?: (form: WorkflowForm) => void;
     cancellation?: { cancelled: boolean };
-    cache: boolean;
-  } = { cache: true },
+    cache?: boolean;
+  },
 ): Promise<WorkflowForm> {
   console.groupCollapsed("processWorkflow");
   const startTime = performance.now();
   const timings: Record<string, number> = {};
+
+  // default to cache
+  if (options.cache === undefined) {
+    options.cache = true;
+  }
 
   // Create a new form or use prefilled form
   let form = createWorkflowForm({

@@ -13,17 +13,7 @@ import { SpellRecord, WORKFLOWS } from "../../../charm/src/workflow.ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { EditorView } from "@codemirror/view";
-import {
-  completeJob,
-  failJob,
-  startJob,
-  updateJob,
-  useActivityContext,
-} from "@/contexts/ActivityContext.tsx";
-import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
-import { toArray } from "../../../../../../Library/Caches/deno/npm/registry.npmjs.org/@react-spring/shared/9.7.5/dist/react-spring_shared.modern.d.ts";
-import { useNavigate } from "react-router-dom";
-import { createPath } from "@/routes.ts";
+import { useActivityContext } from "@/contexts/ActivityContext.tsx";
 
 interface SpecPreviewProps {
   form: Partial<WorkflowForm>;
@@ -317,18 +307,27 @@ export function SpecPreview({
                         index,
                       ) => {
                         // Check if this spell is currently selected
-                        const isSelected = form.spellToCast?.charmId === charmId && 
-                                          form.spellToCast?.spellId === result.id;
-                        
+                        const isSelected =
+                          form.spellToCast?.charmId === charmId &&
+                          form.spellToCast?.spellId === result.id;
+
                         return (
                           <div
                             key={`${charmId}-${index}`}
-                            className={`border border-gray-300 p-2 cursor-pointer ${isSelected ? 'bg-gray-100' : 'bg-white hover:bg-gray-50'}`}
-                            onClick={() => onSelectedCastChange?.(charmId, result.id)}
+                            className={`border border-gray-300 p-2 cursor-pointer ${
+                              isSelected
+                                ? "bg-gray-100"
+                                : "bg-white hover:bg-gray-50"
+                            }`}
+                            onClick={() =>
+                              onSelectedCastChange?.(charmId, result.id)}
                           >
                             <div className="flex items-center">
                               <div className="mr-2 flex-shrink-0 w-4 h-4 border border-gray-400 rounded-full flex items-center justify-center">
-                                {isSelected && <div className="w-2 h-2 bg-gray-700 rounded-full"></div>}
+                                {isSelected && (
+                                  <div className="w-2 h-2 bg-gray-700 rounded-full">
+                                  </div>
+                                )}
                               </div>
                               <div className="font-medium text-sm">
                                 {getSpellPreviewName(result.spell)}

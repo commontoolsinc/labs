@@ -1,4 +1,4 @@
-import { fixRecipePrompt, DEFAULT_MODEL_NAME } from "@commontools/llm";
+import { DEFAULT_MODEL_NAME, fixRecipePrompt } from "@commontools/llm";
 import { Cell, getRecipe } from "@commontools/runner";
 import { Charm, CharmManager } from "./charm.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
@@ -54,8 +54,10 @@ export async function fixItCharm(
     userCode, // Send only the user code portion
     JSON.stringify(iframeRecipe.iframe.argumentSchema),
     error.message,
-    model,
-    true,
+    {
+      model,
+      cache: true,
+    },
   );
 
   // Inject the fixed user code back into the template

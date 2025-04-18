@@ -84,8 +84,7 @@ export async function fixRecipePrompt(
   code: string,
   schema: string,
   error: string,
-  model: string = DEFAULT_MODEL_NAME,
-  cache: boolean,
+  options: { model?: string; cache?: boolean },
 ) {
   const system = hydratePrompt(SYSTEM_PROMPT, {
     SPEC: spec,
@@ -97,6 +96,10 @@ export async function fixRecipePrompt(
     "recipe-fix-user",
     `Please fix the code. Remember to only return the user code portion, not the full template. Do not include any HTML, head, or body tags - just the JavaScript functions.`,
   );
+
+  const model = options.model || DEFAULT_MODEL_NAME;
+  const cache = options.cache || true;
+
   const response = await new LLMClient().sendRequest({
     model,
     system: system.text,

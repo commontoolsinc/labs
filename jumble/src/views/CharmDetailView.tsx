@@ -242,7 +242,6 @@ function useCodeEditor(
               spec: workingSpec,
             },
           },
-          cache: true,
         }).then((form) => {
           const newCharm = form.generation?.charm;
           if (!newCharm) {
@@ -337,6 +336,7 @@ function useCharmOperation() {
     loading: isPreviewLoading,
     model,
     setWorkflowType,
+    setSelectedSpellToCast,
   } = useLiveSpecPreview(
     input,
     charmManager,
@@ -451,6 +451,7 @@ function useCharmOperation() {
     userPreferredModel,
     setUserPreferredModel,
     setWorkflowType,
+    setSelectedSpellToCast,
     showVariants,
     setShowVariants,
     showPreview,
