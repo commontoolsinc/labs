@@ -304,7 +304,7 @@ async function handleNewCharm(
   if (!input) return;
 
   try {
-    const newCharm = await processWorkflow(
+    const form = await processWorkflow(
       input,
       ctx.charmManager,
       {
@@ -312,8 +312,10 @@ async function handleNewCharm(
         model: ctx.userPreferredModel,
       },
     );
-
-    navigateToCharm(ctx, newCharm);
+    const charm = form.generation?.charm;
+    if (charm) {
+      navigateToCharm(ctx, charm);
+    }
   } catch (error) {
     console.error("New charm operation error:", error);
   } finally {

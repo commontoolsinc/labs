@@ -136,10 +136,28 @@ export function useLiveSpecPreview(
     generatePreview(input, form);
   }, [input, currentCharm, model, charmManager]);
 
+  const setSelectedSpellToCast = useCallback(
+    (charmId: string, spellId: string) => {
+      const generationId = crypto.randomUUID();
+      currentGenerationRef.current = generationId;
+
+      const form = {
+        ...previewForm,
+        spellToCast: {
+          charmId,
+          spellId,
+        },
+      };
+      setPreviewForm(form);
+    },
+    [input, currentCharm, model, charmManager, previewForm],
+  );
+
   return {
     previewForm,
     loading,
     model,
     setWorkflowType,
+    setSelectedSpellToCast,
   };
 }

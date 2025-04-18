@@ -81,7 +81,8 @@ function CommandProcessor({
   const {
     previewForm,
     loading: isPreviewLoading,
-    setWorkflowType, // Add the setter function to allow changing workflow type manually
+    setWorkflowType,
+    setSelectedSpellToCast,
   } = useLiveSpecPreview(
     inputValue,
     charmManager, // Explicitly pass CharmManager instance
@@ -138,6 +139,7 @@ function CommandProcessor({
               visible
               floating
               onWorkflowChange={setWorkflowType}
+              onSelectedCastChange={setSelectedSpellToCast}
             />
 
             <Composer

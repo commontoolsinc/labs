@@ -13,7 +13,13 @@ import { SpellRecord, WORKFLOWS } from "../../../charm/src/workflow.ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { EditorView } from "@codemirror/view";
-import { completeJob, failJob, startJob, updateJob, useActivityContext } from "@/contexts/ActivityContext.tsx";
+import {
+  completeJob,
+  failJob,
+  startJob,
+  updateJob,
+  useActivityContext,
+} from "@/contexts/ActivityContext.tsx";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { toArray } from "../../../../../../Library/Caches/deno/npm/registry.npmjs.org/@react-spring/shared/9.7.5/dist/react-spring_shared.modern.d.ts";
 import { useNavigate } from "react-router-dom";
@@ -27,7 +33,7 @@ interface SpecPreviewProps {
   visible: boolean;
   floating?: boolean;
   onWorkflowChange?: (workflow: WorkflowType) => void;
-  onCastSpell?: (charmId: string, spellId: string) => void;
+  onSelectedCastChange?: (charmId: string, spellId: string) => void;
 }
 
 // Accordion component for collapsible sections
@@ -154,10 +160,11 @@ export function SpecPreview({
   visible,
   floating = false,
   onWorkflowChange,
+  onSelectedCastChange,
 }: SpecPreviewProps) {
   const hasContent =
     (loading || form.classification || form.plan?.steps || form.plan?.spec ||
-      form.results) &&
+      form.searchResults) &&
     visible;
 
   // Get the current generation ID from the form metadata
@@ -283,55 +290,12 @@ export function SpecPreview({
 
   // Create a SpellList component to display available spells
   const SpellList = () => {
-    const { charmManager } = useCharmManager();
-    const navigate = useNavigate();
-    if (!form.results?.castable) return null;
-
-    const handleCastSpell = async (targetCharmId: string, spellId: string) => {
-      const id = crypto.randomUUID();
-      startJob(id, "Cast spell", "Fetching components...");
-
-      const charm = await charmManager.get(targetCharmId);
-      const recipe = getRecipe(spellId);
-
-      if (!recipe) {
-        console.error("No recipe found for the spell", spellId);
-        failJob(id, "No recipe found!", spellId);
-        return;
-      }
-
-      if (!charm) {
-        console.error("No charm found for id", targetCharmId);
-        failJob(id, "No charm found!", targetCharmId);
-        return;
-      }
-
-      updateJob(id, 'Casting spell...')
-      const newCharm = await charmManager.runPersistent(
-        recipe,
-        charm,
-      );
-
-      const newCharmId = charmId(newCharm);
-      if (!newCharmId) {
-        console.error("No charm id found for the new charm");
-        failJob(id, "No charm id found!", 'New charm contains invalid data');
-        return;
-      }
-
-      completeJob(id, 'Charm created!', newCharm);
-      navigate(
-        createPath("charmShow", {
-          charmId: newCharmId,
-          replicaName: charmManager.getSpace(),
-        }),
-      );
-    };
+    if (!form.searchResults?.castable) return null;
 
     return (
       <div className="p-2 space-y-4">
         <div className="text-sm font-bold mb-2">AVAILABLE SPELLS</div>
-        {Object.entries(form.results.castable).map(
+        {Object.entries(form.searchResults.castable).map(
           ([charmId, spellsArray]) => {
             // Ensure spellsArray is an array
             const spells = Array.isArray(spellsArray) ? spellsArray : [];
@@ -355,7 +319,8 @@ export function SpecPreview({
                         <div
                           key={`${charmId}-${index}`}
                           className="border border-gray-300 rounded-md p-2 bg-white hover:bg-gray-50 cursor-pointer"
-                          onClick={() => handleCastSpell(charmId, result.id)}
+                          onClick={() =>
+                            onSelectedCastChange?.(charmId, result.id)}
                         >
                           <div className="flex justify-between items-center">
                             <div className="font-medium text-sm">
@@ -366,7 +331,7 @@ export function SpecPreview({
                               className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleCastSpell(charmId, result.id);
+                                onSelectedCastChange?.(charmId, result.id);
                               }}
                             >
                               Cast
@@ -407,7 +372,7 @@ export function SpecPreview({
   if (
     !form.plan?.spec && (!form.plan?.steps || form.plan?.steps.length === 0) &&
     !form.classification &&
-    !form.results &&
+    !form.searchResults &&
     !loading
   ) {
     return null;
@@ -483,7 +448,7 @@ export function SpecPreview({
                 )}
               </div>
               {/* Display SpellList when form.results is present */}
-              {form.results
+              {form.searchResults
                 ? <SpellList />
                 : loading
                 ? (

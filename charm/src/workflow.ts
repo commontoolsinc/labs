@@ -9,7 +9,7 @@
  * 5. Workflow steps and execution
  */
 
-import { Cell } from "@commontools/runner";
+import { Cell, getRecipe } from "@commontools/runner";
 import { Charm, charmId, CharmManager } from "./charm.ts";
 import { JSONSchema } from "@commontools/builder";
 import { classifyWorkflow, generateWorkflowPlan } from "@commontools/llm";
@@ -180,12 +180,22 @@ export async function classifyIntent(
   }
 
   if (!existingSpec || !existingSchema) {
+    if (
+      input.toLowerCase().indexOf("spell") !== -1 &&
+      input.toLowerCase().indexOf("cast") !== -1
+    ) {
+      return {
+        workflowType: "cast-spell",
+        confidence: 1.0,
+        reasoning: "You mentioned casting spells!",
+      };
+    }
+
     return {
       workflowType: "imagine",
       confidence: 1.0,
       reasoning:
         "Automatically classified as 'imagine' because there is nothing to refer to (either no current charm or no iframe recipe).",
-      enhancedPrompt: input,
     };
   }
 
@@ -402,11 +412,16 @@ export interface WorkflowForm {
     charm: Cell<Charm>;
   } | null;
 
-  results: {
+  searchResults: {
     castable: Record<
       string,
       { id: string; spell: SpellRecord; similarity: number }[]
     >;
+  } | null;
+
+  spellToCast: {
+    charmId: string;
+    spellId: string;
   } | null;
 
   // Metadata and workflow state
@@ -449,7 +464,8 @@ export function createWorkflowForm(
     classification: null,
     plan: null,
     generation: null,
-    results: null,
+    searchResults: null,
+    spellToCast: null,
     meta: {
       isComplete: false,
       modelId,
@@ -753,6 +769,8 @@ export async function processWorkflow(
         classification: options.prefill?.classification || form.classification,
         plan: options.prefill?.plan || form.plan,
         generation: options.prefill?.generation || form.generation,
+        searchResults: options.prefill?.searchResults || form.searchResults,
+        spellToCast: options.prefill?.spellToCast || form.spellToCast,
       };
     }
 
@@ -804,76 +822,135 @@ export async function processWorkflow(
 
     checkCancellation();
 
-    // Spell search flow
+    // Spell search flow, TODO(bf): extract
     if (form.classification?.workflowType === "cast-spell") {
-      const schemas: JSONSchema[] = [];
-      const refs = Object.values(form.input.references);
-
-      if (refs.length === 0) {
-        throw new Error("No references found");
-      }
-
-      refs.forEach((cell: Cell<Charm>) => {
-        const schema = cell.schema;
-        if (schema) {
-          schemas.push(schema);
-        }
-      });
-
-      const castable: Record<
-        string,
-        { id: string; spell: SpellRecord; similarity: number }[]
-      > = {};
-
-      globalThis.dispatchEvent(
-        new CustomEvent("job-update", {
-          detail: {
-            type: "job-update",
-            jobId: form.meta.generationId,
-            title: form.input.processedInput,
-            status: `Searching for spells...`,
-          },
-        }),
-      );
-
-      for (const [key, charm] of Object.entries(form.input.references)) {
-        const schema = charm.schema?.properties;
-        const id = charmId(charm);
-        if (!id) continue;
-
-        castable[id] = [];
-        const response = await fetch("/api/ai/spell/find-by-schema", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            schema,
+      if (form.searchResults && form.spellToCast) {
+        globalThis.dispatchEvent(
+          new CustomEvent("job-update", {
+            detail: {
+              type: "job-update",
+              jobId: form.meta.generationId,
+              title: form.input.processedInput,
+              status: `Fetching ingredients...`,
+            },
           }),
+        );
+        const charm = await charmManager.get(form.spellToCast.charmId);
+
+        if (!charm) {
+          throw new Error("No charm found for id: " + form.spellToCast.charmId);
+        }
+
+        await charmManager.syncRecipeBlobby(form.spellToCast.spellId);
+        const recipe = getRecipe(form.spellToCast.spellId);
+
+        if (!recipe) {
+          throw new Error(
+            "No recipe found for the spell: " + form.spellToCast.spellId,
+          );
+        }
+
+        globalThis.dispatchEvent(
+          new CustomEvent("job-update", {
+            detail: {
+              type: "job-update",
+              jobId: form.meta.generationId,
+              title: form.input.processedInput,
+              status: `Casting spell...`,
+            },
+          }),
+        );
+        const newCharm = await charmManager.runPersistent(
+          recipe,
+          charm,
+        );
+
+        globalThis.dispatchEvent(
+          new CustomEvent("job-complete", {
+            detail: {
+              type: "job-complete",
+              jobId: form.meta.generationId,
+              title: form.input.processedInput,
+              status: `Charm created!`,
+            },
+          }),
+        );
+
+        form.generation = {
+          charm: newCharm,
+        };
+
+        return form;
+      } else {
+        const schemas: JSONSchema[] = [];
+        const refs = Object.values(form.input.references);
+
+        if (refs.length === 0) {
+          throw new Error("No references found");
+        }
+
+        refs.forEach((cell: Cell<Charm>) => {
+          const schema = cell.schema;
+          if (schema) {
+            schemas.push(schema);
+          }
         });
 
-        const result = await response.json();
-        for (const spell of result.argument) {
-          castable[id].push(spell);
+        const castable: Record<
+          string,
+          { id: string; spell: SpellRecord; similarity: number }[]
+        > = {};
+
+        globalThis.dispatchEvent(
+          new CustomEvent("job-update", {
+            detail: {
+              type: "job-update",
+              jobId: form.meta.generationId,
+              title: form.input.processedInput,
+              status: `Searching for spells...`,
+            },
+          }),
+        );
+
+        for (const [key, charm] of Object.entries(form.input.references)) {
+          const schema = charm.schema?.properties;
+          const id = charmId(charm);
+          if (!id) continue;
+
+          castable[id] = [];
+          const response = await fetch("/api/ai/spell/find-by-schema", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              schema,
+            }),
+          });
+
+          const result = await response.json();
+          for (const spell of result.argument) {
+            castable[id].push(spell);
+          }
         }
+
+        form.searchResults = {
+          castable,
+        };
+
+        globalThis.dispatchEvent(
+          new CustomEvent("job-complete", {
+            detail: {
+              type: "job-complete",
+              jobId: form.meta.generationId,
+              title: form.input.processedInput,
+              status: `Found ${Object.keys(castable).length} results!`,
+            },
+          }),
+        );
+
+        return form;
       }
-
-      form.results = {
-        castable,
-      };
-
-      globalThis.dispatchEvent(
-        new CustomEvent("job-complete", {
-          detail: {
-            type: "job-complete",
-            jobId: form.meta.generationId,
-            title: form.input.processedInput,
-            status: `Found ${Object.keys(castable).length} results!`,
-          },
-        }),
-      );
-
-      return form;
     }
 
     // Step 3: Planning if not already planned

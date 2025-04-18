@@ -98,6 +98,7 @@ interface CharmOperationContextType {
   handlePerformOperation: () => void;
   handleCancelVariants: () => void;
   setWorkflowType: (workflowType: WorkflowType) => void;
+  setSelectedSpellToCast: (charmId: string, spellId: string) => void;
   performOperation: (
     charmId: string,
     input: string,
@@ -816,6 +817,7 @@ const OperationTab = () => {
     handlePerformOperation,
     isPreviewLoading,
     setWorkflowType,
+    setSelectedSpellToCast,
     previewForm,
   } = useCharmOperationContext();
 
@@ -870,6 +872,7 @@ const OperationTab = () => {
           loading={isPreviewLoading}
           visible={showPreview && input.trim().length >= 16}
           onWorkflowChange={setWorkflowType}
+          onSelectedCastChange={setSelectedSpellToCast}
         />
         <Variants />
         <Suggestions />
