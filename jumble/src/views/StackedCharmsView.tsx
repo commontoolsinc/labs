@@ -4,7 +4,7 @@ import { type StackedCharmsRouteParams } from "@/routes.ts";
 import { LoadingSpinner } from "@/components/Loader.tsx";
 import { useCharms } from "@/hooks/use-charm.ts";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
-import { charmId } from "@/utils/charms.ts";
+import { charmId } from "@commontools/charm";
 
 function StackedCharmsView() {
   const { charmIds: paramCharmIds } = useParams<StackedCharmsRouteParams>();

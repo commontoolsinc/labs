@@ -1,5 +1,6 @@
 export {
   type Charm,
+  charmId,
   charmListSchema,
   CharmManager,
   charmSchema,

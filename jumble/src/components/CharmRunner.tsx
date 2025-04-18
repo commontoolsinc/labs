@@ -1,13 +1,13 @@
 import React, { useMemo, useRef } from "react";
 import { render, type VNode } from "@commontools/html";
 import { UI } from "@commontools/builder";
-import { charmSchema, fixItCharm } from "@commontools/charm";
+import { charmId, charmSchema, fixItCharm } from "@commontools/charm";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { useNavigate } from "react-router-dom";
 import { LuX } from "react-icons/lu";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import { createPath } from "@/routes.ts";
-import { Cell, Charm, charmId } from "@/utils/charms.ts";
+import { Cell, Charm } from "@/utils/charms.ts";
 import { notify } from "@/contexts/ActivityContext.tsx";
 
 interface CharmLoaderProps {

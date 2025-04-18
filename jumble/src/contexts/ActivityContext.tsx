@@ -5,7 +5,8 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { WorkflowForm } from "@commontools/charm";
+import { Charm, WorkflowForm } from "@commontools/charm";
+import { Cell } from "@commontools/runner";
 
 // Type definitions for our activity events
 type ActivityId = string;
@@ -24,7 +25,6 @@ interface JobStartEvent extends BaseJobEvent {
   type: "job-start";
   status: string;
   title: string;
-  payload?: Record<string, unknown>;
   silent: boolean;
 }
 
@@ -32,21 +32,18 @@ interface JobUpdateEvent extends BaseJobEvent {
   type: "job-update";
   status: string;
   progress?: number; // Optional progress percentage (0-100)
-  payload?: Record<string, unknown>;
 }
 
 interface JobCompleteEvent extends BaseJobEvent {
   type: "job-complete";
   status: string;
-  result?: WorkflowForm;
-  payload?: Record<string, unknown>;
+  result?: Cell<Charm>;
 }
 
 interface JobFailedEvent extends BaseJobEvent {
   type: "job-failed";
   status: string;
   error: string;
-  payload?: Record<string, unknown>;
 }
 
 // Notification-specific event
@@ -59,7 +56,6 @@ interface NotificationEvent extends BaseActivityEvent {
     label: string;
     onClick: () => void;
   };
-  payload?: Record<string, unknown>;
 }
 
 type ActivityEvent =
@@ -87,7 +83,7 @@ export interface Job extends Activity {
   state: "running" | "completed" | "failed";
   progress?: number;
   error?: string;
-  result?: WorkflowForm;
+  result?: Cell<Charm>;
   startedAt: Date;
   completedAt?: Date;
 }
@@ -140,7 +136,6 @@ export function startJob(
     type: "job-start",
     title,
     status,
-    payload,
     silent,
   };
 
@@ -155,7 +150,6 @@ export function updateJob(
   id: string,
   status: string,
   progress?: number,
-  payload?: Record<string, unknown>,
 ) {
   const jobEvent: JobUpdateEvent = {
     id,
@@ -163,7 +157,6 @@ export function updateJob(
     type: "job-update",
     status,
     progress,
-    payload,
   };
 
   globalThis.dispatchEvent(
@@ -174,8 +167,7 @@ export function updateJob(
 export function completeJob(
   id: string,
   status: string,
-  result?: WorkflowForm,
-  payload?: Record<string, unknown>,
+  result?: Cell<Charm>,
 ) {
   const jobEvent: JobCompleteEvent = {
     id,
@@ -183,7 +175,6 @@ export function completeJob(
     type: "job-complete",
     status,
     result,
-    payload,
   };
 
   globalThis.dispatchEvent(
@@ -203,7 +194,6 @@ export function failJob(
     type: "job-failed",
     status,
     error,
-    payload,
   };
 
   globalThis.dispatchEvent(

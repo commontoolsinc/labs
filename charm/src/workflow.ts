@@ -10,7 +10,7 @@
  */
 
 import { Cell } from "@commontools/runner";
-import { Charm, CharmManager } from "./charm.ts";
+import { Charm, charmId, CharmManager } from "./charm.ts";
 import { JSONSchema } from "@commontools/builder";
 import { classifyWorkflow, generateWorkflowPlan } from "@commontools/llm";
 import { iterate } from "./iterate.ts";
@@ -405,7 +405,7 @@ export interface WorkflowForm {
   results: {
     castable: Record<
       string,
-      { id: string; spell: SpellRecord; similarity: float }[]
+      { id: string; spell: SpellRecord; similarity: number }[]
     >;
   } | null;
 
@@ -820,7 +820,10 @@ export async function processWorkflow(
         }
       });
 
-      const castable: Record<string, SpellRecord[]> = {};
+      const castable: Record<
+        string,
+        { id: string; spell: SpellRecord; similarity: number }[]
+      > = {};
 
       globalThis.dispatchEvent(
         new CustomEvent("job-update", {
@@ -835,8 +838,10 @@ export async function processWorkflow(
 
       for (const [key, charm] of Object.entries(form.input.references)) {
         const schema = charm.schema?.properties;
+        const id = charmId(charm);
+        if (!id) continue;
 
-        castable[key] = [];
+        castable[id] = [];
         const response = await fetch("/api/ai/spell/find-by-schema", {
           method: "POST",
           headers: {
@@ -849,7 +854,7 @@ export async function processWorkflow(
 
         const result = await response.json();
         for (const spell of result.argument) {
-          castable[key].push(spell);
+          castable[id].push(spell);
         }
       }
 

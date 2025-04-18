@@ -11,9 +11,8 @@ import {
   renameCharm,
   WorkflowForm,
 } from "@commontools/charm";
-import { modifyCharm, processWorkflow } from "@commontools/charm";
+import { charmId, modifyCharm } from "@commontools/charm";
 import type { NavigateFunction } from "react-router-dom";
-import { charmId } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
 import { isStream } from "@commontools/runner";
 import { createPath, createPathWithHash, ROUTES } from "@/routes.ts";
@@ -400,10 +399,10 @@ async function handleImportJSON(ctx: CommandContext) {
       `${title}\n\n Look at the attached JSON data and use it to create a new charm.\n\n${
         JSON.stringify(data)
       }`,
-      false,
+      ctx.charmManager,
       {
-        charmManager: ctx.charmManager,
         cache: true,
+        dryRun: false,
       },
     );
 

@@ -3,7 +3,7 @@ import { NavLink, useParams } from "react-router-dom";
 import { NAME } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
-import { charmId } from "@/utils/charms.ts";
+import { charmId } from "@commontools/charm";
 import { createPath } from "@/routes.ts";
 import { type CharmRouteParams } from "@/routes.ts";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";

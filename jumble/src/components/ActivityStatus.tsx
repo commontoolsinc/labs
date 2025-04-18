@@ -8,7 +8,7 @@ import {
 } from "@/contexts/ActivityContext.tsx";
 import { useNavigate } from "react-router-dom";
 import { createPath } from "@/routes.ts";
-import { charmId } from "@/utils/charms.ts";
+import { charmId } from "@commontools/charm";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 
@@ -200,12 +200,12 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
         {/* Action buttons for different activity types */}
         {activity.type === "job" &&
           (activity as Job).state === "completed" &&
-          (activity as Job).result?.generation?.charm && (
+          (activity as Job).result && (
           <button
             type="button"
             onClick={() => {
               navigate(createPath("charmShow", {
-                charmId: charmId((activity as Job).result!.generation!.charm)!,
+                charmId: charmId((activity as Job).result!)!,
                 replicaName: charmManager.getSpaceName(),
               }));
             }}

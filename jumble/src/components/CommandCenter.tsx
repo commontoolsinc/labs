@@ -21,10 +21,10 @@ import {
 import { WorkflowForm } from "@commontools/charm";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
-import { charmId, getMentionableCharms } from "@/utils/charms.ts";
+import { getMentionableCharms } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
-import { Charm } from "@commontools/charm";
+import { Charm, charmId } from "@commontools/charm";
 import { useLiveSpecPreview } from "@/hooks/use-live-spec-preview.ts";
 import { SpecPreview } from "@/components/SpecPreview.tsx";
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";

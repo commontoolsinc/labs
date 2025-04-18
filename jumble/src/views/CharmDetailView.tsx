@@ -1,13 +1,12 @@
 import {
   Charm,
-  ExecutionPlan,
+  charmId,
   extractUserCode,
   extractVersionTag,
   generateNewRecipeVersion,
   getIframeRecipe,
   IFrameRecipe,
   injectUserCode,
-  iterate,
   modifyCharm,
   processWorkflow,
   WorkflowForm,
@@ -39,7 +38,6 @@ import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { markdown } from "@codemirror/lang-markdown";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
-import { charmId } from "@/utils/charms.ts";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import {
   type CharmSuggestion,
@@ -81,8 +79,6 @@ interface CharmOperationContextType {
   userPreferredModel: LanguageModelId;
   setUserPreferredModel: (model: LanguageModelId) => void;
   setInput: (input: string) => void;
-  classificationLoading: boolean; // Loading state for workflow classification
-  planLoading: boolean; // Loading state for plan generation
   showVariants: boolean;
   setShowVariants: (show: boolean) => void;
   showPreview: boolean;
@@ -338,8 +334,6 @@ function useCharmOperation() {
   const {
     previewForm,
     loading: isPreviewLoading,
-    classificationLoading,
-    planLoading,
     model,
     setWorkflowType,
   } = useLiveSpecPreview(
@@ -456,8 +450,6 @@ function useCharmOperation() {
     userPreferredModel,
     setUserPreferredModel,
     setWorkflowType,
-    classificationLoading, // Add the classification loading state
-    planLoading, // Add the plan loading state
     showVariants,
     setShowVariants,
     showPreview,
@@ -823,9 +815,7 @@ const OperationTab = () => {
     loading,
     handlePerformOperation,
     isPreviewLoading,
-    classificationLoading,
     setWorkflowType,
-    planLoading,
     previewForm,
   } = useCharmOperationContext();
 
@@ -878,8 +868,6 @@ const OperationTab = () => {
         <SpecPreview
           form={previewForm}
           loading={isPreviewLoading}
-          classificationLoading={classificationLoading}
-          planLoading={planLoading}
           visible={showPreview && input.trim().length >= 16}
           onWorkflowChange={setWorkflowType}
         />

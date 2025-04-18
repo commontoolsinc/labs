@@ -123,7 +123,7 @@ function candidates(
       console.log("Consumes match score:", argumentScore);
       if (argumentScore > 0) {
         argument.push({
-          id: key,
+          id: key.replace("spell-", ""),
           spell: spells[key] as Spell,
           similarity: argumentScore + tagScore,
         });
@@ -137,7 +137,7 @@ function candidates(
       console.log("Produces match score:", resultScore);
       if (resultScore > 0) {
         result.push({
-          id: key,
+          id: key.replace("spell-", ""),
           spell: spells[key] as Spell,
           similarity: resultScore + tagScore,
         });

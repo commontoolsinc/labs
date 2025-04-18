@@ -108,8 +108,8 @@ export interface ModelOption {
 }
 
 interface ModelSelectorProps {
-  value: string;
-  onChange: (value: string) => void;
+  value: LanguageModelId;
+  onChange: (value: LanguageModelId) => void;
   size?: "small" | "medium"; // Size variant
   showPresets?: boolean; // Whether to show preset section
   className?: string; // Additional classes
@@ -125,7 +125,10 @@ export function useUserPreferredModel() {
     { type: "string" },
   );
 
-  return { userPreferredModel, setUserPreferredModel };
+  return {
+    userPreferredModel: userPreferredModel as LanguageModelId,
+    setUserPreferredModel,
+  };
 }
 
 /**

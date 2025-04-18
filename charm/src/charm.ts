@@ -32,6 +32,11 @@ import { storage } from "@commontools/runner";
 import { type Session } from "@commontools/identity";
 import { isObj } from "@commontools/utils";
 
+export function charmId(charm: Charm): string | undefined {
+  const id = getEntityId(charm);
+  return id ? id["/"] : undefined;
+}
+
 export type Charm = {
   [NAME]?: string;
   [UI]?: any;
