@@ -288,7 +288,7 @@ export function SpecPreview({
     (form.classification?.confidence ?? 0) * 100,
   );
 
-  // Create a SpellList component to display available spells
+  // Create a SpellList component to display available spells as radio button-like options
   const SpellList = () => {
     if (!form.searchResults?.castable) return null;
 
@@ -311,54 +311,52 @@ export function SpecPreview({
                     </div>
                   )
                   : (
-                    <div className="grid grid-cols-1 gap-2">
+                    <div className="grid grid-cols-1 gap-px">
                       {spells.map((
                         result,
                         index,
-                      ) => (
-                        <div
-                          key={`${charmId}-${index}`}
-                          className="border border-gray-300 rounded-md p-2 bg-white hover:bg-gray-50 cursor-pointer"
-                          onClick={() =>
-                            onSelectedCastChange?.(charmId, result.id)}
-                        >
-                          <div className="flex justify-between items-center">
-                            <div className="font-medium text-sm">
+                      ) => {
+                        // Check if this spell is currently selected
+                        const isSelected = form.spellToCast?.charmId === charmId && 
+                                          form.spellToCast?.spellId === result.id;
+                        
+                        return (
+                          <div
+                            key={`${charmId}-${index}`}
+                            className={`border border-gray-300 p-2 cursor-pointer ${isSelected ? 'bg-gray-100' : 'bg-white hover:bg-gray-50'}`}
+                            onClick={() => onSelectedCastChange?.(charmId, result.id)}
+                          >
+                            <div className="flex items-center">
+                              <div className="mr-2 flex-shrink-0 w-4 h-4 border border-gray-400 rounded-full flex items-center justify-center">
+                                {isSelected && <div className="w-2 h-2 bg-gray-700 rounded-full"></div>}
+                              </div>
+                              <div className="font-medium text-sm">
+                                {getSpellPreviewName(result.spell)}
+                              </div>
+                            </div>
+                            <div className="text-xs text-gray-600 mt-1 ml-6">
                               {getSpellPreviewName(result.spell)}
                             </div>
-                            <button
-                              type="button"
-                              className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onSelectedCastChange?.(charmId, result.id);
-                              }}
-                            >
-                              Cast
-                            </button>
+                            {result.spell.recipeName && (
+                              <div className="text-xs text-gray-500 mt-1 ml-6 line-clamp-2">
+                                {result.spell.recipeName}
+                              </div>
+                            )}
+                            {result.spell.blobCreatedAt && (
+                              <div className="flex items-center text-xs text-gray-500 mt-2 ml-6">
+                                <span className="mr-1">Created:</span>
+                                {new Date(result.spell.blobCreatedAt)
+                                  .toLocaleDateString()}
+                                {result.spell.blobAuthor && (
+                                  <span className="ml-2">
+                                    by {result.spell.blobAuthor}
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </div>
-                          <div className="text-xs text-gray-600 mt-1">
-                            {getSpellPreviewName(result.spell)}
-                          </div>
-                          {result.spell.recipeName && (
-                            <div className="text-xs text-gray-500 mt-1 line-clamp-2">
-                              {result.spell.recipeName}
-                            </div>
-                          )}
-                          {result.spell.blobCreatedAt && (
-                            <div className="flex items-center text-xs text-gray-500 mt-2">
-                              <span className="mr-1">Created:</span>
-                              {new Date(result.spell.blobCreatedAt)
-                                .toLocaleDateString()}
-                              {result.spell.blobAuthor && (
-                                <span className="ml-2">
-                                  by {result.spell.blobAuthor}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
               </div>
