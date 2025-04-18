@@ -175,6 +175,7 @@ export const SchemaQuery = invocation(
   z.object({
     selectSchema: SchemaSelector,
     since: z.number().optional(),
+    subscribe: z.boolean().optional(),
   }),
 );
 

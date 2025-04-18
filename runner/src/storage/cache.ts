@@ -10,6 +10,7 @@ import type {
   QueryError,
   Result,
   Revision,
+  SchemaContext,
   State,
   The,
   TransactionError,
@@ -263,15 +264,18 @@ class RevisionAddress {
 }
 
 class PullQueue {
-  constructor(public members: Map<string, FactAddress> = new Map()) {
+  constructor(
+    public members: Map<string, [FactAddress, SchemaContext?]> = new Map(),
+  ) {
   }
-  add(entries: Iterable<FactAddress>) {
-    for (const entry of entries) {
-      this.members.set(toKey(entry), entry);
+  add(entries: Iterable<[FactAddress, SchemaContext?]>) {
+    // TODO(@ubik2) Ensure the schema context matches
+    for (const [entry, schema] of entries) {
+      this.members.set(toKey(entry), [entry, schema]);
     }
   }
 
-  consume(): FactAddress[] {
+  consume(): [FactAddress, SchemaContext?][] {
     const entries = [...this.members.values()];
     this.members.clear();
     return entries;
@@ -344,16 +348,15 @@ export class Replica {
      */
     public nursery: Nursery = new Nursery(),
     public queue: PullQueue = new PullQueue(),
-    public channel: BroadcastChannel = new globalThis.BroadcastChannel(
-      `idb:${space}`,
-    ),
     public pullRetryLimit: number = 100,
+    public schemaTracker = new Map<string, Set<string>>(),
+    public useSchemaQueries: boolean = false,
   ) {
-    channel.addEventListener("message", this);
     this.pull = this.pull.bind(this);
   }
 
   async poll() {
+    // Poll re-fetches the commit log, then subscribes to that
     const query = this.remote.query({
       select: {
         [this.space]: {
@@ -372,19 +375,6 @@ export class Replica {
     }
   }
 
-  handleEvent(event: Event) {
-    switch (event.type) {
-      case "message":
-        return this.onMessage(event as MessageEvent);
-    }
-  }
-  onMessage(event: MessageEvent) {
-    const { put } = event.data;
-    if (put) {
-      this.heap.merge(put, Replica.put);
-    }
-  }
-
   /**
    * Pulls requested entries from the remote source and updates both in memory
    * cache and local store so they will be available for future reads. If
@@ -392,7 +382,7 @@ export class Replica {
    * local store in this session.
    */
   async pull(
-    entries: FactAddress[] = this.queue.consume(),
+    entries: [FactAddress, SchemaContext?][] = this.queue.consume(),
   ): Promise<
     Result<
       Selection<FactAddress, Revision<State>>,
@@ -407,20 +397,44 @@ export class Replica {
 
     // Otherwise we build a query selector to fetch requested entries from the
     // remote.
-    const selector = {};
-    for (const { the, of } of entries) {
-      Changes.set(selector, [of], the, {});
+    const schemaSelector = {};
+    const querySelector = {};
+    for (const [{ the, of }, schemaContext] of entries) {
+      if (this.useSchemaQueries && schemaContext !== undefined) {
+        Changes.set(schemaSelector, [of, the], "_", {
+          path: [],
+          schemaContext: schemaContext,
+        });
+      } else {
+        Changes.set(querySelector, [of], the, {});
+      }
     }
-    const query = this.remote.query({ select: selector });
 
-    // If query fails we propagate the error.
-    const { error } = await query.promise;
-    if (error) {
-      return { error };
+    let fetchedEntries: [Revision<State>, SchemaContext | undefined][] = [];
+    // Run all our schema queries first
+    if (Object.entries(schemaSelector).length > 0) {
+      const query = this.remote.query({
+        selectSchema: schemaSelector,
+        subscribe: true,
+      });
+      const { error } = await query.promise;
+      // If query fails we propagate the error.
+      if (error) {
+        return { error };
+      }
+      fetchedEntries = query.schemaFacts;
     }
-
-    // We store fetched entries into the heap.
-    const fetched = query.facts;
+    // Now run our regular queries (this will include our commit+json)
+    if (Object.entries(querySelector).length > 0) {
+      const query = this.remote.query({ select: querySelector });
+      const { error } = await query.promise;
+      // If query fails we propagate the error.
+      if (error) {
+        return { error };
+      }
+      fetchedEntries = [...fetchedEntries, ...query.schemaFacts];
+    }
+    const fetched = fetchedEntries.map(([fact, _schema]) => fact);
     this.heap.merge(fetched, Replica.put);
 
     // Remote may not have all the requested entries. We denitrify them by
@@ -430,7 +444,7 @@ export class Replica {
     const notFound = [];
     const revisions = new Map();
     if (fetched.length < entries.length) {
-      for (const entry of entries) {
+      for (const [entry, _schema] of entries) {
         if (!this.get(entry)) {
           // Note we use `-1` as `since` timestamp so that any change will appear greater.
           const revision = { ...unclaimed(entry), since: -1 };
@@ -440,8 +454,17 @@ export class Replica {
       }
     }
 
-    for (const revision of fetched) {
-      revisions.set({ the: revision.the, of: revision.of }, revision);
+    for (const [revision, schema] of fetchedEntries) {
+      const factAddress = { the: revision.the, of: revision.of };
+      revisions.set(factAddress, revision);
+      if (schema !== undefined) {
+        const schemaRef = refer(schema).toString();
+        const factKey = toKey(factAddress);
+        if (!this.schemaTracker.has(factKey)) {
+          this.schemaTracker.set(factKey, new Set<string>());
+        }
+        this.schemaTracker.get(factKey)?.add(schemaRef);
+      }
     }
 
     // Add notFound entries to the heap and also persist them in the cache.
@@ -461,7 +484,7 @@ export class Replica {
    * be fetched from the remote.
    */
   async load(
-    entries: FactAddress[],
+    entries: [FactAddress, SchemaContext?][],
   ): Promise<
     Result<
       Selection<FactAddress, Revision<State>>,
@@ -469,15 +492,25 @@ export class Replica {
     >
   > {
     // First we identify entries that we have need to load from the store.
-    const need = [];
-    for (const address of entries) {
+    const need: [FactAddress, SchemaContext?][] = [];
+    for (const [address, schema] of entries) {
       if (!this.get(address)) {
-        need.push(address);
+        need.push([address, schema]);
+      } else if (schema !== undefined) {
+        // Even though we have our root doc in local store, we may need
+        // to re-issue our query, since our cached copy may have been run with a
+        // different schema, and thus have different linked documents.
+        const schemaRef = refer(schema).toString();
+        const key = toKey(address);
+        if (!this.schemaTracker.get(key)?.has(schemaRef)) {
+          need.push([address, schema]);
+        }
       }
     }
+
     // We also include the commit entity to keep track of the current head.
     if (!this.get({ the, of: this.space })) {
-      need.unshift({ the, of: this.space });
+      need.unshift([{ the, of: this.space }, undefined]);
     }
 
     // If all the entries were already loaded we don't need to do anything
@@ -487,7 +520,12 @@ export class Replica {
     }
 
     // Otherwise we attempt pull needed entries from the local store.
-    const { ok: pulled, error } = await this.cache.pull(need);
+    // We only do this for entries without a schema, since we'll want the server
+    // to track our subscription for the entries with a schema.
+    const schemaless = need
+      .filter(([_addr, schema]) => schema === undefined)
+      .map(([addr, _schema]) => addr);
+    const { ok: pulled, error } = await this.cache.pull(schemaless);
 
     if (error) {
       return { error };
@@ -498,6 +536,7 @@ export class Replica {
       // If number of items pulled from cache is less than number of needed items
       // we did not have everything we needed in cache, in which case we will
       // have to wait until fetch is complete.
+      // TODO(@ubik2) still need to add since field
       if (pulled.size < need.length) {
         return await this.pull(need);
       } //
@@ -506,7 +545,6 @@ export class Replica {
       else {
         this.queue.add(need);
         this.sync();
-
         return { ok: pulled };
       }
     }
@@ -545,7 +583,9 @@ export class Replica {
   > {
     // First we pull all the affected entries into heap so we can build a
     // transaction that is aware of latest state.
-    const { error } = await this.load(changes);
+    const { error } = await this.load(
+      changes.map((change) => [change, undefined]),
+    );
     if (error) {
       return { error };
     } else {
@@ -649,6 +689,11 @@ export interface RemoteStorageProviderSettings {
    * abort.
    */
   connectionTimeout: number;
+
+  /**
+   * Flag to enable or disable remote schema subscriptions
+   */
+  useSchemaQueries: boolean;
 }
 
 export interface RemoteStorageProviderOptions {
@@ -670,6 +715,7 @@ export interface RemoteStorageProviderOptions {
 const defaultSettings: RemoteStorageProviderSettings = {
   maxSubscriptionsPerSpace: 50_000,
   connectionTimeout: 30_000,
+  useSchemaQueries: false,
 };
 
 export class Provider implements StorageProvider {
@@ -736,6 +782,7 @@ export class Provider implements StorageProvider {
     } else {
       const session = this.session.mount(space);
       const replica = new Replica(space, session);
+      replica.useSchemaQueries = this.settings.useSchemaQueries;
       replica.poll();
       this.spaces.set(space, replica);
       return replica;
@@ -779,14 +826,18 @@ export class Provider implements StorageProvider {
     };
 
     workspace.subscribe(address, subscriber);
-    this.workspace.load([address]);
+    this.workspace.load([[address, undefined]]);
 
     return () => workspace.unsubscribe(address, subscriber);
   }
-  sync(entityId: EntityId) {
+  sync(
+    entityId: EntityId,
+    expectedInStorage?: boolean,
+    schemaContext?: SchemaContext,
+  ) {
     const { the } = this;
     const of = Provider.toEntity(entityId);
-    return this.workspace.load([{ the, of }]);
+    return this.workspace.load([[{ the, of }, schemaContext]]);
   }
 
   get<T = any>(entityId: EntityId): StorageValue<T> | undefined {

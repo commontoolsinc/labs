@@ -10,15 +10,23 @@ import { idle } from "./scheduler.ts";
 import { isStatic, markAsStatic } from "@commontools/builder";
 import { StorageProvider, StorageValue } from "./storage/base.ts";
 import { RemoteStorageProvider } from "./storage/remote.ts";
-import { Provider as CachedStorageProvider } from "./storage/cache.ts";
+import {
+  Provider as CachedStorageProvider,
+  RemoteStorageProviderSettings,
+} from "./storage/cache.ts";
 import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
 import { VolatileStorageProvider } from "./storage/volatile.ts";
 import { Signer } from "@commontools/identity";
 import { isBrowser } from "@commontools/utils/env";
 import { sleep } from "@commontools/utils/sleep";
 import { TransactionResult } from "@commontools/memory";
+import { refer } from "@commontools/memory/reference";
 import { defer } from "@commontools/utils";
-import { SchemaContext } from "@commontools/memory/interface";
+import {
+  Entity,
+  SchemaContext,
+  SchemaNone,
+} from "@commontools/memory/interface";
 
 export function log(fn: () => any[]) {
   debug(() => {
@@ -189,6 +197,9 @@ class StorageImpl implements Storage {
   // Any doc here is being synced or in the process of spinning up syncing.
   // See also docIsLoading, which is a promise while the document is loading,
   // and is deleted after it is loaded.
+  // FIXME(@ubik2) All four of these should probably be keyed by a combination of a doc and a schema
+  // If we load the same entity with different schemas, we want to track their resolution
+  // differently. If we only use one schema per doc, this will work ok.
   private docIsSyncing = new Set<DocImpl<any>>();
 
   // Map from doc to promise of loading doc, set at stage 2. Resolves when
@@ -306,7 +317,7 @@ class StorageImpl implements Storage {
       // environment variable override this.
       const type = this.remoteStorageUrl?.protocol === "volatile:"
         ? "volatile"
-        : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "remote");
+        : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "cached");
 
       if (type === "remote") {
         if (!this.remoteStorageUrl) {
@@ -331,6 +342,22 @@ class StorageImpl implements Storage {
           address: new URL("/api/storage/memory", this.remoteStorageUrl!),
           space: space as `did:${string}:${string}`,
           as: this.signer,
+        });
+      } else if (type === "schema") {
+        if (!this.remoteStorageUrl) {
+          throw new Error("No remote storage URL set");
+        }
+        const settings: RemoteStorageProviderSettings = {
+          maxSubscriptionsPerSpace: 50_000,
+          connectionTimeout: 30_000,
+          useSchemaQueries: true,
+        };
+        provider = new CachedStorageProvider({
+          id: this.id,
+          address: new URL("/api/storage/memory", this.remoteStorageUrl!),
+          space: space as `did:${string}:${string}`,
+          as: this.signer,
+          settings: settings,
         });
       } else {
         throw new Error(`Unknown storage type: ${type}`);
@@ -363,6 +390,10 @@ class StorageImpl implements Storage {
     if (!doc.entityId) throw new Error("Doc has no entity ID");
 
     const entityId = JSON.stringify(doc.entityId);
+    // const entity = `of:${doc.entityId["/"]}` as Entity;
+    // const schemaRef = schemaContext === undefined
+    //   ? SchemaNoneRef
+    //   : refer(schemaContext).toString();
 
     // If the doc is ephemeral, we don't need to load it from storage. We still
     // add it to the map of known docs, so that we don't try to keep loading
@@ -928,3 +959,4 @@ class StorageImpl implements Storage {
 }
 
 export const storage = new StorageImpl();
+const SchemaNoneRef = refer(SchemaNone).toString();
