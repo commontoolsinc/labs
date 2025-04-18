@@ -7,46 +7,45 @@ import type { SearchSchemaRoute, SpellSearchRoute } from "../spell.routes.ts";
 import { Spell } from "../spell.ts";
 import { performSearch } from "../behavior/search.ts";
 import { Logger } from "@/lib/prefixed-logger.ts";
-import { CasterSchemaRoute } from "@/routes/ai/spell/spell.routes.ts";
-import { processSpellSearch } from "@/routes/ai/spell/behavior/spell-search.ts";
+import { FindSpellBySchemaRoute } from "@/routes/ai/spell/spell.routes.ts";
 import { captureException } from "@sentry/deno";
-import { areSchemaCompatible } from "../schema-compatibility.ts";
-import { CasterRequest } from "@/routes/ai/spell/spell.handlers.ts";
+import { FindSpellBySchemaRequest } from "@/routes/ai/spell/spell.handlers.ts";
 
 import { checkSchemaMatch } from "@/lib/schema-match.ts";
 import { isObject } from "@/routes/ai/spell/schema.ts";
 import { Schema } from "jsonschema";
 import { Recipe, RecipeSchema } from "../spell.ts";
 
-export const caster: AppRouteHandler<CasterSchemaRoute> = async (c) => {
-  const logger: Logger = c.get("logger");
-  const body = (await c.req.json()) as CasterRequest;
-  const startTime = performance.now();
-  const tags = body.tags || [];
+export const findSpellBySchema: AppRouteHandler<FindSpellBySchemaRoute> =
+  async (c) => {
+    const logger: Logger = c.get("logger");
+    const body = (await c.req.json()) as FindSpellBySchemaRequest;
+    const startTime = performance.now();
+    const tags = body.tags || [];
 
-  try {
-    const spells = await getAllBlobs({
-      allWithData: true,
-      prefix: "spell-",
-    }) as Record<
-      string,
-      Record<string, unknown>
-    >;
-    const response = candidates(body.schema, spells, tags);
+    try {
+      const spells = await getAllBlobs({
+        allWithData: true,
+        prefix: "spell-",
+      }) as Record<
+        string,
+        Record<string, unknown>
+      >;
+      const response = candidates(body.schema, spells, tags);
 
-    return c.json(
-      response,
-      HttpStatusCodes.OK,
-    );
-  } catch (error) {
-    logger.error({ error }, "Error processing schema");
-    captureException(error);
-    return c.json(
-      { error: "Failed to process schema" },
-      HttpStatusCodes.INTERNAL_SERVER_ERROR,
-    );
-  }
-};
+      return c.json(
+        response,
+        HttpStatusCodes.OK,
+      );
+    } catch (error) {
+      logger.error({ error }, "Error processing schema");
+      captureException(error);
+      return c.json(
+        { error: "Failed to process schema" },
+        HttpStatusCodes.INTERNAL_SERVER_ERROR,
+      );
+    }
+  };
 
 export interface SchemaCandidate {
   id: string;
@@ -55,8 +54,8 @@ export interface SchemaCandidate {
 }
 
 export interface SchemaAnalysis {
-  consumes: SchemaCandidate[];
-  produces: SchemaCandidate[];
+  argument: SchemaCandidate[];
+  result: SchemaCandidate[];
 }
 
 function calculateTagScore(item: unknown, tags: string[]): number {
@@ -80,8 +79,8 @@ function candidates(
   tags: string[],
 ): SchemaAnalysis {
   const data: SchemaCandidate[] = [];
-  const consumes: SchemaCandidate[] = [];
-  const produces: SchemaCandidate[] = [];
+  const argument: SchemaCandidate[] = [];
+  const result: SchemaCandidate[] = [];
 
   console.log("Loaded", Object.keys(spells).length, "spells");
   console.log("Parsed", spells);
@@ -117,30 +116,30 @@ function candidates(
       const tagScore = calculateTagScore(spell, tags);
 
       // Check how well our schema matches the spell's argument schema
-      const consumesScore = schemaIntersection(
+      const argumentScore = schemaIntersection(
         schema,
         spell.argumentSchema,
       );
-      console.log("Consumes match score:", consumesScore);
-      if (consumesScore > 0) {
-        consumes.push({
+      console.log("Consumes match score:", argumentScore);
+      if (argumentScore > 0) {
+        argument.push({
           id: key,
           spell: spells[key] as Spell,
-          similarity: consumesScore + tagScore,
+          similarity: argumentScore + tagScore,
         });
       }
 
       // Check how well our schema matches the spell's result schema
-      const producesScore = schemaIntersection(
+      const resultScore = schemaIntersection(
         schema,
         spell.resultSchema,
       );
-      console.log("Produces match score:", producesScore);
-      if (producesScore > 0) {
-        produces.push({
+      console.log("Produces match score:", resultScore);
+      if (resultScore > 0) {
+        result.push({
           id: key,
           spell: spells[key] as Spell,
-          similarity: producesScore + tagScore,
+          similarity: resultScore + tagScore,
         });
       }
     } catch (error) {
@@ -150,8 +149,8 @@ function candidates(
   }
 
   return {
-    consumes: consumes.sort((a, b) => b.similarity - a.similarity),
-    produces: produces.sort((a, b) => b.similarity - a.similarity),
+    argument: argument.sort((a, b) => b.similarity - a.similarity),
+    result: result.sort((a, b) => b.similarity - a.similarity),
   };
 }
 

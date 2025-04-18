@@ -2,8 +2,8 @@ import { createRoute } from "@hono/zod-openapi";
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import { jsonContent } from "stoker/openapi/helpers";
 import {
-  CasterRequestSchema,
-  CasterResponseSchema,
+  FindSpellBySchemaRequestSchema,
+  FindSpellBySchemaResponseSchema,
   SearchSchemaRequestSchema,
   SearchSchemaResponseSchema,
   SpellSearchRequestSchema,
@@ -119,23 +119,23 @@ export const search = createRoute({
 
 export type SearchSchemaRoute = typeof search;
 
-export const caster = createRoute({
+export const findSpellBySchema = createRoute({
   description: "Get spells by schema.",
-  path: "/api/ai/spell/caster",
+  path: "/api/ai/spell/find-by-schema",
   method: "post",
   tags,
   request: {
     body: {
       content: {
         "application/json": {
-          schema: CasterRequestSchema,
+          schema: FindSpellBySchemaRequestSchema,
         },
       },
     },
   },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(
-      CasterResponseSchema,
+      FindSpellBySchemaResponseSchema,
       "The caster results",
     ),
     [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(
@@ -145,7 +145,7 @@ export const caster = createRoute({
   },
 });
 
-export type CasterSchemaRoute = typeof caster;
+export type FindSpellBySchemaRoute = typeof findSpellBySchema;
 
 export const spellSearch = createRoute({
   description: "OBSELETE: will be removed.",
