@@ -228,7 +228,7 @@ export function SpecPreview({
 
   // Create springs for animation with proper types
   const springs = useSpring({
-    opacity: visible && hasContent ? 1 : 0,
+    opacity: visible ? 1 : 0,
     y: visible && hasContent ? 0 : -20,
     config: {
       tension: 280,
