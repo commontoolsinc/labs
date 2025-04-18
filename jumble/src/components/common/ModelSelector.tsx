@@ -40,11 +40,6 @@ const MODEL_OPTIONS = [
     isPreset: false,
   } as const,
   {
-    value: "groq:qwen-qwq-32b",
-    label: "Qwen QwQ 32B 🧠",
-    isPreset: false,
-  } as const,
-  {
     value: "groq:llama-3.3-70b-versatile",
     label: "Llama 3.3 🔥",
     isPreset: false,
