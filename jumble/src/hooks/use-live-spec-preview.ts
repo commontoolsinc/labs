@@ -3,6 +3,7 @@ import { useDebounce } from "./use-debounce.ts";
 import { useRef } from "react";
 import {
   CharmManager,
+  DEFAULT_MODEL,
   parseComposerDocument,
   processWorkflow,
   WorkflowForm,
@@ -37,7 +38,7 @@ export function useLiveSpecPreview(
   charmManager: CharmManager,
   enabled: boolean = true,
   debounceTime: number = 300,
-  model: LanguageModelId = "think",
+  model: LanguageModelId = DEFAULT_MODEL as LanguageModelId,
   currentCharm?: Cell<Charm>,
 ) {
   const [loading, setLoading] = useState(false);

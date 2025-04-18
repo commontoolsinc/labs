@@ -11,32 +11,65 @@ const MODEL_OPTIONS = [
     value: DEFAULT_MODEL_NAME,
     label: "Default",
     isPreset: true,
-  },
-  { value: "openai:gpt-4.1-nano", label: "Fast", isPreset: true },
-  { value: "google:gemini-2.5-pro", label: "Experimental", isPreset: true },
+  } as const,
+  { value: "openai:gpt-4.1-nano", label: "Fast", isPreset: true } as const,
+  {
+    value: "google:gemini-2.5-pro",
+    label: "Experimental",
+    isPreset: true,
+  } as const,
   // Full model list
   {
     value: "anthropic:claude-3-7-sonnet-latest",
     label: "Claude 3.7 ✨",
     isPreset: false,
-  },
-  { value: "google:gemini-2.5-pro", label: "Gemini 2.5 ✨", isPreset: false },
+  } as const,
+  {
+    value: "google:gemini-2.5-pro",
+    label: "Gemini 2.5 ✨",
+    isPreset: false,
+  } as const,
   {
     value: "anthropic:claude-3-5-sonnet-latest",
     label: "Claude 3.5",
     isPreset: false,
-  },
-  { value: "groq:qwen-qwq-32b", label: "Qwen QwQ 32B", isPreset: false },
+  } as const,
+  {
+    value: "groq:qwen-qwq-32b",
+    label: "Qwen QwQ 32B",
+    isPreset: false,
+  } as const,
+  {
+    value: "groq:qwen-qwq-32b",
+    label: "Qwen QwQ 32B 🧠",
+    isPreset: false,
+  } as const,
   {
     value: "groq:llama-3.3-70b-versatile",
     label: "Llama 3.3 🔥",
     isPreset: false,
-  },
+  } as const,
+  { value: "openai:gpt-4.1", label: "gpt-4.1", isPreset: false } as const,
+  {
+    value: "openai:gpt-4.1-mini",
+    label: "gpt-4.1-mini",
+    isPreset: false,
+  } as const,
+  {
+    value: "openai:gpt-4.1-nano",
+    label: "gpt-4.1-nano",
+    isPreset: false,
+  } as const,
+  {
+    value: "openai:o3-mini-low-latest",
+    label: "o3-mini-low",
+    isPreset: false,
+  } as const,
   {
     value: "groq:llama-4-maverick",
     label: "Llama 4 Maverick",
     isPreset: false,
-  },
+  } as const,
   {
     value: "groq:llama-4-scout",
     label: "Llama 4 Scout",
@@ -53,9 +86,17 @@ const MODEL_OPTIONS = [
     value: "openai:o4-mini-high",
     label: "o4-mini-high",
     isPreset: false,
-  },
-  { value: "google:gemini-2.0-pro", label: "Gemini 2.0", isPreset: false },
-  { value: "perplexity:sonar-pro", label: "Sonar Pro 🌐", isPreset: false },
+  } as const,
+  {
+    value: "google:gemini-2.0-pro",
+    label: "Gemini 2.0",
+    isPreset: false,
+  } as const,
+  {
+    value: "perplexity:sonar-pro",
+    label: "Sonar Pro 🌐",
+    isPreset: false,
+  } as const,
 ];
 
 export type LanguageModelId = typeof MODEL_OPTIONS[number]["value"];
@@ -77,7 +118,7 @@ interface ModelSelectorProps {
 
 export function useUserPreferredModel() {
   const { charmManager } = useCharmManager();
-  const space = useMemo(() => charmManager.getSpace(), [charmManager]);
+  const space = useMemo(() => charmManager.getSpaceName(), [charmManager]);
   const [userPreferredModel, setUserPreferredModel] = useNamedCell(
     space,
     "userPreferredModel",

@@ -51,11 +51,6 @@ function CommandProcessor({
   const [inputValue, setInputValue] = useState("");
   const charmMentions = useCharmMentions();
 
-  // State for preview model selection
-  // const [previewModel, setPreviewModel] = useState<LanguageModelId>(
-  //   "think",
-  // );
-
   const {
     userPreferredModel,
     setUserPreferredModel,

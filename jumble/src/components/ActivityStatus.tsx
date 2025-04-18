@@ -206,7 +206,7 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
             onClick={() => {
               navigate(createPath("charmShow", {
                 charmId: charmId((activity as Job).result!.generation!.charm)!,
-                replicaName: charmManager.getSpace(),
+                replicaName: charmManager.getSpaceName(),
               }));
             }}
             className="bg-black text-white border-none px-2 py-0.5 text-[10px] cursor-pointer whitespace-nowrap"

@@ -143,6 +143,10 @@ export class CharmManager {
     return this.space;
   }
 
+  getSpaceName(): string {
+    return this.session.name;
+  }
+
   async synced(): Promise<void> {
     await this.ready;
     return await storage.synced();
