@@ -190,7 +190,7 @@ function schemaIntersection(
   if (allKeys.size === 0) return 1; // Both schemas are empty
 
   let totalScore = 0;
-  let possibleScore = allKeys.size;
+  const possibleScore = allKeys.size;
 
   // Compare each property in either schema
   for (const key of allKeys) {
