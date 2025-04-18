@@ -11,6 +11,7 @@ import { createPath } from "@/routes.ts";
 import { charmId } from "@commontools/charm";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { DitheredCube } from "@/components/DitherCube.tsx";
+import { FeedbackActions } from "@/components/FeedbackActions.tsx";
 
 // Isolated component for elapsed time that handles its own refresh
 const ElapsedTime = ({ startTime }: { startTime: Date }) => {
@@ -169,6 +170,21 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
       }
     }
 
+    const FeedbackButtons = ({ activity }: { activity: Activity }) => {
+      if (activity.type !== "job") return null;
+      const job: Job = activity as Job;
+      if (!job.llmRequestId) return null;
+      return (
+        <FeedbackActions
+          className={`flex flex-row`}
+          llmRequestId={job.llmRequestId}
+        >
+          <button type="button" slot="negative">👎</button>
+          <button type="button" slot="positive">👍</button>
+        </FeedbackActions>
+      );
+    };
+
     return (
       <div
         className={`flex items-center px-3 py-2 h-9 border-b border-gray-200 ${bgColor} relative`}
@@ -190,10 +206,18 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
 
         {getActivityIcon(activity)}
         <div className="flex-1 min-w-0 mr-2.5">
-          <div className="font-medium whitespace-nowrap overflow-hidden text-ellipsis mb-0.5 text-gray-800">
+          <div
+            className="font-medium whitespace-nowrap overflow-hidden text-ellipsis mb-0.5 text-gray-800"
+            title={activity.title}
+          >
             {activity.title}
           </div>
-          <div className="text-[11px] text-gray-600 whitespace-nowrap overflow-hidden text-ellipsis">
+          <div
+            className="text-[11px] text-gray-600 whitespace-nowrap overflow-hidden text-ellipsis"
+            title={activity.type === "job"
+              ? (activity as Job).status
+              : (activity as Notification).message}
+          >
             {activity.type === "job"
               ? (activity as Job).status
               : (activity as Notification).message}
@@ -209,18 +233,21 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
         {activity.type === "job" &&
           (activity as Job).state === "completed" &&
           (activity as Job).result && (
-          <button
-            type="button"
-            onClick={() => {
-              navigate(createPath("charmShow", {
-                charmId: charmId((activity as Job).result!)!,
-                replicaName: charmManager.getSpaceName(),
-              }));
-            }}
-            className="bg-black text-white border-none px-2 py-0.5 text-[10px] cursor-pointer whitespace-nowrap"
-          >
-            View Charm
-          </button>
+          <>
+            <FeedbackButtons activity={activity}></FeedbackButtons>
+            <button
+              type="button"
+              onClick={() => {
+                navigate(createPath("charmShow", {
+                  charmId: charmId((activity as Job).result!)!,
+                  replicaName: charmManager.getSpaceName(),
+                }));
+              }}
+              className="bg-black text-white border-none px-2 py-0.5 text-[10px] cursor-pointer whitespace-nowrap"
+            >
+              View Charm
+            </button>
+          </>
         )}
 
         {/* Show action button for notifications if provided */}
@@ -248,7 +275,7 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
 
   return (
     <div
-      className={`fixed bottom-16 right-2 w-80 bg-white text-xs text-gray-700 max-h-[calc(100vh-100px)] overflow-hidden flex flex-col z-50 border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] hover:translate-y-[-2px] hover:shadow-[2px_4px_0px_0px_rgba(0,0,0,0.7)] transition-[border,box-shadow,transform,opacity] duration-100 ease-in-out ${
+      className={`fixed bottom-16 right-2 w-80 bg-white text-xs text-gray-700 max-h-[calc(100vh-100px)] overflow-hidden flex flex-col z-50 border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] transition-[border,opacity] duration-100 ease-in-out ${
         className || ""
       }`}
     >

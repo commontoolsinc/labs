@@ -46,7 +46,7 @@ export const genSrc = async ({
   model?: string;
   generationId?: string;
   cache: boolean;
-}): Promise<string> => {
+}): Promise<{ content: string; llmRequestId?: string }> => {
   const request = buildPrompt({
     src,
     spec,
@@ -85,7 +85,7 @@ export const genSrc = async ({
   const source = injectUserCode(
     response.content.split(RESPONSE_PREFILL)[1].split("\n```")[0],
   );
-  return source;
+  return { content: source, llmRequestId: response.id };
 };
 
 /**
@@ -99,7 +99,7 @@ export async function iterate(
   model?: string,
   generationId?: string,
   cache = true,
-): Promise<Cell<Charm>> {
+): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
   const { iframe } = getIframeRecipe(charm);
   if (!iframe) {
     throw new Error("Cannot iterate on a non-iframe. Must extend instead.");
@@ -109,7 +109,7 @@ export async function iterate(
   const iframeSpec = iframe.spec;
   const newSpec = plan?.spec ?? iframeSpec;
 
-  const newIFrameSrc = await genSrc({
+  const { content: newIFrameSrc, llmRequestId } = await genSrc({
     src: iframe.src,
     spec: iframeSpec,
     newSpec,
@@ -120,13 +120,16 @@ export async function iterate(
     cache,
   });
 
-  return generateNewRecipeVersion(
-    charmManager,
-    charm,
-    newIFrameSrc,
-    newSpec,
-    generationId,
-  );
+  return {
+    cell: await generateNewRecipeVersion(
+      charmManager,
+      charm,
+      newIFrameSrc,
+      newSpec,
+      generationId,
+    ),
+    llmRequestId,
+  };
 }
 
 export function extractTitle(src: string, defaultTitle: string): string {
@@ -273,6 +276,7 @@ async function singlePhaseCodeGeneration(
     resultSchema,
     title,
     description,
+    llmRequestId,
   } = await generateCodeAndSchema(form, existingSchema, form.meta.modelId);
 
   console.log("resultSchema", resultSchema);
@@ -331,6 +335,7 @@ async function singlePhaseCodeGeneration(
     newRecipeSrc,
     name,
     schema,
+    llmRequestId,
   };
 }
 
@@ -396,7 +401,7 @@ async function twoPhaseCodeGeneration(
   }
 
   // Phase 2: Generate UI code using the schema and enhanced spec
-  const newIFrameSrc = await genSrc({
+  const { content: newIFrameSrc, llmRequestId } = await genSrc({
     newSpec,
     schema,
     steps: form.plan?.steps,
@@ -421,6 +426,7 @@ async function twoPhaseCodeGeneration(
     newRecipeSrc,
     name,
     schema,
+    llmRequestId,
   };
 }
 
@@ -435,7 +441,7 @@ async function twoPhaseCodeGeneration(
 export async function castNewRecipe(
   charmManager: CharmManager,
   form: WorkflowForm,
-): Promise<Cell<Charm>> {
+): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
   console.log("Processing form:", form);
 
   // Remove $UI, $NAME, and any streams from the cells
@@ -445,7 +451,7 @@ export async function castNewRecipe(
   const existingSchema = createJsonSchema(scrubbed);
 
   // Prototype workflow: combine steps
-  const { newIFrameSrc, newSpec, newRecipeSrc, name, schema } =
+  const { newIFrameSrc, newSpec, newRecipeSrc, name, schema, llmRequestId } =
     form.classification?.workflowType === "imagine-single-phase"
       ? await singlePhaseCodeGeneration(form, existingSchema)
       : await twoPhaseCodeGeneration(form, existingSchema);
@@ -462,7 +468,10 @@ export async function castNewRecipe(
     }),
   );
 
-  return compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, input);
+  return {
+    cell: await compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, input),
+    llmRequestId,
+  };
 }
 
 export async function compileRecipe(
