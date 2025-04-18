@@ -93,6 +93,7 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
   const anthropicProvider = createAnthropic({
     apiKey: env.CTTS_AI_LLM_ANTHROPIC_API_KEY,
   });
+  console.log(" Adding 🤖 anthropic");
 
   addModel({
     provider: anthropicProvider,
@@ -153,6 +154,23 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
 if (env.CTTS_AI_LLM_GROQ_API_KEY) {
   const groqProvider = createGroq({
     apiKey: env.CTTS_AI_LLM_GROQ_API_KEY,
+  });
+  console.log(" Adding 🤖 groq");
+
+  addModel({
+    provider: groqProvider,
+    name: "groq:deepseek-r1-distill-llama-70b",
+    aliases: ["groq:deepseek-r1-distill-llama-70b", "r1-llama-70b"],
+    capabilities: {
+      contextWindow: 128_000,
+      maxOutputTokens: 32768,
+      images: false,
+      prefill: false,
+      systemPrompt: false,
+      stopSequences: false,
+      streaming: true,
+      reasoning: true,
+    },
   });
 
   addModel({
@@ -223,6 +241,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
   const openAIProvider = createOpenAI({
     apiKey: env.CTTS_AI_LLM_OPENAI_API_KEY,
   });
+  console.log(" Adding 🤖 openai");
   addModel({
     provider: openAIProvider,
     name: "openai:gpt-4o",
@@ -359,7 +378,7 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
   const credentials = JSON.parse(
     Deno.readTextFileSync(env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS),
   );
-
+  console.log(" Adding 🤖 google");
   const vertexProvider = createVertex({
     googleAuthOptions: {
       credentials: credentials as any,
@@ -375,6 +394,26 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
     capabilities: {
       contextWindow: 1_048_576,
       maxOutputTokens: 65_535,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: true,
+    },
+  });
+
+  addModel({
+    provider: vertexProvider,
+    name: "google:gemini-2.5-flash-preview-04-17",
+    aliases: [
+      "google:gemini-2.5-flash-preview",
+      "gemini-2.5-flash",
+      "google:gemini-2.5-flash",
+    ],
+    capabilities: {
+      contextWindow: 1_048_576,
+      maxOutputTokens: 8_191,
       images: true,
       prefill: true,
       systemPrompt: true,
@@ -423,7 +462,7 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
     apiKey: env.CTTS_AI_LLM_PERPLEXITY_API_KEY,
     baseURL: "https://api.perplexity.ai/",
   });
-
+  console.log(" Adding 🤖 perplexity");
   addModel({
     provider: perplexityProvider,
     name: "perplexity:sonar-reasoning-pro",
