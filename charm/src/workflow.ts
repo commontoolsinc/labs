@@ -9,8 +9,8 @@
  * 5. Workflow steps and execution
  */
 
-import { Cell } from "@commontools/runner";
-import { Charm, CharmManager } from "./charm.ts";
+import { Cell, getRecipe } from "@commontools/runner";
+import { Charm, charmId, CharmManager } from "./charm.ts";
 import { JSONSchema } from "@commontools/builder";
 import { classifyWorkflow, generateWorkflowPlan } from "@commontools/llm";
 import { iterate } from "./iterate.ts";
@@ -18,13 +18,36 @@ import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode } from "./iframe/static.ts";
 import { formatPromptWithMentions } from "./format.ts";
 import { castNewRecipe } from "./iterate.ts";
+import { VNode } from "@commontools/html";
+
+export interface RecipeRecord {
+  argumentSchema: JSONSchema; // Schema type from jsonschema
+  resultSchema: JSONSchema; // Schema type from jsonschema
+  result: {
+    $NAME?: string;
+    $UI?: VNode;
+  };
+  initial?: any;
+}
+
+export interface SpellRecord {
+  recipe: RecipeRecord;
+  spec: string;
+  src: string;
+  recipeName?: string;
+  spellbookTitle?: string;
+  spellbookTags?: string[];
+  blobAuthor?: string;
+  blobCreatedAt?: string;
+}
 
 // Types for workflow classification
 export type WorkflowType =
   | "fix"
   | "edit"
   | "imagine"
-  | "imagine-single-phase";
+  | "imagine-single-phase"
+  | "cast-spell";
 
 // Configuration for each workflow type
 export interface WorkflowConfig {
@@ -67,6 +90,14 @@ export const WORKFLOWS: Record<WorkflowType, WorkflowConfig> = {
     name: "imagine-single-phase",
     label: "IMAGINE (SINGLE PHASE)",
     description: "IN DEVELOPMENT",
+    updateSpec: true,
+    updateSchema: true,
+    allowsDataReferences: true,
+  },
+  "cast-spell": {
+    name: "cast-spell",
+    label: "CAST",
+    description: "Cast a spell from the spellbook",
     updateSpec: true,
     updateSchema: true,
     allowsDataReferences: true,
@@ -149,12 +180,22 @@ export async function classifyIntent(
   }
 
   if (!existingSpec || !existingSchema) {
+    if (
+      input.toLowerCase().indexOf("spell") !== -1 &&
+      input.toLowerCase().indexOf("cast") !== -1
+    ) {
+      return {
+        workflowType: "cast-spell",
+        confidence: 1.0,
+        reasoning: "You mentioned casting spells!",
+      };
+    }
+
     return {
       workflowType: "imagine",
       confidence: 1.0,
       reasoning:
         "Automatically classified as 'imagine' because there is nothing to refer to (either no current charm or no iframe recipe).",
-      enhancedPrompt: input,
     };
   }
 
@@ -367,18 +408,28 @@ export interface WorkflowForm {
     dataModel?: string;
   } | null;
 
-  // Generation information (only when actually generating code)
-  generation?: {
+  generation: {
     charm: Cell<Charm>;
-  };
+  } | null;
+
+  searchResults: {
+    castable: Record<
+      string,
+      { id: string; spell: SpellRecord; similarity: number }[]
+    >;
+  } | null;
+
+  spellToCast: {
+    charmId: string;
+    spellId: string;
+  } | null;
 
   // Metadata and workflow state
   meta: {
-    isComplete: boolean;
-    isFilled: boolean;
-    modelId?: string;
+    charmManager: CharmManager;
     generationId?: string;
-    charmManager?: CharmManager;
+    modelId?: string;
+    isComplete: boolean;
     cache: boolean;
   };
 }
@@ -394,12 +445,13 @@ export interface WorkflowForm {
  * @returns A new workflow form object
  */
 export function createWorkflowForm(
-  { input, modelId, charm, generationId, cache = true }: {
+  { input, modelId, charm, generationId, charmManager, cache = true }: {
     input: string;
     modelId?: string;
     charm?: Cell<Charm>;
     generationId?: string;
     cache: boolean;
+    charmManager: CharmManager;
   },
 ): WorkflowForm {
   return {
@@ -411,12 +463,15 @@ export function createWorkflowForm(
     },
     classification: null,
     plan: null,
+    generation: null,
+    searchResults: null,
+    spellToCast: null,
     meta: {
       isComplete: false,
-      isFilled: false,
       modelId,
       generationId: generationId ?? crypto.randomUUID(),
       cache,
+      charmManager,
     },
   };
 }
@@ -591,9 +646,6 @@ export async function fillPlanningSection(
     dataModel: planningResult.dataModel,
   };
 
-  // Mark the form as filled (ready for generation) once we have a plan
-  newForm.meta.isFilled = true;
-
   return newForm;
 }
 
@@ -607,11 +659,6 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
   }
 
   const newForm = { ...form };
-
-  // Check if the form is filled properly
-  if (!newForm.meta.isFilled) {
-    throw new Error("Cannot generate code from an incomplete workflow form");
-  }
 
   if (!newForm.meta.charmManager) {
     throw new Error("CharmManager is required for code generation");
@@ -673,20 +720,25 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
  */
 export async function processWorkflow(
   input: string,
-  dryRun: boolean = false,
+  charmManager: CharmManager,
   options: {
-    charmManager?: CharmManager;
+    dryRun?: boolean;
     existingCharm?: Cell<Charm>;
     prefill?: Partial<WorkflowForm>;
     model?: string;
     onProgress?: (form: WorkflowForm) => void;
     cancellation?: { cancelled: boolean };
-    cache: boolean;
-  } = { cache: true },
+    cache?: boolean;
+  },
 ): Promise<WorkflowForm> {
   console.groupCollapsed("processWorkflow");
   const startTime = performance.now();
   const timings: Record<string, number> = {};
+
+  // default to cache
+  if (options.cache === undefined) {
+    options.cache = true;
+  }
 
   // Create a new form or use prefilled form
   let form = createWorkflowForm({
@@ -694,6 +746,7 @@ export async function processWorkflow(
     charm: options.existingCharm,
     modelId: options.model,
     cache: options.cache,
+    charmManager,
   });
   console.log("creating form", form);
 
@@ -711,9 +764,19 @@ export async function processWorkflow(
 
     if (options.prefill) {
       console.log("prefilling form", options.prefill);
-      // do not prefill the meta
-      delete options.prefill.meta;
-      form = { ...options.prefill, ...form };
+      // Only use prefill values for fields that aren't null or undefined in the prefill
+      // Intentionally omit the meta
+      form = {
+        ...form,
+        input: options.prefill?.input
+          ? { ...form.input, ...options.prefill.input }
+          : form.input,
+        classification: options.prefill?.classification || form.classification,
+        plan: options.prefill?.plan || form.plan,
+        generation: options.prefill?.generation || form.generation,
+        searchResults: options.prefill?.searchResults || form.searchResults,
+        spellToCast: options.prefill?.spellToCast || form.spellToCast,
+      };
     }
 
     // Step 1: Process input (mentions, references, etc.) if not already processed
@@ -721,13 +784,9 @@ export async function processWorkflow(
       !form.input?.processedInput ||
       form.input?.processedInput === form.input?.rawInput
     ) {
-      if (!options.charmManager) {
-        throw new Error("charmManager required to format input");
-      }
-
       console.log("processing input...");
       const stepStartTime = performance.now();
-      form = await processInputSection(options.charmManager, form);
+      form = await processInputSection(charmManager, form);
       timings.processInput = performance.now() - stepStartTime;
       options.onProgress?.(form);
       console.log("processed input!", form);
@@ -740,6 +799,7 @@ export async function processWorkflow(
           jobId: form.meta.generationId,
           title: form.input.processedInput,
           status: "Initializing...",
+          debug: options.dryRun,
         },
       }),
     );
@@ -768,6 +828,138 @@ export async function processWorkflow(
 
     checkCancellation();
 
+    // Spell search flow, TODO(bf): extract
+    if (form.classification?.workflowType === "cast-spell") {
+      if (form.searchResults && form.spellToCast) {
+        globalThis.dispatchEvent(
+          new CustomEvent("job-update", {
+            detail: {
+              type: "job-update",
+              jobId: form.meta.generationId,
+              title: form.input.processedInput,
+              status: `Fetching ingredients...`,
+            },
+          }),
+        );
+        const charm = await charmManager.get(form.spellToCast.charmId);
+
+        if (!charm) {
+          throw new Error("No charm found for id: " + form.spellToCast.charmId);
+        }
+
+        await charmManager.syncRecipeBlobby(form.spellToCast.spellId);
+        const recipe = getRecipe(form.spellToCast.spellId);
+
+        if (!recipe) {
+          throw new Error(
+            "No recipe found for the spell: " + form.spellToCast.spellId,
+          );
+        }
+
+        globalThis.dispatchEvent(
+          new CustomEvent("job-update", {
+            detail: {
+              type: "job-update",
+              jobId: form.meta.generationId,
+              title: form.input.processedInput,
+              status: `Casting spell...`,
+            },
+          }),
+        );
+        const newCharm = await charmManager.runPersistent(
+          recipe,
+          charm,
+        );
+
+        globalThis.dispatchEvent(
+          new CustomEvent("job-complete", {
+            detail: {
+              type: "job-complete",
+              jobId: form.meta.generationId,
+              title: form.input.processedInput,
+              result: newCharm,
+              status: `Charm created!`,
+            },
+          }),
+        );
+
+        form.generation = {
+          charm: newCharm,
+        };
+
+        return form;
+      } else {
+        const schemas: JSONSchema[] = [];
+        const refs = Object.values(form.input.references);
+
+        if (refs.length === 0) {
+          throw new Error("No references found");
+        }
+
+        refs.forEach((cell: Cell<Charm>) => {
+          const schema = cell.schema;
+          if (schema) {
+            schemas.push(schema);
+          }
+        });
+
+        const castable: Record<
+          string,
+          { id: string; spell: SpellRecord; similarity: number }[]
+        > = {};
+
+        globalThis.dispatchEvent(
+          new CustomEvent("job-update", {
+            detail: {
+              type: "job-update",
+              jobId: form.meta.generationId,
+              title: form.input.processedInput,
+              status: `Searching for spells...`,
+            },
+          }),
+        );
+
+        for (const [key, charm] of Object.entries(form.input.references)) {
+          const schema = charm.schema?.properties;
+          const id = charmId(charm);
+          if (!id) continue;
+
+          castable[id] = [];
+          const response = await fetch("/api/ai/spell/find-by-schema", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              schema,
+            }),
+          });
+
+          const result = await response.json();
+          for (const spell of result.argument) {
+            castable[id].push(spell);
+          }
+        }
+
+        form.searchResults = {
+          castable,
+        };
+
+        globalThis.dispatchEvent(
+          new CustomEvent("job-complete", {
+            detail: {
+              type: "job-complete",
+              jobId: form.meta.generationId,
+              title: form.input.processedInput,
+              status: `Found ${Object.keys(castable).length} results!`,
+            },
+          }),
+        );
+
+        return form;
+      }
+    }
+
     // Step 3: Planning if not already planned
     if (!form.plan || !form.plan.spec || !form.plan.steps) {
       console.log("planning task");
@@ -791,7 +983,7 @@ export async function processWorkflow(
     checkCancellation();
 
     // Step 4: Generation (if not a dry run and not already generated)
-    if (!dryRun && options.charmManager && !form.generation?.charm) {
+    if (!options.dryRun && !form.generation?.charm) {
       console.log("generating code");
       globalThis.dispatchEvent(
         new CustomEvent("job-update", {
@@ -828,15 +1020,7 @@ export async function processWorkflow(
           jobId: form.meta.generationId,
           title: form.input.processedInput,
           status: "Completed successfully",
-          result: form,
-          viewAction: form.generation?.charm
-            ? {
-              label: "View Results",
-              action: () => {
-                console.log("made", form.generation?.charm);
-              },
-            }
-            : undefined,
+          result: form.generation?.charm,
         },
       }),
     );
@@ -1050,39 +1234,4 @@ export function executeImagineWorkflow(
     charmManager,
     form,
   );
-}
-
-/**
- * Main entry point for all workflow processing
- *
- * This function orchestrates the entire workflow process:
- * 1. Input processing and mention detection
- * 2. Classification (if not overridden)
- * 3. Plan generation
- * 4. Code generation
- */
-export async function executeWorkflow(
-  charmManager: CharmManager,
-  input: string,
-  context: {
-    currentCharm?: Cell<Charm>;
-    prefill?: Partial<WorkflowForm>;
-    model?: string;
-  },
-): Promise<Cell<Charm>> {
-  // Process the workflow with dryRun=false to fully execute and generate code
-  const form = await processWorkflow(input, false, {
-    charmManager,
-    existingCharm: context.currentCharm,
-    model: context.model,
-    prefill: context.prefill,
-    cache: true,
-  });
-
-  // A completed form should have a generated charm
-  if (!form.generation?.charm) {
-    throw new Error("Workflow execution failed to create a charm");
-  }
-
-  return form.generation.charm;
 }

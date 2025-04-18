@@ -1,9 +1,8 @@
-import { charmId } from "@/utils/charms.ts";
 import { Cell } from "@commontools/runner";
 import { NAME } from "@commontools/builder";
 import { CommonCard } from "@/components/common/CommonCard.tsx";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
-import { Charm } from "@commontools/charm";
+import { Charm, charmId } from "@commontools/charm";
 import { memo, useCallback, useEffect, useState } from "react";
 
 export interface HoverPreviewProps {

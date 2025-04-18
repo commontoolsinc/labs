@@ -7,8 +7,6 @@ import type { FulfillSchemaRoute } from "@/routes/ai/spell/spell.routes.ts";
 import { Spell } from "@/routes/ai/spell/spell.ts";
 import { performSearch } from "../behavior/search.ts";
 import { Logger } from "@/lib/prefixed-logger.ts";
-import { candidates } from "@/routes/ai/spell/caster.ts";
-import { CasterSchemaRoute } from "@/routes/ai/spell/spell.routes.ts";
 import { processSpellSearch } from "@/routes/ai/spell/behavior/spell-search.ts";
 import { captureException } from "@sentry/deno";
 import { areSchemaCompatible } from "@/routes/ai/spell/schema-compatibility.ts";

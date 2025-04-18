@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   getElapsedTime,
@@ -8,7 +8,7 @@ import {
 } from "@/contexts/ActivityContext.tsx";
 import { useNavigate } from "react-router-dom";
 import { createPath } from "@/routes.ts";
-import { charmId } from "@/utils/charms.ts";
+import { charmId } from "@commontools/charm";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 
@@ -39,8 +39,8 @@ interface ActivityStatusProps {
 const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
   // Use the activity context
   const {
-    activeItems,
-    archivedItems,
+    activeItems: unfilteredActiveItems,
+    archivedItems: unfilteredArchivedItems,
     runningJobs,
     showArchived,
     setShowArchived,
@@ -50,6 +50,14 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
     archiveAllCompleted,
     clearAllArchived,
   } = useActivityContext();
+
+  const activeItems = useMemo(() => {
+    return unfilteredActiveItems.filter((item) => !item.debug);
+  }, [unfilteredActiveItems]);
+
+  const archivedItems = useMemo(() => {
+    return unfilteredArchivedItems.filter((item) => !item.debug);
+  }, [unfilteredArchivedItems]);
 
   const navigate = useNavigate();
   const { charmManager } = useCharmManager();
@@ -200,13 +208,13 @@ const ActivityStatus: React.FC<ActivityStatusProps> = ({ className }) => {
         {/* Action buttons for different activity types */}
         {activity.type === "job" &&
           (activity as Job).state === "completed" &&
-          (activity as Job).result?.generation?.charm && (
+          (activity as Job).result && (
           <button
             type="button"
             onClick={() => {
               navigate(createPath("charmShow", {
-                charmId: charmId((activity as Job).result!.generation!.charm)!,
-                replicaName: charmManager.getSpace(),
+                charmId: charmId((activity as Job).result!)!,
+                replicaName: charmManager.getSpaceName(),
               }));
             }}
             className="bg-black text-white border-none px-2 py-0.5 text-[10px] cursor-pointer whitespace-nowrap"

@@ -1,13 +1,12 @@
 import {
   Charm,
-  ExecutionPlan,
+  charmId,
   extractUserCode,
   extractVersionTag,
   generateNewRecipeVersion,
   getIframeRecipe,
   IFrameRecipe,
   injectUserCode,
-  iterate,
   modifyCharm,
   processWorkflow,
   WorkflowForm,
@@ -39,7 +38,6 @@ import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { markdown } from "@codemirror/lang-markdown";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
-import { charmId } from "@/utils/charms.ts";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import {
   type CharmSuggestion,
@@ -81,8 +79,6 @@ interface CharmOperationContextType {
   userPreferredModel: LanguageModelId;
   setUserPreferredModel: (model: LanguageModelId) => void;
   setInput: (input: string) => void;
-  classificationLoading: boolean; // Loading state for workflow classification
-  planLoading: boolean; // Loading state for plan generation
   showVariants: boolean;
   setShowVariants: (show: boolean) => void;
   showPreview: boolean;
@@ -102,6 +98,7 @@ interface CharmOperationContextType {
   handlePerformOperation: () => void;
   handleCancelVariants: () => void;
   setWorkflowType: (workflowType: WorkflowType) => void;
+  setSelectedSpellToCast: (charmId: string, spellId: string) => void;
   performOperation: (
     charmId: string,
     input: string,
@@ -232,8 +229,8 @@ function useCodeEditor(
           "Spec has changed, using current behavior with future possibility for regeneration",
         );
 
-        processWorkflow(workingSpec, false, {
-          charmManager,
+        processWorkflow(workingSpec, charmManager, {
+          dryRun: false,
           existingCharm: charm,
           prefill: {
             classification: {
@@ -245,7 +242,6 @@ function useCodeEditor(
               spec: workingSpec,
             },
           },
-          cache: true,
         }).then((form) => {
           const newCharm = form.generation?.charm;
           if (!newCharm) {
@@ -338,10 +334,9 @@ function useCharmOperation() {
   const {
     previewForm,
     loading: isPreviewLoading,
-    classificationLoading,
-    planLoading,
     model,
     setWorkflowType,
+    setSelectedSpellToCast,
   } = useLiveSpecPreview(
     input,
     charmManager,
@@ -456,8 +451,7 @@ function useCharmOperation() {
     userPreferredModel,
     setUserPreferredModel,
     setWorkflowType,
-    classificationLoading, // Add the classification loading state
-    planLoading, // Add the plan loading state
+    setSelectedSpellToCast,
     showVariants,
     setShowVariants,
     showPreview,
@@ -823,9 +817,8 @@ const OperationTab = () => {
     loading,
     handlePerformOperation,
     isPreviewLoading,
-    classificationLoading,
     setWorkflowType,
-    planLoading,
+    setSelectedSpellToCast,
     previewForm,
   } = useCharmOperationContext();
 
@@ -878,10 +871,9 @@ const OperationTab = () => {
         <SpecPreview
           form={previewForm}
           loading={isPreviewLoading}
-          classificationLoading={classificationLoading}
-          planLoading={planLoading}
           visible={showPreview && input.trim().length >= 16}
           onWorkflowChange={setWorkflowType}
+          onSelectedCastChange={setSelectedSpellToCast}
         />
         <Variants />
         <Suggestions />

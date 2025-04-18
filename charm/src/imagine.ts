@@ -8,8 +8,6 @@ import { extractUserCode } from "./iframe/static.ts";
 // Re-export workflow types and functions from workflow module
 export type { WorkflowConfig, WorkflowType } from "./workflow.ts";
 
-export { executeWorkflow, WORKFLOWS } from "./workflow.ts";
-
 /**
  * Structure representing a successfully parsed mention in a prompt
  */

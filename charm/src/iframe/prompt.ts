@@ -7,6 +7,7 @@ import {
 } from "@commontools/llm";
 
 import { extractUserCode, systemMd } from "./static.ts";
+import { DEFAULT_MODEL } from "../index.ts";
 
 export const RESPONSE_PREFILL = "```javascript\n";
 

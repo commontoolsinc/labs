@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { DitheredCube } from "./DitherCube.tsx";
 import { animated, useSpring, useTransition } from "@react-spring/web";
 import { ToggleButton } from "./common/CommonToggle.tsx";
@@ -7,8 +7,9 @@ import type {
   WorkflowForm,
   WorkflowType,
 } from "@commontools/charm";
-import JsonView from "@uiw/react-json-view";
-import { WORKFLOWS } from "../../../charm/src/workflow.ts";
+import { getRecipe } from "@commontools/runner";
+import { charmId } from "@commontools/charm";
+import { SpellRecord, WORKFLOWS } from "../../../charm/src/workflow.ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { EditorView } from "@codemirror/view";
@@ -22,6 +23,7 @@ interface SpecPreviewProps {
   visible: boolean;
   floating?: boolean;
   onWorkflowChange?: (workflow: WorkflowType) => void;
+  onSelectedCastChange?: (charmId: string, spellId: string) => void;
 }
 
 // Accordion component for collapsible sections
@@ -113,7 +115,6 @@ function Accordion(
 // JobStatusIndicator component to display job status based on generationId
 const JobStatusIndicator = ({ generationId }: { generationId?: string }) => {
   const { jobs } = useActivityContext();
-
   if (!generationId || !jobs[generationId]) {
     return null;
   }
@@ -139,21 +140,37 @@ const JobStatusIndicator = ({ generationId }: { generationId?: string }) => {
   );
 };
 
+function getSpellPreviewName(spell: SpellRecord) {
+  return spell.recipe.result.$NAME || "Unnamed Spell";
+}
+
 export function SpecPreview({
   form,
   loading,
-  classificationLoading = false,
-  planLoading = false,
   visible,
   floating = false,
   onWorkflowChange,
+  onSelectedCastChange,
 }: SpecPreviewProps) {
   const hasContent =
-    (loading || form.classification || form.plan?.steps || form.plan?.spec) &&
+    (loading || form.classification || form.plan?.steps || form.plan?.spec ||
+      form.searchResults) &&
     visible;
 
   // Get the current generation ID from the form metadata
   const generationId = form.meta?.generationId;
+
+  // Local state for workflow type to make the select behave properly
+  const [localWorkflowType, setLocalWorkflowType] = useState<
+    WorkflowType | undefined
+  >(form.classification?.workflowType);
+
+  // Sync local state with form data when it changes
+  useEffect(() => {
+    if (form.classification?.workflowType !== localWorkflowType) {
+      setLocalWorkflowType(form.classification?.workflowType);
+    }
+  }, [form.classification?.workflowType]);
 
   // Create a reference to measure content height
   const contentRef = useRef<HTMLDivElement>(null);
@@ -209,27 +226,22 @@ export function SpecPreview({
     Boolean(form.plan?.spec)
   }`;
 
-  // Container animation that handles visibility only
-  const containerSpring = useSpring({
-    opacity: visible && hasContent ? 1 : 0,
-    transform: visible && hasContent ? "translateY(0%)" : "translateY(-20%)",
-    width: visible && hasContent ? "100%" : "95%",
-    height: containerHeight,
+  // Create springs for animation with proper types
+  const springs = useSpring({
+    opacity: visible ? 1 : 0,
+    y: visible && hasContent ? 0 : -20,
     config: {
       tension: 280,
       friction: 24,
     },
     // Don't reset on height changes to allow smooth transitions
     reset: false,
-    // Remove key dependency on progressKey to prevent animation resets
   });
 
   // Text reveal animation - updates based on progress state not just loading
   const textSpring = useSpring({
     opacity: (visible && (!loading || form.classification)) ? 1 : 0,
-    transform: (visible && (!loading || form.classification))
-      ? "translateY(0)"
-      : "translateY(10px)",
+    y: (visible && (!loading || form.classification)) ? 0 : 10,
     config: {
       tension: 300,
       friction: 20,
@@ -266,44 +278,126 @@ export function SpecPreview({
     (form.classification?.confidence ?? 0) * 100,
   );
 
+  // Create a SpellList component to display available spells as radio button-like options
+  const SpellList = () => {
+    if (!form.searchResults?.castable) return null;
+
+    return (
+      <div className="p-2 space-y-4">
+        <div className="text-sm font-bold mb-2">AVAILABLE SPELLS</div>
+        {Object.entries(form.searchResults.castable).map(
+          ([charmId, spellsArray]) => {
+            // Ensure spellsArray is an array
+            const spells = Array.isArray(spellsArray) ? spellsArray : [];
+            return (
+              <div key={charmId} className="space-y-2">
+                <div className="text-xs font-semibold text-gray-700">
+                  {charmId}
+                </div>
+                {spells.length === 0
+                  ? (
+                    <div className="text-xs text-gray-500 italic">
+                      No spells available
+                    </div>
+                  )
+                  : (
+                    <div className="grid grid-cols-1 gap-px">
+                      {spells.map((
+                        result,
+                        index,
+                      ) => {
+                        // Check if this spell is currently selected
+                        const isSelected =
+                          form.spellToCast?.charmId === charmId &&
+                          form.spellToCast?.spellId === result.id;
+
+                        return (
+                          <div
+                            key={`${charmId}-${index}`}
+                            className={`border border-gray-300 p-2 cursor-pointer ${
+                              isSelected
+                                ? "bg-gray-100"
+                                : "bg-white hover:bg-gray-50"
+                            }`}
+                            onClick={() =>
+                              onSelectedCastChange?.(charmId, result.id)}
+                          >
+                            <div className="flex items-center">
+                              <div className="mr-2 flex-shrink-0 w-4 h-4 border border-gray-400 rounded-full flex items-center justify-center">
+                                {isSelected && (
+                                  <div className="w-2 h-2 bg-gray-700 rounded-full">
+                                  </div>
+                                )}
+                              </div>
+                              <div className="font-medium text-sm">
+                                {getSpellPreviewName(result.spell)}
+                              </div>
+                            </div>
+                            <div className="text-xs text-gray-600 mt-1 ml-6">
+                              {getSpellPreviewName(result.spell)}
+                            </div>
+                            {result.spell.recipeName && (
+                              <div className="text-xs text-gray-500 mt-1 ml-6 line-clamp-2">
+                                {result.spell.recipeName}
+                              </div>
+                            )}
+                            {result.spell.blobCreatedAt && (
+                              <div className="flex items-center text-xs text-gray-500 mt-2 ml-6">
+                                <span className="mr-1">Created:</span>
+                                {new Date(result.spell.blobCreatedAt)
+                                  .toLocaleDateString()}
+                                {result.spell.blobAuthor && (
+                                  <span className="ml-2">
+                                    by {result.spell.blobAuthor}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+              </div>
+            );
+          },
+        )}
+      </div>
+    );
+  };
+
   if (
     !form.plan?.spec && (!form.plan?.steps || form.plan?.steps.length === 0) &&
     !form.classification &&
-    !loading && !planLoading
+    !form.searchResults &&
+    !loading
   ) {
     return null;
   }
 
+  // Create static styles
+  const containerStyle = {
+    width: floating ? (isMobile ? "100vw" : "calc(100% + 2rem)") : "100%",
+    left: floating ? (isMobile ? "50%" : "-1rem") : undefined,
+    maxWidth: floating
+      ? (isMobile ? "100vw" : undefined)
+      : (isMobile ? "100%" : undefined),
+    bottom: floating ? "calc(100% + 0.5rem)" : undefined,
+    overflowY: "auto" as const,
+    height: containerHeight,
+    transition: "height 500ms ease-in-out",
+    display: !visible || !hasContent ? "none" : "block",
+  };
+
   return (
-    <animated.div
+    <div
       className={containerClasses}
       style={{
-        ...containerSpring,
-        ...(floating
-          ? {
-            width: isMobile ? "100vw" : "calc(100% + 2rem)",
-            left: isMobile ? "50%" : "-1rem",
-            transform: isMobile ? "translateX(-50%)" : undefined,
-            maxWidth: isMobile ? "100vw" : undefined,
-            bottom: "calc(100% + 0.5rem)",
-            overflowY: "auto",
-          }
-          : {
-            maxWidth: isMobile ? "100%" : undefined,
-            overflowY: "auto",
-          }),
-        // Use visibility to completely hide when not visible
-        display: !visible || !hasContent ? "none" : "block",
-        visibility: containerSpring.opacity.to((o) =>
-          o === 0 ? "hidden" : "visible"
-        ),
-        pointerEvents: containerSpring.opacity.to((o) =>
-          o === 0 ? "none" : "auto"
-        ),
-        // Set an explicit height to override the reactive value if needed
-        height: containerHeight,
-        // Add explicit transition for height - this is key to smooth animation
-        transition: "height 500ms ease-in-out, opacity 300ms ease-in-out",
+        ...containerStyle,
+        opacity: springs.opacity.get(),
+        transform: `translateY(${springs.y.get()}%)`,
+        visibility: springs.opacity.get() === 0 ? "hidden" : "visible",
+        pointerEvents: springs.opacity.get() === 0 ? "none" : "auto",
       }}
     >
       <div className="p-2 relative" ref={contentRef}>
@@ -317,8 +411,43 @@ export function SpecPreview({
         >
           {!visible ? null : (
             <div className="space-y-2 w-full">
-              {/* Only show main loading spinner while we wait for classification */}
-              {loading && !form.classification
+              <div className="flex items-center">
+                <select
+                  className="text-sm py-0.5 px-1 border border-gray-300 rounded bg-white"
+                  value={localWorkflowType || ""}
+                  onChange={(e) => {
+                    const newValue = e.target
+                      .value as WorkflowType;
+                    setLocalWorkflowType(newValue);
+                    onWorkflowChange?.(newValue);
+                  }}
+                >
+                  {Object.values(WORKFLOWS).map((workflow) => (
+                    <option
+                      key={workflow.name}
+                      value={workflow.name}
+                    >
+                      {workflow.label}
+                    </option>
+                  ))}
+                </select>
+                {form.classification?.confidence &&
+                  form.classification?.confidence > 0 && (
+                  <span
+                    className={`text-xs ml-2 ${
+                      form.classification?.confidence > 0.7
+                        ? "text-green-700"
+                        : "text-amber-600"
+                    }`}
+                  >
+                    ({confidencePercentage}% confidence)
+                  </span>
+                )}
+              </div>
+              {/* Display SpellList when form.results is present */}
+              {form.searchResults
+                ? <SpellList />
+                : loading
                 ? (
                   <div className="flex items-center justify-center w-full py-2">
                     <DitheredCube
@@ -333,231 +462,178 @@ export function SpecPreview({
                 )
                 : (
                   <div className="space-y-2 w-full">
-                    {/* Workflow Classification Section */}
-                    {(classificationLoading ||
-                        !form.classification?.workflowType)
-                      ? (
-                        <div className="flex items-center justify-center py-2">
-                          <DitheredCube
-                            animationSpeed={2}
-                            width={24}
-                            height={24}
-                            animate
-                            cameraZoom={12}
-                          />
-                          <span className="ml-2 text-sm">
-                            Classifying workflow...
-                          </span>
-                          <JobStatusIndicator generationId={generationId} />
-                        </div>
-                      )
-                      : (
-                        <>
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className="flex items-center">
-                              <select
-                                className="text-sm py-0.5 px-1 border border-gray-300 rounded bg-white"
-                                value={form.classification?.workflowType}
-                                onChange={(e) =>
-                                  onWorkflowChange?.(
-                                    e.target.value as WorkflowType,
-                                  )}
-                              >
-                                {Object.values(WORKFLOWS).map((workflow) => (
-                                  <option
-                                    key={workflow.name}
-                                    value={workflow.name}
-                                  >
-                                    {workflow.label}
-                                  </option>
-                                ))}
-                              </select>
-                              {form.classification?.confidence > 0 && (
-                                <span
-                                  className={`text-xs ml-2 ${
-                                    form.classification?.confidence > 0.7
-                                      ? "text-green-700"
-                                      : "text-amber-600"
-                                  }`}
-                                >
-                                  ({confidencePercentage}% confidence)
-                                </span>
-                              )}
+                    <div className="flex items-center gap-2 mb-2">
+                      {/* Add reasoning accordion inline */}
+                      {form.classification?.reasoning && (
+                        <div className="flex-1 ml-2">
+                          <Accordion
+                            title={
+                              <span className="text-xs">
+                                Reasoning
+                              </span>
+                            }
+                            defaultOpen={false}
+                            badge={null}
+                          >
+                            <div className="text-xs text-gray-700 leading-tight max-h-12 overflow-y-auto">
+                              {form.classification?.reasoning}
                             </div>
+                          </Accordion>
+                        </div>
+                      )}
+                    </div>
 
-                            {/* Add reasoning accordion inline */}
-                            {form.classification?.reasoning && (
-                              <div className="flex-1 ml-2">
-                                <Accordion
-                                  title={
-                                    <span className="text-xs">
-                                      Reasoning
-                                    </span>
-                                  }
-                                  defaultOpen={false}
-                                  badge={null}
-                                >
-                                  <div className="text-xs text-gray-700 leading-tight max-h-12 overflow-y-auto">
-                                    {form.classification?.reasoning}
-                                  </div>
-                                </Accordion>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Spec as full-width section */}
-                          <div className="w-full space-y-1">
-                            {/* Spec Section */}
-                            {form.classification?.workflowType !== "fix"
+                    {/* Spec as full-width section */}
+                    <div className="w-full space-y-1">
+                      {/* Spec Section */}
+                      {form.classification?.workflowType !== "fix"
+                        ? (
+                          <div className="p-1">
+                            <div className="text-sm font-bold mb-1">
+                              SPEC
+                            </div>
+                            {/* Show spec when available, otherwise loading */}
+                            {form.plan?.spec
                               ? (
-                                <div className="p-1">
-                                  <div className="text-sm font-bold mb-1">
-                                    SPEC
-                                  </div>
-                                  {/* Show spec when available, otherwise loading */}
-                                  {form.plan?.spec
-                                    ? (
-                                      <div className="font-mono text-xs whitespace-pre-wrap overflow-y-auto">
-                                        {form.plan?.spec}
-                                      </div>
-                                    )
-                                    : (
-                                      <div className="flex items-center py-1">
-                                        <DitheredCube
-                                          animationSpeed={2}
-                                          width={20}
-                                          height={20}
-                                          animate
-                                          cameraZoom={12}
-                                        />
-                                        <span className="ml-1 text-xs">
-                                          Generating...
-                                        </span>
-                                        <JobStatusIndicator
-                                          generationId={generationId}
-                                        />
-                                      </div>
-                                    )}
+                                <div className="font-mono text-xs whitespace-pre-wrap overflow-y-auto">
+                                  {form.plan?.spec}
                                 </div>
                               )
                               : (
-                                <div className="p-1">
-                                  <div className="text-sm font-bold mb-1">
-                                    ORIGINAL SPEC{" "}
-                                    <span className="text-xs text-blue-600">
-                                      (preserved)
-                                    </span>
-                                  </div>
-                                  {form.plan?.spec
-                                    ? (
-                                      <div className="font-mono text-xs whitespace-pre-wrap overflow-y-auto">
-                                        {form.plan?.spec}
-                                      </div>
-                                    )
-                                    : (
-                                      <div className="text-xs text-gray-500 italic">
-                                        Loading original specification...
-                                      </div>
-                                    )}
+                                <div className="flex items-center py-1">
+                                  <DitheredCube
+                                    animationSpeed={2}
+                                    width={20}
+                                    height={20}
+                                    animate
+                                    cameraZoom={12}
+                                  />
+                                  <span className="ml-1 text-xs">
+                                    Generating...
+                                  </span>
+                                  <JobStatusIndicator
+                                    generationId={generationId}
+                                  />
                                 </div>
                               )}
-
-                            {/* Plan and Data Model in 2-column layout */}
-                            <div className="grid grid-cols-2 gap-1">
-                              {/* Plan Section */}
-                              <div className="p-1">
-                                <div className="text-sm font-bold mb-1">
-                                  PLAN
-                                </div>
-                                {/* Show loading spinner whenever plan is still loading */}
-                                {(loading || planLoading) && !form.plan?.spec
-                                  ? (
-                                    <div className="flex items-center py-1">
-                                      <DitheredCube
-                                        animationSpeed={2}
-                                        width={20}
-                                        height={20}
-                                        animate
-                                        cameraZoom={12}
-                                      />
-                                      <span className="ml-1 text-xs">
-                                        Generating...
-                                      </span>
-                                      <JobStatusIndicator
-                                        generationId={generationId}
-                                      />
-                                    </div>
-                                  )
-                                  : form.plan?.steps
-                                  ? (
-                                    <div className="font-mono text-xs whitespace-pre-wrap">
-                                      {form.plan?.steps.map((step, index) => (
-                                        <div
-                                          key={index}
-                                          className="py-0.5 border-t first:border-t-0 border-gray-100"
-                                        >
-                                          <span className="font-bold">
-                                            {index + 1}.
-                                          </span>{" "}
-                                          {step}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )
-                                  : (
-                                    <div className="text-xs text-gray-500 italic">
-                                      Plan will appear here...
-                                    </div>
-                                  )}
-                              </div>
-
-                              {/* Data Model Section (conditional based on availability) */}
-                              <div className="p-1">
-                                <div className="text-sm font-bold mb-1">
-                                  DATA MODEL
-                                </div>
-                                {form.plan?.dataModel
-                                  ? (
-                                    <CodeMirror
-                                      key="source"
-                                      value={form.plan.dataModel || ""}
-                                      theme="light"
-                                      extensions={[
-                                        javascript(),
-                                        EditorView.lineWrapping,
-                                      ]}
-                                      style={{
-                                        height: "100%",
-                                        overflow: "auto",
-                                      }}
-                                      readOnly
-                                    />
-                                  )
-                                  : (
-                                    <div className="text-xs text-gray-500 italic">
-                                      Data model will appear here...
-                                    </div>
-                                  )}
-                              </div>
-                            </div>
                           </div>
-                        </>
-                      )}
+                        )
+                        : (
+                          <div className="p-1">
+                            <div className="text-sm font-bold mb-1">
+                              ORIGINAL SPEC{" "}
+                              <span className="text-xs text-blue-600">
+                                (preserved)
+                              </span>
+                            </div>
+                            {form.plan?.spec
+                              ? (
+                                <div className="font-mono text-xs whitespace-pre-wrap overflow-y-auto">
+                                  {form.plan?.spec}
+                                </div>
+                              )
+                              : (
+                                <div className="text-xs text-gray-500 italic">
+                                  Loading original specification...
+                                </div>
+                              )}
+                          </div>
+                        )}
 
-                    {/* Classification Reasoning moved to be inline with dropdown */}
+                      {/* Plan and Data Model in 2-column layout */}
+                      <div className="grid grid-cols-2 gap-1">
+                        {/* Plan Section */}
+                        <div className="p-1">
+                          <div className="text-sm font-bold mb-1">
+                            PLAN
+                          </div>
+                          {/* Show loading spinner whenever plan is still loading */}
+                          {loading && !form.plan?.spec
+                            ? (
+                              <div className="flex items-center py-1">
+                                <DitheredCube
+                                  animationSpeed={2}
+                                  width={20}
+                                  height={20}
+                                  animate
+                                  cameraZoom={12}
+                                />
+                                <span className="ml-1 text-xs">
+                                  Generating...
+                                </span>
+                                <JobStatusIndicator
+                                  generationId={generationId}
+                                />
+                              </div>
+                            )
+                            : form.plan?.steps
+                            ? (
+                              <div className="font-mono text-xs whitespace-pre-wrap">
+                                {form.plan?.steps.map((step, index) => (
+                                  <div
+                                    key={index}
+                                    className="py-0.5 border-t first:border-t-0 border-gray-100"
+                                  >
+                                    <span className="font-bold">
+                                      {index + 1}.
+                                    </span>{" "}
+                                    {step}
+                                  </div>
+                                ))}
+                              </div>
+                            )
+                            : (
+                              <div className="text-xs text-gray-500 italic">
+                                Plan will appear here...
+                              </div>
+                            )}
+                        </div>
 
-                    {/* Data Model is now shown in the two-column layout */}
+                        {/* Data Model Section (conditional based on availability) */}
+                        <div className="p-1">
+                          <div className="text-sm font-bold mb-1">
+                            DATA MODEL
+                          </div>
+                          {form.plan?.dataModel
+                            ? (
+                              <CodeMirror
+                                key="source"
+                                value={form.plan.dataModel || ""}
+                                theme="light"
+                                extensions={[
+                                  javascript(),
+                                  EditorView.lineWrapping,
+                                ]}
+                                style={{
+                                  height: "100%",
+                                  overflow: "auto",
+                                }}
+                                readOnly
+                              />
+                            )
+                            : (
+                              <div className="text-xs text-gray-500 italic">
+                                Data model will appear here...
+                              </div>
+                            )}
+                        </div>
+                      </div>
+                    </div>
 
                     {/* Empty state message */}
                     {!form.plan?.spec && !form.plan?.steps &&
-                      !classificationLoading && !planLoading &&
+                      !loading &&
                       (
-                        <animated.div
+                        <div
                           className="text-sm text-gray-500 italic py-4 text-center"
-                          style={textSpring}
+                          style={{
+                            opacity: textSpring.opacity.get(),
+                            transform: `translateY(${textSpring.y.get()}px)`,
+                            transition: "opacity 300ms, transform 300ms",
+                          }}
                         >
                           Your preview will appear here as you type...
-                        </animated.div>
+                        </div>
                       )}
                   </div>
                 )}
@@ -565,6 +641,6 @@ export function SpecPreview({
           )}
         </div>
       </div>
-    </animated.div>
+    </div>
   );
 }

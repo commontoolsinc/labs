@@ -32,6 +32,11 @@ import { storage } from "@commontools/runner";
 import { type Session } from "@commontools/identity";
 import { isObj } from "@commontools/utils";
 
+export function charmId(charm: Charm): string | undefined {
+  const id = getEntityId(charm);
+  return id ? id["/"] : undefined;
+}
+
 export type Charm = {
   [NAME]?: string;
   [UI]?: any;
@@ -141,6 +146,10 @@ export class CharmManager {
 
   getSpace(): string {
     return this.space;
+  }
+
+  getSpaceName(): string {
+    return this.session.name;
   }
 
   async synced(): Promise<void> {
