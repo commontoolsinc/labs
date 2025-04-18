@@ -3,6 +3,7 @@ import { User } from "@/components/User.tsx";
 import { useCell, useNamedCell } from "@/hooks/use-cell.ts";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { DEFAULT_MODEL_NAME } from "@commontools/llm/types";
+import { DEFAULT_MODEL } from "../../../../charm/src/index.ts";
 
 // Define the model options - these can be expanded in the future
 const MODEL_OPTIONS = [
@@ -110,19 +111,23 @@ interface ModelSelectorProps {
   className?: string; // Additional classes
   mapPreview?: boolean; // Whether to map preview model values (think/fast) to actual models
 }
-
 export function useUserPreferredModel() {
-  const { charmManager } = useCharmManager();
-  const space = useMemo(() => charmManager.getSpaceName(), [charmManager]);
-  const [userPreferredModel, setUserPreferredModel] = useNamedCell(
-    space,
-    "userPreferredModel",
-    { type: "string" },
+  const [userPreferredModel, setUserPreferredModel] = useState<LanguageModelId>(
+    () => {
+      const savedModel = localStorage.getItem("userPreferredModel");
+      return (savedModel as LanguageModelId) || DEFAULT_MODEL;
+    },
   );
 
+  // Update localStorage when the preferred model changes
+  const setAndSaveUserPreferredModel = (model: LanguageModelId) => {
+    localStorage.setItem("userPreferredModel", model);
+    setUserPreferredModel(model);
+  };
+
   return {
-    userPreferredModel: userPreferredModel as LanguageModelId,
-    setUserPreferredModel,
+    userPreferredModel,
+    setUserPreferredModel: setAndSaveUserPreferredModel,
   };
 }
 
