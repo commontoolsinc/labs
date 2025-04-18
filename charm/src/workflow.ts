@@ -18,6 +18,28 @@ import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode } from "./iframe/static.ts";
 import { formatPromptWithMentions } from "./format.ts";
 import { castNewRecipe } from "./iterate.ts";
+import { VNode } from "@commontools/html";
+
+export interface RecipeRecord {
+  argumentSchema: JSONSchema; // Schema type from jsonschema
+  resultSchema: JSONSchema; // Schema type from jsonschema
+  result: {
+    $NAME?: string;
+    $UI?: VNode;
+  };
+  initial?: any;
+}
+
+export interface SpellRecord {
+  recipe: RecipeRecord;
+  spec: string;
+  src: string;
+  recipeName?: string;
+  spellbookTitle?: string;
+  spellbookTags?: string[];
+  blobAuthor?: string;
+  blobCreatedAt?: string;
+}
 
 // Types for workflow classification
 export type WorkflowType =
@@ -376,10 +398,16 @@ export interface WorkflowForm {
     dataModel?: string;
   } | null;
 
-  // Generation information (only when actually generating code)
-  generation?: {
+  generation: {
     charm: Cell<Charm>;
-  };
+  } | null;
+
+  results: {
+    castable: Record<
+      string,
+      { id: string; spell: SpellRecord; similarity: float }[]
+    >;
+  } | null;
 
   // Metadata and workflow state
   meta: {
@@ -420,6 +448,8 @@ export function createWorkflowForm(
     },
     classification: null,
     plan: null,
+    generation: null,
+    results: null,
     meta: {
       isComplete: false,
       modelId,
@@ -773,6 +803,73 @@ export async function processWorkflow(
     }
 
     checkCancellation();
+
+    // Spell search flow
+    if (form.classification?.workflowType === "cast-spell") {
+      const schemas: JSONSchema[] = [];
+      const refs = Object.values(form.input.references);
+
+      if (refs.length === 0) {
+        throw new Error("No references found");
+      }
+
+      refs.forEach((cell: Cell<Charm>) => {
+        const schema = cell.schema;
+        if (schema) {
+          schemas.push(schema);
+        }
+      });
+
+      const castable: Record<string, SpellRecord[]> = {};
+
+      globalThis.dispatchEvent(
+        new CustomEvent("job-update", {
+          detail: {
+            type: "job-update",
+            jobId: form.meta.generationId,
+            title: form.input.processedInput,
+            status: `Searching for spells...`,
+          },
+        }),
+      );
+
+      for (const [key, charm] of Object.entries(form.input.references)) {
+        const schema = charm.schema?.properties;
+
+        castable[key] = [];
+        const response = await fetch("/api/ai/spell/find-by-schema", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            schema,
+          }),
+        });
+
+        const result = await response.json();
+        for (const spell of result.argument) {
+          castable[key].push(spell);
+        }
+      }
+
+      form.results = {
+        castable,
+      };
+
+      globalThis.dispatchEvent(
+        new CustomEvent("job-complete", {
+          detail: {
+            type: "job-complete",
+            jobId: form.meta.generationId,
+            title: form.input.processedInput,
+            status: `Found ${Object.keys(castable).length} results!`,
+          },
+        }),
+      );
+
+      return form;
+    }
 
     // Step 3: Planning if not already planned
     if (!form.plan || !form.plan.spec || !form.plan.steps) {

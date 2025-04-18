@@ -7,8 +7,10 @@ import type {
   WorkflowForm,
   WorkflowType,
 } from "@commontools/charm";
+
+// No additional type needed, we'll just use the original interface
 import JsonView from "@uiw/react-json-view";
-import { WORKFLOWS } from "../../../charm/src/workflow.ts";
+import { SpellRecord, WORKFLOWS } from "../../../charm/src/workflow.ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { EditorView } from "@codemirror/view";
@@ -138,6 +140,10 @@ const JobStatusIndicator = ({ generationId }: { generationId?: string }) => {
   );
 };
 
+function getSpellPreviewName(spell: SpellRecord) {
+  return spell.recipe.result.$NAME || "Unnamed Spell";
+}
+
 export function SpecPreview({
   form,
   loading,
@@ -146,7 +152,8 @@ export function SpecPreview({
   onWorkflowChange,
 }: SpecPreviewProps) {
   const hasContent =
-    (loading || form.classification || form.plan?.steps || form.plan?.spec) &&
+    (loading || form.classification || form.plan?.steps || form.plan?.spec ||
+      form.results) &&
     visible;
 
   // Get the current generation ID from the form metadata
@@ -270,9 +277,98 @@ export function SpecPreview({
     (form.classification?.confidence ?? 0) * 100,
   );
 
+  // Create a SpellList component to display available spells
+  const SpellList = () => {
+    if (!form.results?.castable) return null;
+
+    const handleCastSpell = (spell: SpellRecord) => {
+      alert(
+        `Casting spell: ${
+          spell.recipe.result.$NAME || spell.recipeName || "Unnamed Spell"
+        }`,
+      );
+    };
+
+    return (
+      <div className="p-2 space-y-4">
+        <div className="text-sm font-bold mb-2">AVAILABLE SPELLS</div>
+        {Object.entries(form.results.castable).map(
+          ([sourceKey, spellsArray]) => {
+            // Ensure spellsArray is an array
+            const spells = Array.isArray(spellsArray) ? spellsArray : [];
+            return (
+              <div key={sourceKey} className="space-y-2">
+                <div className="text-xs font-semibold text-gray-700">
+                  {sourceKey}
+                </div>
+                {spells.length === 0
+                  ? (
+                    <div className="text-xs text-gray-500 italic">
+                      No spells available
+                    </div>
+                  )
+                  : (
+                    <div className="grid grid-cols-1 gap-2">
+                      {spells.map((
+                        result,
+                        index,
+                      ) => (
+                        <div
+                          key={`${sourceKey}-${index}`}
+                          className="border border-gray-300 rounded-md p-2 bg-white hover:bg-gray-50 cursor-pointer"
+                          onClick={() => handleCastSpell(result.spell)}
+                        >
+                          <div className="flex justify-between items-center">
+                            <div className="font-medium text-sm">
+                              {getSpellPreviewName(result.spell)}
+                            </div>
+                            <button
+                              type="button"
+                              className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCastSpell(result.spell);
+                              }}
+                            >
+                              Cast
+                            </button>
+                          </div>
+                          <div className="text-xs text-gray-600 mt-1">
+                            {getSpellPreviewName(result.spell)}
+                          </div>
+                          {result.spell.recipeName && (
+                            <div className="text-xs text-gray-500 mt-1 line-clamp-2">
+                              {result.spell.recipeName}
+                            </div>
+                          )}
+                          {result.spell.blobCreatedAt && (
+                            <div className="flex items-center text-xs text-gray-500 mt-2">
+                              <span className="mr-1">Created:</span>
+                              {new Date(result.spell.blobCreatedAt)
+                                .toLocaleDateString()}
+                              {result.spell.blobAuthor && (
+                                <span className="ml-2">
+                                  by {result.spell.blobAuthor}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+              </div>
+            );
+          },
+        )}
+      </div>
+    );
+  };
+
   if (
     !form.plan?.spec && (!form.plan?.steps || form.plan?.steps.length === 0) &&
     !form.classification &&
+    !form.results &&
     !loading
   ) {
     return null;
@@ -314,8 +410,43 @@ export function SpecPreview({
         >
           {!visible ? null : (
             <div className="space-y-2 w-full">
-              {/* Only show main loading spinner while we wait for classification */}
-              {loading
+              <div className="flex items-center">
+                <select
+                  className="text-sm py-0.5 px-1 border border-gray-300 rounded bg-white"
+                  value={localWorkflowType || ""}
+                  onChange={(e) => {
+                    const newValue = e.target
+                      .value as WorkflowType;
+                    setLocalWorkflowType(newValue);
+                    onWorkflowChange?.(newValue);
+                  }}
+                >
+                  {Object.values(WORKFLOWS).map((workflow) => (
+                    <option
+                      key={workflow.name}
+                      value={workflow.name}
+                    >
+                      {workflow.label}
+                    </option>
+                  ))}
+                </select>
+                {form.classification?.confidence &&
+                  form.classification?.confidence > 0 && (
+                  <span
+                    className={`text-xs ml-2 ${
+                      form.classification?.confidence > 0.7
+                        ? "text-green-700"
+                        : "text-amber-600"
+                    }`}
+                  >
+                    ({confidencePercentage}% confidence)
+                  </span>
+                )}
+              </div>
+              {/* Display SpellList when form.results is present */}
+              {form.results
+                ? <SpellList />
+                : loading
                 ? (
                   <div className="flex items-center justify-center w-full py-2">
                     <DitheredCube
@@ -331,40 +462,6 @@ export function SpecPreview({
                 : (
                   <div className="space-y-2 w-full">
                     <div className="flex items-center gap-2 mb-2">
-                      <div className="flex items-center">
-                        <select
-                          className="text-sm py-0.5 px-1 border border-gray-300 rounded bg-white"
-                          value={localWorkflowType || ""}
-                          onChange={(e) => {
-                            const newValue = e.target
-                              .value as WorkflowType;
-                            setLocalWorkflowType(newValue);
-                            onWorkflowChange?.(newValue);
-                          }}
-                        >
-                          {Object.values(WORKFLOWS).map((workflow) => (
-                            <option
-                              key={workflow.name}
-                              value={workflow.name}
-                            >
-                              {workflow.label}
-                            </option>
-                          ))}
-                        </select>
-                        {form.classification?.confidence &&
-                          form.classification?.confidence > 0 && (
-                          <span
-                            className={`text-xs ml-2 ${
-                              form.classification?.confidence > 0.7
-                                ? "text-green-700"
-                                : "text-amber-600"
-                            }`}
-                          >
-                            ({confidencePercentage}% confidence)
-                          </span>
-                        )}
-                      </div>
-
                       {/* Add reasoning accordion inline */}
                       {form.classification?.reasoning && (
                         <div className="flex-1 ml-2">
