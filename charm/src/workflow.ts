@@ -876,6 +876,7 @@ export async function processWorkflow(
               type: "job-complete",
               jobId: form.meta.generationId,
               title: form.input.processedInput,
+              result: newCharm,
               status: `Charm created!`,
             },
           }),
@@ -1018,15 +1019,7 @@ export async function processWorkflow(
           jobId: form.meta.generationId,
           title: form.input.processedInput,
           status: "Completed successfully",
-          result: form,
-          viewAction: form.generation?.charm
-            ? {
-              label: "View Results",
-              action: () => {
-                console.log("made", form.generation?.charm);
-              },
-            }
-            : undefined,
+          result: form.generation?.charm,
         },
       }),
     );
