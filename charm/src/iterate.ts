@@ -11,7 +11,7 @@ import {
   JSONSchema,
   type Writable,
 } from "@commontools/builder";
-import { Charm, CharmManager, charmSourceCellSchema } from "./charm.ts";
+import { Charm, CharmManager, charmSourceCellSchema } from "./manager.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import {

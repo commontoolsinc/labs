@@ -5,7 +5,7 @@ export {
   CharmManager,
   charmSchema,
   processSchema,
-} from "./charm.ts";
+} from "./manager.ts";
 export {
   castNewRecipe,
   compileAndRunRecipe,
