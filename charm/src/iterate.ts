@@ -127,6 +127,7 @@ export async function iterate(
       newIFrameSrc,
       newSpec,
       generationId,
+      llmRequestId,
     ),
     llmRequestId,
   };
@@ -144,6 +145,7 @@ export const generateNewRecipeVersion = async (
   newIFrameSrc: string,
   newSpec: string,
   generationId?: string,
+  llmRequestId?: string,
 ) => {
   const { recipeId, iframe } = getIframeRecipe(parent);
 
@@ -177,6 +179,12 @@ export const generateNewRecipeVersion = async (
     parent.getSourceCell()?.key("argument"),
     recipeId ? [recipeId] : undefined,
   );
+
+  if (llmRequestId) {
+    newCharm.getSourceCell(charmSourceCellSchema)?.key("llmRequestId").set(
+      llmRequestId,
+    );
+  }
 
   newCharm.getSourceCell(charmSourceCellSchema)?.key("lineage").push({
     charm: parent,

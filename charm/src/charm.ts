@@ -77,6 +77,7 @@ export const charmSourceCellSchema = {
       items: charmLineageSchema,
       default: [],
     },
+    llmRequestId: { type: "string", default: undefined },
   },
 } as const satisfies JSONSchema;
 
@@ -1204,6 +1205,7 @@ export class CharmManager {
     recipe: Recipe | Module,
     inputs?: any,
     cause?: any,
+    llmRequestId?: string,
   ): Promise<Cell<Charm>> {
     await idle();
 
