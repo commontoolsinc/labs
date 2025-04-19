@@ -52,6 +52,7 @@ import { CharmLink } from "@/components/CharmLink.tsx";
 import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
 import {
   LanguageModelId,
+  ModelSelector,
   useUserPreferredModel,
 } from "@/components/common/ModelSelector.tsx";
 import { SpecPreview } from "@/components/SpecPreview.tsx";
