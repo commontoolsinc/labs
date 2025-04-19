@@ -366,6 +366,11 @@ export class CharmManager {
       [];
   }
 
+  getLLMTrace(charm: Cell<Charm>): string | undefined {
+    return charm.getSourceCell(charmSourceCellSchema)?.key("llmRequestId")
+      .get() ?? undefined;
+  }
+
   /**
    * Find all charms that the given charm reads data from via aliases or links.
    * This identifies dependencies that the charm has on other charms.

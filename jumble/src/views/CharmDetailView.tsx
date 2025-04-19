@@ -1064,6 +1064,7 @@ const DataTab = () => {
             <span>{isArgumentExpanded ? "▼" : "▶"}</span>
           </button>
 
+          <p>{charmManager.getLLMTrace(charm)}</p>
           {isArgumentExpanded && (
             <div className="border border-gray-300 rounded bg-gray-50 p-2">
               {/* @ts-expect-error JsonView is imported as any */}

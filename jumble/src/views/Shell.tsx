@@ -38,7 +38,7 @@ export default function Shell() {
             <ActionBar />
             <CharmPublisher />
             <CommandCenter />
-            <PrimaryFeedbackActions />
+            {/* <PrimaryFeedbackActions /> */}
             <ToggleableNetworkInspector
               visible={localStorage.getItem("networkInspectorVisible") ===
                 "true"}
