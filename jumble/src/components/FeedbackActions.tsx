@@ -2,13 +2,12 @@ import { ReactElement, useEffect, useState } from "react";
 import { FeedbackDialog } from "@/components/FeedbackDialog.tsx";
 import { Slot } from "@/components/Slot.tsx";
 import { submitFeedback } from "@/services/feedback.ts";
-import { getLastTraceSpanID } from "@commontools/builder";
 import { MdThumbDownOffAlt, MdThumbUpOffAlt } from "react-icons/md";
 import { notify } from "@/contexts/ActivityContext.tsx";
 import { useLocation } from "react-router-dom";
 
 export function PrimaryFeedbackActions(
-  { llmRequestId }: { llmRequestId?: string } = {},
+  { llmRequestId }: { llmRequestId: string },
 ) {
   const [showFeedbackButtons, setShowFeedbackButtons] = useState(false);
   // Hide buttons when the user navigates to a different route
@@ -80,7 +79,7 @@ export function PrimaryFeedbackActions(
 
 export function FeedbackActions(
   { llmRequestId, className, children, onClose, onOpen }: {
-    llmRequestId?: string;
+    llmRequestId: string;
     onClose?: () => void;
     onOpen?: () => void;
     className?: string;
@@ -129,7 +128,7 @@ export function FeedbackActions(
     console.log("Submitting feedback:", data);
     setIsSubmitting(true);
 
-    const spanId = llmRequestId ?? getLastTraceSpanID() as string;
+    const spanId = llmRequestId;
     try {
       await submitFeedback(
         {
