@@ -10,14 +10,12 @@ import {
 } from "@commontools/builder";
 import {
   type Cell,
-  type CellLink,
   createRef,
   DocImpl,
   EntityId,
   followAliases,
   getCell,
   getCellFromEntityId,
-  getDoc,
   getEntityId,
   getRecipe,
   idle,
