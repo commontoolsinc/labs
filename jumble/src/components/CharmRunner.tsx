@@ -131,6 +131,8 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
 
     container.addEventListener("common-iframe-error", handleIframeError);
 
+    console.log("LLMTRACE", charmManager.getLLMTrace(charm));
+
     const cleanup = render(
       container,
       charm.asSchema(charmSchema).key(UI) as Cell<VNode>,

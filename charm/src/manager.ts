@@ -1242,6 +1242,12 @@ export class CharmManager {
     await this.syncRecipe(charm);
     await this.add([charm]);
 
+    if (llmRequestId) {
+      charm.getSourceCell(charmSourceCellSchema)?.key("llmRequestId").set(
+        llmRequestId,
+      );
+    }
+
     return charm;
   }
 
