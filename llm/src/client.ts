@@ -37,6 +37,8 @@ export class LLMClient {
       );
     }
 
+    request.messages = request.messages.map(processMessage);
+
     const response = await fetch(this.serverUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -117,4 +119,19 @@ export class LLMClient {
 
     return { content: text, id };
   }
+}
+
+// FIXME(ja): we should either make message always a LLMMessage or update the types that
+// iframes/recipes can generate
+function processMessage(
+  m: LLMMessage | string,
+  idx: number,
+): LLMMessage {
+  if (typeof m === "string" || Array.isArray(m)) {
+    return {
+      role: idx % 2 === 0 ? "user" : "assistant",
+      content: m,
+    };
+  }
+  return m;
 }

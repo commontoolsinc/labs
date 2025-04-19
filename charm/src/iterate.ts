@@ -11,7 +11,7 @@ import {
   JSONSchema,
   type Writable,
 } from "@commontools/builder";
-import { Charm, CharmManager, charmSourceCellSchema } from "./charm.ts";
+import { Charm, CharmManager, charmSourceCellSchema } from "./manager.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import {
@@ -127,6 +127,7 @@ export async function iterate(
       newIFrameSrc,
       newSpec,
       generationId,
+      llmRequestId,
     ),
     llmRequestId,
   };
@@ -144,6 +145,7 @@ export const generateNewRecipeVersion = async (
   newIFrameSrc: string,
   newSpec: string,
   generationId?: string,
+  llmRequestId?: string,
 ) => {
   const { recipeId, iframe } = getIframeRecipe(parent);
 
@@ -176,6 +178,7 @@ export const generateNewRecipeVersion = async (
     newSpec,
     parent.getSourceCell()?.key("argument"),
     recipeId ? [recipeId] : undefined,
+    llmRequestId,
   );
 
   newCharm.getSourceCell(charmSourceCellSchema)?.key("lineage").push({
@@ -451,7 +454,7 @@ export async function castNewRecipe(
   const existingSchema = createJsonSchema(scrubbed);
 
   // Prototype workflow: combine steps
-  const { newIFrameSrc, newSpec, newRecipeSrc, name, schema, llmRequestId } =
+  const { newSpec, newRecipeSrc, llmRequestId } =
     form.classification?.workflowType === "imagine-single-phase"
       ? await singlePhaseCodeGeneration(form, existingSchema)
       : await twoPhaseCodeGeneration(form, existingSchema);
@@ -469,7 +472,14 @@ export async function castNewRecipe(
   );
 
   return {
-    cell: await compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, input),
+    cell: await compileAndRunRecipe(
+      charmManager,
+      newRecipeSrc,
+      newSpec,
+      input,
+      undefined,
+      llmRequestId,
+    ),
     llmRequestId,
   };
 }
@@ -499,11 +509,17 @@ export async function compileAndRunRecipe(
   spec: string,
   runOptions: any,
   parents?: string[],
+  llmRequestId?: string,
 ): Promise<Cell<Charm>> {
   const recipe = await compileRecipe(recipeSrc, spec, parents);
   if (!recipe) {
     throw new Error("Failed to compile recipe");
   }
 
-  return charmManager.runPersistent(recipe, runOptions);
+  return charmManager.runPersistent(
+    recipe,
+    runOptions,
+    undefined,
+    llmRequestId,
+  );
 }

@@ -5,7 +5,7 @@
  * I'm starting from the bottom (common memory) up and purposely calling
  * APIs that would normally call into common memory.
  */
-import { Charm, charmListSchema, CharmManager } from "../charm/src/charm.ts";
+import { Charm, charmListSchema, CharmManager } from "../charm/src/manager.ts";
 import { Cell, type CellLink } from "../runner/src/cell.ts";
 import { Session } from "../identity/src/index.ts";
 import { DocImpl, getDoc } from "../runner/src/doc.ts";

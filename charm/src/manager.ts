@@ -10,14 +10,12 @@ import {
 } from "@commontools/builder";
 import {
   type Cell,
-  type CellLink,
   createRef,
   DocImpl,
   EntityId,
   followAliases,
   getCell,
   getCellFromEntityId,
-  getDoc,
   getEntityId,
   getRecipe,
   idle,
@@ -77,6 +75,7 @@ export const charmSourceCellSchema = {
       items: charmLineageSchema,
       default: [],
     },
+    llmRequestId: { type: "string", default: undefined },
   },
 } as const satisfies JSONSchema;
 
@@ -363,6 +362,11 @@ export class CharmManager {
   getLineage(charm: Cell<Charm>) {
     return charm.getSourceCell(charmSourceCellSchema)?.key("lineage").get() ??
       [];
+  }
+
+  getLLMTrace(charm: Cell<Charm>): string | undefined {
+    return charm.getSourceCell(charmSourceCellSchema)?.key("llmRequestId")
+      .get() ?? undefined;
   }
 
   /**
@@ -1204,6 +1208,7 @@ export class CharmManager {
     recipe: Recipe | Module,
     inputs?: any,
     cause?: any,
+    llmRequestId?: string,
   ): Promise<Cell<Charm>> {
     await idle();
 
@@ -1236,6 +1241,12 @@ export class CharmManager {
     await runSynced(charm, recipe, inputs);
     await this.syncRecipe(charm);
     await this.add([charm]);
+
+    if (llmRequestId) {
+      charm.getSourceCell(charmSourceCellSchema)?.key("llmRequestId").set(
+        llmRequestId,
+      );
+    }
 
     return charm;
   }

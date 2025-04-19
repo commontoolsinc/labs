@@ -14,39 +14,58 @@ import { ToggleableNetworkInspector } from "@/components/NetworkInspector.tsx";
 import { NetworkInspectorProvider } from "@/contexts/NetworkInspectorContext.tsx";
 import { PrimaryFeedbackActions } from "@/components/FeedbackActions.tsx";
 import ActivityStatus from "@/components/ActivityStatus.tsx";
+import { useCharm } from "@/hooks/use-charm.ts";
+import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { useEffect, useState } from "react";
 
 export default function Shell() {
   const { charmId } = useParams<CharmRouteParams>();
-  useGlobalActions();
   const { session } = useAuthentication();
-
+  
   if (!session) {
     return <AuthenticationView />;
   }
 
   return (
     <CharmsManagerProvider>
-      <SyncStatusProvider>
-        <NetworkInspectorProvider>
-          <div className="flex flex-col shell h-full bg-gray-50 border-2 border-black">
-            <ShellHeader session={session} charmId={charmId} />
-
-            <div className="h-full overflow-y-auto">
-              <Outlet />
-            </div>
-
-            <ActionBar />
-            <CharmPublisher />
-            <CommandCenter />
-            <PrimaryFeedbackActions />
-            <ToggleableNetworkInspector
-              visible={localStorage.getItem("networkInspectorVisible") ===
-                "true"}
-            />
-            <ActivityStatus className="floating-panel" />
-          </div>
-        </NetworkInspectorProvider>
-      </SyncStatusProvider>
+      <ShellContent charmId={charmId} />
     </CharmsManagerProvider>
+  );
+}
+
+function ShellContent({ charmId }: { charmId?: string }) {
+  const { currentFocus: charm } = useCharm(charmId);
+  const { charmManager } = useCharmManager();
+  const { session } = useAuthentication();
+  // We don't need a custom toggle handler - PrimaryFeedbackActions handles its own state
+  
+  useGlobalActions();
+
+  return (
+    <SyncStatusProvider>
+      <NetworkInspectorProvider>
+        <div className="flex flex-col shell h-full bg-gray-50 border-2 border-black">
+          <ShellHeader session={session!} charmId={charmId} />
+
+          <div className="h-full overflow-y-auto">
+            <Outlet />
+          </div>
+
+          <ActionBar />
+          <CharmPublisher />
+          <CommandCenter />
+          {charm && charmManager && (() => {
+            const traceId = charmManager.getLLMTrace(charm);
+            return traceId && typeof traceId === 'string' && traceId.trim() !== '' ? 
+              <PrimaryFeedbackActions llmRequestId={traceId} /> : null;
+          })()}
+          <ToggleableNetworkInspector
+            visible={localStorage.getItem("networkInspectorVisible") ===
+              "true"}
+          />
+          <ActivityStatus className="floating-panel" />
+        </div>
+      </NetworkInspectorProvider>
+    </SyncStatusProvider>
   );
 }

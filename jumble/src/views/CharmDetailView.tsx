@@ -20,7 +20,7 @@ import {
   CommonCheckbox,
   CommonLabel,
   ToggleButton,
-} from "../components/common/CommonToggle.tsx";
+} from "@/components/common/CommonToggle.tsx";
 import React, {
   createContext,
   useCallback,
@@ -48,7 +48,6 @@ import { createPath } from "@/routes.ts";
 import JsonView from "@uiw/react-json-view";
 import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { useCharmMentions } from "@/components/CommandCenter.tsx";
-import { formatPromptWithMentions } from "@commontools/charm";
 import { CharmLink } from "@/components/CharmLink.tsx";
 import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
 import {
@@ -61,7 +60,6 @@ import { useLiveSpecPreview } from "@/hooks/use-live-spec-preview.ts";
 import { EditorView } from "@codemirror/view";
 
 type Tab = "iterate" | "code" | "data";
-type OperationType = "iterate" | "extend";
 
 const variantModels = [
   "anthropic:claude-3-5-sonnet-latest",

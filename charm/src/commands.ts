@@ -1,6 +1,6 @@
 import { DEFAULT_MODEL_NAME, fixRecipePrompt } from "@commontools/llm";
 import { Cell, getRecipe } from "@commontools/runner";
-import { Charm, CharmManager } from "./charm.ts";
+import { Charm, CharmManager } from "./manager.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode, injectUserCode } from "./iframe/static.ts";
 import { compileAndRunRecipe, generateNewRecipeVersion } from "./iterate.ts";

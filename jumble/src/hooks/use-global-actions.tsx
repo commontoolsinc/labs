@@ -93,7 +93,27 @@ export function useGlobalActions() {
     ),
   );
 
-  // Feedback action (available only when a charm is open)
+  // Track if current charm has LLM trace ID for feedback
+  const [hasLLMTrace, setHasLLMTrace] = useState(false);
+  
+  useEffect(() => {
+    let mounted = true;
+    
+    async function checkLLMTrace() {
+      if (charmId && charmManager) {
+        const charm = await charmManager.get(charmId);
+        if (charm && mounted) {
+          const traceId = charmManager.getLLMTrace(charm);
+          setHasLLMTrace(!!traceId && typeof traceId === 'string' && traceId.trim() !== '');
+        }
+      }
+    }
+    
+    checkLLMTrace();
+    return () => { mounted = false; };
+  }, [charmId, charmManager]);
+
+  // Feedback action (available only when a charm with LLM trace is open)
   useAction(
     useMemo(
       () => ({
@@ -104,9 +124,9 @@ export function useGlobalActions() {
           globalThis.dispatchEvent(new CustomEvent("toggle-feedback"));
         },
         priority: 30,
-        predicate: hasCharmId,
+        predicate: () => hasCharmId() && hasLLMTrace,
       }),
-      [hasCharmId],
+      [hasCharmId, hasLLMTrace],
     ),
   );
 }

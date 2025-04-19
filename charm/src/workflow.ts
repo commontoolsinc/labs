@@ -10,7 +10,7 @@
  */
 
 import { Cell, getRecipe } from "@commontools/runner";
-import { Charm, charmId, CharmManager } from "./charm.ts";
+import { Charm, charmId, CharmManager } from "./manager.ts";
 import { JSONSchema } from "@commontools/builder";
 import { classifyWorkflow, generateWorkflowPlan } from "@commontools/llm";
 import { iterate } from "./iterate.ts";
