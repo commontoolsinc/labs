@@ -20,7 +20,13 @@ import {
   unsafe_originalRecipe,
 } from "./types.ts";
 import { getTopFrame } from "./recipe.ts";
-import { type CellLink, isCell, isCellLink, isDoc } from "@commontools/runner";
+import {
+  type CellLink,
+  ContextualFlowControl,
+  isCell,
+  isCellLink,
+  isDoc,
+} from "@commontools/runner";
 
 /**
  * Traverse a value, _not_ entering cells
@@ -329,6 +335,8 @@ export function recipeToJSON(recipe: Recipe) {
 }
 
 export function connectInputAndOutputs(node: NodeRef) {
+  const cfc = new ContextualFlowControl();
+
   function connect(value: any): any {
     if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
     if (isOpaqueRef(value)) {
@@ -342,5 +350,14 @@ export function connectInputAndOutputs(node: NodeRef) {
   }
 
   node.inputs = traverseValue(node.inputs, connect);
+  const inputClassification = new Set<string>();
+  if (isOpaqueRef(node.inputs)) {
+    const { schema, rootSchema } = node.inputs.export();
+    if (schema) {
+      console.log("Got node inputs with schema:", schema);
+      cfc.joinSchema(inputClassification, schema, rootSchema);
+    }
+  }
+  console.log(inputClassification);
   node.outputs = traverseValue(node.outputs, connect);
 }
