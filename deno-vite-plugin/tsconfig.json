@@ -4,8 +4,13 @@
     "declaration": true,
     "target": "ES2020",
     "module": "NodeNext",
-    "moduleResolution": "NodeNext"
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true
   },
   "include": ["src"],
-  "exclude": ["vendor/"]
+  "exclude": ["vendor/", "node_modules"]
 }

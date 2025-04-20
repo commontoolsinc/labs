@@ -123,7 +123,7 @@ export async function resolveDeno(
   // redirects.
   const redirected = json.redirects[actualId] ?? actualId;
 
-  // Find the module information based on the redirected speciffier
+  // Find the module information based on the redirected specifier
   const mod = json.modules.find((info) => info.specifier === redirected);
   if (mod === undefined) return null;
 
@@ -229,11 +229,15 @@ export function parseDenoSpecifier(spec: DenoSpecifierName): {
   id: string;
   resolved: string;
 } {
-  const [_, loader, id, resolved] = spec.split("::") as [
-    string,
-    string,
-    DenoMediaType,
-    string,
-  ];
-  return { loader: loader as DenoMediaType, id, resolved };
+  const parts = spec.split("::");
+  if (parts.length !== 4) {
+    throw new Error(`Invalid Deno specifier format: ${spec}`);
+  }
+
+  const [, loader, id, resolved] = parts;
+  return {
+    loader: loader as DenoMediaType,
+    id,
+    resolved,
+  };
 }
