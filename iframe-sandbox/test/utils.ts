@@ -93,11 +93,16 @@ export function assertEquals(a: any, b: any) {
 }
 
 const FIXTURE_ID = "common-iframe-csp-fixture-container";
-export function render(src: string, context = {}): Promise<CommonIframeSandboxElement> {
+export function render(
+  src: string,
+  context = {},
+): Promise<CommonIframeSandboxElement> {
   return new Promise((resolve) => {
     const parent = document.createElement("div");
     parent.id = `${FIXTURE_ID}-${(Math.random() * 1_000_000).toFixed(0)}`;
-    const iframe = document.createElement("common-iframe-sandbox") as CommonIframeSandboxElement;
+    const iframe = document.createElement(
+      "common-iframe-sandbox",
+    ) as CommonIframeSandboxElement;
     // @ts-ignore This is a lit property.
     iframe.context = context;
     iframe.addEventListener("load", (_) => {

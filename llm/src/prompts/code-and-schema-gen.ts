@@ -1,10 +1,11 @@
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
-import { client } from "../client.ts";
+import { LLMClient } from "../client.ts";
 import type { JSONSchema, JSONSchemaWritable } from "@commontools/builder";
 import { WorkflowForm } from "@commontools/charm";
 import { systemMdConcise } from "../../../charm/src/iframe/static.ts";
 import { formatForm } from "./spec-and-schema-gen.ts";
 import { llmPrompt } from "../index.ts";
+import { DEFAULT_MODEL_NAME } from "../types.ts";
 
 // This is for the 'imagine-single-phase' workflow
 
@@ -199,7 +200,7 @@ Return ONLY the requested XML tags, no other commentary.
 export async function generateCodeAndSchema(
   form: WorkflowForm,
   existingSchema?: JSONSchema,
-  model: string = "anthropic:claude-3-7-sonnet-latest",
+  model: string = DEFAULT_MODEL_NAME,
 ): Promise<{
   sourceCode: string;
   title: string;
@@ -244,7 +245,7 @@ Based on this goal and the existing schema, please provide a title, description,
   }
 
   // Send the request to the LLM using the specified model or default
-  const response = await client.sendRequest({
+  const response = await new LLMClient().sendRequest({
     model: model,
     system: systemPrompt.text,
     stream: false,
@@ -254,6 +255,7 @@ Based on this goal and the existing schema, please provide a title, description,
         content: userContent.text,
       },
     ],
+    cache: form.meta.cache,
     metadata: {
       context: "workflow",
       workflow: "code-and-schema-gen",
@@ -264,16 +266,19 @@ Based on this goal and the existing schema, please provide a title, description,
   });
 
   // Extract sections from the response
-  const title = parseTagFromResponse(response, "title") || "New Charm";
-  const description = parseTagFromResponse(response, "description");
-  const sourceCode = parseTagFromResponse(response, "source_code");
+  const title = parseTagFromResponse(response.content, "title") || "New Charm";
+  const description = parseTagFromResponse(response.content, "description");
+  const sourceCode = parseTagFromResponse(response.content, "source_code");
 
   // If we have an existing schema, use it; otherwise parse the generated schema
   let resultSchema: JSONSchemaWritable;
   let argumentSchema: JSONSchemaWritable;
 
   try {
-    const resultSchemaJson = parseTagFromResponse(response, "result_schema");
+    const resultSchemaJson = parseTagFromResponse(
+      response.content,
+      "result_schema",
+    );
     resultSchema = resultSchemaJson ? JSON.parse(resultSchemaJson) : {};
   } catch (error) {
     console.warn("Error parsing schema:", error);
@@ -283,7 +288,7 @@ Based on this goal and the existing schema, please provide a title, description,
 
   try {
     const argumentSchemaJson = parseTagFromResponse(
-      response,
+      response.content,
       "argument_schema",
     );
     argumentSchema = argumentSchemaJson ? JSON.parse(argumentSchemaJson) : {};

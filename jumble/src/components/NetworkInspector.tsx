@@ -46,6 +46,8 @@ export const DummyModelInspector: React.FC = () => {
   return <ModelInspector model={status.current} />;
 };
 
+const NETWORK_INSPECTOR_OPEN = "networkInspectorOpen";
+
 export const ToggleableNetworkInspector: React.FC<
   { fullscreen?: boolean; visible: boolean }
 > = (
@@ -57,10 +59,12 @@ export const ToggleableNetworkInspector: React.FC<
 
   if (!visible || !status.current) return null;
 
+  const initiallyOpen = localStorage.getItem(NETWORK_INSPECTOR_OPEN) === "true";
+
   return (
     <ModelInspector
       model={status.current}
-      initiallyOpen
+      initiallyOpen={initiallyOpen}
       fullscreen={fullscreen}
     />
   );
@@ -80,6 +84,11 @@ const ModelInspector: React.FC<
 
   // Use our animation smoothing hook
   const { updateValue, getValue, rafRef } = useAnimationSmoothing();
+
+  // Persist inspector status across sessions.
+  useEffect(() => {
+    localStorage.setItem(NETWORK_INSPECTOR_OPEN, String(isOpen));
+  }, [isOpen]);
 
   // Set up render loop with requestAnimationFrame when inspector is open
   useEffect(() => {

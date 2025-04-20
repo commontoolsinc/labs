@@ -1,5 +1,6 @@
-import { client } from "../client.ts";
+import { LLMClient } from "../client.ts";
 import { llmPrompt } from "../index.ts";
+import { DEFAULT_MODEL_NAME } from "../types.ts";
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { recipeGuidePrompt } from "./recipe-guide.ts";
 
@@ -83,7 +84,8 @@ export async function fixRecipePrompt(
   code: string,
   schema: string,
   error: string,
-  model: string = "anthropic:claude-3-7-sonnet-latest",
+  model: string = DEFAULT_MODEL_NAME,
+  cache: boolean,
 ) {
   const system = hydratePrompt(SYSTEM_PROMPT, {
     SPEC: spec,
@@ -95,7 +97,7 @@ export async function fixRecipePrompt(
     "recipe-fix-user",
     `Please fix the code. Remember to only return the user code portion, not the full template. Do not include any HTML, head, or body tags - just the JavaScript functions.`,
   );
-  const response = await client.sendRequest({
+  const response = await new LLMClient().sendRequest({
     model,
     system: system.text,
     stream: false,
@@ -111,8 +113,9 @@ export async function fixRecipePrompt(
       systemPrompt: system.version,
       userPrompt: prompt.version,
     },
+    cache,
   });
 
   // console.log("RESPONSE", parseTagFromResponse(response, "fixed_code"));
-  return parseTagFromResponse(response, "fixed_code");
+  return parseTagFromResponse(response.content, "fixed_code");
 }

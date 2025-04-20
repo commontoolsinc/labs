@@ -1,38 +1,11 @@
-import { LlmPrompt } from "./prompts/prompting.ts";
-import { setLastTraceSpanID } from "@commontools/builder";
+import { LLMContent, LLMMessage, LLMRequest, LLMResponse } from "./types.ts";
 
-export type SimpleMessage = {
-  role: "user" | "assistant";
-  content: SimpleContent;
-};
-
-export type SimpleContent = string | TypedContent[];
-
-type TypedContent =
-  | {
-    type: "text";
-    text: string;
-  }
-  | {
-    type: "image";
-    url: string;
-  };
+type PartialCallback = (text: string) => void;
 
 export const DEFAULT_LLM_URL = typeof globalThis.location !== "undefined"
   ? globalThis.location.protocol + "//" + globalThis.location.host +
     "/api/ai/llm"
   : "//api/ai/llm";
-
-export type LLMRequest = {
-  messages: SimpleMessage[] | SimpleContent[];
-  system?: string;
-  model: string | string[];
-  max_tokens?: number;
-  stream?: boolean;
-  stop?: string;
-  mode?: "json";
-  metadata?: Record<string, string | undefined | LlmPrompt>;
-};
 
 export class LLMClient {
   private serverUrl: string = DEFAULT_LLM_URL;
@@ -41,69 +14,64 @@ export class LLMClient {
     this.serverUrl = new URL("/api/ai/llm", toolshedUrl).toString();
   }
 
+  /**
+   * Sends a request to the LLM service.
+   *
+   * @param userRequest The LLM request object.
+   * @param partialCB Optional callback for streaming responses.
+   * @returns The full LLM response as a string.
+   * @throws If the request fails after retrying with fallback models.
+   */
   async sendRequest(
-    userRequest: LLMRequest,
-    partialCB?: (text: string) => void,
-  ): Promise<string> {
-    const models = Array.isArray(userRequest.model)
-      ? userRequest.model
-      : [userRequest.model];
-
-    const errors: Error[] = [];
-
-    for (const model of models) {
-      const fullRequest: LLMRequest = {
-        ...userRequest,
-        model,
-        stream: partialCB ? true : false,
-        messages: userRequest.messages.map(processMessage),
-      };
-
-      try {
-        const response = await fetch(this.serverUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(fullRequest),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(
-            `HTTP error! status: ${response.status}, body: ${errorText}`,
-          );
-        }
-
-        if (!response.body) {
-          throw new Error("No response body");
-        }
-
-        const traceSpanID = response.headers.get("x-ct-llm-trace-id") as string;
-        if (traceSpanID) {
-          setLastTraceSpanID(traceSpanID);
-        }
-
-        // the server might return cached data instead of a stream
-        if (response.headers.get("content-type") === "application/json") {
-          const data = (await response.json()) as SimpleMessage;
-          // FIXME(ja): can the LLM ever return anything other than a string?
-          return data.content as string;
-        }
-        // FIXME(ja): this doesn't handle falling back to other models
-        // if we fail during streaming
-        return await this.stream(response.body, partialCB);
-      } catch (error) {
-        console.error(`Model "${model}" failed:`, error, fullRequest);
-        errors.push(error as Error);
-      }
+    request: LLMRequest,
+    callback?: PartialCallback,
+  ): Promise<LLMResponse> {
+    if (request.stream && !callback) {
+      throw new Error(
+        "Requested an LLM request stream but no callback provided.",
+      );
+    }
+    if (!request.stream && callback) {
+      throw new Error(
+        "Requested an LLM request with callback, but not configured as a stream.",
+      );
     }
 
-    throw new Error("All models failed");
+    const response = await fetch(this.serverUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `HTTP error! status: ${response.status}, body: ${errorText}`,
+      );
+    }
+
+    if (!response.body) {
+      throw new Error("No response body");
+    }
+
+    const id = response.headers.get("x-ct-llm-trace-id") as string;
+
+    // the server might return cached data instead of a stream
+    if (response.headers.get("content-type") === "application/json") {
+      const data = (await response.json()) as LLMMessage;
+      return {
+        content: data.content as string,
+        id,
+      };
+    }
+    return await this.stream(response.body, id, callback);
   }
 
   private async stream(
     body: ReadableStream,
-    cb?: (partial: string) => void,
-  ): Promise<string> {
+    id: string,
+    callback?: PartialCallback,
+  ): Promise<LLMResponse> {
     const reader = body.getReader();
     const decoder = new TextDecoder();
 
@@ -127,7 +95,7 @@ export class LLMClient {
             try {
               const t = JSON.parse(line);
               text += t;
-              if (cb) cb(text);
+              if (callback) callback(text);
             } catch (error) {
               console.error("Failed to parse JSON line:", line, error);
             }
@@ -141,27 +109,12 @@ export class LLMClient {
       try {
         const t = JSON.parse(buffer.trim());
         text += t;
-        if (cb) cb(text);
+        if (callback) callback(text);
       } catch (error) {
         console.error("Failed to parse final JSON line:", buffer, error);
       }
     }
 
-    return text;
+    return { content: text, id };
   }
 }
-
-function processMessage(
-  m: SimpleMessage | SimpleContent,
-  idx: number,
-): SimpleMessage {
-  if (typeof m === "string" || Array.isArray(m)) {
-    return {
-      role: idx % 2 === 0 ? "user" : "assistant",
-      content: m,
-    };
-  }
-  return m;
-}
-
-export const client = new LLMClient();

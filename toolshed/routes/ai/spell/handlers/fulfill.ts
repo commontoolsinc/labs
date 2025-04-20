@@ -221,6 +221,7 @@ export async function processSchema(
       : "Return a valid JSON object synthesized from real data from the database. Must match the schema exactly.",
     stream: false,
     messages: [{ role: "user", content: prompt }],
+    cache: true,
   });
   logger.info(
     { llmTime: Math.round(performance.now() - llmStartTime) },
@@ -231,6 +232,9 @@ export async function processSchema(
 
   try {
     logger.debug("Parsing LLM response");
+    if (typeof llmResponse !== "string") {
+      throw new Error("Received unsupported LLM typed content.");
+    }
     result = extractJSON(llmResponse);
     logger.debug({ extractedJSON: result }, "Extracted JSON from response");
 

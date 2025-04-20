@@ -1,10 +1,8 @@
-import { assertEquals, assertExists } from "@std/assert";
-import { beforeEach, describe, it, afterEach } from "@std/testing/bdd";
+import { assertEquals } from "@std/assert";
+import { describe, it } from "@std/testing/bdd";
 import { scrub } from "../src/iterate.ts";
-import { getImmutableCell, isCell, isStream, Cell } from "@commontools/runner";
+import { getImmutableCell } from "@commontools/runner";
 import { JSONSchema } from "@commontools/builder";
-import { isObj } from "@commontools/utils";
-import { Charm, CharmManager } from "../src/charm.ts";
 
 describe("scrub function", () => {
   it("should return primitive values unchanged", () => {

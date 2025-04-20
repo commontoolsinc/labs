@@ -14,7 +14,9 @@ type ToggleButtonProps<T extends readonly { value: string; label: string }[]> =
     className?: string;
   };
 
-export function ToggleButton<T extends readonly { value: string; label: string }[]>({
+export function ToggleButton<
+  T extends readonly { value: string; label: string }[],
+>({
   options,
   value,
   onChange,
@@ -31,34 +33,36 @@ export function ToggleButton<T extends readonly { value: string; label: string }
 
   return (
     <div className={containerClasses}>
-      {options.map((option: { value: string; label: string }, index: number) => {
-        const isSelected = value === option.value;
-        const isFirstItem = index === 0;
-        const isNextItemSelected = index < options.length - 1 &&
-          value === options[index + 1].value;
+      {options.map(
+        (option: { value: string; label: string }, index: number) => {
+          const isSelected = value === option.value;
+          const isFirstItem = index === 0;
+          const isNextItemSelected = index < options.length - 1 &&
+            value === options[index + 1].value;
 
-        return (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => onChange(option.value)}
-            className={`
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onChange(option.value)}
+              className={`
               ${sizeClasses[size as keyof typeof sizeClasses]}
               flex-1 text-center border-2
               ${index > 0 ? "border-l-0" : ""}
               ${
-              isSelected
-                ? "border-black bg-black text-white"
-                : `border-gray-300 bg-white hover:border-gray-400 ${
-                  isFirstItem && isNextItemSelected ? "border-r-0" : ""
-                }`
-            }
+                isSelected
+                  ? "border-black bg-black text-white"
+                  : `border-gray-300 bg-white hover:border-gray-400 ${
+                    isFirstItem && isNextItemSelected ? "border-r-0" : ""
+                  }`
+              }
             `}
-          >
-            {option.label}
-          </button>
-        );
-      })}
+            >
+              {option.label}
+            </button>
+          );
+        },
+      )}
     </div>
   );
 }

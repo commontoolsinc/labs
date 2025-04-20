@@ -1,8 +1,9 @@
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
-import { client } from "../client.ts";
+import { LLMClient } from "../client.ts";
 import type { JSONSchema } from "@commontools/builder";
 import { WorkflowType } from "@commontools/charm";
 import { llmPrompt } from "../index.ts";
+import { DEFAULT_MODEL_NAME } from "../types.ts";
 
 /**
  * Basic prompt for classifying user intent into a workflow type
@@ -148,7 +149,14 @@ function generateCharmContext(
 }
 
 /**
- * Classifies the user's intent into a workflow type
+ * Classifies the workflow type based on user prompt and optional existing code context.
+ *
+ * @param input The user's input prompt.
+ * @param existingCode Optional existing code snippet for context.
+ * @param model Optional specific LLM model to use.
+ * @param generationId Optional identifier for the generation process.
+ * @param cache Optional flag to enable/disable LLM cache.
+ * @returns A promise resolving to an object containing the classified workflow type and confidence score.
  */
 export async function classifyWorkflow(
   input: string,
@@ -157,6 +165,7 @@ export async function classifyWorkflow(
   existingCode?: string,
   model?: string,
   generationId?: string,
+  cache = true,
 ): Promise<{
   workflowType: WorkflowType;
   confidence: number;
@@ -179,10 +188,11 @@ export async function classifyWorkflow(
     "You are a helpful AI assistant tasked with classifying user intents for code generation",
   );
 
-  const response = await client.sendRequest({
+  const response = await new LLMClient().sendRequest({
     system: systemPrompt.text,
     messages: [{ role: "user", content: prompt.text }],
-    model: model || "anthropic:claude-3-7-sonnet-latest",
+    model: model ?? DEFAULT_MODEL_NAME,
+    cache,
     metadata: {
       context: "workflow",
       workflow: "classification",
@@ -193,13 +203,19 @@ export async function classifyWorkflow(
   });
 
   try {
-    const workflow = parseTagFromResponse(response, "workflow").toLowerCase();
-    const confidence = parseFloat(parseTagFromResponse(response, "confidence"));
-    const reasoning = parseTagFromResponse(response, "reasoning");
+    const workflow = parseTagFromResponse(response.content, "workflow")
+      .toLowerCase();
+    const confidence = parseFloat(
+      parseTagFromResponse(response.content, "confidence"),
+    );
+    const reasoning = parseTagFromResponse(response.content, "reasoning");
 
     let enhancedPrompt: string | undefined;
     try {
-      enhancedPrompt = parseTagFromResponse(response, "enhanced_prompt");
+      enhancedPrompt = parseTagFromResponse(
+        response.content,
+        "enhanced_prompt",
+      );
     } catch (e) {
       // Enhanced prompt is optional
     }
@@ -273,6 +289,16 @@ function cleanJsonString(jsonStr: string): string {
 
 /**
  * Generates an execution plan for a workflow
+ *
+ * @param input The user's input prompt.
+ * @param workflowType The type of workflow to generate a plan for.
+ * @param existingSpec Optional existing specification for context.
+ * @param existingSchema Optional existing schema for context.
+ * @param existingCode Optional existing code snippet for context.
+ * @param model Optional specific LLM model to use.
+ * @param generationId Optional identifier for the generation process.
+ * @param cache Optional flag to enable/disable LLM cache.
+ * @returns A promise resolving to an object containing the generation steps and schema specification.
  */
 export async function generateWorkflowPlan(
   input: string,
@@ -282,6 +308,7 @@ export async function generateWorkflowPlan(
   existingCode?: string,
   model?: string,
   generationId?: string,
+  cache = true,
 ): Promise<{
   steps: string[];
   spec: string;
@@ -304,10 +331,11 @@ export async function generateWorkflowPlan(
     "You are a helpful AI assistant tasked with planning code generation workflows",
   );
 
-  const response = await client.sendRequest({
+  const response = await new LLMClient().sendRequest({
     system: systemPrompt.text,
     messages: [{ role: "user", content: prompt.text }],
-    model: model || "anthropic:claude-3-7-sonnet-latest",
+    model: model ?? DEFAULT_MODEL_NAME,
+    cache,
     metadata: {
       context: "workflow",
       workflow: workflowType.toLowerCase(),
@@ -319,7 +347,7 @@ export async function generateWorkflowPlan(
 
   try {
     // Parse the steps
-    const stepsText = parseTagFromResponse(response, "steps");
+    const stepsText = parseTagFromResponse(response.content, "steps");
     const steps = stepsText
       .split(/\d+\.\s+/)
       .filter((step) => step.trim().length > 0)
@@ -332,13 +360,13 @@ export async function generateWorkflowPlan(
     const references = "";
 
     try {
-      specification = parseTagFromResponse(response, "specification");
+      specification = parseTagFromResponse(response.content, "specification");
     } catch (e) {
       // Specification might not be available
     }
 
     try {
-      dataModel = parseTagFromResponse(response, "data_model");
+      dataModel = parseTagFromResponse(response.content, "data_model");
     } catch (e) {
       // Data model might not be available
     }

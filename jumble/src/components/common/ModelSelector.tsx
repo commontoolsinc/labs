@@ -2,12 +2,13 @@ import React, { useMemo, useState } from "react";
 import { User } from "@/components/User.tsx";
 import { useCell, useNamedCell } from "@/hooks/use-cell.ts";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
+import { DEFAULT_MODEL_NAME } from "@commontools/llm/types";
 
 // Define the model options - these can be expanded in the future
 const MODEL_OPTIONS = [
   // Preset section
   {
-    value: "anthropic:claude-3-7-sonnet-latest",
+    value: DEFAULT_MODEL_NAME,
     label: "Default",
     isPreset: true,
   },
@@ -25,24 +26,32 @@ const MODEL_OPTIONS = [
     label: "Claude 3.5",
     isPreset: false,
   },
-  { value: "groq:qwen-qwq-32b", label: "Qwen QwQ 32B 🧠", isPreset: false },
+  { value: "groq:qwen-qwq-32b", label: "Qwen QwQ 32B", isPreset: false },
   {
     value: "groq:llama-3.3-70b-versatile",
     label: "Llama 3.3 🔥",
     isPreset: false,
   },
-  { value: "openai:gpt-4.1", label: "gpt-4.1", isPreset: false },
-  { value: "openai:gpt-4.1-mini", label: "gpt-4.1-mini", isPreset: false },
-  { value: "openai:gpt-4.1-nano", label: "gpt-4.1-nano", isPreset: false },
-  { value: "openai:o3-mini-low-latest", label: "o3-mini-low", isPreset: false },
   {
-    value: "openai:o3-mini-medium-latest",
-    label: "o3-mini-medium",
+    value: "groq:llama-4-maverick",
+    label: "Llama 4 Maverick",
     isPreset: false,
   },
   {
-    value: "openai:o3-mini-high-latest",
-    label: "o3-mini-high",
+    value: "groq:llama-4-scout",
+    label: "Llama 4 Scout",
+    isPreset: false,
+  },
+  { value: "openai:o3", label: "o3 🧠", isPreset: false },
+  { value: "openai:o4-mini-low", label: "o4-mini-low", isPreset: false },
+  {
+    value: "openai:o4-mini-medium",
+    label: "o4-mini-medium",
+    isPreset: false,
+  },
+  {
+    value: "openai:o4-mini-high",
+    label: "o4-mini-high",
     isPreset: false,
   },
   { value: "google:gemini-2.0-pro", label: "Gemini 2.0", isPreset: false },

@@ -2,29 +2,42 @@ import { createRoute } from "@hono/zod-openapi";
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import { jsonContent } from "stoker/openapi/helpers";
 import { z } from "zod";
+import { toZod } from "@commontools/utils/zod-utils";
+import {
+  type LLMMessage,
+  type LLMRequest,
+  LLMTypedContent,
+} from "@commontools/llm/types";
 
 const tags = ["AI Language Models"];
 
-export const MessageSchema = z.object({
-  role: z.string(),
-  content: z.string(),
+const TypedMessageSchema = toZod<LLMTypedContent>().with({
+  type: z.enum(["text", "image"]),
+  data: z.string(),
+});
+
+export const MessageSchema = toZod<LLMMessage>().with({
+  role: z.enum(["user", "assistant"]),
+  content: z.union([
+    z.string(),
+    z.array(TypedMessageSchema),
+  ]),
 });
 
 export type LLMResponseMessage = z.infer<typeof MessageSchema>;
 
-export const LLMRequestSchema = z.object({
+export const LLMRequestSchema = toZod<LLMRequest>().with({
   messages: z.array(MessageSchema),
   system: z.string().optional(),
-  model: z.string().optional().openapi({
+  model: z.string().openapi({
     example: "claude-3-7-sonnet",
   }),
-  task: z.string().optional(),
-  max_tokens: z.number().optional(),
-  stop_token: z.string().optional(),
-  max_completion_tokens: z.number().optional(),
-  stream: z.boolean().default(false),
+  maxTokens: z.number().optional(),
+  stop: z.string().optional(),
+  stream: z.boolean().optional(),
   mode: z.enum(["json"]).optional(),
   metadata: z.record(z.union([z.string(), z.any()])).optional(),
+  cache: z.boolean(),
 });
 
 export const ModelInfoSchema = z.object({
@@ -130,6 +143,7 @@ export const generateText = createRoute({
               model: "anthropic:claude-3-7-sonnet-latest",
               system: "You are a pirate, make sure you talk like one.",
               stream: false,
+              cache: true,
               messages: [
                 {
                   role: "user",

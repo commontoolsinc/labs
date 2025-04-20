@@ -1,23 +1,27 @@
 import { createNodeFactory, lift } from "./module.ts";
 import type { NodeFactory, Opaque, OpaqueRef } from "./types.ts";
 
-export const llm = createNodeFactory({
-  type: "ref",
-  implementation: "llm",
-}) as <T = string>(
-  params: Opaque<{
-    messages?: string[];
-    prompt?: string;
-    system?: string;
-    stop?: string;
-    max_tokens?: number;
-  }>,
-) => OpaqueRef<{
+export interface BuiltInLLMParams {
+  messages?: string[];
+  model?: string;
+  system?: string;
+  stop?: string;
+  maxTokens?: number;
+}
+
+export interface BuiltInLLMState<T> {
   pending: boolean;
   result?: T;
   partial?: string;
   error: any;
-}>;
+}
+
+export const llm = createNodeFactory({
+  type: "ref",
+  implementation: "llm",
+}) as <T = string>(
+  params: Opaque<BuiltInLLMParams>,
+) => OpaqueRef<BuiltInLLMState<T>>;
 
 export const fetchData = createNodeFactory({
   type: "ref",

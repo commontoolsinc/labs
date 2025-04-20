@@ -15,6 +15,7 @@ const EnvSchema = z.object({
     "trace",
     "silent",
   ]).default("info"),
+  DISABLE_LOG_REQ_RES: z.coerce.boolean().default(false),
   CACHE_DIR: z.string().default("./cache"),
 
   // ===========================================================================

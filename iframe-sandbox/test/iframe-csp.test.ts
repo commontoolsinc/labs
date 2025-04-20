@@ -59,7 +59,8 @@ const SCRIPT_URL = "https://common.tools/static/sketch.js";
 const STYLE_URL = "https://common.tools/static/main.css";
 const IMG_URL = "https://common.tools/static/text.png";
 const ORIGIN_URL = new URL(globalThis.location.href).origin;
-const BASE64_IMG_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
+const BASE64_IMG_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
 
 function openWindow(target: any) {
   return `<script>

@@ -1,10 +1,10 @@
 import { checkSchemaMatch } from "@/lib/schema-match.ts";
 import { SearchResult } from "../search.ts";
 import { Logger, PrefixedLogger } from "@/lib/prefixed-logger.ts";
-import type { RedisClientType } from "redis";
 import { generateText } from "@/lib/llm.ts";
 import { getAllBlobs, getBlob } from "../effects.ts";
 import { Schema } from "jsonschema";
+import { type LLMRequest } from "@commontools/llm/types";
 
 export async function generateSchema(
   query: string,
@@ -12,7 +12,7 @@ export async function generateSchema(
 ): Promise<unknown> {
   const prefixedLogger = new PrefixedLogger(logger, "scanBySchema");
   prefixedLogger.info(`Generating schema for query: ${query}`);
-  const schemaPrompt = {
+  const schemaPrompt: LLMRequest = {
     model: "claude-3-7-sonnet",
     messages: [
       {
@@ -23,9 +23,14 @@ export async function generateSchema(
     system:
       "Generate a minimal JSON schema to match data that relates to this search query, aim for the absolute minimal number of fields that cature the essence of the data. (e.g. articles are really just title and url) Return only valid JSON schema.",
     stream: false,
+    cache: true,
   };
 
   const schemaText = await generateText(schemaPrompt);
+  // Currently only handle string responses
+  if (typeof schemaText !== "string") {
+    throw new Error("Received unsupported LLM typed content.");
+  }
   const schema = JSON.parse(schemaText);
   prefixedLogger.info(`Generated schema:\n${JSON.stringify(schema, null, 2)}`);
   return schema;

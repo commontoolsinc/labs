@@ -1,6 +1,7 @@
 # Diagnose Issue Command
 
-A command to analyze a GitHub issue and provide detailed diagnosis with Claude assistance.
+A command to analyze a GitHub issue and provide detailed diagnosis with Claude
+assistance.
 
 ## Usage
 
@@ -22,7 +23,8 @@ claude diagnose <issue-number>
 3. **Present to Claude**:
    - Show Claude the formatted issue details
    - Ask Claude to explore the codebase for relevant files/code
-   - Request analysis including problem summary, affected code, root causes, and solutions
+   - Request analysis including problem summary, affected code, root causes, and
+     solutions
 
 4. **Generate diagnosis**:
    - Claude analyzes the issue and codebase

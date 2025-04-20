@@ -23,15 +23,23 @@ phoenix.
     cd toolshed; deno task dev
     cd jumble; deno task dev-local
 
-    TOOLSHED_API_URL=http://localhost:8000 deno task start --space blue42
+    TOOLSHED_API_URL=http://localhost:8000 deno task start --name blue42
 
 staging:
 
-    TOOLSHED_API_URL=https://toolshed.saga-castor.ts.net deno task start --space blue42
+    TOOLSHED_API_URL=https://toolshed.saga-castor.ts.net deno task start --name blue42
 
 estuary:
 
-    TOOLSHED_API_URL=https://estuary.saga-castor.ts.net deno task start --space blue42
+    TOOLSHED_API_URL=https://estuary.saga-castor.ts.net deno task start --name blue42
+
+To run the seeder with a specific tag, use the `--tag` flag.
+
+    deno task start --name blue42 --tag smol
+
+To run the seeder with cache disabled, use the `--no-cache` flag.
+
+    deno task start --name blue42 --no-cache
 
 ## Adding more scenarios / prompts
 

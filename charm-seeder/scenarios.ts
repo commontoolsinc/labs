@@ -1,14 +1,4 @@
-import { CommandType } from "./commands.ts";
-
-export type Step = {
-  type: CommandType;
-  prompt: string;
-};
-
-export type Scenario = {
-  name: string;
-  steps: Step[];
-};
+import { CommandType, type Scenario, type Step } from "./interfaces.ts";
 
 export const scenarios: Scenario[] = [
   {
@@ -17,6 +7,7 @@ export const scenarios: Scenario[] = [
       type: CommandType.New,
       prompt: "a 2048 game",
     }],
+    tags: ["smol"],
   },
   {
     name: "2048 Game Short",
@@ -87,7 +78,8 @@ make it minimal and apple-like UI.`,
     name: "HyperList - Extend Version",
     steps: [{
       type: CommandType.New,
-      prompt: `Outline tool that allows me to create a hierarchical list where items can be nested under other items by one level per parent/child relationship.  Moving any item will move everything nested inside that item's substructure.  Items at the top level have no parents.
+      prompt:
+        `Outline tool that allows me to create a hierarchical list where items can be nested under other items by one level per parent/child relationship.  Moving any item will move everything nested inside that item's substructure.  Items at the top level have no parents.
 
 There is a root item in the list that looks the same as the others but can not be deleted.  If one doesn't exist, add one and name it "Root".
 
@@ -129,16 +121,19 @@ Make the UI clean and Apple-like.
 
    - Make all buttons subtle and minimal.
 
-   - Include a subtle version number in the corner: 0.01`
+   - Include a subtle version number in the corner: 0.01`,
     }, {
       type: CommandType.Extend,
-      prompt: "fix the bug where Tab should set the level to the item above which shares the same level as ActiveItem before indentation (increase hierarchical level) by one increment.",
+      prompt:
+        "fix the bug where Tab should set the level to the item above which shares the same level as ActiveItem before indentation (increase hierarchical level) by one increment.",
     }, {
       type: CommandType.Extend,
-      prompt: "fix the bug where CMD-Return SHOULD insert the new item directly below the current ActiveItem",      
+      prompt:
+        "fix the bug where CMD-Return SHOULD insert the new item directly below the current ActiveItem",
     }, {
       type: CommandType.Extend,
-      prompt: "add the ability to change the order but moving the position of the active selection with CMD-up arrow and CMD-down arrow while retaining hierarchical integrity of all connected child relationships",
+      prompt:
+        "add the ability to change the order but moving the position of the active selection with CMD-up arrow and CMD-down arrow while retaining hierarchical integrity of all connected child relationships",
     }],
   },
   {
@@ -217,7 +212,7 @@ Hierarchical integrity is maintained as subitems with their Parent items.
         Make all buttons subtle and minimal.
         Include a subtle version number in the corner: 0.01
     Fix the bug where users can't add items!
-    Force focus on the first item of the list`
+    Force focus on the first item of the list`,
     }],
   },
 ];
