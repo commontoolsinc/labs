@@ -334,10 +334,9 @@ test("list multiple facts using schema query", store, async (session) => {
     expectedFacts[fact.cause.toString()] = { is: fact.is, since: commit.since };
   }
   const factChanges = Selection.from(facts.map((fact) => [fact, commit.since]));
-  const newObject = { ...factChanges, "_": { [the]: expectedFacts } };
   assertEquals(
     result.ok?.selection,
-    { [subject.did()]: newObject },
+    { [subject.did()]: factChanges },
     "lists multiple facts",
   );
 });

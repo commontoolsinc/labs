@@ -75,7 +75,7 @@ export interface Model {
    * Status of current subscriptions.
    */
   subscriptions: Record<string, {
-    source: Subscribe;
+    source: Subscribe | SchemaQuery;
     opened: Time;
     updated?: Time;
     value: JSONValue | undefined;
@@ -87,7 +87,7 @@ export class Model {
   push: PushState;
   pull: PullState;
   subscriptions: Record<string, {
-    source: Subscribe;
+    source: Subscribe | SchemaQuery;
     opened: Time;
     updated?: Time;
     value: JSONValue | undefined;
@@ -97,7 +97,7 @@ export class Model {
     push: PushState,
     pull: PullState,
     subscriptions: Record<string, {
-      source: Subscribe;
+      source: Subscribe | SchemaQuery;
       opened: Time;
       updated?: Time;
       value: JSONValue | undefined;
@@ -257,6 +257,14 @@ const send = (
     }
     case "/memory/graph/query": {
       state.pull[url] = { ok: { invocation, authorization } };
+      if (invocation.args.subscribe) {
+        state.subscriptions[url] = {
+          source: invocation,
+          opened: time,
+          updated: undefined,
+          value: undefined,
+        };
+      }
       return state;
     }
     case "/memory/query/subscribe": {

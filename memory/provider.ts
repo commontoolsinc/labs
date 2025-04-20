@@ -2,12 +2,17 @@ import * as Memory from "./memory.ts";
 import type {
   AsyncResult,
   Await,
+  Cause,
+  Changes,
   CloseResult,
   Commit,
+  CommitData,
   ConnectionError,
   ConsumerCommandInvocation,
   ConsumerInvocationFor,
   ConsumerResultFor,
+  Fact,
+  FactSelection,
   Invocation,
   InvocationURL,
   MemorySession,
@@ -21,9 +26,13 @@ import type {
   QueryError,
   Reference,
   Result,
+  Revision,
+  SchemaQuery,
+  Select,
   Selection,
   Subscribe,
   Subscriber,
+  The,
   Transaction,
   UCAN,
 } from "./interface.ts";
@@ -37,6 +46,11 @@ export * as Memory from "./memory.ts";
 export * as Subscription from "./subscription.ts";
 import { refer } from "./reference.ts";
 import * as Access from "./access.ts";
+import { Fact as FactModule, SelectionBuilder } from "./lib.ts";
+import { assert } from "@std/assert/assert";
+
+// Convenient shorthand so I don't need this long type for this string
+type JobId = InvocationURL<Reference<ConsumerCommandInvocation<Protocol>>>;
 
 export const open = async (
   options: Memory.Options,
@@ -110,6 +124,14 @@ class MemoryProvider<
   }
 }
 
+export class SchemaSubscription {
+  constructor(
+    public invocation: SchemaQuery,
+    public watchedObjects: Set<string>,
+    public since: number = -1,
+  ) {}
+}
+
 class MemoryProviderSession<
   Space extends MemorySpace,
   MemoryProtocol extends Protocol<Space>,
@@ -121,6 +143,7 @@ class MemoryProviderSession<
     | undefined;
 
   channels: Map<InvocationURL<Reference<Subscribe>>, Set<string>> = new Map();
+  schemaChannels: Map<JobId, SchemaSubscription> = new Map();
 
   constructor(
     public memory: MemorySession,
@@ -208,13 +231,14 @@ class MemoryProviderSession<
         });
       }
       case "/memory/graph/query": {
+        const result = await this.memory.querySchema(invocation);
+        if (invocation.args.subscribe && result.ok !== undefined) {
+          this.addSchemaSubscription(of, invocation, result.ok);
+        }
         return this.perform({
           the: "task/return",
           of,
-          is: (await this.memory.querySchema(invocation)) as Result<
-            Selection<Space>,
-            QueryError
-          >,
+          is: result,
         });
       }
       case "/memory/transact": {
@@ -266,14 +290,29 @@ class MemoryProviderSession<
     }
   }
 
-  commit(commit: Commit<Space>) {
+  async commit(commit: Commit<Space>) {
+    // First, check to see if any of our schema queries need to be notified
+    const [lastId, maxSince, facts] = await this.getSchemaSubscriptionMatches(
+      commit,
+    );
+    // It doesn't really matter who we say we're responding to as long as we
+    // return all the relevant objects, the client will dispatch.
+    // It is important that we send it to the right kind of listener.
+    if (lastId !== undefined) {
+      //this.setCommitData(commit, maxSince, changes);
+      console.log("Sending facts", facts, "to", lastId);
+      this.perform({
+        the: "task/effect",
+        of: lastId,
+        is: facts,
+      });
+    }
+
     for (const [id, channels] of this.channels) {
       if (Subscription.match(commit, channels)) {
-        // Note that we intentionally exit on the first match because we do not
-        // want to send same transaction multiple times to the same consumer.
-        // Consumer does it's own bookkeeping of all the subscriptions and will
-        // distribute transaction to all of them locally.
-        return this.perform({
+        // Note that we don't exit on the first match anymore because we need
+        // to keep these subscriptions distinct.
+        this.perform({
           the: "task/effect",
           of: id,
           is: commit,
@@ -282,6 +321,73 @@ class MemoryProviderSession<
     }
 
     return { ok: {} };
+  }
+
+  private addSchemaSubscription<Space extends MemorySpace>(
+    of: JobId,
+    invocation: SchemaQuery<Space>,
+    result: Selection<Space>,
+  ) {
+    const factSelection = result[invocation.sub];
+    const factVersions = Array.from(FactModule.iterate(factSelection));
+    const includedFacts = new Set(
+      factVersions.map((fv) => Subscription.formatAddress(fv)),
+    );
+    const since = factVersions.reduce(
+      (acc, cur, _i) => cur.since > acc ? cur.since : acc,
+      -1,
+    );
+    const subscription = new SchemaSubscription(
+      invocation,
+      includedFacts,
+      since,
+    );
+    this.schemaChannels.set(of, subscription);
+  }
+
+  private async getSchemaSubscriptionMatches(
+    commit: Commit<Space>,
+  ): Promise<[JobId | undefined, number, Selection<Space>]> {
+    const schemaMatches = new Map<string, Revision<Fact>>();
+    let maxSince = -1;
+    let lastId;
+    const [[space, _attributes]] = Object.entries(commit);
+    // Eventually, we should support multiple spaces, but currently the since handling is per-space
+    // Our websockets are also per-space, so there's larger issues involved.
+    for (const [id, subscription] of this.schemaChannels) {
+      if (Subscription.match(commit, subscription.watchedObjects)) {
+        const result = await this.memory.querySchema(subscription.invocation);
+        const factSelection = result.ok![space as Space];
+        const factVersions = Array.from(FactModule.iterate(factSelection));
+        const includedFacts = new Map(
+          factVersions.map((fv) => [Subscription.formatAddress(fv), fv]),
+        );
+        const since = factVersions.reduce(
+          (acc, cur, _i) => cur.since > acc ? cur.since : acc,
+          -1,
+        );
+        // We only need to include the facts that are newer than our query
+        const newFacts = includedFacts.entries().filter((
+          [address, factVersion],
+        ) =>
+          factVersion.since > subscription.since ||
+          !subscription.watchedObjects.has(address)
+        );
+        for (const [address, factVersion] of newFacts) {
+          schemaMatches.set(address, factVersion);
+        }
+        // Update our subscription
+        subscription.watchedObjects = new Set(includedFacts.keys());
+        subscription.since = since;
+        lastId = id;
+        maxSince = since > maxSince ? since : maxSince;
+      }
+    }
+    const selection = SelectionBuilder.from(
+      schemaMatches.values().map((item) => [item, item.since]),
+    );
+    const selectionSpace = { [space]: selection } as Selection<Space>;
+    return [lastId, maxSince, selectionSpace];
   }
 }
 
