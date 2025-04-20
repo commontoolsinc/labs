@@ -1,14 +1,12 @@
 import { Cell, getEntityId, isCell, isStream } from "@commontools/runner";
 import { isObj } from "@commontools/utils";
 import { JSONSchema } from "@commontools/builder";
-import { Charm, CharmManager } from "./charm.ts";
+import { Charm, CharmManager } from "./manager.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode } from "./iframe/static.ts";
 
 // Re-export workflow types and functions from workflow module
 export type { WorkflowConfig, WorkflowType } from "./workflow.ts";
-
-export { executeWorkflow, WORKFLOWS } from "./workflow.ts";
 
 /**
  * Structure representing a successfully parsed mention in a prompt

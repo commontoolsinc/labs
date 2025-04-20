@@ -13,7 +13,7 @@ import {
   ReactivityLog,
   removeAction,
 } from "@commontools/runner";
-import { LLMClient, DEFAULT_MODEL_NAME } from "@commontools/llm";
+import { DEFAULT_IFRAME_MODELS, LLMClient } from "@commontools/llm";
 import { isObj } from "@commontools/utils";
 import {
   completeJob,
@@ -276,9 +276,12 @@ export const setupIframe = () =>
       console.log("onLLMRequest", payload, charmId, spaceName);
       const jsonPayload = JSON.parse(payload);
       if (!jsonPayload.model) {
-        jsonPayload.model = DEFAULT_MODEL_NAME;
+        jsonPayload.model = DEFAULT_IFRAME_MODELS;
       }
-      updateJob(jobId, "Using " + jsonPayload.model);
+      if (!jsonPayload.cache) {
+        jsonPayload.cache = true;
+      }
+      updateJob(jobId, `Using ${jsonPayload.model}`);
       jsonPayload.metadata = {
         ...jsonPayload.metadata,
         context: "iframe",
@@ -288,7 +291,12 @@ export const setupIframe = () =>
 
       const res = await llm.sendRequest(jsonPayload);
       console.log("onLLMRequest res", res);
-      completeJob(jobId, res.content ?? "Completed!");
+      completeJob({
+        id: jobId,
+        result: undefined,
+        status: res.content ?? "Completed!",
+        llmRequestId: res.id
+      });
       return res as any;
     },
     async onReadWebpageRequest(
@@ -303,7 +311,10 @@ export const setupIframe = () =>
         `/api/ai/webreader/${encodeURIComponent(payload)}`,
       );
       console.log("onReadWebpageRequest res", res);
-      completeJob(jobId, res.status === 200 ? "Completed!" : "Failed!");
+      completeJob({
+        id: jobId,
+        status: res.status === 200 ? "Completed!" : "Failed!"
+      });
       return await res.json();
     },
     async onPerform(

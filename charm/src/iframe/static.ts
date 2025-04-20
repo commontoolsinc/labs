@@ -1,5 +1,4 @@
-import { CSP } from "@commontools/iframe-sandbox";
-import { llmPrompt } from "../../../llm/src/prompts/prompting.ts";
+import { llmPrompt } from "@commontools/llm";
 
 const libraries = {
   "imports": {

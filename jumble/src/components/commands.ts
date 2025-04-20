@@ -11,9 +11,8 @@ import {
   renameCharm,
   WorkflowForm,
 } from "@commontools/charm";
-import { executeWorkflow, modifyCharm } from "@commontools/charm";
+import { charmId, modifyCharm } from "@commontools/charm";
 import type { NavigateFunction } from "react-router-dom";
-import { charmId } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
 import { isStream } from "@commontools/runner";
 import { createPath, createPathWithHash, ROUTES } from "@/routes.ts";
@@ -267,7 +266,7 @@ async function handleModifyCharm(
   try {
     let newCharm;
 
-    // bf: I suspect this is pointless and already handled in executeWorkflow
+    // bf: I suspect this is pointless and already handled in processWorkflow
     if (ctx.focusedCharmId) {
       // Get the current charm
       const charm = await ctx.charmManager.get(ctx.focusedCharmId, false);
@@ -305,16 +304,18 @@ async function handleNewCharm(
   if (!input) return;
 
   try {
-    const newCharm = await executeWorkflow(
-      ctx.charmManager,
+    const form = await processWorkflow(
       input,
+      ctx.charmManager,
       {
         prefill: ctx.previewForm,
         model: ctx.userPreferredModel,
       },
     );
-
-    navigateToCharm(ctx, newCharm);
+    const charm = form.generation?.charm;
+    if (charm) {
+      navigateToCharm(ctx, charm);
+    }
   } catch (error) {
     console.error("New charm operation error:", error);
   } finally {
@@ -400,10 +401,10 @@ async function handleImportJSON(ctx: CommandContext) {
       `${title}\n\n Look at the attached JSON data and use it to create a new charm.\n\n${
         JSON.stringify(data)
       }`,
-      false,
+      ctx.charmManager,
       {
-        charmManager: ctx.charmManager,
         cache: true,
+        dryRun: false,
       },
     );
 

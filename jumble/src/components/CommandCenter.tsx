@@ -21,10 +21,10 @@ import {
 import { WorkflowForm } from "@commontools/charm";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
-import { charmId, getMentionableCharms } from "@/utils/charms.ts";
+import { getMentionableCharms } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
-import { Charm } from "@commontools/charm";
+import { Charm, charmId } from "@commontools/charm";
 import { useLiveSpecPreview } from "@/hooks/use-live-spec-preview.ts";
 import { SpecPreview } from "@/components/SpecPreview.tsx";
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
@@ -50,11 +50,6 @@ function CommandProcessor({
   const { charmManager } = context;
   const [inputValue, setInputValue] = useState("");
   const charmMentions = useCharmMentions();
-
-  // State for preview model selection
-  // const [previewModel, setPreviewModel] = useState<LanguageModelId>(
-  //   "think",
-  // );
 
   const {
     userPreferredModel,
@@ -86,9 +81,8 @@ function CommandProcessor({
   const {
     previewForm,
     loading: isPreviewLoading,
-    classificationLoading,
-    planLoading,
-    setWorkflowType, // Add the setter function to allow changing workflow type manually
+    setWorkflowType,
+    setSelectedSpellToCast,
   } = useLiveSpecPreview(
     inputValue,
     charmManager, // Explicitly pass CharmManager instance
@@ -142,11 +136,10 @@ function CommandProcessor({
             <SpecPreview
               form={previewForm}
               loading={isPreviewLoading}
-              classificationLoading={classificationLoading}
-              planLoading={planLoading}
               visible
               floating
               onWorkflowChange={setWorkflowType}
+              onSelectedCastChange={setSelectedSpellToCast}
             />
 
             <Composer

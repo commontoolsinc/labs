@@ -1,13 +1,12 @@
 import {
   Charm,
-  ExecutionPlan,
+  charmId,
   extractUserCode,
   extractVersionTag,
   generateNewRecipeVersion,
   getIframeRecipe,
   IFrameRecipe,
   injectUserCode,
-  iterate,
   modifyCharm,
   processWorkflow,
   WorkflowForm,
@@ -21,7 +20,7 @@ import {
   CommonCheckbox,
   CommonLabel,
   ToggleButton,
-} from "../components/common/CommonToggle.tsx";
+} from "@/components/common/CommonToggle.tsx";
 import React, {
   createContext,
   useCallback,
@@ -39,7 +38,6 @@ import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { markdown } from "@codemirror/lang-markdown";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
-import { charmId } from "@/utils/charms.ts";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import {
   type CharmSuggestion,
@@ -50,7 +48,6 @@ import { createPath } from "@/routes.ts";
 import JsonView from "@uiw/react-json-view";
 import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { useCharmMentions } from "@/components/CommandCenter.tsx";
-import { formatPromptWithMentions } from "@commontools/charm";
 import { CharmLink } from "@/components/CharmLink.tsx";
 import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
 import {
@@ -63,7 +60,6 @@ import { useLiveSpecPreview } from "@/hooks/use-live-spec-preview.ts";
 import { EditorView } from "@codemirror/view";
 
 type Tab = "iterate" | "code" | "data";
-type OperationType = "iterate" | "extend";
 
 const variantModels = [
   "anthropic:claude-3-5-sonnet-latest",
@@ -81,8 +77,6 @@ interface CharmOperationContextType {
   userPreferredModel: LanguageModelId;
   setUserPreferredModel: (model: LanguageModelId) => void;
   setInput: (input: string) => void;
-  classificationLoading: boolean; // Loading state for workflow classification
-  planLoading: boolean; // Loading state for plan generation
   showVariants: boolean;
   setShowVariants: (show: boolean) => void;
   showPreview: boolean;
@@ -102,6 +96,7 @@ interface CharmOperationContextType {
   handlePerformOperation: () => void;
   handleCancelVariants: () => void;
   setWorkflowType: (workflowType: WorkflowType) => void;
+  setSelectedSpellToCast: (charmId: string, spellId: string) => void;
   performOperation: (
     charmId: string,
     input: string,
@@ -232,8 +227,8 @@ function useCodeEditor(
           "Spec has changed, using current behavior with future possibility for regeneration",
         );
 
-        processWorkflow(workingSpec, false, {
-          charmManager,
+        processWorkflow(workingSpec, charmManager, {
+          dryRun: false,
           existingCharm: charm,
           prefill: {
             classification: {
@@ -245,7 +240,6 @@ function useCodeEditor(
               spec: workingSpec,
             },
           },
-          cache: true,
         }).then((form) => {
           const newCharm = form.generation?.charm;
           if (!newCharm) {
@@ -338,10 +332,9 @@ function useCharmOperation() {
   const {
     previewForm,
     loading: isPreviewLoading,
-    classificationLoading,
-    planLoading,
     model,
     setWorkflowType,
+    setSelectedSpellToCast,
   } = useLiveSpecPreview(
     input,
     charmManager,
@@ -456,8 +449,7 @@ function useCharmOperation() {
     userPreferredModel,
     setUserPreferredModel,
     setWorkflowType,
-    classificationLoading, // Add the classification loading state
-    planLoading, // Add the plan loading state
+    setSelectedSpellToCast,
     showVariants,
     setShowVariants,
     showPreview,
@@ -823,9 +815,8 @@ const OperationTab = () => {
     loading,
     handlePerformOperation,
     isPreviewLoading,
-    classificationLoading,
     setWorkflowType,
-    planLoading,
+    setSelectedSpellToCast,
     previewForm,
   } = useCharmOperationContext();
 
@@ -878,10 +869,9 @@ const OperationTab = () => {
         <SpecPreview
           form={previewForm}
           loading={isPreviewLoading}
-          classificationLoading={classificationLoading}
-          planLoading={planLoading}
           visible={showPreview && input.trim().length >= 16}
           onWorkflowChange={setWorkflowType}
+          onSelectedCastChange={setSelectedSpellToCast}
         />
         <Variants />
         <Suggestions />

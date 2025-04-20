@@ -347,6 +347,22 @@ class StorageImpl implements Storage {
           as: this.signer,
           settings: settings,
         });
+      } else if (type === "schema") {
+        if (!this.remoteStorageUrl) {
+          throw new Error("No remote storage URL set");
+        }
+        const settings: RemoteStorageProviderSettings = {
+          maxSubscriptionsPerSpace: 50_000,
+          connectionTimeout: 30_000,
+          useSchemaQueries: true,
+        };
+        provider = new CachedStorageProvider({
+          id: this.id,
+          address: new URL("/api/storage/memory", this.remoteStorageUrl!),
+          space: space as `did:${string}:${string}`,
+          as: this.signer,
+          settings: settings,
+        });
       } else {
         throw new Error(`Unknown storage type: ${type}`);
       }

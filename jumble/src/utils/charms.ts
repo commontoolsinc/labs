@@ -1,13 +1,8 @@
-import { type Charm, CharmManager } from "@commontools/charm";
+import { type Charm, charmId, CharmManager } from "@commontools/charm";
 import { Cell, getEntityId } from "@commontools/runner";
 import { NAME } from "@commontools/builder";
 
 export type { Cell, Charm };
-
-export function charmId(charm: Charm): string | undefined {
-  const id = getEntityId(charm);
-  return id ? id["/"] : undefined;
-}
 
 /**
  * Gets mentionable charms by filtering out trash and prioritizing pinned charms
