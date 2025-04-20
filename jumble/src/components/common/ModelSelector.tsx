@@ -93,6 +93,16 @@ const MODEL_OPTIONS = [
     label: "Sonar Pro 🌐",
     isPreset: false,
   } as const,
+  {
+    value: "xai:grok-3-mini-latest",
+    label: "Grok 3 Mini",
+    isPreset: false,
+  } as const,
+  {
+    value: "xai:grok-3-latest",
+    label: "Grok 3",
+    isPreset: false,
+  } as const,
 ];
 
 export type LanguageModelId = typeof MODEL_OPTIONS[number]["value"];

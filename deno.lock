@@ -50,6 +50,7 @@
     "npm:@ai-sdk/groq@^1.1.7": "1.1.12_zod@3.24.2",
     "npm:@ai-sdk/openai@^1.1.9": "1.2.2_zod@3.24.2",
     "npm:@ai-sdk/openai@^1.3.16": "1.3.16_zod@3.24.2",
+    "npm:@ai-sdk/xai@^1.2.13": "1.2.13_zod@3.24.2",
     "npm:@arizeai/openinference-semantic-conventions@1": "1.0.0",
     "npm:@arizeai/openinference-vercel@^2.0.1": "2.0.1_@opentelemetry+api@1.9.0",
     "npm:@cfworker/json-schema@^4.1.0": "4.1.1",
@@ -133,9 +134,9 @@
     "npm:turndown@^7.1.2": "7.2.0",
     "npm:typescript@*": "5.8.2",
     "npm:typescript@^5.6.2": "5.8.2",
-    "npm:vite@*": "6.2.1_@types+node@22.12.0",
-    "npm:vite@^6.2.1": "6.2.1_@types+node@22.12.0",
-    "npm:vitest@^2.1.1": "2.1.9_@types+node@22.13.10_jsdom@26.0.0_vite@5.4.14__@types+node@22.13.10",
+    "npm:vite@*": "6.2.1_@types+node@22.12.0_lightningcss@1.29.2",
+    "npm:vite@^6.2.1": "6.2.1_@types+node@22.12.0_lightningcss@1.29.2",
+    "npm:vitest@^2.1.1": "2.1.9_@types+node@22.13.10_jsdom@26.0.0_vite@5.4.14__@types+node@22.13.10_@types+node@22.12.0",
     "npm:zod-to-json-schema@^3.24.1": "3.24.3_zod@3.24.2",
     "npm:zod@*": "3.24.2",
     "npm:zod@^3.24.1": "3.24.2"
@@ -350,6 +351,14 @@
         "zod"
       ]
     },
+    "@ai-sdk/openai-compatible@0.2.11_zod@3.24.2": {
+      "integrity": "sha512-56U0uNCcFTygA4h6R/uREv8r5sKA3/pGkpIAnMOpRzs5wiARlTYakWW3LZgxg6D4Gpeswo4gwNJczB7nM0K1Qg==",
+      "dependencies": [
+        "@ai-sdk/provider@1.1.3",
+        "@ai-sdk/provider-utils@2.2.7_zod@3.24.2",
+        "zod"
+      ]
+    },
     "@ai-sdk/openai@1.2.2_zod@3.24.2": {
       "integrity": "sha512-5355FLtSOH8sz9N9fsSwWpTaEgfqKOPMMHgSs1j4Aih5kQc9PhJ/oAPZuH308c/ktrbx6GcCW/hVrITimYsQhQ==",
       "dependencies": [
@@ -415,6 +424,15 @@
         "@ai-sdk/provider-utils@2.2.7_zod@3.24.2",
         "zod",
         "zod-to-json-schema"
+      ]
+    },
+    "@ai-sdk/xai@1.2.13_zod@3.24.2": {
+      "integrity": "sha512-vJnzpnRVIVuGgDHrHgfIc3ImjVp6YN+salVX99r+HWd2itiGQy+vAmQKen0Ml8BK/avnLyQneeYRfdlgDBkhgQ==",
+      "dependencies": [
+        "@ai-sdk/openai-compatible",
+        "@ai-sdk/provider@1.1.3",
+        "@ai-sdk/provider-utils@2.2.7_zod@3.24.2",
+        "zod"
       ]
     },
     "@ampproject/remapping@2.3.0": {
@@ -2346,7 +2364,7 @@
         "@babel/plugin-transform-react-jsx-source",
         "@types/babel__core",
         "react-refresh",
-        "vite@6.2.1_@types+node@22.12.0"
+        "vite@6.2.1_@types+node@22.12.0_lightningcss@1.29.2"
       ]
     },
     "@vitest/expect@2.1.9": {
@@ -2365,6 +2383,15 @@
         "estree-walker@3.0.3",
         "magic-string",
         "vite@5.4.14_@types+node@22.13.10"
+      ]
+    },
+    "@vitest/mocker@2.1.9_vite@5.4.14__@types+node@22.13.10_@types+node@22.13.10_@types+node@22.12.0": {
+      "integrity": "sha512-tVL6uJgoUdi6icpxmdrn5YNo3g3Dxv+IHJBr0GXHaEdTcw3F+cPKnsXFhli6nO+f/6SDKPHEK1UN+k+TQv0Ehg==",
+      "dependencies": [
+        "@vitest/spy",
+        "estree-walker@3.0.3",
+        "magic-string",
+        "vite@5.4.14_@types+node@22.13.10_@types+node@22.12.0"
       ]
     },
     "@vitest/pretty-format@2.1.9": {
@@ -5899,10 +5926,30 @@
         "vite@5.4.14_@types+node@22.13.10"
       ]
     },
+    "vite-node@2.1.9_@types+node@22.13.10_@types+node@22.12.0": {
+      "integrity": "sha512-AM9aQ/IPrW/6ENLQg3AGY4K1N2TGZdR5e4gu/MmmR2xR3Ll1+dib+nook92g4TV3PXVyeyxdWwtaCAiUL0hMxA==",
+      "dependencies": [
+        "cac",
+        "debug@4.4.0",
+        "es-module-lexer",
+        "pathe",
+        "vite@5.4.14_@types+node@22.13.10_@types+node@22.12.0"
+      ]
+    },
     "vite@5.4.14_@types+node@22.13.10": {
       "integrity": "sha512-EK5cY7Q1D8JNhSaPKVK4pwBFvaTmZxEnoKXLG/U9gmdDcihQGNzFlgIvaxezFR4glP1LsuiedwMBqCXH3wZccA==",
       "dependencies": [
         "@types/node@22.13.10",
+        "esbuild@0.21.5",
+        "fsevents",
+        "postcss",
+        "rollup"
+      ]
+    },
+    "vite@5.4.14_@types+node@22.13.10_@types+node@22.12.0": {
+      "integrity": "sha512-EK5cY7Q1D8JNhSaPKVK4pwBFvaTmZxEnoKXLG/U9gmdDcihQGNzFlgIvaxezFR4glP1LsuiedwMBqCXH3wZccA==",
+      "dependencies": [
+        "@types/node@22.12.0",
         "esbuild@0.21.5",
         "fsevents",
         "postcss",
@@ -5935,7 +5982,7 @@
       "dependencies": [
         "@types/node@22.13.10",
         "@vitest/expect",
-        "@vitest/mocker",
+        "@vitest/mocker@2.1.9_vite@5.4.14__@types+node@22.13.10_@types+node@22.13.10",
         "@vitest/pretty-format",
         "@vitest/runner",
         "@vitest/snapshot",
@@ -5953,7 +6000,34 @@
         "tinypool",
         "tinyrainbow",
         "vite@5.4.14_@types+node@22.13.10",
-        "vite-node",
+        "vite-node@2.1.9_@types+node@22.13.10",
+        "why-is-node-running"
+      ]
+    },
+    "vitest@2.1.9_@types+node@22.13.10_jsdom@26.0.0_vite@5.4.14__@types+node@22.13.10_@types+node@22.12.0": {
+      "integrity": "sha512-MSmPM9REYqDGBI8439mA4mWhV5sKmDlBKWIYbA3lRb2PTHACE0mgKwA8yQ2xq9vxDTuk4iPrECBAEW2aoFXY0Q==",
+      "dependencies": [
+        "@types/node@22.12.0",
+        "@vitest/expect",
+        "@vitest/mocker@2.1.9_vite@5.4.14__@types+node@22.13.10_@types+node@22.13.10_@types+node@22.12.0",
+        "@vitest/pretty-format",
+        "@vitest/runner",
+        "@vitest/snapshot",
+        "@vitest/spy",
+        "@vitest/utils",
+        "chai",
+        "debug@4.4.0",
+        "expect-type",
+        "jsdom",
+        "magic-string",
+        "pathe",
+        "std-env",
+        "tinybench",
+        "tinyexec",
+        "tinypool",
+        "tinyrainbow",
+        "vite@5.4.14_@types+node@22.13.10_@types+node@22.12.0",
+        "vite-node@2.1.9_@types+node@22.13.10_@types+node@22.12.0",
         "why-is-node-running"
       ]
     },
@@ -6277,6 +6351,7 @@
           "npm:@ai-sdk/google-vertex@^2.1.12",
           "npm:@ai-sdk/groq@^1.1.7",
           "npm:@ai-sdk/openai@^1.3.16",
+          "npm:@ai-sdk/xai@^1.2.13",
           "npm:@arizeai/openinference-semantic-conventions@1",
           "npm:@arizeai/openinference-vercel@^2.0.1",
           "npm:@fal-ai/client@^1.2.2",

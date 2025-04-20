@@ -3,6 +3,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createGroq, groq } from "@ai-sdk/groq";
 import { openai } from "@ai-sdk/openai";
 import { createVertex, vertex } from "@ai-sdk/google-vertex";
+import { createXai, xai } from "@ai-sdk/xai";
 
 import env from "@/env.ts";
 
@@ -51,7 +52,8 @@ const addModel = ({
     | typeof anthropic
     | typeof groq
     | typeof openai
-    | typeof vertex;
+    | typeof vertex
+    | typeof xai;
   name: string;
   aliases: string[];
   capabilities: Capabilities;
@@ -489,6 +491,44 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
       images: false,
       prefill: false,
       systemPrompt: false,
+      stopSequences: true,
+      streaming: true,
+      reasoning: false,
+    },
+  });
+}
+
+if (env.CTTS_AI_LLM_XAI_API_KEY) {
+  const xaiProvider = createXai({
+    apiKey: env.CTTS_AI_LLM_XAI_API_KEY,
+  });
+  console.log(" Adding 🤖 Xai");
+  addModel({
+    provider: xaiProvider,
+    name: "xai:grok-3-mini-latest",
+    aliases: ["grok-3-mini", "grok-3-mini-latest"],
+    capabilities: {
+      contextWindow: 131_071,
+      maxOutputTokens: 8192,
+      images: false,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: true,
+    },
+  });
+
+  addModel({
+    provider: xaiProvider,
+    name: "xai:grok-3-latest",
+    aliases: ["grok-3", "grok-3-latest"],
+    capabilities: {
+      contextWindow: 131_071,
+      maxOutputTokens: 8192,
+      images: false,
+      prefill: true,
+      systemPrompt: true,
       stopSequences: true,
       streaming: true,
       reasoning: false,
