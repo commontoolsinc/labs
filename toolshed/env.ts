@@ -41,6 +41,7 @@ const EnvSchema = z.object({
   CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS: z.string().default(""),
   CTTS_AI_LLM_GOOGLE_VERTEX_PROJECT: z.string().default(""),
   CTTS_AI_LLM_GOOGLE_VERTEX_LOCATION: z.string().default(""),
+  CTTS_AI_LLM_XAI_API_KEY: z.string().default(""),
 
   // LLM Observability Tool
   CTTS_AI_LLM_PHOENIX_PROJECT: z.string().default(""),
