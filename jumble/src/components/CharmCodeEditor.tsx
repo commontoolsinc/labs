@@ -19,12 +19,11 @@ export interface DocEditor {
 interface Props {
   docs: DocEditor[];
   activeKey: string;
-  onActiveKeyChange: (key: string) => void;
   loading?: boolean;
 }
 
 const CharmCodeEditor: React.FC<Props> = (
-  { docs, activeKey, onActiveKeyChange, loading },
+  { docs, activeKey, loading },
 ) => {
   const current = docs.find((d) => d.key === activeKey) || docs[0];
   const extensions = (() => {
@@ -46,22 +45,6 @@ const CharmCodeEditor: React.FC<Props> = (
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="flex items-center gap-4 p-4">
-        {docs.map((d) => (
-          <button
-            key={d.key}
-            type="button"
-            onClick={() => onActiveKeyChange(d.key)}
-            className={`px-2 py-1 text-xs border-2 ${
-              activeKey === d.key
-                ? "bg-gray-100 font-bold border-black"
-                : "border-transparent"
-            }`}
-          >
-            {d.label}
-          </button>
-        ))}
-      </div>
       <div className="flex-grow overflow-hidden border-black border-2 h-full">
         <CodeMirror
           key={current.key}

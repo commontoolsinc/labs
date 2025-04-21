@@ -19,6 +19,7 @@ import {
   CheckboxToggle,
   CommonCheckbox,
   CommonLabel,
+  ToggleButton,
 } from "@/components/common/CommonToggle.tsx";
 import React, {
   createContext,
@@ -37,6 +38,8 @@ import CharmCodeEditor from "@/components/CharmCodeEditor.tsx";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { markdown } from "@codemirror/lang-markdown";
+import { json } from "@codemirror/lang-json";
+import { EditorView } from "@codemirror/view";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import {
@@ -787,7 +790,17 @@ const CodeTab = () => {
   );
   const templateVersion = extractVersionTag(fullSrc);
 
-  // Document editors
+  // Active section (code, spec, or schemas)
+  const [activeSection, setActiveSection] = useState<
+    "code" | "spec" | "schemas"
+  >("code");
+
+  // Active schema when in schemas section
+  const [activeSchema, setActiveSchema] = useState<"argument" | "result">(
+    "argument",
+  );
+
+  // Define document editors for CharmCodeEditor
   const docs = [
     {
       key: "code",
@@ -821,30 +834,36 @@ const CodeTab = () => {
     },
   ];
 
-  // Active editor key
-  const [activeKey, setActiveKey] = useState(docs[0].key);
+  // Get active key based on section and schema selection
+  const getActiveKey = () => {
+    if (activeSection === "code") return "code";
+    if (activeSection === "spec") return "spec";
+    return activeSchema === "argument" ? "argumentSchema" : "resultSchema";
+  };
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="flex items-center gap-4 p-4">
-        <CommonLabel size="small">
-          Template Version: {templateVersion ?? "Missing"}
-        </CommonLabel>
-        <div className="flex items-center gap-4">
-          <CommonCheckbox
-            id="fullCode"
-            label="Show Full Template"
-            checked={showFullCode}
-            onChange={setShowFullCode}
-            size="small"
-          />
-        </div>
+      <div className="flex items-center justify-between p-4 pb-2">
+        {/* Toggle buttons for section selection */}
+        <ToggleButton
+          options={[
+            { value: "code", label: "Code" },
+            { value: "spec", label: "Specification" },
+            { value: "schemas", label: "Schemas" },
+          ] as const}
+          value={activeSection}
+          onChange={(value) =>
+            setActiveSection(value as "code" | "spec" | "schemas")}
+          size="medium"
+        />
+
+        {/* Save button */}
         {hasUnsavedChanges && (
           <button
             type="button"
             onClick={saveChanges}
             disabled={loading}
-            className="px-2 py-1 text-xs bg-black text-white border-2 border-black disabled:opacity-50 flex items-center gap-1"
+            className="px-3 py-1 text-sm bg-black text-white border border-black disabled:opacity-50 flex items-center gap-1"
           >
             {loading
               ? (
@@ -866,11 +885,44 @@ const CodeTab = () => {
           </button>
         )}
       </div>
+
+      {/* Content-specific controls */}
+      {activeSection === "code" && (
+        <div className="flex items-center gap-2 px-4 mb-3">
+          <CommonLabel size="small">
+            Template Version: {templateVersion ?? "Missing"}
+          </CommonLabel>
+          <CommonCheckbox
+            id="fullCode"
+            label="Show Full Template"
+            checked={showFullCode}
+            onChange={setShowFullCode}
+            size="small"
+          />
+        </div>
+      )}
+
+      {/* Schema toggle when in schemas mode */}
+      {activeSection === "schemas" && (
+        <div className="flex items-center gap-2 px-4 mb-3">
+          <ToggleButton
+            options={[
+              { value: "argument", label: "Argument Schema" },
+              { value: "result", label: "Result Schema" },
+            ] as const}
+            value={activeSchema}
+            onChange={(value) =>
+              setActiveSchema(value as "argument" | "result")}
+            size="small"
+          />
+        </div>
+      )}
+
+      {/* Editor */}
       <div className="px-4 flex-grow flex flex-col overflow-hidden">
         <CharmCodeEditor
           docs={docs}
-          activeKey={activeKey}
-          onActiveKeyChange={setActiveKey}
+          activeKey={getActiveKey()}
           loading={loading}
         />
       </div>

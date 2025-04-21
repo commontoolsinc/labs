@@ -47,7 +47,7 @@ export function ToggleButton<
               onClick={() => onChange(option.value)}
               className={`
               ${sizeClasses[size as keyof typeof sizeClasses]}
-              flex-1 text-center border-2
+              flex-1 text-center border-2 whitespace-nowrap
               ${index > 0 ? "border-l-0" : ""}
               ${
                 isSelected
