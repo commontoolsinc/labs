@@ -6,7 +6,7 @@ import { addModuleByRef } from "../src/module.ts";
 import { getDoc } from "../src/doc.ts";
 import { type ErrorWithContext, idle, onError } from "../src/scheduler.ts";
 import { type Cell } from "../src/cell.ts";
-import { getRecipeId } from "../src/recipe-map.ts";
+import { getRecipeId } from "../src/recipe-manager.ts";
 
 describe("Recipe Runner", () => {
   it("should run a simple recipe", async () => {

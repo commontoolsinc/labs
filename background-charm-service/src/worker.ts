@@ -5,7 +5,7 @@ import {
   isErrorWithContext,
   isStream,
   onError,
-  setBobbyServerUrl,
+  setBlobbyServerUrl,
   setRecipeEnvironment,
   storage,
 } from "@commontools/runner";
@@ -47,7 +47,7 @@ async function initialize(
   const apiUrl = new URL(toolshedUrl);
   // Initialize storage and remote connection
   storage.setRemoteStorage(apiUrl);
-  setBobbyServerUrl(toolshedUrl);
+  setBlobbyServerUrl(toolshedUrl);
   storage.setSigner(identity);
   setRecipeEnvironment({
     apiUrl,

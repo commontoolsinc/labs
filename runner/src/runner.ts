@@ -4,7 +4,6 @@ import {
   isModule,
   isRecipe,
   isStreamAlias,
-  type JSONSchema,
   type JSONValue,
   type Module,
   type NodeFactory,
@@ -41,12 +40,16 @@ import {
 import { getModuleByRef } from "./module.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
-import { getRecipe, getRecipeId, registerNewRecipe } from "./recipe-map.ts";
+import {
+  ensureRecipeAvailable,
+  getRecipe,
+  getRecipeId,
+  registerNewRecipe,
+} from "./recipe-manager.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import { getCellLinkOrThrow } from "./query-result-proxy.ts";
 import { storage } from "./storage.ts";
-import { ensureRecipeSourceCell } from "./recipe-sync.ts";
 
 export const cancels = new WeakMap<DocImpl<any>, Cancel>();
 
@@ -657,7 +660,7 @@ async function syncCellsForRunningRecipe(
   const recipeId = sourceCell.get()[TYPE];
   if (!recipeId) throw new Error(`No recipe ID found in source cell`);
 
-  await ensureRecipeSourceCell(sourceCell.getAsCellLink().space!, recipeId);
+  await ensureRecipeAvailable(sourceCell.getAsCellLink().space!, recipeId);
 
   const recipe = getRecipe(recipeId);
   if (!recipe) throw new Error(`Unknown recipe: ${recipeId}`);

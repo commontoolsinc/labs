@@ -1,14 +1,12 @@
 /**
  * RecipeManager: Unified Recipe Storage and Sync System
  *
- * This file consolidates the functionality previously split between recipe-map.ts
- * and recipe-sync.ts. It provides a single source of truth for managing recipes.
- *
  * Design goals:
  * 1. Single storage model: Uses cells in the storage layer for persistent storage
  * 2. Preserves recipe IDs: Maintains consistency between local and remote IDs
  * 3. Clear publishing flow: Only syncs with Blobby when explicitly requested
- * 4. Backward compatibility: Maintains the same API surface as previous implementations
+ * 4. Attempts to download recipes from Blobby if no cell is found
+ * 5. Minimize requirements that Blobby is available for a space to run recipes
  *
  * Storage layers:
  * - In-memory cache: Fast access during runtime
@@ -364,4 +362,5 @@ export const {
   allRecipesByName,
   registerNewRecipe,
   registerRecipe,
+  ensureRecipeAvailable,
 } = recipeManager;

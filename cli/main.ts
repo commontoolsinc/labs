@@ -5,7 +5,7 @@ import {
   getEntityId,
   idle,
   isStream,
-  setBobbyServerUrl,
+  setBlobbyServerUrl,
   storage,
 } from "@commontools/runner";
 import {
@@ -47,7 +47,7 @@ const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
 const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
 
 storage.setRemoteStorage(new URL(toolshedUrl));
-setBobbyServerUrl(toolshedUrl);
+setBlobbyServerUrl(toolshedUrl);
 
 async function main() {
   if (!spaceName && !spaceDID) {

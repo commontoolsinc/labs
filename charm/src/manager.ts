@@ -12,7 +12,7 @@ import {
   type Cell,
   createRef,
   DocImpl,
-  ensureRecipeSourceCell,
+  ensureRecipeAvailable,
   EntityId,
   followAliases,
   getCell,
@@ -1248,6 +1248,8 @@ export class CharmManager {
       );
     }
 
+    this.syncRecipe(charm);
+
     return charm;
   }
 
@@ -1267,7 +1269,7 @@ export class CharmManager {
   }
 
   async syncRecipeById(recipeId: string) {
-    await ensureRecipeSourceCell(this.space, recipeId);
+    await ensureRecipeAvailable(this.space, recipeId);
   }
 
   async sync(entity: Cell<any>, waitForStorage: boolean = false) {
