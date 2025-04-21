@@ -3,7 +3,7 @@ import { CharmManager, compileRecipe } from "@commontools/charm";
 import {
   getCell,
   getEntityId,
-  setBobbyServerUrl,
+  setBlobbyServerUrl,
   storage,
 } from "@commontools/runner";
 import { type DID } from "@commontools/identity";
@@ -43,7 +43,7 @@ const identity = await getIdentity(
 );
 
 storage.setRemoteStorage(new URL(toolshedUrl));
-setBobbyServerUrl(toolshedUrl);
+setBlobbyServerUrl(toolshedUrl);
 
 async function castRecipe() {
   const spaceId = BG_SYSTEM_SPACE_ID;

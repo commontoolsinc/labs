@@ -3,7 +3,7 @@ import { CharmManager, compileRecipe } from "@commontools/charm";
 import {
   getEntityId,
   isStream,
-  setBobbyServerUrl,
+  setBlobbyServerUrl,
   storage,
 } from "@commontools/runner";
 import { createAdminSession, type DID, Identity } from "@commontools/identity";
@@ -33,7 +33,7 @@ const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
 const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
 
 storage.setRemoteStorage(new URL(toolshedUrl));
-setBobbyServerUrl(toolshedUrl);
+setBlobbyServerUrl(toolshedUrl);
 
 async function castRecipe() {
   console.log(`Casting recipe from ${recipePath} in space ${spaceId}`);

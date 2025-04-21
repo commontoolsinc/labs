@@ -4,6 +4,8 @@ import {
   isStream,
   registerNewRecipe,
   runtime,
+  recipeManager,
+  tsToExports,
 } from "@commontools/runner";
 import { isObj } from "@commontools/utils";
 import {
@@ -509,7 +511,17 @@ export async function compileRecipe(
     throw new Error("No default recipe found in the compiled exports.");
   }
   const parentsIds = parents?.map((id) => id.toString());
-  registerNewRecipe(recipe, recipeSrc, spec, parentsIds);
+  recipeManager.registerRecipe({
+    recipeId: recipeManager.generateRecipeId(recipe),
+    space: charmManager.getSpace(),
+    recipe,
+    recipeMeta: {
+      id: recipe.id,
+      src: recipeSrc,
+      spec,
+      parents: parentsIds,
+    },
+  });
   return recipe;
 }
 

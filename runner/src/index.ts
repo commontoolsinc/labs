@@ -37,22 +37,9 @@ export {
   getDocByEntityId,
   getEntityId,
 } from "./doc-map.ts";
-export {
-  allRecipesByName,
-  getRecipe,
-  getRecipeId,
-  getRecipeName,
-  getRecipeParents,
-  getRecipeSpec,
-  getRecipeSrc,
-  registerNewRecipe,
-  registerRecipe,
-} from "./recipe-map.ts";
-// export { addSchema, getSchema, getSchemaId } from "./schema-map.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export { type Storage, storage } from "./storage.ts";
 export { setBobbyServerUrl, syncRecipeBlobby } from "./recipe-sync.ts";
-// export { saveSchema, syncSchemaBlobby } from "./schema-sync.ts";
 export {
   getBlobbyServerUrl,
   loadFromBlobby,
@@ -60,9 +47,12 @@ export {
   setBlobbyServerUrl,
 } from "./blobby-storage.ts";
 export { ConsoleMethod, runtime } from "./runtime/index.ts";
+export { getBlobbyServerUrl, setBlobbyServerUrl } from "./blobby-storage.ts";
+export { tsToExports } from "./local-build.ts";
 export {
   addCommonIDfromObjectID,
   followAliases,
   maybeGetCellLink,
 } from "./utils.ts";
 export { ContextualFlowControl } from "./cfc.ts";
+export * from "./recipe-manager.ts";

@@ -51,7 +51,7 @@ function Launcher() {
       try {
         console.log("Attempting to sync recipe for spellId:", spellId);
         // Sync the recipe
-        await charmManager.syncRecipeBlobby(spellId);
+        await charmManager.syncRecipeById(spellId);
         console.log("Recipe sync completed");
 
         const recipe = getRecipe(spellId);
