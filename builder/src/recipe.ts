@@ -222,9 +222,13 @@ function factoryFromRecipe<T, R>(
   let count = 0;
   cells.forEach((cell: OpaqueRef<any>) => {
     if (paths.has(cell)) return;
-    const { cell: top, path, name } = cell.export();
-    if (!paths.has(top)) paths.set(top, ["internal", name ?? `__#${count++}`]);
-    if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
+    const { cell: top, path, name, external } = cell.export();
+    if (!external) {
+      if (!paths.has(top)) {
+        paths.set(top, ["internal", name ?? `__#${count++}`]);
+      }
+      if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
+    }
   });
   shadows.forEach((shadow) => {
     if (paths.has(shadow)) return;
@@ -246,18 +250,12 @@ function factoryFromRecipe<T, R>(
   cells.forEach((cell) => {
     // Only process roots of extra cells:
     if (cell === inputs) return;
-    const { path, value, defaultValue } = cell.export();
-    if (path.length > 0) return;
+    const { path, value, defaultValue, external } = cell.export();
+    if (path.length > 0 || external) return;
 
     const cellPath = paths.get(cell)!;
     if (value) setValueAtPath(initial, cellPath, value);
     if (defaultValue) setValueAtPath(defaults, cellPath, defaultValue);
-  });
-
-  // External cells all have to be added to the initial state
-  cells.forEach((cell) => {
-    const { external } = cell.export();
-    if (external) setValueAtPath(initial, paths.get(cell)!, external);
   });
 
   let argumentSchema: JSONSchema;
@@ -326,7 +324,8 @@ function factoryFromRecipe<T, R>(
   // Bind all cells to the recipe
   // TODO(seefeld): Does OpaqueRef cause issues here?
   [...cells]
-    .filter((cell) => !cell.export().path.length) // Only bind root cells
+    // Only bind root cells that are not external
+    .filter((cell) => !cell.export().path.length && !cell.export().external)
     .forEach((cell) =>
       cell.unsafe_bindToRecipeAndPath(recipeFactory, paths.get(cell)!)
     );

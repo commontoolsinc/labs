@@ -141,6 +141,12 @@ export function toJSONWithAliases(
     value = createShadowRef(value);
   }
 
+  // If the this is an external reference, just copy it the reference in as is.
+  if (isOpaqueRef(value)) {
+    const { external } = value.export();
+    if (external) return external;
+  }
+
   if (isOpaqueRef(value) || isShadowRef(value)) {
     const pathToCell = paths.get(value);
     if (pathToCell) {
@@ -157,7 +163,9 @@ export function toJSONWithAliases(
         },
       } satisfies Alias;
     } else throw new Error(`Cell not found in paths`);
-  } else if (isAlias(value)) {
+  }
+
+  if (isAlias(value)) {
     const alias = (value as Alias).$alias;
     if (isShadowRef(alias.cell)) {
       const cell = alias.cell.shadowOf;
