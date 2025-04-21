@@ -25,20 +25,20 @@ export const fromDID = async <ID extends DIDKey>(
 ): AsyncResult<VerifierIdentity<ID>, SyntaxError> => {
   if (!id.startsWith(DID_PREFIX)) {
     return {
-      error: new SyntaxError(`Invalid DID "${id}", must start with 'did:'`),
+      error: new SyntaxError(`Invalid DID "${id}", must start with "did:"`),
     };
-  } else if (id.startsWith(DID_KEY_PREFIX)) {
-    let identity, error;
-    try {
-      identity = await VerifierIdentity.fromDid(id as ID);
-      return { ok: identity };
-    } catch (e) {
-      return { error: new SyntaxError(`${e}`) };
-    }
-  } else {
+  } else if (!id.startsWith(DID_KEY_PREFIX)) {
     return {
-      error: new SyntaxError(`Expected did identifier instead got ${id}`),
+      error: new SyntaxError(
+        `Invalid DID "${id}", only "did:key:" are supported right now`,
+      ),
     };
+  } else {
+    try {
+      return { ok: await VerifierIdentity.fromDid(id as ID) };
+    } catch (e) {
+      return { error: new SyntaxError(`Invalid DID "${id}", ${e}`) };
+    }
   }
 };
 

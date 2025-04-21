@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertMatch } from "@std/assert";
 import { alice, bob, mallory, space } from "./principal.ts";
 import * as Access from "../access.ts";
+import { type DID } from "@commontools/identity";
 import { refer } from "../reference.ts";
 import { Invocation } from "../interface.ts";
 
@@ -96,6 +97,30 @@ test("Fail authorization if issuer is not a subject", async () => {
     claim.error?.message ?? "",
     new RegExp(
       `Principal ${bob.did()} has no authority over ${alice.did()} space`,
+    ),
+  );
+});
+
+test("Fail authorization if subject isn't a did", async () => {
+  const invocation: Invocation = {
+    iss: bob.did(),
+    cmd: "/test/run",
+    sub: alice.did().slice(0, -1) as DID,
+    args: {},
+    prf: [],
+  };
+
+  const result = await Access.authorize([refer(invocation)], bob);
+  assert(result.ok, "authorization was issued");
+  const authorization = result.ok;
+
+  const claim = await Access.claim(invocation, authorization, serviceDid);
+  assertMatch(
+    claim.error?.message ?? "",
+    new RegExp(
+      `Expected valid did:key identifier instead got "${
+        alice.did().slice(0, -1)
+      }"`,
     ),
   );
 });

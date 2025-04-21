@@ -32,7 +32,7 @@ export const claim = async <Access extends Invocation>(
         error: unauthorized(`Could not create issuer key`, error),
       };
     }
-    const result = await issuer!.verify({
+    const result = await issuer.verify({
       payload: refer(authorization.access).bytes,
       signature: authorization.signature,
     });
@@ -44,9 +44,16 @@ export const claim = async <Access extends Invocation>(
       // subject space is a DID identifier. Furthermore we assume that the
       // subject and issuer are the same DID. In the future we will add UCANs
       // to allow delegations.
-      const { ok: subject } = await fromDID(access.sub);
+      const { ok: subject, error } = await fromDID(access.sub);
+      if (error) {
+        return {
+          error: unauthorized(
+            `Expected valid did:key identifier instead got "${access.sub}"`,
+          ),
+        };
+      }
       if (
-        !subject || subject.did() === issuer.did() ||
+        subject.did() === issuer.did() ||
         issuer.did() === serviceDid
       ) {
         return { ok: access };
