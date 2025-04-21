@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "dev": "deno run -A --node-modules-dir=auto npm:vite",
+    "dev": "TOOLSHED_API_URL=https://toolshed.saga-castor.ts.net deno run -A --node-modules-dir=auto npm:vite",
     "dev-local": "TOOLSHED_API_URL=http://localhost:8000 deno run -A --node-modules-dir=auto npm:vite",
     "build": "VITE_BUILD_SOURCEMAPS=true deno run -A --node-modules-dir=auto npm:vite build",
     "preview": "deno run -A --node-modules-dir=auto npm:vite preview",
