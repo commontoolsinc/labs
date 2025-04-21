@@ -3,7 +3,7 @@ import {
   isCell,
   isStream,
   registerNewRecipe,
-  tsToExports,
+  runtime,
 } from "@commontools/runner";
 import { isObj } from "@commontools/utils";
 import {
@@ -491,12 +491,7 @@ export async function compileRecipe(
   spec: string,
   parents?: string[],
 ) {
-  const { exports, errors } = await tsToExports(recipeSrc);
-  if (errors) {
-    console.error(errors);
-    throw new Error("Compilation errors in recipe");
-  }
-  const recipe = exports.default;
+  const recipe = await runtime.compile(recipeSrc);
   if (!recipe) {
     throw new Error("No default recipe found in the compiled exports.");
   }

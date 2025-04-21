@@ -6,7 +6,6 @@ import {
   getRecipeSrc,
   registerRecipe,
 } from "./recipe-map.ts";
-import { buildRecipe } from "./local-build.ts";
 import {
   createItemsKnownToStorageSet,
   getBlobbyServerUrl,
@@ -14,6 +13,7 @@ import {
   saveToBlobby,
   setBlobbyServerUrl,
 } from "./blobby-storage.ts";
+import { runtime } from "./runtime/index.ts";
 
 // For backward compatibility
 export function setBobbyServerUrl(url: string) {
@@ -46,8 +46,7 @@ export async function syncRecipeBlobby(id: string) {
   const spec = response.spec || "";
   const parents = response.parents || [];
 
-  const { recipe, errors } = await buildRecipe(src);
-  if (errors) throw new Error(errors);
+  const recipe = await runtime.compile(src);
 
   registerRecipe(id, recipe!, src, spec, parents);
   recipesKnownToStorage.add(id);
