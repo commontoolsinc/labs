@@ -144,7 +144,9 @@ export function extractTitle(src: string, defaultTitle: string): string {
 export const generateNewRecipeVersion = async (
   charmManager: CharmManager,
   parent: Cell<Charm>,
-  newRecipe: Partial<IFrameRecipe>,
+  newRecipe:
+    & Pick<IFrameRecipe, "src" | "spec">
+    & Partial<Omit<IFrameRecipe, "src" | "spec">>,
   generationId?: string,
   llmRequestId?: string,
 ) => {
@@ -154,7 +156,7 @@ export const generateNewRecipeVersion = async (
     throw new Error("FIXME, no recipeId or iframe, what should we do?");
   }
 
-  const name = extractTitle(newRecipe.src!, "<unknown>");
+  const name = extractTitle(newRecipe.src, "<unknown>");
   const fullSrc = buildFullRecipe({
     ...iframe,
     ...newRecipe,
