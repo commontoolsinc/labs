@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useSyncExternalStore } from "react";
 import { User } from "@/components/User.tsx";
 import { useCell, useNamedCell } from "@/hooks/use-cell.ts";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
@@ -112,23 +112,34 @@ interface ModelSelectorProps {
   mapPreview?: boolean; // Whether to map preview model values (think/fast) to actual models
 }
 export function useUserPreferredModel() {
-  const [userPreferredModel, setUserPreferredModel] = useState<LanguageModelId>(
-    () => {
-      const savedModel = localStorage.getItem("userPreferredModel");
-      return (savedModel as LanguageModelId) || DEFAULT_MODEL;
-    },
+  // snapshot reader
+  const getSnapshot = useMemo(() => {
+    return () =>
+      (localStorage.getItem("userPreferredModel") as LanguageModelId) ||
+      DEFAULT_MODEL;
+  }, []);
+
+  // subscribe helper
+  const subscribe = useMemo(() => {
+    return (callback: () => void) => {
+      globalThis.addEventListener("userPreferredModelChanged", callback);
+      return () =>
+        globalThis.removeEventListener("userPreferredModelChanged", callback);
+    };
+  }, []);
+
+  const userPreferredModel = useSyncExternalStore(
+    subscribe,
+    getSnapshot,
+    getSnapshot, // server snapshot - same as client
   );
 
-  // Update localStorage when the preferred model changes
-  const setAndSaveUserPreferredModel = (model: LanguageModelId) => {
+  const setUserPreferredModel = (model: LanguageModelId) => {
     localStorage.setItem("userPreferredModel", model);
-    setUserPreferredModel(model);
+    globalThis.dispatchEvent(new Event("userPreferredModelChanged"));
   };
 
-  return {
-    userPreferredModel,
-    setUserPreferredModel: setAndSaveUserPreferredModel,
-  };
+  return { userPreferredModel, setUserPreferredModel } as const;
 }
 
 /**
