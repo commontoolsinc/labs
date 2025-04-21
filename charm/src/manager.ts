@@ -12,6 +12,7 @@ import {
   type Cell,
   createRef,
   DocImpl,
+  ensureRecipeSourceCell,
   EntityId,
   followAliases,
   getCell,
@@ -24,7 +25,6 @@ import {
   isDoc,
   maybeGetCellLink,
   runSynced,
-  syncRecipeBlobby,
 } from "@commontools/runner";
 import { storage } from "@commontools/runner";
 import { type Session } from "@commontools/identity";
@@ -1256,28 +1256,18 @@ export class CharmManager {
     await storage.syncCell(charm);
 
     const sourceCell = charm.getSourceCell();
-    if (!sourceCell) throw new Error("charm missing source cell");
-
     await storage.syncCell(sourceCell);
 
     const recipeId = sourceCell.get()?.[TYPE];
     if (!recipeId) throw new Error("charm missing recipe ID");
 
-    await Promise.all([
-      this.syncRecipeCells(recipeId),
-      this.syncRecipeBlobby(recipeId),
-    ]);
+    await this.syncRecipeById(recipeId);
+
     return recipeId;
   }
 
-  async syncRecipeCells(recipeId: string) {
-    // NOTE(ja): this doesn't sync recipe to storage
-    if (recipeId) await storage.syncCellById(this.space, { "/": recipeId });
-  }
-
-  // FIXME(ja): blobby seems to be using toString not toJSON
-  async syncRecipeBlobby(recipeId: string) {
-    await syncRecipeBlobby(recipeId);
+  async syncRecipeById(recipeId: string) {
+    await ensureRecipeSourceCell(this.space, recipeId);
   }
 
   async sync(entity: Cell<any>, waitForStorage: boolean = false) {

@@ -16,7 +16,7 @@ export const castSpellAsCharm = async (
   if (recipeKey && argument) {
     console.log("Syncing...");
     const recipeId = recipeKey.replace("spell-", "");
-    await charmManager.syncRecipeBlobby(recipeId);
+    await charmManager.syncRecipeById(recipeId);
 
     const recipe = getRecipe(recipeId);
     if (!recipe) return;

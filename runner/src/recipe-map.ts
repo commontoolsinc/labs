@@ -21,6 +21,7 @@ export function registerNewRecipe(
     ? createRef({ src }, "recipe source").toString()
     : createRef(recipe, "recipe").toString();
 
+  console.log("registerNewRecipe", id);
   return registerRecipe(id, recipe, src, spec, parents);
 }
 

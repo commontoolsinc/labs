@@ -858,7 +858,7 @@ export async function processWorkflow(
           throw new Error("No charm found for id: " + form.spellToCast.charmId);
         }
 
-        await charmManager.syncRecipeBlobby(form.spellToCast.spellId);
+        await charmManager.syncRecipeById(form.spellToCast.spellId);
         const recipe = getRecipe(form.spellToCast.spellId);
 
         if (!recipe) {

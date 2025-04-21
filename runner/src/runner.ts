@@ -46,7 +46,7 @@ import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import { getCellLinkOrThrow } from "./query-result-proxy.ts";
 import { storage } from "./storage.ts";
-import { syncRecipeBlobby } from "./recipe-sync.ts";
+import { ensureRecipeSourceCell } from "./recipe-sync.ts";
 
 export const cancels = new WeakMap<DocImpl<any>, Cancel>();
 
@@ -657,7 +657,7 @@ async function syncCellsForRunningRecipe(
   const recipeId = sourceCell.get()[TYPE];
   if (!recipeId) throw new Error(`No recipe ID found in source cell`);
 
-  await syncRecipeBlobby(recipeId);
+  await ensureRecipeSourceCell(sourceCell.getAsCellLink().space!, recipeId);
 
   const recipe = getRecipe(recipeId);
   if (!recipe) throw new Error(`Unknown recipe: ${recipeId}`);
