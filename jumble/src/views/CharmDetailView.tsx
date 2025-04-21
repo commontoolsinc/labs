@@ -1238,7 +1238,7 @@ const BottomSheet = ({
               : ""
           }`}
         >
-          Operation
+          LLM
         </button>
         <button
           type="button"
@@ -1249,7 +1249,7 @@ const BottomSheet = ({
               : ""
           }`}
         >
-          Edit Code
+          Edit
         </button>
         <button
           type="button"
@@ -1260,7 +1260,7 @@ const BottomSheet = ({
               : ""
           }`}
         >
-          View Data
+          Data
         </button>
       </div>
 
