@@ -8,7 +8,6 @@ import {
   llm,
   NAME,
   recipe,
-  Schema,
   str,
   UI,
 } from "@commontools/builder";
@@ -398,6 +397,8 @@ export default recipe(
       const extractionResult = llm({
         system: systemPrompt,
         prompt: userPrompt,
+        model: "google:gemini-2.0-flash",
+        mode: "json",
       });
 
       // Return email with extracted dates
@@ -469,39 +470,41 @@ export default recipe(
           <common-hstack gap="md">
             <common-vstack gap="sm">
               <div>
-                <common-checkbox
+                <input
+                  type="checkbox"
                   checked={settings.includeEmailDate}
-                  oncommon-checked={includeEmailDateHandler}
+                  onChange={includeEmailDateHandler}
                 />
                 <label>Include email sent date</label>
               </div>
 
               <div>
-                <common-checkbox
+                <input
+                  type="checkbox"
                   checked={settings.extractTimes}
-                  oncommon-checked={extractTimesHandler}
+                  onChange={extractTimesHandler}
                 />
                 <label>Extract time information</label>
               </div>
 
               <div>
                 <label>Context length</label>
-                <common-input
+                <input
                   type="number"
                   value={settings.contextLength}
-                  oncommon-input={contextLengthHandler}
+                  onChange={contextLengthHandler}
                 />
               </div>
 
               <div>
                 <label>Min confidence (0-1)</label>
-                <common-input
+                <input
                   type="number"
                   step="0.1"
                   min="0"
                   max="1"
                   value={settings.minConfidence}
-                  oncommon-input={minConfidenceHandler}
+                  onChange={minConfidenceHandler}
                 />
               </div>
             </common-vstack>
@@ -534,11 +537,14 @@ export default recipe(
                     )}
                     <td>{date.context}</td>
                     <td>
-                      {derive(date, (d) => (d.confidence * 100).toFixed(0))}%
+                      {derive(date, (d) =>
+                        (d?.confidence ?? 0 * 100).toFixed(0))}%
                     </td>
                     <td>
                       {derive(emailsWithDates, (items) =>
-                        items.find((e) => e.dates.includes(date))?.email
+                        items.find((e) =>
+                          e.dates.includes(date)
+                        )?.email
                           .subject ||
                         "")}
                     </td>
@@ -562,7 +568,7 @@ export default recipe(
                       <tr>
                         <th>DATE TEXT</th>
                         <th>NORMALIZED</th>
-                        {ifElse(settings.extractTimes, <th>TIME</th>, null)}
+                        {ifElse(settings.extractTimes, (<th>TIME</th>), null)}
                         <th>CONTEXT</th>
                         <th>CONFIDENCE</th>
                       </tr>
@@ -574,20 +580,20 @@ export default recipe(
                           <td>{date.normalizedDate}</td>
                           {ifElse(
                             settings.extractTimes,
-                            <td>
+                            (<td>
                               {ifElse(
                                 date.normalizedTime,
                                 date.normalizedTime,
                                 "-",
                               )}
-                            </td>,
+                            </td>),
                             null,
                           )}
                           <td>{date.context}</td>
                           <td>
                             {derive(
                               date,
-                              (d) => (d.confidence * 100).toFixed(0),
+                              (d) => (d?.confidence ?? 0 * 100).toFixed(0),
                             )}%
                           </td>
                         </tr>
