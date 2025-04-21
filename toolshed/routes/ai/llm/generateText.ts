@@ -150,8 +150,8 @@ export async function generateText(
     maxTokens: params.maxTokens,
   };
 
-  if (params.model == "openai:o3") {
-    // o3 does not support stop sequences
+  // remove stopSequences if the model doesn't support them
+  if (!modelConfig.capabilities.stopSequences) {
     streamParams.stopSequences = undefined;
   }
 
