@@ -16,7 +16,7 @@ const UpdaterSchema = {
       type: "array",
       items: {
         type: "string",
-        $ifc: { classification: ["confidential"] },
+        ifc: { classification: ["confidential"] },
       },
     },
   },
@@ -31,13 +31,12 @@ const InputSchema = {
   properties: {
     values: {
       type: "array",
-      items: { type: "string", $ifc: { classification: ["confidential"] } },
+      items: { type: "string", ifc: { classification: ["confidential"] } },
       asCell: true,
     },
   },
   default: {
     values: ["string"],
-    $ifc: { classification: ["unclassified"], integrity: ["commontools"] },
   },
 } as const satisfies JSONSchema;
 

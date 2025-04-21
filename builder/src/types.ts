@@ -148,7 +148,7 @@ export type JSONSchema = {
   readonly asStream?: boolean;
   readonly anyOf?: readonly JSONSchema[];
   readonly additionalProperties?: Readonly<JSONSchema> | boolean;
-  readonly $ifc?: { classification?: string[]; integrity?: string[] }; // temporarily used to assign labels like "confidential"
+  readonly ifc?: { classification?: string[]; integrity?: string[] }; // temporarily used to assign labels like "confidential"
 };
 
 export type Writable<T> = {
