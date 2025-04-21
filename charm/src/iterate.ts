@@ -21,7 +21,7 @@ import {
   LLMClient,
 } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
-import { WorkflowForm } from "./index.ts";
+import { IFrameRecipe, WorkflowForm } from "./index.ts";
 
 const llm = new LLMClient();
 
@@ -124,8 +124,10 @@ export async function iterate(
     cell: await generateNewRecipeVersion(
       charmManager,
       charm,
-      newIFrameSrc,
-      newSpec,
+      {
+        src: newIFrameSrc,
+        spec: newSpec,
+      },
       generationId,
       llmRequestId,
     ),
@@ -142,8 +144,9 @@ export function extractTitle(src: string, defaultTitle: string): string {
 export const generateNewRecipeVersion = async (
   charmManager: CharmManager,
   parent: Cell<Charm>,
-  newIFrameSrc: string,
-  newSpec: string,
+  newRecipe:
+    & Pick<IFrameRecipe, "src" | "spec">
+    & Partial<Omit<IFrameRecipe, "src" | "spec">>,
   generationId?: string,
   llmRequestId?: string,
 ) => {
@@ -153,12 +156,11 @@ export const generateNewRecipeVersion = async (
     throw new Error("FIXME, no recipeId or iframe, what should we do?");
   }
 
-  const name = extractTitle(newIFrameSrc, "<unknown>");
-  const newRecipeSrc = buildFullRecipe({
+  const name = extractTitle(newRecipe.src, "<unknown>");
+  const fullSrc = buildFullRecipe({
     ...iframe,
-    src: newIFrameSrc,
-    spec: newSpec,
-    name,
+    ...newRecipe,
+    name: name,
   });
 
   globalThis.dispatchEvent(
@@ -174,8 +176,8 @@ export const generateNewRecipeVersion = async (
   // Pass the newSpec so it's properly persisted and can be displayed/edited
   const newCharm = await compileAndRunRecipe(
     charmManager,
-    newRecipeSrc,
-    newSpec,
+    fullSrc,
+    newRecipe.spec!,
     parent.getSourceCell()?.key("argument"),
     recipeId ? [recipeId] : undefined,
     llmRequestId,

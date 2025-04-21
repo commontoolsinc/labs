@@ -66,8 +66,7 @@ export async function fixItCharm(
   return generateNewRecipeVersion(
     charmManager,
     charm,
-    fixedFullCode,
-    iframeRecipe.iframe.spec,
+    { src: fixedFullCode, spec: iframeRecipe.iframe.spec },
   );
 }
 

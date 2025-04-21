@@ -34,9 +34,12 @@ import { type CharmRouteParams } from "@/routes.ts";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { LoadingSpinner } from "@/components/Loader.tsx";
 import { useCharm } from "@/hooks/use-charm.ts";
+import CharmCodeEditor from "@/components/CharmCodeEditor.tsx";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { markdown } from "@codemirror/lang-markdown";
+import { json } from "@codemirror/lang-json";
+import { EditorView } from "@codemirror/view";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import {
@@ -57,7 +60,7 @@ import {
 } from "@/components/common/ModelSelector.tsx";
 import { SpecPreview } from "@/components/SpecPreview.tsx";
 import { useLiveSpecPreview } from "@/hooks/use-live-spec-preview.ts";
-import { EditorView } from "@codemirror/view";
+import { useCodeEditor } from "@/hooks/use-code-editor.ts";
 
 type Tab = "iterate" | "code" | "data";
 
@@ -180,126 +183,6 @@ function useSuggestions(charm: Cell<Charm> | undefined) {
   return {
     suggestions,
     loadingSuggestions,
-  };
-}
-
-// Hook for code editing
-function useCodeEditor(
-  charm?: Cell<Charm>,
-  iframeRecipe?: IFrameRecipe,
-  showFullCode: boolean = false,
-) {
-  const { charmManager } = useCharmManager();
-  const navigate = useNavigate();
-  const [workingSrc, setWorkingSrc] = useState<string>();
-  const [workingSpec, setWorkingSpec] = useState<string>();
-  const [initialSpec, setInitialSpec] = useState<string>();
-  const { replicaName } = useParams<CharmRouteParams>();
-
-  const { setLoading } = useCharmOperationContext();
-
-  useEffect(() => {
-    if (charm && iframeRecipe) {
-      if (showFullCode) {
-        setWorkingSrc(iframeRecipe.src);
-      } else {
-        setWorkingSrc(extractUserCode(iframeRecipe.src ?? "") ?? "");
-      }
-      setWorkingSpec(iframeRecipe.spec);
-      setInitialSpec(iframeRecipe.spec);
-    }
-  }, [iframeRecipe, charm, showFullCode]);
-
-  const hasSourceChanges = showFullCode
-    ? workingSrc !== iframeRecipe?.src
-    : injectUserCode(workingSrc ?? "") !== iframeRecipe?.src;
-  const hasSpecChanges = workingSpec !== initialSpec;
-  const hasUnsavedChanges = hasSourceChanges || hasSpecChanges;
-
-  const saveChanges = useCallback(() => {
-    const src = showFullCode ? workingSrc : injectUserCode(workingSrc ?? "");
-    if (src && iframeRecipe && charm && workingSpec) {
-      setLoading(true);
-
-      if (hasSpecChanges) {
-        // CASE 1: Spec has changed
-        console.log(
-          "Spec has changed, using current behavior with future possibility for regeneration",
-        );
-
-        processWorkflow(workingSpec, charmManager, {
-          dryRun: false,
-          existingCharm: charm,
-          prefill: {
-            classification: {
-              workflowType: "edit",
-              confidence: 1.0,
-              reasoning: "spec edited",
-            },
-            plan: {
-              spec: workingSpec,
-            },
-          },
-        }).then((form) => {
-          const newCharm = form.generation?.charm;
-          if (!newCharm) {
-            throw new Error("no charm generated after spec edit");
-          }
-
-          navigate(createPath("charmShow", {
-            charmId: charmId(newCharm)!,
-            replicaName: replicaName!,
-          }));
-        }).catch((error) => {
-          console.error("Error processing workflow:", error);
-        }).finally(() => {
-          setLoading(false);
-        });
-      } else {
-        // CASE 2: Only source code changes - simpler update path
-        generateNewRecipeVersion(
-          charmManager,
-          charm,
-          src,
-          workingSpec,
-        ).then((newCharm) => {
-          navigate(createPath("charmShow", {
-            charmId: charmId(newCharm)!,
-            replicaName: replicaName!,
-          }));
-        }).catch((error) => {
-          console.error("Error generating new recipe version:", error);
-        }).finally(() => {
-          setLoading(false);
-        });
-      }
-    }
-  }, [
-    workingSrc,
-    workingSpec,
-    initialSpec,
-    iframeRecipe,
-    charm,
-    navigate,
-    replicaName,
-    showFullCode,
-    charmManager,
-    hasSpecChanges,
-    hasSourceChanges,
-    setLoading,
-  ]);
-
-  return {
-    fullSrc: iframeRecipe?.src ?? "",
-    workingSrc,
-    setWorkingSrc,
-    workingSpec,
-    setWorkingSpec,
-    initialSpec,
-    hasSpecChanges,
-    hasSourceChanges,
-    hasUnsavedChanges,
-    saveChanges,
   };
 }
 
@@ -885,7 +768,6 @@ const CodeTab = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
   const [showFullCode, setShowFullCode] = useState(false);
-  const [activeEditor, setActiveEditor] = useState<"code" | "spec">("code");
   const { loading } = useCharmOperationContext();
 
   const {
@@ -894,7 +776,12 @@ const CodeTab = () => {
     setWorkingSrc,
     workingSpec,
     setWorkingSpec,
+    workingArgumentSchema,
+    setWorkingArgumentSchema,
+    workingResultSchema,
+    setWorkingResultSchema,
     hasUnsavedChanges,
+    hasSchemaChanges,
     saveChanges,
   } = useCodeEditor(
     charm,
@@ -903,51 +790,80 @@ const CodeTab = () => {
   );
   const templateVersion = extractVersionTag(fullSrc);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-        e.preventDefault();
-        if (hasUnsavedChanges && !loading) {
-          saveChanges();
-        }
-      }
-    };
+  // Active section (code, spec, or schemas)
+  const [activeSection, setActiveSection] = useState<
+    "code" | "spec" | "schemas"
+  >("code");
 
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [hasUnsavedChanges, saveChanges, loading]);
+  // Active schema when in schemas section
+  const [activeSchema, setActiveSchema] = useState<"argument" | "result">(
+    "argument",
+  );
+
+  // Define document editors for CharmCodeEditor
+  const docs = [
+    {
+      key: "code",
+      label: "Code",
+      value: workingSrc || "",
+      onChange: setWorkingSrc,
+      language: "javascript" as const,
+    },
+    {
+      key: "spec",
+      label: "Specification",
+      value: workingSpec || "",
+      onChange: setWorkingSpec,
+      language: "markdown" as const,
+    },
+    {
+      key: "argumentSchema",
+      label: "Argument Schema",
+      value: workingArgumentSchema,
+      onChange: setWorkingArgumentSchema,
+      language: "json" as const,
+      readOnly: loading,
+    },
+    {
+      key: "resultSchema",
+      label: "Result Schema",
+      value: workingResultSchema,
+      onChange: setWorkingResultSchema,
+      language: "json" as const,
+      readOnly: loading,
+    },
+  ];
+
+  // Get active key based on section and schema selection
+  const getActiveKey = () => {
+    if (activeSection === "code") return "code";
+    if (activeSection === "spec") return "spec";
+    return activeSchema === "argument" ? "argumentSchema" : "resultSchema";
+  };
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="flex items-center gap-4 p-4">
-        <CommonLabel size="small">
-          Template Version: {templateVersion ?? "Missing"}
-        </CommonLabel>
-        <div className="flex items-center gap-4">
-          <CommonCheckbox
-            id="fullCode"
-            label="Show Full Template"
-            checked={showFullCode}
-            onChange={setShowFullCode}
-            size="small"
-          />
+      <div className="flex items-center justify-between p-4 pb-2">
+        {/* Toggle buttons for section selection */}
+        <ToggleButton
+          options={[
+            { value: "code", label: "Code" },
+            { value: "spec", label: "Specification" },
+            { value: "schemas", label: "Schemas" },
+          ] as const}
+          value={activeSection}
+          onChange={(value) =>
+            setActiveSection(value as "code" | "spec" | "schemas")}
+          size="medium"
+        />
 
-          <ToggleButton
-            options={[
-              { value: "code", label: "Code" },
-              { value: "spec", label: "Specification" },
-            ]}
-            value={activeEditor}
-            onChange={(value) => setActiveEditor(value as "code" | "spec")}
-            size="small"
-          />
-        </div>
+        {/* Save button */}
         {hasUnsavedChanges && (
           <button
             type="button"
             onClick={saveChanges}
             disabled={loading}
-            className="px-2 py-1 text-xs bg-black text-white border-2 border-black disabled:opacity-50 flex items-center gap-1"
+            className="px-3 py-1 text-sm bg-black text-white border border-black disabled:opacity-50 flex items-center gap-1"
           >
             {loading
               ? (
@@ -970,42 +886,45 @@ const CodeTab = () => {
         )}
       </div>
 
-      <div className="px-4 flex-grow flex flex-col overflow-hidden">
-        {activeEditor === "code" && (
-          <div className="flex-grow overflow-hidden border-black border-2 h-full">
-            <CodeMirror
-              key="source"
-              value={workingSrc || ""}
-              theme="dark"
-              extensions={[javascript()]}
-              onChange={setWorkingSrc}
-              style={{ height: "100%", overflow: "auto" }}
-              readOnly={loading}
-            />
-          </div>
-        )}
+      {/* Content-specific controls */}
+      {activeSection === "code" && (
+        <div className="flex items-center gap-2 px-4 mb-3">
+          <CommonLabel size="small">
+            Template Version: {templateVersion ?? "Missing"}
+          </CommonLabel>
+          <CommonCheckbox
+            id="fullCode"
+            label="Show Full Template"
+            checked={showFullCode}
+            onChange={setShowFullCode}
+            size="small"
+          />
+        </div>
+      )}
 
-        {activeEditor === "spec" && (
-          <div className="flex-grow overflow-hidden border border-black h-full">
-            {
-              /* <textarea
-              value={workingSpec || ""}
-              onChange={(e) => setWorkingSpec(e.target.value)}
-              className="w-full h-full p-4 font-mono text-sm resize-none"
-              style={{ height: "100%", overflow: "auto" }}
-            /> */
-            }
-            <CodeMirror
-              key="spec"
-              value={workingSpec || ""}
-              theme="light"
-              extensions={[markdown(), EditorView.lineWrapping]}
-              onChange={setWorkingSpec}
-              style={{ height: "100%", overflow: "auto" }}
-              readOnly={loading}
-            />
-          </div>
-        )}
+      {/* Schema toggle when in schemas mode */}
+      {activeSection === "schemas" && (
+        <div className="flex items-center gap-2 px-4 mb-3">
+          <ToggleButton
+            options={[
+              { value: "argument", label: "Argument Schema" },
+              { value: "result", label: "Result Schema" },
+            ] as const}
+            value={activeSchema}
+            onChange={(value) =>
+              setActiveSchema(value as "argument" | "result")}
+            size="small"
+          />
+        </div>
+      )}
+
+      {/* Editor */}
+      <div className="px-4 flex-grow flex flex-col overflow-hidden">
+        <CharmCodeEditor
+          docs={docs}
+          activeKey={getActiveKey()}
+          loading={loading}
+        />
       </div>
     </div>
   );
@@ -1319,7 +1238,7 @@ const BottomSheet = ({
               : ""
           }`}
         >
-          Operation
+          LLM
         </button>
         <button
           type="button"
@@ -1330,7 +1249,7 @@ const BottomSheet = ({
               : ""
           }`}
         >
-          Edit Code
+          Edit
         </button>
         <button
           type="button"
@@ -1341,7 +1260,7 @@ const BottomSheet = ({
               : ""
           }`}
         >
-          View Data
+          Data
         </button>
       </div>
 
