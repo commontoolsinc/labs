@@ -19,7 +19,6 @@ import {
   CheckboxToggle,
   CommonCheckbox,
   CommonLabel,
-  ToggleButton,
 } from "@/components/common/CommonToggle.tsx";
 import React, {
   createContext,
@@ -34,6 +33,7 @@ import { type CharmRouteParams } from "@/routes.ts";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { LoadingSpinner } from "@/components/Loader.tsx";
 import { useCharm } from "@/hooks/use-charm.ts";
+import CharmCodeEditor from "@/components/CharmCodeEditor.tsx";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { markdown } from "@codemirror/lang-markdown";
@@ -57,7 +57,7 @@ import {
 } from "@/components/common/ModelSelector.tsx";
 import { SpecPreview } from "@/components/SpecPreview.tsx";
 import { useLiveSpecPreview } from "@/hooks/use-live-spec-preview.ts";
-import { EditorView } from "@codemirror/view";
+import { useCodeEditor } from "@/hooks/use-code-editor.ts";
 
 type Tab = "iterate" | "code" | "data";
 
@@ -180,126 +180,6 @@ function useSuggestions(charm: Cell<Charm> | undefined) {
   return {
     suggestions,
     loadingSuggestions,
-  };
-}
-
-// Hook for code editing
-function useCodeEditor(
-  charm?: Cell<Charm>,
-  iframeRecipe?: IFrameRecipe,
-  showFullCode: boolean = false,
-) {
-  const { charmManager } = useCharmManager();
-  const navigate = useNavigate();
-  const [workingSrc, setWorkingSrc] = useState<string>();
-  const [workingSpec, setWorkingSpec] = useState<string>();
-  const [initialSpec, setInitialSpec] = useState<string>();
-  const { replicaName } = useParams<CharmRouteParams>();
-
-  const { setLoading } = useCharmOperationContext();
-
-  useEffect(() => {
-    if (charm && iframeRecipe) {
-      if (showFullCode) {
-        setWorkingSrc(iframeRecipe.src);
-      } else {
-        setWorkingSrc(extractUserCode(iframeRecipe.src ?? "") ?? "");
-      }
-      setWorkingSpec(iframeRecipe.spec);
-      setInitialSpec(iframeRecipe.spec);
-    }
-  }, [iframeRecipe, charm, showFullCode]);
-
-  const hasSourceChanges = showFullCode
-    ? workingSrc !== iframeRecipe?.src
-    : injectUserCode(workingSrc ?? "") !== iframeRecipe?.src;
-  const hasSpecChanges = workingSpec !== initialSpec;
-  const hasUnsavedChanges = hasSourceChanges || hasSpecChanges;
-
-  const saveChanges = useCallback(() => {
-    const src = showFullCode ? workingSrc : injectUserCode(workingSrc ?? "");
-    if (src && iframeRecipe && charm && workingSpec) {
-      setLoading(true);
-
-      if (hasSpecChanges) {
-        // CASE 1: Spec has changed
-        console.log(
-          "Spec has changed, using current behavior with future possibility for regeneration",
-        );
-
-        processWorkflow(workingSpec, charmManager, {
-          dryRun: false,
-          existingCharm: charm,
-          prefill: {
-            classification: {
-              workflowType: "edit",
-              confidence: 1.0,
-              reasoning: "spec edited",
-            },
-            plan: {
-              spec: workingSpec,
-            },
-          },
-        }).then((form) => {
-          const newCharm = form.generation?.charm;
-          if (!newCharm) {
-            throw new Error("no charm generated after spec edit");
-          }
-
-          navigate(createPath("charmShow", {
-            charmId: charmId(newCharm)!,
-            replicaName: replicaName!,
-          }));
-        }).catch((error) => {
-          console.error("Error processing workflow:", error);
-        }).finally(() => {
-          setLoading(false);
-        });
-      } else {
-        // CASE 2: Only source code changes - simpler update path
-        generateNewRecipeVersion(
-          charmManager,
-          charm,
-          src,
-          workingSpec,
-        ).then((newCharm) => {
-          navigate(createPath("charmShow", {
-            charmId: charmId(newCharm)!,
-            replicaName: replicaName!,
-          }));
-        }).catch((error) => {
-          console.error("Error generating new recipe version:", error);
-        }).finally(() => {
-          setLoading(false);
-        });
-      }
-    }
-  }, [
-    workingSrc,
-    workingSpec,
-    initialSpec,
-    iframeRecipe,
-    charm,
-    navigate,
-    replicaName,
-    showFullCode,
-    charmManager,
-    hasSpecChanges,
-    hasSourceChanges,
-    setLoading,
-  ]);
-
-  return {
-    fullSrc: iframeRecipe?.src ?? "",
-    workingSrc,
-    setWorkingSrc,
-    workingSpec,
-    setWorkingSpec,
-    initialSpec,
-    hasSpecChanges,
-    hasSourceChanges,
-    hasUnsavedChanges,
-    saveChanges,
   };
 }
 
@@ -885,7 +765,6 @@ const CodeTab = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
   const [showFullCode, setShowFullCode] = useState(false);
-  const [activeEditor, setActiveEditor] = useState<"code" | "spec">("code");
   const { loading } = useCharmOperationContext();
 
   const {
@@ -894,7 +773,12 @@ const CodeTab = () => {
     setWorkingSrc,
     workingSpec,
     setWorkingSpec,
+    workingArgumentSchema,
+    setWorkingArgumentSchema,
+    workingResultSchema,
+    setWorkingResultSchema,
     hasUnsavedChanges,
+    hasSchemaChanges,
     saveChanges,
   } = useCodeEditor(
     charm,
@@ -903,19 +787,42 @@ const CodeTab = () => {
   );
   const templateVersion = extractVersionTag(fullSrc);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-        e.preventDefault();
-        if (hasUnsavedChanges && !loading) {
-          saveChanges();
-        }
-      }
-    };
+  // Document editors
+  const docs = [
+    {
+      key: "code",
+      label: "Code",
+      value: workingSrc || "",
+      onChange: setWorkingSrc,
+      language: "javascript" as const,
+    },
+    {
+      key: "spec",
+      label: "Specification",
+      value: workingSpec || "",
+      onChange: setWorkingSpec,
+      language: "markdown" as const,
+    },
+    {
+      key: "argumentSchema",
+      label: "Argument Schema",
+      value: workingArgumentSchema,
+      onChange: setWorkingArgumentSchema,
+      language: "json" as const,
+      readOnly: loading,
+    },
+    {
+      key: "resultSchema",
+      label: "Result Schema",
+      value: workingResultSchema,
+      onChange: setWorkingResultSchema,
+      language: "json" as const,
+      readOnly: loading,
+    },
+  ];
 
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [hasUnsavedChanges, saveChanges, loading]);
+  // Active editor key
+  const [activeKey, setActiveKey] = useState(docs[0].key);
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -929,16 +836,6 @@ const CodeTab = () => {
             label="Show Full Template"
             checked={showFullCode}
             onChange={setShowFullCode}
-            size="small"
-          />
-
-          <ToggleButton
-            options={[
-              { value: "code", label: "Code" },
-              { value: "spec", label: "Specification" },
-            ]}
-            value={activeEditor}
-            onChange={(value) => setActiveEditor(value as "code" | "spec")}
             size="small"
           />
         </div>
@@ -969,43 +866,13 @@ const CodeTab = () => {
           </button>
         )}
       </div>
-
       <div className="px-4 flex-grow flex flex-col overflow-hidden">
-        {activeEditor === "code" && (
-          <div className="flex-grow overflow-hidden border-black border-2 h-full">
-            <CodeMirror
-              key="source"
-              value={workingSrc || ""}
-              theme="dark"
-              extensions={[javascript()]}
-              onChange={setWorkingSrc}
-              style={{ height: "100%", overflow: "auto" }}
-              readOnly={loading}
-            />
-          </div>
-        )}
-
-        {activeEditor === "spec" && (
-          <div className="flex-grow overflow-hidden border border-black h-full">
-            {
-              /* <textarea
-              value={workingSpec || ""}
-              onChange={(e) => setWorkingSpec(e.target.value)}
-              className="w-full h-full p-4 font-mono text-sm resize-none"
-              style={{ height: "100%", overflow: "auto" }}
-            /> */
-            }
-            <CodeMirror
-              key="spec"
-              value={workingSpec || ""}
-              theme="light"
-              extensions={[markdown(), EditorView.lineWrapping]}
-              onChange={setWorkingSpec}
-              style={{ height: "100%", overflow: "auto" }}
-              readOnly={loading}
-            />
-          </div>
-        )}
+        <CharmCodeEditor
+          docs={docs}
+          activeKey={activeKey}
+          onActiveKeyChange={setActiveKey}
+          loading={loading}
+        />
       </div>
     </div>
   );

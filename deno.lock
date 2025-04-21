@@ -53,8 +53,12 @@
     "npm:@arizeai/openinference-semantic-conventions@1": "1.0.0",
     "npm:@arizeai/openinference-vercel@^2.0.1": "2.0.1_@opentelemetry+api@1.9.0",
     "npm:@cfworker/json-schema@^4.1.0": "4.1.1",
+    "npm:@codemirror/lang-javascript@^6.1.4": "6.2.3",
     "npm:@codemirror/lang-javascript@^6.2.2": "6.2.3",
+    "npm:@codemirror/lang-json@^6.0.1": "6.0.1",
+    "npm:@codemirror/lang-markdown@^6.1.4": "6.3.2",
     "npm:@codemirror/lang-markdown@^6.3.2": "6.3.2",
+    "npm:@codemirror/lint@^6.1.4": "6.8.4",
     "npm:@codemirror/view@^6.36.2": "6.36.4",
     "npm:@fal-ai/client@^1.2.2": "1.2.3",
     "npm:@hono/sentry@^1.2.0": "1.2.0_hono@4.7.4",
@@ -656,6 +660,13 @@
         "@lezer/javascript"
       ]
     },
+    "@codemirror/lang-json@6.0.1": {
+      "integrity": "sha512-+T1flHdgpqDDlJZ2Lkil/rLiRy684WMLc74xUnjJH48GQdfJo/pudlTRreZmKwzP8/tGdKf83wlbAdOCzlJOGQ==",
+      "dependencies": [
+        "@codemirror/language",
+        "@lezer/json"
+      ]
+    },
     "@codemirror/lang-markdown@6.3.2": {
       "integrity": "sha512-c/5MYinGbFxYl4itE9q/rgN/sMTjOr8XL5OWnC+EaRMLfCbVUmmubTJfdgpfcSS2SCaT7b+Q+xi3l6CgoE+BsA==",
       "dependencies": [
@@ -1093,6 +1104,14 @@
     },
     "@lezer/javascript@1.4.21": {
       "integrity": "sha512-lL+1fcuxWYPURMM/oFZLEDm0XuLN128QPV+VuGtKpeaOGdcl9F2LYC3nh1S9LkPqx9M0mndZFdXCipNAZpzIkQ==",
+      "dependencies": [
+        "@lezer/common",
+        "@lezer/highlight",
+        "@lezer/lr"
+      ]
+    },
+    "@lezer/json@1.0.3": {
+      "integrity": "sha512-BP9KzdF9Y35PDpv04r0VeSTKDeox5vVr3efE7eBbx3r4s3oNLfunchejZhjArmeieBH+nVOpgIiBJpEAv8ilqQ==",
       "dependencies": [
         "@lezer/common",
         "@lezer/highlight",
@@ -6176,6 +6195,7 @@
       "jsr:@std/testing@1",
       "npm:@cfworker/json-schema@^4.1.0",
       "npm:@codemirror/lang-javascript@^6.2.2",
+      "npm:@codemirror/lang-json@^6.0.1",
       "npm:@codemirror/lang-markdown@^6.3.2",
       "npm:@types/jsdom@^21.1.7",
       "npm:@vercel/otel@^1.10.1",
@@ -6222,6 +6242,9 @@
       },
       "jumble": {
         "dependencies": [
+          "npm:@codemirror/lang-javascript@^6.1.4",
+          "npm:@codemirror/lang-json@^6.0.1",
+          "npm:@codemirror/lang-markdown@^6.1.4",
           "npm:@codemirror/view@^6.36.2",
           "npm:@lit/react@^1.0.7",
           "npm:@radix-ui/react-dialog@^1.1.6",
