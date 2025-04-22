@@ -141,7 +141,7 @@ export function toJSONWithAliases(
     value = createShadowRef(value);
   }
 
-  // If the this is an external reference, just copy it the reference in as is.
+  // If this is an external reference, just copy the reference as is.
   if (isOpaqueRef(value)) {
     const { external } = value.export();
     if (external) return external;
