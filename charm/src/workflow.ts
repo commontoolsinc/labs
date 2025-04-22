@@ -2,11 +2,12 @@
  * Workflow module - Contains the core workflow processing pipeline for charm operations
  *
  * This module defines:
- * 1. Workflow types (Fix, Edit, Rework)
+ * 1. Workflow types (Fix, Edit, Imagine, Cast-spell)
  * 2. Classification process
  * 3. Plan generation pipeline
  * 4. Schema and specification generation
  * 5. Workflow steps and execution
+ * 6. Spell search and casting
  */
 
 import { Cell, getRecipe } from "@commontools/runner";
@@ -235,13 +236,8 @@ function extractContext(charm: Cell<Charm>) {
  * This is the second step in the workflow pipeline. Based on the classified
  * workflow type, it generates an execution plan, updated spec, and schema.
  *
- * @param input User input
- * @param workflowType The classified workflow type
- * @param currentCharm Current charm context
- * @param model LLM model to use
- * @param generationId Optional ID for tracking generation
- * @param cache Optional flag to enable/disable LLM cache
- * @returns Execution plan with steps, spec, and schema
+ * @param form The workflow form containing classification and input context
+ * @returns Plan section for the workflow form with steps, spec, and data model
  */
 export async function generatePlan(
   form: WorkflowForm,
@@ -332,7 +328,9 @@ export interface WorkflowForm {
  * @param modelId Optional model ID
  * @param charm Optional existing charm
  * @param generationId Optional generation ID
+ * @param charmManager The charm manager instance
  * @param cache Optional flag to enable/disable LLM cache
+ * @param permittedWorkflows Optional list of allowed workflow types
  * @returns A new workflow form object
  */
 export function createWorkflowForm(
@@ -383,14 +381,7 @@ export function createWorkflowForm(
  *
  * @param charmManager The charm manager
  * @param form The workflow form
- * @param options Optional configuration options
- * @param options.existingCharm Optional existing charm to extend
- * @param options.prefill Optional prefilled form data
- * @param options.model Optional LLM model override
- * @param options.onProgress Optional callback for progress updates
- * @param options.cancellation Optional object to signal cancellation
- * @param options.cache Optional flag to enable/disable LLM cache
- * @returns The processed workflow form
+ * @returns The processed workflow form with mentions processed and references updated
  */
 export async function processInputSection(
   charmManager: CharmManager,
@@ -1016,9 +1007,9 @@ function toCamelCase(input: string): string {
 }
 
 /**
- * Execute the Rework workflow
+ * Execute the Imagine workflow
  *
- * The Rework workflow creates a new charm with potentially different
+ * The Imagine workflow creates a new charm with potentially different
  * schema, allowing for more significant changes or combinations of
  * data from multiple existing charms.
  */
