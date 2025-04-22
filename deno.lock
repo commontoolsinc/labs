@@ -6234,12 +6234,6 @@
       "npm:zod@^3.24.1"
     ],
     "members": {
-      "charm-seeder": {
-        "dependencies": [
-          "npm:@ai-sdk/anthropic@^1.1.6",
-          "npm:@ai-sdk/openai@^1.1.9"
-        ]
-      },
       "deno-vite-plugin": {
         "packageJson": {
           "dependencies": [
@@ -6309,6 +6303,12 @@
         "dependencies": [
           "jsr:@db/sqlite@0.12",
           "npm:@opentelemetry/api@^1.9.0"
+        ]
+      },
+      "seeder": {
+        "dependencies": [
+          "npm:@ai-sdk/anthropic@^1.1.6",
+          "npm:@ai-sdk/openai@^1.1.9"
         ]
       },
       "toolshed": {
