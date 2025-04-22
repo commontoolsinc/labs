@@ -150,25 +150,11 @@ export interface ProcessedPrompt {
  * This is the first step in the workflow pipeline. It processes the user
  * input and determines which workflow type best matches their intent.
  *
- * @param input User input text
- * @param options Additional options for classification
- * @param options.currentCharm Current charm context (optional)
- * @param options.model LLM model to use
- * @param options.references Referenced charm data
- * @param options.generationId Optional ID for tracking generation
- * @param options.cache Optional flag to enable/disable LLM cache
- * @returns Classification result
+ * @param form The workflow form containing user input and context
+ * @returns Classification result with workflow type, confidence, and reasoning
  */
 export async function classifyIntent(
-  input: string,
-  options?: {
-    currentCharm?: Cell<Charm>;
-    model?: string;
-    references?: Record<string, Cell<any>>;
-    generationId?: string;
-    cache?: boolean;
-    permittedWorkflows?: WorkflowType[];
-  },
+  form: WorkflowForm,
 ): Promise<IntentClassificationResult> {
   // Process the input for @mentions if a CharmManager is provided
   // Extract context from the current charm if available
@@ -176,28 +162,22 @@ export async function classifyIntent(
   let existingSchema: JSONSchema | undefined;
   let existingCode: string | undefined;
 
-  const {
-    currentCharm,
-    model,
-    references,
-    generationId,
-    cache = true,
-    permittedWorkflows,
-  } = options || {};
-
-  if (currentCharm) {
-    const { spec, schema, code } = extractContext(currentCharm);
+  if (form.input.existingCharm) {
+    const { spec, schema, code } = extractContext(form.input.existingCharm);
     existingSpec = spec;
     existingSchema = schema;
     existingCode = code;
   }
 
   // Keyword detection for casting a spell
-  if (permittedWorkflows && permittedWorkflows.includes("cast-spell")) {
+  if (
+    form.meta.permittedWorkflows &&
+    form.meta.permittedWorkflows.includes("cast-spell")
+  ) {
     if (!existingSpec || !existingSchema) {
       if (
-        input.toLowerCase().indexOf("spell") !== -1 &&
-        input.toLowerCase().indexOf("cast") !== -1
+        form.input.processedInput.toLowerCase().indexOf("spell") !== -1 &&
+        form.input.processedInput.toLowerCase().indexOf("cast") !== -1
       ) {
         return {
           workflowType: "cast-spell",
@@ -215,81 +195,14 @@ export async function classifyIntent(
     }
   }
 
-  // Check if we have any mentions of other charms (except the current charm)
-  // If so, we should automatically classify as "rework" since we need to build
-  // a combined schema and create a new argument cell that can access all referenced data
-  const hasOtherCharmReferences = references &&
-    Object.keys(references).filter((key) => key !== "currentCharm")
-        .length > 0;
+  const result = await classifyWorkflow(form);
 
-  if (
-    permittedWorkflows && permittedWorkflows.includes("imagine") &&
-    hasOtherCharmReferences
-  ) {
-    // Auto-classify as rework when referencing other charms
-    return {
-      workflowType: "imagine",
-      confidence: 1.0,
-      reasoning:
-        "Automatically classified as 'imagine' because the prompt references other charms. " +
-        "When referencing other charms, we need to construct a new argument cell that can " +
-        "access data from all references with a combined schema.",
-      enhancedPrompt: input,
-    };
-  }
-
-  try {
-    const result = await classifyWorkflow(
-      input,
-      {
-        existingSpec,
-        existingSchema,
-        existingCode,
-        model,
-        generationId,
-        cache,
-      },
-    );
-
-    return {
-      workflowType: result.workflowType,
-      confidence: result.confidence,
-      reasoning: result.reasoning,
-      enhancedPrompt: result.enhancedPrompt,
-    };
-  } catch (error) {
-    console.error("Error during workflow classification:", error);
-
-    // If no references, fallback to a simple heuristic based on keywords
-    const lowerInput = input.toLowerCase();
-
-    if (
-      lowerInput.includes("fix") || lowerInput.includes("bug") ||
-      lowerInput.includes("issue")
-    ) {
-      return {
-        workflowType: "fix",
-        confidence: 0.7,
-        reasoning: "Fallback classification: Input suggests a fix operation",
-      };
-    } else if (
-      lowerInput.includes("edit") || lowerInput.includes("update") ||
-      lowerInput.includes("improve") || lowerInput.includes("add")
-    ) {
-      return {
-        workflowType: "edit",
-        confidence: 0.6,
-        reasoning:
-          "Fallback classification: Input suggests enhancing functionality",
-      };
-    } else {
-      return {
-        workflowType: "imagine",
-        confidence: 0.5,
-        reasoning: "Fallback classification: Input suggests new functionality",
-      };
-    }
-  }
+  return {
+    workflowType: result.workflowType,
+    confidence: result.confidence,
+    reasoning: result.reasoning,
+    enhancedPrompt: result.enhancedPrompt,
+  };
 }
 
 function extractContext(charm: Cell<Charm>) {
@@ -331,75 +244,30 @@ function extractContext(charm: Cell<Charm>) {
  * @returns Execution plan with steps, spec, and schema
  */
 export async function generatePlan(
-  { input, workflowType, currentCharm, model, generationId, cache = true }: {
-    input: string;
-    workflowType: WorkflowType;
-    currentCharm?: Cell<Charm>;
-    model?: string;
-    generationId?: string;
-    cache: boolean;
-  },
-): Promise<ExecutionPlan> {
+  form: WorkflowForm,
+): Promise<WorkflowForm["plan"]> {
   // Extract context from the current charm if available
   let existingSpec: string | undefined;
   let existingSchema: JSONSchema | undefined;
   let existingCode: string | undefined;
 
-  if (currentCharm) {
-    const { spec, schema, code } = extractContext(currentCharm);
+  if (form.input.existingCharm) {
+    const { spec, schema, code } = extractContext(form.input.existingCharm);
     existingSpec = spec;
     existingSchema = schema;
     existingCode = code;
   }
 
-  try {
-    const result = await generateWorkflowPlan(
-      input,
-      workflowType,
-      existingSpec,
-      existingSchema,
-      existingCode,
-      model,
-      generationId,
-      cache,
-    );
+  const result = await generateWorkflowPlan(
+    form,
+    { existingSpec, existingSchema, existingCode },
+  );
 
-    return {
-      workflowType,
-      steps: result.steps,
-      spec: result.spec,
-      dataModel: result.dataModel,
-    };
-  } catch (error: any) {
-    console.error(
-      "Error during plan generation:",
-      error && ("message" in error) ? error.message : error,
-    );
-
-    // Fallback to a simple plan if LLM generation fails
-    const steps: string[] = [];
-
-    if (workflowType === "fix") {
-      steps.push("Analyze existing code to identify the issue");
-      steps.push("Implement fix while maintaining current functionality");
-      steps.push("Verify the fix doesn't introduce side effects");
-    } else if (workflowType === "edit") {
-      steps.push("Update specification to reflect new requirements");
-      steps.push("Modify code to implement the new functionality");
-      steps.push("Ensure backward compatibility with existing data");
-    } else { // imagine
-      steps.push("Generate new specification and schema");
-      steps.push("Create new implementation based on requirements");
-      steps.push("Link to referenced data from existing charms");
-    }
-
-    return {
-      workflowType,
-      steps,
-      spec: input,
-      dataModel: "",
-    };
-  }
+  return {
+    steps: result.steps,
+    spec: result.spec,
+    dataModel: result.dataModel,
+  };
 }
 
 /**
@@ -581,16 +449,7 @@ export async function fillClassificationSection(
     return newForm;
   }
 
-  const classification = await classifyIntent(
-    form.input.processedInput,
-    {
-      currentCharm: form.input.existingCharm,
-      model: form.meta.modelId,
-      generationId: form.meta.generationId,
-      cache: form.meta.cache,
-      permittedWorkflows: form.meta.permittedWorkflows,
-    },
-  );
+  const classification = await classifyIntent(form);
 
   // Update classification in the form
   newForm.classification = {
@@ -622,7 +481,7 @@ export async function fillPlanningSection(
     return newForm;
   }
 
-  let planningResult;
+  let planningResult: WorkflowForm["plan"];
   // Generate new plan based on workflow type
   if (
     form.classification.workflowType === "fix" && form.input.existingCharm
@@ -637,50 +496,13 @@ export async function fillPlanningSection(
       }
     }
 
-    // Generate just the plan without updating spec
-    const executionPlan = await generatePlan(
-      {
-        input: form.input.processedInput,
-        workflowType: form.classification.workflowType,
-        currentCharm: form.input.existingCharm,
-        model: form.meta.modelId,
-        generationId: form.meta.generationId,
-        cache: form.meta.cache,
-      },
-    );
-
-    planningResult = {
-      steps: executionPlan.steps,
-      spec: form.plan?.spec, // Use existing spec for fix workflow
-      dataModel: "",
-    };
+    planningResult = await generatePlan(form);
   } else {
-    // For edit/imagine, generate both plan and spec
-    const executionPlan = await generatePlan(
-      {
-        input: form.input.processedInput,
-        workflowType: form.classification.workflowType,
-        currentCharm: form.input.existingCharm,
-        model: form.meta.modelId,
-        generationId: form.meta.generationId,
-        cache: form.meta.cache,
-      },
-    );
-
-    planningResult = {
-      steps: executionPlan.steps,
-      spec: form.plan?.spec ?? executionPlan.spec, // if we have a prefilled spec, prefer that
-      dataModel: executionPlan.dataModel,
-    };
+    // For edit/imagine, generate everything
+    planningResult = await generatePlan(form);
   }
 
-  // Update planning in the form
-  newForm.plan = {
-    steps: planningResult.steps || [],
-    spec: planningResult.spec,
-    dataModel: planningResult.dataModel,
-  };
-
+  newForm.plan = planningResult;
   return newForm;
 }
 

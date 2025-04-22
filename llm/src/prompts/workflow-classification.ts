@@ -1,7 +1,7 @@
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
 import type { JSONSchema } from "@commontools/builder";
-import { WorkflowType } from "@commontools/charm";
+import { WorkflowForm, WorkflowType } from "@commontools/charm";
 import { llmPrompt } from "../index.ts";
 import { DEFAULT_MODEL_NAME } from "../types.ts";
 
@@ -146,15 +146,11 @@ function generateCharmContext(
  * @throws Error if the classified workflow type is not in the permitted workflows list
  */
 export async function classifyWorkflow(
-  input: string,
+  form: WorkflowForm,
   options?: {
     existingSpec?: string;
     existingSchema?: JSONSchema;
     existingCode?: string;
-    model?: string;
-    generationId?: string;
-    cache?: boolean;
-    permittedWorkflows?: WorkflowType[];
   },
 ): Promise<{
   workflowType: WorkflowType;
@@ -166,10 +162,6 @@ export async function classifyWorkflow(
     existingSpec,
     existingSchema,
     existingCode,
-    model,
-    generationId,
-    cache = true,
-    permittedWorkflows,
   } = options || {};
 
   const context = generateCharmContext(
@@ -204,9 +196,9 @@ export async function classifyWorkflow(
     // - Creates new code, specification, and schema in one step`
   };
 
-  if (permittedWorkflows && permittedWorkflows.length > 0) {
+  if (form.meta.permittedWorkflows && form.meta.permittedWorkflows.length > 0) {
     // Only include permitted workflows in the prompt
-    workflowsDescription = permittedWorkflows
+    workflowsDescription = form.meta.permittedWorkflows
       .map((type, index) => `${index + 1}. ${workflowDescriptions[type]}`)
       .filter(Boolean)
       .join("\n\n");
@@ -218,7 +210,7 @@ export async function classifyWorkflow(
   }
 
   const prompt = hydratePrompt(WORKFLOW_CLASSIFICATION_PROMPT, {
-    INPUT: input,
+    INPUT: form.input.processedInput,
     CONTEXT: context,
     WORKFLOWS: workflowsDescription,
   });
@@ -231,12 +223,12 @@ export async function classifyWorkflow(
   const response = await new LLMClient().sendRequest({
     system: systemPrompt.text,
     messages: [{ role: "user", content: prompt.text }],
-    model: model ?? DEFAULT_MODEL_NAME,
-    cache,
+    model: form.meta.modelId ?? DEFAULT_MODEL_NAME,
+    cache: form.meta.cache,
     metadata: {
       context: "workflow",
       workflow: "classification",
-      generationId,
+      generationId: form.meta.generationId,
       systemPrompt: systemPrompt.version,
       userPrompt: prompt.version,
     },
@@ -261,11 +253,13 @@ export async function classifyWorkflow(
     }
 
     // Validate that the classified workflow is in the permitted workflows list
-    if (permittedWorkflows && permittedWorkflows.length > 0) {
-      if (!permittedWorkflows.includes(workflow)) {
+    if (
+      form.meta.permittedWorkflows && form.meta.permittedWorkflows.length > 0
+    ) {
+      if (!form.meta.permittedWorkflows.includes(workflow)) {
         throw new Error(
           `Workflow type '${workflow}' is not permitted. Allowed workflows: ${
-            permittedWorkflows.join(", ")
+            form.meta.permittedWorkflows.join(", ")
           }`,
         );
       }
@@ -282,9 +276,11 @@ export async function classifyWorkflow(
 
     // If we have permitted workflows, we should use the first one as default
     // instead of hardcoding "edit" as the fallback
-    if (permittedWorkflows && permittedWorkflows.length > 0) {
+    if (
+      form.meta.permittedWorkflows && form.meta.permittedWorkflows.length > 0
+    ) {
       return {
-        workflowType: permittedWorkflows[0],
+        workflowType: form.meta.permittedWorkflows[0],
         confidence: 0.5,
         reasoning: "Default classification due to parsing error",
       };
@@ -297,56 +293,6 @@ export async function classifyWorkflow(
       reasoning: "Default classification due to parsing error",
     };
   }
-}
-
-/**
- * Helper function to clean JSON strings from LLM responses
- * Handles markdown code blocks and other common issues
- */
-function cleanJsonString(jsonStr: string): string {
-  // Strip markdown code blocks if present
-  let cleaned = jsonStr.trim();
-
-  // Remove markdown code block markers
-  const codeBlockRegex = /^```(?:json)?\s*([\s\S]*?)```$/;
-  const match = cleaned.match(codeBlockRegex);
-  if (match) {
-    cleaned = match[1].trim();
-    console.log("Removed markdown code block markers");
-  }
-
-  // Check and fix common JSON issues
-  // Sometimes LLM adds explanatory text before or after the JSON
-  try {
-    // Try to find the start of a JSON object or array
-    const jsonStartRegex = /(\{|\[)/;
-    const jsonStart = cleaned.search(jsonStartRegex);
-    if (jsonStart > 0) {
-      // There's text before the JSON starts
-      cleaned = cleaned.substring(jsonStart);
-      console.log("Trimmed text before JSON starts");
-    }
-
-    // Try to find the end of a JSON object or array
-    const lastBrace = Math.max(
-      cleaned.lastIndexOf("}"),
-      cleaned.lastIndexOf("]"),
-    );
-    if (lastBrace > 0 && lastBrace < cleaned.length - 1) {
-      // There's text after the JSON ends
-      cleaned = cleaned.substring(0, lastBrace + 1);
-      console.log("Trimmed text after JSON ends");
-    }
-
-    // Validate JSON by parsing it
-    JSON.parse(cleaned);
-  } catch (e) {
-    console.warn(
-      "Could not automatically fix JSON, returning cleaned string as-is",
-    );
-  }
-
-  return cleaned;
 }
 
 /**
@@ -363,28 +309,30 @@ function cleanJsonString(jsonStr: string): string {
  * @returns A promise resolving to an object containing the generation steps and schema specification.
  */
 export async function generateWorkflowPlan(
-  input: string,
-  workflowType: WorkflowType,
-  existingSpec?: string,
-  existingSchema?: JSONSchema,
-  existingCode?: string,
-  model?: string,
-  generationId?: string,
-  cache = true,
+  form: WorkflowForm,
+  options?: {
+    existingSpec?: string;
+    existingSchema?: JSONSchema;
+    existingCode?: string;
+  },
 ): Promise<{
   steps: string[];
   spec: string;
   dataModel: string;
 }> {
   const context = generateCharmContext(
-    existingSpec,
-    existingSchema,
-    existingCode,
+    options?.existingSpec,
+    options?.existingSchema,
+    options?.existingCode,
   );
 
+  if (!form.classification) {
+    throw new Error("Workflow classification is required");
+  }
+
   const prompt = hydratePrompt(PLAN_GENERATION_PROMPT, {
-    INPUT: input,
-    WORKFLOW_TYPE: workflowType.toUpperCase(),
+    INPUT: form.input.processedInput,
+    WORKFLOW_TYPE: form.classification.workflowType.toUpperCase(),
     CONTEXT: context,
   });
 
@@ -396,12 +344,12 @@ export async function generateWorkflowPlan(
   const response = await new LLMClient().sendRequest({
     system: systemPrompt.text,
     messages: [{ role: "user", content: prompt.text }],
-    model: model ?? DEFAULT_MODEL_NAME,
-    cache,
+    model: form.meta.modelId ?? DEFAULT_MODEL_NAME,
+    cache: form.meta.cache,
     metadata: {
       context: "workflow",
-      workflow: workflowType.toLowerCase(),
-      generationId,
+      workflow: form.classification.workflowType.toLowerCase(),
+      generationId: form.meta.generationId,
       systemPrompt: systemPrompt.version,
       userPrompt: prompt.version,
     },
@@ -434,9 +382,10 @@ export async function generateWorkflowPlan(
     }
 
     // For fix workflow, if we have an existing spec, use that instead
-    const updatedSpec = workflowType === "fix" && existingSpec
-      ? existingSpec
-      : specification;
+    const updatedSpec =
+      form.classification.workflowType === "fix" && options?.existingSpec
+        ? options?.existingSpec
+        : specification;
 
     return {
       steps,
