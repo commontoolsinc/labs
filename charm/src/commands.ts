@@ -6,7 +6,7 @@ import { extractUserCode, injectUserCode } from "./iframe/static.ts";
 import { compileAndRunRecipe, generateNewRecipeVersion } from "./iterate.ts";
 import { NAME } from "@commontools/builder";
 import { WorkflowForm } from "./index.ts";
-import { processWorkflow } from "./workflow.ts";
+import { processWorkflow, ProcessWorkflowOptions } from "./workflow.ts";
 
 export const castSpellAsCharm = async (
   charmManager: CharmManager,
@@ -119,10 +119,11 @@ export async function modifyCharm(
   model?: string,
 ): Promise<Cell<Charm>> {
   // Include the current charm in the context
-  const context = {
-    currentCharm: currentCharm,
+  const context: ProcessWorkflowOptions = {
+    existingCharm: currentCharm,
     prefill,
     model,
+    permittedWorkflows: ["edit"], // only edit is allowed here
   };
 
   const form = await processWorkflow(

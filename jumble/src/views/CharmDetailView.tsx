@@ -58,8 +58,6 @@ import {
   ModelSelector,
   useUserPreferredModel,
 } from "@/components/common/ModelSelector.tsx";
-import { SpecPreview } from "@/components/SpecPreview.tsx";
-import { useLiveSpecPreview } from "@/hooks/use-live-spec-preview.ts";
 import { useCodeEditor } from "@/hooks/use-code-editor.ts";
 
 type Tab = "iterate" | "code" | "data";
@@ -76,30 +74,27 @@ const variantModels = [
 // TODO(bf): this is also super bloated
 interface CharmOperationContextType {
   input: string;
-  previewForm: Partial<WorkflowForm>;
   userPreferredModel: LanguageModelId;
   setUserPreferredModel: (model: LanguageModelId) => void;
   setInput: (input: string) => void;
   showVariants: boolean;
   setShowVariants: (show: boolean) => void;
-  showPreview: boolean;
-  setShowPreview: (show: boolean) => void;
+
   // Global loading state used across all tabs (Operation, Code, Data)
   // This controls the main overlay and should be used for any operation
   // that requires user feedback about processing
   loading: boolean;
   setLoading: (loading: boolean) => void;
+
   variants: Cell<Charm>[];
   setVariants: (updater: (prev: Cell<Charm>[]) => Cell<Charm>[]) => void;
   selectedVariant: Cell<Charm> | null;
   setSelectedVariant: (variant: Cell<Charm> | null) => void;
   expectedVariantCount: number;
   setExpectedVariantCount: (count: number) => void;
-  isPreviewLoading: boolean;
+
   handlePerformOperation: () => void;
   handleCancelVariants: () => void;
-  setWorkflowType: (workflowType: WorkflowType) => void;
-  setSelectedSpellToCast: (charmId: string, spellId: string) => void;
   performOperation: (
     charmId: string,
     input: string,
@@ -157,12 +152,11 @@ function useSuggestions(charm: Cell<Charm> | undefined) {
 
     const loadSuggestions = async () => {
       setLoadingSuggestions(true);
-      const iframeRecipe = getIframeRecipe(charm);
-      if (!iframeRecipe) {
-        console.error("No iframe recipe found in charm");
-        return;
-      }
       try {
+        const iframeRecipe = getIframeRecipe(charm);
+        if (!iframeRecipe) {
+          throw new Error("No iframe recipe found in charm");
+        }
         const newSuggestions = await generateCharmSuggestions(
           iframeRecipe?.iframe?.spec || "",
           iframeRecipe?.iframe?.src || "",
@@ -170,7 +164,7 @@ function useSuggestions(charm: Cell<Charm> | undefined) {
         );
         setSuggestions(newSuggestions);
       } catch (error) {
-        console.error("Failed to load suggestions:", error);
+        console.warn("Failed to load suggestions:", error);
       } finally {
         setLoadingSuggestions(false);
       }
@@ -197,7 +191,6 @@ function useCharmOperation() {
   const [input, setInput] = useState("");
 
   const [showVariants, setShowVariants] = useState(false);
-  const [showPreview, setShowPreview] = useState(true);
   const [loading, setLoading] = useState(false);
   const [variants, setVariants] = useState<Cell<Charm>[]>([]);
   const [variantModelsMap, setVariantModelsMap] = useState<
@@ -208,24 +201,7 @@ function useCharmOperation() {
   );
   const [expectedVariantCount, setExpectedVariantCount] = useState(0);
 
-  // Preview model state
   const { userPreferredModel, setUserPreferredModel } = useUserPreferredModel();
-
-  // Live preview generation with workflow classification
-  const {
-    previewForm,
-    loading: isPreviewLoading,
-    model,
-    setWorkflowType,
-    setSelectedSpellToCast,
-  } = useLiveSpecPreview(
-    input,
-    charmManager,
-    showPreview,
-    250,
-    userPreferredModel,
-    charm,
-  );
 
   // Function that performs the selected operation using modifyCharm
   const performOperation = useCallback(
@@ -245,14 +221,19 @@ function useCharmOperation() {
           charmManager,
           input,
           fetched,
-          previewForm,
+          {
+            classification: {
+              workflowType: "edit",
+              confidence: 1.0,
+              reasoning: "Invoked from CharmDetailView edit sheet",
+            },
+          },
           model,
         );
       });
     },
     [
       charmManager,
-      previewForm,
     ],
   );
 
@@ -316,7 +297,6 @@ function useCharmOperation() {
     performOperation,
     charmManager,
     navigate,
-    previewForm,
   ]);
 
   const handleCancelVariants = useCallback(() => {
@@ -331,12 +311,8 @@ function useCharmOperation() {
     setInput,
     userPreferredModel,
     setUserPreferredModel,
-    setWorkflowType,
-    setSelectedSpellToCast,
     showVariants,
     setShowVariants,
-    showPreview,
-    setShowPreview,
     loading,
     setLoading,
     variants,
@@ -345,8 +321,6 @@ function useCharmOperation() {
     setSelectedVariant,
     expectedVariantCount,
     setExpectedVariantCount,
-    previewForm,
-    isPreviewLoading,
     handlePerformOperation,
     handleCancelVariants,
     performOperation,
@@ -694,13 +668,8 @@ const OperationTab = () => {
     setUserPreferredModel,
     showVariants,
     setShowVariants,
-    showPreview,
     loading,
     handlePerformOperation,
-    isPreviewLoading,
-    setWorkflowType,
-    setSelectedSpellToCast,
-    previewForm,
   } = useCharmOperationContext();
 
   const mentions = useCharmMentions();
@@ -711,11 +680,7 @@ const OperationTab = () => {
         <div className="flex flex-col gap-2">
           <div className="border border-gray-300">
             <Composer
-              placeholder={previewForm.classification?.workflowType === "fix"
-                ? "Fix issues in your charm..."
-                : previewForm.classification?.workflowType === "edit"
-                ? "Tweak your charm..."
-                : "Create a new charm based on this data..."}
+              placeholder="Edit this charm"
               readOnly={false}
               mentions={mentions}
               value={input}
@@ -749,13 +714,6 @@ const OperationTab = () => {
 
       {/* Content Container with single scrollbar */}
       <div className="flex-grow overflow-auto mt-3 -mx-4 px-4">
-        <SpecPreview
-          form={previewForm}
-          loading={isPreviewLoading}
-          visible={showPreview && input.trim().length >= 16}
-          onWorkflowChange={setWorkflowType}
-          onSelectedCastChange={setSelectedSpellToCast}
-        />
         <Variants />
         <Suggestions />
       </div>
