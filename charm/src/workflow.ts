@@ -48,7 +48,8 @@ export type WorkflowType =
   | "edit"
   | "imagine"
   | "imagine-single-phase"
-  | "cast-spell";
+  | "cast-spell"
+  | "import-json";
 
 // Configuration for each workflow type
 export interface WorkflowConfig {
@@ -99,6 +100,14 @@ export const WORKFLOWS: Record<WorkflowType, WorkflowConfig> = {
     name: "cast-spell",
     label: "CAST",
     description: "Cast a spell from the spellbook",
+    updateSpec: true,
+    updateSchema: true,
+    allowsDataReferences: true,
+  },
+  "import-json": {
+    name: "import-json",
+    label: "IMPORT JSON",
+    description: "Create a new charm from imported JSON data",
     updateSpec: true,
     updateSchema: true,
     allowsDataReferences: true,
@@ -824,6 +833,61 @@ export async function processWorkflow(
       }
     }
 
+    // Handle JSON Import workflow
+    if (form.classification?.workflowType === "import-json") {
+      globalThis.dispatchEvent(
+        new CustomEvent("job-update", {
+          detail: {
+            type: "job-update",
+            jobId: form.meta.generationId,
+            title: form.input.processedInput,
+            status: "Importing JSON...",
+          },
+        }),
+      );
+
+      try {
+        // Execute the import-json workflow
+        const { cell, llmRequestId } = await executeImportJsonWorkflow(
+          charmManager,
+          form,
+        );
+
+        form.meta.llmRequestId = llmRequestId;
+        form.generation = {
+          charm: cell,
+        };
+
+        globalThis.dispatchEvent(
+          new CustomEvent("job-complete", {
+            detail: {
+              type: "job-complete",
+              jobId: form.meta.generationId,
+              title: form.input.processedInput,
+              result: cell,
+              status: "Charm created from JSON import!",
+            },
+          }),
+        );
+
+        return form;
+      } catch (error) {
+        console.error("Error during JSON import:", error);
+        globalThis.dispatchEvent(
+          new CustomEvent("job-failed", {
+            detail: {
+              type: "job-failed",
+              jobId: form.meta.generationId,
+              title: form.input.processedInput,
+              error,
+              status: "Failed to import JSON",
+            },
+          }),
+        );
+        throw error;
+      }
+    }
+
     // Step 3: Planning if not already planned
     if (!form.plan || !form.plan.spec || !form.plan.steps) {
       console.log("planning task");
@@ -1099,4 +1163,36 @@ export function executeImagineWorkflow(
     charmManager,
     form,
   );
+}
+
+/**
+ * Execute the Import JSON workflow
+ *
+ * The Import JSON workflow creates a new charm based on imported JSON data,
+ * allowing for visualizing and interacting with existing data structures
+ */
+export function executeImportJsonWorkflow(
+  charmManager: CharmManager,
+  form: WorkflowForm,
+): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
+  console.log("Executing IMPORT-JSON workflow");
+
+  // This workflow is similar to imagine, but focused on using external JSON data
+  // We leverage the existing castNewRecipe functionality
+  return castNewRecipe(
+    charmManager,
+    form,
+  );
+}
+
+/**
+ * Helper function to format JSON data for inclusion in a prompt
+ *
+ * @param title The title for the imported data
+ * @param jsonData The JSON data to import
+ * @returns A formatted prompt string for the import-json workflow
+ */
+export function formatJsonImportPrompt(title: string, jsonData: any): string {
+  const jsonString = JSON.stringify(jsonData, null, 2);
+  return `${title}\n\nLook at the attached JSON data and use it to create a new charm.\n\n${jsonString}`;
 }

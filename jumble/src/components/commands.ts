@@ -7,6 +7,7 @@ import {
   CharmManager,
   compileAndRunRecipe,
   createWorkflowForm,
+  formatJsonImportPrompt,
   processWorkflow,
   renameCharm,
   WorkflowForm,
@@ -355,14 +356,20 @@ async function handleImportJSON(ctx: CommandContext) {
     if (!title) return;
 
     ctx.setOpen(false);
+    const llmprompt = formatJsonImportPrompt(title, data);
     const form = await processWorkflow(
-      `${title}\n\n Look at the attached JSON data and use it to create a new charm.\n\n${
-        JSON.stringify(data)
-      }`,
+      llmprompt,
       ctx.charmManager,
       {
         cache: true,
         dryRun: false,
+        prefill: {
+          classification: {
+            workflowType: "import-json",
+            confidence: 1.0,
+            reasoning: "User selected JSON import",
+          },
+        },
       },
     );
 
