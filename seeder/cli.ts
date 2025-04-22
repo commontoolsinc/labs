@@ -2,7 +2,7 @@ import { parseArgs } from "@std/cli/parse-args";
 import { castNewRecipe, CharmManager } from "@commontools/charm";
 import { getEntityId, setBobbyServerUrl, storage } from "@commontools/runner";
 import { createSession, Identity } from "@commontools/identity";
-import { formatJsonImportPrompt, LLMClient } from "@commontools/llm";
+import { formatJsonImportPrompt, LLMClient, setLLMUrl } from "@commontools/llm";
 import { processWorkflow } from "@commontools/charm";
 import { type CharmResult, CommandType, type Step } from "./interfaces.ts";
 import { scenarios } from "./scenarios.ts";
@@ -32,8 +32,8 @@ if (!name) {
 
 storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
+setLLMUrl(toolshedUrl);
 const llmClient = new LLMClient();
-llmClient.setServerUrl(toolshedUrl);
 
 const charmManager = new CharmManager(
   await createSession({

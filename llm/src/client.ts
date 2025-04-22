@@ -2,18 +2,16 @@ import { LLMContent, LLMMessage, LLMRequest, LLMResponse } from "./types.ts";
 
 type PartialCallback = (text: string) => void;
 
-export const DEFAULT_LLM_URL = typeof globalThis.location !== "undefined"
+let llmApiUrl = typeof globalThis.location !== "undefined"
   ? globalThis.location.protocol + "//" + globalThis.location.host +
     "/api/ai/llm"
   : "//api/ai/llm";
 
+export const setLLMUrl = (toolshedUrl: string) => {
+  llmApiUrl = new URL("/api/ai/llm", toolshedUrl).toString();
+};
+
 export class LLMClient {
-  private serverUrl: string = DEFAULT_LLM_URL;
-
-  public setServerUrl(toolshedUrl: string) {
-    this.serverUrl = new URL("/api/ai/llm", toolshedUrl).toString();
-  }
-
   /**
    * Sends a request to the LLM service.
    *
@@ -39,7 +37,7 @@ export class LLMClient {
 
     request.messages = request.messages.map(processMessage);
 
-    const response = await fetch(this.serverUrl, {
+    const response = await fetch(llmApiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
