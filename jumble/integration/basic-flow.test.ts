@@ -24,7 +24,7 @@ import { join } from "@std/path";
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
   "http://localhost:8000/";
 const FRONTEND_URL = Deno.env.get("FRONTEND_URL") ?? "http://localhost:5173/";
-const HEADLESS = true;
+const HEADLESS = false;
 const ASTRAL_TIMEOUT = 60_000;
 
 console.log(`TOOLSHED_API_URL=${TOOLSHED_API_URL}`);
@@ -214,15 +214,17 @@ Deno.test({
           await page.keyboard.up("ControlLeft");
           await sleep(1000);
 
-          await page.keyboard.type("modify");
+          await page.keyboard.type("new");
           await sleep(1000);
           await page.keyboard.press("Enter");
 
           await sleep(500);
-          await page.keyboard.type("count the values in current");
-          await sleep(1000);
+          await page.keyboard.type("count the values in @v");
+          await sleep(500);
+          await page.keyboard.press("Tab");
+          await sleep(500);
           await page.keyboard.press("Enter");
-          await sleep(1000);
+          await sleep(500);
         },
       });
 
