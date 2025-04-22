@@ -6,8 +6,10 @@
  * @returns A formatted prompt string for the import-json workflow
  */
 
-// FIXME(ja): do we really want to send all the json data to the LLM?
+import { createJsonSchema } from "@commontools/builder";
+
 export function formatJsonImportPrompt(title: string, jsonData: any): string {
-  const jsonString = JSON.stringify(jsonData, null, 2);
-  return `${title}\n\nLook at the attached JSON data and use it to create a new charm.\n\n${jsonString}`;
+  const schema = createJsonSchema(jsonData);
+  const schemaString = JSON.stringify(schema, null, 2);
+  return `${title}\n\nLook at the attached JSON schema and use it to create a new charm.\n\n${schemaString}`;
 }
