@@ -721,6 +721,16 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
   return newForm;
 }
 
+export type ProcessWorkflowOptions = {
+  dryRun?: boolean;
+  existingCharm?: Cell<Charm>;
+  prefill?: Partial<WorkflowForm>;
+  model?: string;
+  onProgress?: (form: WorkflowForm) => void;
+  cancellation?: { cancelled: boolean };
+  cache?: boolean;
+};
+
 /**
  * Process a workflow request from start to finish or just fill the form
  *
@@ -732,15 +742,7 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
 export async function processWorkflow(
   input: string,
   charmManager: CharmManager,
-  options: {
-    dryRun?: boolean;
-    existingCharm?: Cell<Charm>;
-    prefill?: Partial<WorkflowForm>;
-    model?: string;
-    onProgress?: (form: WorkflowForm) => void;
-    cancellation?: { cancelled: boolean };
-    cache?: boolean;
-  },
+  options: ProcessWorkflowOptions,
 ): Promise<WorkflowForm> {
   console.groupCollapsed("processWorkflow");
   const startTime = performance.now();
