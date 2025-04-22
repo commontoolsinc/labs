@@ -354,20 +354,13 @@ async function handleImportJSON(ctx: CommandContext) {
     if (!title) return;
 
     ctx.setOpen(false);
-    const llmprompt = formatJsonImportPrompt(title, data);
+    const jsonPrompt = formatJsonImportPrompt(title, data);
     const form = await processWorkflow(
-      llmprompt,
+      jsonPrompt,
       ctx.charmManager,
       {
         cache: true,
         dryRun: false,
-        prefill: {
-          classification: {
-            workflowType: "import-json",
-            confidence: 1.0,
-            reasoning: "User selected JSON import",
-          },
-        },
       },
     );
 
