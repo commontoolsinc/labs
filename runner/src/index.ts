@@ -3,6 +3,7 @@ export { addModuleByRef, raw } from "./module.ts";
 export {
   idle,
   isErrorWithContext,
+  onConsole,
   onError,
   run as addAction,
   unschedule as removeAction,
@@ -58,7 +59,7 @@ export {
   saveToBlobby,
   setBlobbyServerUrl,
 } from "./blobby-storage.ts";
-export { tsToExports } from "./local-build.ts";
+export { ConsoleMethod, runtime } from "./runtime/index.ts";
 export {
   addCommonIDfromObjectID,
   followAliases,

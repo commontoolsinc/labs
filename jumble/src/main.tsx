@@ -1,6 +1,6 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { onError } from "@commontools/runner";
+import { ConsoleMethod, onConsole, onError } from "@commontools/runner";
 import {
   BrowserRouter as Router,
   createBrowserRouter,
@@ -96,6 +96,21 @@ onError((error: Error) => {
   // Also send to Sentry
   Sentry.captureException(error);
 });
+
+// Handle console messages depending on charm context.
+// This is essentially the same as the default handling currently,
+// but adding this here for future use.
+onConsole(
+  (
+    _metadata:
+      | { charmId?: string; space?: string; recipeId?: string }
+      | undefined,
+    _method: ConsoleMethod,
+    args: any[],
+  ) => {
+    return args;
+  },
+);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

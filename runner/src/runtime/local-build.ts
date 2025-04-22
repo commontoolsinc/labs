@@ -46,10 +46,8 @@ const sourceMapConsumers = new Map<string, SourceMapConsumer>();
 // Chrome at least only observe `sourceURL` but not the source map, so we can
 // use the former to find the right source map and then apply this.
 export const mapSourceMapsOnStacktrace = (
-  stack: string | undefined,
+  stack: string,
 ): string => {
-  if (!stack) return "Unknown error";
-
   const lines = stack.split("\n");
   const mappedLines = lines.map((line) => {
     const match = line.match(stackTracePattern);
@@ -86,7 +84,10 @@ export const mapSourceMapsOnStacktrace = (
 
 const importCache: Record<string, any> = {};
 
-const ensureRequires = async (js: string): Promise<Record<string, any>> => {
+const ensureRequires = async (
+  js: string,
+  config: EvalBuildConfig,
+): Promise<Record<string, any>> => {
   const requires = /require\((['"])([^'"]+)\1\)/g;
   const sagaCastorPattern =
     /https:\/\/paas\.saga-castor\.ts\.net\/blobby\/blob\/[^/]+\/src/;
@@ -99,7 +100,10 @@ const ensureRequires = async (js: string): Promise<Record<string, any>> => {
       if (!importCache[modulePath]) {
         // Fetch and compile the module
         const importSrc = await fetch(modulePath).then((resp) => resp.text());
-        const importedModule = await tsToExports(importSrc, modulePath);
+        const importedModule = await tsToExports(importSrc, {
+          injection: config.injection,
+          fileName: modulePath,
+        });
         if (importedModule.errors) {
           throw new Error(
             `Failed to import ${modulePath}: ${importedModule.errors}`,
@@ -113,16 +117,21 @@ const ensureRequires = async (js: string): Promise<Record<string, any>> => {
   return localImports;
 };
 
-export const tsToExports = async (
-  src: string,
-  fileName?: string,
-): Promise<{ exports?: any; errors?: string }> => {
-  const ts = await getTSCompiler();
+export interface EvalBuildConfig {
+  injection?: string;
+  fileName?: string;
+}
 
-  if (!fileName) fileName = merkleReference.refer(src).toString() + ".tsx";
+export const tsToExports = async (
+  source: string,
+  config: EvalBuildConfig,
+): Promise<any> => {
+  const ts = await getTSCompiler();
+  const fileName = config.fileName ??
+    merkleReference.refer(source).toString() + ".tsx";
 
   // Add error handling for compilation
-  const result = ts.transpileModule(src, {
+  const result = ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.CommonJS,
       target: ts.ScriptTarget.ES2022,
@@ -160,7 +169,7 @@ export const tsToExports = async (
         return `Compilation Error: ${locationInfo}${message}`;
       })
       .join("\n");
-    return { errors };
+    throw errors;
   }
 
   const js = result.outputText;
@@ -177,12 +186,14 @@ export const tsToExports = async (
 
   let localImports: Record<string, any> | undefined;
   try {
-    localImports = await ensureRequires(js);
+    localImports = await ensureRequires(js, config);
   } catch (e) {
     const error = e as Error;
     // Add source location context if possible
-    const errorWithContext = mapSourceMapsOnStacktrace(error.stack);
-    return { errors: errorWithContext };
+    if (error.stack) {
+      error.stack = mapSourceMapsOnStacktrace(error.stack);
+    }
+    throw error;
   }
 
   // Custom module resolution
@@ -210,8 +221,16 @@ export const tsToExports = async (
 
   globalThis.DOMParser ??= await getDOMParser();
 
+  let injection = "";
+  if (config.injection) {
+    // Enforce injection script being a single line for source map
+    // reasons detailed below
+    injection = config.injection.split("\n").join("");
+  }
+
   // Important: ${js} is on the first line, so that the source map is accurate
-  let wrappedCode = `(async function(require) { const exports = {}; ${js}
+  let wrappedCode =
+    `(async function(require) { const exports = {}; ${injection} ${js}
 return exports;
 })`;
 
@@ -226,28 +245,13 @@ return exports;
   }
 
   try {
-    const exports = await eval(wrappedCode)(customRequire);
-    return { exports };
+    return await eval(wrappedCode)(customRequire);
   } catch (e) {
     const error = e as Error;
     // Add source location context if possible
-    const errorWithContext = mapSourceMapsOnStacktrace(error.stack);
-    return { errors: errorWithContext };
+    if (error.stack) {
+      error.stack = mapSourceMapsOnStacktrace(error.stack);
+    }
+    throw error;
   }
-};
-
-export const buildRecipe = async (
-  src: string,
-): Promise<{ recipe?: commonBuilder.Recipe; errors?: string }> => {
-  if (!src) {
-    return { errors: "No source code provided" };
-  }
-
-  const { exports, errors } = await tsToExports(src);
-
-  if (errors) {
-    return { errors };
-  }
-
-  return { recipe: exports.default };
 };

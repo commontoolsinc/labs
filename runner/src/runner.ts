@@ -4,7 +4,6 @@ import {
   isModule,
   isRecipe,
   isStreamAlias,
-  type JSONSchema,
   type JSONValue,
   type Module,
   type NodeFactory,
@@ -32,7 +31,6 @@ import {
   extractDefaultValues,
   findAllAliasedCells,
   followAliases,
-  maybeUnwrapProxy,
   mergeObjects,
   sendValueToBinding,
   unsafe_noteParentOnRecipes,
@@ -47,6 +45,7 @@ import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import { getCellLinkOrThrow } from "./query-result-proxy.ts";
 import { storage } from "./storage.ts";
 import { syncRecipeBlobby } from "./recipe-sync.ts";
+import { runtime } from "./runtime/index.ts";
 
 export const cancels = new WeakMap<DocImpl<any>, Cancel>();
 
@@ -347,7 +346,7 @@ function instantiateJavaScriptNode(
 
   let fn = (
     typeof module.implementation === "string"
-      ? eval(module.implementation)
+      ? runtime.getInvocation(module.implementation)
       : module.implementation
   ) as (inputs: any) => any;
 
