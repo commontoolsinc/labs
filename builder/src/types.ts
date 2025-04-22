@@ -237,8 +237,8 @@ type CanBeOpaqueRef = { [toOpaqueRef]: () => OpaqueRef<any> };
 
 export function canBeOpaqueRef(value: any): value is CanBeOpaqueRef {
   return (
-    !!value &&
     (typeof value === "object" || typeof value === "function") &&
+    value !== null &&
     typeof value[toOpaqueRef] === "function"
   );
 }
