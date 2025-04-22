@@ -136,9 +136,8 @@ async function processCommand(
           cache,
         },
       );
-
-      const charm = await castNewRecipe(charmManager, form);
-      const id = getEntityId(charm);
+      const newCharm = form.generation?.charm;
+      const id = getEntityId(newCharm);
       if (id) {
         console.log(`Charm added from JSON import: ${id["/"]}`);
         await verifyCharm(id["/"], prompt);
