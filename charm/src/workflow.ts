@@ -151,26 +151,39 @@ export interface ProcessedPrompt {
  * input and determines which workflow type best matches their intent.
  *
  * @param input User input text
- * @param currentCharm Current charm context (optional)
- * @param model LLM model to use
- * @param references Referenced charm data
- * @param generationId Optional ID for tracking generation
- * @param cache Optional flag to enable/disable LLM cache
+ * @param options Additional options for classification
+ * @param options.currentCharm Current charm context (optional)
+ * @param options.model LLM model to use
+ * @param options.references Referenced charm data
+ * @param options.generationId Optional ID for tracking generation
+ * @param options.cache Optional flag to enable/disable LLM cache
  * @returns Classification result
  */
 export async function classifyIntent(
   input: string,
-  currentCharm?: Cell<Charm>,
-  model?: string,
-  references?: Record<string, Cell<any>>,
-  generationId?: string,
-  cache = true,
+  options?: {
+    currentCharm?: Cell<Charm>;
+    model?: string;
+    references?: Record<string, Cell<any>>;
+    generationId?: string;
+    cache?: boolean;
+    permittedWorkflows?: WorkflowType[];
+  },
 ): Promise<IntentClassificationResult> {
   // Process the input for @mentions if a CharmManager is provided
   // Extract context from the current charm if available
   let existingSpec: string | undefined;
   let existingSchema: JSONSchema | undefined;
   let existingCode: string | undefined;
+
+  const {
+    currentCharm,
+    model,
+    references,
+    generationId,
+    cache = true,
+    permittedWorkflows,
+  } = options || {};
 
   if (currentCharm) {
     const { spec, schema, code } = extractContext(currentCharm);
@@ -179,24 +192,27 @@ export async function classifyIntent(
     existingCode = code;
   }
 
-  if (!existingSpec || !existingSchema) {
-    if (
-      input.toLowerCase().indexOf("spell") !== -1 &&
-      input.toLowerCase().indexOf("cast") !== -1
-    ) {
+  // Keyword detection for casting a spell
+  if (permittedWorkflows && permittedWorkflows.includes("cast-spell")) {
+    if (!existingSpec || !existingSchema) {
+      if (
+        input.toLowerCase().indexOf("spell") !== -1 &&
+        input.toLowerCase().indexOf("cast") !== -1
+      ) {
+        return {
+          workflowType: "cast-spell",
+          confidence: 1.0,
+          reasoning: "You mentioned casting spells!",
+        };
+      }
+
       return {
-        workflowType: "cast-spell",
+        workflowType: "imagine",
         confidence: 1.0,
-        reasoning: "You mentioned casting spells!",
+        reasoning:
+          "Automatically classified as 'imagine' because there is nothing to refer to (either no current charm or no iframe recipe).",
       };
     }
-
-    return {
-      workflowType: "imagine",
-      confidence: 1.0,
-      reasoning:
-        "Automatically classified as 'imagine' because there is nothing to refer to (either no current charm or no iframe recipe).",
-    };
   }
 
   // Check if we have any mentions of other charms (except the current charm)
@@ -206,7 +222,10 @@ export async function classifyIntent(
     Object.keys(references).filter((key) => key !== "currentCharm")
         .length > 0;
 
-  if (hasOtherCharmReferences) {
+  if (
+    permittedWorkflows && permittedWorkflows.includes("imagine") &&
+    hasOtherCharmReferences
+  ) {
     // Auto-classify as rework when referencing other charms
     return {
       workflowType: "imagine",
@@ -427,6 +446,7 @@ export interface WorkflowForm {
   // Metadata and workflow state
   meta: {
     charmManager: CharmManager;
+    permittedWorkflows?: WorkflowType[];
     generationId?: string;
     modelId?: string;
     isComplete: boolean;
@@ -446,13 +466,22 @@ export interface WorkflowForm {
  * @returns A new workflow form object
  */
 export function createWorkflowForm(
-  { input, modelId, charm, generationId, charmManager, cache = true }: {
+  {
+    input,
+    modelId,
+    charm,
+    generationId,
+    charmManager,
+    cache = true,
+    permittedWorkflows,
+  }: {
     input: string;
     modelId?: string;
     charm?: Cell<Charm>;
     generationId?: string;
     cache: boolean;
     charmManager: CharmManager;
+    permittedWorkflows?: WorkflowType[];
   },
 ): WorkflowForm {
   return {
@@ -473,6 +502,7 @@ export function createWorkflowForm(
       generationId: generationId ?? crypto.randomUUID(),
       cache,
       charmManager,
+      permittedWorkflows,
     },
   };
 }
@@ -729,6 +759,7 @@ export type ProcessWorkflowOptions = {
   onProgress?: (form: WorkflowForm) => void;
   cancellation?: { cancelled: boolean };
   cache?: boolean;
+  permittedWorkflows?: WorkflowType[]; // can be used to scope possible classifications
 };
 
 /**
@@ -760,6 +791,7 @@ export async function processWorkflow(
     modelId: options.model,
     cache: options.cache,
     charmManager,
+    permittedWorkflows: options.permittedWorkflows,
   });
   console.log("creating form", form);
 

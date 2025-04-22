@@ -123,6 +123,7 @@ export async function modifyCharm(
     existingCharm: currentCharm,
     prefill,
     model,
+    permittedWorkflows: ["edit"], // only edit is allowed here
   };
 
   const form = await processWorkflow(

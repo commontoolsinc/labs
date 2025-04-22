@@ -310,6 +310,7 @@ async function handleNewCharm(
       {
         prefill: ctx.previewForm,
         model: ctx.userPreferredModel,
+        permittedWorkflows: ["imagine", "cast-spell"],
       },
     );
     const charm = form.generation?.charm;

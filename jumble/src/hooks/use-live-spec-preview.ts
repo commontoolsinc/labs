@@ -22,6 +22,15 @@ export interface PreviewProgress {
   plan: boolean;
   spec: boolean;
 }
+/**
+ * Options for the live spec preview
+ */
+type LiveSpecPreviewOptions = {
+  debounceTime?: number;
+  model?: LanguageModelId;
+  currentCharm?: Cell<Charm>;
+  permittedWorkflows?: WorkflowType[];
+};
 
 /**
  * Hook for generating a live preview of the spec and plan as the user types,
@@ -29,18 +38,21 @@ export interface PreviewProgress {
  * @param input The user's input text
  * @param charmManager The CharmManager instance for handling mentions
  * @param enabled Whether the preview is enabled
- * @param debounceTime The debounce time in ms
- * @param model The model to use ("fast" or "think")
- * @param currentCharm Optional current charm for context
+ * @param options Additional options for the preview
  */
 export function useLiveSpecPreview(
   input: string,
   charmManager: CharmManager,
   enabled: boolean = true,
-  debounceTime: number = 300,
-  model: LanguageModelId = DEFAULT_MODEL as LanguageModelId,
-  currentCharm?: Cell<Charm>,
+  options: LiveSpecPreviewOptions = {},
 ) {
+  const {
+    debounceTime = 300,
+    model = DEFAULT_MODEL as LanguageModelId,
+    currentCharm,
+    permittedWorkflows,
+  } = options;
+
   const [loading, setLoading] = useState(false);
   // Track the current generation process to cancel outdated requests
   const currentGenerationRef = useRef<string>("0");
@@ -77,6 +89,7 @@ export function useLiveSpecPreview(
           existingCharm: currentCharm,
           model,
           prefill: prefill,
+          permittedWorkflows,
           onProgress: (f) => {
             // Check if this is still the current generation before proceeding
             if (!isCurrentGeneration()) {

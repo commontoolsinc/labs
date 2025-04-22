@@ -87,9 +87,12 @@ function CommandProcessor({
     inputValue,
     charmManager, // Explicitly pass CharmManager instance
     true,
-    1000,
-    userPreferredModel,
-    command.id == "new-charm" ? undefined : focusedCharm, // Pass the current charm for context
+    {
+      debounceTime: 1000,
+      model: userPreferredModel,
+      currentCharm: command.id == "new-charm" ? undefined : focusedCharm,
+      permittedWorkflows: ["imagine", "cast-spell"],
+    },
   );
 
   useEffect(() => {
