@@ -241,12 +241,14 @@ export async function classifyIntent(
   try {
     const result = await classifyWorkflow(
       input,
-      existingSpec,
-      existingSchema,
-      existingCode,
-      model,
-      generationId,
-      cache,
+      {
+        existingSpec,
+        existingSchema,
+        existingCode,
+        model,
+        generationId,
+        cache,
+      },
     );
 
     return {
@@ -581,11 +583,12 @@ export async function fillClassificationSection(
 
   const classification = await classifyIntent(
     form.input.processedInput,
-    form.input.existingCharm,
-    form.meta.modelId,
-    form.input.references,
-    form.meta.generationId,
-    form.meta.cache,
+    {
+      currentCharm: form.input.existingCharm,
+      model: form.meta.modelId,
+      generationId: form.meta.generationId,
+      cache: form.meta.cache,
+    },
   );
 
   // Update classification in the form
