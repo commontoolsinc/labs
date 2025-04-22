@@ -1,12 +1,8 @@
 import { parseArgs } from "@std/cli/parse-args";
-import {
-  castNewRecipe,
-  CharmManager,
-  formatJsonImportPrompt,
-} from "@commontools/charm";
+import { castNewRecipe, CharmManager } from "@commontools/charm";
 import { getEntityId, setBobbyServerUrl, storage } from "@commontools/runner";
 import { createSession, Identity } from "@commontools/identity";
-import { LLMClient } from "@commontools/llm";
+import { formatJsonImportPrompt, LLMClient } from "@commontools/llm";
 import { processWorkflow } from "@commontools/charm";
 import { type CharmResult, CommandType, type Step } from "./interfaces.ts";
 import { scenarios } from "./scenarios.ts";
@@ -132,7 +128,6 @@ async function processCommand(
         throw new Error("Missing data for JSON import.");
       }
 
-      // Use the shared formatJsonImportPrompt helper
       const jsonPrompt = formatJsonImportPrompt(prompt, step.data);
       const form = await processWorkflow(
         jsonPrompt,
