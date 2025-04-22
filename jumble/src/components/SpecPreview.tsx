@@ -422,7 +422,10 @@ export function SpecPreview({
                     onWorkflowChange?.(newValue);
                   }}
                 >
-                  {Object.values(WORKFLOWS).map((workflow) => (
+                  {Object.values(WORKFLOWS).filter((w) =>
+                    !form.meta?.permittedWorkflows ||
+                    form.meta.permittedWorkflows.includes(w.name)
+                  ).map((workflow) => (
                     <option
                       key={workflow.name}
                       value={workflow.name}
