@@ -152,12 +152,11 @@ function useSuggestions(charm: Cell<Charm> | undefined) {
 
     const loadSuggestions = async () => {
       setLoadingSuggestions(true);
-      const iframeRecipe = getIframeRecipe(charm);
-      if (!iframeRecipe) {
-        console.error("No iframe recipe found in charm");
-        return;
-      }
       try {
+        const iframeRecipe = getIframeRecipe(charm);
+        if (!iframeRecipe) {
+          throw new Error("No iframe recipe found in charm");
+        }
         const newSuggestions = await generateCharmSuggestions(
           iframeRecipe?.iframe?.spec || "",
           iframeRecipe?.iframe?.src || "",
@@ -165,7 +164,7 @@ function useSuggestions(charm: Cell<Charm> | undefined) {
         );
         setSuggestions(newSuggestions);
       } catch (error) {
-        console.error("Failed to load suggestions:", error);
+        console.warn("Failed to load suggestions:", error);
       } finally {
         setLoadingSuggestions(false);
       }

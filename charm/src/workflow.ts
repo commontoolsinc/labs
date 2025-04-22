@@ -213,7 +213,9 @@ function extractContext(charm: Cell<Charm>) {
 
   try {
     const iframeRecipe = getIframeRecipe(charm);
-    if (iframeRecipe && iframeRecipe.iframe) {
+    if (
+      iframeRecipe && iframeRecipe.iframe
+    ) {
       spec = iframeRecipe.iframe.spec;
       schema = iframeRecipe.iframe.argumentSchema;
       code = extractUserCode(iframeRecipe.iframe.src || "") ||

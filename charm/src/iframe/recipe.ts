@@ -62,8 +62,13 @@ function parseIframeRecipe(source: string): IFrameRecipe {
 }
 
 export const getIframeRecipe = (charm: Cell<Charm>) => {
-  const { src, recipeId } = getRecipeFrom(charm);
-  return { recipeId, iframe: parseIframeRecipe(src) };
+  const { src, recipeId, recipe } = getRecipeFrom(charm);
+  try {
+    return { recipeId, iframe: parseIframeRecipe(src) };
+  } catch (error) {
+    console.warn("Error parsing iframe recipe:", error);
+    return { recipeId, iframe: undefined };
+  }
 };
 
 export const getRecipeFrom = (charm: Cell<Charm>) => {

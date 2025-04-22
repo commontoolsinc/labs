@@ -12,7 +12,11 @@ import {
   type Writable,
 } from "@commontools/builder";
 import { Charm, CharmManager, charmSourceCellSchema } from "./manager.ts";
-import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
+import {
+  buildFullRecipe,
+  getIframeRecipe,
+  getRecipeFrom,
+} from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import {
   formatForm,
@@ -101,19 +105,18 @@ export async function iterate(
   cache = true,
 ): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
   const { iframe } = getIframeRecipe(charm);
-  if (!iframe) {
-    throw new Error("Cannot iterate on a non-iframe. Must extend instead.");
-  }
 
-  // TODO(bf): questionable logic...
-  const iframeSpec = iframe.spec;
-  const newSpec = plan?.spec ?? iframeSpec;
+  const prevSpec = iframe?.spec;
+  if (!plan?.spec) {
+    throw new Error("No specification provided");
+  }
+  const newSpec = plan.spec;
 
   const { content: newIFrameSrc, llmRequestId } = await genSrc({
-    src: iframe.src,
-    spec: iframeSpec,
+    src: iframe?.src,
+    spec: prevSpec,
     newSpec,
-    schema: iframe.argumentSchema,
+    schema: iframe?.argumentSchema || { type: "object" },
     steps: plan?.steps,
     model,
     generationId,
@@ -150,18 +153,26 @@ export const generateNewRecipeVersion = async (
   generationId?: string,
   llmRequestId?: string,
 ) => {
-  const { recipeId, iframe } = getIframeRecipe(parent);
-
-  if (!recipeId || !iframe) {
-    throw new Error("FIXME, no recipeId or iframe, what should we do?");
-  }
+  const { iframe } = getIframeRecipe(parent);
+  const { recipe, recipeId } = getRecipeFrom(parent);
 
   const name = extractTitle(newRecipe.src, "<unknown>");
-  const fullSrc = buildFullRecipe({
-    ...iframe,
-    ...newRecipe,
-    name: name,
-  });
+  // If we have an iframe already, just spread everything
+  const fullSrc = buildFullRecipe(
+    iframe
+      ? {
+        ...iframe,
+        ...newRecipe,
+        name: name,
+      }
+      // otherwise, we are editing a non-iframe recipe and need to grab/fill the schema
+      : {
+        argumentSchema: recipe.argumentSchema ?? { type: "object" },
+        resultSchema: recipe.resultSchema ?? { type: "object" },
+        ...newRecipe,
+        name,
+      },
+  );
 
   globalThis.dispatchEvent(
     new CustomEvent("job-update", {
