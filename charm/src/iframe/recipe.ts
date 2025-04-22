@@ -1,6 +1,6 @@
-import { JSONSchema, TYPE } from "@commontools/builder";
-import { Charm, processSchema } from "../manager.ts";
-import { Cell, getRecipe, getRecipeSrc } from "@commontools/runner";
+import { JSONSchema } from "@commontools/builder";
+import { Charm, getRecipeIdFromCharm, processSchema } from "../manager.ts";
+import { Cell, recipeManager } from "@commontools/runner";
 
 export type IFrameRecipe = {
   src: string;
@@ -61,15 +61,15 @@ function parseIframeRecipe(source: string): IFrameRecipe {
   return JSON.parse(match[1]) as IFrameRecipe;
 }
 
-export const getIframeRecipe = (charm: Cell<Charm>) => {
-  const { src, recipeId } = getRecipeFrom(charm);
-  return { recipeId, iframe: parseIframeRecipe(src) };
-};
-
-export const getRecipeFrom = (charm: Cell<Charm>) => {
-  const recipeId = charm.getSourceCell(processSchema)?.get()?.[TYPE];
-  const recipe = getRecipe(recipeId)!;
-  const src = getRecipeSrc(recipeId)!;
-
-  return { recipeId, recipe, src };
+export const getIframeRecipe = (charm: Cell<Charm>): {
+  recipeId: string;
+  src: string;
+  iframe: IFrameRecipe;
+} => {
+  const recipeId = getRecipeIdFromCharm(charm);
+  const src = recipeManager.getRecipeMeta({ recipeId })?.src;
+  if (!src) {
+    throw new Error("Could not find src in charm");
+  }
+  return { recipeId, src, iframe: parseIframeRecipe(src) };
 };

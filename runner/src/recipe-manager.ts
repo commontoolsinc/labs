@@ -15,23 +15,19 @@
  *
  * Usage:
  * - Use the singleton instance exported as `recipeManager`
- * - For backward compatibility, individual methods are also exported
  * - For new code, prefer the `recipeManager` object
  */
 
 import { JSONSchema, Module, Recipe, Schema } from "@commontools/builder";
 import { storage } from "./storage.ts";
+import { Cell } from "./cell.ts";
 import { createRef } from "./doc-map.ts";
 import { getCell } from "./cell.ts";
 import { buildRecipe } from "./local-build.ts";
-import {
-  createItemsKnownToStorageSet,
-  loadFromBlobby,
-  saveToBlobby,
-} from "./blobby-storage.ts";
+import { getBlobbyServerUrl } from "./blobby-storage.ts";
 
 // Schema definitions
-export const recipeSrcSchema = {
+export const recipeMetaSchema = {
   type: "object",
   properties: {
     id: { type: "string" },
@@ -40,304 +36,264 @@ export const recipeSrcSchema = {
     parents: { type: "array", items: { type: "string" } },
     recipeName: { type: "string" },
   },
-  required: ["id", "src"],
+  required: ["id"],
 } as const satisfies JSONSchema;
 
-export type RecipeSrc = Schema<typeof recipeSrcSchema>;
-
-export const recipeSrcListSchema = {
-  type: "array",
-  items: { ...recipeSrcSchema, asCell: true },
-} as const satisfies JSONSchema;
+export type RecipeMeta = Schema<typeof recipeMetaSchema>;
 
 // Type guard to check if an object is a Recipe
 function isRecipe(obj: Recipe | Module): obj is Recipe {
   return "result" in obj && "nodes" in obj;
 }
 
+// FIXME(ja): what happens when we have multiple active spaces... how do we make
+// sure we register the same recipeMeta in multiple spaces?
+const recipeMetaMap = new WeakMap<Recipe, Cell<RecipeMeta>>();
+const recipeIdMap = new Map<string, Recipe>();
+
 class RecipeManager {
-  // In-memory caches
-  private recipeById = new Map<string, Recipe | Module>();
-  private recipeNameById = new Map<string, string>();
-  private recipeByName = new Map<string, Recipe | Module>();
-  private idByRecipe = new Map<Recipe | Module, string>();
-  private srcById = new Map<string, string>();
-  private specById = new Map<string, string>();
-  private parentsById = new Map<string, string[]>();
+  private async getRecipeMetaCell(
+    { recipeId, space }: { recipeId: string; space: string },
+  ) {
+    const cell = getCell(
+      space,
+      { recipeId, type: "recipe" },
+      recipeMetaSchema,
+    );
 
-  // Track recipes known to storage to avoid redundant saves
-  private recipesKnownToStorage = createItemsKnownToStorageSet();
-
-  // Local operations
-
-  /**
-   * Get a recipe by its ID
-   */
-  getRecipe(id: string): Recipe | Module | undefined {
-    return this.recipeById.get(id);
+    await storage.syncCell(cell);
+    await storage.synced();
+    return cell;
   }
 
-  /**
-   * Get a recipe's ID by reference
-   */
-  getRecipeId(recipe: Recipe | Module): string | undefined {
-    return this.idByRecipe.get(recipe);
+  // returns the recipeMeta for a loaded recipe
+  getRecipeMeta(
+    input: Recipe | Module | { recipeId: string },
+  ): RecipeMeta | undefined {
+    if ("recipeId" in input) {
+      const recipe = this.recipeById(input.recipeId);
+      return recipe ? recipeMetaMap.get(recipe)?.get() : undefined;
+    }
+    return recipeMetaMap.get(input as Recipe)?.get();
   }
 
-  /**
-   * Get a recipe's name by ID
-   */
-  getRecipeName(id: string): string | undefined {
-    return this.recipeNameById.get(id);
-  }
+  generateRecipeId(recipe: Recipe | Module, src?: string) {
+    let id = recipeMetaMap.get(recipe as Recipe)?.get()?.id;
+    if (id) {
+      console.log("generateRecipeId: existing recipe id", id);
+      return id;
+    }
 
-  /**
-   * Get a recipe's source by ID
-   */
-  getRecipeSrc(id: string): string | undefined {
-    return this.srcById.get(id);
-  }
-
-  /**
-   * Get a recipe's spec by ID
-   */
-  getRecipeSpec(id: string): string | undefined {
-    return this.specById.get(id);
-  }
-
-  /**
-   * Get a recipe's parents by ID
-   */
-  getRecipeParents(id: string): string[] | undefined {
-    return this.parentsById.get(id);
-  }
-
-  /**
-   * Get all recipes by name
-   */
-  allRecipesByName(): Map<string, Recipe | Module> {
-    return this.recipeByName;
-  }
-
-  /**
-   * Register a new recipe and generate a stable ID
-   */
-  registerNewRecipe(
-    recipe: Recipe,
-    src?: string,
-    spec?: string,
-    parents?: string[],
-  ): string {
-    if (this.idByRecipe.has(recipe)) return this.idByRecipe.get(recipe)!;
-
-    const id = src
+    id = src
       ? createRef({ src }, "recipe source").toString()
       : createRef(recipe, "recipe").toString();
 
-    return this.registerRecipe(id, recipe, src, spec, parents);
-  }
-
-  /**
-   * Register a recipe with a specific ID
-   */
-  registerRecipe(
-    id: string,
-    recipe: Recipe | Module,
-    src?: string,
-    spec?: string,
-    parents?: string[],
-  ): string {
-    if (this.idByRecipe.has(recipe)) return this.idByRecipe.get(recipe)!;
-
-    this.recipeById.set(id, recipe);
-    this.idByRecipe.set(recipe, id);
-
-    if (src) this.srcById.set(id, src);
-    if (spec) this.specById.set(id, spec);
-    if (parents) this.parentsById.set(id, parents);
-
-    const name = (recipe.argumentSchema as { description: string })
-      ?.description;
-    if (name) {
-      this.recipeByName.set(name, recipe);
-      this.recipeNameById.set(id, name);
-    }
+    console.log("generateRecipeId: generated id", id);
 
     return id;
   }
 
-  // Cell storage operations
+  async registerRecipe(
+    { recipeId, space, recipe, recipeMeta }: {
+      recipeId: string;
+      space: string;
+      recipe: Recipe | Module;
+      recipeMeta: RecipeMeta;
+    },
+  ): Promise<boolean> {
+    console.log("registerRecipe", recipeId, space);
 
-  /**
-   * Save a recipe to a cell in the specified space
-   */
-  async saveRecipeToCell(space: string, recipeId: string): Promise<void> {
-    const recipe = this.getRecipe(recipeId);
-    if (!recipe) {
-      throw new Error(`Recipe ${recipeId} not found`);
+    // FIXME(ja): is there a reason to save if we don't have src?
+    // mostly wondering about modules...
+    if (!recipeMeta.src) {
+      console.error(
+        "registerRecipe: no reason to save recipe, missing src",
+        recipeId,
+      );
+      return false;
     }
 
-    const src = this.getRecipeSrc(recipeId);
-    if (!src) {
-      throw new Error(`Source for recipe ${recipeId} not found`);
+    // FIXME(ja): should we update the recipeMeta if it already exists? when does this happen?
+    if (recipeMetaMap.has(recipe as Recipe)) {
+      return true;
     }
 
-    const cell = getCell(
-      space,
-      { recipeId, type: "recipe" },
-      recipeSrcSchema,
-    );
-
-    cell.set({
-      id: recipeId,
-      src,
-      spec: this.getRecipeSpec(recipeId),
-      parents: this.getRecipeParents(recipeId),
-      recipeName: this.getRecipeName(recipeId),
-    });
-
-    await storage.syncCell(cell);
+    const recipeMetaCell = await this.getRecipeMetaCell({ recipeId, space });
+    recipeMetaCell.set(recipeMeta);
+    recipeMetaMap.set(recipe as Recipe, recipeMetaCell);
+    await storage.syncCell(recipeMetaCell);
     await storage.synced();
+
+    recipeIdMap.set(recipeId, recipe as Recipe);
+    recipeMetaMap.set(recipe as Recipe, recipeMetaCell);
+
+    return true;
   }
 
-  /**
-   * Load a recipe from a cell in the specified space
-   */
-  async loadRecipeFromCell(space: string, recipeId: string): Promise<boolean> {
-    const cell = getCell(
-      space,
-      { recipeId, type: "recipe" },
-      recipeSrcSchema,
-    );
+  // returns a recipe already loaded
+  recipeById(recipeId: string): Recipe | undefined {
+    return recipeIdMap.get(recipeId);
+  }
 
-    await storage.syncCell(cell);
-
-    const recipeData = cell.get();
-    if (!recipeData || recipeData.id !== recipeId) {
-      return false;
+  async loadRecipe(
+    { space, recipeId }: { space: string; recipeId: string },
+  ): Promise<Recipe | undefined> {
+    if (recipeIdMap.has(recipeId)) {
+      return recipeIdMap.get(recipeId);
     }
 
-    const { src, spec, parents } = recipeData;
+    const metaCell = await this.getRecipeMetaCell({ recipeId, space });
 
-    try {
-      const { recipe, errors } = await buildRecipe(src);
-      if (errors || !recipe) {
-        console.error(`Failed to build recipe ${recipeId}:`, errors);
-        return false;
+    const recipeMeta = metaCell.get();
+    // if we don't have the recipeMeta, we should try to import from blobby
+    // as it might be from before we started saving recipes in cells
+    if (recipeMeta.id !== recipeId) {
+      const { recipe, recipeMeta } = await this.importFromBlobby({ recipeId });
+      if (recipe) {
+        metaCell.set(recipeMeta);
+        await storage.syncCell(metaCell);
+        await storage.synced();
+        recipeIdMap.set(recipeId, recipe);
+        recipeMetaMap.set(recipe, metaCell);
+        return recipe;
       }
-
-      this.registerRecipe(recipeId, recipe, src, spec, parents);
-      return true;
-    } catch (error) {
-      console.error(`Error loading recipe ${recipeId} from cell:`, error);
-      return false;
+      return undefined;
     }
+
+    const { src } = recipeMeta;
+
+    const { recipe, errors } = await buildRecipe(src!);
+    if (errors || !recipe) {
+      console.error(`Failed to build recipe ${recipeId}:`, errors);
+      return undefined;
+    }
+
+    metaCell.set(recipeMeta);
+    await storage.syncCell(metaCell);
+    await storage.synced();
+    recipeIdMap.set(recipeId, recipe);
+    recipeMetaMap.set(recipe, metaCell);
+    return recipe;
   }
 
-  // Blobby operations
-
   /**
-   * Load a recipe from Blobby
+   * Load a recipe from Blobby, returning the recipe and recipeMeta
    */
-  async loadFromBlobby(id: string): Promise<boolean> {
-    // If we already have this recipe, no need to load it again
-    if (this.getRecipe(id) && this.recipesKnownToStorage.has(id)) {
-      return true;
+  // FIXME(ja): move this back to blobby!
+  private async importFromBlobby(
+    { recipeId }: { recipeId: string },
+  ): Promise<
+    { recipe: Recipe; recipeMeta: RecipeMeta } | Record<string, never>
+  > {
+    const response = await fetch(`${getBlobbyServerUrl()}/spell-${recipeId}`);
+    if (!response.ok) {
+      return {};
     }
 
-    const response = await loadFromBlobby<{
+    const recipeJson = await response.json() as {
       src: string;
       spec?: string;
       parents?: string[];
-    }>("spell", id);
-
-    if (!response) return false;
-
-    const { src, spec = "", parents = [] } = response;
+    };
 
     try {
-      const { recipe, errors } = await buildRecipe(src);
+      const { recipe, errors } = await buildRecipe(recipeJson.src!);
       if (errors || !recipe) {
-        console.error(`Failed to build recipe ${id} from Blobby:`, errors);
-        return false;
+        console.error(
+          `Failed to build recipe ${recipeId} from Blobby:`,
+          errors,
+        );
+        return {};
       }
 
-      this.registerRecipe(id, recipe, src, spec, parents);
-      this.recipesKnownToStorage.add(id);
-      return true;
+      return {
+        recipe,
+        recipeMeta: {
+          id: recipeId,
+          src: recipeJson.src,
+          spec: recipeJson.spec,
+          parents: recipeJson.parents,
+        },
+      };
     } catch (error) {
-      console.error(`Error loading recipe ${id} from Blobby:`, error);
-      return false;
+      console.error(`Error loading recipe ${recipeId} from Blobby:`, error);
+      return {};
     }
   }
 
-  /**
-   * Publish a recipe to Blobby
-   */
+  // FIXME(ja): move this back to blobby!
   async publishToBlobby(
-    id: string,
+    recipeId: string,
     spellbookTitle?: string,
     spellbookTags?: string[],
-  ): Promise<boolean> {
-    const recipe = this.getRecipe(id);
+  ) {
+    const recipe = recipeIdMap.get(recipeId);
     if (!recipe) {
-      throw new Error(`Recipe ${id} not found`);
+      throw new Error(`Recipe ${recipeId} not found`);
+    }
+    const recipeMeta = recipeMetaMap.get(recipe)?.get();
+    if (!recipeMeta) {
+      throw new Error(`Recipe meta for recipe ${recipeId} not found`);
     }
 
-    const src = this.getRecipeSrc(id);
-    if (!src) {
-      throw new Error(`Source for recipe ${id} not found`);
+    if (!recipeMeta.src) {
+      throw new Error(`Source for recipe ${recipeId} not found`);
     }
-
-    // If the recipe is already known to storage and we're not adding metadata, skip
-    if (
-      this.recipesKnownToStorage.has(id) && !spellbookTitle && !spellbookTags
-    ) {
-      return true;
-    }
-
-    this.recipesKnownToStorage.add(id);
 
     const data = {
-      src,
+      src: recipeMeta.src,
       recipe: JSON.parse(JSON.stringify(recipe)),
-      spec: this.getRecipeSpec(id),
-      parents: this.getRecipeParents(id),
-      recipeName: this.getRecipeName(id),
+      spec: recipeMeta.spec,
+      parents: recipeMeta.parents,
+      recipeName: recipeMeta.recipeName,
       spellbookTitle,
       spellbookTags,
     };
 
-    return saveToBlobby("spell", id, data);
+    console.log(`Saving spell-${recipeId}`);
+    const response = await fetch(`${getBlobbyServerUrl()}/spell-${recipeId}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(data),
+    });
+    return response.ok;
   }
-
-  // Combined operations
 
   /**
    * Ensure a recipe is available, trying cell storage first then Blobby
    */
-  async ensureRecipeAvailable(
-    space: string,
-    recipeId: string,
-  ): Promise<Recipe | Module> {
+  async ensureRecipeAvailable({
+    space,
+    recipeId,
+  }: {
+    space: string;
+    recipeId: string;
+  }): Promise<Recipe | Module> {
     // First check if it's already in memory
-    let recipe = this.getRecipe(recipeId);
+    let recipe = recipeIdMap.get(recipeId);
     if (recipe) return recipe;
 
     // Try to load from cell storage
-    const loadedFromCell = await this.loadRecipeFromCell(space, recipeId);
+    const loadedFromCell = await this.loadRecipe({ space, recipeId });
     if (loadedFromCell) {
-      recipe = this.getRecipe(recipeId);
+      recipe = loadedFromCell;
       if (recipe) return recipe;
     }
 
     // Try to load from Blobby
-    const loadedFromBlobby = await this.loadFromBlobby(recipeId);
+    const loadedFromBlobby = await this.importFromBlobby({ recipeId });
     if (loadedFromBlobby) {
-      recipe = this.getRecipe(recipeId);
+      recipe = loadedFromBlobby.recipe;
       if (recipe) {
         // Save to cell for future use
-        await this.saveRecipeToCell(space, recipeId);
+        await this.registerRecipe({
+          recipeId,
+          space,
+          recipe,
+          recipeMeta: loadedFromBlobby.recipeMeta,
+        });
         return recipe;
       }
     }
@@ -348,19 +304,13 @@ class RecipeManager {
   }
 }
 
-// Export a singleton instance
 export const recipeManager = new RecipeManager();
-
-// Export individual methods for backward compatibility
 export const {
-  getRecipe,
-  getRecipeId,
-  getRecipeName,
-  getRecipeSrc,
-  getRecipeSpec,
-  getRecipeParents,
-  allRecipesByName,
-  registerNewRecipe,
+  getRecipeMeta,
+  generateRecipeId,
   registerRecipe,
+  loadRecipe,
   ensureRecipeAvailable,
+  publishToBlobby,
+  recipeById,
 } = recipeManager;

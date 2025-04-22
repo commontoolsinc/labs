@@ -6,7 +6,7 @@ import { addModuleByRef } from "../src/module.ts";
 import { getDoc } from "../src/doc.ts";
 import { type ErrorWithContext, idle, onError } from "../src/scheduler.ts";
 import { type Cell } from "../src/cell.ts";
-import { getRecipeId } from "../src/recipe-manager.ts";
+import { getRecipeIdFromCharm } from "../../charm/src/manager.ts";
 
 describe("Recipe Runner", () => {
   it("should run a simple recipe", async () => {
@@ -720,7 +720,7 @@ describe("Recipe Runner", () => {
     expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
 
-    expect(lastError?.recipeId).toBe(getRecipeId(divRecipe));
+    expect(lastError?.recipeId).toBe(getRecipeIdFromCharm(charm));
     expect(lastError?.space).toBe("test");
     expect(lastError?.charmId).toBe(
       JSON.parse(JSON.stringify(charm.entityId))["/"],
@@ -783,7 +783,7 @@ describe("Recipe Runner", () => {
     expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 10 });
 
-    expect(lastError?.recipeId).toBe(getRecipeId(divRecipe));
+    expect(lastError?.recipeId).toBe(getRecipeIdFromCharm(charm));
     expect(lastError?.space).toBe("test");
     expect(lastError?.charmId).toBe(
       JSON.parse(JSON.stringify(charm.entityId))["/"],

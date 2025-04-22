@@ -18,6 +18,7 @@ import {
 } from "@commontools/builder";
 import { type DocImpl, getDoc, isDoc } from "./doc.ts";
 import { type Cell, getCellFromLink } from "./cell.ts";
+import { recipeManager } from "./recipe-manager.ts";
 import {
   Action,
   addEventHandler,
@@ -31,7 +32,6 @@ import {
   extractDefaultValues,
   findAllAliasedCells,
   followAliases,
-  maybeUnwrapProxy,
   mergeObjects,
   sendValueToBinding,
   unsafe_noteParentOnRecipes,
@@ -40,12 +40,6 @@ import {
 import { getModuleByRef } from "./module.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
-import {
-  ensureRecipeAvailable,
-  getRecipe,
-  getRecipeId,
-  registerNewRecipe,
-} from "./recipe-manager.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import { getCellLinkOrThrow } from "./query-result-proxy.ts";
@@ -111,7 +105,7 @@ export function run<T, R = any>(
 
   if (!recipeOrModule && processCell.get()?.[TYPE]) {
     recipeId = processCell.get()[TYPE];
-    recipeOrModule = getRecipe(recipeId);
+    recipeOrModule = recipeManager.recipeById(recipeId);
     if (!recipeOrModule) throw new Error(`Unknown recipe: ${recipeId}`);
   } else if (!recipeOrModule) {
     console.warn(
@@ -126,7 +120,7 @@ export function run<T, R = any>(
   // passing arguments in unmodified and passing all results through as is
   if (isModule(recipeOrModule)) {
     const module = recipeOrModule as Module;
-    recipeId ??= getRecipeId(module);
+    recipeId ??= recipeManager.generateRecipeId(module);
 
     recipe = {
       argumentSchema: module.argumentSchema ?? {},
@@ -144,7 +138,7 @@ export function run<T, R = any>(
     recipe = recipeOrModule as Recipe;
   }
 
-  recipeId ??= registerNewRecipe(recipe);
+  recipeId ??= recipeManager.generateRecipeId(recipe);
 
   if (cancels.has(resultCell)) {
     // If it's already running and no new recipe or argument are given,
@@ -638,7 +632,8 @@ export async function runSynced(
   }
 
   // Now get used recipe to extract schema
-  recipe = getRecipe(resultCell.getSourceCell().get()[TYPE]!);
+  const recipeId = resultCell.getSourceCell().get()[TYPE]!;
+  recipe = recipeManager.recipeById(recipeId);
 
   return recipe?.resultSchema
     ? resultCell.asSchema(recipe.resultSchema)
@@ -660,9 +655,12 @@ async function syncCellsForRunningRecipe(
   const recipeId = sourceCell.get()[TYPE];
   if (!recipeId) throw new Error(`No recipe ID found in source cell`);
 
-  await ensureRecipeAvailable(sourceCell.getAsCellLink().space!, recipeId);
+  await recipeManager.ensureRecipeAvailable({
+    space: sourceCell.getAsCellLink().space!,
+    recipeId,
+  });
 
-  const recipe = getRecipe(recipeId);
+  const recipe = recipeManager.recipeById(recipeId);
   if (!recipe) throw new Error(`Unknown recipe: ${recipeId}`);
 
   // We could support this by replicating what happens in runner, but since

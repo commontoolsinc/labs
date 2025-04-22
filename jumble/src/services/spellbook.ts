@@ -1,8 +1,4 @@
-import {
-  getRecipeParents,
-  getRecipeSpec,
-  getRecipeSrc,
-} from "@commontools/runner";
+import { recipeManager } from "@commontools/runner";
 import { UI } from "@commontools/builder";
 
 export interface Spell {
@@ -105,9 +101,7 @@ export async function saveSpell(
 ): Promise<boolean> {
   try {
     // Get all the required data from commontools first
-    const src = getRecipeSrc(spellId);
-    const spec = getRecipeSpec(spellId);
-    const parents = getRecipeParents(spellId);
+    const { src, spec, parents } = await recipeManager.getRecipeMeta(recipe);
     const ui = spell.resultRef?.[UI];
 
     if (spellId === undefined) {

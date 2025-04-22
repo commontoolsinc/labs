@@ -38,12 +38,7 @@ export {
 } from "./doc-map.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export { type Storage, storage } from "./storage.ts";
-export {
-  getBlobbyServerUrl,
-  loadFromBlobby,
-  saveToBlobby,
-  setBlobbyServerUrl,
-} from "./blobby-storage.ts";
+export { getBlobbyServerUrl, setBlobbyServerUrl } from "./blobby-storage.ts";
 export { tsToExports } from "./local-build.ts";
 export {
   addCommonIDfromObjectID,

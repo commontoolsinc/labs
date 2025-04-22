@@ -9,7 +9,7 @@
  * 5. Workflow steps and execution
  */
 
-import { Cell, getRecipe } from "@commontools/runner";
+import { Cell, recipeManager } from "@commontools/runner";
 import { Charm, charmId, CharmManager } from "./manager.ts";
 import { JSONSchema } from "@commontools/builder";
 import { classifyWorkflow, generateWorkflowPlan } from "@commontools/llm";
@@ -285,7 +285,7 @@ function extractContext(charm: Cell<Charm>) {
         undefined;
     }
   } catch {
-    console.warn("Failed to extract context from charm");
+    console.info("Failed to extract context from charm");
   }
 
   return {
@@ -858,8 +858,9 @@ export async function processWorkflow(
           throw new Error("No charm found for id: " + form.spellToCast.charmId);
         }
 
-        await charmManager.syncRecipeById(form.spellToCast.spellId);
-        const recipe = getRecipe(form.spellToCast.spellId);
+        const recipe = await charmManager.syncRecipeById(
+          form.spellToCast.spellId,
+        );
 
         if (!recipe) {
           throw new Error(

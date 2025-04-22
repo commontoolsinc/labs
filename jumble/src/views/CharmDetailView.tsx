@@ -159,7 +159,7 @@ function useSuggestions(charm: Cell<Charm> | undefined) {
       setLoadingSuggestions(true);
       const iframeRecipe = getIframeRecipe(charm);
       if (!iframeRecipe) {
-        console.error("No iframe recipe found in charm");
+        console.info("No iframe recipe found in charm");
         return;
       }
       try {
