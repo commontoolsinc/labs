@@ -1,17 +1,16 @@
 import "./commands.css";
 import {
   addGithubRecipe,
-  castNewRecipe,
   castSpellAsCharm,
   Charm,
   CharmManager,
   compileAndRunRecipe,
-  createWorkflowForm,
   processWorkflow,
   renameCharm,
   WorkflowForm,
 } from "@commontools/charm";
-import { charmId, modifyCharm } from "@commontools/charm";
+import { formatJsonImportPrompt } from "@commontools/llm";
+import { charmId } from "@commontools/charm";
 import type { NavigateFunction } from "react-router-dom";
 import { NAME } from "@commontools/builder";
 import { isStream } from "@commontools/runner";
@@ -355,10 +354,9 @@ async function handleImportJSON(ctx: CommandContext) {
     if (!title) return;
 
     ctx.setOpen(false);
+    const jsonPrompt = formatJsonImportPrompt(title, data);
     const form = await processWorkflow(
-      `${title}\n\n Look at the attached JSON data and use it to create a new charm.\n\n${
-        JSON.stringify(data)
-      }`,
+      jsonPrompt,
       ctx.charmManager,
       {
         cache: true,

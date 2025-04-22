@@ -2,6 +2,7 @@ export enum CommandType {
   New,
   Extend,
   Other,
+  ImportJSON,
 }
 export type Command = {
   type: CommandType.New;
@@ -12,6 +13,10 @@ export type Command = {
 } | {
   type: CommandType.Extend;
   prompt: string;
+} | {
+  type: CommandType.ImportJSON;
+  prompt: string;
+  data: any;
 };
 
 export type CharmResult = {
@@ -25,6 +30,7 @@ export type CharmResult = {
 export type Step = {
   type: CommandType;
   prompt: string;
+  data?: any;
 };
 
 export type Scenario = {
