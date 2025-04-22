@@ -400,51 +400,49 @@ export function CommandCenter() {
   }, [open]);
 
   useEffect(() => {
-    const handleEditRecipe = (e: KeyboardEvent) => {
+    const handleNewCharm = (e: KeyboardEvent) => {
       if (e.key === "i" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        const editRecipeCommand = allCommands.find((cmd) =>
-          cmd.id === "edit-recipe"
+        const newCharmCommand = allCommands.find((cmd) =>
+          cmd.id === "new-charm"
         );
-        if (!editRecipeCommand) {
-          console.warn("Edit recipe command not found");
+        if (!newCharmCommand) {
+          console.warn("New charm command not found");
           return;
         }
         setOpen(true);
         setMode({
           type: "input",
-          command: editRecipeCommand,
-          placeholder: "What would you like to change?",
+          command: newCharmCommand,
+          placeholder: (newCharmCommand as InputCommandItem).placeholder || "What would you like to create?",
         });
       }
     };
 
-    const handleEditRecipeEvent = () => {
-      if (focusedCharmId) {
-        const editRecipeCommand = allCommands.find((cmd) =>
-          cmd.id === "edit-recipe"
-        );
-        if (!editRecipeCommand) {
-          console.warn("Edit recipe command not found");
-          return;
-        }
-        setOpen(true);
-        setMode({
-          type: "input",
-          command: editRecipeCommand,
-          placeholder: "What would you like to change?",
-        });
+    const handleNewCharmEvent = () => {
+      const newCharmCommand = allCommands.find((cmd) =>
+        cmd.id === "new-charm"
+      );
+      if (!newCharmCommand) {
+        console.warn("New charm command not found");
+        return;
       }
+      setOpen(true);
+      setMode({
+        type: "input",
+        command: newCharmCommand,
+        placeholder: (newCharmCommand as InputCommandItem).placeholder || "What would you like to create?",
+      });
     };
 
-    document.addEventListener("keydown", handleEditRecipe);
-    globalThis.addEventListener("edit-recipe-command", handleEditRecipeEvent);
+    document.addEventListener("keydown", handleNewCharm);
+    globalThis.addEventListener("new-charm-command", handleNewCharmEvent);
 
     return () => {
-      document.removeEventListener("keydown", handleEditRecipe);
+      document.removeEventListener("keydown", handleNewCharm);
       globalThis.removeEventListener(
-        "edit-recipe-command",
-        handleEditRecipeEvent,
+        "new-charm-command",
+        handleNewCharmEvent,
       );
     };
   }, [focusedCharmId, allCommands]);

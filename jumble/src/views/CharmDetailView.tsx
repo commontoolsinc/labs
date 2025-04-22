@@ -58,8 +58,6 @@ import {
   ModelSelector,
   useUserPreferredModel,
 } from "@/components/common/ModelSelector.tsx";
-import { SpecPreview } from "@/components/SpecPreview.tsx";
-import { useLiveSpecPreview } from "@/hooks/use-live-spec-preview.ts";
 import { useCodeEditor } from "@/hooks/use-code-editor.ts";
 
 type Tab = "iterate" | "code" | "data";

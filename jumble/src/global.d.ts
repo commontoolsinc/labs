@@ -53,6 +53,7 @@ declare module "react-icons/md" {
   export type IconType = ComponentType<IconProps>;
 
   export const MdEdit: React.FC<IconProps>;
+  export const MdRemoveRedEye: React.FC<IconProps>;
   export const MdOutlineStar: React.FC<IconProps>;
   export const MdOutlineStarBorder: React.FC<IconProps>;
   export const MdShare: React.FC<IconProps>;
