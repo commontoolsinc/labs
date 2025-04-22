@@ -250,5 +250,6 @@ Hierarchical integrity is maintained as subitems with their Parent items.
         ],
       },
     }],
+    tags: ["import"],
   },
 ];

@@ -134,13 +134,6 @@ async function processCommand(
         charmManager,
         {
           cache,
-          prefill: {
-            classification: {
-              workflowType: "import-json",
-              confidence: 1.0,
-              reasoning: "JSON import workflow",
-            },
-          },
         },
       );
 
