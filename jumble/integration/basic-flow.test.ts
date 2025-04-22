@@ -24,7 +24,7 @@ import { join } from "@std/path";
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
   "http://localhost:8000/";
 const FRONTEND_URL = Deno.env.get("FRONTEND_URL") ?? "http://localhost:5173/";
-const HEADLESS = false;
+const HEADLESS = true;
 const ASTRAL_TIMEOUT = 60_000;
 
 console.log(`TOOLSHED_API_URL=${TOOLSHED_API_URL}`);
