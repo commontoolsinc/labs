@@ -588,6 +588,7 @@ export async function fillClassificationSection(
       model: form.meta.modelId,
       generationId: form.meta.generationId,
       cache: form.meta.cache,
+      permittedWorkflows: form.meta.permittedWorkflows,
     },
   );
 
