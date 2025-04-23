@@ -6,6 +6,7 @@ import { extractUserCode, injectUserCode } from "./iframe/static.ts";
 import { compileAndRunRecipe, generateNewRecipeVersion } from "./iterate.ts";
 import { NAME } from "@commontools/builder";
 import { WorkflowForm } from "./index.ts";
+import { createJsonSchema, type JSONSchema } from "@commontools/builder";
 import { processWorkflow, ProcessWorkflowOptions } from "./workflow.ts";
 
 export const castSpellAsCharm = async (
@@ -30,6 +31,42 @@ export const castSpellAsCharm = async (
   }
   console.log("Failed to cast");
   return null;
+};
+
+export const createDataCharm = (
+  charmManager: CharmManager,
+  data: Record<string, any>,
+  schema?: JSONSchema,
+  name?: string,
+) => {
+  const argumentSchema = schema ?? createJsonSchema(data);
+
+  const schemaString = JSON.stringify(argumentSchema, null, 2);
+  const result = Object.keys(argumentSchema.properties ?? {}).map((key) =>
+    `    ${key}: data.${key},\n`
+  ).join("\n");
+
+  const dataRecipeSrc = `import { h } from "@commontools/html";
+  import { recipe, UI, NAME, derive, type JSONSchema } from "@commontools/builder";
+
+  const schema = ${schemaString};
+
+  export default recipe(schema, schema, (data) => ({
+    [NAME]: "${name ?? "data import"}",
+    [UI]: <div><h2>Your data has this schema</h2><pre>${
+    schemaString.replaceAll("{", "&#123;")
+      .replaceAll("}", "&#125;")
+      .replaceAll("\n", "<br/>")
+  }</pre></div>,
+    ${result}
+  }));`;
+
+  return compileAndRunRecipe(
+    charmManager,
+    dataRecipeSrc,
+    name ?? "data import",
+    data,
+  );
 };
 
 export async function fixItCharm(

@@ -218,58 +218,63 @@ Hierarchical integrity is maintained as subitems with their Parent items.
   {
     name: "Recipe Collection Manager",
     tags: ["import"],
-    steps: [{
-      type: CommandType.ImportJSON,
-      prompt:
-        "Recipe collection manager, the lets the user dream up new recipes using the LLM",
-      dataSchema: {
-        type: "object",
-        properties: {
-          "recipes": {
-            type: "array",
-            items: {
-              "type": "object",
-              "properties": {
-                "name": { "type": "string" },
-                "ingredients": {
-                  "type": "array",
-                  "items": { "type": "string" },
+    steps: [
+      {
+        type: CommandType.ImportJSON,
+        prompt: "Family Cookbook",
+        dataSchema: {
+          type: "object",
+          properties: {
+            "recipes": {
+              type: "array",
+              items: {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "ingredients": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                  },
+                  "instructions": { "type": "string" },
                 },
-                "instructions": { "type": "string" },
               },
             },
           },
         },
+        data: {
+          "recipes": [
+            {
+              "name": "Pasta Carbonara",
+              "ingredients": [
+                "200g spaghetti",
+                "100g pancetta",
+                "2 eggs",
+                "50g pecorino cheese",
+                "50g parmesan",
+                "black pepper",
+              ],
+              "instructions":
+                "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
+            },
+            {
+              "name": "Classic Margherita Pizza",
+              "ingredients": [
+                "pizza dough",
+                "tomato sauce",
+                "fresh mozzarella",
+                "fresh basil",
+                "olive oil",
+              ],
+              "instructions":
+                "Stretch dough. Add sauce, cheese. Bake at high heat. Add basil after cooking.",
+            },
+          ],
+        },
       },
-      data: {
-        "recipes": [
-          {
-            "name": "Pasta Carbonara",
-            "ingredients": [
-              "200g spaghetti",
-              "100g pancetta",
-              "2 eggs",
-              "50g pecorino cheese",
-              "50g parmesan",
-              "black pepper",
-            ],
-            "instructions":
-              "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
-          },
-          {
-            "name": "Classic Margherita Pizza",
-            "ingredients": [
-              "pizza dough",
-              "tomato sauce",
-              "fresh mozzarella",
-              "fresh basil",
-              "olive oil",
-            ],
-            "instructions":
-              "Stretch dough. Add sauce, cheese. Bake at high heat. Add basil after cooking.",
-          },
-        ],
+      {
+        type: CommandType.Extend,
+        prompt: "Allow user to find recipes by common ingredients",
       },
-    }],
+    ],
   },
 ];
