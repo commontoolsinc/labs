@@ -2,7 +2,7 @@ import { parseArgs } from "@std/cli/parse-args";
 import { castNewRecipe, CharmManager } from "@commontools/charm";
 import { getEntityId, setBobbyServerUrl, storage } from "@commontools/runner";
 import { createSession, Identity } from "@commontools/identity";
-import { client as llm } from "@commontools/llm";
+import { formatJsonImportPrompt, LLMClient, setLLMUrl } from "@commontools/llm";
 import { processWorkflow } from "@commontools/charm";
 import { type CharmResult, CommandType, type Step } from "./interfaces.ts";
 import { scenarios } from "./scenarios.ts";
@@ -32,7 +32,8 @@ if (!name) {
 
 storage.setRemoteStorage(new URL(toolshedUrl));
 setBobbyServerUrl(toolshedUrl);
-llm.setServerUrl(toolshedUrl);
+setLLMUrl(toolshedUrl);
+const llmClient = new LLMClient();
 
 const charmManager = new CharmManager(
   await createSession({
@@ -75,8 +76,7 @@ async function processCommand(
   switch (type) {
     case CommandType.New: {
       console.log(`Adding: "${prompt}"`);
-      const form = await processWorkflow(prompt, false, {
-        charmManager,
+      const form = await processWorkflow(prompt, charmManager, {
         cache,
         prefill: {
           classification: {
@@ -101,8 +101,7 @@ async function processCommand(
         throw new Error("Last charm ID is undefined.");
       }
       const charm = await charmManager.get(lastCharmId);
-      const form = await processWorkflow(prompt, false, {
-        charmManager,
+      const form = await processWorkflow(prompt, charmManager, {
         existingCharm: charm,
         cache,
         prefill: {
@@ -118,6 +117,29 @@ async function processCommand(
       const id = getEntityId(charm);
       if (id) {
         console.log(`Charm added: ${id["/"]}`);
+        await verifyCharm(id["/"], prompt);
+        return id["/"];
+      }
+      break;
+    }
+    case CommandType.ImportJSON: {
+      console.log(`Importing JSON for: "${prompt}"`);
+      if (!step.data) {
+        throw new Error("Missing data for JSON import.");
+      }
+
+      const jsonPrompt = formatJsonImportPrompt(prompt, step.data);
+      const form = await processWorkflow(
+        jsonPrompt,
+        charmManager,
+        {
+          cache,
+        },
+      );
+      const newCharm = form.generation?.charm;
+      const id = getEntityId(newCharm);
+      if (id) {
+        console.log(`Charm added from JSON import: ${id["/"]}`);
         await verifyCharm(id["/"], prompt);
         return id["/"];
       }

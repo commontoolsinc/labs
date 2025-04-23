@@ -3,6 +3,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createGroq, groq } from "@ai-sdk/groq";
 import { openai } from "@ai-sdk/openai";
 import { createVertex, vertex } from "@ai-sdk/google-vertex";
+import { createXai, xai } from "@ai-sdk/xai";
 
 import env from "@/env.ts";
 
@@ -51,7 +52,8 @@ const addModel = ({
     | typeof anthropic
     | typeof groq
     | typeof openai
-    | typeof vertex;
+    | typeof vertex
+    | typeof xai;
   name: string;
   aliases: string[];
   capabilities: Capabilities;
@@ -93,6 +95,7 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
   const anthropicProvider = createAnthropic({
     apiKey: env.CTTS_AI_LLM_ANTHROPIC_API_KEY,
   });
+  console.log(" Adding 🤖 anthropic");
 
   addModel({
     provider: anthropicProvider,
@@ -153,6 +156,23 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
 if (env.CTTS_AI_LLM_GROQ_API_KEY) {
   const groqProvider = createGroq({
     apiKey: env.CTTS_AI_LLM_GROQ_API_KEY,
+  });
+  console.log(" Adding 🤖 groq");
+
+  addModel({
+    provider: groqProvider,
+    name: "groq:deepseek-r1-distill-llama-70b",
+    aliases: ["groq:deepseek-r1-distill-llama-70b", "r1-llama-70b"],
+    capabilities: {
+      contextWindow: 128_000,
+      maxOutputTokens: 32768,
+      images: false,
+      prefill: false,
+      systemPrompt: false,
+      stopSequences: false,
+      streaming: true,
+      reasoning: true,
+    },
   });
 
   addModel({
@@ -223,6 +243,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
   const openAIProvider = createOpenAI({
     apiKey: env.CTTS_AI_LLM_OPENAI_API_KEY,
   });
+  console.log(" Adding 🤖 openai");
   addModel({
     provider: openAIProvider,
     name: "openai:gpt-4o",
@@ -250,7 +271,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       prefill: false,
       reasoning: true,
       systemPrompt: false,
-      stopSequences: true,
+      stopSequences: false,
       streaming: true,
     },
   });
@@ -266,7 +287,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       prefill: false,
       reasoning: true,
       systemPrompt: false,
-      stopSequences: true,
+      stopSequences: false,
       streaming: true,
     },
     providerOptions: { reasoningEffort: "low" },
@@ -283,7 +304,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       prefill: false,
       reasoning: true,
       systemPrompt: false,
-      stopSequences: true,
+      stopSequences: false,
       streaming: true,
     },
     providerOptions: { reasoningEffort: "medium" },
@@ -300,7 +321,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       prefill: false,
       reasoning: true,
       systemPrompt: false,
-      stopSequences: true,
+      stopSequences: false,
       streaming: true,
     },
     providerOptions: { reasoningEffort: "high" },
@@ -359,7 +380,7 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
   const credentials = JSON.parse(
     Deno.readTextFileSync(env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS),
   );
-
+  console.log(" Adding 🤖 google");
   const vertexProvider = createVertex({
     googleAuthOptions: {
       credentials: credentials as any,
@@ -375,6 +396,26 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
     capabilities: {
       contextWindow: 1_048_576,
       maxOutputTokens: 65_535,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: true,
+    },
+  });
+
+  addModel({
+    provider: vertexProvider,
+    name: "google:gemini-2.5-flash-preview-04-17",
+    aliases: [
+      "google:gemini-2.5-flash-preview",
+      "gemini-2.5-flash",
+      "google:gemini-2.5-flash",
+    ],
+    capabilities: {
+      contextWindow: 1_048_576,
+      maxOutputTokens: 8_191,
       images: true,
       prefill: true,
       systemPrompt: true,
@@ -423,7 +464,7 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
     apiKey: env.CTTS_AI_LLM_PERPLEXITY_API_KEY,
     baseURL: "https://api.perplexity.ai/",
   });
-
+  console.log(" Adding 🤖 perplexity");
   addModel({
     provider: perplexityProvider,
     name: "perplexity:sonar-reasoning-pro",
@@ -450,6 +491,44 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
       images: false,
       prefill: false,
       systemPrompt: false,
+      stopSequences: true,
+      streaming: true,
+      reasoning: false,
+    },
+  });
+}
+
+if (env.CTTS_AI_LLM_XAI_API_KEY) {
+  const xaiProvider = createXai({
+    apiKey: env.CTTS_AI_LLM_XAI_API_KEY,
+  });
+  console.log(" Adding 🤖 Xai");
+  addModel({
+    provider: xaiProvider,
+    name: "xai:grok-3-mini-latest",
+    aliases: ["grok-3-mini", "grok-3-mini-latest"],
+    capabilities: {
+      contextWindow: 131_071,
+      maxOutputTokens: 8192,
+      images: false,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: true,
+    },
+  });
+
+  addModel({
+    provider: xaiProvider,
+    name: "xai:grok-3-latest",
+    aliases: ["grok-3", "grok-3-latest"],
+    capabilities: {
+      contextWindow: 131_071,
+      maxOutputTokens: 8192,
+      images: false,
+      prefill: true,
+      systemPrompt: true,
       stopSequences: true,
       streaming: true,
       reasoning: false,

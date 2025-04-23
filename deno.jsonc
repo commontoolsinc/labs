@@ -3,7 +3,6 @@
     "./background-charm-service",
     "./builder",
     "./charm",
-    "./charm-seeder",
     "./cli",
     "./deno-vite-plugin",
     "./deno-web-test",
@@ -14,6 +13,7 @@
     "./llm",
     "./memory",
     "./runner",
+    "./seeder",
     "./toolshed",
     "./ui",
     "./utils"
@@ -25,8 +25,16 @@
   },
   "compilerOptions": {
     "jsx": "react-jsxdev",
-    "lib": ["deno.ns", "dom", "dom.iterable", "dom.asynciterable", "esnext"],
-    "types": ["./jumble/src/global.d.ts"]
+    "lib": [
+      "deno.ns",
+      "dom",
+      "dom.iterable",
+      "dom.asynciterable",
+      "esnext"
+    ],
+    "types": [
+      "./jumble/src/global.d.ts"
+    ]
   },
   "exclude": [
     "jumble/.vite/deps/",
@@ -38,11 +46,22 @@
     "**/coverage/"
   ],
   "lint": {
-    "exclude": ["deno-vite-plugin"],
+    "exclude": [
+      "deno-vite-plugin"
+    ],
     "rules": {
-      "tags": ["recommended"],
-      "include": ["ban-untagged-todo", "no-external-import"],
-      "exclude": ["no-unused-vars", "no-explicit-any", "require-yield"]
+      "tags": [
+        "recommended"
+      ],
+      "include": [
+        "ban-untagged-todo",
+        "no-external-import"
+      ],
+      "exclude": [
+        "no-unused-vars",
+        "no-explicit-any",
+        "require-yield"
+      ]
     }
   },
   "fmt": {
@@ -51,7 +70,9 @@
     "semiColons": true,
     "singleQuote": false,
     "proseWrap": "always",
-    "exclude": ["jumble/integration/cache/llm-api-cache/"]
+    "exclude": [
+      "jumble/integration/cache/llm-api-cache/"
+    ]
   },
   "imports": {
     "@astral/astral": "jsr:@astral/astral",
@@ -59,6 +80,7 @@
     "@cmd-johnson/oauth2-client": "jsr:@cmd-johnson/oauth2-client@^2.0.0",
     "@codemirror/lang-javascript": "npm:@codemirror/lang-javascript@^6.2.2",
     "@codemirror/lang-markdown": "npm:@codemirror/lang-markdown@^6.3.2",
+    "@codemirror/lang-json": "npm:@codemirror/lang-json@^6.0.1",
     "@hono/hono": "npm:hono@^4.7.0",
     "@luca/esbuild-deno-loader": "jsr:@luca/esbuild-deno-loader",
     "@std/assert": "jsr:@std/assert@^1",

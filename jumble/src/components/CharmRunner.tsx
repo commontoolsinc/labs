@@ -1,14 +1,15 @@
 import React, { useMemo, useRef } from "react";
 import { render, type VNode } from "@commontools/html";
 import { UI } from "@commontools/builder";
-import { charmSchema, fixItCharm } from "@commontools/charm";
+import { charmId, charmSchema, fixItCharm } from "@commontools/charm";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { useNavigate } from "react-router-dom";
 import { LuX } from "react-icons/lu";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import { createPath } from "@/routes.ts";
-import { Cell, Charm, charmId } from "@/utils/charms.ts";
+import { Cell, Charm } from "@/utils/charms.ts";
 import { notify } from "@/contexts/ActivityContext.tsx";
+import { submitFeedback } from "@/services/feedback.ts";
 
 interface CharmLoaderProps {
   charmImport: () => Promise<any>;
@@ -116,6 +117,44 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
     }
   }, [runtimeError, isFixing, charmManager, id, currentReplica, navigate]);
 
+  // Function to submit automatic error feedback
+  const submitAutomaticErrorFeedback = React.useCallback(
+    async (error: Error) => {
+      try {
+        const traceId = charmManager.getLLMTrace(charm);
+
+        if (!traceId) {
+          console.log("No LLM trace ID available for automatic feedback");
+          return;
+        }
+
+        const userInfo = {
+          email: "jumble@common.tools",
+          name: "Jumble System",
+          shortName: "Jumble",
+          avatar: "",
+        };
+
+        await submitFeedback(
+          {
+            score: 0, // thumbs down
+            explanation:
+              `Automatic error report: ${error.message}\n\nStack trace: ${
+                error.stack || "No stack trace"
+              }`,
+            spanId: traceId,
+          },
+          userInfo,
+        );
+
+        console.log("Automatic error feedback submitted successfully");
+      } catch (submissionError) {
+        console.error("Failed to submit automatic feedback:", submissionError);
+      }
+    },
+    [charm, charmManager],
+  );
+
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -127,6 +166,8 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
       const customEvent = event as CustomEvent<Error>;
       notify("Charm Error!", customEvent.detail.message, "error");
       setRuntimeError(customEvent.detail);
+
+      submitAutomaticErrorFeedback(customEvent.detail);
     }
 
     container.addEventListener("common-iframe-error", handleIframeError);
@@ -143,7 +184,7 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
         container.innerHTML = "";
       }
     };
-  }, [id]);
+  }, [id, submitAutomaticErrorFeedback]);
 
   return (
     // @ts-ignore Ignore typechecking for custom element.

@@ -44,11 +44,20 @@ export async function login(name: string) {
   // Click the first button, "register"
   await waitForSelectorClick(page, "button[aria-label='register']");
 
-  // Click the first button, "register with passphrase"
-  await waitForSelectorClick(
-    page,
-    "button[aria-label='register-with-passphrase']",
+  // Check if we need to select a method first (in case of multiple auth methods available)
+  const methodPassphraseButton = await page.$(
+    "button[aria-label='method-passphrase']",
   );
+  if (methodPassphraseButton) {
+    console.log("Multiple auth methods available, selecting passphrase method");
+    await methodPassphraseButton.click();
+  } else {
+    // Click the register with passphrase button
+    await waitForSelectorClick(
+      page,
+      "button[aria-label='register-with-passphrase']",
+    );
+  }
 
   // Get the mnemonic from textarea.
   let input = await page.waitForSelector("textarea[aria-label='mnemonic']");
@@ -58,6 +67,17 @@ export async function login(name: string) {
 
   // Click the SECOND button, "continue to login"
   await waitForSelectorClick(page, "button[aria-label='continue-login']");
+
+  // Check if we need to select a method for login (in case of multiple auth methods)
+  const loginMethodPassphraseButton = await page.$(
+    "button[aria-label='method-passphrase']",
+  );
+  if (loginMethodPassphraseButton) {
+    console.log(
+      "Multiple auth methods available for login, selecting passphrase method",
+    );
+    await loginMethodPassphraseButton.click();
+  }
 
   // Paste the mnemonic in the input.
   input = await page.waitForSelector("input[aria-label='enter-passphrase']");

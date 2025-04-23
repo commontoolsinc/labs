@@ -215,4 +215,41 @@ Hierarchical integrity is maintained as subitems with their Parent items.
     Force focus on the first item of the list`,
     }],
   },
+  {
+    name: "Import JSON Sample",
+    steps: [{
+      type: CommandType.ImportJSON,
+      prompt: "Recipe Collection",
+      data: {
+        "recipes": [
+          {
+            "name": "Pasta Carbonara",
+            "ingredients": [
+              "200g spaghetti",
+              "100g pancetta",
+              "2 eggs",
+              "50g pecorino cheese",
+              "50g parmesan",
+              "black pepper",
+            ],
+            "instructions":
+              "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
+          },
+          {
+            "name": "Classic Margherita Pizza",
+            "ingredients": [
+              "pizza dough",
+              "tomato sauce",
+              "fresh mozzarella",
+              "fresh basil",
+              "olive oil",
+            ],
+            "instructions":
+              "Stretch dough. Add sauce, cheese. Bake at high heat. Add basil after cooking.",
+          },
+        ],
+      },
+    }],
+    tags: ["import"],
+  },
 ];

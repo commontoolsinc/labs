@@ -214,15 +214,17 @@ Deno.test({
           await page.keyboard.up("ControlLeft");
           await sleep(1000);
 
-          await page.keyboard.type("modify");
+          await page.keyboard.type("new");
           await sleep(1000);
           await page.keyboard.press("Enter");
 
           await sleep(500);
-          await page.keyboard.type("count the values in current");
-          await sleep(1000);
+          await page.keyboard.type("count the values in @v");
+          await sleep(500);
+          await page.keyboard.press("Tab");
+          await sleep(500);
           await page.keyboard.press("Enter");
-          await sleep(1000);
+          await sleep(500);
         },
       });
 
@@ -236,7 +238,7 @@ Deno.test({
           await waitForSelectorWithText(
             page,
             "a[aria-roledescription='charm-link']",
-            "Value Counter Charm",
+            "Value Counter Utility",
           );
 
           // FIXME(ja): how to look at the actual iframe content?

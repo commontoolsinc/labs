@@ -1,5 +1,4 @@
-import { Charm } from "@commontools/charm";
-import { charmId } from "@/utils/charms.ts";
+import { Charm, charmId } from "@commontools/charm";
 import { useState } from "react";
 import { Cell } from "@commontools/runner";
 import { useCharmHover } from "@/hooks/use-charm-hover.ts";

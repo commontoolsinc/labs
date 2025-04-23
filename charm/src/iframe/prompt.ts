@@ -1,9 +1,9 @@
 import { JSONSchema } from "@commontools/builder";
 import {
+  DEFAULT_MODEL_NAME,
   hydratePrompt,
   type LLMMessage,
   type LLMRequest,
-  DEFAULT_MODEL_NAME,
 } from "@commontools/llm";
 
 import { extractUserCode, systemMd } from "./static.ts";

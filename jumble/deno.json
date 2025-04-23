@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "dev": "deno run -A --node-modules-dir=auto npm:vite",
+    "dev": "TOOLSHED_API_URL=https://toolshed.saga-castor.ts.net deno run -A --node-modules-dir=auto npm:vite",
     "dev-local": "TOOLSHED_API_URL=http://localhost:8000 deno run -A --node-modules-dir=auto npm:vite",
     "build": "VITE_BUILD_SOURCEMAPS=true deno run -A --node-modules-dir=auto npm:vite build",
     "preview": "deno run -A --node-modules-dir=auto npm:vite preview",
@@ -34,6 +34,9 @@
     "@uiw/codemirror-theme-vscode": "npm:@uiw/codemirror-theme-vscode@^4.23.7",
     "@uiw/react-codemirror": "npm:@uiw/react-codemirror@^4.23.7",
     "@uiw/react-json-view": "npm:@uiw/react-json-view@2.0.0-alpha.30",
+    "@codemirror/lang-javascript": "npm:@codemirror/lang-javascript@^6.1.4",
+    "@codemirror/lang-markdown": "npm:@codemirror/lang-markdown@^6.1.4",
+    "@codemirror/lang-json": "npm:@codemirror/lang-json@^6.0.1",
     "@use-gesture/react": "npm:@use-gesture/react@^10.3.1",
     "@vitejs/plugin-react": "npm:@vitejs/plugin-react@^4.3.4",
     "cmdk": "npm:cmdk@^1.0.4",

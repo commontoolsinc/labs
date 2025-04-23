@@ -1,19 +1,17 @@
 import "./commands.css";
 import {
   addGithubRecipe,
-  castNewRecipe,
   castSpellAsCharm,
   Charm,
   CharmManager,
   compileAndRunRecipe,
-  createWorkflowForm,
   processWorkflow,
   renameCharm,
   WorkflowForm,
 } from "@commontools/charm";
-import { executeWorkflow, modifyCharm } from "@commontools/charm";
+import { formatJsonImportPrompt } from "@commontools/llm";
+import { charmId } from "@commontools/charm";
 import type { NavigateFunction } from "react-router-dom";
-import { charmId } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
 import { isStream } from "@commontools/runner";
 import { createPath, createPathWithHash, ROUTES } from "@/routes.ts";
@@ -255,49 +253,6 @@ function navigateToCharm(ctx: CommandContext, charm: Charm | string) {
   );
 }
 
-// Command handlers
-// Unified handler for charm operations using the imagine function
-async function handleModifyCharm(
-  ctx: CommandContext,
-  input: string,
-  options?: { model: string },
-) {
-  if (!input) return;
-
-  try {
-    let newCharm;
-
-    // bf: I suspect this is pointless and already handled in executeWorkflow
-    if (ctx.focusedCharmId) {
-      // Get the current charm
-      const charm = await ctx.charmManager.get(ctx.focusedCharmId, false);
-      if (!charm) {
-        throw new Error("Failed to load charm");
-      }
-
-      newCharm = await modifyCharm(
-        ctx.charmManager,
-        input,
-        charm,
-        ctx.previewForm,
-        options?.model,
-      );
-    } else {
-      console.warn("Attempted to modify charm without a focused charm ID");
-    }
-
-    if (!newCharm) {
-      throw new Error("Failed to create charm");
-    }
-
-    navigateToCharm(ctx, newCharm);
-  } catch (error) {
-    console.error("Imagine operation error:", error);
-  } finally {
-    ctx.setOpen(false);
-  }
-}
-
 async function handleNewCharm(
   ctx: CommandContext,
   input: string,
@@ -305,16 +260,19 @@ async function handleNewCharm(
   if (!input) return;
 
   try {
-    const newCharm = await executeWorkflow(
-      ctx.charmManager,
+    const form = await processWorkflow(
       input,
+      ctx.charmManager,
       {
         prefill: ctx.previewForm,
         model: ctx.userPreferredModel,
+        permittedWorkflows: ["imagine", "cast-spell"],
       },
     );
-
-    navigateToCharm(ctx, newCharm);
+    const charm = form.generation?.charm;
+    if (charm) {
+      navigateToCharm(ctx, charm);
+    }
   } catch (error) {
     console.error("New charm operation error:", error);
   } finally {
@@ -396,14 +354,13 @@ async function handleImportJSON(ctx: CommandContext) {
     if (!title) return;
 
     ctx.setOpen(false);
+    const jsonPrompt = formatJsonImportPrompt(title, data);
     const form = await processWorkflow(
-      `${title}\n\n Look at the attached JSON data and use it to create a new charm.\n\n${
-        JSON.stringify(data)
-      }`,
-      false,
+      jsonPrompt,
+      ctx.charmManager,
       {
-        charmManager: ctx.charmManager,
         cache: true,
+        dryRun: false,
       },
     );
 
@@ -638,8 +595,50 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
       id: "new-charm",
       type: "input",
       title: "New Charm",
-      group: "Create",
+      group: "Charm",
       handler: handleNewCharm,
+    },
+    {
+      id: "edit-mode",
+      type: "action",
+      title: "Edit Mode",
+      group: "Charm",
+      predicate: !!ctx.focusedCharmId &&
+        !globalThis.location.hash.includes("#iterate"),
+      handler: () => {
+        if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
+          ctx.setOpen(false);
+          return;
+        }
+        ctx.navigate(
+          createPathWithHash(
+            "charmDetail",
+            {
+              charmId: ctx.focusedCharmId,
+              replicaName: ctx.focusedReplicaId,
+            },
+            "iterate",
+          ),
+        );
+        ctx.setOpen(false);
+      },
+    },
+    {
+      id: "view-mode",
+      type: "action",
+      title: "View Mode",
+      group: "Charm",
+      predicate: !!ctx.focusedCharmId &&
+        globalThis.location.pathname.includes("/detail"),
+      handler: () => {
+        if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
+          console.warn("Missing charm ID or replica name");
+          ctx.setOpen(false);
+          return;
+        }
+        navigateToCharm(ctx, ctx.focusedCharmId);
+        ctx.setOpen(false);
+      },
     },
     {
       id: "search-charms",
@@ -709,7 +708,7 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
       id: "spellcaster-menu",
       type: "menu",
       title: "Spellcaster",
-      group: "Create",
+      group: "Action",
       predicate: !!ctx.focusedReplicaId,
       children: [
         {
@@ -735,15 +734,6 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
       group: "Charm",
       predicate: !!ctx.focusedCharmId,
       handler: handleRenameCharm,
-    },
-    {
-      id: "edit-recipe",
-      type: "input",
-      title: `Modify Charm`,
-      group: "Charm",
-      predicate: !!ctx.focusedCharmId,
-      placeholder: "What would you like to change?",
-      handler: handleModifyCharm,
     },
     {
       id: "duplicate-charm",
@@ -784,7 +774,7 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
       id: "pin-charm",
       type: "action",
       title: "Pin Charm",
-      group: "View",
+      group: "Action",
       predicate: !!ctx.focusedCharmId,
       handler: async () => {
         if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
@@ -806,7 +796,7 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
       id: "unpin-charm",
       type: "action",
       title: "Unpin Charm",
-      group: "View",
+      group: "Action",
       predicate: !!ctx.focusedCharmId,
       handler: async () => {
         if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
@@ -824,90 +814,7 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
         ctx.setOpen(false);
       },
     },
-    {
-      id: "view-detail",
-      type: "action",
-      title: "View Detail",
-      group: "View",
-      predicate: !!ctx.focusedCharmId,
-      handler: () => {
-        if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
-          ctx.setOpen(false);
-          return;
-        }
-        ctx.navigate(
-          createPath("charmDetail", {
-            charmId: ctx.focusedCharmId,
-            replicaName: ctx.focusedReplicaId,
-          }),
-        );
-        ctx.setOpen(false);
-      },
-    },
-    {
-      id: "edit-code",
-      type: "action",
-      title: "Edit Code",
-      group: "View",
-      predicate: !!ctx.focusedCharmId,
-      handler: () => {
-        if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
-          ctx.setOpen(false);
-          return;
-        }
-        ctx.navigate(
-          createPathWithHash(
-            "charmDetail",
-            {
-              charmId: ctx.focusedCharmId,
-              replicaName: ctx.focusedReplicaId,
-            },
-            "code",
-          ),
-        );
-        ctx.setOpen(false);
-      },
-    },
-    {
-      id: "view-data",
-      type: "action",
-      title: "View Backing Data",
-      group: "View",
-      predicate: !!ctx.focusedCharmId,
-      handler: () => {
-        if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
-          ctx.setOpen(false);
-          return;
-        }
-        ctx.navigate(
-          createPathWithHash(
-            "charmDetail",
-            {
-              charmId: ctx.focusedCharmId,
-              replicaName: ctx.focusedReplicaId,
-            },
-            "data",
-          ),
-        );
-        ctx.setOpen(false);
-      },
-    },
-    {
-      id: "view-charm",
-      type: "action",
-      title: "View Charm",
-      group: "View",
-      predicate: !!ctx.focusedCharmId,
-      handler: () => {
-        if (!ctx.focusedCharmId || !ctx.focusedReplicaId) {
-          console.warn("Missing charm ID or replica name");
-          ctx.setOpen(false);
-          return;
-        }
-        navigateToCharm(ctx, ctx.focusedCharmId);
-        ctx.setOpen(false);
-      },
-    },
+
     {
       id: "back",
       type: "action",

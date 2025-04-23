@@ -14,6 +14,7 @@ import {
   ConsumerResultFor,
   DID,
   Entity,
+  Fact,
   InferOf,
   Invocation,
   InvocationURL,
@@ -26,6 +27,9 @@ import {
   QueryError,
   Reference,
   Result,
+  Revision,
+  SchemaContext,
+  SchemaPathSelector,
   SchemaQuery,
   SchemaSelector,
   Seconds,
@@ -41,15 +45,14 @@ import {
 import { refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
 import * as ChangesBuilder from "./changes.ts";
-import * as Fact from "./fact.ts";
+import * as FactModule from "./fact.ts";
 import * as Access from "./access.ts";
 import * as Subscription from "./subscription.ts";
 import { toStringStream } from "./ucan.ts";
 import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
 export * from "./interface.ts";
-import { the as commitType, toRevision } from "./commit.ts";
-export { ChangesBuilder };
+import { toRevision } from "./commit.ts";
 
 export const connect = ({
   address,
@@ -145,17 +148,27 @@ class MemoryConsumerSession<
     const id = command.of;
     if (command.the === "task/return") {
       const invocation = this.invocations.get(id);
-      this.invocations.delete(id);
+      // TODO(@ubik2) this is really gross.
+      if (
+        invocation === undefined || !("args" in invocation) ||
+        invocation.args === null || !(typeof invocation.args === "object") ||
+        !("subscribe" in invocation.args) || !invocation.args.subscribe
+      ) {
+        this.invocations.delete(id);
+      }
       invocation?.return(command.is as NonNullable<unknown>);
     } // If it is an effect it can be for one specific subscription, yet we may
-    // have other subscriptions that will be affected. There for we simply
-    // pass effect to each one and they can detect if it concerns them.
-    // ℹ️ We could optimize this in the future and try indexing subscriptions
-    // so we don't have to broadcast to all.
+    // have other subscriptions that will be affected.
+    // We can't just send one message over, since the client needs to know
+    // about which extra objects are needed for that specific subscription.
+    // There's a chance we'll send the same object over more than once because
+    // of this (in particular, this is almost guaranteed by the cache that
+    // maintains a subscription to every object in the cache).
+    // For now, I think this is the best approach, but we can use the since
+    // fields to remove these later.
     else if (command.the === "task/effect") {
-      for (const [, invocation] of this.invocations) {
-        invocation.perform(command.is);
-      }
+      const invocation = this.invocations.get(id);
+      invocation?.perform(command.is);
     }
   }
 
@@ -268,7 +281,7 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
         args: source,
       });
       return QueryView.create(this.session, query);
-    } else {
+    } else { // selectSchema
       const query = this.session.invoke({
         cmd: "/memory/graph/query" as const,
         sub: this.space,
@@ -394,6 +407,11 @@ class QueryView<
       Result<QueryView<Space, MemoryProtocol>, QueryError | ConnectionError>
     >,
   ) {
+    invocation.perform = (
+      effect:
+        | ConsumerEffectFor<"/memory/query", MemoryProtocol>
+        | ConsumerEffectFor<"/memory/graph/query", MemoryProtocol>,
+    ) => this.perform(effect as any);
     this.selection = { [this.space]: {} } as Selection<InferOf<Protocol>>;
     this.selector = ("select" in this.invocation.args)
       ? (this.invocation.args as { select?: Selector }).select as Selector
@@ -403,6 +421,12 @@ class QueryView<
 
   return(selection: Selection<InferOf<Protocol>>) {
     this.selection = selection;
+  }
+
+  perform(effect: Selection<Space>) {
+    const differential = { ...effect[this.space] } as Selection<Space>;
+    this.integrate(differential);
+    return { ok: effect };
   }
 
   then<T, X>(
@@ -432,8 +456,14 @@ class QueryView<
     }
   }
 
-  get facts() {
-    return [...Fact.iterate(this.selection[this.space])];
+  get facts(): Revision<Fact>[] {
+    return [...FactModule.iterate(this.selection[this.space])];
+  }
+
+  // Get the facts returned by the query, together with the associated
+  // schema context used to query
+  get schemaFacts(): [Revision<Fact>, SchemaContext | undefined][] {
+    return this.facts.map((fact) => [fact, this.getSchema(fact)]);
   }
 
   subscribe() {
@@ -447,6 +477,7 @@ class QueryView<
   // Since we already have these results, we don't want to re-fetch them, so
   // make a QueryView available for subscriptions to use that lets us skip
   // that step when we subscribe.
+  // TODO(@ubik2) Remove this code when we remove the rest of remote.ts
   includedQueryView(): QueryView<MemorySpace, MemoryProtocol> | undefined {
     const factSelection = this.selection[this.space];
     const subSelector: Selector = {};
@@ -483,6 +514,22 @@ class QueryView<
     subQueryView.selector = subSelector;
     subQueryView.promise = Promise.resolve({ ok: subQueryView });
     return subQueryView;
+  }
+
+  // Get the schema context used to fetch the specified fact.
+  // If the fact was included from another fact, it will not have a schemaContext.
+  getSchema(fact: Revision<Fact>): SchemaContext | undefined {
+    const factSelector = this.selector;
+    const attributes = factSelector[fact.of];
+    if (attributes !== undefined) {
+      const causes = attributes[fact.the] as Record<Cause, SchemaPathSelector>;
+      if (causes !== undefined) {
+        for (const [_cause, selector] of Object.entries(causes)) {
+          return selector.schemaContext;
+        }
+      }
+    }
+    return undefined;
   }
 }
 

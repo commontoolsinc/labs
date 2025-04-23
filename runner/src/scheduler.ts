@@ -6,7 +6,8 @@ import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { mapSourceMapsOnStacktrace } from "./local-build.ts";
+import { runtime } from "./runtime/index.ts";
+import { ConsoleEvent, ConsoleMethod } from "./runtime/console.ts";
 
 export type Action = (log: ReactivityLog) => any;
 export type EventHandler = (event: any) => any;
@@ -22,6 +23,15 @@ let loopCounter = new WeakMap<Action, number>();
 const errorHandlers = new Set<
   ((error: Error) => void) | ((error: ErrorWithContext) => void)
 >();
+let consoleHandler = function (
+  _metadata: ReturnType<typeof getCharmMetadataFromFrame>,
+  _method: ConsoleMethod,
+  args: any[],
+): any[] {
+  // Default console handler returns arguments unaffected.
+  // Call `onConsole` to override default handler.
+  return args;
+};
 let running: Promise<void> | undefined = undefined;
 let scheduled = false;
 
@@ -127,6 +137,27 @@ export function onError(
   errorHandlers.add(fn);
 }
 
+// Replace the default console hook with a function that accepts context metadata,
+// console method name and the arguments.
+export function onConsole(
+  fn: (
+    metadata: ReturnType<typeof getCharmMetadataFromFrame>,
+    method: ConsoleMethod,
+    args: any[],
+  ) => any[],
+) {
+  consoleHandler = fn;
+}
+
+runtime.addEventListener("console", (e: Event) => {
+  // Called synchronously when `console` methods are
+  // called within the runtime.
+  const { method, args } = e as ConsoleEvent;
+  const metadata = getCharmMetadataFromFrame();
+  const result = consoleHandler(metadata, method, args);
+  console[method].apply(console, result);
+});
+
 export function queueEvent(eventRef: CellLink, event: any) {
   for (const [ref, handler] of eventHandlers) {
     if (
@@ -177,28 +208,15 @@ export function isErrorWithContext(error: unknown): error is ErrorWithContext {
 
 function handleError(error: Error, action: any) {
   // Since most errors come from `eval`ed code, let's fix the stack trace.
-  if (error.stack) error.stack = mapSourceMapsOnStacktrace(error.stack);
+  if (error.stack) error.stack = runtime.mapStackTrace(error.stack);
 
-  // TODO(seefeld): This is a rather hacky way to get the context, based on the
-  // unsafe_binding pattern. Once we replace that mechanism, let's add nicer
-  // abstractions for context here as well.
-  const frame = getTopFrame();
+  const { charmId, recipeId, space } = getCharmMetadataFromFrame() ?? {};
 
   const errorWithContext = error as ErrorWithContext;
   errorWithContext.action = action;
-
-  const sourceAsProxy = frame?.unsafe_binding?.materialize([]);
-
-  if (isQueryResultForDereferencing(sourceAsProxy)) {
-    const { cell: source } = getCellLinkOrThrow(sourceAsProxy);
-    errorWithContext.recipeId = source?.get()?.[TYPE];
-
-    const resultDoc = source?.get()?.resultRef?.cell;
-    errorWithContext.space = resultDoc?.space;
-    errorWithContext.charmId = JSON.parse(
-      JSON.stringify(resultDoc?.entityId ?? {}),
-    )["/"];
-  }
+  if (charmId) errorWithContext.charmId = charmId;
+  if (recipeId) errorWithContext.recipeId = recipeId;
+  if (space) errorWithContext.space = space;
 
   console.error("caught error", errorWithContext);
   for (const handler of errorHandlers) handler(errorWithContext);
@@ -407,4 +425,30 @@ function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
       changedPath.every((key, index) => key === path[index])) ||
     path.every((key, index) => key === changedPath[index])
   );
+}
+
+function getCharmMetadataFromFrame(): {
+  recipeId?: string;
+  space?: string;
+  charmId?: string;
+} | undefined {
+  // TODO(seefeld): This is a rather hacky way to get the context, based on the
+  // unsafe_binding pattern. Once we replace that mechanism, let's add nicer
+  // abstractions for context here as well.
+  const frame = getTopFrame();
+
+  const sourceAsProxy = frame?.unsafe_binding?.materialize([]);
+
+  if (!isQueryResultForDereferencing(sourceAsProxy)) {
+    return;
+  }
+  const result: ReturnType<typeof getCharmMetadataFromFrame> = {};
+  const { cell: source } = getCellLinkOrThrow(sourceAsProxy);
+  result.recipeId = source?.get()?.[TYPE];
+  const resultDoc = source?.get()?.resultRef?.cell;
+  result.space = resultDoc?.space;
+  result.charmId = JSON.parse(
+    JSON.stringify(resultDoc?.entityId ?? {}),
+  )["/"];
+  return result;
 }

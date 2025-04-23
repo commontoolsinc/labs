@@ -150,6 +150,11 @@ export async function generateText(
     maxTokens: params.maxTokens,
   };
 
+  // remove stopSequences if the model doesn't support them
+  if (!modelConfig.capabilities.stopSequences) {
+    streamParams.stopSequences = undefined;
+  }
+
   // Apply JSON mode configuration if requested
   if (params.mode) {
     configureJsonMode(

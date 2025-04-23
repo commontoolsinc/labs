@@ -1,4 +1,4 @@
-import type { Reference } from "merkle-reference";
+import { refer, type Reference } from "merkle-reference";
 import { JSONSchema } from "../builder/src/types.ts";
 
 export type { Reference };
@@ -144,7 +144,8 @@ export type Protocol<Space extends MemorySpace = MemorySpace> = {
       >;
       query: {
         (query: { select: Selector; since?: number }): Task<
-          Result<Selection<Space>, AuthorizationError | QueryError>
+          Result<Selection<Space>, AuthorizationError | QueryError>,
+          Selection<Space>
         >;
         subscribe(
           source: Subscribe<Space>["args"],
@@ -158,9 +159,14 @@ export type Protocol<Space extends MemorySpace = MemorySpace> = {
       };
       graph: {
         query(
-          schemaQuery: { selectSchema: SchemaSelector; since?: number },
+          schemaQuery: {
+            selectSchema: SchemaSelector;
+            since?: number;
+            subscribe?: boolean;
+          },
         ): Task<
-          Result<Selection<Space>, AuthorizationError | QueryError>
+          Result<Selection<Space>, AuthorizationError | QueryError>,
+          Selection<Space>
         >;
       };
     };
@@ -714,7 +720,7 @@ export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
 export type SchemaQuery<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/graph/query",
   Space,
-  { selectSchema: SchemaSelector; since?: number }
+  { selectSchema: SchemaSelector; since?: number; subscribe?: boolean }
 >;
 
 // A normal Selector looks like this (with _ as wildcard cause):
@@ -750,7 +756,7 @@ export type SchemaSelector = Select<
 
 export type SchemaPathSelector = {
   path: string[];
-  schemaContext: SchemaContext;
+  schemaContext?: SchemaContext;
 };
 
 // This is a schema, together with its rootSchema for resolving $ref entries
@@ -964,3 +970,9 @@ export type Variant<U extends Record<string, unknown>> = {
       [K in Key]: U[Key];
     };
 }[keyof U];
+
+// This will match every doc reachable by the specified set of documents
+export const SchemaAll: SchemaContext = { schema: true, rootSchema: true };
+
+// This is equivalent to a standard query, and will only match the specified documents
+export const SchemaNone: SchemaContext = { schema: false, rootSchema: false };

@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/charm-seeder",
+  "name": "@commontools/seeder",
   "tasks": {
     "start": "deno run -A ./cli.ts",
     "test": "echo 'No tests defined.'"

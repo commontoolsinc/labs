@@ -1,20 +1,17 @@
 import { type Charm, CharmManager } from "@commontools/charm";
 import {
   Cell,
+  ConsoleMethod,
   idle,
   isErrorWithContext,
   isStream,
+  onConsole,
   onError,
   setBobbyServerUrl,
   setRecipeEnvironment,
   storage,
 } from "@commontools/runner";
-import {
-  createAdminSession,
-  type DID,
-  Identity,
-  KeyPairRaw,
-} from "@commontools/identity";
+import { createAdminSession, type DID, Identity } from "@commontools/identity";
 import {
   InitializationData,
   isWorkerIPCRequest,
@@ -34,11 +31,55 @@ onError((e: Error) => {
   latestError = e;
 });
 
+const trueConsole = globalThis.console;
+// Console for "worker" messages
+const console = {
+  log(...args: any[]) {
+    trueConsole.log(this.context(), ...args);
+  },
+  error(...args: any[]) {
+    trueConsole.error(this.context(), ...args);
+  },
+  context() {
+    return `Worker(${spaceId ?? "NO_SPACE"})`;
+  },
+};
+// Annotate messages from charm contexts
+onConsole(
+  (
+    metadata:
+      | { charmId?: string; recipeId?: string; space?: string }
+      | undefined,
+    _method: ConsoleMethod,
+    args: any[],
+  ) => {
+    if (!spaceId) {
+      // Shouldn't happen.
+      throw new Error(
+        "FatalError: Charm executing but worker has no space ID.",
+      );
+    }
+    let ctx;
+    if (metadata) {
+      if (metadata.space) {
+        if (metadata.space !== spaceId) {
+          throw new Error("FatalError: Mismatched space ids in worker.");
+        }
+      }
+      if (metadata.charmId) {
+        ctx = `Charm(${metadata.charmId})`;
+      }
+    }
+    ctx = ctx ?? "Charm(NO_CHARM)";
+    return [ctx, ...args];
+  },
+);
+
 async function initialize(
   data: InitializationData,
 ): Promise<void> {
   if (initialized) {
-    console.log(`Worker: Already initialized, skipping initialize`);
+    console.log(`Already initialized, skipping initialize`);
     return;
   }
 
@@ -64,17 +105,17 @@ async function initialize(
   // Initialize charm manager
   manager = new CharmManager(currentSession);
 
-  console.log(`Worker: ${did} initialized`);
+  console.log(`Initialized`);
   initialized = true;
 }
 
 // FIXME(ja) should we make sure we kill the worker?
 async function cleanup(): Promise<void> {
   if (!initialized) {
-    console.log(`Worker: Not initialized, skipping cleanup`);
+    console.log(`Not initialized, skipping cleanup`);
     return;
   }
-  console.log(`Worker: Shutting down execution environment`);
+  console.log(`Shutting down execution environment`);
 
   loadedCharms.clear();
   currentSession = null;
@@ -93,7 +134,7 @@ async function runCharm(data: RunData): Promise<void> {
 
   const { charmId } = data;
 
-  console.log(`Worker: Running charm ${spaceId}/${charmId}`);
+  console.log(`Running charm ${spaceId}/${charmId}`);
   try {
     // Reset error tracking
     latestError = null;
@@ -103,7 +144,7 @@ async function runCharm(data: RunData): Promise<void> {
 
     if (!runningCharm) {
       // If not loaded yet, get it from the manager
-      console.log(`Worker: Loading charm ${charmId} for the first time`);
+      console.log(`Loading charm ${charmId} for the first time`);
       runningCharm = await manager.get(charmId, true);
 
       if (!runningCharm) {
@@ -113,7 +154,7 @@ async function runCharm(data: RunData): Promise<void> {
       // Store for future use
       loadedCharms.set(charmId, runningCharm);
     } else {
-      console.log(`Worker: Using previously loaded charm ${charmId}`);
+      console.log(`Using previously loaded charm ${charmId}`);
     }
 
     // Find the updater stream
@@ -132,14 +173,14 @@ async function runCharm(data: RunData): Promise<void> {
       throw latestError;
     }
 
-    console.log(`Worker: Successfully executed charm ${spaceId}/${charmId}`);
+    console.log(`Successfully executed charm ${spaceId}/${charmId}`);
     return;
   } catch (error) {
     const errorMessage = isErrorWithContext(error)
       ? `${error.message} @ ${error.space}:${error.charmId} running ${error.recipeId}`
       : String(error);
     console.error(
-      `Worker error executing charm ${spaceId}/${charmId}: ${errorMessage}`,
+      `Error executing charm ${spaceId}/${charmId}: ${errorMessage}`,
     );
 
     // FIXME(ja): this isn't enough to ensure we reload/stop the charm

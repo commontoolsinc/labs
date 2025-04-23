@@ -21,10 +21,10 @@ import {
 import { WorkflowForm } from "@commontools/charm";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
-import { charmId, getMentionableCharms } from "@/utils/charms.ts";
+import { getMentionableCharms } from "@/utils/charms.ts";
 import { NAME } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
-import { Charm } from "@commontools/charm";
+import { Charm, charmId } from "@commontools/charm";
 import { useLiveSpecPreview } from "@/hooks/use-live-spec-preview.ts";
 import { SpecPreview } from "@/components/SpecPreview.tsx";
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
@@ -50,11 +50,6 @@ function CommandProcessor({
   const { charmManager } = context;
   const [inputValue, setInputValue] = useState("");
   const charmMentions = useCharmMentions();
-
-  // State for preview model selection
-  // const [previewModel, setPreviewModel] = useState<LanguageModelId>(
-  //   "think",
-  // );
 
   const {
     userPreferredModel,
@@ -86,16 +81,18 @@ function CommandProcessor({
   const {
     previewForm,
     loading: isPreviewLoading,
-    classificationLoading,
-    planLoading,
-    setWorkflowType, // Add the setter function to allow changing workflow type manually
+    setWorkflowType,
+    setSelectedSpellToCast,
   } = useLiveSpecPreview(
     inputValue,
     charmManager, // Explicitly pass CharmManager instance
     true,
-    1000,
-    userPreferredModel,
-    command.id == "new-charm" ? undefined : focusedCharm, // Pass the current charm for context
+    {
+      debounceTime: 1000,
+      model: userPreferredModel,
+      currentCharm: command.id == "new-charm" ? undefined : focusedCharm,
+      permittedWorkflows: ["imagine", "cast-spell"],
+    },
   );
 
   useEffect(() => {
@@ -142,11 +139,10 @@ function CommandProcessor({
             <SpecPreview
               form={previewForm}
               loading={isPreviewLoading}
-              classificationLoading={classificationLoading}
-              planLoading={planLoading}
               visible
               floating
               onWorkflowChange={setWorkflowType}
+              onSelectedCastChange={setSelectedSpellToCast}
             />
 
             <Composer
@@ -404,51 +400,49 @@ export function CommandCenter() {
   }, [open]);
 
   useEffect(() => {
-    const handleEditRecipe = (e: KeyboardEvent) => {
+    const handleNewCharm = (e: KeyboardEvent) => {
       if (e.key === "i" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        const editRecipeCommand = allCommands.find((cmd) =>
-          cmd.id === "edit-recipe"
+        const newCharmCommand = allCommands.find((cmd) =>
+          cmd.id === "new-charm"
         );
-        if (!editRecipeCommand) {
-          console.warn("Edit recipe command not found");
+        if (!newCharmCommand) {
+          console.warn("New charm command not found");
           return;
         }
         setOpen(true);
         setMode({
           type: "input",
-          command: editRecipeCommand,
-          placeholder: "What would you like to change?",
+          command: newCharmCommand,
+          placeholder: (newCharmCommand as InputCommandItem).placeholder || "What would you like to create?",
         });
       }
     };
 
-    const handleEditRecipeEvent = () => {
-      if (focusedCharmId) {
-        const editRecipeCommand = allCommands.find((cmd) =>
-          cmd.id === "edit-recipe"
-        );
-        if (!editRecipeCommand) {
-          console.warn("Edit recipe command not found");
-          return;
-        }
-        setOpen(true);
-        setMode({
-          type: "input",
-          command: editRecipeCommand,
-          placeholder: "What would you like to change?",
-        });
+    const handleNewCharmEvent = () => {
+      const newCharmCommand = allCommands.find((cmd) =>
+        cmd.id === "new-charm"
+      );
+      if (!newCharmCommand) {
+        console.warn("New charm command not found");
+        return;
       }
+      setOpen(true);
+      setMode({
+        type: "input",
+        command: newCharmCommand,
+        placeholder: (newCharmCommand as InputCommandItem).placeholder || "What would you like to create?",
+      });
     };
 
-    document.addEventListener("keydown", handleEditRecipe);
-    globalThis.addEventListener("edit-recipe-command", handleEditRecipeEvent);
+    document.addEventListener("keydown", handleNewCharm);
+    globalThis.addEventListener("new-charm-command", handleNewCharmEvent);
 
     return () => {
-      document.removeEventListener("keydown", handleEditRecipe);
+      document.removeEventListener("keydown", handleNewCharm);
       globalThis.removeEventListener(
-        "edit-recipe-command",
-        handleEditRecipeEvent,
+        "new-charm-command",
+        handleNewCharmEvent,
       );
     };
   }, [focusedCharmId, allCommands]);

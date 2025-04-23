@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { CharmManager } from "../src/charm.ts";
+import { CharmManager } from "../src/manager.ts";
 import {
   Cell,
   DocImpl,

@@ -4,12 +4,12 @@
 
 import { createRouter } from "@/lib/create-app.ts";
 import { cors } from "@hono/hono/cors";
-import * as handlers from "./spell.handlers.ts";
 import * as routes from "./spell.routes.ts";
 import { fulfill } from "./handlers/fulfill.ts";
 import { imagine } from "./handlers/imagine.ts";
 import { recast } from "./handlers/recast.ts";
 import { reuse } from "./handlers/reuse.ts";
+import { findSpellBySchema } from "./handlers/find-spell-by-schema.ts";
 
 const router = createRouter();
 
@@ -29,6 +29,7 @@ const Router = router
   .openapi(routes.recast, recast)
   .openapi(routes.reuse, reuse)
   .openapi(routes.imagine, imagine)
+  .openapi(routes.findSpellBySchema, findSpellBySchema)
   .openapi(routes.fulfill, fulfill);
 
 export default Router;

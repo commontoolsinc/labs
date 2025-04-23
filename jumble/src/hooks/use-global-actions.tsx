@@ -1,7 +1,13 @@
 import "@commontools/ui";
 import { useLocation, useParams } from "react-router-dom";
 import { type CharmRouteParams } from "@/routes.ts";
-import { MdEdit, MdOutlineStar, MdSend, MdShare } from "react-icons/md";
+import {
+  MdEdit,
+  MdOutlineStar,
+  MdRemoveRedEye,
+  MdSend,
+  MdShare,
+} from "react-icons/md";
 
 import { useAction } from "@/contexts/ActionManagerContext.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -82,18 +88,44 @@ export function useGlobalActions() {
     useMemo(
       () => ({
         id: "link:edit-charm",
-        label: "Edit",
-        icon: <MdEdit size={28} />,
+        label: isDetailActive ? "View" : "Edit",
+        icon: isDetailActive
+          ? <MdRemoveRedEye size={28} />
+          : <MdEdit size={28} />,
         to: togglePath,
         onClick: () => {},
         predicate: hasCharmId,
         priority: 50,
       }),
-      [hasCharmId, togglePath],
+      [hasCharmId, togglePath, isDetailActive],
     ),
   );
 
-  // Feedback action (available only when a charm is open)
+  // Track if current charm has LLM trace ID for feedback
+  const [hasLLMTrace, setHasLLMTrace] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function checkLLMTrace() {
+      if (charmId && charmManager) {
+        const charm = await charmManager.get(charmId);
+        if (charm && mounted) {
+          const traceId = charmManager.getLLMTrace(charm);
+          setHasLLMTrace(
+            !!traceId && typeof traceId === "string" && traceId.trim() !== "",
+          );
+        }
+      }
+    }
+
+    checkLLMTrace();
+    return () => {
+      mounted = false;
+    };
+  }, [charmId, charmManager]);
+
+  // Feedback action (available only when a charm with LLM trace is open)
   useAction(
     useMemo(
       () => ({
@@ -104,9 +136,9 @@ export function useGlobalActions() {
           globalThis.dispatchEvent(new CustomEvent("toggle-feedback"));
         },
         priority: 30,
-        predicate: hasCharmId,
+        predicate: () => hasCharmId() && hasLLMTrace,
       }),
-      [hasCharmId],
+      [hasCharmId, hasLLMTrace],
     ),
   );
 }

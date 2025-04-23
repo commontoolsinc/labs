@@ -3,7 +3,7 @@ import {
   isCell,
   isStream,
   registerNewRecipe,
-  tsToExports,
+  runtime,
 } from "@commontools/runner";
 import { isObj } from "@commontools/utils";
 import {
@@ -11,8 +11,12 @@ import {
   JSONSchema,
   type Writable,
 } from "@commontools/builder";
-import { Charm, CharmManager, charmSourceCellSchema } from "./charm.ts";
-import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
+import { Charm, CharmManager, charmSourceCellSchema } from "./manager.ts";
+import {
+  buildFullRecipe,
+  getIframeRecipe,
+  getRecipeFrom,
+} from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import {
   formatForm,
@@ -21,7 +25,7 @@ import {
   LLMClient,
 } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
-import { WorkflowForm } from "./index.ts";
+import { IFrameRecipe, WorkflowForm } from "./index.ts";
 
 const llm = new LLMClient();
 
@@ -46,7 +50,7 @@ export const genSrc = async ({
   model?: string;
   generationId?: string;
   cache: boolean;
-}): Promise<string> => {
+}): Promise<{ content: string; llmRequestId?: string }> => {
   const request = buildPrompt({
     src,
     spec,
@@ -85,7 +89,7 @@ export const genSrc = async ({
   const source = injectUserCode(
     response.content.split(RESPONSE_PREFILL)[1].split("\n```")[0],
   );
-  return source;
+  return { content: source, llmRequestId: response.id };
 };
 
 /**
@@ -99,34 +103,39 @@ export async function iterate(
   model?: string,
   generationId?: string,
   cache = true,
-): Promise<Cell<Charm>> {
+): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
   const { iframe } = getIframeRecipe(charm);
-  if (!iframe) {
-    throw new Error("Cannot iterate on a non-iframe. Must extend instead.");
+
+  const prevSpec = iframe?.spec;
+  if (!plan?.spec) {
+    throw new Error("No specification provided");
   }
+  const newSpec = plan.spec;
 
-  // TODO(bf): questionable logic...
-  const iframeSpec = iframe.spec;
-  const newSpec = plan?.spec ?? iframeSpec;
-
-  const newIFrameSrc = await genSrc({
-    src: iframe.src,
-    spec: iframeSpec,
+  const { content: newIFrameSrc, llmRequestId } = await genSrc({
+    src: iframe?.src,
+    spec: prevSpec,
     newSpec,
-    schema: iframe.argumentSchema,
+    schema: iframe?.argumentSchema || { type: "object" },
     steps: plan?.steps,
     model,
     generationId,
     cache,
   });
 
-  return generateNewRecipeVersion(
-    charmManager,
-    charm,
-    newIFrameSrc,
-    newSpec,
-    generationId,
-  );
+  return {
+    cell: await generateNewRecipeVersion(
+      charmManager,
+      charm,
+      {
+        src: newIFrameSrc,
+        spec: newSpec,
+      },
+      generationId,
+      llmRequestId,
+    ),
+    llmRequestId,
+  };
 }
 
 export function extractTitle(src: string, defaultTitle: string): string {
@@ -138,23 +147,32 @@ export function extractTitle(src: string, defaultTitle: string): string {
 export const generateNewRecipeVersion = async (
   charmManager: CharmManager,
   parent: Cell<Charm>,
-  newIFrameSrc: string,
-  newSpec: string,
+  newRecipe:
+    & Pick<IFrameRecipe, "src" | "spec">
+    & Partial<Omit<IFrameRecipe, "src" | "spec">>,
   generationId?: string,
+  llmRequestId?: string,
 ) => {
-  const { recipeId, iframe } = getIframeRecipe(parent);
+  const { iframe } = getIframeRecipe(parent);
+  const { recipe, recipeId } = getRecipeFrom(parent);
 
-  if (!recipeId || !iframe) {
-    throw new Error("FIXME, no recipeId or iframe, what should we do?");
-  }
-
-  const name = extractTitle(newIFrameSrc, "<unknown>");
-  const newRecipeSrc = buildFullRecipe({
-    ...iframe,
-    src: newIFrameSrc,
-    spec: newSpec,
-    name,
-  });
+  const name = extractTitle(newRecipe.src, "<unknown>");
+  // If we have an iframe already, just spread everything
+  const fullSrc = buildFullRecipe(
+    iframe
+      ? {
+        ...iframe,
+        ...newRecipe,
+        name: name,
+      }
+      // otherwise, we are editing a non-iframe recipe and need to grab/fill the schema
+      : {
+        argumentSchema: recipe.argumentSchema ?? { type: "object" },
+        resultSchema: recipe.resultSchema ?? { type: "object" },
+        ...newRecipe,
+        name,
+      },
+  );
 
   globalThis.dispatchEvent(
     new CustomEvent("job-update", {
@@ -169,10 +187,11 @@ export const generateNewRecipeVersion = async (
   // Pass the newSpec so it's properly persisted and can be displayed/edited
   const newCharm = await compileAndRunRecipe(
     charmManager,
-    newRecipeSrc,
-    newSpec,
+    fullSrc,
+    newRecipe.spec!,
     parent.getSourceCell()?.key("argument"),
     recipeId ? [recipeId] : undefined,
+    llmRequestId,
   );
 
   newCharm.getSourceCell(charmSourceCellSchema)?.key("lineage").push({
@@ -273,6 +292,7 @@ async function singlePhaseCodeGeneration(
     resultSchema,
     title,
     description,
+    llmRequestId,
   } = await generateCodeAndSchema(form, existingSchema, form.meta.modelId);
 
   console.log("resultSchema", resultSchema);
@@ -331,6 +351,7 @@ async function singlePhaseCodeGeneration(
     newRecipeSrc,
     name,
     schema,
+    llmRequestId,
   };
 }
 
@@ -396,7 +417,7 @@ async function twoPhaseCodeGeneration(
   }
 
   // Phase 2: Generate UI code using the schema and enhanced spec
-  const newIFrameSrc = await genSrc({
+  const { content: newIFrameSrc, llmRequestId } = await genSrc({
     newSpec,
     schema,
     steps: form.plan?.steps,
@@ -421,6 +442,7 @@ async function twoPhaseCodeGeneration(
     newRecipeSrc,
     name,
     schema,
+    llmRequestId,
   };
 }
 
@@ -435,7 +457,7 @@ async function twoPhaseCodeGeneration(
 export async function castNewRecipe(
   charmManager: CharmManager,
   form: WorkflowForm,
-): Promise<Cell<Charm>> {
+): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
   console.log("Processing form:", form);
 
   // Remove $UI, $NAME, and any streams from the cells
@@ -445,7 +467,7 @@ export async function castNewRecipe(
   const existingSchema = createJsonSchema(scrubbed);
 
   // Prototype workflow: combine steps
-  const { newIFrameSrc, newSpec, newRecipeSrc, name, schema } =
+  const { newSpec, newRecipeSrc, llmRequestId } =
     form.classification?.workflowType === "imagine-single-phase"
       ? await singlePhaseCodeGeneration(form, existingSchema)
       : await twoPhaseCodeGeneration(form, existingSchema);
@@ -462,7 +484,17 @@ export async function castNewRecipe(
     }),
   );
 
-  return compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, input);
+  return {
+    cell: await compileAndRunRecipe(
+      charmManager,
+      newRecipeSrc,
+      newSpec,
+      input,
+      undefined,
+      llmRequestId,
+    ),
+    llmRequestId,
+  };
 }
 
 export async function compileRecipe(
@@ -470,12 +502,7 @@ export async function compileRecipe(
   spec: string,
   parents?: string[],
 ) {
-  const { exports, errors } = await tsToExports(recipeSrc);
-  if (errors) {
-    console.error(errors);
-    throw new Error("Compilation errors in recipe");
-  }
-  const recipe = exports.default;
+  const recipe = await runtime.compile(recipeSrc);
   if (!recipe) {
     throw new Error("No default recipe found in the compiled exports.");
   }
@@ -490,11 +517,17 @@ export async function compileAndRunRecipe(
   spec: string,
   runOptions: any,
   parents?: string[],
+  llmRequestId?: string,
 ): Promise<Cell<Charm>> {
   const recipe = await compileRecipe(recipeSrc, spec, parents);
   if (!recipe) {
     throw new Error("Failed to compile recipe");
   }
 
-  return charmManager.runPersistent(recipe, runOptions);
+  return charmManager.runPersistent(
+    recipe,
+    runOptions,
+    undefined,
+    llmRequestId,
+  );
 }

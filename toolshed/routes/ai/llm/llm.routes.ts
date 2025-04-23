@@ -37,7 +37,7 @@ export const LLMRequestSchema = toZod<LLMRequest>().with({
   stream: z.boolean().optional(),
   mode: z.enum(["json"]).optional(),
   metadata: z.record(z.union([z.string(), z.any()])).optional(),
-  cache: z.boolean(),
+  cache: z.boolean().default(true).optional(),
 });
 
 export const ModelInfoSchema = z.object({

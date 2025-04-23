@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useSyncExternalStore } from "react";
 import { User } from "@/components/User.tsx";
 import { useCell, useNamedCell } from "@/hooks/use-cell.ts";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { DEFAULT_MODEL_NAME } from "@commontools/llm/types";
+import { DEFAULT_MODEL } from "../../../../charm/src/index.ts";
 
 // Define the model options - these can be expanded in the future
 const MODEL_OPTIONS = [
@@ -11,32 +12,60 @@ const MODEL_OPTIONS = [
     value: DEFAULT_MODEL_NAME,
     label: "Default",
     isPreset: true,
-  },
-  { value: "openai:gpt-4.1-nano", label: "Fast", isPreset: true },
-  { value: "google:gemini-2.5-pro", label: "Experimental", isPreset: true },
+  } as const,
+  { value: "openai:gpt-4.1-nano", label: "Fast", isPreset: true } as const,
+  {
+    value: "google:gemini-2.5-pro",
+    label: "Experimental",
+    isPreset: true,
+  } as const,
   // Full model list
   {
     value: "anthropic:claude-3-7-sonnet-latest",
     label: "Claude 3.7 ✨",
     isPreset: false,
-  },
-  { value: "google:gemini-2.5-pro", label: "Gemini 2.5 ✨", isPreset: false },
+  } as const,
+  {
+    value: "google:gemini-2.5-pro",
+    label: "Gemini 2.5 ✨",
+    isPreset: false,
+  } as const,
   {
     value: "anthropic:claude-3-5-sonnet-latest",
     label: "Claude 3.5",
     isPreset: false,
-  },
-  { value: "groq:qwen-qwq-32b", label: "Qwen QwQ 32B", isPreset: false },
+  } as const,
+  {
+    value: "groq:qwen-qwq-32b",
+    label: "Qwen QwQ 32B",
+    isPreset: false,
+  } as const,
   {
     value: "groq:llama-3.3-70b-versatile",
     label: "Llama 3.3 🔥",
     isPreset: false,
-  },
+  } as const,
+  { value: "openai:gpt-4.1", label: "gpt-4.1", isPreset: false } as const,
+  {
+    value: "openai:gpt-4.1-mini",
+    label: "gpt-4.1-mini",
+    isPreset: false,
+  } as const,
+  {
+    value: "openai:gpt-4.1-nano",
+    label: "gpt-4.1-nano",
+    isPreset: false,
+  } as const,
+  {
+    value: "openai:o3-mini-low-latest",
+    label: "o3-mini-low",
+    isPreset: false,
+  } as const,
   {
     value: "groq:llama-4-maverick",
     label: "Llama 4 Maverick",
     isPreset: false,
-  },
+  } as const,
   {
     value: "groq:llama-4-scout",
     label: "Llama 4 Scout",
@@ -53,9 +82,27 @@ const MODEL_OPTIONS = [
     value: "openai:o4-mini-high",
     label: "o4-mini-high",
     isPreset: false,
-  },
-  { value: "google:gemini-2.0-pro", label: "Gemini 2.0", isPreset: false },
-  { value: "perplexity:sonar-pro", label: "Sonar Pro 🌐", isPreset: false },
+  } as const,
+  {
+    value: "google:gemini-2.0-pro",
+    label: "Gemini 2.0",
+    isPreset: false,
+  } as const,
+  {
+    value: "perplexity:sonar-pro",
+    label: "Sonar Pro 🌐",
+    isPreset: false,
+  } as const,
+  {
+    value: "xai:grok-3-mini-latest",
+    label: "Grok 3 Mini",
+    isPreset: false,
+  } as const,
+  {
+    value: "xai:grok-3-latest",
+    label: "Grok 3",
+    isPreset: false,
+  } as const,
 ];
 
 export type LanguageModelId = typeof MODEL_OPTIONS[number]["value"];
@@ -67,24 +114,42 @@ export interface ModelOption {
 }
 
 interface ModelSelectorProps {
-  value: string;
-  onChange: (value: string) => void;
+  value: LanguageModelId;
+  onChange: (value: LanguageModelId) => void;
   size?: "small" | "medium"; // Size variant
   showPresets?: boolean; // Whether to show preset section
   className?: string; // Additional classes
   mapPreview?: boolean; // Whether to map preview model values (think/fast) to actual models
 }
-
 export function useUserPreferredModel() {
-  const { charmManager } = useCharmManager();
-  const space = useMemo(() => charmManager.getSpace(), [charmManager]);
-  const [userPreferredModel, setUserPreferredModel] = useNamedCell(
-    space,
-    "userPreferredModel",
-    { type: "string" },
+  // snapshot reader
+  const getSnapshot = useMemo(() => {
+    return () =>
+      (localStorage.getItem("userPreferredModel") as LanguageModelId) ||
+      DEFAULT_MODEL;
+  }, []);
+
+  // subscribe helper
+  const subscribe = useMemo(() => {
+    return (callback: () => void) => {
+      globalThis.addEventListener("userPreferredModelChanged", callback);
+      return () =>
+        globalThis.removeEventListener("userPreferredModelChanged", callback);
+    };
+  }, []);
+
+  const userPreferredModel = useSyncExternalStore(
+    subscribe,
+    getSnapshot,
+    getSnapshot, // server snapshot - same as client
   );
 
-  return { userPreferredModel, setUserPreferredModel };
+  const setUserPreferredModel = (model: LanguageModelId) => {
+    localStorage.setItem("userPreferredModel", model);
+    globalThis.dispatchEvent(new Event("userPreferredModelChanged"));
+  };
+
+  return { userPreferredModel, setUserPreferredModel } as const;
 }
 
 /**
