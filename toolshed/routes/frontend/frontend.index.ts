@@ -9,6 +9,9 @@ const router = createRouter();
 
 router.use(
   "*",
+  // Setup CORS so that modules imported from sandboxed null-origin iframe are rejected.
+  // Specifically we need this to be able to import ./jumble/public/module/charm/sandbox/bootstrap.js
+  // from sandboxed iframe
   cors({
     origin: "*",
     allowMethods: ["GET", "OPTIONS"],
