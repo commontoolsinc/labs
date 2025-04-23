@@ -14,5 +14,5 @@ export function applyDefaults<T extends Partial<GenerationOptions> | undefined>(
     model: DEFAULT_MODEL_NAME,
     cache: true,
     ...(options || {}),
-  } as T & { modelId: string; cache: boolean };
+  } as T & { model: string; cache: boolean };
 }

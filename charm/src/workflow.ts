@@ -317,7 +317,7 @@ export interface WorkflowForm {
     charmManager: CharmManager;
     permittedWorkflows?: WorkflowType[];
     generationId?: string;
-    modelId?: string;
+    model?: string;
     isComplete: boolean;
     cache: boolean;
     llmRequestId?: string;
@@ -347,7 +347,7 @@ export function createWorkflowForm(
 ): WorkflowForm {
   const {
     input,
-    modelId,
+    model,
     charm,
     generationId,
     charmManager,
@@ -369,7 +369,7 @@ export function createWorkflowForm(
     spellToCast: null,
     meta: {
       isComplete: false,
-      modelId,
+      model,
       generationId: generationId ?? crypto.randomUUID(),
       cache,
       charmManager,

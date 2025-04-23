@@ -223,7 +223,7 @@ export async function classifyWorkflow(
   const response = await new LLMClient().sendRequest({
     system: systemPrompt.text,
     messages: [{ role: "user", content: prompt.text }],
-    model: form.meta.modelId ?? DEFAULT_MODEL_NAME,
+    model: form.meta.model ?? DEFAULT_MODEL_NAME,
     cache: form.meta.cache,
     metadata: {
       context: "workflow",
@@ -345,7 +345,7 @@ export async function generateWorkflowPlan(
   const response = await new LLMClient().sendRequest({
     system: systemPrompt.text,
     messages: [{ role: "user", content: prompt.text }],
-    model: form.meta.modelId ?? DEFAULT_MODEL_NAME,
+    model: form.meta.model ?? DEFAULT_MODEL_NAME,
     cache: form.meta.cache,
     metadata: {
       context: "workflow",
