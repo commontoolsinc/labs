@@ -5,6 +5,7 @@ import {
   Charm,
   CharmManager,
   compileAndRunRecipe,
+  createDataCharm,
   processWorkflow,
   renameCharm,
   WorkflowForm,
@@ -354,17 +355,13 @@ async function handleImportJSON(ctx: CommandContext) {
     if (!title) return;
 
     ctx.setOpen(false);
-    const jsonPrompt = formatJsonImportPrompt(title, data);
-    const form = await processWorkflow(
-      jsonPrompt,
-      ctx.charmManager,
-      {
-        cache: true,
-        dryRun: false,
-      },
-    );
 
-    const newCharm = form.generation?.charm;
+    const newCharm = await createDataCharm(
+      ctx.charmManager,
+      data,
+      undefined,
+      title,
+    );
     if (!newCharm) throw new Error("Failed to create new charm");
 
     navigateToCharm(ctx, newCharm);

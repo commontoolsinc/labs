@@ -7,19 +7,11 @@ import {
 import { getEntityId, setBobbyServerUrl, storage } from "@commontools/runner";
 import { createSession, Identity } from "@commontools/identity";
 import { LLMClient, setLLMUrl } from "@commontools/llm";
-import { processWorkflow } from "@commontools/charm";
+import { createDataCharm, processWorkflow } from "@commontools/charm";
 import { type CharmResult, CommandType, type Step } from "./interfaces.ts";
 import { scenarios } from "./scenarios.ts";
 import { toolshedUrl } from "./env.ts";
 import { llmVerifyCharm } from "./judge.ts";
-import {
-  createJsonSchema,
-  derive,
-  NAME,
-  recipe,
-  UI,
-} from "@commontools/builder";
-import { h } from "@commontools/html";
 import { ensureReportDir, generateReport } from "./report.ts";
 import {
   addErrorListeners,
@@ -140,53 +132,18 @@ async function processCommand(
         throw new Error("Missing data for JSON import.");
       }
 
-      // FIXME(ja): we should move this to a common charm method so that
-      // jumble and seeder can share
-      const schema = step.dataSchema ?? createJsonSchema(step.data);
-      const schemaString = JSON.stringify(schema, null, 2);
-      const result = Object.keys(schema.properties ?? {}).map((key) =>
-        `    ${key}: data.${key},\n`
-      ).join("\n");
-
-      const dataRecipeSrc = `import { h } from "@commontools/html";
-      import { recipe, UI, NAME, derive, type JSONSchema } from "@commontools/builder";
-
-      const schema = ${schemaString};
-
-      export default recipe(schema, schema, (data) => ({
-        [NAME]: "Data Import",
-        [UI]: <div><h2>schema</h2><pre>${
-        schemaString.replaceAll("{", "&#123;")
-          .replaceAll("}", "&#125;")
-          .replaceAll("\n", "<br/>")
-      }</pre></div>,
-        ${result}
-      }));`;
-
-      const dataCharm = await compileAndRunRecipe(
+      const charm = await createDataCharm(
         charmManager,
-        dataRecipeSrc,
-        "data import",
         step.data,
+        step.dataSchema,
+        prompt,
       );
 
-      const form = await processWorkflow(prompt, charmManager, {
-        existingCharm: dataCharm,
-        cache,
-        prefill: {
-          classification: {
-            workflowType: "imagine",
-            confidence: 1.0,
-            reasoning: "hard coded",
-          },
-        },
-      });
-
-      const newCharm = form.generation?.charm;
-      const id = getEntityId(newCharm);
+      const id = getEntityId(charm);
+      console.log(`Charm added from JSON import`, { id });
       if (id) {
         console.log(`Charm added from JSON import: ${id["/"]}`);
-        await verifyCharm(id["/"], prompt);
+        await verifyCharm(id["/"], "shows a jsonschema for " + prompt);
         return id["/"];
       }
       break;
