@@ -81,6 +81,7 @@ export default defineConfig({
     },
     headers: {
       "Service-Worker-Allowed": "/data/",
+      "access-control-allow-origin": "*",
     },
   },
   build: {
