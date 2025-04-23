@@ -31,11 +31,6 @@ export const prefillHtml = `<html>
 <script type="importmap">
 ${JSON.stringify(libraries)}
 </script>
-<script type="module">
-  import * as Babel from 'https://esm.sh/@babel/standalone';
-  window.Babel = Babel;
-</script>
-
 <!-- Bootstrap script that runs first to set up React and utility functions -->
 <script type="module" id="bootstrap" src="${
   libraries.imports["common-tools/charm/sandbox/bootstrap"]
