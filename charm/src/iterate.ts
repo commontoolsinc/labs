@@ -280,7 +280,7 @@ async function singlePhaseCodeGeneration(
       detail: {
         type: "job-update",
         jobId: form.meta.generationId,
-        status: `Generating code and schema ${form.meta.modelId}...`,
+        status: `Generating code and schema ${form.meta.model}...`,
       },
     }),
   );
@@ -291,7 +291,7 @@ async function singlePhaseCodeGeneration(
     title,
     description,
     llmRequestId,
-  } = await generateCodeAndSchema(form, existingSchema, form.meta.modelId);
+  } = await generateCodeAndSchema(form, existingSchema, form.meta.model);
 
   console.log("resultSchema", resultSchema);
 
@@ -363,7 +363,7 @@ async function twoPhaseCodeGeneration(
       detail: {
         type: "job-update",
         jobId: form.meta.generationId,
-        status: `Generating spec and schema ${form.meta.modelId}...`,
+        status: `Generating spec and schema ${form.meta.model}...`,
       },
     }),
   );
@@ -374,7 +374,7 @@ async function twoPhaseCodeGeneration(
     title,
     description,
     plan,
-  } = await generateSpecAndSchema(form, existingSchema, form.meta.modelId);
+  } = await generateSpecAndSchema(form, existingSchema, form.meta.model);
 
   console.log("resultSchema", resultSchema);
 
@@ -420,7 +420,7 @@ async function twoPhaseCodeGeneration(
     schema,
     steps: form.plan?.steps,
   }, {
-    model: form.meta.modelId,
+    model: form.meta.model,
     generationId: form.meta.generationId,
     cache: form.meta.cache,
     space: form.meta.charmManager.getSpaceName(),

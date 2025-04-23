@@ -680,7 +680,7 @@ export async function processWorkflow(
             type: "job-update",
             jobId: form.meta.generationId,
             title: form.input.processedInput,
-            status: `Classifying task ${form.meta.modelId}...`,
+            status: `Classifying task ${form.meta.model}...`,
           },
         }),
       );
@@ -834,7 +834,7 @@ export async function processWorkflow(
             type: "job-update",
             jobId: form.meta.generationId,
             title: form.input.processedInput,
-            status: `Planning task ${form.meta.modelId}...`,
+            status: `Planning task ${form.meta.model}...`,
           },
         }),
       );
@@ -856,7 +856,7 @@ export async function processWorkflow(
             type: "job-update",
             jobId: form.meta.generationId,
             title: form.input.processedInput,
-            status: `Generating charm ${form.meta.modelId}...`,
+            status: `Generating charm ${form.meta.model}...`,
           },
         }),
       );
@@ -958,7 +958,7 @@ export function executeFixWorkflow(
     charmManager,
     form.input.existingCharm!,
     form.plan,
-    form.meta.modelId,
+    form.meta.model,
     form.meta.generationId,
     form.meta.cache,
   );
@@ -981,7 +981,7 @@ export function executeEditWorkflow(
     charmManager,
     form.input.existingCharm!,
     form.plan,
-    form.meta.modelId,
+    form.meta.model,
     form.meta.generationId,
     form.meta.cache,
   );
