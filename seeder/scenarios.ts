@@ -3,11 +3,11 @@ import { CommandType, type Scenario, type Step } from "./interfaces.ts";
 export const scenarios: Scenario[] = [
   {
     name: "2048 Game Long",
+    tags: ["smol"],
     steps: [{
       type: CommandType.New,
       prompt: "a 2048 game",
     }],
-    tags: ["smol"],
   },
   {
     name: "2048 Game Short",
@@ -217,9 +217,10 @@ Hierarchical integrity is maintained as subitems with their Parent items.
   },
   {
     name: "Import JSON Sample",
+    tags: ["import"],
     steps: [{
       type: CommandType.ImportJSON,
-      prompt: "Recipe Collection",
+      prompt: "Recipe collection manager",
       data: {
         "recipes": [
           {
@@ -250,6 +251,5 @@ Hierarchical integrity is maintained as subitems with their Parent items.
         ],
       },
     }],
-    tags: ["import"],
   },
 ];
