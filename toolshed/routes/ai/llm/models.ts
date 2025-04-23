@@ -242,6 +242,7 @@ if (env.CTTS_AI_LLM_GROQ_API_KEY) {
 if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
   const openAIProvider = createOpenAI({
     apiKey: env.CTTS_AI_LLM_OPENAI_API_KEY,
+    compatibility: "strict",
   });
   console.log(" Adding 🤖 openai");
   addModel({

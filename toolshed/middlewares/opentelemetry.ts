@@ -1,7 +1,14 @@
 import { Context, MiddlewareHandler } from "@hono/hono";
 import { context, Span, SpanStatusCode, trace } from "@opentelemetry/api";
+import { getTracerProvider } from "@/lib/otel.ts";
 
-const tracer = trace.getTracer("toolshed-middleware", "1.0.0");
+// Dynamically resolve the tracer so we don't capture the no-op global tracer
+const obtainTracer = () => {
+  const provider = getTracerProvider();
+  return provider
+    ? provider.getTracer("toolshed-middleware", "1.0.0")
+    : trace.getTracer("toolshed-middleware", "1.0.0");
+};
 
 export interface OtelConfig {
   /**
@@ -29,95 +36,88 @@ export function otelTracing(config: OtelConfig = {}): MiddlewareHandler {
   return async (c, next) => {
     const path = c.req.path;
     const method = c.req.method;
+    const route = c.req.routePath || path;
 
-    // Create and configure span
-    const span = tracer.startSpan(`${method} ${path}`);
-    span.setAttribute("http.method", method);
-    span.setAttribute("http.route", path);
-    span.setAttribute("http.target", path);
-    span.setAttribute("http.host", c.req.header("host") || "unknown");
-    span.setAttribute(
-      "http.user_agent",
-      c.req.header("user-agent") || "unknown",
-    );
+    await obtainTracer().startActiveSpan(`${method} ${path}`, async (span) => {
+      span.setAttribute("http.method", method);
+      span.setAttribute("http.route", path + c.req.routePath);
+      span.setAttribute("http.host", c.req.header("host") || "unknown");
+      span.setAttribute(
+        "http.user_agent",
+        c.req.header("user-agent") || "unknown",
+      );
 
-    // Add request ID if it exists in headers
-    const requestId = c.req.header("x-request-id");
-    if (requestId) {
-      span.setAttribute("http.request_id", requestId);
-    }
-
-    // Add custom attributes if configured
-    if (config.additionalAttributes) {
-      Object.entries(config.additionalAttributes).forEach(([key, value]) => {
-        span.setAttribute(key, value);
-      });
-    }
-
-    // Include request body if configured
-    if (config.includeRequestBody) {
-      try {
-        const bodyClone = c.req.raw.clone();
-        const body = await bodyClone.text();
-        if (body) {
-          span.setAttribute("http.request.body", body);
-        }
-      } catch (e) {
-        // Ignore if body can't be parsed
-      }
-    }
-
-    try {
-      // Set the span in context for nested spans
-      await context.with(trace.setSpan(context.active(), span), async () => {
-        // Need to capture response status after next() is called
-        await next();
-      });
-
-      // Capture status code from response if available
-      if (c.res?.status) {
-        span.setAttribute("http.status_code", c.res.status);
+      // Add request ID if it exists in headers
+      const requestId = c.req.header("x-request-id");
+      if (requestId) {
+        span.setAttribute("http.request_id", requestId);
       }
 
-      // Include response body if configured
-      if (config.includeResponseBody && c.res?.body) {
+      // Add custom attributes if configured
+      if (config.additionalAttributes) {
+        Object.entries(config.additionalAttributes).forEach(([key, value]) => {
+          span.setAttribute(key, value);
+        });
+      }
+
+      // Include request body if configured
+      if (config.includeRequestBody) {
         try {
-          // Try to get the response body content
-          const clonedResponse = c.res.clone();
-          const text = await clonedResponse.text();
-          if (text) {
-            span.setAttribute("http.response.body", text);
+          const bodyClone = c.req.raw.clone();
+          const body = await bodyClone.text();
+          if (body) {
+            span.setAttribute("http.request.body", body);
           }
-        } catch (e) {
-          // Ignore if body can't be accessed
+        } catch (_) {
+          /* swallow */
         }
       }
-    } catch (error) {
-      // Handle errors
-      span.setAttribute("error", true);
-      span.setAttribute(
-        "error.message",
-        error instanceof Error ? error.message : String(error),
-      );
-      span.setAttribute(
-        "error.type",
-        error instanceof Error ? error.name : "UnknownError",
-      );
-      span.setStatus({
-        code: SpanStatusCode.ERROR,
-        message: error instanceof Error ? error.message : String(error),
-      });
 
-      if (error instanceof Error && error.stack) {
-        span.setAttribute("error.stack", error.stack);
+      try {
+        // Execute the downstream handlers while this span is active
+        await next();
+
+        // Capture status code from response if available
+        if (c.res?.status) {
+          span.setAttribute("http.status_code", c.res.status);
+        }
+
+        // Include response body if configured
+        if (config.includeResponseBody && c.res?.body) {
+          try {
+            const clonedResponse = c.res.clone();
+            const text = await clonedResponse.text();
+            if (text) {
+              span.setAttribute("http.response.body", text);
+            }
+          } catch (_) {
+            /* swallow */
+          }
+        }
+      } catch (error) {
+        span.setAttribute("error", true);
+        span.setAttribute(
+          "error.message",
+          error instanceof Error ? error.message : String(error),
+        );
+        span.setAttribute(
+          "error.type",
+          error instanceof Error ? error.name : "UnknownError",
+        );
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: error instanceof Error ? error.message : String(error),
+        });
+
+        if (error instanceof Error && error.stack) {
+          span.setAttribute("error.stack", error.stack);
+        }
+
+        throw error;
+      } finally {
+        span.end();
       }
-
-      span.end();
-      throw error;
-    }
-
-    // End the span
-    span.end();
+    });
   };
 }
 
@@ -137,7 +137,7 @@ export async function createSpan<T>(
   attributes: Record<string, string | number | boolean> = {},
 ): Promise<T> {
   const parentSpan = getCurrentSpan();
-  const span = tracer.startSpan(
+  const span = obtainTracer().startSpan(
     name,
     undefined,
     parentSpan ? trace.setSpan(context.active(), parentSpan) : undefined,
