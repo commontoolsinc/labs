@@ -140,6 +140,8 @@ async function processCommand(
         throw new Error("Missing data for JSON import.");
       }
 
+      // FIXME(ja): we should move this to a common charm method so that
+      // jumble and seeder can share
       const schema = createJsonSchema(step.data);
       const schemaString = JSON.stringify(schema, null, 2);
       const result = Object.keys(schema.properties ?? {}).map((key) =>
