@@ -142,7 +142,7 @@ async function processCommand(
 
       // FIXME(ja): we should move this to a common charm method so that
       // jumble and seeder can share
-      const schema = createJsonSchema(step.data);
+      const schema = step.dataSchema ?? createJsonSchema(step.data);
       const schemaString = JSON.stringify(schema, null, 2);
       const result = Object.keys(schema.properties ?? {}).map((key) =>
         `    ${key}: data.${key},\n`
@@ -150,7 +150,7 @@ async function processCommand(
 
       const dataRecipeSrc = `import { h } from "@commontools/html";
       import { recipe, UI, NAME, derive, type JSONSchema } from "@commontools/builder";
-    
+
       const schema = ${schemaString};
 
       export default recipe(schema, schema, (data) => ({

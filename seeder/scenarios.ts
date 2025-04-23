@@ -216,11 +216,31 @@ Hierarchical integrity is maintained as subitems with their Parent items.
     }],
   },
   {
-    name: "Import JSON Sample",
+    name: "Recipe Collection Manager",
     tags: ["import"],
     steps: [{
       type: CommandType.ImportJSON,
-      prompt: "Recipe collection manager",
+      prompt:
+        "Recipe collection manager, the lets the user dream up new recipes using the LLM",
+      dataSchema: {
+        type: "object",
+        properties: {
+          "recipes": {
+            type: "array",
+            items: {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "ingredients": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                },
+                "instructions": { "type": "string" },
+              },
+            },
+          },
+        },
+      },
       data: {
         "recipes": [
           {
