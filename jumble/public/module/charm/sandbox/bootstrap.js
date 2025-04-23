@@ -55,7 +55,7 @@ window.useDoc = function (key) {
   }
 
   // If we have not yet received response from the host we use field from the
-  // sourceData which was preloaded via `subscribeToSource` during initalization
+  // sourceData which was preloaded via `subscribeToSource` during initialization
   // in the `initializeApp`.
   // ⚠️ Please note that value we prefetched still could be out of date because
   // `*` subscription is removed in the iframe-ctx.ts file which could lead
