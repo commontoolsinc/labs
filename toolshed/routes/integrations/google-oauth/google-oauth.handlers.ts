@@ -23,9 +23,11 @@ import {
   fetchUserInfo,
   getBaseUrl,
   persistTokens,
+  tokenToAuthData,
 } from "./google-oauth.utils.ts";
 import { setBGCharm } from "@commontools/background-charm";
 import { type CellLink, storage } from "@commontools/runner";
+import { Tokens } from "@cmd-johnson/oauth2-client";
 
 /**
  * Google OAuth Login Handler
@@ -263,7 +265,7 @@ export const refresh: AppRouteHandler<RefreshRoute> = async (c) => {
     // Create OAuth client
     const client = createOAuthClient(redirectUri);
 
-    let newToken;
+    let newToken: Tokens | undefined;
     try {
       newToken = await client.refreshToken.refresh(refreshToken);
     } catch (error) {
@@ -282,19 +284,13 @@ export const refresh: AppRouteHandler<RefreshRoute> = async (c) => {
       "Refreshed OAuth tokens",
     );
 
+    const authData = tokenToAuthData(newToken);
     // Keep existing refresh token if a new one wasn't provided
-    if (!newToken.refreshToken) {
-      newToken.refreshToken = refreshToken;
+    if (!authData.refreshToken) {
+      authData.refreshToken = refreshToken;
     }
 
-    const resp: AuthData = {
-      ...newToken,
-      expiresAt: newToken.expiresIn
-        ? Date.now() + newToken.expiresIn * 1000
-        : undefined,
-    };
-
-    return createRefreshSuccessResponse(c, "success", resp);
+    return createRefreshSuccessResponse(c, "success", authData);
   } catch (error) {
     logger.error({ error }, "Failed to process refresh request");
     return createRefreshErrorResponse(c, "Failed to process refresh request");
