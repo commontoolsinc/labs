@@ -31,6 +31,7 @@ export type Step = {
   type: CommandType;
   prompt: string;
   data?: any;
+  dataSchema?: any;
 };
 
 export type Scenario = {

@@ -1,13 +1,25 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { castNewRecipe, CharmManager } from "@commontools/charm";
+import {
+  castNewRecipe,
+  CharmManager,
+  compileAndRunRecipe,
+} from "@commontools/charm";
 import { getEntityId, setBobbyServerUrl, storage } from "@commontools/runner";
 import { createSession, Identity } from "@commontools/identity";
-import { formatJsonImportPrompt, LLMClient, setLLMUrl } from "@commontools/llm";
+import { LLMClient, setLLMUrl } from "@commontools/llm";
 import { processWorkflow } from "@commontools/charm";
 import { type CharmResult, CommandType, type Step } from "./interfaces.ts";
 import { scenarios } from "./scenarios.ts";
 import { toolshedUrl } from "./env.ts";
 import { llmVerifyCharm } from "./judge.ts";
+import {
+  createJsonSchema,
+  derive,
+  NAME,
+  recipe,
+  UI,
+} from "@commontools/builder";
+import { h } from "@commontools/html";
 import { ensureReportDir, generateReport } from "./report.ts";
 import {
   addErrorListeners,
@@ -128,14 +140,48 @@ async function processCommand(
         throw new Error("Missing data for JSON import.");
       }
 
-      const jsonPrompt = formatJsonImportPrompt(prompt, step.data);
-      const form = await processWorkflow(
-        jsonPrompt,
+      // FIXME(ja): we should move this to a common charm method so that
+      // jumble and seeder can share
+      const schema = step.dataSchema ?? createJsonSchema(step.data);
+      const schemaString = JSON.stringify(schema, null, 2);
+      const result = Object.keys(schema.properties ?? {}).map((key) =>
+        `    ${key}: data.${key},\n`
+      ).join("\n");
+
+      const dataRecipeSrc = `import { h } from "@commontools/html";
+      import { recipe, UI, NAME, derive, type JSONSchema } from "@commontools/builder";
+
+      const schema = ${schemaString};
+
+      export default recipe(schema, schema, (data) => ({
+        [NAME]: "Data Import",
+        [UI]: <div><h2>schema</h2><pre>${
+        schemaString.replaceAll("{", "&#123;")
+          .replaceAll("}", "&#125;")
+          .replaceAll("\n", "<br/>")
+      }</pre></div>,
+        ${result}
+      }));`;
+
+      const dataCharm = await compileAndRunRecipe(
         charmManager,
-        {
-          cache,
-        },
+        dataRecipeSrc,
+        "data import",
+        step.data,
       );
+
+      const form = await processWorkflow(prompt, charmManager, {
+        existingCharm: dataCharm,
+        cache,
+        prefill: {
+          classification: {
+            workflowType: "imagine",
+            confidence: 1.0,
+            reasoning: "hard coded",
+          },
+        },
+      });
+
       const newCharm = form.generation?.charm;
       const id = getEntityId(newCharm);
       if (id) {
