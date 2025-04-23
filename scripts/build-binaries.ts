@@ -143,11 +143,8 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
       "compile",
       "--output",
       config.distPath("toolshed"),
-      // disable this for a second to see if it fixes it
       "--include",
       config.toolshedFrontendPath(),
-      // "--include",
-      // config.toolshedBootstrapPath(),
       "--include",
       config.toolshedEnvPath(),
       ...config.toolshedFlags,
