@@ -18,7 +18,11 @@ import type {
   Unit,
 } from "@commontools/memory/interface";
 import type { Cancel, EntityId } from "@commontools/runner";
-import { type StorageProvider, type StorageValue } from "./base.ts";
+import {
+  BaseStorageProvider,
+  type StorageProvider,
+  type StorageValue,
+} from "./base.ts";
 import type { MemorySpaceSession } from "@commontools/memory/consumer";
 import { assert, retract, unclaimed } from "@commontools/memory/fact";
 import { fromString, refer } from "merkle-reference";
@@ -789,29 +793,12 @@ export class Provider implements StorageProvider {
     }
   }
 
-  static toEntity(source: EntityId): Entity {
-    if (typeof source["/"] === "string") {
-      return `of:${source["/"]}`;
-    } else if (source.toJSON) {
-      return `of:${source.toJSON()["/"]}`;
-    } else {
-      throw Object.assign(
-        new TypeError(
-          `💣 Got entity ID that is neither merkle reference nor {'/'}`,
-        ),
-        {
-          cause: source,
-        },
-      );
-    }
-  }
-
   sink<T = any>(
     entityId: EntityId,
     callback: (value: StorageValue<T>) => void,
   ): Cancel {
     const { the } = this;
-    const of = Provider.toEntity(entityId);
+    const of = BaseStorageProvider.toEntity(entityId);
     const { workspace } = this;
     const address = { the, of };
     const subscriber = (revision?: Revision<State>) => {
@@ -836,14 +823,14 @@ export class Provider implements StorageProvider {
     schemaContext?: SchemaContext,
   ) {
     const { the } = this;
-    const of = Provider.toEntity(entityId);
+    const of = BaseStorageProvider.toEntity(entityId);
     return this.workspace.load([[{ the, of }, schemaContext]]);
   }
 
   get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
     const entity = this.workspace.get({
       the: this.the,
-      of: Provider.toEntity(entityId),
+      of: BaseStorageProvider.toEntity(entityId),
     });
 
     return entity?.is as StorageValue<T> | undefined;
@@ -865,7 +852,7 @@ export class Provider implements StorageProvider {
 
     const changes = [];
     for (const { entityId, value } of batch) {
-      const of = Provider.toEntity(entityId);
+      const of = BaseStorageProvider.toEntity(entityId);
       const content = JSON.stringify(value);
 
       const current = workspace.get({ the, of });

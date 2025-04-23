@@ -1,5 +1,5 @@
 import type { Cancel, EntityId } from "@commontools/runner";
-import type { Result, Unit } from "@commontools/memory/interface";
+import type { Entity, Result, Unit } from "@commontools/memory/interface";
 import { log } from "../storage.ts";
 import { SchemaContext } from "@commontools/memory/interface";
 
@@ -144,4 +144,21 @@ export abstract class BaseStorageProvider implements StorageProvider {
   abstract destroy(): Promise<void>;
 
   abstract getReplica(): string | undefined;
+
+  static toEntity(source: EntityId): Entity {
+    if (typeof source["/"] === "string") {
+      return `of:${source["/"]}`;
+    } else if (source.toJSON) {
+      return `of:${source.toJSON()["/"]}`;
+    } else {
+      throw Object.assign(
+        new TypeError(
+          `💣 Got entity ID that is neither merkle reference nor {'/'}`,
+        ),
+        {
+          cause: source,
+        },
+      );
+    }
+  }
 }

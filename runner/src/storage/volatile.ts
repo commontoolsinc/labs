@@ -7,7 +7,6 @@ import {
   type Unit,
 } from "./base.ts";
 import { SchemaContext } from "@commontools/memory/interface";
-import { RemoteStorageProvider } from "./remote.ts";
 
 /**
  * Volatile (in-memory) storage provider. Just for testing.
@@ -84,7 +83,7 @@ export class VolatileStorageProvider extends BaseStorageProvider {
           error: {
             name: "ConflictError",
             conflict: {
-              of: RemoteStorageProvider.toEntity(entityId),
+              of: BaseStorageProvider.toEntity(entityId),
               actual: { is: value },
             },
           } as unknown as Error,
