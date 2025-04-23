@@ -608,7 +608,7 @@ export async function processWorkflow(
   let form = createWorkflowForm({
     input,
     charm: options.existingCharm,
-    modelId: options.model,
+    model: options.model,
     cache: options.cache,
     charmManager,
     permittedWorkflows: options.permittedWorkflows,
@@ -958,9 +958,12 @@ export function executeFixWorkflow(
     charmManager,
     form.input.existingCharm!,
     form.plan,
-    form.meta.model,
-    form.meta.generationId,
-    form.meta.cache,
+    {
+      model: form.meta.model,
+      space: form.meta.charmManager.getSpaceName(),
+      cache: form.meta.cache,
+      generationId: form.meta.generationId,
+    },
   );
 }
 
@@ -981,9 +984,12 @@ export function executeEditWorkflow(
     charmManager,
     form.input.existingCharm!,
     form.plan,
-    form.meta.model,
-    form.meta.generationId,
-    form.meta.cache,
+    {
+      model: form.meta.model,
+      space: form.meta.charmManager.getSpaceName(),
+      cache: form.meta.cache,
+      generationId: form.meta.generationId,
+    },
   );
 }
 
