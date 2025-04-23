@@ -2,8 +2,9 @@ import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
 import JSON5 from "json5";
 import { describeCharm } from "./charm-describe.ts";
-import { llmPrompt } from "../index.ts";
+import { applyDefaults, llmPrompt } from "../index.ts";
 import { DEFAULT_MODEL_NAME } from "../types.ts";
+import { GenerationOptions } from "../options.ts";
 
 const SYSTEM_PROMPT = llmPrompt(
   "charm-suggestions-system",
@@ -88,15 +89,22 @@ export async function generateCharmSuggestions(
   code: string,
   schema: string,
   count: number = 3,
-  model: string = DEFAULT_MODEL_NAME,
-  cache: boolean = true,
+  options?: GenerationOptions,
 ): Promise<CharmSuggestion[]> {
+  const optionsWithDefaults = applyDefaults(options);
+  const { model, cache, space, generationId } = optionsWithDefaults;
+
   // FIXME(jake): Currently in jumble, whenever we iterate, we are overwriting
   // the entire spec, so we lose context of the original spec.
   //
   // To work around this, we we first generate a description of the charm, and
   // then we'll use that as a stand-in for the spec.
-  const description = await describeCharm(spec, code, schema, model);
+  const description = await describeCharm(
+    spec,
+    code,
+    schema,
+    optionsWithDefaults,
+  );
 
   const system = hydratePrompt(SYSTEM_PROMPT, {
     SPEC: description,
@@ -123,6 +131,8 @@ export async function generateCharmSuggestions(
       context: "charm-suggestions",
       systemPrompt: system.version,
       userPrompt: prompt.version,
+      space,
+      generationId,
     },
     cache,
   });

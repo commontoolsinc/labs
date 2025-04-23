@@ -7,6 +7,7 @@ import {
 } from "@commontools/llm";
 
 import { extractUserCode, systemMd } from "./static.ts";
+import { applyDefaults, GenerationOptions } from "../../../llm/src/options.ts";
 
 export const RESPONSE_PREFILL = "```javascript\n";
 
@@ -16,17 +17,15 @@ export const buildPrompt = ({
   newSpec,
   schema,
   steps,
-  model,
-  cache = true,
 }: {
   src?: string;
   spec?: string;
   newSpec: string;
   schema: JSONSchema;
   steps?: string[];
-  model?: string;
-  cache: boolean;
-}): LLMRequest => {
+}, options: GenerationOptions): LLMRequest => {
+  const { model, cache, space, generationId } = applyDefaults(options);
+
   const messages: LLMMessage[] = [];
   if (spec && src) {
     messages.push({
@@ -74,12 +73,14 @@ ${steps.map((step, index) => `${index + 1}. ${step}`).join("\n")}`
   });
 
   return {
-    model: model ?? DEFAULT_MODEL_NAME,
+    model: model,
     system: system.text,
     messages,
     stop: "\n```",
     metadata: {
       systemPrompt: system.version,
+      generationId,
+      space,
     },
     cache,
   };

@@ -20,6 +20,7 @@ import { extractUserCode } from "./iframe/static.ts";
 import { formatPromptWithMentions } from "./format.ts";
 import { castNewRecipe } from "./iterate.ts";
 import { VNode } from "@commontools/html";
+import { applyDefaults, GenerationOptions } from "@commontools/llm";
 
 export interface RecipeRecord {
   argumentSchema: JSONSchema; // Schema type from jsonschema
@@ -336,24 +337,24 @@ export interface WorkflowForm {
  * @returns A new workflow form object
  */
 export function createWorkflowForm(
-  {
+  options: {
+    input: string;
+    charm?: Cell<Charm>;
+    generationId?: string;
+    charmManager: CharmManager;
+    permittedWorkflows?: WorkflowType[];
+  } & GenerationOptions,
+): WorkflowForm {
+  const {
     input,
     modelId,
     charm,
     generationId,
     charmManager,
-    cache = true,
+    cache,
     permittedWorkflows,
-  }: {
-    input: string;
-    modelId?: string;
-    charm?: Cell<Charm>;
-    generationId?: string;
-    cache: boolean;
-    charmManager: CharmManager;
-    permittedWorkflows?: WorkflowType[];
-  },
-): WorkflowForm {
+  } = applyDefaults(options);
+
   return {
     input: {
       rawInput: input,

@@ -26,40 +26,39 @@ import {
 } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
 import { IFrameRecipe, WorkflowForm } from "./index.ts";
+import { applyDefaults, GenerationOptions } from "../../llm/src/options.ts";
 
 const llm = new LLMClient();
 
 /**
  * Generate source code for a charm based on its specification, schema, and optional existing source
  */
-export const genSrc = async ({
-  src,
-  spec,
-  newSpec,
-  schema,
-  steps,
-  model,
-  generationId,
-  cache = true,
-}: {
-  src?: string;
-  spec?: string;
-  newSpec: string;
-  schema: JSONSchema;
-  steps?: string[];
-  model?: string;
-  generationId?: string;
-  cache: boolean;
-}): Promise<{ content: string; llmRequestId?: string }> => {
+export const genSrc = async (
+  {
+    src,
+    spec,
+    newSpec,
+    schema,
+    steps,
+  }: {
+    src?: string;
+    spec?: string;
+    newSpec: string;
+    schema: JSONSchema;
+    steps?: string[];
+  },
+  options?: GenerationOptions,
+): Promise<{ content: string; llmRequestId?: string }> => {
+  const optionsWithDefaults = applyDefaults(options);
+  const { model, cache, space, generationId } = optionsWithDefaults;
+
   const request = buildPrompt({
     src,
     spec,
     newSpec,
     schema,
-    model,
     steps,
-    cache,
-  });
+  }, optionsWithDefaults);
 
   globalThis.dispatchEvent(
     new CustomEvent("job-update", {
@@ -78,7 +77,9 @@ export const genSrc = async ({
       context: "workflow",
       workflow: "genSrc",
       generationId,
+      space,
     },
+    cache,
   });
 
   // FIXME(ja): this is a hack to get the prefill to work
@@ -100,10 +101,10 @@ export async function iterate(
   charmManager: CharmManager,
   charm: Cell<Charm>,
   plan: WorkflowForm["plan"],
-  model?: string,
-  generationId?: string,
-  cache = true,
+  options?: GenerationOptions,
 ): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
+  const optionsWithDefaults = applyDefaults(options);
+  const { model, cache, space, generationId } = optionsWithDefaults;
   const { iframe } = getIframeRecipe(charm);
 
   const prevSpec = iframe?.spec;
@@ -118,10 +119,7 @@ export async function iterate(
     newSpec,
     schema: iframe?.argumentSchema || { type: "object" },
     steps: plan?.steps,
-    model,
-    generationId,
-    cache,
-  });
+  }, optionsWithDefaults);
 
   return {
     cell: await generateNewRecipeVersion(
@@ -421,10 +419,13 @@ async function twoPhaseCodeGeneration(
     newSpec,
     schema,
     steps: form.plan?.steps,
+  }, {
+    model: form.meta.modelId,
     generationId: form.meta.generationId,
     cache: form.meta.cache,
-    model: form.meta.modelId,
+    space: form.meta.charmManager.getSpaceName(),
   });
+
   const name = extractTitle(newIFrameSrc, title); // Use the generated title as fallback
   const newRecipeSrc = buildFullRecipe({
     src: newIFrameSrc,

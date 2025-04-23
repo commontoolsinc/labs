@@ -231,6 +231,7 @@ export async function classifyWorkflow(
       generationId: form.meta.generationId,
       systemPrompt: systemPrompt.version,
       userPrompt: prompt.version,
+      space: form.meta.charmManager.getSpaceName(),
     },
   });
 
@@ -352,6 +353,7 @@ export async function generateWorkflowPlan(
       generationId: form.meta.generationId,
       systemPrompt: systemPrompt.version,
       userPrompt: prompt.version,
+      space: form.meta.charmManager.getSpaceName(),
     },
   });
 
