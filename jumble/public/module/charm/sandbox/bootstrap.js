@@ -1,10 +1,6 @@
-// deno-lint-ignore-file
 // Import React immediately
-// @ts-ignore
 import * as React from "react"
-// @ts-ignore
 import * as ReactDOM from "react-dom/client"
-// @ts-ignore
 import * as Babel from "https://esm.sh/@babel/standalone"
 
 // Make React available globally
