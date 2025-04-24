@@ -22,6 +22,7 @@ export {
 export {
   addGithubRecipe,
   castSpellAsCharm,
+  createDataCharm,
   fixItCharm,
   modifyCharm,
   renameCharm,

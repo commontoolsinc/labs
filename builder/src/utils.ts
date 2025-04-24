@@ -8,7 +8,7 @@ import {
   isShadowRef,
   isStatic,
   type JSONSchema,
-  type JSONSchemaWritable,
+  type JSONSchemaMutable,
   type JSONValue,
   makeOpaqueRef,
   markAsStatic,
@@ -238,7 +238,7 @@ export function toJSONWithAliases(
 export function createJsonSchema(
   example: any,
   addDefaults = false,
-): JSONSchemaWritable {
+): JSONSchemaMutable {
   function analyzeType(value: any): JSONSchema {
     if (isCell(value)) {
       if (value.schema) {
@@ -265,7 +265,7 @@ export function createJsonSchema(
     }
 
     const type = typeof value;
-    const schema: JSONSchemaWritable = {};
+    const schema: JSONSchemaMutable = {};
 
     switch (type) {
       case "object":
@@ -320,7 +320,7 @@ export function createJsonSchema(
     return schema;
   }
 
-  return analyzeType(example);
+  return analyzeType(example) as JSONSchemaMutable;
 }
 
 export function moduleToJSON(module: Module) {

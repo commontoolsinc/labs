@@ -20,6 +20,7 @@ import { extractUserCode } from "./iframe/static.ts";
 import { formatPromptWithMentions } from "./format.ts";
 import { castNewRecipe } from "./iterate.ts";
 import { VNode } from "@commontools/html";
+import { applyDefaults, GenerationOptions } from "@commontools/llm";
 
 export interface RecipeRecord {
   argumentSchema: JSONSchema; // Schema type from jsonschema
@@ -316,7 +317,7 @@ export interface WorkflowForm {
     charmManager: CharmManager;
     permittedWorkflows?: WorkflowType[];
     generationId?: string;
-    modelId?: string;
+    model?: string;
     isComplete: boolean;
     cache: boolean;
     llmRequestId?: string;
@@ -336,24 +337,24 @@ export interface WorkflowForm {
  * @returns A new workflow form object
  */
 export function createWorkflowForm(
-  {
+  options: {
+    input: string;
+    charm?: Cell<Charm>;
+    generationId?: string;
+    charmManager: CharmManager;
+    permittedWorkflows?: WorkflowType[];
+  } & GenerationOptions,
+): WorkflowForm {
+  const {
     input,
-    modelId,
+    model,
     charm,
     generationId,
     charmManager,
-    cache = true,
+    cache,
     permittedWorkflows,
-  }: {
-    input: string;
-    modelId?: string;
-    charm?: Cell<Charm>;
-    generationId?: string;
-    cache: boolean;
-    charmManager: CharmManager;
-    permittedWorkflows?: WorkflowType[];
-  },
-): WorkflowForm {
+  } = applyDefaults(options);
+
   return {
     input: {
       rawInput: input,
@@ -368,7 +369,7 @@ export function createWorkflowForm(
     spellToCast: null,
     meta: {
       isComplete: false,
-      modelId,
+      model,
       generationId: generationId ?? crypto.randomUUID(),
       cache,
       charmManager,
@@ -607,7 +608,7 @@ export async function processWorkflow(
   let form = createWorkflowForm({
     input,
     charm: options.existingCharm,
-    modelId: options.model,
+    model: options.model,
     cache: options.cache,
     charmManager,
     permittedWorkflows: options.permittedWorkflows,
@@ -679,7 +680,7 @@ export async function processWorkflow(
             type: "job-update",
             jobId: form.meta.generationId,
             title: form.input.processedInput,
-            status: `Classifying task ${form.meta.modelId}...`,
+            status: `Classifying task ${form.meta.model}...`,
           },
         }),
       );
@@ -833,7 +834,7 @@ export async function processWorkflow(
             type: "job-update",
             jobId: form.meta.generationId,
             title: form.input.processedInput,
-            status: `Planning task ${form.meta.modelId}...`,
+            status: `Planning task ${form.meta.model}...`,
           },
         }),
       );
@@ -855,7 +856,7 @@ export async function processWorkflow(
             type: "job-update",
             jobId: form.meta.generationId,
             title: form.input.processedInput,
-            status: `Generating charm ${form.meta.modelId}...`,
+            status: `Generating charm ${form.meta.model}...`,
           },
         }),
       );
@@ -957,9 +958,12 @@ export function executeFixWorkflow(
     charmManager,
     form.input.existingCharm!,
     form.plan,
-    form.meta.modelId,
-    form.meta.generationId,
-    form.meta.cache,
+    {
+      model: form.meta.model,
+      space: form.meta.charmManager.getSpaceName(),
+      cache: form.meta.cache,
+      generationId: form.meta.generationId,
+    },
   );
 }
 
@@ -980,9 +984,12 @@ export function executeEditWorkflow(
     charmManager,
     form.input.existingCharm!,
     form.plan,
-    form.meta.modelId,
-    form.meta.generationId,
-    form.meta.cache,
+    {
+      model: form.meta.model,
+      space: form.meta.charmManager.getSpaceName(),
+      cache: form.meta.cache,
+      generationId: form.meta.generationId,
+    },
   );
 }
 

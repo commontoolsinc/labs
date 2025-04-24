@@ -1,7 +1,7 @@
 import { hydratePrompt, llmPrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
 import { DEFAULT_MODEL_NAME } from "../types.ts";
-import type { JSONSchema, JSONSchemaWritable } from "@commontools/builder";
+import type { JSONSchema, JSONSchemaMutable } from "@commontools/builder";
 import { WorkflowForm } from "@commontools/charm";
 
 // Prompt for generating schema and specification from a goal
@@ -260,6 +260,7 @@ Based on this goal and the existing schema, please provide a title, description,
       generationId: form.meta.generationId,
       systemPrompt: systemPrompt.version,
       userPrompt: userContent.version,
+      space: form.meta.charmManager.getSpaceName(),
     },
   });
 
@@ -270,8 +271,8 @@ Based on this goal and the existing schema, please provide a title, description,
   const plan = parseTagFromResponse(response.content, "plan");
 
   // If we have an existing schema, use it; otherwise parse the generated schema
-  let resultSchema: JSONSchemaWritable;
-  let argumentSchema: JSONSchemaWritable;
+  let resultSchema: JSONSchemaMutable;
+  let argumentSchema: JSONSchemaMutable;
 
   try {
     const resultSchemaJson = parseTagFromResponse(
@@ -380,6 +381,7 @@ Based on this goal and the existing schema, please provide a title, description,
       generationId: form.meta.generationId,
       systemPrompt: systemPrompt.version,
       userPrompt: userContent.version,
+      space: form.meta.charmManager.getSpaceName(),
     },
     cache: form.meta.cache,
   });
@@ -391,8 +393,8 @@ Based on this goal and the existing schema, please provide a title, description,
   const plan = parseTagFromResponse(response.content, "plan");
 
   // If we have an existing schema, use it; otherwise parse the generated schema
-  let resultSchema: JSONSchemaWritable;
-  let argumentSchema: JSONSchemaWritable;
+  let resultSchema: JSONSchemaMutable;
+  let argumentSchema: JSONSchemaMutable;
 
   try {
     const resultSchemaJson = parseTagFromResponse(

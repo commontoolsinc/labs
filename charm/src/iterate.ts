@@ -9,7 +9,7 @@ import { isObj } from "@commontools/utils";
 import {
   createJsonSchema,
   JSONSchema,
-  type Writable,
+  JSONSchemaMutable,
 } from "@commontools/builder";
 import { Charm, CharmManager, charmSourceCellSchema } from "./manager.ts";
 import {
@@ -19,9 +19,11 @@ import {
 } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import {
+  applyDefaults,
   formatForm,
   generateCodeAndSchema,
   generateSpecAndSchema,
+  type GenerationOptions,
   LLMClient,
 } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
@@ -32,34 +34,32 @@ const llm = new LLMClient();
 /**
  * Generate source code for a charm based on its specification, schema, and optional existing source
  */
-export const genSrc = async ({
-  src,
-  spec,
-  newSpec,
-  schema,
-  steps,
-  model,
-  generationId,
-  cache = true,
-}: {
-  src?: string;
-  spec?: string;
-  newSpec: string;
-  schema: JSONSchema;
-  steps?: string[];
-  model?: string;
-  generationId?: string;
-  cache: boolean;
-}): Promise<{ content: string; llmRequestId?: string }> => {
+export const genSrc = async (
+  {
+    src,
+    spec,
+    newSpec,
+    schema,
+    steps,
+  }: {
+    src?: string;
+    spec?: string;
+    newSpec: string;
+    schema: JSONSchema;
+    steps?: string[];
+  },
+  options?: GenerationOptions,
+): Promise<{ content: string; llmRequestId?: string }> => {
+  const optionsWithDefaults = applyDefaults(options);
+  const { model, cache, space, generationId } = optionsWithDefaults;
+
   const request = buildPrompt({
     src,
     spec,
     newSpec,
     schema,
-    model,
     steps,
-    cache,
-  });
+  }, optionsWithDefaults);
 
   globalThis.dispatchEvent(
     new CustomEvent("job-update", {
@@ -78,7 +78,9 @@ export const genSrc = async ({
       context: "workflow",
       workflow: "genSrc",
       generationId,
+      space,
     },
+    cache,
   });
 
   // FIXME(ja): this is a hack to get the prefill to work
@@ -100,10 +102,10 @@ export async function iterate(
   charmManager: CharmManager,
   charm: Cell<Charm>,
   plan: WorkflowForm["plan"],
-  model?: string,
-  generationId?: string,
-  cache = true,
+  options?: GenerationOptions,
 ): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
+  const optionsWithDefaults = applyDefaults(options);
+  const { model, cache, space, generationId } = optionsWithDefaults;
   const { iframe } = getIframeRecipe(charm);
 
   const prevSpec = iframe?.spec;
@@ -118,10 +120,7 @@ export async function iterate(
     newSpec,
     schema: iframe?.argumentSchema || { type: "object" },
     steps: plan?.steps,
-    model,
-    generationId,
-    cache,
-  });
+  }, optionsWithDefaults);
 
   return {
     cell: await generateNewRecipeVersion(
@@ -237,7 +236,7 @@ export function scrub(data: any): any {
               (key) => [key, {}],
             ),
           ),
-        } as JSONSchema;
+        } satisfies JSONSchema;
         console.log("scrubbed generated schema", scrubbed);
         // Only if we found any properties, return the scrubbed schema
         return Object.keys(scrubbed).length > 0
@@ -282,7 +281,7 @@ async function singlePhaseCodeGeneration(
       detail: {
         type: "job-update",
         jobId: form.meta.generationId,
-        status: `Generating code and schema ${form.meta.modelId}...`,
+        status: `Generating code and schema ${form.meta.model}...`,
       },
     }),
   );
@@ -293,7 +292,7 @@ async function singlePhaseCodeGeneration(
     title,
     description,
     llmRequestId,
-  } = await generateCodeAndSchema(form, existingSchema, form.meta.modelId);
+  } = await generateCodeAndSchema(form, existingSchema, form.meta.model);
 
   console.log("resultSchema", resultSchema);
 
@@ -303,7 +302,7 @@ async function singlePhaseCodeGeneration(
     ...existingSchema,
     title: title || "missing",
     description,
-  } as Writable<JSONSchema>;
+  } as JSONSchemaMutable;
 
   if (!schema.type) {
     schema.type = "object";
@@ -365,7 +364,7 @@ async function twoPhaseCodeGeneration(
       detail: {
         type: "job-update",
         jobId: form.meta.generationId,
-        status: `Generating spec and schema ${form.meta.modelId}...`,
+        status: `Generating spec and schema ${form.meta.model}...`,
       },
     }),
   );
@@ -376,7 +375,7 @@ async function twoPhaseCodeGeneration(
     title,
     description,
     plan,
-  } = await generateSpecAndSchema(form, existingSchema, form.meta.modelId);
+  } = await generateSpecAndSchema(form, existingSchema, form.meta.model);
 
   console.log("resultSchema", resultSchema);
 
@@ -393,7 +392,7 @@ async function twoPhaseCodeGeneration(
     ...existingSchema,
     title: title || "missing",
     description,
-  } as Writable<JSONSchema>;
+  } as JSONSchemaMutable;
 
   if (!schema.type) {
     schema.type = "object";
@@ -421,10 +420,13 @@ async function twoPhaseCodeGeneration(
     newSpec,
     schema,
     steps: form.plan?.steps,
+  }, {
+    model: form.meta.model,
     generationId: form.meta.generationId,
     cache: form.meta.cache,
-    model: form.meta.modelId,
+    space: form.meta.charmManager.getSpaceName(),
   });
+
   const name = extractTitle(newIFrameSrc, title); // Use the generated title as fallback
   const newRecipeSrc = buildFullRecipe({
     src: newIFrameSrc,

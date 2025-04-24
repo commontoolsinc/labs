@@ -1,8 +1,7 @@
-import { OAuth2Client } from "@cmd-johnson/oauth2-client";
+import { OAuth2Client, Tokens } from "@cmd-johnson/oauth2-client";
 import env from "@/env.ts";
 import { type CellLink, getCellFromLink, storage } from "@commontools/runner";
 import { Context } from "@hono/hono";
-import { Identity, Signer } from "@commontools/identity";
 // Types
 export interface AuthData {
   token?: string;
@@ -189,20 +188,11 @@ export async function persistTokens(
     }
 
     // Prepare token data to store
-    const tokenData: AuthData = {
-      token: oauthToken.accessToken,
-      tokenType: oauthToken.tokenType,
-      scope: oauthToken.scope,
-      expiresIn: oauthToken.expiresIn,
-      refreshToken: oauthToken.refreshToken,
-      expiresAt: oauthToken.expiresIn
-        ? Date.now() + oauthToken.expiresIn * 1000
-        : undefined,
-      user: {
-        email: userInfo.email || "",
-        name: userInfo.name || "",
-        picture: userInfo.picture || "",
-      },
+    const tokenData = tokenToAuthData(oauthToken);
+    tokenData.user = {
+      email: userInfo.email || "",
+      name: userInfo.name || "",
+      picture: userInfo.picture || "",
     };
 
     // Set the new tokens to the auth cell
@@ -365,4 +355,18 @@ export function createBackgroundIntegrationErrorResponse(
   status = 400,
 ) {
   return c.json({ success: false, error: errorMessage }, status) as any;
+}
+
+export function tokenToAuthData(token: Tokens | OAuth2Tokens): AuthData {
+  return {
+    token: token.accessToken,
+    tokenType: token.tokenType,
+    scope: token.scope,
+    expiresIn: token.expiresIn,
+    refreshToken: token.refreshToken,
+    // `Tokens` does not have `expiresAt`, and is optional for `OAuth2Tokens`.
+    expiresAt: token.expiresIn
+      ? Date.now() + token.expiresIn * 1000
+      : undefined,
+  };
 }

@@ -1,6 +1,6 @@
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
-import type { JSONSchema, JSONSchemaWritable } from "@commontools/builder";
+import type { JSONSchema, JSONSchemaMutable } from "@commontools/builder";
 import { WorkflowForm } from "@commontools/charm";
 import { systemMdConcise } from "../../../charm/src/iframe/static.ts";
 import { formatForm } from "./spec-and-schema-gen.ts";
@@ -263,6 +263,7 @@ Based on this goal and the existing schema, please provide a title, description,
       generationId: form.meta.generationId,
       systemPrompt: systemPrompt.version,
       userPrompt: userContent.version,
+      space: form.meta.charmManager.getSpaceName(),
     },
   });
 
@@ -272,8 +273,8 @@ Based on this goal and the existing schema, please provide a title, description,
   const sourceCode = parseTagFromResponse(response.content, "source_code");
 
   // If we have an existing schema, use it; otherwise parse the generated schema
-  let resultSchema: JSONSchemaWritable;
-  let argumentSchema: JSONSchemaWritable;
+  let resultSchema: JSONSchemaMutable;
+  let argumentSchema: JSONSchemaMutable;
 
   try {
     const resultSchemaJson = parseTagFromResponse(

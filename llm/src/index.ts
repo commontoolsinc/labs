@@ -11,3 +11,4 @@ export * from "./prompts/spec-and-schema-gen.ts";
 export * from "./prompts/code-and-schema-gen.ts";
 export * from "./prompts/workflow-classification.ts";
 export * from "./prompts/prompting.ts";
+export * from "./options.ts";

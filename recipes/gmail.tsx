@@ -6,6 +6,7 @@ import {
   handler,
   ID,
   JSONSchema,
+  Mutable,
   NAME,
   recipe,
   Schema,
@@ -93,8 +94,8 @@ const EmailSchema = {
   type: "object",
   properties: EmailProperties,
   required: Object.keys(EmailProperties),
-} as const as JSONSchema;
-type Email = Schema<typeof EmailSchema>;
+} as const satisfies JSONSchema;
+type Email = Mutable<Schema<typeof EmailSchema>>;
 
 const AuthSchema = {
   type: "object",
@@ -180,15 +181,16 @@ const refreshAuthToken = async (auth: Cell<Auth>) => {
 
   console.log("refreshAuthToken", body);
 
-  const refresh_response = await fetch(
+  const res = await fetch(
     new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
     {
       method: "POST",
       body: JSON.stringify(body),
     },
-  ).then((res) => res.json());
-
-  return refresh_response.tokenInfo as Auth;
+  );
+  const json = await res.json();
+  const authData = json.tokenInfo as Auth;
+  auth.update(authData);
 };
 
 const googleUpdater = handler(
@@ -214,7 +216,7 @@ const googleUpdater = handler(
 
     console.log("gmailFilterQuery", gmailFilterQuery);
 
-    return fetchEmail(
+    return process(
       state.auth,
       state.settings.limit,
       gmailFilterQuery,
@@ -395,7 +397,39 @@ Accept: application/json
   }).filter((message): message is Email => message !== null);
 }
 
-export async function fetchEmail(
+async function fetchEmail(
+  auth: Cell<Auth>,
+  maxResults: number = 100,
+  gmailFilterQuery: string = "in:INBOX",
+): Promise<object | undefined> {
+  const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${
+    encodeURIComponent(gmailFilterQuery)
+  }&maxResults=${maxResults}`;
+  const query = async (auth: Cell<Auth>): Promise<Response> => {
+    const authData = auth.get();
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${authData.token}`,
+      },
+    });
+    console.log(`${url}: ${res.status} ${res.statusText}`);
+    return res;
+  };
+
+  const res = await query(auth);
+  if (res.status === 200) {
+    return await res.json();
+  } else if (res.status === 401) {
+    await refreshAuthToken(auth);
+    const res = await query(auth);
+    if (res.status === 200) {
+      return await res.json();
+    }
+    throw new Error("Fetching email failed upon reauthorization.");
+  }
+}
+
+export async function process(
   auth: Cell<Auth>,
   maxResults: number = 100,
   gmailFilterQuery: string = "in:INBOX",
@@ -403,17 +437,8 @@ export async function fetchEmail(
     emails: Cell<Email[]>;
   },
 ) {
-  let cur = auth.get();
-
-  if (cur.expiresAt && Date.now() > cur.expiresAt) {
-    const resp = await refreshAuthToken(auth);
-    auth.update(resp);
-    console.log("refresh_data", resp);
-  }
-
-  cur = auth.get();
-
-  if (!cur.token) {
+  const authData = auth.get();
+  if (!authData.token) {
     console.warn("no token");
     return;
   }
@@ -422,21 +447,16 @@ export async function fetchEmail(
     state.emails.get().map((email) => email.id),
   );
 
-  const listResponse = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${
-      encodeURIComponent(gmailFilterQuery)
-    }&maxResults=${maxResults}`,
-    {
-      headers: {
-        Authorization: `Bearer ${cur.token}`,
-      },
-    },
+  const listData = await fetchEmail(
+    auth,
+    maxResults,
+    gmailFilterQuery,
   );
 
-  const listData = await listResponse.json();
-
-  if (!listData.messages || !Array.isArray(listData.messages)) {
-    console.log("No messages found in response");
+  if (
+    !listData || !("messages" in listData) || !Array.isArray(listData.messages)
+  ) {
+    console.log(`No messages found in response: ${JSON.stringify(listData)}`);
     return;
   }
 
@@ -463,7 +483,7 @@ export async function fetchEmail(
     );
 
     try {
-      const emails = await processBatch(batchMessages, cur.token);
+      const emails = await processBatch(batchMessages, authData.token);
 
       // Filter out any duplicates by ID
       const newEmails = emails.filter((email) =>

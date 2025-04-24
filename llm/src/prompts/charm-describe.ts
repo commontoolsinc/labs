@@ -1,5 +1,5 @@
 import { LLMClient } from "../client.ts";
-import { llmPrompt } from "../index.ts";
+import { applyDefaults, GenerationOptions, llmPrompt } from "../index.ts";
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { DEFAULT_MODEL_NAME } from "../types.ts";
 
@@ -50,9 +50,10 @@ export async function describeCharm(
   spec: string,
   code: string,
   schema: string,
-  model: string = DEFAULT_MODEL_NAME,
-  cache: boolean = true,
+  options?: GenerationOptions,
 ) {
+  const { model, cache, space, generationId } = applyDefaults(options);
+
   const system = hydratePrompt(SYSTEM_PROMPT, {
     SPEC: spec,
     CODE: code,
@@ -76,6 +77,8 @@ export async function describeCharm(
       context: "charm-describe",
       systemPrompt: system.version,
       userPrompt: prompt.version,
+      space,
+      generationId,
     },
     cache,
   });

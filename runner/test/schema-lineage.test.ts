@@ -258,7 +258,7 @@ describe("Schema propagation end-to-end example", () => {
             additionalProperties: { asCell: true },
           },
         },
-      } as const as JSONSchema,
+      } as const satisfies JSONSchema,
     );
 
     expect(isCell(c.get().props.value)).toBe(true);

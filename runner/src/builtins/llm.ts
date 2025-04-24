@@ -82,6 +82,7 @@ export function llm(
       model: model ?? DEFAULT_MODEL_NAME,
       metadata: {
         // FIXME(ja): how do we get the context of space/charm id here
+        // bf: I also do not know... this one is tricky
         context: "charm",
       },
       cache: true,

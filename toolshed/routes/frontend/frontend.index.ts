@@ -3,8 +3,20 @@ import * as path from "@std/path";
 import { createRouter } from "@/lib/create-app.ts";
 import { applyProxy } from "./frontend.proxy.ts";
 import { applyStatic } from "./frontend.static.ts";
+import { cors } from "@hono/hono/cors";
 
 const router = createRouter();
+
+router.use(
+  "*",
+  // Setup CORS so that modules imported from sandboxed null-origin iframe are rejected.
+  // Specifically we need this to be able to import ./jumble/public/module/charm/sandbox/bootstrap.js
+  // from sandboxed iframe
+  cors({
+    origin: "*",
+    allowMethods: ["GET", "OPTIONS"],
+  }),
+);
 
 const dirname = import.meta?.dirname;
 if (!dirname) {

@@ -1,9 +1,13 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { castNewRecipe, CharmManager } from "@commontools/charm";
+import {
+  castNewRecipe,
+  CharmManager,
+  compileAndRunRecipe,
+} from "@commontools/charm";
 import { getEntityId, setBobbyServerUrl, storage } from "@commontools/runner";
 import { createSession, Identity } from "@commontools/identity";
-import { formatJsonImportPrompt, LLMClient, setLLMUrl } from "@commontools/llm";
-import { processWorkflow } from "@commontools/charm";
+import { LLMClient, setLLMUrl } from "@commontools/llm";
+import { createDataCharm, processWorkflow } from "@commontools/charm";
 import { type CharmResult, CommandType, type Step } from "./interfaces.ts";
 import { scenarios } from "./scenarios.ts";
 import { toolshedUrl } from "./env.ts";
@@ -18,10 +22,18 @@ import {
   screenshot,
 } from "./jumble.ts";
 
-const { name, tag, "no-cache": noCache } = parseArgs(Deno.args, {
-  string: ["name", "tag"],
-  boolean: ["no-cache"],
-});
+const {
+  name,
+  tag,
+  "no-cache": noCache,
+  model = "anthropic:claude-3-7-sonnet-20250219",
+} = parseArgs(
+  Deno.args,
+  {
+    string: ["name", "tag", "model"],
+    boolean: ["no-cache"],
+  },
+);
 
 const cache = !noCache;
 
@@ -78,6 +90,7 @@ async function processCommand(
       console.log(`Adding: "${prompt}"`);
       const form = await processWorkflow(prompt, charmManager, {
         cache,
+        model,
         prefill: {
           classification: {
             workflowType: "imagine",
@@ -104,6 +117,7 @@ async function processCommand(
       const form = await processWorkflow(prompt, charmManager, {
         existingCharm: charm,
         cache,
+        model,
         prefill: {
           classification: {
             workflowType: "imagine",
@@ -119,6 +133,8 @@ async function processCommand(
         console.log(`Charm added: ${id["/"]}`);
         await verifyCharm(id["/"], prompt);
         return id["/"];
+      } else {
+        console.error(`Charm not added: ${prompt}`);
       }
       break;
     }
@@ -128,19 +144,18 @@ async function processCommand(
         throw new Error("Missing data for JSON import.");
       }
 
-      const jsonPrompt = formatJsonImportPrompt(prompt, step.data);
-      const form = await processWorkflow(
-        jsonPrompt,
+      const charm = await createDataCharm(
         charmManager,
-        {
-          cache,
-        },
+        step.data,
+        step.dataSchema,
+        prompt,
       );
-      const newCharm = form.generation?.charm;
-      const id = getEntityId(newCharm);
+
+      const id = getEntityId(charm);
+      console.log(`Charm added from JSON import`, { id });
       if (id) {
         console.log(`Charm added from JSON import: ${id["/"]}`);
-        await verifyCharm(id["/"], prompt);
+        await verifyCharm(id["/"], "shows a jsonschema for " + prompt);
         return id["/"];
       }
       break;

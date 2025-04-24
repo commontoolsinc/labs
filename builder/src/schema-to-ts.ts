@@ -1,4 +1,4 @@
-import type { JSONSchema } from "./types.ts";
+import type { IDFields, JSONSchema } from "./types.ts";
 import type { Cell, Stream } from "@commontools/runner";
 
 export const schema = <T extends JSONSchema>(schema: T) => schema;
@@ -126,7 +126,8 @@ type ObjectFromProperties<
       : AP extends JSONSchema
         ? { [key: string]: Schema<AP, Root, DecrementDepth<Depth>> }
       : Record<string | number | symbol, never>
-  );
+  )
+  & IDFields;
 
 // Restrict Depth to these numeric literal types
 type DepthLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;

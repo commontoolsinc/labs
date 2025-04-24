@@ -8,8 +8,11 @@ import {
 } from "./query-result-proxy.ts";
 import { idle } from "./scheduler.ts";
 import { isStatic, markAsStatic } from "@commontools/builder";
-import { StorageProvider, StorageValue } from "./storage/base.ts";
-import { RemoteStorageProvider } from "./storage/remote.ts";
+import {
+  BaseStorageProvider,
+  StorageProvider,
+  StorageValue,
+} from "./storage/base.ts";
 import {
   Provider as CachedStorageProvider,
   RemoteStorageProviderSettings,
@@ -22,11 +25,7 @@ import { sleep } from "@commontools/utils/sleep";
 import { TransactionResult } from "@commontools/memory";
 import { refer } from "@commontools/memory/reference";
 import { defer } from "@commontools/utils";
-import {
-  Entity,
-  SchemaContext,
-  SchemaNone,
-} from "@commontools/memory/interface";
+import { SchemaContext, SchemaNone } from "@commontools/memory/interface";
 
 export function log(fn: () => any[]) {
   debug(() => {
@@ -319,18 +318,7 @@ class StorageImpl implements Storage {
         ? "volatile"
         : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "cached");
 
-      if (type === "remote") {
-        if (!this.remoteStorageUrl) {
-          throw new Error("No remote storage URL set");
-        }
-
-        provider = new RemoteStorageProvider({
-          id: this.id,
-          address: new URL("/api/storage/memory", this.remoteStorageUrl!),
-          space: space as `did:${string}:${string}`,
-          as: this.signer,
-        });
-      } else if (type === "volatile") {
+      if (type === "volatile") {
         provider = new VolatileStorageProvider(space);
       } else if (type === "cached") {
         if (!this.remoteStorageUrl) {
@@ -774,7 +762,7 @@ class StorageImpl implements Storage {
           }
 
           const conflictJobIndex = jobs.findIndex((job) =>
-            RemoteStorageProvider.toEntity(job.entityId) === conflict.of
+            BaseStorageProvider.toEntity(job.entityId) === conflict.of
           );
 
           if (conflictJobIndex === -1) {

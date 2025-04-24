@@ -3,11 +3,11 @@ import { CommandType, type Scenario, type Step } from "./interfaces.ts";
 export const scenarios: Scenario[] = [
   {
     name: "2048 Game Long",
+    tags: ["smol"],
     steps: [{
       type: CommandType.New,
       prompt: "a 2048 game",
     }],
-    tags: ["smol"],
   },
   {
     name: "2048 Game Short",
@@ -216,40 +216,65 @@ Hierarchical integrity is maintained as subitems with their Parent items.
     }],
   },
   {
-    name: "Import JSON Sample",
-    steps: [{
-      type: CommandType.ImportJSON,
-      prompt: "Recipe Collection",
-      data: {
-        "recipes": [
-          {
-            "name": "Pasta Carbonara",
-            "ingredients": [
-              "200g spaghetti",
-              "100g pancetta",
-              "2 eggs",
-              "50g pecorino cheese",
-              "50g parmesan",
-              "black pepper",
-            ],
-            "instructions":
-              "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
-          },
-          {
-            "name": "Classic Margherita Pizza",
-            "ingredients": [
-              "pizza dough",
-              "tomato sauce",
-              "fresh mozzarella",
-              "fresh basil",
-              "olive oil",
-            ],
-            "instructions":
-              "Stretch dough. Add sauce, cheese. Bake at high heat. Add basil after cooking.",
-          },
-        ],
-      },
-    }],
+    name: "Recipe Collection Manager",
     tags: ["import"],
+    steps: [
+      {
+        type: CommandType.ImportJSON,
+        prompt: "Family Cookbook",
+        dataSchema: {
+          type: "object",
+          properties: {
+            "recipes": {
+              type: "array",
+              items: {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "ingredients": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                  },
+                  "instructions": { "type": "string" },
+                },
+              },
+            },
+          },
+        },
+        data: {
+          "recipes": [
+            {
+              "name": "Pasta Carbonara",
+              "ingredients": [
+                "200g spaghetti",
+                "100g pancetta",
+                "2 eggs",
+                "50g pecorino cheese",
+                "50g parmesan",
+                "black pepper",
+              ],
+              "instructions":
+                "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
+            },
+            {
+              "name": "Classic Margherita Pizza",
+              "ingredients": [
+                "pizza dough",
+                "tomato sauce",
+                "fresh mozzarella",
+                "fresh basil",
+                "olive oil",
+              ],
+              "instructions":
+                "Stretch dough. Add sauce, cheese. Bake at high heat. Add basil after cooking.",
+            },
+          ],
+        },
+      },
+      {
+        type: CommandType.Extend,
+        prompt: "Allow user to find recipes by common ingredients",
+      },
+    ],
   },
 ];
