@@ -6,10 +6,6 @@ import { sleep } from "@commontools/utils/sleep";
 
 const COMMON_CLI_PATH = path.join(import.meta.dirname!, "../../cli");
 
-export type Mutable<T> = {
-  -readonly [k in keyof T]: T[k];
-};
-
 export const decode = (() => {
   const decoder = new TextDecoder();
   return (buffer: Uint8Array): string => decoder.decode(buffer);
@@ -107,7 +103,7 @@ export const waitForSelectorWithText = async (
   page: Page,
   selector: string,
   text: string,
-  config?: { retry?: number, timeoutMs?: number }
+  config?: { retry?: number; timeoutMs?: number },
 ): Promise<ElementHandle> => {
   const retry = config?.retry ?? 60;
   const timeout = config?.timeoutMs ?? 1000;

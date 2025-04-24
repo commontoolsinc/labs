@@ -12,7 +12,6 @@ import {
   addCharm,
   inspectCharm,
   login,
-  Mutable,
   snapshot,
   waitForSelectorClick,
   waitForSelectorWithText,
@@ -20,6 +19,7 @@ import {
 import * as path from "@std/path";
 import { ensureDirSync } from "@std/fs";
 import { join } from "@std/path";
+import { Mutable } from "@commontools/utils/types";
 
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
   "http://localhost:8000/";

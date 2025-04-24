@@ -4,7 +4,7 @@ import {
   isOpaqueRef,
   isShadowRef,
   type JSONSchema,
-  type JSONSchemaWritable,
+  type JSONSchemaMutable,
   makeOpaqueRef,
   type Module,
   type Node,
@@ -262,7 +262,7 @@ function factoryFromRecipe<T, R>(
 
   if (typeof argumentSchemaArg === "string") {
     // Create a writable schema
-    const writableSchema: JSONSchemaWritable = createJsonSchema(defaults, true);
+    const writableSchema: JSONSchemaMutable = createJsonSchema(defaults, true);
     writableSchema.description = argumentSchemaArg;
 
     delete (writableSchema.properties as any)?.[UI]; // TODO(seefeld): This should be a schema for views

@@ -1,7 +1,7 @@
 {
   "name": "@commontools/utils",
   "tasks": {
-    "test": "echo 'No tests to run.'"
+    "test": "deno test"
   },
   "exports": {
     ".": "./src/index.ts",
@@ -9,6 +9,7 @@
     "./encoding": "./src/encoding.ts",
     "./env": "./src/env.ts",
     "./sleep": "./src/sleep.ts",
+    "./types": "./src/types.ts",
     "./integration": "./src/integration.ts",
     "./zod-utils": "./src/zod-utils.ts"
   }
