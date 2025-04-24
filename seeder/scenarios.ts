@@ -216,7 +216,7 @@ Hierarchical integrity is maintained as subitems with their Parent items.
     }],
   },
   {
-    name: "Recipe Collection Manager",
+    name: "Recipe 1",
     tags: ["import"],
     steps: [
       {
@@ -256,6 +256,402 @@ Hierarchical integrity is maintained as subitems with their Parent items.
         type: CommandType.Extend,
         prompt:
           "Show number of recipes in the collection, and a button to generate a new one using the LLM based on the current names of the recipes.",
+      },
+    ],
+  },
+  {
+    name: "Recipe 2",
+    tags: ["import"],
+    steps: [
+      {
+        type: CommandType.ImportJSON,
+        prompt: "Family Cookbook",
+        data: {
+          "recipes": [
+            {
+              "name": "Pasta Carbonara",
+              "ingredients": [
+                { "quantity": "200g", "name": "spaghetti" },
+                { "quantity": "100g", "name": "pancetta" },
+                { "quantity": "2", "name": "eggs" },
+                { "quantity": "50g", "name": "pecorino cheese" },
+                { "quantity": "50g", "name": "parmesan" },
+                { "quantity": "dash", "name": "black pepper" },
+              ],
+              "instructions":
+                "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
+            },
+            {
+              "name": "Classic Margherita Pizza",
+              "ingredients": [
+                { "quantity": "1", "name": "pizza dough" },
+                { "quantity": "1/2 cup", "name": "tomato sauce" },
+                { "quantity": "1 cup", "name": "fresh mozzarella" },
+                { "quantity": "1 tsp", "name": "fresh basil" },
+                { "quantity": "1 tbsp", "name": "olive oil" },
+              ],
+              "instructions":
+                "Stretch dough. Add sauce, cheese. Bake at high heat. Add basil after cooking.",
+            },
+          ],
+        },
+      },
+      {
+        type: CommandType.Extend,
+        prompt:
+          "Show a heading with the total number of recipes followed by a bulleted list of each recipe's name.",
+      },
+    ],
+  },
+  {
+    name: "Recipe 3",
+    tags: ["import"],
+    steps: [
+      {
+        type: CommandType.ImportJSON,
+        prompt: "Family Cookbook",
+        data: {
+          "recipes": [
+            {
+              "name": "Pasta Carbonara",
+              "ingredients": [
+                { "quantity": "200g", "name": "spaghetti" },
+                { "quantity": "100g", "name": "pancetta" },
+                { "quantity": "2", "name": "eggs" },
+                { "quantity": "50g", "name": "pecorino cheese" },
+                { "quantity": "50g", "name": "parmesan" },
+                { "quantity": "dash", "name": "black pepper" },
+              ],
+              "instructions":
+                "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
+            },
+            {
+              "name": "Classic Margherita Pizza",
+              "ingredients": [
+                { "quantity": "1", "name": "pizza dough" },
+                { "quantity": "1/2 cup", "name": "tomato sauce" },
+                { "quantity": "1 cup", "name": "fresh mozzarella" },
+                { "quantity": "1 tsp", "name": "fresh basil" },
+                { "quantity": "1 tbsp", "name": "olive oil" },
+              ],
+              "instructions":
+                "Stretch dough. Add sauce, cheese. Bake at high heat. Add basil after cooking.",
+            },
+          ],
+        },
+      },
+      {
+        type: CommandType.Extend,
+        prompt:
+          "Render a two-column table listing every recipe and how many ingredients it uses.",
+      },
+    ],
+  },
+  {
+    name: "Recipe 4",
+    tags: ["import"],
+    steps: [
+      {
+        type: CommandType.ImportJSON,
+        prompt: "Family Cookbook",
+        data: {
+          "recipes": [
+            {
+              "name": "Pasta Carbonara",
+              "ingredients": [
+                { "quantity": "200g", "name": "spaghetti" },
+                { "quantity": "100g", "name": "pancetta" },
+                { "quantity": "2", "name": "eggs" },
+                { "quantity": "50g", "name": "pecorino cheese" },
+                { "quantity": "50g", "name": "parmesan" },
+                { "quantity": "dash", "name": "black pepper" },
+              ],
+              "instructions":
+                "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
+            },
+            {
+              "name": "Classic Margherita Pizza",
+              "ingredients": [
+                { "quantity": "1", "name": "pizza dough" },
+                { "quantity": "1/2 cup", "name": "tomato sauce" },
+                { "quantity": "1 cup", "name": "fresh mozzarella" },
+                { "quantity": "1 tsp", "name": "fresh basil" },
+                { "quantity": "1 tbsp", "name": "olive oil" },
+              ],
+              "instructions":
+                "Stretch dough. Add sauce, cheese. Bake at high heat. Add basil after cooking.",
+            },
+          ],
+        },
+      },
+      {
+        type: CommandType.Extend,
+        prompt:
+          "Create a dropdown of recipe names that, when a name is chosen, reveals that recipe's ingredient list.",
+      },
+    ],
+  },
+  {
+    name: "Recipe 5",
+    tags: ["import"],
+    steps: [
+      {
+        type: CommandType.ImportJSON,
+        prompt: "Family Cookbook",
+        data: {
+          "recipes": [
+            {
+              "name": "Pasta Carbonara",
+              "ingredients": [
+                { "quantity": "200g", "name": "spaghetti" },
+                { "quantity": "100g", "name": "pancetta" },
+                { "quantity": "2", "name": "eggs" },
+                { "quantity": "50g", "name": "pecorino cheese" },
+                { "quantity": "50g", "name": "parmesan" },
+                { "quantity": "dash", "name": "black pepper" },
+              ],
+              "instructions":
+                "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
+            },
+            {
+              "name": "Classic Margherita Pizza",
+              "ingredients": [
+                { "quantity": "1", "name": "pizza dough" },
+                { "quantity": "1/2 cup", "name": "tomato sauce" },
+                { "quantity": "1 cup", "name": "fresh mozzarella" },
+                { "quantity": "1 tsp", "name": "fresh basil" },
+                { "quantity": "1 tbsp", "name": "olive oil" },
+              ],
+              "instructions":
+                "Stretch dough. Add sauce, cheese. Bake at high heat. Add basil after cooking.",
+            },
+          ],
+        },
+      },
+      {
+        type: CommandType.Extend,
+        prompt:
+          "Add a button labeled “Random Recipe” that displays one randomly selected recipe's name, ingredients, and instructions.",
+      },
+    ],
+  },
+  {
+    name: "Recipe 6",
+    tags: ["import"],
+    steps: [
+      {
+        type: CommandType.ImportJSON,
+        prompt: "Family Cookbook",
+        data: {
+          "recipes": [
+            {
+              "name": "Pasta Carbonara",
+              "ingredients": [
+                { "quantity": "200g", "name": "spaghetti" },
+                { "quantity": "100g", "name": "pancetta" },
+                { "quantity": "2", "name": "eggs" },
+                { "quantity": "50g", "name": "pecorino cheese" },
+                { "quantity": "50g", "name": "parmesan" },
+                { "quantity": "dash", "name": "black pepper" },
+              ],
+              "instructions":
+                "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
+            },
+            {
+              "name": "Classic Margherita Pizza",
+              "ingredients": [
+                { "quantity": "1", "name": "pizza dough" },
+                { "quantity": "1/2 cup", "name": "tomato sauce" },
+                { "quantity": "1 cup", "name": "fresh mozzarella" },
+                { "quantity": "1 tsp", "name": "fresh basil" },
+                { "quantity": "1 tbsp", "name": "olive oil" },
+              ],
+              "instructions":
+                "Stretch dough. Add sauce, cheese. Bake at high heat. Add basil after cooking.",
+            },
+          ],
+        },
+      },
+      {
+        type: CommandType.Extend,
+        prompt:
+          "Provide a text input to search an ingredient; list all recipes that contain the typed ingredient in real time.",
+      },
+    ],
+  },
+  {
+    name: "Recipe 7",
+    tags: ["import"],
+    steps: [
+      {
+        type: CommandType.ImportJSON,
+        prompt: "Family Cookbook",
+        data: {
+          "recipes": [
+            {
+              "name": "Pasta Carbonara",
+              "ingredients": [
+                { "quantity": "200g", "name": "spaghetti" },
+                { "quantity": "100g", "name": "pancetta" },
+                { "quantity": "2", "name": "eggs" },
+                { "quantity": "50g", "name": "pecorino cheese" },
+                { "quantity": "50g", "name": "parmesan" },
+                { "quantity": "dash", "name": "black pepper" },
+              ],
+              "instructions":
+                "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
+            },
+            {
+              "name": "Classic Margherita Pizza",
+              "ingredients": [
+                { "quantity": "1", "name": "pizza dough" },
+                { "quantity": "1/2 cup", "name": "tomato sauce" },
+                { "quantity": "1 cup", "name": "fresh mozzarella" },
+                { "quantity": "1 tsp", "name": "fresh basil" },
+                { "quantity": "1 tbsp", "name": "olive oil" },
+              ],
+              "instructions":
+                "Stretch dough. Add sauce, cheese. Bake at high heat. Add basil after cooking.",
+            },
+          ],
+        },
+      },
+      {
+        type: CommandType.Extend,
+        prompt:
+          "Display an alphabetical list of every unique ingredient used across all recipes.",
+      },
+    ],
+  },
+  {
+    name: "Recipe 8",
+    tags: ["import"],
+    steps: [
+      {
+        type: CommandType.ImportJSON,
+        prompt: "Family Cookbook",
+        data: {
+          "recipes": [
+            {
+              "name": "Pasta Carbonara",
+              "ingredients": [
+                { "quantity": "200g", "name": "spaghetti" },
+                { "quantity": "100g", "name": "pancetta" },
+                { "quantity": "2", "name": "eggs" },
+                { "quantity": "50g", "name": "pecorino cheese" },
+                { "quantity": "50g", "name": "parmesan" },
+                { "quantity": "dash", "name": "black pepper" },
+              ],
+              "instructions":
+                "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
+            },
+            {
+              "name": "Classic Margherita Pizza",
+              "ingredients": [
+                { "quantity": "1", "name": "pizza dough" },
+                { "quantity": "1/2 cup", "name": "tomato sauce" },
+                { "quantity": "1 cup", "name": "fresh mozzarella" },
+                { "quantity": "1 tsp", "name": "fresh basil" },
+                { "quantity": "1 tbsp", "name": "olive oil" },
+              ],
+              "instructions":
+                "Stretch dough. Add sauce, cheese. Bake at high heat. Add basil after cooking.",
+            },
+          ],
+        },
+      },
+      {
+        type: CommandType.Extend,
+        prompt:
+          "Calculate and show the average number of ingredients per recipe as a single number.",
+      },
+    ],
+  },
+  {
+    name: "Recipe 9",
+    tags: ["import"],
+    steps: [
+      {
+        type: CommandType.ImportJSON,
+        prompt: "Family Cookbook",
+        data: {
+          "recipes": [
+            {
+              "name": "Pasta Carbonara",
+              "ingredients": [
+                { "quantity": "200g", "name": "spaghetti" },
+                { "quantity": "100g", "name": "pancetta" },
+                { "quantity": "2", "name": "eggs" },
+                { "quantity": "50g", "name": "pecorino cheese" },
+                { "quantity": "50g", "name": "parmesan" },
+                { "quantity": "dash", "name": "black pepper" },
+              ],
+              "instructions":
+                "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
+            },
+            {
+              "name": "Classic Margherita Pizza",
+              "ingredients": [
+                { "quantity": "1", "name": "pizza dough" },
+                { "quantity": "1/2 cup", "name": "tomato sauce" },
+                { "quantity": "1 cup", "name": "fresh mozzarella" },
+                { "quantity": "1 tsp", "name": "fresh basil" },
+                { "quantity": "1 tbsp", "name": "olive oil" },
+              ],
+              "instructions":
+                "Stretch dough. Add sauce, cheese. Bake at high heat. Add basil after cooking.",
+            },
+          ],
+        },
+      },
+      {
+        type: CommandType.Extend,
+        prompt:
+          "Generate checkboxes beside each recipe; when any are ticked, show a combined grocery list of the selected recipes' ingredients.",
+      },
+    ],
+  },
+  {
+    name: "Recipe 10",
+    tags: ["import"],
+    steps: [
+      {
+        type: CommandType.ImportJSON,
+        prompt: "Family Cookbook",
+        data: {
+          "recipes": [
+            {
+              "name": "Pasta Carbonara",
+              "ingredients": [
+                { "quantity": "200g", "name": "spaghetti" },
+                { "quantity": "100g", "name": "pancetta" },
+                { "quantity": "2", "name": "eggs" },
+                { "quantity": "50g", "name": "pecorino cheese" },
+                { "quantity": "50g", "name": "parmesan" },
+                { "quantity": "dash", "name": "black pepper" },
+              ],
+              "instructions":
+                "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
+            },
+            {
+              "name": "Classic Margherita Pizza",
+              "ingredients": [
+                { "quantity": "1", "name": "pizza dough" },
+                { "quantity": "1/2 cup", "name": "tomato sauce" },
+                { "quantity": "1 cup", "name": "fresh mozzarella" },
+                { "quantity": "1 tsp", "name": "fresh basil" },
+                { "quantity": "1 tbsp", "name": "olive oil" },
+              ],
+              "instructions":
+                "Stretch dough. Add sauce, cheese. Bake at high heat. Add basil after cooking.",
+            },
+          ],
+        },
+      },
+      {
+        type: CommandType.Extend,
+        prompt:
+          "Make each recipe name a toggle that expands or collapses its cooking instructions.",
       },
     ],
   },
