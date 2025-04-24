@@ -4,6 +4,8 @@ import {
   hydratePrompt,
   type LLMMessage,
   type LLMRequest,
+  applyDefaults,
+  type GenerationOptions
 } from "@commontools/llm";
 
 import { extractUserCode, systemMd } from "./static.ts";
@@ -16,17 +18,15 @@ export const buildPrompt = ({
   newSpec,
   schema,
   steps,
-  model,
-  cache = true,
 }: {
   src?: string;
   spec?: string;
   newSpec: string;
   schema: JSONSchema;
   steps?: string[];
-  model?: string;
-  cache: boolean;
-}): LLMRequest => {
+}, options: GenerationOptions): LLMRequest => {
+  const { model, cache, space, generationId } = applyDefaults(options);
+
   const messages: LLMMessage[] = [];
   if (spec && src) {
     messages.push({
@@ -74,12 +74,14 @@ ${steps.map((step, index) => `${index + 1}. ${step}`).join("\n")}`
   });
 
   return {
-    model: model ?? DEFAULT_MODEL_NAME,
+    model: model,
     system: system.text,
     messages,
     stop: "\n```",
     metadata: {
       systemPrompt: system.version,
+      generationId,
+      space,
     },
     cache,
   };

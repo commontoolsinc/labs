@@ -1,5 +1,6 @@
 import { LLMClient } from "../client.ts";
-import { llmPrompt } from "../index.ts";
+import { GenerationOptions, llmPrompt } from "../index.ts";
+import { applyDefaults } from "../options.ts";
 import { DEFAULT_MODEL_NAME } from "../types.ts";
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { recipeGuidePrompt } from "./recipe-guide.ts";
@@ -84,7 +85,7 @@ export async function fixRecipePrompt(
   code: string,
   schema: string,
   error: string,
-  options: { model?: string; cache?: boolean },
+  options?: GenerationOptions,
 ) {
   const system = hydratePrompt(SYSTEM_PROMPT, {
     SPEC: spec,
@@ -97,8 +98,7 @@ export async function fixRecipePrompt(
     `Please fix the code. Remember to only return the user code portion, not the full template. Do not include any HTML, head, or body tags - just the JavaScript functions.`,
   );
 
-  const model = options.model || DEFAULT_MODEL_NAME;
-  const cache = options.cache || true;
+  const { model, cache, space, generationId } = applyDefaults(options);
 
   const response = await new LLMClient().sendRequest({
     model,
@@ -115,6 +115,8 @@ export async function fixRecipePrompt(
       workflow: "recipe-fix",
       systemPrompt: system.version,
       userPrompt: prompt.version,
+      space,
+      generationId,
     },
     cache,
   });
