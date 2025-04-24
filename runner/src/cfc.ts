@@ -1,10 +1,13 @@
 // This is a simple form of the policy, where you express the basics of the partial ordering.
 
-import { type JSONSchema } from "@commontools/builder";
+import type { JSONSchema, JSONValue } from "@commontools/builder";
+import { isObject } from "../../memory/util.ts";
+import { extractDefaultValues } from "./utils.ts";
 
-// We'll work with the transitive closure of this graph.
+// We'll often work with the transitive closure of this graph.
 // I currently require this to be a DAG, but I could support cycles
-const defaultClassificationPolicy = new Map<string, string[]>([
+// Technically, this is required to be a join-semilattice.
+const classificationLattice = new Map<string, string[]>([
   ["unclassified", []],
   ["confidential", ["unclassified"]],
   ["secret", ["confidential"]],
@@ -133,12 +136,17 @@ class KahnTopologicalSort {
   }
 }
 
+// Class for handling cfc rules.
+// Right now, we just drop this constructor all over, but eventually
+// we'll get our lattice from the user, so we should be constructing
+// these objects where we have access to the user's preferences.
+// These preferences are likely per user/space combination.
 export class ContextualFlowControl {
   private reachable: Map<string, Set<string>>;
   constructor(
-    private policy: Map<string, string[]> = defaultClassificationPolicy,
+    private lattice: Map<string, string[]> = classificationLattice,
   ) {
-    this.reachable = ContextualFlowControl.reachableNodes(policy);
+    this.reachable = ContextualFlowControl.reachableNodes(lattice);
   }
 
   // This could be made more conservative by combining the schema with the object
@@ -180,6 +188,39 @@ export class ContextualFlowControl {
     return joined;
   }
 
+  // Get the least upper bound classification from the schema.
+  public lubSchema(
+    schema: JSONSchema,
+    rootSchema?: JSONSchema,
+    extraClassifications?: Set<string>,
+  ) {
+    const classifications = (extraClassifications !== undefined)
+      ? new Set<string>(extraClassifications)
+      : new Set<string>();
+    return this.joinSchema(classifications, schema, rootSchema);
+  }
+
+  public lub(joined: Set<string>) {
+    return ContextualFlowControl.findLub(this.lattice, joined);
+  }
+
+  // Return a copy of the schema with the least upper bound classifcation.
+  public schemaWithLub<T>(schema: JSONSchema, classification: string) {
+    const joined = new Set<string>([classification]);
+    if (schema.ifc !== undefined) {
+      if (schema.ifc.classification !== undefined) {
+        for (const item of schema.ifc.classification) {
+          joined.add(item);
+        }
+      }
+    }
+    const restrictedSchema = {
+      ...schema,
+      ifc: { classification: [this.lub(joined)] },
+    };
+    return restrictedSchema;
+  }
+
   // Compute the transitive closure, which is the set of all nodes reachable from each node.
   // May want to consider Warshall algorithm for this.
   static reachableNodes<T>(graph: Map<T, T[]>): Map<T, Set<T>> {
@@ -198,6 +239,116 @@ export class ContextualFlowControl {
       reachable.set(from, reachableFrom);
     }
     return reachable;
+  }
+
+  // Return the Least Upper Bound for the set of classification values
+  // This could be almost certainly be more efficient.
+  static findLub<T>(graph: Map<T, T[]>, joined: Set<T>): T {
+    const sortedNodes = ContextualFlowControl.sortedGraphNodes(graph);
+    const reachable = new Map<T, Set<T>>();
+    for (const [from, tos] of sortedNodes.reverse()) {
+      const reachableFrom = new Set<T>();
+      for (const to of tos) {
+        // Add the elements in tos to reachableFrom
+        for (const tutu of reachable.get(to)!) {
+          reachableFrom.add(tutu);
+        }
+        reachableFrom.add(to);
+      }
+      reachableFrom.add(from);
+      if (reachableFrom.isSupersetOf(joined)) {
+        return from;
+      }
+      reachable.set(from, reachableFrom);
+    }
+    throw Error("Improper lattice");
+  }
+
+  schemaAtPath(
+    schema: JSONSchema | boolean,
+    path: string[],
+    extraClassifications?: Set<string>,
+  ): JSONSchema | boolean | undefined {
+    const joined = (extraClassifications !== undefined)
+      ? new Set<string>(extraClassifications)
+      : new Set<string>();
+    let cursor = schema;
+    for (const part of path) {
+      if (typeof cursor === "boolean") {
+        break;
+      } else if ("$ref" in cursor) {
+        // We'd need a rootSchema to make this work
+        // We don't need to do real cycle detection, since the path is limited
+        throw new Error("schemaAtPath doesn't yet support following $ref");
+      } else if (isObject(cursor) && Object.keys(cursor).length == 0) {
+        // wildcard schema -- equivalent to true, but we can add ifc tags
+        break;
+      } else if (cursor.type === "object") {
+        if (cursor.ifc !== undefined && cursor.ifc.classification) {
+          for (const classification of cursor.ifc.classification) {
+            joined.add(classification);
+          }
+        }
+        if (cursor.properties && part in cursor.properties) {
+          const cursorObj = cursor.properties as Record<
+            string,
+            JSONSchema | boolean
+          >;
+          cursor = cursorObj[part];
+          if (typeof cursor === "boolean") {
+            break;
+          } else {
+            const schemaCursor = cursor as JSONSchema;
+            if (
+              schemaCursor.ifc !== undefined &&
+              schemaCursor.ifc?.classification !== undefined
+            ) {
+              for (const classification of schemaCursor.ifc.classification) {
+                joined.add(classification);
+              }
+            }
+          }
+        } else if (cursor.additionalProperties) {
+          cursor = cursor.additionalProperties;
+        } else {
+          return false;
+        }
+      } else if (cursor.type === "array" && cursor.items) {
+        const numericKeyValue = new Number(part).valueOf();
+        if (Number.isInteger(numericKeyValue) && numericKeyValue >= 0) {
+          cursor = cursor.items;
+        } else {
+          return false;
+        }
+      } else {
+        // we can only descend into objects and arrays
+        return false;
+      }
+    }
+    if (
+      typeof cursor === "object" && (cursor as JSONSchema).ifc !== undefined &&
+      (cursor as JSONSchema).ifc?.classification !== undefined
+    ) {
+      for (const classification of cursor.ifc!.classification!) {
+        joined.add(classification);
+      }
+    }
+    if (joined.size === 0) {
+      return cursor; // no need for classification tags
+    }
+    if (typeof cursor === "boolean") {
+      if (!cursor) {
+        return false; // no need to attach tags -- we'll never match
+      }
+      cursor = {}; // change to use the empty object schema, so we can attach ifc.
+    }
+    // If we've encountered any classification tags while walking down the schema, we need to add them to the returned object
+    const existingIfc = cursor.ifc ? cursor.ifc : {};
+    const ifc = {
+      ...existingIfc,
+      classification: [this.lub(joined)],
+    };
+    return { ...cursor, ifc: ifc };
   }
 
   private static sortedGraphNodes<T>(graph: Map<T, T[]>) {

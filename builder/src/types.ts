@@ -34,6 +34,7 @@ export type OpaqueRefMethods<T> = {
   setDefault(value: Opaque<T> | T): void;
   setPreExisting(ref: any): void;
   setName(name: string): void;
+  setSchema(schema: JSONSchema): void;
   connect(node: NodeRef): void;
   export(): {
     cell: OpaqueRef<any>;

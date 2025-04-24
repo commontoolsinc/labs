@@ -55,9 +55,7 @@ const updater = handler(
   UpdaterSchema,
   InputSchema,
   (event, state) => {
-    console.log("updating values", event);
     event.newValues.forEach((value) => {
-      console.log("adding value", value);
       state.values.push(value);
     });
   },

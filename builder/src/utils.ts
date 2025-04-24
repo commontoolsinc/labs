@@ -358,14 +358,68 @@ export function connectInputAndOutputs(node: NodeRef) {
   }
 
   node.inputs = traverseValue(node.inputs, connect);
-  const inputClassification = new Set<string>();
-  if (isOpaqueRef(node.inputs)) {
-    const { schema, rootSchema } = node.inputs.export();
-    if (schema) {
-      console.log("Got node inputs with schema:", schema);
-      cfc.joinSchema(inputClassification, schema, rootSchema);
+  node.outputs = traverseValue(node.outputs, connect);
+
+  // We will also apply ifc tags from inputs to outputs
+  applyInputIfcToOutput(node.inputs, node.outputs);
+}
+
+export function applyArgumentIfcToResult(
+  argumentSchema?: JSONSchema,
+  resultSchema?: JSONSchema,
+): JSONSchema | undefined {
+  if (argumentSchema !== undefined) {
+    const cfc = new ContextualFlowControl();
+    const joined = cfc.joinSchema(new Set(), argumentSchema);
+    return (joined.size !== 0)
+      ? cfc.schemaWithLub(resultSchema ?? {}, cfc.lub(joined))
+      : resultSchema;
+  }
+  return resultSchema;
+}
+
+// If our inputs had any ifc tags, carry them through to our outputs
+export function applyInputIfcToOutput<T, R>(
+  inputs: Opaque<T>,
+  outputs: Opaque<R>,
+) {
+  const collectedClassifications = new Set<string>();
+  const cfc = new ContextualFlowControl();
+  traverseValue(inputs, (item) => {
+    if (isOpaqueRef(item)) {
+      const { schema: inputSchema } = (item as OpaqueRef<T>).export();
+      if (inputSchema !== undefined) {
+        cfc.joinSchema(collectedClassifications, inputSchema);
+      }
+    }
+  });
+  if (collectedClassifications.size !== 0) {
+    attachCfcToOutputs(outputs, cfc, cfc.lub(collectedClassifications));
+  }
+}
+
+// FIXME: Cycle detection
+// Attach ifc classification to OpaqueRef objects reachable
+// from the outputs without descending into OpaqueRef objects
+function attachCfcToOutputs<T, R>(
+  outputs: Opaque<R>,
+  cfc: ContextualFlowControl,
+  lubClassification: string,
+) {
+  if (isOpaqueRef(outputs)) {
+    const exported = (outputs as OpaqueRef<T>).export();
+    const outputSchema = exported.schema ?? {};
+    // we may have fields in the output schema, so incorporate those
+    const joined = cfc.joinSchema(new Set([lubClassification]), outputSchema);
+    const ifc = (outputSchema.ifc !== undefined) ? { ...outputSchema.ifc } : {};
+    ifc.classification = [cfc.lub(joined)];
+    const cfcSchema: JSONSchema = { ...outputSchema, ifc };
+    (outputs as OpaqueRef<T>).setSchema(cfcSchema);
+    return;
+  } else if (typeof outputs === "object" && outputs !== null) {
+    // Descend into objects and arrays
+    for (const [key, value] of Object.entries(outputs)) {
+      attachCfcToOutputs(value, cfc, lubClassification);
     }
   }
-  console.log(inputClassification);
-  node.outputs = traverseValue(node.outputs, connect);
 }

@@ -50,6 +50,7 @@ export function opaqueRef<T>(
     nodes: new Set<NodeRef>(),
     frame: getTopFrame()!,
     name: undefined as string | undefined,
+    schema: schema,
   };
 
   let unsafe_binding: { recipe: Recipe; path: PropertyKey[] } | undefined;
@@ -81,7 +82,6 @@ export function opaqueRef<T>(
           // For root array elements
           childSchema = schema.items;
         }
-
         return createNestedProxy(
           [...path, key],
           key in methods ? methods[key as keyof OpaqueRefMethods<any>] : store,
@@ -99,14 +99,17 @@ export function opaqueRef<T>(
         if (path.length === 0) store.name = name;
         else throw new Error("Can only set name for root opaque ref");
       },
+      setSchema: (newSchema: JSONSchema) => {
+        // This sets the schema of the nested proxy, but does not alter the parent store's
+        // schema. Our schema variable shadows that one.
+        schema = newSchema;
+      },
       connect: (node: NodeRef) => store.nodes.add(node),
-      export: () => ({
-        cell: top,
-        path,
-        schema,
-        rootSchema,
-        ...store,
-      }),
+      export: () => {
+        // Store's schema won't be the same as ours as a nested proxy
+        // We also don't adjust the defaultValue to be relative to our path
+        return { cell: top, path, rootSchema, ...store, schema };
+      },
       unsafe_bindToRecipeAndPath: (
         recipe: Recipe,
         path: PropertyKey[],
