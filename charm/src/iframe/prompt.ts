@@ -4,10 +4,11 @@ import {
   hydratePrompt,
   type LLMMessage,
   type LLMRequest,
+  applyDefaults,
+  type GenerationOptions
 } from "@commontools/llm";
 
 import { extractUserCode, systemMd } from "./static.ts";
-import { applyDefaults, GenerationOptions } from "../../../llm/src/options.ts";
 
 export const RESPONSE_PREFILL = "```javascript\n";
 

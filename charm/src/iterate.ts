@@ -23,10 +23,11 @@ import {
   generateCodeAndSchema,
   generateSpecAndSchema,
   LLMClient,
+  applyDefaults,
+  type GenerationOptions
 } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
 import { IFrameRecipe, WorkflowForm } from "./index.ts";
-import { applyDefaults, GenerationOptions } from "../../llm/src/options.ts";
 
 const llm = new LLMClient();
 
