@@ -71,7 +71,7 @@ onConsole(
       }
     }
     ctx = ctx ?? "Charm(NO_CHARM)";
-    return [ctx, ...args];
+    return [ctx, ...fmtConsole(args)];
   },
 );
 
@@ -188,6 +188,22 @@ async function runCharm(data: RunData): Promise<void> {
 
     throw new Error(errorMessage);
   }
+}
+
+// Logs here are often viewed through observability dashboards
+// that don't render objects well. Attempt to stringify any objects
+// here.
+function fmtConsole(args: any[]): any[] {
+  return [...args].map((value) => {
+    if (value && typeof value === "object") {
+      try {
+        return JSON.stringify(value);
+      } catch (_e) {
+        // satisfy typescript's empty block
+      }
+    }
+    return value;
+  });
 }
 
 self.addEventListener("unhandledrejection", (e: PromiseRejectionEvent) => {
