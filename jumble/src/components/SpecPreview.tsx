@@ -171,10 +171,10 @@ export function SpecPreview({
   // Calculate different heights for different states (more compact)
   const loaderHeight = 60; // Height for just the loader (smaller cube + padding)
   const maxContentHeight = floating
-    ? 360
+    ? 240
     : typeof window !== "undefined"
-    ? Math.min(360, globalThis.innerHeight * 0.5)
-    : 360;
+    ? Math.min(240, globalThis.innerHeight * 0.5)
+    : 240;
 
   // Directly set the height style without animation
   const containerHeight = React.useMemo(() => {
@@ -404,42 +404,6 @@ export function SpecPreview({
         >
           {!visible ? null : (
             <div className="space-y-2 w-full">
-              <div className="flex items-center">
-                <select
-                  className="text-sm py-0.5 px-1 border border-gray-300 rounded bg-white"
-                  value={localWorkflowType || ""}
-                  onChange={(e) => {
-                    const newValue = e.target
-                      .value as WorkflowType;
-                    setLocalWorkflowType(newValue);
-                    onWorkflowChange?.(newValue);
-                  }}
-                >
-                  {Object.values(WORKFLOWS).filter((w) =>
-                    !form.meta?.permittedWorkflows ||
-                    form.meta.permittedWorkflows.includes(w.name)
-                  ).map((workflow) => (
-                    <option
-                      key={workflow.name}
-                      value={workflow.name}
-                    >
-                      {workflow.label}
-                    </option>
-                  ))}
-                </select>
-                {form.classification?.confidence &&
-                  form.classification?.confidence > 0 && (
-                  <span
-                    className={`text-xs ml-2 ${
-                      form.classification?.confidence > 0.7
-                        ? "text-green-700"
-                        : "text-amber-600"
-                    }`}
-                  >
-                    ({confidencePercentage}% confidence)
-                  </span>
-                )}
-              </div>
               {/* Display SpellList when form.results is present */}
               {form.searchResults
                 ? <SpellList />
@@ -458,36 +422,12 @@ export function SpecPreview({
                 )
                 : (
                   <div className="space-y-2 w-full">
-                    <div className="flex items-center gap-2 mb-2">
-                      {/* Add reasoning accordion inline */}
-                      {form.classification?.reasoning && (
-                        <div className="flex-1 ml-2">
-                          <Accordion
-                            title={
-                              <span className="text-xs">
-                                Reasoning
-                              </span>
-                            }
-                            defaultOpen={false}
-                            badge={null}
-                          >
-                            <div className="text-xs text-gray-700 leading-tight max-h-12 overflow-y-auto">
-                              {form.classification?.reasoning}
-                            </div>
-                          </Accordion>
-                        </div>
-                      )}
-                    </div>
-
                     {/* Spec as full-width section */}
                     <div className="w-full space-y-1">
                       {/* Spec Section */}
                       {form.classification?.workflowType !== "fix"
                         ? (
                           <div className="p-1">
-                            <div className="text-sm font-bold mb-1">
-                              SPEC
-                            </div>
                             {/* Show spec when available, otherwise loading */}
                             {form.plan?.spec
                               ? (
@@ -535,85 +475,30 @@ export function SpecPreview({
                               )}
                           </div>
                         )}
+                    </div>
 
-                      {/* Plan and Data Model in 2-column layout */}
-                      <div className="grid grid-cols-2 gap-1">
-                        {/* Plan Section */}
-                        <div className="p-1">
-                          <div className="text-sm font-bold mb-1">
-                            PLAN
+                    <div>
+                      {form.plan?.steps
+                        ? (
+                          <div className="font-mono text-xs whitespace-pre-wrap">
+                            {form.plan?.steps.map((step, index) => (
+                              <div
+                                key={index}
+                                className="py-0.5 border-t first:border-t-0 border-gray-100"
+                              >
+                                <span className="font-bold">
+                                  {index + 1}.
+                                </span>{" "}
+                                {step}
+                              </div>
+                            ))}
                           </div>
-                          {/* Show loading spinner whenever plan is still loading */}
-                          {loading && !form.plan?.spec
-                            ? (
-                              <div className="flex items-center py-1">
-                                <DitheredCube
-                                  animationSpeed={2}
-                                  width={20}
-                                  height={20}
-                                  animate
-                                  cameraZoom={12}
-                                />
-                                <span className="ml-1 text-xs">
-                                  Generating...
-                                </span>
-                                <JobStatusIndicator
-                                  generationId={generationId}
-                                />
-                              </div>
-                            )
-                            : form.plan?.steps
-                            ? (
-                              <div className="font-mono text-xs whitespace-pre-wrap">
-                                {form.plan?.steps.map((step, index) => (
-                                  <div
-                                    key={index}
-                                    className="py-0.5 border-t first:border-t-0 border-gray-100"
-                                  >
-                                    <span className="font-bold">
-                                      {index + 1}.
-                                    </span>{" "}
-                                    {step}
-                                  </div>
-                                ))}
-                              </div>
-                            )
-                            : (
-                              <div className="text-xs text-gray-500 italic">
-                                Plan will appear here...
-                              </div>
-                            )}
-                        </div>
-
-                        {/* Data Model Section (conditional based on availability) */}
-                        <div className="p-1">
-                          <div className="text-sm font-bold mb-1">
-                            DATA MODEL
+                        )
+                        : (
+                          <div className="text-xs text-gray-500 italic">
+                            Plan will appear here...
                           </div>
-                          {form.plan?.dataModel
-                            ? (
-                              <CodeMirror
-                                key="source"
-                                value={form.plan.dataModel || ""}
-                                theme="light"
-                                extensions={[
-                                  javascript(),
-                                  EditorView.lineWrapping,
-                                ]}
-                                style={{
-                                  height: "100%",
-                                  overflow: "auto",
-                                }}
-                                readOnly
-                              />
-                            )
-                            : (
-                              <div className="text-xs text-gray-500 italic">
-                                Data model will appear here...
-                              </div>
-                            )}
-                        </div>
-                      </div>
+                        )}
                     </div>
 
                     {/* Empty state message */}

@@ -1,4 +1,8 @@
-import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
+import {
+  hydratePrompt,
+  parseTagFromResponse,
+  parseTagListFromResponse,
+} from "./prompting.ts";
 import { LLMClient } from "../client.ts";
 import type { JSONSchema } from "@commontools/builder";
 import { WorkflowForm, WorkflowType } from "@commontools/charm";
@@ -28,6 +32,34 @@ Please analyze this request and respond in the following format:
 <reasoning>Brief explanation of your classification</reasoning>
 <enhanced_prompt>Optional improved or clarified version of the user's request</enhanced_prompt>
 `,
+);
+
+export const AUTOCOMPLETE_INTENT_PROMPT = llmPrompt(
+  "autocomplete-intent",
+  `
+  This is Common Tools. Our system uses the concept of a \`Charm\`, a bundle of data + UI + functionality that can be composed, remixed and reused. Charms are smaller than apps, closer to a screen or panel of a web app, but can be networked together into complex systems. Charms communicate using a reactive graph database, any changes to referenced data automatically propagate. The 'behavior' of a Charm is defined by a Recipe, a data flow graph where the nodes are functions.
+
+  Users will come to you with intentions, requests and vague ideas of their needs. Your task is to 'autocomplete' their thought, using your knowledge of the Common Tools system.
+
+  Your Capabilities:
+
+  1. generate a charm
+      - generate a spec, implementation plan and code for a charm that meets the user's requirements
+  2. search for and cast existing spells from the spellbook
+      - a spell can be 'cast' on an existing charm to change its behavior, but re-use the data
+  3. connect referenced data to a new charm
+      - multiple charms can be
+  4. edit an existing charm
+      - code and schema can be modified independently
+      - the user may ask you to fix bugs, add features or tweak the overall concept slightly
+  5. navigate to an existing charm
+      - sometimes, the user will ask for something that already exists, and you should be able to find it quickly
+
+  Generate 1-3 sentence 'expansion' of the user's request in terms of the system capabilities. Start with 'Let's', do not say 'I' or 'me'. It's a joint project with the user. Return your response between <autocomplete></autocomplete> tags.
+
+  When generating a charm, return a <features></features> tag with <feature> tags for each feature, just a few words for each (and an emoji).
+
+  User's request: ({{WORKFLOW_TYPE}}) "{{ INPUT }}"`,
 );
 
 /**
@@ -317,9 +349,8 @@ export async function generateWorkflowPlan(
     existingCode?: string;
   },
 ): Promise<{
-  steps: string[];
-  spec: string;
-  dataModel: string;
+  autocompletion: string;
+  features: string[];
 }> {
   const context = generateCharmContext(
     options?.existingSpec,
@@ -331,69 +362,44 @@ export async function generateWorkflowPlan(
     throw new Error("Workflow classification is required");
   }
 
-  const prompt = hydratePrompt(PLAN_GENERATION_PROMPT, {
-    INPUT: form.input.processedInput,
+  const system = hydratePrompt(AUTOCOMPLETE_INTENT_PROMPT, {
     WORKFLOW_TYPE: form.classification.workflowType.toUpperCase(),
     CONTEXT: context,
   });
 
-  const systemPrompt = llmPrompt(
-    "plan-generation-system",
-    "You are a helpful AI assistant tasked with planning code generation workflows",
-  );
-
   const response = await new LLMClient().sendRequest({
-    system: systemPrompt.text,
-    messages: [{ role: "user", content: prompt.text }],
+    system: system.text,
+    messages: [{ role: "user", content: form.input.processedInput }],
     model: form.meta.model ?? DEFAULT_MODEL_NAME,
     cache: form.meta.cache,
     metadata: {
       context: "workflow",
       workflow: form.classification.workflowType.toLowerCase(),
       generationId: form.meta.generationId,
-      systemPrompt: systemPrompt.version,
       userPrompt: prompt.version,
       space: form.meta.charmManager.getSpaceName(),
+      systemPrompt: system.version,
     },
   });
 
   try {
-    // Parse the steps
-    const stepsText = parseTagFromResponse(response.content, "steps");
-    const steps = stepsText
-      .split(/\d+\.\s+/)
-      .filter((step) => step.trim().length > 0)
-      .map((step) => step.trim());
-
-    // Get individual components for specific usage
-    let specification = "";
-    let dataModel = "";
-    let schema: JSONSchema | undefined;
-    const references = "";
+    let autocompletion = "";
+    let features: string[] = [];
 
     try {
-      specification = parseTagFromResponse(response.content, "specification");
+      autocompletion = parseTagFromResponse(response.content, "autocomplete");
     } catch (e) {
       // Specification might not be available
     }
 
     try {
-      dataModel = parseTagFromResponse(response.content, "data_model");
+      const body = parseTagFromResponse(response.content, "features");
+      features = parseTagListFromResponse(body, "feature");
     } catch (e) {
-      // Data model might not be available
+      // Specification might not be available
     }
 
-    // For fix workflow, if we have an existing spec, use that instead
-    const updatedSpec =
-      form.classification.workflowType === "fix" && options?.existingSpec
-        ? options?.existingSpec
-        : specification;
-
-    return {
-      steps,
-      spec: updatedSpec,
-      dataModel,
-    };
+    return { autocompletion, features };
   } catch (error) {
     console.error(error);
     throw new Error("Error parsing workflow plan response:");

@@ -263,9 +263,8 @@ export async function generatePlan(
   );
 
   return {
-    steps: result.steps,
-    spec: result.spec,
-    dataModel: result.dataModel,
+    spec: result.autocompletion,
+    steps: result.features,
   };
 }
 
