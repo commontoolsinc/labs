@@ -30,10 +30,7 @@ export const prefillHtml = `<html>
 ${JSON.stringify(libraries)}
 </script>
 <!-- Bootstrap script that runs first to set up React and utility functions -->
-<script type="module" id="bootstrap" src="${new URL(
-  "/module/charm/sandbox/bootstrap.js",
-  import.meta.url,
-)}"></script>
+<script type="module" id="bootstrap" src="/module/charm/sandbox/bootstrap.js"></script>
 
 <!-- User code to be transformed by Babel -->
 <script type="text/babel" data-presets="react" id="user-code">
