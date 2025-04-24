@@ -151,8 +151,7 @@ describe("createJsonSchema", () => {
     expect(arraySchema).toEqual({
       type: "array",
       items: {
-        type: "object",
-        properties: {},
+        type: "string",
       },
     });
 
@@ -195,8 +194,7 @@ describe("createJsonSchema", () => {
             array: {
               type: "array",
               items: {
-                type: "object",
-                properties: {},
+                type: "integer",
               },
             },
             value: { type: "null" },
@@ -214,6 +212,7 @@ describe("createJsonSchema", () => {
 
     expect(createJsonSchema([])).toEqual({
       type: "array",
+      items: {},
     });
   });
 
@@ -308,8 +307,7 @@ describe("createJsonSchema", () => {
     expect(schema).toEqual({
       type: "array",
       items: {
-        type: "object",
-        properties: {},
+        type: "integer",
       },
     });
   });
@@ -355,6 +353,62 @@ describe("createJsonSchema", () => {
           properties: {
             darkMode: { type: "boolean" },
             fontSize: { type: "integer" },
+          },
+        },
+      },
+    });
+  });
+
+  it("should handle multidimensional array of numbers", () => {
+    const data = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+    expect(createJsonSchema(data)).toEqual({
+      type: "array",
+      items: {
+        type: "array",
+        items: {
+          type: "integer",
+        },
+      },
+    });
+  });
+
+  it("should handle nested array of strings", () => {
+    const data = {
+      "recipes": [{
+        "name": "Pasta Carbonara",
+        "ingredients": [
+          "200g spaghetti",
+          "100g pancetta",
+          "2 eggs",
+          "50g pecorino cheese",
+          "50g parmesan",
+          "black pepper",
+        ],
+        "instructions":
+          "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
+      }],
+    };
+    expect(createJsonSchema(data)).toEqual({
+      "type": "object",
+      "properties": {
+        "recipes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+              },
+              "ingredients": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                },
+              },
+              "instructions": {
+                "type": "string",
+              },
+            },
           },
         },
       },
