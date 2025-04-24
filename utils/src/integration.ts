@@ -107,7 +107,7 @@ export const waitForSelectorWithText = async (
   page: Page,
   selector: string,
   text: string,
-  config?: { retry?: number, timeoutMs?: number }
+  config?: { retry?: number; timeoutMs?: number },
 ): Promise<ElementHandle> => {
   const retry = config?.retry ?? 60;
   const timeout = config?.timeoutMs ?? 1000;

@@ -4,6 +4,7 @@ import {
   handler,
   JSONSchema,
   lift,
+  Mutable,
   NAME,
   recipe,
   Schema,
@@ -34,8 +35,8 @@ const BGCharmEntrySchema = {
     "lastRun",
     "status",
   ],
-} as const as JSONSchema;
-type BGCharmEntry = Schema<typeof BGCharmEntrySchema>;
+} as const satisfies JSONSchema;
+type BGCharmEntry = Mutable<Schema<typeof BGCharmEntrySchema>>;
 
 const BGCharmEntriesSchema = {
   type: "array",
@@ -49,7 +50,7 @@ const InputSchema = {
   properties: {
     charms: BGCharmEntriesSchema,
   },
-} as const as JSONSchema;
+} as const satisfies JSONSchema;
 
 const ResultSchema = {
   type: "object",

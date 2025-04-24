@@ -158,6 +158,8 @@ export type Writable<T> = {
 
 export type JSONSchemaWritable = Writable<JSONSchema>;
 
+export type Mutable<T> = { -readonly [P in keyof T]: Mutable<T[P]> };
+
 export type Alias = {
   $alias: {
     cell?: any;

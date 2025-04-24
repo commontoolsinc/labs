@@ -23,7 +23,7 @@ const updaterSchema = {
 } as const satisfies JSONSchema;
 
 // Different way to define the same schema, using 'schema' helper function,
-// let's as leave off `as const as JSONSchema`.
+// let's as leave off `as const satisfies JSONSchema` and fields are writable.
 const inputSchema = schema({
   type: "object",
   properties: {

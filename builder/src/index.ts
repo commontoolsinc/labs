@@ -49,6 +49,7 @@ export {
   markAsStatic,
   type Module,
   type ModuleFactory,
+  type Mutable,
   NAME,
   type Node,
   type NodeFactory,
