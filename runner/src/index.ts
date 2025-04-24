@@ -65,3 +65,4 @@ export {
   followAliases,
   maybeGetCellLink,
 } from "./utils.ts";
+export { ContextualFlowControl } from "./cfc.ts";

@@ -20,7 +20,13 @@ import {
   unsafe_originalRecipe,
 } from "./types.ts";
 import { getTopFrame } from "./recipe.ts";
-import { type CellLink, isCell, isCellLink, isDoc } from "@commontools/runner";
+import {
+  type CellLink,
+  ContextualFlowControl,
+  isCell,
+  isCellLink,
+  isDoc,
+} from "@commontools/runner";
 
 /**
  * Traverse a value, _not_ entering cells
@@ -347,6 +353,8 @@ export function recipeToJSON(recipe: Recipe) {
 }
 
 export function connectInputAndOutputs(node: NodeRef) {
+  const cfc = new ContextualFlowControl();
+
   function connect(value: any): any {
     if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
     if (isOpaqueRef(value)) {
@@ -361,4 +369,67 @@ export function connectInputAndOutputs(node: NodeRef) {
 
   node.inputs = traverseValue(node.inputs, connect);
   node.outputs = traverseValue(node.outputs, connect);
+
+  // We will also apply ifc tags from inputs to outputs
+  applyInputIfcToOutput(node.inputs, node.outputs);
+}
+
+export function applyArgumentIfcToResult(
+  argumentSchema?: JSONSchema,
+  resultSchema?: JSONSchema,
+): JSONSchema | undefined {
+  if (argumentSchema !== undefined) {
+    const cfc = new ContextualFlowControl();
+    const joined = cfc.joinSchema(new Set(), argumentSchema);
+    return (joined.size !== 0)
+      ? cfc.schemaWithLub(resultSchema ?? {}, cfc.lub(joined))
+      : resultSchema;
+  }
+  return resultSchema;
+}
+
+// If our inputs had any ifc tags, carry them through to our outputs
+export function applyInputIfcToOutput<T, R>(
+  inputs: Opaque<T>,
+  outputs: Opaque<R>,
+) {
+  const collectedClassifications = new Set<string>();
+  const cfc = new ContextualFlowControl();
+  traverseValue(inputs, (item) => {
+    if (isOpaqueRef(item)) {
+      const { schema: inputSchema } = (item as OpaqueRef<T>).export();
+      if (inputSchema !== undefined) {
+        cfc.joinSchema(collectedClassifications, inputSchema);
+      }
+    }
+  });
+  if (collectedClassifications.size !== 0) {
+    attachCfcToOutputs(outputs, cfc, cfc.lub(collectedClassifications));
+  }
+}
+
+// Attach ifc classification to OpaqueRef objects reachable
+// from the outputs without descending into OpaqueRef objects
+// TODO(@ubik2) Investigate: can we have cycles here?
+function attachCfcToOutputs<T, R>(
+  outputs: Opaque<R>,
+  cfc: ContextualFlowControl,
+  lubClassification: string,
+) {
+  if (isOpaqueRef(outputs)) {
+    const exported = (outputs as OpaqueRef<T>).export();
+    const outputSchema = exported.schema ?? {};
+    // we may have fields in the output schema, so incorporate those
+    const joined = cfc.joinSchema(new Set([lubClassification]), outputSchema);
+    const ifc = (outputSchema.ifc !== undefined) ? { ...outputSchema.ifc } : {};
+    ifc.classification = [cfc.lub(joined)];
+    const cfcSchema: JSONSchema = { ...outputSchema, ifc };
+    (outputs as OpaqueRef<T>).setSchema(cfcSchema);
+    return;
+  } else if (typeof outputs === "object" && outputs !== null) {
+    // Descend into objects and arrays
+    for (const [key, value] of Object.entries(outputs)) {
+      attachCfcToOutputs(value, cfc, lubClassification);
+    }
+  }
 }

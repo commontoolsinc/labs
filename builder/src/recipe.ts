@@ -20,6 +20,8 @@ import {
 } from "./types.ts";
 import { createShadowRef, opaqueRef } from "./opaque-ref.ts";
 import {
+  applyArgumentIfcToResult,
+  applyInputIfcToOutput,
   connectInputAndOutputs,
   createJsonSchema,
   moduleToJSON,
@@ -103,6 +105,8 @@ export function recipe<T, R>(
 
   const outputs = fn!(inputs);
 
+  applyInputIfcToOutput(inputs, outputs);
+
   const result = factoryFromRecipe<T, R>(
     argumentSchema,
     resultSchema,
@@ -173,6 +177,8 @@ function factoryFromRecipe<T, R>(
     });
   inputs = collectCellsAndNodes(inputs);
   outputs = collectCellsAndNodes(outputs);
+
+  applyInputIfcToOutput(inputs, outputs);
 
   // Fill in reasonable names for all cells, where possible:
 
@@ -282,7 +288,8 @@ function factoryFromRecipe<T, R>(
     argumentSchema = argumentSchemaArg;
   }
 
-  const resultSchema: JSONSchema = resultSchemaArg || { type: "object" };
+  const resultSchema =
+    applyArgumentIfcToResult(argumentSchema, resultSchemaArg) || {};
 
   const serializedNodes = Array.from(nodes).map((node) => {
     const module = toJSONWithAliases(node.module, paths) as unknown as Module;

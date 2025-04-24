@@ -35,6 +35,7 @@ export type OpaqueRefMethods<T> = {
   setDefault(value: Opaque<T> | T): void;
   setPreExisting(ref: any): void;
   setName(name: string): void;
+  setSchema(schema: JSONSchema): void;
   connect(node: NodeRef): void;
   export(): {
     cell: OpaqueRef<any>;
@@ -149,6 +150,7 @@ export type JSONSchema = {
   readonly asStream?: boolean;
   readonly anyOf?: readonly JSONSchema[];
   readonly additionalProperties?: Readonly<JSONSchema> | boolean;
+  readonly ifc?: { classification?: string[]; integrity?: string[] }; // temporarily used to assign labels like "confidential"
 };
 
 export { type Mutable };

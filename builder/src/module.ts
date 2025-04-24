@@ -9,9 +9,10 @@ import type {
   OpaqueRef,
   toJSON,
 } from "./types.ts";
-import { isModule } from "./types.ts";
+import { isModule, isOpaqueRef } from "./types.ts";
 import { opaqueRef } from "./opaque-ref.ts";
 import {
+  applyArgumentIfcToResult,
   connectInputAndOutputs,
   moduleToJSON,
   traverseValue,
@@ -26,7 +27,12 @@ export function createNodeFactory<T = any, R = any>(
     ...moduleSpec,
     toJSON: () => moduleToJSON(module),
   };
-
+  // A module with ifc classification on its argument schema should have at least
+  // that value on its result schema
+  module.resultSchema = applyArgumentIfcToResult(
+    module.argumentSchema,
+    module.resultSchema,
+  );
   return Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
     const outputs = opaqueRef<R>();
     const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
