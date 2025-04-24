@@ -9,7 +9,7 @@ import { isObj } from "@commontools/utils";
 import {
   createJsonSchema,
   JSONSchema,
-  type Writable,
+  JSONSchemaMutable,
 } from "@commontools/builder";
 import { Charm, CharmManager, charmSourceCellSchema } from "./manager.ts";
 import {
@@ -19,12 +19,12 @@ import {
 } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import {
+  applyDefaults,
   formatForm,
   generateCodeAndSchema,
   generateSpecAndSchema,
+  type GenerationOptions,
   LLMClient,
-  applyDefaults,
-  type GenerationOptions
 } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
 import { IFrameRecipe, WorkflowForm } from "./index.ts";
@@ -236,7 +236,7 @@ export function scrub(data: any): any {
               (key) => [key, {}],
             ),
           ),
-        } as JSONSchema;
+        } satisfies JSONSchema;
         console.log("scrubbed generated schema", scrubbed);
         // Only if we found any properties, return the scrubbed schema
         return Object.keys(scrubbed).length > 0
@@ -302,7 +302,7 @@ async function singlePhaseCodeGeneration(
     ...existingSchema,
     title: title || "missing",
     description,
-  } as Writable<JSONSchema>;
+  } as JSONSchemaMutable;
 
   if (!schema.type) {
     schema.type = "object";
@@ -392,7 +392,7 @@ async function twoPhaseCodeGeneration(
     ...existingSchema,
     title: title || "missing",
     description,
-  } as Writable<JSONSchema>;
+  } as JSONSchemaMutable;
 
   if (!schema.type) {
     schema.type = "object";

@@ -12,7 +12,7 @@ const argumentSchema = {
     },
   },
   description: "SMOL Counter demo",
-} as JSONSchema;
+} satisfies JSONSchema;
 
 export default recipe(argumentSchema, (data) => ({
   [NAME]: "smol iframe",

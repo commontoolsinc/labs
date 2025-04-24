@@ -6,6 +6,7 @@ import {
   handler,
   ID,
   JSONSchema,
+  Mutable,
   NAME,
   recipe,
   Schema,
@@ -93,8 +94,8 @@ const EmailSchema = {
   type: "object",
   properties: EmailProperties,
   required: Object.keys(EmailProperties),
-} as const as JSONSchema;
-type Email = Schema<typeof EmailSchema>;
+} as const satisfies JSONSchema;
+type Email = Mutable<Schema<typeof EmailSchema>>;
 
 const AuthSchema = {
   type: "object",

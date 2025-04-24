@@ -48,7 +48,7 @@ const MessageSchema = {
     "referenced_message_id",
     "thread_id",
   ],
-} as const as JSONSchema;
+} as const satisfies JSONSchema;
 type MessageSchema = Schema<typeof MessageSchema>;
 
 const InputSchema = {

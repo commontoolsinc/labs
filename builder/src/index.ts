@@ -44,11 +44,12 @@ export {
   isStatic,
   isStreamAlias,
   type JSONSchema,
-  type JSONSchemaWritable,
+  type JSONSchemaMutable,
   type JSONValue,
   markAsStatic,
   type Module,
   type ModuleFactory,
+  type Mutable,
   NAME,
   type Node,
   type NodeFactory,
@@ -67,7 +68,6 @@ export {
   unsafe_originalRecipe,
   unsafe_parentRecipe,
   type UnsafeBinding,
-  type Writable,
 } from "./types.ts";
 export { type Schema, schema } from "./schema-to-ts.ts";
 

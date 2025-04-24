@@ -1,4 +1,5 @@
 import { isObj } from "@commontools/utils";
+import { Mutable } from "@commontools/utils/types";
 
 export const ID: unique symbol = Symbol("ID, unique to the context");
 export const ID_FIELD: unique symbol = Symbol(
@@ -150,13 +151,8 @@ export type JSONSchema = {
   readonly additionalProperties?: Readonly<JSONSchema> | boolean;
 };
 
-export type Writable<T> = {
-  -readonly [P in keyof T]: T[P] extends ReadonlyArray<infer U> ? Writable<U>[]
-    : T[P] extends Readonly<infer U> ? Writable<U>
-    : T[P];
-};
-
-export type JSONSchemaWritable = Writable<JSONSchema>;
+export { type Mutable };
+export type JSONSchemaMutable = Mutable<JSONSchema>;
 
 export type Alias = {
   $alias: {
