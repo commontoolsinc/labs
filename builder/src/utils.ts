@@ -398,9 +398,9 @@ export function applyInputIfcToOutput<T, R>(
   }
 }
 
-// FIXME: Cycle detection
 // Attach ifc classification to OpaqueRef objects reachable
 // from the outputs without descending into OpaqueRef objects
+// TODO(@ubik2) Investigate: can we have cycles here?
 function attachCfcToOutputs<T, R>(
   outputs: Opaque<R>,
   cfc: ContextualFlowControl,
