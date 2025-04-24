@@ -22,10 +22,18 @@ import {
   screenshot,
 } from "./jumble.ts";
 
-const { name, tag, "no-cache": noCache } = parseArgs(Deno.args, {
-  string: ["name", "tag"],
-  boolean: ["no-cache"],
-});
+const {
+  name,
+  tag,
+  "no-cache": noCache,
+  model = "anthropic:claude-3-7-sonnet-20250219",
+} = parseArgs(
+  Deno.args,
+  {
+    string: ["name", "tag", "model"],
+    boolean: ["no-cache"],
+  },
+);
 
 const cache = !noCache;
 
@@ -82,6 +90,7 @@ async function processCommand(
       console.log(`Adding: "${prompt}"`);
       const form = await processWorkflow(prompt, charmManager, {
         cache,
+        model,
         prefill: {
           classification: {
             workflowType: "imagine",
@@ -108,6 +117,7 @@ async function processCommand(
       const form = await processWorkflow(prompt, charmManager, {
         existingCharm: charm,
         cache,
+        model,
         prefill: {
           classification: {
             workflowType: "imagine",
@@ -123,6 +133,8 @@ async function processCommand(
         console.log(`Charm added: ${id["/"]}`);
         await verifyCharm(id["/"], prompt);
         return id["/"];
+      } else {
+        console.error(`Charm not added: ${prompt}`);
       }
       break;
     }
