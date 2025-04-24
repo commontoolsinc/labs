@@ -1,9 +1,5 @@
 import { parseArgs } from "@std/cli/parse-args";
-import {
-  castNewRecipe,
-  CharmManager,
-  compileAndRunRecipe,
-} from "@commontools/charm";
+import { castNewRecipe, CharmManager } from "@commontools/charm";
 import { getEntityId, setBobbyServerUrl, storage } from "@commontools/runner";
 import { createSession, Identity } from "@commontools/identity";
 import { LLMClient, setLLMUrl } from "@commontools/llm";
@@ -12,7 +8,6 @@ import {
   type CharmResult,
   CommandType,
   type ExecutedScenario,
-  type Scenario,
   type Step,
 } from "./interfaces.ts";
 import { scenarios } from "./scenarios.ts";
@@ -122,7 +117,7 @@ async function processCommand(
           },
         },
       });
-      const charm = await castNewRecipe(charmManager, form);
+      const { cell: charm } = await castNewRecipe(charmManager, form);
       const id = getEntityId(charm);
       if (id) {
         console.log(`Charm added: ${id["/"]}`);
@@ -150,8 +145,8 @@ async function processCommand(
         },
       });
 
-      await castNewRecipe(charmManager, form);
-      const id = getEntityId(charm);
+      const { cell: extendedCharm } = await castNewRecipe(charmManager, form);
+      const id = getEntityId(extendedCharm);
       if (id) {
         console.log(`Charm added: ${id["/"]}`);
         await verifyCharm(id["/"], prompt, results);
