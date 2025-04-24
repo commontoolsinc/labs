@@ -222,36 +222,17 @@ Hierarchical integrity is maintained as subitems with their Parent items.
       {
         type: CommandType.ImportJSON,
         prompt: "Family Cookbook",
-        dataSchema: {
-          type: "object",
-          properties: {
-            "recipes": {
-              type: "array",
-              items: {
-                "type": "object",
-                "properties": {
-                  "name": { "type": "string" },
-                  "ingredients": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                  },
-                  "instructions": { "type": "string" },
-                },
-              },
-            },
-          },
-        },
         data: {
           "recipes": [
             {
               "name": "Pasta Carbonara",
               "ingredients": [
-                "200g spaghetti",
-                "100g pancetta",
-                "2 eggs",
-                "50g pecorino cheese",
-                "50g parmesan",
-                "black pepper",
+                { "quantity": "200g", "name": "spaghetti" },
+                { "quantity": "100g", "name": "pancetta" },
+                { "quantity": "2", "name": "eggs" },
+                { "quantity": "50g", "name": "pecorino cheese" },
+                { "quantity": "50g", "name": "parmesan" },
+                { "quantity": "dash", "name": "black pepper" },
               ],
               "instructions":
                 "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
@@ -259,11 +240,11 @@ Hierarchical integrity is maintained as subitems with their Parent items.
             {
               "name": "Classic Margherita Pizza",
               "ingredients": [
-                "pizza dough",
-                "tomato sauce",
-                "fresh mozzarella",
-                "fresh basil",
-                "olive oil",
+                { "quantity": "1", "name": "pizza dough" },
+                { "quantity": "1/2 cup", "name": "tomato sauce" },
+                { "quantity": "1 cup", "name": "fresh mozzarella" },
+                { "quantity": "1 tsp", "name": "fresh basil" },
+                { "quantity": "1 tbsp", "name": "olive oil" },
               ],
               "instructions":
                 "Stretch dough. Add sauce, cheese. Bake at high heat. Add basil after cooking.",
@@ -273,7 +254,8 @@ Hierarchical integrity is maintained as subitems with their Parent items.
       },
       {
         type: CommandType.Extend,
-        prompt: "Allow user to find recipes by common ingredients",
+        prompt:
+          "Show number of recipes in the collection, and a button to generate a new one using the LLM based on the current names of the recipes.",
       },
     ],
   },
