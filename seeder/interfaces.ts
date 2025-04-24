@@ -39,3 +39,8 @@ export type Scenario = {
   steps: Step[];
   tags?: string[];
 };
+
+export interface ExecutedScenario {
+  scenario: Scenario;
+  results: CharmResult[];
+}

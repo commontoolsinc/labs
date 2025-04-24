@@ -1,4 +1,4 @@
-import type { CharmResult, Scenario } from "./interfaces.ts";
+import type { CharmResult, ExecutedScenario, Scenario } from "./interfaces.ts";
 
 export const ensureReportDir = async (name: string) => {
   const reportDir = `results/${name}`;
@@ -58,21 +58,23 @@ function groupResultsByScenario(
 
 export async function generateReport(
   name: string,
-  charmResults: CharmResult[],
+  executedScenarios: ExecutedScenario[],
   toolshedUrl: string,
-  scenarios: Scenario[],
+  allScenarios: Scenario[],
 ) {
   // Calculate overall statistics
-  const totalScenarios = scenarios.length;
-  const totalSteps = charmResults.length;
-  const totalPassed = charmResults.filter((r) => r.status === "PASS").length;
+  const totalScenarios = executedScenarios.length;
+
+  // Flatten all results to calculate overall statistics
+  const allResults: CharmResult[] = executedScenarios.flatMap((es) =>
+    es.results
+  );
+  const totalSteps = allResults.length;
+  const totalPassed = allResults.filter((r) => r.status === "PASS").length;
   const totalFailed = totalSteps - totalPassed;
   const passRate = totalSteps > 0
     ? Math.round((totalPassed / totalSteps) * 100)
     : 0;
-
-  // Calculate statistics per scenario
-  const scenarioGroups = groupResultsByScenario(charmResults, scenarios);
 
   const html = `
   <!DOCTYPE html>
@@ -136,13 +138,17 @@ export async function generateReport(
       </div>
   
       ${
-    Array.from(scenarioGroups).map(
-      ([scenarioIndex, scenarioData], groupIndex) => {
+    executedScenarios.map(
+      (executedScenario, groupIndex) => {
+        const scenarioData = executedScenario.results;
+        const scenarioName = executedScenario.scenario.name ||
+          `Scenario ${groupIndex + 1}`;
+
         const scenarioPassed =
-          scenarioData.results.filter((r) => r.status === "PASS").length;
-        const scenarioFailed = scenarioData.results.length - scenarioPassed;
-        const scenarioPassRate = scenarioData.results.length > 0
-          ? Math.round((scenarioPassed / scenarioData.results.length) * 100)
+          scenarioData.filter((r) => r.status === "PASS").length;
+        const scenarioFailed = scenarioData.length - scenarioPassed;
+        const scenarioPassRate = scenarioData.length > 0
+          ? Math.round((scenarioPassed / scenarioData.length) * 100)
           : 0;
         const headerBgColor = scenarioPassRate >= 80
           ? "bg-blue-600"
@@ -155,7 +161,7 @@ export async function generateReport(
           groupIndex * 0.1
         }s">
             <div class="${headerBgColor} text-white py-3 px-5 rounded-t-lg shadow-md flex justify-between items-center">
-              <h2 class="text-xl font-semibold">${scenarioData.name}</h2>
+              <h2 class="text-xl font-semibold">${scenarioName}</h2>
               <div class="flex items-center space-x-2">
                 <span class="bg-white text-green-700 px-2 py-1 rounded-md text-sm">${scenarioPassed} ✓</span>
                 <span class="bg-white text-red-700 px-2 py-1 rounded-md text-sm">${scenarioFailed} ✗</span>
@@ -165,7 +171,7 @@ export async function generateReport(
             <div class="bg-white p-5 rounded-b-lg shadow-md">
               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 ${
-          scenarioData.results.map((result, index) => {
+          scenarioData.map((result, index) => {
             const relativePath = result.screenshotPath.replace(
               `results/`,
               "./",

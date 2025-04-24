@@ -8,7 +8,13 @@ import { getEntityId, setBobbyServerUrl, storage } from "@commontools/runner";
 import { createSession, Identity } from "@commontools/identity";
 import { LLMClient, setLLMUrl } from "@commontools/llm";
 import { createDataCharm, processWorkflow } from "@commontools/charm";
-import { type CharmResult, CommandType, type Step } from "./interfaces.ts";
+import {
+  type CharmResult,
+  CommandType,
+  type ExecutedScenario,
+  type Scenario,
+  type Step,
+} from "./interfaces.ts";
 import { scenarios } from "./scenarios.ts";
 import { toolshedUrl } from "./env.ts";
 import { llmVerifyCharm } from "./judge.ts";
@@ -56,32 +62,49 @@ const charmManager = new CharmManager(
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const charmResults: CharmResult[] = [];
+// Track executed scenarios and steps
+const executedScenarios: ExecutedScenario[] = [];
+
 async function processPrompts(tag: string | undefined) {
-  let promptCount = 0;
+  let stepCount = 0;
   console.log(`Processing prompts...`);
 
   for (const scenario of scenarios) {
     if (tag && (scenario.tags === undefined || !scenario.tags.includes(tag))) {
       continue;
     }
+
+    const executedScenario: ExecutedScenario = {
+      scenario,
+      results: [],
+    };
+    executedScenarios.push(executedScenario);
+
     await goto(toolshedUrl);
     await sleep(1000);
-    let lastCharmId: string | undefined = undefined;
+    let lastCharmId: string | undefined;
     for (const step of scenario.steps) {
-      promptCount++;
-      const newCharmId = await processCommand(step, lastCharmId, cache);
+      stepCount++;
+      const newCharmId = await processCommand(
+        step,
+        lastCharmId,
+        cache,
+        executedScenario.results,
+      );
       if (newCharmId) {
         lastCharmId = newCharmId;
       }
     }
   }
-  console.log(`Successfully processed ${promptCount} prompts.`);
+  console.log(`Processed ${stepCount} steps.`);
 }
 
 async function processCommand(
   step: Step,
   lastCharmId: string | undefined,
   cache = true,
+  results: CharmResult[] = [],
 ): Promise<string | undefined> {
   const { type, prompt } = step;
 
@@ -103,7 +126,7 @@ async function processCommand(
       const id = getEntityId(charm);
       if (id) {
         console.log(`Charm added: ${id["/"]}`);
-        await verifyCharm(id["/"], prompt);
+        await verifyCharm(id["/"], prompt, results);
         return id["/"];
       }
       break;
@@ -131,7 +154,7 @@ async function processCommand(
       const id = getEntityId(charm);
       if (id) {
         console.log(`Charm added: ${id["/"]}`);
-        await verifyCharm(id["/"], prompt);
+        await verifyCharm(id["/"], prompt, results);
         return id["/"];
       } else {
         console.error(`Charm not added: ${prompt}`);
@@ -155,7 +178,7 @@ async function processCommand(
       console.log(`Charm added from JSON import`, { id });
       if (id) {
         console.log(`Charm added from JSON import: ${id["/"]}`);
-        await verifyCharm(id["/"], "shows a jsonschema for " + prompt);
+        await verifyCharm(id["/"], "shows a jsonschema for " + prompt, results);
         return id["/"];
       }
       break;
@@ -166,9 +189,11 @@ async function processCommand(
   }
 }
 
-const charmResults: CharmResult[] = [];
-
-async function verifyCharm(id: string, prompt: string): Promise<string> {
+async function verifyCharm(
+  id: string,
+  prompt: string,
+  results: CharmResult[] = [],
+): Promise<string> {
   // FIXME(ja): can we navigate without causing a page reload?
   await goto(`/${name!}/${id}`);
   addErrorListeners();
@@ -178,13 +203,15 @@ async function verifyCharm(id: string, prompt: string): Promise<string> {
   await screenshot(id, screenshotPath);
   const errors = await checkForErrors();
   if (errors.length > 0) {
-    charmResults.push({
+    const result = {
       id,
       prompt,
       screenshotPath,
       status: "FAIL",
       summary: `Errors: ${errors.join("\n")}`,
-    });
+    };
+    results.push(result);
+    charmResults.push(result);
     return `Error: ${errors.join("\n")}`;
   }
 
@@ -193,13 +220,15 @@ async function verifyCharm(id: string, prompt: string): Promise<string> {
 
   // Parse the verdict and add to results
   const parsedVerdict = JSON.parse(verdict);
-  charmResults.push({
+  const result = {
     id,
     prompt,
     screenshotPath,
     status: parsedVerdict.result,
     summary: parsedVerdict.summary,
-  });
+  };
+  results.push(result);
+  charmResults.push(result);
 
   return verdict;
 }
@@ -208,9 +237,7 @@ try {
   await login(name);
   await processPrompts(tag);
   await ensureReportDir(name);
-  await generateReport(name, charmResults, toolshedUrl, scenarios);
-} catch (e) {
-  console.error(e);
+  await generateReport(name, executedScenarios, toolshedUrl, scenarios);
 } finally {
   await sleep(100);
   await browser.close();
