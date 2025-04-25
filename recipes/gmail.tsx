@@ -174,24 +174,220 @@ const updateLimit = handler({
   state.limit.set(parseInt(detail?.value ?? "100") || 0);
 });
 
-const refreshAuthToken = async (auth: Cell<Auth>) => {
-  const body = {
-    refreshToken: auth.get().refreshToken,
-  };
+interface GmailClientConfig {
+  // How many times the client will retry after an HTTP failure
+  retries?: number;
+  // In milliseconds, the delay between making any subsequent requests due to failure.
+  delay?: number;
+  // In milliseconds, the amount to permanently increment to the `delay` on every 429 response.
+  delayIncrement?: number;
+}
 
-  console.log("refreshAuthToken", body);
+class GmailClient {
+  private auth: Cell<Auth>;
+  private retries: number;
+  private delay: number;
+  private delayIncrement: number;
 
-  const res = await fetch(
-    new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
-    {
-      method: "POST",
-      body: JSON.stringify(body),
-    },
-  );
-  const json = await res.json();
-  const authData = json.tokenInfo as Auth;
-  auth.update(authData);
-};
+  constructor(
+    auth: Cell<Auth>,
+    { retries = 3, delay = 1000, delayIncrement = 100 }: GmailClientConfig = {},
+  ) {
+    this.auth = auth;
+    this.retries = retries;
+    this.delay = delay;
+    this.delayIncrement = delayIncrement;
+  }
+
+  private async refreshAuth() {
+    const body = {
+      refreshToken: this.auth.get().refreshToken,
+    };
+
+    console.log("refreshAuthToken", body);
+
+    const res = await fetch(
+      new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+    if (!res.ok) {
+      throw new Error("Could not acquired a refresh token.");
+    }
+    const json = await res.json();
+    const authData = json.tokenInfo as Auth;
+    this.auth.update(authData);
+  }
+
+  async fetchEmail(
+    maxResults: number = 100,
+    gmailFilterQuery: string = "in:INBOX",
+  ): Promise<any[]> {
+    const url = new URL(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${
+        encodeURIComponent(gmailFilterQuery)
+      }&maxResults=${maxResults}`,
+    );
+
+    const res = await this.googleRequest(url);
+    const json = await res.json();
+    if (
+      !json || !("messages" in json) || !Array.isArray(json.messages)
+    ) {
+      console.log(`No messages found in response: ${JSON.stringify(json)}`);
+      return [];
+    }
+    return json.messages;
+  }
+
+  async fetchBatch(
+    messages: { id: string }[],
+  ): Promise<any[]> {
+    const boundary = `batch_${Math.random().toString(36).substring(2)}`;
+    console.log("Processing batch with boundary", boundary);
+
+    const batchBody = messages.map((message, index) => `
+--${boundary}
+Content-Type: application/http
+Content-ID: <batch-${index}+${message.id}>
+
+GET /gmail/v1/users/me/messages/${message.id}?format=full
+Authorization: Bearer $PLACEHOLDER
+Accept: application/json
+
+`).join("") + `--${boundary}--`;
+
+    console.log("Sending batch request for", messages.length, "messages");
+
+    const batchResponse = await this.googleRequest(
+      new URL(
+        "https://gmail.googleapis.com/batch/gmail/v1",
+      ),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": `multipart/mixed; boundary=${boundary}`,
+        },
+        body: batchBody,
+      },
+    );
+
+    const responseText = await batchResponse.text();
+    console.log("Received batch response of length:", responseText.length);
+
+    const HTTP_RES_REGEX = /HTTP\/\d\.\d (\d\d\d) ([^\n]*)/;
+    const parts = responseText.split(`--batch_`)
+      .slice(1, -1)
+      .map((part) => {
+        const httpResIndex = part.search(HTTP_RES_REGEX);
+        const httpResMatch = part.match(HTTP_RES_REGEX);
+        let httpStatus = httpResMatch && httpResMatch.length >= 2
+          ? Number(httpResMatch[1])
+          : 0;
+        const httpMessage = httpResMatch && httpResMatch.length >= 3
+          ? httpResMatch[2]
+          : "";
+        try {
+          const jsonStart = part.indexOf(`\n{`);
+          if (jsonStart === -1) return null;
+          // If we have an HTTP status, ensure its a successful one,
+          // Otherwise ignore.
+          if (httpResIndex > 0) {
+            // If we have an HTTP status for this part, ensure it's not
+            // in the JSON data and that it's OK
+            if (jsonStart <= httpResIndex) {
+              httpStatus = 0;
+            }
+            if (httpStatus > 0 && httpStatus >= 400) {
+              console.warn(
+                `Non-successful HTTP status code (${httpStatus}) returned in multipart response: ${httpMessage}`,
+              );
+              return null;
+            }
+          }
+          const jsonContent = part.slice(jsonStart).trim();
+          return JSON.parse(jsonContent);
+        } catch (error) {
+          console.error("Error parsing part:", error);
+          return null;
+        }
+      })
+      .filter((part) => part !== null);
+
+    console.log("Found", parts.length, "parts in response");
+    return parts;
+  }
+
+  private async googleRequest(
+    url: URL,
+    _options?: RequestInit,
+    _retries?: number,
+  ): Promise<Response> {
+    const token = this.auth.get().token;
+    if (!token) {
+      throw new Error("No authorization token.");
+    }
+
+    const retries = _retries ?? this.retries;
+    const options = _options ?? {};
+    options.headers = new Headers(options.headers);
+    options.headers.set("Authorization", `Bearer ${token}`);
+
+    if (options.body && typeof options.body === "string") {
+      // Rewrite the authorization in the body here incase reauth was necessary
+      options.body = options.body.replace(
+        /Authorization: Bearer [^\n]*/g,
+        `Authorization: Bearer ${token}`,
+      );
+    }
+
+    const res = await fetch(url, options);
+    let { ok, status, statusText } = res;
+
+    // Batch requests expect a text response on success, but upon error, we get a 200 status code
+    // with error details in the json response.
+    if (options.method === "POST") {
+      // `body` can only be consumed once. Clone the body before consuming as json.
+      try {
+        const json = await res.clone().json();
+        if (json?.error?.code) {
+          ok = false;
+          status = json.error.code;
+          statusText = json.error?.message;
+        }
+      } catch (e) {
+        // If parsing as json failed, then this is probably a real 200 scenario
+      }
+    }
+
+    // Allow all 2xx status
+    if (ok) {
+      console.log(`${url}: ${status} ${statusText}`);
+      return res;
+    }
+
+    console.warn(
+      `${url}: ${status} ${statusText}`,
+      `Remaining retries: ${retries}`,
+    );
+    if (retries === 0) {
+      throw new Error("Too many failed attempts.");
+    }
+
+    await sleep(this.delay);
+
+    if (status === 401) {
+      await this.refreshAuth();
+    } else if (status === 429) {
+      this.delay += this.delayIncrement;
+      console.log(`Incrementing delay to ${this.delay}`);
+      await sleep(this.delay);
+    }
+    return this.googleRequest(url, _options, retries - 1);
+  }
+}
 
 const googleUpdater = handler(
   {},
@@ -250,58 +446,9 @@ function getHeader(headers: any[], name: string): string {
   return header ? header.value : "";
 }
 
-async function processBatch(
-  messages: { id: string }[],
-  accessToken: string,
-): Promise<Email[]> {
-  const boundary = `batch_${Math.random().toString(36).substring(2)}`;
-  console.log("Processing batch with boundary", boundary);
-
-  const batchBody = messages.map((message, index) => `
---${boundary}
-Content-Type: application/http
-Content-ID: <batch-${index}+${message.id}>
-
-GET /gmail/v1/users/me/messages/${message.id}?format=full
-Authorization: Bearer ${accessToken}
-Accept: application/json
-
-`).join("") + `--${boundary}--`;
-
-  console.log("Sending batch request for", messages.length, "messages");
-
-  const batchResponse = await fetch(
-    "https://gmail.googleapis.com/batch/gmail/v1",
-    {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${accessToken}`,
-        "Content-Type": `multipart/mixed; boundary=${boundary}`,
-      },
-      body: batchBody,
-    },
-  );
-
-  const responseText = await batchResponse.text();
-  console.log("Received batch response of length:", responseText.length);
-
-  const parts = responseText.split(`--batch_`)
-    .slice(1, -1)
-    .map((part) => {
-      try {
-        const jsonStart = part.indexOf("\n{");
-        if (jsonStart === -1) return null;
-        const jsonContent = part.slice(jsonStart).trim();
-        return JSON.parse(jsonContent);
-      } catch (error) {
-        console.error("Error parsing part:", error);
-        return null;
-      }
-    })
-    .filter((part) => part !== null);
-
-  console.log("Found", parts.length, "parts in response");
-
+function messageToEmail(
+  parts: any[],
+): Email[] {
   return parts.map((messageData) => {
     try {
       if (!messageData.payload?.headers) {
@@ -390,43 +537,14 @@ Accept: application/json
         htmlContent,
         markdownContent,
       };
-    } catch (error) {
-      console.error("Error processing message part:", error);
+    } catch (error: any) {
+      console.error(
+        "Error processing message part:",
+        "message" in error ? error.message : error,
+      );
       return null;
     }
   }).filter((message): message is Email => message !== null);
-}
-
-async function fetchEmail(
-  auth: Cell<Auth>,
-  maxResults: number = 100,
-  gmailFilterQuery: string = "in:INBOX",
-): Promise<object | undefined> {
-  const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${
-    encodeURIComponent(gmailFilterQuery)
-  }&maxResults=${maxResults}`;
-  const query = async (auth: Cell<Auth>): Promise<Response> => {
-    const authData = auth.get();
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${authData.token}`,
-      },
-    });
-    console.log(`${url}: ${res.status} ${res.statusText}`);
-    return res;
-  };
-
-  const res = await query(auth);
-  if (res.status === 200) {
-    return await res.json();
-  } else if (res.status === 401) {
-    await refreshAuthToken(auth);
-    const res = await query(auth);
-    if (res.status === 200) {
-      return await res.json();
-    }
-    throw new Error("Fetching email failed upon reauthorization.");
-  }
 }
 
 export async function process(
@@ -437,8 +555,7 @@ export async function process(
     emails: Cell<Email[]>;
   },
 ) {
-  const authData = auth.get();
-  if (!authData.token) {
+  if (!auth.get()) {
     console.warn("no token");
     return;
   }
@@ -447,21 +564,11 @@ export async function process(
     state.emails.get().map((email) => email.id),
   );
 
-  const listData = await fetchEmail(
-    auth,
-    maxResults,
-    gmailFilterQuery,
-  );
-
-  if (
-    !listData || !("messages" in listData) || !Array.isArray(listData.messages)
-  ) {
-    console.log(`No messages found in response: ${JSON.stringify(listData)}`);
-    return;
-  }
+  const client = new GmailClient(auth);
+  const messages = await client.fetchEmail(maxResults, gmailFilterQuery);
 
   // Filter out existing messages
-  const newMessages = listData.messages.filter(
+  const newMessages = messages.filter(
     (message: { id: string }) => !existingEmailIds.has(message.id),
   );
 
@@ -471,7 +578,6 @@ export async function process(
   }
 
   const batchSize = 100;
-  const allDetailedMessages: Email[] = [];
 
   // Process messages in batches with delay
   for (let i = 0; i < newMessages.length; i += batchSize) {
@@ -483,7 +589,9 @@ export async function process(
     );
 
     try {
-      const emails = await processBatch(batchMessages, authData.token);
+      await sleep(1000);
+      const fetched = await client.fetchBatch(batchMessages);
+      const emails = messageToEmail(fetched);
 
       // Filter out any duplicates by ID
       const newEmails = emails.filter((email) =>
@@ -499,21 +607,18 @@ export async function process(
       } else {
         console.log("No new emails found");
       }
-
-      // Add 1 second delay between batches, but not after the last batch
-      if (i + batchSize < newMessages.length) {
-        console.log("Waiting 1 second before next batch...");
-        await sleep(1000);
-      }
-    } catch (error) {
-      console.error("Error processing batch:", error);
+    } catch (error: any) {
+      console.error(
+        "Error processing batch:",
+        "message" in error ? error.message : error,
+      );
       // Optional: add longer delay and retry logic here if needed
     }
   }
 
   console.log(
     "Successfully parsed",
-    allDetailedMessages.length,
+    newMessages.length,
     "messages total",
   );
 }
@@ -608,7 +713,7 @@ export default recipe(
                     <td style="border: 1px solid black; padding: 10px;">
                       &nbsp;{derive(
                         email,
-                        (email) => email.labelIds.join(", "),
+                        (email) => email?.labelIds?.join(", "),
                       )}&nbsp;
                     </td>
                     <td style="border: 1px solid black; padding: 10px;">
