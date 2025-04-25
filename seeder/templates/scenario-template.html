@@ -1,0 +1,15 @@
+<div class="mb-10 fade-in" style="animation-delay: {{SCENARIO_INDEX}}s">
+  <div class="{{HEADER_BG_COLOR}} text-white py-3 px-5 rounded-t-lg shadow-md flex justify-between items-center">
+    <h2 class="text-xl font-semibold">{{SCENARIO_NAME}}</h2>
+    <div class="flex items-center space-x-2">
+      <span class="bg-white text-green-700 px-2 py-1 rounded-md text-sm">{{SCENARIO_PASSED}} ✓</span>
+      <span class="bg-white text-red-700 px-2 py-1 rounded-md text-sm">{{SCENARIO_FAILED}} ✗</span>
+      <span class="bg-white text-gray-700 px-2 py-1 rounded-md text-sm">{{SCENARIO_PASS_RATE}}%</span>
+    </div>
+  </div>
+  <div class="bg-white p-5 rounded-b-lg shadow-md">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {{SCENARIO_RESULTS}}
+    </div>
+  </div>
+</div> 

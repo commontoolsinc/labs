@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{NAME}} - {{DATE}}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .fade-in {
+      animation: fadeIn 0.5s ease-in-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .hover-scale {
+      transition: transform 0.3s ease;
+    }
+    .hover-scale:hover {
+      transform: scale(1.03);
+    }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <div class="container mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold text-center text-gray-800 mb-4">{{NAME}}</h1>
+
+    <!-- Summary Section -->
+    <div class="mb-8 fade-in bg-white p-5 rounded-lg shadow-md">
+      <h2 class="text-xl font-semibold mb-3 border-b pb-2">Summary</h2>
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-center">
+        <div class="bg-blue-50 p-3 rounded-lg">
+          <p class="text-blue-800 font-bold text-2xl">{{TOTAL_SCENARIOS}}</p>
+          <p class="text-blue-600">Scenarios</p>
+        </div>
+        <div class="bg-gray-50 p-3 rounded-lg">
+          <p class="text-gray-800 font-bold text-2xl">{{TOTAL_STEPS}}</p>
+          <p class="text-gray-600">Total Steps</p>
+        </div>
+        <div class="bg-green-50 p-3 rounded-lg">
+          <p class="text-green-800 font-bold text-2xl">{{TOTAL_PASSED}}</p>
+          <p class="text-green-600">Passed</p>
+        </div>
+        <div class="bg-red-50 p-3 rounded-lg">
+          <p class="text-red-800 font-bold text-2xl">{{TOTAL_FAILED}}</p>
+          <p class="text-red-600">Failed</p>
+        </div>
+      </div>
+      <div class="mt-4 w-full bg-gray-200 rounded-full h-4">
+        <div class="bg-green-500 h-4 rounded-full" style="width: {{PASS_RATE}}%"></div>
+      </div>
+      <p class="text-center mt-1 text-gray-600">{{PASS_RATE}}% Success Rate</p>
+    </div>
+
+    {{SCENARIOS_HTML}}
+  </div>
+</body>
+</html> 

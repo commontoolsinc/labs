@@ -1,0 +1,19 @@
+<div class="bg-white rounded-lg overflow-hidden shadow-md hover-scale fade-in" style="animation-delay: {{RESULT_DELAY}}s">
+  <div class="relative">
+    {{SCREENSHOT_HTML}}
+    <div class="absolute top-0 right-0 m-2">
+      <span class="px-3 py-1 rounded-full text-sm font-medium {{STATUS_COLOR}}">
+        {{STATUS}}
+      </span>
+    </div>
+  </div>
+  <div class="p-4">
+    <a href="{{TOOLSHED_URL}}/{{NAME}}/{{RESULT_ID}}" class="text-blue-600 hover:text-blue-800 font-medium" target="_blank">
+      Charm ID: {{SHORT_ID}}
+    </a>
+    <p class="mt-2 text-gray-700 font-medium">Prompt:</p>
+    <p class="text-gray-600 mb-3">{{PROMPT}}</p>
+    <p class="text-gray-700 font-medium">Verdict:</p>
+    <p class="text-gray-600">{{SUMMARY}}</p>
+  </div>
+</div> 

@@ -22,7 +22,7 @@ export type Command = {
 export type CharmResult = {
   id: string;
   prompt: string;
-  screenshotPath: string;
+  screenshotPath?: string;
   status: string;
   summary: string;
 };
@@ -39,3 +39,8 @@ export type Scenario = {
   steps: Step[];
   tags?: string[];
 };
+
+export interface ExecutedScenario {
+  scenario: Scenario;
+  results: CharmResult[];
+}
