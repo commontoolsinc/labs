@@ -21,6 +21,7 @@ import { formatPromptWithMentions } from "./format.ts";
 import { castNewRecipe } from "./iterate.ts";
 import { VNode } from "@commontools/html";
 import { applyDefaults, GenerationOptions } from "@commontools/llm";
+import { CharmSearchResult, searchCharms } from "./search.ts";
 
 export interface RecipeRecord {
   argumentSchema: JSONSchema; // Schema type from jsonschema
@@ -262,9 +263,26 @@ export async function generatePlan(
     { existingSpec, existingSchema, existingCode },
   );
 
+  globalThis.dispatchEvent(
+    new CustomEvent("job-update", {
+      detail: {
+        type: "job-update",
+        jobId: form.meta.generationId,
+        title: form.input.processedInput,
+        status: `Search for relevant data ${form.meta.modelId}...`,
+      },
+    }),
+  );
+
+  const { charms } = await searchCharms(
+    form.input.processedInput,
+    form.meta.charmManager,
+  );
+
   return {
-    spec: result.autocompletion,
-    steps: result.features,
+    description: result.autocompletion,
+    features: result.features,
+    charms,
   };
 }
 
@@ -290,9 +308,9 @@ export interface WorkflowForm {
 
   // Planning information
   plan: {
-    steps?: string[];
-    spec?: string;
-    dataModel?: string;
+    features?: string[];
+    description?: string;
+    charms?: CharmSearchResult[];
   } | null;
 
   generation: {
@@ -466,34 +484,7 @@ export async function fillPlanningSection(
 
   const newForm = { ...form };
 
-  // Skip for empty inputs
-  if (!form.input.rawInput || form.input.rawInput.trim().length === 0) {
-    newForm.plan = {
-      steps: [],
-    };
-    return newForm;
-  }
-
-  let planningResult: WorkflowForm["plan"];
-  // Generate new plan based on workflow type
-  if (
-    form.classification.workflowType === "fix" && form.input.existingCharm
-  ) {
-    if (form.input.existingCharm) {
-      const { spec, schema, code } = extractContext(form.input.existingCharm);
-
-      if (!form.plan) {
-        form.plan = { spec };
-      } else {
-        form.plan.spec = spec;
-      }
-    }
-
-    planningResult = await generatePlan(form);
-  } else {
-    // For edit/imagine, generate everything
-    planningResult = await generatePlan(form);
-  }
+  const planningResult = await generatePlan(form);
 
   newForm.plan = planningResult;
   return newForm;
@@ -626,21 +617,12 @@ export async function processWorkflow(
     // Check for cancellation before starting work
     checkCancellation();
 
+    // Apply any prefilled values if provided
     if (options.prefill) {
       console.log("prefilling form", options.prefill);
-      // Only use prefill values for fields that aren't null or undefined in the prefill
-      // Intentionally omit the meta
-      form = {
-        ...form,
-        input: options.prefill?.input
-          ? { ...form.input, ...options.prefill.input }
-          : form.input,
-        classification: options.prefill?.classification || form.classification,
-        plan: options.prefill?.plan || form.plan,
-        generation: options.prefill?.generation || form.generation,
-        searchResults: options.prefill?.searchResults || form.searchResults,
-        spellToCast: options.prefill?.spellToCast || form.spellToCast,
-      };
+      form = { ...form, ...options.prefill };
+      // Preserve the original meta section
+      form.meta = { ...form.meta };
     }
 
     // Step 1: Process input (mentions, references, etc.) if not already processed
@@ -826,7 +808,7 @@ export async function processWorkflow(
     }
 
     // Step 3: Planning if not already planned
-    if (!form.plan || !form.plan.spec || !form.plan.steps) {
+    if (!form.plan) {
       console.log("planning task");
       globalThis.dispatchEvent(
         new CustomEvent("job-update", {

@@ -17,6 +17,7 @@ import { NAME } from "@commontools/builder";
 import { isStream } from "@commontools/runner";
 import { createPath, createPathWithHash, ROUTES } from "@/routes.ts";
 import { LanguageModelId } from "@/components/common/ModelSelector.tsx";
+import { searchCharms } from "@/services/search.ts";
 
 export type CommandType =
   | "action"
@@ -286,28 +287,11 @@ async function handleSearchCharms(ctx: CommandContext) {
   try {
     const charms = ctx.charmManager.getCharms();
     await ctx.charmManager.sync(charms);
-    const results = charms.get().map((charm) => {
-      const data = charm.get();
-      const title = data?.[NAME] ?? "Untitled";
-      return {
-        title: title + ` (#${charmId(charm.entityId!)!.slice(-4)})`,
-        id: charmId(charm.entityId!)!,
-        value: charm.entityId!,
-      };
-    });
-    ctx.setMode({
-      type: "select",
-      command: {
-        id: "charm-select",
-        type: "select",
-        title: "Select Charm",
-        handler: (selected) => {
-          navigateToCharm(ctx, selected);
-          ctx.setOpen(false);
-        },
-      },
-      options: results,
-    });
+
+    const result = await searchCharms("todo list", ctx.charmManager);
+    ctx.setLoading(false);
+
+    ctx.setOpen(false);
   } catch (error) {
     console.error("Search charms error:", error);
   } finally {

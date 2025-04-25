@@ -55,9 +55,9 @@ export const AUTOCOMPLETE_INTENT_PROMPT = llmPrompt(
   5. navigate to an existing charm
       - sometimes, the user will ask for something that already exists, and you should be able to find it quickly
 
-  Generate 1-3 sentence 'expansion' of the user's request in terms of the system capabilities. Start with 'Let's', do not say 'I' or 'me'. It's a joint project with the user. Return your response between <autocomplete></autocomplete> tags.
-
-  When generating a charm, return a <features></features> tag with <feature> tags for each feature, just a few words for each (and an emoji).
+  Generate an 'autocompletion' of the user's request, in terms of the system capabilities. Do not list out features, stay at the conversational level. Work with the user's voice, do not say 'I' or 'me'. It's a joint project with the user.
+  Do not generate code or plan the project. e.g. "I need to buy groceries" -> "Make a 🛒 grocery list and determine 📍 where to buy everything". "Emails from my boss" -> "Find 📧 emails from a particular sender 👩‍💼 (boss)".
+  Return your just the autocompletion between <autocomplete></autocomplete> tags.
 
   User's request: ({{WORKFLOW_TYPE}}) "{{ INPUT }}"`,
 );

@@ -7,6 +7,7 @@ import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { EditorView } from "@codemirror/view";
 import { useActivityContext } from "@/contexts/ActivityContext.tsx";
+import CharmLink from "@/components/CharmLink.tsx";
 
 interface SpecPreviewProps {
   form: Partial<WorkflowForm>;
@@ -145,9 +146,8 @@ export function SpecPreview({
   onWorkflowChange,
   onSelectedCastChange,
 }: SpecPreviewProps) {
-  const hasContent =
-    (loading || form.classification || form.plan?.steps || form.plan?.spec ||
-      form.searchResults) &&
+  const hasContent = (loading || form.classification || form.plan ||
+    form.searchResults) &&
     visible;
 
   // Get the current generation ID from the form metadata
@@ -189,7 +189,7 @@ export function SpecPreview({
     }
 
     // If we have a complete plan, show full height
-    if (form.plan && form.plan.steps && form.plan.spec) {
+    if (form.plan) {
       return maxContentHeight;
     }
 
@@ -206,18 +206,13 @@ export function SpecPreview({
     hasContent,
     loading,
     form.classification,
-    form.plan?.steps,
-    form.plan?.spec,
+    form.plan,
     loaderHeight,
     maxContentHeight,
   ]);
 
   // Create a key that changes when progress state changes to force re-renders
-  const progressKey = `${Boolean(form.classification)}-${
-    Boolean(form.plan?.steps)
-  }-${Boolean(form.plan?.spec)}-${Boolean(form.plan?.steps)}-${
-    Boolean(form.plan?.spec)
-  }`;
+  const progressKey = `${Boolean(form.classification)}-${Boolean(form.plan)}`;
 
   // Create springs for animation with proper types
   const springs = useSpring({
@@ -360,7 +355,7 @@ export function SpecPreview({
   };
 
   if (
-    !form.plan?.spec && (!form.plan?.steps || form.plan?.steps.length === 0) &&
+    !form.plan &&
     !form.classification &&
     !form.searchResults &&
     !loading
@@ -425,70 +420,63 @@ export function SpecPreview({
                     {/* Spec as full-width section */}
                     <div className="w-full space-y-1">
                       {/* Spec Section */}
-                      {form.classification?.workflowType !== "fix"
-                        ? (
-                          <div className="p-1">
-                            {/* Show spec when available, otherwise loading */}
-                            {form.plan?.spec
-                              ? (
-                                <div className="font-mono text-xs whitespace-pre-wrap overflow-y-auto">
-                                  {form.plan?.spec}
-                                </div>
-                              )
-                              : (
-                                <div className="flex items-center py-1">
-                                  <DitheredCube
-                                    animationSpeed={2}
-                                    width={20}
-                                    height={20}
-                                    animate
-                                    cameraZoom={12}
-                                  />
-                                  <span className="ml-1 text-xs">
-                                    Generating...
-                                  </span>
-                                  <JobStatusIndicator
-                                    generationId={generationId}
-                                  />
-                                </div>
-                              )}
-                          </div>
-                        )
-                        : (
-                          <div className="p-1">
-                            <div className="text-sm font-bold mb-1">
-                              ORIGINAL SPEC{" "}
-                              <span className="text-xs text-blue-600">
-                                (preserved)
-                              </span>
+                      <div className="p-1">
+                        {/* Show spec when available, otherwise loading */}
+                        {form.plan?.description
+                          ? (
+                            <div className="font-mono text-xs whitespace-pre-wrap overflow-y-auto">
+                              {form.plan?.description}
                             </div>
-                            {form.plan?.spec
-                              ? (
-                                <div className="font-mono text-xs whitespace-pre-wrap overflow-y-auto">
-                                  {form.plan?.spec}
-                                </div>
-                              )
-                              : (
-                                <div className="text-xs text-gray-500 italic">
-                                  Loading original specification...
-                                </div>
-                              )}
-                          </div>
-                        )}
+                          )
+                          : (
+                            <div className="flex items-center py-1">
+                              <DitheredCube
+                                animationSpeed={2}
+                                width={20}
+                                height={20}
+                                animate
+                                cameraZoom={12}
+                              />
+                              <span className="ml-1 text-xs">
+                                Thinking...
+                              </span>
+                              <JobStatusIndicator
+                                generationId={generationId}
+                              />
+                            </div>
+                          )}
+                      </div>
                     </div>
 
                     <div>
-                      {form.plan?.steps
+                      {form.plan?.charms && form.plan?.charms.length > 0 && (
+                        <>
+                          <div className="text-sm font-bold mb-2">
+                            FROM YOUR SPACE
+                          </div>
+                          <div className="flex flex-row flex-wrap gap-2">
+                            {form.plan.charms.map((result) => (
+                              <div
+                                key={result.name}
+                                className="text-sm px-3 py-1 bg-gray-100"
+                              >
+                                <CharmLink charm={result.charm} />
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    <div>
+                      {form.plan?.features
                         ? (
                           <div className="font-mono text-xs whitespace-pre-wrap">
-                            {form.plan?.steps.map((step, index) => (
+                            {form.plan?.features.map((step, index) => (
                               <div
                                 key={index}
                                 className="py-0.5 border-t first:border-t-0 border-gray-100"
                               >
-                                <span className="font-bold">
-                                  {index + 1}.
-                                </span>{" "}
                                 {step}
                               </div>
                             ))}
@@ -500,22 +488,6 @@ export function SpecPreview({
                           </div>
                         )}
                     </div>
-
-                    {/* Empty state message */}
-                    {!form.plan?.spec && !form.plan?.steps &&
-                      !loading &&
-                      (
-                        <div
-                          className="text-sm text-gray-500 italic py-4 text-center"
-                          style={{
-                            opacity: textSpring.opacity.get(),
-                            transform: `translateY(${textSpring.y.get()}px)`,
-                            transition: "opacity 300ms, transform 300ms",
-                          }}
-                        >
-                          Your preview will appear here as you type...
-                        </div>
-                      )}
                   </div>
                 )}
             </div>
