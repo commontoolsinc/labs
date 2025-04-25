@@ -105,17 +105,17 @@ export async function iterate(
   const { iframe } = getIframeRecipe(charm);
 
   const prevSpec = iframe?.spec;
-  if (!plan?.spec) {
+  if (!plan?.description) {
     throw new Error("No specification provided");
   }
-  const newSpec = plan.spec;
+  const newSpec = plan.description;
 
   const { content: newIFrameSrc, llmRequestId } = await genSrc({
     src: iframe?.src,
     spec: prevSpec,
     newSpec,
     schema: iframe?.argumentSchema || { type: "object" },
-    steps: plan?.steps,
+    steps: plan?.features,
   }, optionsWithDefaults);
 
   return {
@@ -327,7 +327,7 @@ async function singlePhaseCodeGeneration(
     });
   }
 
-  if (!form.plan?.spec || !form.plan?.steps) {
+  if (!form.plan?.description || !form.plan?.features) {
     throw new Error("Plan is missing spec or steps");
   }
 
@@ -336,10 +336,12 @@ async function singlePhaseCodeGeneration(
   const name = extractTitle(sourceCode, title); // Use the generated title as fallback
   const newRecipeSrc = buildFullRecipe({
     src: fullCode,
-    spec: form.plan.spec,
-    plan: Array.isArray(form.plan.steps)
-      ? form.plan.steps.map((step, index) => `${index + 1}. ${step}`).join("\n")
-      : form.plan.steps,
+    spec: form.plan.description,
+    plan: Array.isArray(form.plan.features)
+      ? form.plan.features.map((step, index) => `${index + 1}. ${step}`).join(
+        "\n",
+      )
+      : form.plan.features,
     goal: form.input.processedInput,
     argumentSchema: schema,
     resultSchema,
@@ -347,7 +349,7 @@ async function singlePhaseCodeGeneration(
   });
 
   return {
-    newSpec: form.plan.spec,
+    newSpec: form.plan.description,
     newIFrameSrc: fullCode,
     newRecipeSrc,
     name,
@@ -421,7 +423,7 @@ async function twoPhaseCodeGeneration(
   const { content: newIFrameSrc, llmRequestId } = await genSrc({
     newSpec,
     schema,
-    steps: form.plan?.steps,
+    steps: form.plan?.features,
   }, {
     model: form.meta.model,
     generationId: form.meta.generationId,
