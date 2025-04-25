@@ -12,7 +12,7 @@ window.useDoc = function (key) {
   // Track if we've received a response from the parent
   const [received, setReceived] = React.useState(false)
   // Initialize state with defaultValue
-  const [doc, setDocState] = React.useState(defaultValue)
+  const [doc, setDocState] = React.useState(undefined)
 
   React.useEffect(() => {
     // Handler for document updates
