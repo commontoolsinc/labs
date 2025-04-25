@@ -47,5 +47,5 @@ You can add new flows to `scenarios.ts`.
 
 ## Reading the report
 
-A report will be generated in the `report` directory named `report/blue42.html`.
+A report will be generated in the `results` directory named `results/blue42.html`.
 You can open this in your browser to see the results.

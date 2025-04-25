@@ -1,0 +1,137 @@
+name: Evals
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Git commit SHA to evaluate"
+        required: true
+        type: string
+      test_size:
+        type: choice
+        description: "Number of charms to run"
+        options:
+          - one
+          - ten
+          - all
+  # FOR DEVELOPMENT
+  #pull_request:
+  #  branches:
+  #    - main
+
+env:
+  # FOR DEVELOPMENT
+  #target_sha: "4a4e488db80aa074a825923c757572f99137c957"
+  #test_size: "one"
+  target_sha: ${{ github.event.inputs.commit_sha }}
+  test_size: ${{ github.event.inputs.test_size }}
+
+jobs:
+  evals:
+    name: "Evals"
+    runs-on: ubuntu-latest
+    environment: seeder
+    services:
+      redis:
+        image: redis
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      # TODO Upload `seeder` as a deno executable to avoid
+      # running from source.
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.target_sha }}
+
+      - name: 🦕 Setup Deno 2.2.2
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.2.2"
+
+      - name: 📦 Cache Deno dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.deno
+            ~/.cache/deno
+          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+
+      - name: 🔑 Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: ⚙️ Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: 📥 Download built binaries from Google Cloud Storage
+        run: |
+          mkdir -p downloaded-artifacts
+          gsutil cp gs://commontools-build-artifacts/workspace-artifacts/labs-${{ env.target_sha }}.tar.gz downloaded-artifacts/
+          gsutil cp gs://commontools-build-artifacts/workspace-artifacts/labs-${{ env.target_sha }}.hash.txt hash.txt
+
+          # Verify the tarball exists
+          if [ ! -f downloaded-artifacts/labs-${{ env.target_sha }}.tar.gz ]; then
+            echo "::error::Artifact tarball for commit ${{ env.target_sha }} not found!"
+            echo "Make sure this commit was successfully built and artifacts were uploaded."
+            exit 1
+          fi
+          mkdir -p common-binaries
+          tar -xzf downloaded-artifacts/labs-${{ env.target_sha }}.tar.gz -C common-binaries
+
+      # CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS points to `/tmp/gcp-vertex-creds.json`
+      - name: ⚙️ Setup Google Vertex Key
+        run: |
+          echo '${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}' > /tmp/gcp-vertex-creds.json
+
+      # We want to essentially use a persistent directory
+      # https://github.com/actions/cache/blob/main/tips-and-workarounds.md#update-a-cache
+      - name: 📦 Load LLM Cache
+        id: load-llm-cache
+        uses: actions/cache@v4
+        with:
+          path: ./llm_cache_dir
+          key: llm-cache-${{ github.run_id }}
+          restore-keys: llm-cache
+
+      - name: 🚀 Start Toolshed server
+        run: |
+          mkdir -p ./llm_cache_dir
+          chmod +x ./common-binaries/toolshed
+          CACHE_DIR=./llm_cache_dir \
+          CTTS_AI_LLM_ANTHROPIC_API_KEY=${{ secrets.CTTS_AI_LLM_ANTHROPIC_API_KEY }} \
+          CTTS_AI_LLM_OPENAI_API_KEY=${{ secrets.CTTS_AI_LLM_OPENAI_API_KEY }} \
+          CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS=${{ secrets.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS }} \
+          ./common-binaries/toolshed &
+
+      # For Astral
+      # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
+      - name: 🛡️ Disable AppArmor for browser tests
+        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+
+      - name: 🧪 Run seeder
+        working-directory: seeder
+        run: |
+          FLAGS=""
+          if [ ${{ env.test_size }} == "one" ]; then
+            FLAGS="--tag smol"
+          elif [ ${{ env.test_size }} == "ten" ]; then
+            FLAGS="--tag 10x10"
+          fi
+
+          TOOLSHED_API_URL=http://localhost:8000/ \
+          OPENAI_API_KEY=${{ secrets.CTTS_AI_LLM_OPENAI_API_KEY }} \
+          deno task start --name ${{ env.target_sha }} $FLAGS
+
+      - name: 📤 Upload reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: seeder-results
+          path: |
+            ./seeder/results
