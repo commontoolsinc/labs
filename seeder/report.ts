@@ -1,6 +1,9 @@
 import type { CharmResult, ExecutedScenario, Scenario } from "./interfaces.ts";
 import { dirname, fromFileUrl, join } from "@std/path";
 
+// FIXME(ja): we should just use handlebars or something...  claude built a custom template engine for this...
+// it works, and claude really doesn't want to change... at some point this will be a pain and we should fix it
+
 // Get the directory of the current module
 const __dirname = dirname(fromFileUrl(import.meta.url));
 
