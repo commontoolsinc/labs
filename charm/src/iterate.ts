@@ -236,7 +236,7 @@ export function scrub(data: any): any {
               (key) => [key, {}],
             ),
           ),
-        } satisfies JSONSchema;
+        } as const satisfies JSONSchema;
         console.log("scrubbed generated schema", scrubbed);
         // Only if we found any properties, return the scrubbed schema
         return Object.keys(scrubbed).length > 0

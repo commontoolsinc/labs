@@ -7,7 +7,6 @@ import type {
   RefreshRoute,
 } from "./google-oauth.routes.ts";
 import {
-  type AuthData,
   type CallbackResult,
   clearAuthData,
   createBackgroundIntegrationErrorResponse,

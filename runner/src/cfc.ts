@@ -2,16 +2,25 @@
 
 import type { JSONSchema, JSONValue } from "@commontools/builder";
 import { isObject } from "../../memory/util.ts";
-import { extractDefaultValues } from "./utils.ts";
+
+// I use these strings in other code, so make them available as
+// constants. These are just strings, and real meaning would be
+// up to implementation.
+export const Classification = {
+  Unclassified: "unclassified",
+  Confidential: "confidential",
+  Secret: "secret",
+  TopSecret: "topsecret",
+} as const;
 
 // We'll often work with the transitive closure of this graph.
 // I currently require this to be a DAG, but I could support cycles
 // Technically, this is required to be a join-semilattice.
 const classificationLattice = new Map<string, string[]>([
-  ["unclassified", []],
-  ["confidential", ["unclassified"]],
-  ["secret", ["confidential"]],
-  ["topsecret", ["secret"]],
+  [Classification.Unclassified, []],
+  [Classification.Confidential, [Classification.Unclassified]],
+  [Classification.Secret, [Classification.Confidential]],
+  [Classification.TopSecret, [Classification.Secret]],
 ]);
 
 // This class lets me sort with strongly connected components.

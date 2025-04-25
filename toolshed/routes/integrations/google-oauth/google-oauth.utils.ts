@@ -1,21 +1,14 @@
 import { OAuth2Client, Tokens } from "@cmd-johnson/oauth2-client";
 import env from "@/env.ts";
-import { type CellLink, getCellFromLink, storage } from "@commontools/runner";
+import {
+  type CellLink,
+  Classification,
+  getCellFromLink,
+  storage,
+} from "@commontools/runner";
 import { Context } from "@hono/hono";
+import { JSONSchema, Mutable, Schema } from "@commontools/builder";
 // Types
-export interface AuthData {
-  token?: string;
-  tokenType?: string;
-  scope?: string[];
-  expiresIn?: number;
-  refreshToken?: string;
-  expiresAt?: number;
-  user?: {
-    email: string;
-    name: string;
-    picture: string;
-  };
-}
 
 export interface OAuth2Tokens {
   accessToken: string;
@@ -44,6 +37,35 @@ export interface CallbackResult extends Record<string, unknown> {
   message?: string;
   details?: Record<string, unknown>;
 }
+
+const AuthSchema = {
+  type: "object",
+  properties: {
+    token: {
+      type: "string",
+      default: "",
+      ifc: { classification: [Classification.Secret] },
+    },
+    tokenType: { type: "string", default: "" },
+    scope: { type: "array", items: { type: "string" }, default: [] },
+    expiresIn: { type: "number", default: 0 },
+    expiresAt: { type: "number", default: 0 },
+    refreshToken: {
+      type: "string",
+      default: "",
+      ifc: { classification: [Classification.Secret] },
+    },
+    user: {
+      type: "object",
+      properties: {
+        email: { type: "string", default: "" },
+        name: { type: "string", default: "" },
+        picture: { type: "string", default: "" },
+      },
+    },
+  },
+} as const satisfies JSONSchema;
+type AuthData = Mutable<Schema<typeof AuthSchema>>;
 
 // Create OAuth client with credentials from environment variables
 export const createOAuthClient = (redirectUri: string) => {
@@ -161,7 +183,7 @@ export async function getAuthCellAndStorage(docLink: CellLink | string) {
     // FIXME(ja): add the authcell schema!
     const authCell = getCellFromLink(
       parsedDocLink,
-      undefined,
+      AuthSchema,
     );
 
     // make sure the cell is live!
@@ -357,6 +379,7 @@ export function createBackgroundIntegrationErrorResponse(
   return c.json({ success: false, error: errorMessage }, status) as any;
 }
 
+// Sadly, this declassifies the data
 export function tokenToAuthData(token: Tokens | OAuth2Tokens): AuthData {
   return {
     token: token.accessToken,

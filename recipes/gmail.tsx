@@ -13,7 +13,7 @@ import {
   str,
   UI,
 } from "@commontools/builder";
-import { Cell } from "@commontools/runner";
+import { Cell, Classification } from "@commontools/runner";
 import TurndownService from "turndown";
 
 // Initialize turndown service
@@ -94,18 +94,27 @@ const EmailSchema = {
   type: "object",
   properties: EmailProperties,
   required: Object.keys(EmailProperties),
+  ifc: { classification: [Classification.Confidential] },
 } as const satisfies JSONSchema;
 type Email = Mutable<Schema<typeof EmailSchema>>;
 
 const AuthSchema = {
   type: "object",
   properties: {
-    token: { type: "string", default: "" },
+    token: {
+      type: "string",
+      default: "",
+      ifc: { classification: [Classification.Secret] },
+    },
     tokenType: { type: "string", default: "" },
     scope: { type: "array", items: { type: "string" }, default: [] },
     expiresIn: { type: "number", default: 0 },
     expiresAt: { type: "number", default: 0 },
-    refreshToken: { type: "string", default: "" },
+    refreshToken: {
+      type: "string",
+      default: "",
+      ifc: { classification: [Classification.Secret] },
+    },
     user: {
       type: "object",
       properties: {
