@@ -52,7 +52,7 @@ export const createDataCharm = (
   const schema = ${schemaString};
 
   export default recipe(schema, schema, (data) => ({
-    [NAME]: "${name ?? "data import"}",
+    [NAME]: "${name ?? "Data Import"}",
     [UI]: <div><h2>Your data has this schema</h2><pre>${
     schemaString.replaceAll("{", "&#123;")
       .replaceAll("}", "&#125;")
@@ -64,7 +64,7 @@ export const createDataCharm = (
   return compileAndRunRecipe(
     charmManager,
     dataRecipeSrc,
-    name ?? "data import",
+    name ?? "Data Import",
     data,
   );
 };

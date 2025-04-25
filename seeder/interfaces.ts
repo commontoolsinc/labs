@@ -22,7 +22,7 @@ export type Command = {
 export type CharmResult = {
   id: string;
   prompt: string;
-  screenshotPath: string;
+  screenshotPath?: string;
   status: string;
   summary: string;
 };

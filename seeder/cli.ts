@@ -79,14 +79,31 @@ async function processPrompts(tag: string | undefined) {
     await goto(toolshedUrl);
     await sleep(1000);
     let lastCharmId: string | undefined;
+    let failed = false;
     for (const step of scenario.steps) {
       stepCount++;
-      const newCharmId = await processCommand(
-        step,
-        lastCharmId,
-        cache,
-        executedScenario.results,
-      );
+      if (failed) {
+        executedScenario.results.push({
+          id: "skip",
+          prompt: step.prompt,
+          status: "FAIL",
+          summary: "Failed to process step",
+        });
+        continue;
+      }
+      let newCharmId: string | undefined;
+      try {
+        newCharmId = await processCommand(
+          step,
+          lastCharmId,
+          cache,
+          executedScenario.results,
+        );
+      } catch (error) {
+        console.error(`Error processing step ${stepCount}:`, error);
+        failed = true;
+        continue;
+      }
       if (newCharmId) {
         lastCharmId = newCharmId;
       }
@@ -145,7 +162,7 @@ async function processCommand(
         },
       });
 
-      const { cell: extendedCharm } = await castNewRecipe(charmManager, form);
+      const extendedCharm = form.generation?.charm;
       const id = getEntityId(extendedCharm);
       if (id) {
         console.log(`Charm added: ${id["/"]}`);
@@ -192,7 +209,7 @@ async function verifyCharm(
   // FIXME(ja): can we navigate without causing a page reload?
   await goto(`/${name!}/${id}`);
   addErrorListeners();
-  await sleep(5000);
+  await sleep(10000);
   await ensureReportDir(name!);
   const screenshotPath = `results/${name}/${id}.png`;
   await screenshot(id, screenshotPath);

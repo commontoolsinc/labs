@@ -172,22 +172,33 @@ export async function generateReport(
               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 ${
           scenarioData.map((result, index) => {
-            const relativePath = result.screenshotPath.replace(
-              `results/`,
-              "./",
-            );
             const statusColor = result.status === "PASS"
               ? "bg-green-100 text-green-800"
               : "bg-red-100 text-red-800";
+
+            const relativePath = result.screenshotPath?.replace(
+              `results/`,
+              "./",
+            );
 
             return `
                       <div class="bg-white rounded-lg overflow-hidden shadow-md hover-scale fade-in" style="animation-delay: ${
               (groupIndex * 0.1) + (index * 0.05)
             }s">
                         <div class="relative">
-                          <a href="${relativePath}" target="_blank">
-                            <img src="${relativePath}" alt="Screenshot" class="w-full h-48 object-cover">
-                          </a>
+                          ${
+              result.screenshotPath
+                ? `
+                            <a href="${relativePath}" target="_blank">
+                              <img src="${relativePath}" alt="Screenshot" class="w-full h-48 object-cover">
+                            </a>
+                          `
+                : `
+                            <div class="w-full h-48 bg-gray-100 flex items-center justify-center">
+                              <p class="text-gray-500">No screenshot available</p>
+                            </div>
+                          `
+            }
                           <div class="absolute top-0 right-0 m-2">
                             <span class="px-3 py-1 rounded-full text-sm font-medium ${statusColor}">
                               ${result.status}
