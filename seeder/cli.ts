@@ -39,6 +39,7 @@ const {
 const cache = !noCache;
 
 if (!name) {
+  // FIXME(ja): if the name already exists, we should not use it!
   console.error("Error: Missing `--name`.");
   Deno.exit(1);
 }
@@ -245,6 +246,7 @@ async function verifyCharm(
   return verdict;
 }
 
+// FIXME(ja): if the tag doesn't exist, we should error out with warning, show the tags
 try {
   await login(name);
   await processPrompts(tag);
