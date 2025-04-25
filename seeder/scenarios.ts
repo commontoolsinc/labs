@@ -2,12 +2,12 @@ import { CommandType, type Scenario, type Step } from "./interfaces.ts";
 
 const familyCookbook = (prompt: string, idx: number): Scenario => {
   return {
-    name: `Recipe ${idx}`,
+    name: `Family Cookbook ${idx}: ${prompt}`,
     tags: ["10x10", "family-cookbook"],
     steps: [
       {
         type: CommandType.ImportJSON,
-        prompt: `Family Cookbook ${idx}`,
+        prompt: `Family Cookbook Data ${idx}: ${prompt}`,
         data: {
           "recipes": [
             {
@@ -45,15 +45,8 @@ const familyCookbook = (prompt: string, idx: number): Scenario => {
 
 export const scenarios: Scenario[] = [
   {
-    name: "2048 Game Long",
+    name: "2048 Game",
     tags: ["smol"],
-    steps: [{
-      type: CommandType.New,
-      prompt: "a 2048 game",
-    }],
-  },
-  {
-    name: "2048 Game Short",
     steps: [{
       type: CommandType.New,
       prompt: "2048 game",
