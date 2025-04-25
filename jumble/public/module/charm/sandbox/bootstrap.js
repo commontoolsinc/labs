@@ -46,12 +46,18 @@ window.useDoc = function (key) {
 
   // Update function
   const updateDoc = newValue => {
-    if (typeof newValue === "function") {
-      newValue = newValue(doc)
+    // only perform write if sourceData contains this key otherwise we ignore
+    // write which somewhat aligns with returning `undefined`.
+    // TODO(@seefeld) - should we throw here instead or use different method
+    // to decide whether to send a write request
+    if (key in window.sourceData) {
+      if (typeof newValue === "function") {
+        newValue = newValue(doc)
+      }
+      console.log("useDoc", key, "written", newValue)
+      setDocState(newValue)
+      window.parent.postMessage({ type: "write", data: [key, newValue] }, "*")
     }
-    console.log("useDoc", key, "written", newValue)
-    setDocState(newValue)
-    window.parent.postMessage({ type: "write", data: [key, newValue] }, "*")
   }
 
   // If we have not yet received response from the host we use field from the
