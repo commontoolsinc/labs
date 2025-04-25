@@ -5,7 +5,8 @@ import { browser, page } from "./browser.ts";
 import { toolshedUrl } from "./env.ts";
 export { browser };
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+export const sleep = (ms: number) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 async function waitForSelectorClick(
   page: Page,
