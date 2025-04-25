@@ -269,7 +269,7 @@ export async function generatePlan(
         type: "job-update",
         jobId: form.meta.generationId,
         title: form.input.processedInput,
-        status: `Search for relevant data ${form.meta.modelId}...`,
+        status: `Search for relevant data ${form.meta.model}...`,
       },
     }),
   );

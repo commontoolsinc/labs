@@ -424,7 +424,7 @@ export function SpecPreview({
                         {/* Show spec when available, otherwise loading */}
                         {form.plan?.description
                           ? (
-                            <div className="font-mono text-xs whitespace-pre-wrap overflow-y-auto">
+                            <div className="font-mono text-md whitespace-pre-wrap overflow-y-auto">
                               {form.plan?.description}
                             </div>
                           )
