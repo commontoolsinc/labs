@@ -1256,13 +1256,13 @@ export class CharmManager {
       );
     }
 
-    this.syncRecipe(charm);
+    await this.syncRecipe(charm);
 
     return charm;
   }
 
   // FIXME(JA): this really really really needs to be revisited
-  async syncRecipe(charm: Cell<Charm>): Promise<string> {
+  async syncRecipe(charm: Cell<Charm>) {
     await storage.syncCell(charm);
 
     const sourceCell = charm.getSourceCell();
@@ -1272,8 +1272,6 @@ export class CharmManager {
     if (!recipeId) throw new Error("charm missing recipe ID");
 
     await this.syncRecipeById(recipeId);
-
-    return recipeId;
   }
 
   async syncRecipeById(recipeId: string) {
