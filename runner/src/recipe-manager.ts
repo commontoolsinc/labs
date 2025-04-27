@@ -128,6 +128,8 @@ class RecipeManager {
     recipeIdMap.set(recipeId, recipe as Recipe);
     recipeMetaMap.set(recipe as Recipe, recipeMetaCell);
 
+    await this.publishToBlobby(recipeId);
+
     return true;
   }
 
@@ -224,6 +226,9 @@ class RecipeManager {
       throw new Error(`Source for recipe ${recipeId} not found`);
     }
 
+    // NOTE(ja): if you don't set spellbookTitle or spellbookTags
+    // it will only be stored on blobby, but not published to
+    // the spellbook
     const data = {
       src: recipeMeta.src,
       recipe: JSON.parse(JSON.stringify(recipe)),

@@ -447,9 +447,6 @@ async function handleUseDataInSpell(ctx: CommandContext) {
           const charm = await ctx.charmManager.get(ctx.focusedCharmId);
           if (!charm) throw new Error("No current charm found");
           const argument = ctx.charmManager.getArgument(charm);
-          if (!argument) {
-            throw new Error("No sourceCell/argument found for current charm");
-          }
 
           ctx.setLoading(true);
           const newCharm = await castSpellAsCharm(

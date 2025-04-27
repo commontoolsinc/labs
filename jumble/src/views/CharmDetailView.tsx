@@ -1,16 +1,9 @@
 import {
   Charm,
   charmId,
-  extractUserCode,
   extractVersionTag,
-  generateNewRecipeVersion,
   getIframeRecipe,
-  IFrameRecipe,
-  injectUserCode,
   modifyCharm,
-  processWorkflow,
-  WorkflowForm,
-  WorkflowType,
 } from "@commontools/charm";
 import { useCharmReferences } from "@/hooks/use-charm-references.ts";
 import { isCell, isStream } from "@commontools/runner";
@@ -35,11 +28,6 @@ import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { LoadingSpinner } from "@/components/Loader.tsx";
 import { useCharm } from "@/hooks/use-charm.ts";
 import CharmCodeEditor from "@/components/CharmCodeEditor.tsx";
-import CodeMirror from "@uiw/react-codemirror";
-import { javascript } from "@codemirror/lang-javascript";
-import { markdown } from "@codemirror/lang-markdown";
-import { json } from "@codemirror/lang-json";
-import { EditorView } from "@codemirror/view";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 import {
@@ -926,6 +914,20 @@ const DataTab = () => {
     </div>
   );
 
+  let argumentJson: Record<string, any>;
+  try {
+    if (isArgumentExpanded) {
+      argumentJson = translateCellsAndStreamsToPlainJSON(
+        charmManager.getArgument(charm).get(),
+      ) as Record<string, any>;
+    } else {
+      argumentJson = {};
+    }
+  } catch (error) {
+    console.warn("Error translating argument to JSON:", error);
+    argumentJson = {};
+  }
+
   return (
     <div className="h-full overflow-auto p-4">
       {charm.getSourceCell() && (
@@ -943,9 +945,7 @@ const DataTab = () => {
             <div className="border border-gray-300 rounded bg-gray-50 p-2">
               {/* @ts-expect-error JsonView is imported as any */}
               <JsonView
-                value={translateCellsAndStreamsToPlainJSON(
-                  charmManager.getArgument(charm)?.get(),
-                ) ?? {}}
+                value={argumentJson}
                 style={{
                   background: "transparent",
                   fontSize: "0.875rem",
