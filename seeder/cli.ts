@@ -1,5 +1,5 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { setBobbyServerUrl, storage } from "@commontools/runner";
+import { setBlobbyServerUrl, storage } from "@commontools/runner";
 import { setLLMUrl } from "@commontools/llm";
 import { processScenario } from "./processor.ts";
 import { type ExecutedScenario } from "./interfaces.ts";
@@ -31,7 +31,7 @@ if (!name) {
 }
 
 storage.setRemoteStorage(new URL(toolshedUrl));
-setBobbyServerUrl(toolshedUrl);
+setBlobbyServerUrl(toolshedUrl);
 setLLMUrl(toolshedUrl);
 
 // Track executed scenarios and steps
