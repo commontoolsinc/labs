@@ -274,30 +274,36 @@ export const setupIframe = () =>
         { charmId: null, spaceName: null };
 
       console.log("onLLMRequest", payload, charmId, spaceName);
-      const jsonPayload = JSON.parse(payload);
-      if (!jsonPayload.model) {
-        jsonPayload.model = DEFAULT_IFRAME_MODELS;
-      }
-      if (!jsonPayload.cache) {
-        jsonPayload.cache = true;
-      }
-      updateJob(jobId, `Using ${jsonPayload.model}`);
-      jsonPayload.metadata = {
-        ...jsonPayload.metadata,
-        context: "iframe",
-        spaceName: spaceName ?? "fixme",
-        charmId: charmId ?? "fixme",
-      };
+      try {
+        const jsonPayload = JSON.parse(payload);
+        if (!jsonPayload.model) {
+          jsonPayload.model = DEFAULT_IFRAME_MODELS;
+        }
+        if (!jsonPayload.cache) {
+          jsonPayload.cache = true;
+        }
+        updateJob(jobId, `Using ${jsonPayload.model}`);
+        jsonPayload.metadata = {
+          ...jsonPayload.metadata,
+          context: "iframe",
+          spaceName: spaceName ?? "fixme",
+          charmId: charmId ?? "fixme",
+        };
 
-      const res = await llm.sendRequest(jsonPayload);
-      console.log("onLLMRequest res", res);
-      completeJob({
-        id: jobId,
-        result: undefined,
-        status: res.content ?? "Completed!",
-        llmRequestId: res.id
-      });
-      return res as any;
+        const res = await llm.sendRequest(jsonPayload);
+        console.log("onLLMRequest res", res);
+        completeJob({
+          id: jobId,
+          result: undefined,
+          status: res.content ?? "Completed!",
+          llmRequestId: res.id,
+        });
+        return res as any;
+      } catch (e: any) {
+        console.error("onLLMRequest error", e);
+        failJob(jobId, "LLM request failed", e.message);
+        return null;
+      }
     },
     async onReadWebpageRequest(
       _element: CommonIframeSandboxElement,
@@ -313,7 +319,7 @@ export const setupIframe = () =>
       console.log("onReadWebpageRequest res", res);
       completeJob({
         id: jobId,
-        status: res.status === 200 ? "Completed!" : "Failed!"
+        status: res.status === 200 ? "Completed!" : "Failed!",
       });
       return await res.json();
     },
