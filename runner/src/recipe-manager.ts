@@ -23,7 +23,7 @@ import { storage } from "./storage.ts";
 import { Cell } from "./cell.ts";
 import { createRef } from "./doc-map.ts";
 import { getCell } from "./cell.ts";
-import { buildRecipe } from "./local-build.ts";
+import { runtime } from "@commontools/runner";
 import { getBlobbyServerUrl } from "./blobby-storage.ts";
 
 // Schema definitions
@@ -69,12 +69,13 @@ class RecipeManager {
   // returns the recipeMeta for a loaded recipe
   getRecipeMeta(
     input: Recipe | Module | { recipeId: string },
-  ): RecipeMeta | undefined {
+  ): RecipeMeta {
     if ("recipeId" in input) {
       const recipe = this.recipeById(input.recipeId);
-      return recipe ? recipeMetaMap.get(recipe)?.get() : undefined;
+      if (!recipe) throw new Error(`Recipe ${input.recipeId} not loaded`);
+      return recipeMetaMap.get(recipe)?.get()!;
     }
-    return recipeMetaMap.get(input as Recipe)?.get();
+    return recipeMetaMap.get(input as Recipe)?.get()!;
   }
 
   generateRecipeId(recipe: Recipe | Module, src?: string) {
@@ -137,9 +138,10 @@ class RecipeManager {
 
   async loadRecipe(
     { space, recipeId }: { space: string; recipeId: string },
-  ): Promise<Recipe | undefined> {
-    if (recipeIdMap.has(recipeId)) {
-      return recipeIdMap.get(recipeId);
+  ): Promise<Recipe> {
+    const existingRecipe = recipeIdMap.get(recipeId);
+    if (existingRecipe) {
+      return existingRecipe;
     }
 
     const metaCell = await this.getRecipeMetaCell({ recipeId, space });
@@ -157,16 +159,12 @@ class RecipeManager {
         recipeMetaMap.set(recipe, metaCell);
         return recipe;
       }
-      return undefined;
+      throw new Error(`Failed to import recipe ${recipeId} from blobby`);
     }
 
     const { src } = recipeMeta;
 
-    const { recipe, errors } = await buildRecipe(src!);
-    if (errors || !recipe) {
-      console.error(`Failed to build recipe ${recipeId}:`, errors);
-      return undefined;
-    }
+    const recipe = await runtime.compile(src!);
 
     metaCell.set(recipeMeta);
     await storage.syncCell(metaCell);
@@ -182,12 +180,10 @@ class RecipeManager {
   // FIXME(ja): move this back to blobby!
   private async importFromBlobby(
     { recipeId }: { recipeId: string },
-  ): Promise<
-    { recipe: Recipe; recipeMeta: RecipeMeta } | Record<string, never>
-  > {
+  ): Promise<{ recipe: Recipe; recipeMeta: RecipeMeta }> {
     const response = await fetch(`${getBlobbyServerUrl()}/spell-${recipeId}`);
     if (!response.ok) {
-      return {};
+      throw new Error(`Failed to fetch recipe ${recipeId} from blobby`);
     }
 
     const recipeJson = await response.json() as {
@@ -196,29 +192,17 @@ class RecipeManager {
       parents?: string[];
     };
 
-    try {
-      const { recipe, errors } = await buildRecipe(recipeJson.src!);
-      if (errors || !recipe) {
-        console.error(
-          `Failed to build recipe ${recipeId} from Blobby:`,
-          errors,
-        );
-        return {};
-      }
+    const recipe = await runtime.compile(recipeJson.src!);
 
-      return {
-        recipe,
-        recipeMeta: {
-          id: recipeId,
-          src: recipeJson.src,
-          spec: recipeJson.spec,
-          parents: recipeJson.parents,
-        },
-      };
-    } catch (error) {
-      console.error(`Error loading recipe ${recipeId} from Blobby:`, error);
-      return {};
-    }
+    return {
+      recipe,
+      recipeMeta: {
+        id: recipeId,
+        src: recipeJson.src,
+        spec: recipeJson.spec,
+        parents: recipeJson.parents,
+      },
+    };
   }
 
   // FIXME(ja): move this back to blobby!

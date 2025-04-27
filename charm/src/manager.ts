@@ -1146,21 +1146,18 @@ export class CharmManager {
     );
   }
 
-  // Return Cell with argument content according to the schema of the charm.
-  async getArgument<T = any>(
+  // Return Cell with argument content of already loaded recipe according
+  // to the schema of the charm.
+  getArgument<T = any>(
     charm: Cell<Charm | T>,
-  ): Promise<Cell<T> | undefined> {
+  ): Cell<T> {
     const source = charm.getSourceCell(processSchema);
     const recipeId = source?.get()?.[TYPE]!;
-    const recipe = await recipeManager.loadRecipe({
-      recipeId,
-      space: this.space,
-    });
-    if (!recipe) return undefined;
-    const argumentSchema = recipe?.argumentSchema;
-    return source?.key("argument").asSchema(argumentSchema!) as
-      | Cell<T>
-      | undefined;
+    if (!recipeId) throw new Error("charm missing recipe ID");
+    const recipe = recipeManager.recipeById(recipeId);
+    if (!recipe) throw new Error(`Recipe ${recipeId} not loaded`);
+    // FIXME(ja): return should be Cell<Schema<T>> I think?
+    return source.key("argument").asSchema<T>(recipe.argumentSchema);
   }
 
   // note: removing a charm doesn't clean up the charm's cells

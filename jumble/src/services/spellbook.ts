@@ -101,7 +101,7 @@ export async function saveSpell(
 ): Promise<boolean> {
   try {
     // Get all the required data from commontools first
-    const { src, spec, parents } = await recipeManager.getRecipeMeta(recipe);
+    const { src, spec, parents } = recipeManager.getRecipeMeta(spell);
     const ui = spell.resultRef?.[UI];
 
     if (spellId === undefined) {

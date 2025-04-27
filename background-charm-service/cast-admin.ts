@@ -64,11 +64,6 @@ async function castRecipe() {
     // Load and compile the recipe first
     console.log("Loading recipe...");
     const recipeSrc = await Deno.readTextFile(recipePath!);
-    const recipe = await compileRecipe(recipeSrc, "recipe", []);
-
-    if (!recipe) {
-      throw new Error(`Failed to compile recipe from ${recipePath}`);
-    }
 
     if (!cause) {
       throw new Error("Cell ID is required");
@@ -100,6 +95,7 @@ async function castRecipe() {
 
     // Create charm manager for the specified space
     const charmManager = new CharmManager(session);
+    const recipe = await compileRecipe(recipeSrc, "recipe", charmManager);
 
     const charm = await charmManager.runPersistent(
       recipe,

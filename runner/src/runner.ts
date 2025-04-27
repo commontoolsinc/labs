@@ -44,7 +44,6 @@ import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import { getCellLinkOrThrow } from "./query-result-proxy.ts";
 import { storage } from "./storage.ts";
-import { syncRecipeBlobby } from "./recipe-sync.ts";
 import { runtime } from "./runtime/index.ts";
 
 export const cancels = new WeakMap<DocImpl<any>, Cancel>();
