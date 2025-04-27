@@ -26,6 +26,8 @@ import { getCell } from "./cell.ts";
 import { runtime } from "@commontools/runner";
 import { getBlobbyServerUrl } from "./blobby-storage.ts";
 
+const inProgressCompilations = new Map<string, Promise<Recipe>>();
+
 // Schema definitions
 export const recipeMetaSchema = {
   type: "object",
@@ -140,35 +142,32 @@ class RecipeManager {
     return recipeIdMap.get(recipeId);
   }
 
-  async loadRecipe(
-    { space, recipeId }: { space: string; recipeId: string },
+  // we need to ensure we only compile once otherwise we get ~12 +/- 4
+  // compiles of each recipe
+  private async compileRecipeOnce(
+    recipeId: string,
+    space: string,
   ): Promise<Recipe> {
-    const existingRecipe = recipeIdMap.get(recipeId);
-    if (existingRecipe) {
-      return existingRecipe;
-    }
-
     const metaCell = await this.getRecipeMetaCell({ recipeId, space });
+    let recipeMeta = metaCell.get();
 
-    const recipeMeta = metaCell.get();
-    // if we don't have the recipeMeta, we should try to import from blobby
-    // as it might be from before we started saving recipes in cells
+    // 1. Fallback to Blobby if cell missing or stale
     if (recipeMeta.id !== recipeId) {
-      const { recipe, recipeMeta } = await this.importFromBlobby({ recipeId });
-      if (recipe) {
-        metaCell.set(recipeMeta);
-        await storage.syncCell(metaCell);
-        await storage.synced();
-        recipeIdMap.set(recipeId, recipe);
-        recipeMetaMap.set(recipe, metaCell);
-        return recipe;
-      }
-      throw new Error(`Failed to import recipe ${recipeId} from blobby`);
+      const imported = await this.importFromBlobby({ recipeId });
+      recipeMeta = imported.recipeMeta;
+      metaCell.set(recipeMeta);
+      await storage.syncCell(metaCell);
+      await storage.synced();
+      recipeIdMap.set(recipeId, imported.recipe);
+      recipeMetaMap.set(imported.recipe, metaCell);
+      return imported.recipe;
     }
 
-    const { src } = recipeMeta;
-
-    const recipe = await runtime.compile(src!);
+    // 2. Compile from stored source
+    if (!recipeMeta.src) {
+      throw new Error(`Recipe ${recipeId} has no stored source`);
+    }
+    const recipe = await runtime.compile(recipeMeta.src);
 
     metaCell.set(recipeMeta);
     await storage.syncCell(metaCell);
@@ -176,6 +175,27 @@ class RecipeManager {
     recipeIdMap.set(recipeId, recipe);
     recipeMetaMap.set(recipe, metaCell);
     return recipe;
+  }
+
+  async loadRecipe(
+    { space, recipeId }: { space: string; recipeId: string },
+  ): Promise<Recipe> {
+    // quick paths
+    const existingRecipe = recipeIdMap.get(recipeId);
+    if (existingRecipe) {
+      return existingRecipe;
+    }
+
+    if (inProgressCompilations.has(recipeId)) {
+      return inProgressCompilations.get(recipeId)!;
+    }
+
+    // single-flight compilation
+    const compilationPromise = this.compileRecipeOnce(recipeId, space)
+      .finally(() => inProgressCompilations.delete(recipeId)); // tidy up
+
+    inProgressCompilations.set(recipeId, compilationPromise);
+    return await compilationPromise;
   }
 
   /**
