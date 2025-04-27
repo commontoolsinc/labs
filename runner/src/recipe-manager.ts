@@ -128,6 +128,8 @@ class RecipeManager {
     recipeIdMap.set(recipeId, recipe as Recipe);
     recipeMetaMap.set(recipe as Recipe, recipeMetaCell);
 
+    // FIXME(ja): in a week we should remove auto-publishing to blobby
+    // if this patch doesn't need to be reverted
     await this.publishToBlobby(recipeId);
 
     return true;
