@@ -69,8 +69,6 @@ async function castRecipe() {
       throw new Error("Cell ID is required");
     }
 
-    console.log("Recipe compiled successfully");
-
     const targetCell = getCell(
       spaceId as DID,
       cause,
@@ -96,6 +94,7 @@ async function castRecipe() {
     // Create charm manager for the specified space
     const charmManager = new CharmManager(session);
     const recipe = await compileRecipe(recipeSrc, "recipe", charmManager);
+    console.log("Recipe compiled successfully");
 
     const charm = await charmManager.runPersistent(
       recipe,
