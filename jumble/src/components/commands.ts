@@ -8,6 +8,7 @@ import {
   createDataCharm,
   processWorkflow,
   renameCharm,
+  searchCharms,
   WorkflowForm,
 } from "@commontools/charm";
 import { formatJsonImportPrompt } from "@commontools/llm";
@@ -17,7 +18,6 @@ import { NAME } from "@commontools/builder";
 import { isStream } from "@commontools/runner";
 import { createPath, createPathWithHash, ROUTES } from "@/routes.ts";
 import { LanguageModelId } from "@/components/common/ModelSelector.tsx";
-import { searchCharms } from "@/services/search.ts";
 
 export type CommandType =
   | "action"
