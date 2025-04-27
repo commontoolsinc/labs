@@ -236,6 +236,7 @@ export function run<T, R = any>(
     );
   }
 
+  // NOTE(ja): perhaps this should actually return as a Cell<Charm>?
   return resultCell;
 }
 

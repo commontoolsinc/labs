@@ -724,7 +724,7 @@ describe("Recipe Runner", () => {
     expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
 
-    expect(lastError?.recipeId).toBe(getRecipeIdFromCharm(charm));
+    expect(lastError?.recipeId).toBe(getRecipeIdFromCharm(charm.asCell()));
     expect(lastError?.space).toBe("test");
     expect(lastError?.charmId).toBe(
       JSON.parse(JSON.stringify(charm.entityId))["/"],
@@ -787,7 +787,7 @@ describe("Recipe Runner", () => {
     expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 10 });
 
-    expect(lastError?.recipeId).toBe(getRecipeIdFromCharm(charm));
+    expect(lastError?.recipeId).toBe(getRecipeIdFromCharm(charm.asCell()));
     expect(lastError?.space).toBe("test");
     expect(lastError?.charmId).toBe(
       JSON.parse(JSON.stringify(charm.entityId))["/"],
