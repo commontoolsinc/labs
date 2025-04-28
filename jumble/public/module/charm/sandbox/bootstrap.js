@@ -104,7 +104,7 @@ window.generateText = function ({ system, messages }) {
   return window.llm({
     system,
     messages,
-  })
+  }).then(result => result.content)
 }
 
 window.generateObject = function ({ system, messages }) {
@@ -112,13 +112,38 @@ window.generateObject = function ({ system, messages }) {
     system,
     messages,
     mode: 'json'
-  }).then(result => {
-    try {
-      return JSON.parse(result);
-    } catch (e) {
-      return undefined;
-    }
-  });
+  })
+    .then(result => result.content)
+    .then(result => {
+      try {
+        // Handle possible control characters and escape sequences
+        const cleanedResult = result.replace(/[\u0000-\u001F\u007F-\u009F]/g, match => {
+          // Keep common whitespace characters as they are
+          if (match === '\n' || match === '\r' || match === '\t') {
+            return match;
+          }
+          // Replace other control characters with space
+          return ' ';
+        });
+
+        return JSON.parse(cleanedResult);
+      } catch (e) {
+        console.error("JSON parse error:", e);
+
+        // Try to extract a valid JSON object from the text as fallback
+        try {
+          const jsonRegex = /\{.*\}/s;  // Matches anything between curly braces, including newlines
+          const match = result.match(jsonRegex);
+          if (match && match[0]) {
+            return JSON.parse(match[0]);
+          }
+        } catch (e2) {
+          // Silently fail the fallback attempt
+        }
+
+        return undefined;
+      }
+    });
 }
 
 window.perform = (() => {
