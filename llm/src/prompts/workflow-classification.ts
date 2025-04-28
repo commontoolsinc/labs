@@ -376,7 +376,6 @@ export async function generateWorkflowPlan(
       context: "workflow",
       workflow: form.classification.workflowType.toLowerCase(),
       generationId: form.meta.generationId,
-      userPrompt: prompt.version,
       space: form.meta.charmManager.getSpaceName(),
       systemPrompt: system.version,
     },
