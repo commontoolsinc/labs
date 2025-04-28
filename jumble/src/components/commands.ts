@@ -8,6 +8,7 @@ import {
   createDataCharm,
   processWorkflow,
   renameCharm,
+  searchCharms,
   WorkflowForm,
 } from "@commontools/charm";
 import { formatJsonImportPrompt } from "@commontools/llm";
@@ -278,40 +279,6 @@ async function handleNewCharm(
     console.error("New charm operation error:", error);
   } finally {
     ctx.setOpen(false);
-  }
-}
-
-async function handleSearchCharms(ctx: CommandContext) {
-  ctx.setLoading(true);
-  try {
-    const charms = ctx.charmManager.getCharms();
-    await ctx.charmManager.sync(charms);
-    const results = charms.get().map((charm) => {
-      const data = charm.get();
-      const title = data?.[NAME] ?? "Untitled";
-      return {
-        title: title + ` (#${charmId(charm.entityId!)!.slice(-4)})`,
-        id: charmId(charm.entityId!)!,
-        value: charm.entityId!,
-      };
-    });
-    ctx.setMode({
-      type: "select",
-      command: {
-        id: "charm-select",
-        type: "select",
-        title: "Select Charm",
-        handler: (selected) => {
-          navigateToCharm(ctx, selected);
-          ctx.setOpen(false);
-        },
-      },
-      options: results,
-    });
-  } catch (error) {
-    console.error("Search charms error:", error);
-  } finally {
-    ctx.setLoading(false);
   }
 }
 
@@ -633,13 +600,6 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
         navigateToCharm(ctx, ctx.focusedCharmId);
         ctx.setOpen(false);
       },
-    },
-    {
-      id: "search-charms",
-      type: "action",
-      title: "Search Charms",
-      group: "Navigation",
-      handler: () => handleSearchCharms(ctx),
     },
     {
       id: "execute-charm-action",

@@ -219,7 +219,7 @@ Deno.test({
           await page.keyboard.press("Enter");
 
           await sleep(500);
-          await page.keyboard.type("count the values in @v");
+          await page.keyboard.type("show the data from @v");
           await sleep(500);
           await page.keyboard.press("Tab");
           await sleep(500);
@@ -238,7 +238,7 @@ Deno.test({
           await waitForSelectorWithText(
             page,
             "a[aria-roledescription='charm-link']",
-            "Value Counter Utility",
+            "SimpleValue2 Viewer",
           );
 
           // FIXME(ja): how to look at the actual iframe content?

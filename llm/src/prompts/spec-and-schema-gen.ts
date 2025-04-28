@@ -58,25 +58,37 @@ SCHEMA GUIDELINES:
 \`\`\`json
 {
   "type": "object",
-  "title": "Note",
-  "description": "A simple note for the user",
+  "title": "Note List",
+  "description": "A simple note list for the user",
   "properties": {
-    "title": {
-      "type": "string",
-      "title": "Title",
-      "description": "Title of the note",
-      "default": "New Note"
-    },
-    "content": {
-      "type": "string",
-      "title": "Content",
-      "description": "Content of the note"
-    },
-    "created": {
-      "type": "string",
-      "format": "date-time",
-      "title": "Created Date",
-      "description": "When the note was created",
+    "notes": {
+      "type": "array",
+      "title": "Notes",
+      "description": "List of user notes",
+      "default": [],
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "Title of the note",
+            "default": "New Note"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "Content of the note"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created Date",
+            "description": "When the note was created"
+          }
+        },
+        "required": ["title", "content"]
+      }
     }
   },
   "required": ["title", "content"]
@@ -141,29 +153,42 @@ SCHEMA GUIDELINES:
 \`\`\`json
 {
   "type": "object",
-  "title": "Note",
-  "description": "A simple note for the user",
+  "title": "Note List",
+  "description": "A simple note list for the user",
   "properties": {
-    "title": {
-      "type": "string",
-      "title": "Title",
-      "description": "Title of the note",
-      "default": "New Note"
-    },
-    "content": {
-      "type": "string",
-      "title": "Content",
-      "description": "Content of the note"
-    },
-    "created": {
-      "type": "string",
-      "format": "date-time",
-      "title": "Created Date",
-      "description": "When the note was created",
+    "notes": {
+      "type": "array",
+      "title": "Notes",
+      "description": "List of user notes",
+      "default": [],
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "Title of the note",
+            "default": "New Note"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "Content of the note"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created Date",
+            "description": "When the note was created"
+          }
+        },
+        "required": ["title", "content"]
+      }
     }
   },
   "required": ["title", "content"]
 }
+\`\`\`
 
 GUIDELINES:
 - Aim for the simplest possible solution that works with the existing schema
@@ -182,11 +207,16 @@ IMPORTANT:
 export function formatForm(form: WorkflowForm) {
   return `
 <goal>${form.input.processedInput}</goal>
-<plan>${
-    (form.plan?.steps ?? []).map((step) => `<step>${step}</step>`).join("\n")
-  }</plan>
-<description>${form.plan?.spec}</description>
-<data>${JSON.stringify(form.plan?.dataModel)}</data>
+${
+    form.plan?.features?.length
+      ? `<features>${
+        form.plan.features.map((step) => `<feature>${step}</feature>`).join(
+          "\n",
+        )
+      }</features>`
+      : ""
+  }
+<description>${form.plan?.description}</description>
 `;
 }
 
@@ -296,6 +326,11 @@ Based on this goal and the existing schema, please provide a title, description,
     console.warn("Error parsing schema:", error);
     // Fallback to an empty schema
     argumentSchema = {};
+  }
+
+  if (!argumentSchema && resultSchema) {
+    // HACK(bf): for iframes, this is ok, it will not last forever
+    argumentSchema = resultSchema;
   }
 
   // Add title and description to schema
