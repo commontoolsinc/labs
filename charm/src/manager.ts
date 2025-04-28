@@ -1271,7 +1271,7 @@ export class CharmManager {
     const recipeId = sourceCell.get()?.[TYPE];
     if (!recipeId) throw new Error("charm missing recipe ID");
 
-    await this.syncRecipeById(recipeId);
+    return await this.syncRecipeById(recipeId);
   }
 
   async syncRecipeById(recipeId: string) {
