@@ -131,7 +131,7 @@ jobs:
         env:
           VITE_COMMIT_SHA: ${{ github.sha }}
           VITE_BUILD_SOURCEMAPS: "true"
-          VITE_STORAGE_TYPE: "cached"
+          VITE_STORAGE_TYPE: "schema"
 
       # Archive source maps for later use in deployments
       - name: 📤 Archive Jumble frontend artifacts
