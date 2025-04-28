@@ -282,23 +282,6 @@ async function handleNewCharm(
   }
 }
 
-async function handleSearchCharms(ctx: CommandContext) {
-  ctx.setLoading(true);
-  try {
-    const charms = ctx.charmManager.getCharms();
-    await ctx.charmManager.sync(charms);
-
-    const result = await searchCharms("todo list", ctx.charmManager);
-    ctx.setLoading(false);
-
-    ctx.setOpen(false);
-  } catch (error) {
-    console.error("Search charms error:", error);
-  } finally {
-    ctx.setLoading(false);
-  }
-}
-
 async function handleRenameCharm(
   ctx: CommandContext,
   input: string | undefined,
@@ -617,13 +600,6 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
         navigateToCharm(ctx, ctx.focusedCharmId);
         ctx.setOpen(false);
       },
-    },
-    {
-      id: "search-charms",
-      type: "action",
-      title: "Search Charms",
-      group: "Navigation",
-      handler: () => handleSearchCharms(ctx),
     },
     {
       id: "execute-charm-action",
