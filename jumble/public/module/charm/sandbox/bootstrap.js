@@ -8,11 +8,11 @@ window.React = React
 window.ReactDOM = ReactDOM
 window.Babel = Babel
 
-window.useDoc = function (key, defaultValue = null) {
+window.useDoc = function (key) {
   // Track if we've received a response from the parent
   const [received, setReceived] = React.useState(false)
   // Initialize state with defaultValue
-  const [doc, setDocState] = React.useState(defaultValue)
+  const [doc, setDocState] = React.useState(undefined)
 
   React.useEffect(() => {
     // Handler for document updates
@@ -44,18 +44,6 @@ window.useDoc = function (key, defaultValue = null) {
     }
   }, [key])
 
-  // After we've received a response, apply default value if needed
-  React.useEffect(() => {
-    if (received && doc === undefined && defaultValue !== undefined) {
-      // Only write the default value if we've confirmed no data exists
-      console.log("useDoc", key, "default", defaultValue)
-      window.parent.postMessage(
-        { type: "write", data: [key, defaultValue] },
-        "*"
-      )
-    }
-  }, [received, doc, defaultValue, key])
-
   // Update function
   const updateDoc = newValue => {
     if (typeof newValue === "function") {
@@ -66,11 +54,13 @@ window.useDoc = function (key, defaultValue = null) {
     window.parent.postMessage({ type: "write", data: [key, newValue] }, "*")
   }
 
-  // Return the current document value or the default if we haven't received data yet
-  return [
-    received ? (doc === undefined ? defaultValue : doc) : defaultValue,
-    updateDoc,
-  ]
+  // If we have not yet received response from the host we use field from the
+  // sourceData which was preloaded via `subscribeToSource` during initialization
+  // in the `initializeApp`.
+  // ⚠️ Please note that value we prefetched still could be out of date because
+  // `*` subscription is removed in the iframe-ctx.ts file which could lead
+  // charm to make wrong conclusion and overwrite key.
+  return [received ? doc : window.sourceData[key], updateDoc]
 }
 
 // Define llm utility with React available

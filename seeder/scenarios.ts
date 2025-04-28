@@ -1,16 +1,52 @@
 import { CommandType, type Scenario, type Step } from "./interfaces.ts";
 
+const familyCookbook = (prompt: string, idx: number): Scenario => {
+  return {
+    name: `Family Cookbook ${idx}: ${prompt}`,
+    tags: ["10x10", "family-cookbook"],
+    steps: [
+      {
+        type: CommandType.ImportJSON,
+        prompt: `Family Cookbook Data ${idx}: ${prompt}`,
+        data: {
+          "recipes": [
+            {
+              "name": "Pasta Carbonara",
+              "ingredients": [
+                { "quantity": "200g", "name": "spaghetti" },
+                { "quantity": "100g", "name": "pancetta" },
+                { "quantity": "2", "name": "eggs" },
+                { "quantity": "50g", "name": "pecorino cheese" },
+                { "quantity": "50g", "name": "parmesan" },
+                { "quantity": "dash", "name": "black pepper" },
+              ],
+              "instructions":
+                "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
+            },
+            {
+              "name": "Classic Margherita Pizza",
+              "ingredients": [
+                { "quantity": "1", "name": "pizza dough" },
+                { "quantity": "1/2 cup", "name": "tomato sauce" },
+                { "quantity": "1 cup", "name": "fresh mozzarella" },
+                { "quantity": "1 tsp", "name": "fresh basil" },
+                { "quantity": "1 tbsp", "name": "olive oil" },
+              ],
+              "instructions":
+                "Stretch dough. Add sauce, cheese. Bake at high heat. Add basil after cooking.",
+            },
+          ],
+        },
+      },
+      { type: CommandType.Extend, prompt },
+    ],
+  };
+};
+
 export const scenarios: Scenario[] = [
   {
-    name: "2048 Game Long",
+    name: "2048 Game",
     tags: ["smol"],
-    steps: [{
-      type: CommandType.New,
-      prompt: "a 2048 game",
-    }],
-  },
-  {
-    name: "2048 Game Short",
     steps: [{
       type: CommandType.New,
       prompt: "2048 game",
@@ -215,66 +251,16 @@ Hierarchical integrity is maintained as subitems with their Parent items.
     Force focus on the first item of the list`,
     }],
   },
-  {
-    name: "Recipe Collection Manager",
-    tags: ["import"],
-    steps: [
-      {
-        type: CommandType.ImportJSON,
-        prompt: "Family Cookbook",
-        dataSchema: {
-          type: "object",
-          properties: {
-            "recipes": {
-              type: "array",
-              items: {
-                "type": "object",
-                "properties": {
-                  "name": { "type": "string" },
-                  "ingredients": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                  },
-                  "instructions": { "type": "string" },
-                },
-              },
-            },
-          },
-        },
-        data: {
-          "recipes": [
-            {
-              "name": "Pasta Carbonara",
-              "ingredients": [
-                "200g spaghetti",
-                "100g pancetta",
-                "2 eggs",
-                "50g pecorino cheese",
-                "50g parmesan",
-                "black pepper",
-              ],
-              "instructions":
-                "Cook pasta. Fry pancetta. Mix eggs and cheese. Combine all ingredients while pasta is hot.",
-            },
-            {
-              "name": "Classic Margherita Pizza",
-              "ingredients": [
-                "pizza dough",
-                "tomato sauce",
-                "fresh mozzarella",
-                "fresh basil",
-                "olive oil",
-              ],
-              "instructions":
-                "Stretch dough. Add sauce, cheese. Bake at high heat. Add basil after cooking.",
-            },
-          ],
-        },
-      },
-      {
-        type: CommandType.Extend,
-        prompt: "Allow user to find recipes by common ingredients",
-      },
-    ],
-  },
+  ...[
+    "Show number of recipes in the collection, and a button to generate a new one using the LLM based on the current names of the recipes.",
+    "Show a heading with the total number of recipes followed by a bulleted list of each recipe's name.",
+    "Render a two-column table listing every recipe and how many ingredients it uses.",
+    "Create a dropdown of recipe names that, when a name is chosen, reveals that recipe's ingredient list.",
+    "Add a button labeled 'Random Recipe' that displays one randomly selected recipe's name, ingredients, and instructions.",
+    "Provide a text input to search an ingredient; list all recipes that contain the typed ingredient in real time.",
+    "Display an alphabetical list of every unique ingredient used across all recipes.",
+    "Calculate and show the average number of ingredients per recipe as a single number.",
+    "Generate checkboxes beside each recipe; when any are ticked, show a combined grocery list of the selected recipes' ingredients.",
+    "Make each recipe name a toggle that expands or collapses its cooking instructions.",
+  ].map(familyCookbook),
 ];

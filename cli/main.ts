@@ -5,7 +5,7 @@ import {
   getEntityId,
   idle,
   isStream,
-  setBobbyServerUrl,
+  setBlobbyServerUrl,
   storage,
 } from "@commontools/runner";
 import {
@@ -47,7 +47,7 @@ const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
 const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
 
 storage.setRemoteStorage(new URL(toolshedUrl));
-setBobbyServerUrl(toolshedUrl);
+setBlobbyServerUrl(toolshedUrl);
 
 async function main() {
   if (!spaceName && !spaceDID) {
@@ -94,8 +94,8 @@ async function main() {
   }) satisfies Session;
 
   // TODO(seefeld): It only wants the space, so maybe we simplify the above and just space the space did?
-  const manager = new CharmManager(session);
-  const charms = manager.getCharms();
+  const charmManager = new CharmManager(session);
+  const charms = charmManager.getCharms();
   charms.sink((charms) => {
     console.log(
       "all charms:",
@@ -104,7 +104,7 @@ async function main() {
   });
 
   if (charmId) {
-    const charm = await manager.get(charmId);
+    const charm = await charmManager.get(charmId);
     if (quit) {
       if (!charm) {
         console.error("charm not found:", charmId);
@@ -148,9 +148,9 @@ async function main() {
   if (recipeFile) {
     try {
       const recipeSrc = await Deno.readTextFile(recipeFile);
-      const recipe = await compileRecipe(recipeSrc, "recipe", []);
-      const charm = await manager.runPersistent(recipe, inputValue, cause);
-      const charmWithSchema = (await manager.get(charm))!;
+      const recipe = await compileRecipe(recipeSrc, "recipe", charmManager);
+      const charm = await charmManager.runPersistent(recipe, inputValue, cause);
+      const charmWithSchema = (await charmManager.get(charm))!;
       charmWithSchema.sink((value) => {
         console.log("running charm:", getEntityId(charm), value);
       });

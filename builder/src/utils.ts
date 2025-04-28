@@ -271,24 +271,34 @@ export function createJsonSchema(
       case "object":
         if (Array.isArray(value)) {
           schema.type = "array";
-          if (value.length > 0) {
-            const properties: { [key: string]: any } = {};
-            for (let i = 0; i < value.length; i++) {
-              const item = value?.[i];
-              if (typeof item === "object" && item !== null) {
-                Object.keys(item).forEach((key) => {
-                  if (!(key in properties)) {
-                    properties[key] = analyzeType(
-                      value?.[i]?.[key],
-                    );
-                  }
-                });
+          // Check the array type. The array type is determined by the first element
+          // of the array, or if objects, a superset of all properties of the object elements.
+          // If array is empty, `items` is `{}`.
+          if (value.length === 0) {
+            schema.items = {};
+          } else {
+            const first = value[0];
+            if (first && typeof first === "object" && !Array.isArray(first)) {
+              const properties: { [key: string]: any } = {};
+              for (let i = 0; i < value.length; i++) {
+                const item = value?.[i];
+                if (typeof item === "object" && item !== null) {
+                  Object.keys(item).forEach((key) => {
+                    if (!(key in properties)) {
+                      properties[key] = analyzeType(
+                        value?.[i]?.[key],
+                      );
+                    }
+                  });
+                }
               }
+              schema.items = {
+                type: "object",
+                properties,
+              };
+            } else {
+              schema.items = analyzeType(first) as JSONSchemaMutable;
             }
-            schema.items = {
-              type: "object",
-              properties,
-            };
           }
         } else if (value !== null) {
           schema.type = "object";

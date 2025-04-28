@@ -6,6 +6,7 @@ export {
   charmSchema,
   processSchema,
 } from "./manager.ts";
+export { searchCharms } from "./search.ts";
 export {
   castNewRecipe,
   compileAndRunRecipe,

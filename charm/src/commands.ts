@@ -1,5 +1,5 @@
 import { DEFAULT_MODEL_NAME, fixRecipePrompt } from "@commontools/llm";
-import { Cell, getRecipe } from "@commontools/runner";
+import { Cell, recipeManager } from "@commontools/runner";
 import { Charm, CharmManager } from "./manager.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode, injectUserCode } from "./iframe/static.ts";
@@ -17,9 +17,7 @@ export const castSpellAsCharm = async (
   if (recipeKey && argument) {
     console.log("Syncing...");
     const recipeId = recipeKey.replace("spell-", "");
-    await charmManager.syncRecipeBlobby(recipeId);
-
-    const recipe = getRecipe(recipeId);
+    const recipe = await charmManager.syncRecipeById(recipeId);
     if (!recipe) return;
 
     console.log("Casting...");
@@ -52,7 +50,7 @@ export const createDataCharm = (
   const schema = ${schemaString};
 
   export default recipe(schema, schema, (data) => ({
-    [NAME]: "${name ?? "data import"}",
+    [NAME]: "${name ?? "Data Import"}",
     [UI]: <div><h2>Your data has this schema</h2><pre>${
     schemaString.replaceAll("{", "&#123;")
       .replaceAll("}", "&#125;")
@@ -64,7 +62,7 @@ export const createDataCharm = (
   return compileAndRunRecipe(
     charmManager,
     dataRecipeSrc,
-    name ?? "data import",
+    name ?? "Data Import",
     data,
   );
 };

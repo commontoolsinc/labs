@@ -75,3 +75,21 @@ export function parseTagFromResponse(
   }
   throw new Error(`Tag ${tag} not found in response`);
 }
+
+/**
+ * Parses multiple instances of an xml tag from a response.
+ * @param response - The response to parse.
+ * @param tag - The tag to parse.
+ * @returns An array of strings containing the content within all instances of the given tag, or an empty array if none are found.
+ */
+// NOTE(jake): To parse all content in <foo> tags, call with:
+// `await parseTagListFromResponse(response, "foo")`
+export function parseTagListFromResponse(
+  response: string,
+  tag: string,
+): string[] {
+  const escapedTag = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`<${escapedTag}>([\\s\\S]*?)</${escapedTag}>`, "g");
+  const matches = [...response.trim().matchAll(regex)];
+  return matches.map((match) => match[1].trim());
+}

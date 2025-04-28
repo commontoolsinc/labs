@@ -15,14 +15,18 @@ export class UnsafeEvalRuntime extends EventTarget implements Runtime {
     // by the eval script scope.
     globalThis[RUNTIME_CONSOLE_HOOK] = new Console(this);
   }
-  async compile(source: string): Promise<Recipe | undefined> {
+  // FIXME(ja): perhaps we need the errors?
+  async compile(source: string): Promise<Recipe> {
     if (!source) {
       throw new Error("No source provided.");
     }
     const exports = await tsToExports(source, {
       injection: `const console = globalThis.${RUNTIME_CONSOLE_HOOK};`,
     });
-    return "default" in exports ? exports.default : undefined;
+    if (!("default" in exports)) {
+      throw new Error("No default export found in compiled recipe.");
+    }
+    return exports.default;
   }
   getInvocation(source: string): RuntimeFunction {
     return eval(source);
