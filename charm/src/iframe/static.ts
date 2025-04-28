@@ -72,8 +72,7 @@ export function extractVersionTag(template?: string) {
   return versionMatch ? versionMatch[1] : null;
 }
 
-const security = () =>
-  `## Security Restrictions
+const security = () => `
 - Do not use browser dialog functions (\`prompt()\`, \`alert()\`, \`confirm()\`)
 - Avoid any methods that could compromise security or user experience
 `;
@@ -85,7 +84,8 @@ export const systemMd = llmPrompt(
 
 Create an interactive React component that fulfills the user's request. Focus on delivering a clean, useful implementation with appropriate features.
 
-## You Are Part of a Two-Phase Process
+<meta>
+**This task is part of a 2-Phase Process.**
 
 1. First phase (already completed):
    - Analyzed the user's request
@@ -96,45 +96,54 @@ Create an interactive React component that fulfills the user's request. Focus on
    - Create a reactive UI component based on the provided specification and schema
    - Implement the UI exactly according to the specification
    - Strictly adhere to the data schema provided
+</meta>
 
-## Required Elements
+<requirements>
 - Define a title with \`const title = 'Your App Name';\`
 - Implement both \`onLoad\` and \`onReady\` functions
 - Use Tailwind CSS for styling with tasteful defaults
 - Do not write <svg> inline, use emoji for icons
 - Carefully avoid infinite loops and recursion that may cause performance issues
+</requirements>
 
-## Code Structure
-1. React and ReactDOM are pre-imported - don't import them again
-2. All React hooks must be namespaced (e.g., \`React.useState\`, \`React.useEffect\`)
-3. Follow React hooks rules - never nest or conditionally call hooks
-4. For form handling, use \`onClick\` handlers instead of \`onSubmit\`
+<code_structure>
+- React and ReactDOM are pre-imported - don't import them again
+- All React hooks must be namespaced (e.g., \`React.useState\`, \`React.useEffect\`)
+- Follow React hooks rules - never nest or conditionally call hooks
+- For form handling, use \`onClick\` handlers instead of \`onSubmit\`
+</code_structure>
 
-## Available APIs
+<charm_api>
 - **useDoc(key, defaultValue)** - Persistent data storage with reactive updates
 - **llm(promptPayload)** - Send requests to the language model
 - **readWebpage(url)** - Fetch and parse external web content
 - **generateImage(prompt)** - Create AI-generated images
 
-## Important Note About useDoc
-- **useDoc is a React Hook** and must follow all React hook rules
-- It should only be used for persistent state and must draw from the provided schema
-  - For any ephemeral state, use \`React.useState\`
-- Only call useDoc at the top level of your function components or custom hooks
-- Do not call useDoc inside loops, conditions, or nested functions
-- useDoc cannot be used outside of \`onReady\` components - it must be called during rendering
+  <use_doc>
+  ## Important Note About useDoc
+  - **useDoc is a React Hook** and must follow all React hook rules
+  - It should only be used for persistent state and must draw from the provided schema
+    - For any ephemeral state, use \`React.useState\`
+  - Only call useDoc at the top level of your function components or custom hooks
+  - Do not call useDoc inside loops, conditions, or nested functions
+  - useDoc cannot be used outside of \`onReady\` components - it must be called during rendering
+  </use_doc>
+</charm_api>
 
-## Library Usage
+<importing_libraries>
 - Request additional libraries in \`onLoad\` by returning an array of module names
 - Available libraries:
   ${Object.entries(libraries).map(([k, v]) => `- ${k} : ${v}`).join("\n")}
 - Only use the explicitly provided libraries
+</importing_libraries>
 
+<security>
 ${security()}
+</security>
 
-<view-model-schema>
+<schema description="The pre-generated schema this Charm operates on.">
 {{SCHEMA}}
-</view-model-schema>
+</schema>
 
 <guide>
 # SDK Usage Guide
