@@ -28,7 +28,7 @@ env:
 
 jobs:
   evals:
-    name: "Evals"
+    name: Evals
     runs-on: ubuntu-latest
     environment: seeder
     services:
@@ -42,6 +42,12 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
+      - name: ✏️ Log Eval Run Metadata
+        run: |
+          echo "Running Evals:"
+          echo "- Size: ${{ env.test_size }} charms"
+          echo "- SHA: ${{ env.target_sha }}"
+
       # TODO Upload `seeder` as a deno executable to avoid
       # running from source.
       - name: 📥 Checkout repository
@@ -100,6 +106,13 @@ jobs:
           key: llm-cache-${{ github.run_id }}
           restore-keys: llm-cache
 
+      - name: ✏️ List LLM Cache Load 
+        run: |
+          mkdir -p ./llm_cache_dir/llm-api-cache
+          ls -1 ./llm_cache_dir/llm-api-cache > ./cache-log-pre
+          echo "$(cat ./cache-log-pre | wc -l) items found in cache."
+          cat ./cache-log-pre
+
       - name: 🚀 Start Toolshed server
         run: |
           mkdir -p ./llm_cache_dir
@@ -129,6 +142,25 @@ jobs:
           OPENAI_API_KEY=${{ secrets.CTTS_AI_LLM_OPENAI_API_KEY }} \
           deno task start --name ${{ env.target_sha }} $FLAGS
 
+      - name: ✏️ List LLM Cache Save 
+        run: |
+          mkdir -p ./llm_cache_dir/llm-api-cache
+          ls -1 ./llm_cache_dir/llm-api-cache > ./cache-log-post
+          echo "$(cat ./cache-log-post | wc -l) items found in cache."
+          cat ./cache-log-post
+      
+      - name: 📦 LLM Cache Status
+        run: |
+          diff ./cache-log-pre ./cache-log-post > ./cache-analysis-diff
+          RESULT=$?
+          if [ $RESULT -eq 0 ]; then
+            echo "No new LLM cache entries added!"
+          else
+            # `diff` outputs two lines per diff, one for location, one for content
+            ADDITIONS=$(cat ./cache_analysis-diff | wc -l)
+            echo "LLM cache has added $((ADDITIONS / 2)) entries."
+          fi
+ 
       - name: 📤 Upload reports
         uses: actions/upload-artifact@v4
         with:
