@@ -96,7 +96,11 @@ export async function searchCharms(
       /<charm id="([^"]+)" name="([^"]+)">([\s\S]*?)<\/charm>/g,
     );
 
-    const selectedCharms = [];
+    const selectedCharms: {
+      charm: Cell<Charm>;
+      name: string;
+      reason: string;
+    }[] = [];
     if (charmMatches) {
       for (const match of charmMatches) {
         const charmId = match[1];
