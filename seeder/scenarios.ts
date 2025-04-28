@@ -43,7 +43,7 @@ const familyCookbook = (prompt: string, idx: number): Scenario => {
   };
 };
 
-let llm_todo_list_data = 
+const llm_todo_list_data = 
 {
   "todos":[
     {
@@ -62,7 +62,7 @@ let llm_todo_list_data =
     }
   ]
 }
-let llm_todo_list = {
+const llm_todo_list = {
   name: "llm call todo list",
   tags: ["json_llm"],
   steps: [
