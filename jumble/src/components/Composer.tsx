@@ -32,9 +32,6 @@ import {
   withReact,
 } from "slate-react";
 import { createPortal } from "react-dom";
-import { CharmManager } from "../../../charm/src/index.ts";
-import { Module, Recipe, TYPE } from "@commontools/builder";
-import { Cell, getRecipe } from "@commontools/runner";
 import { LuSend } from "react-icons/lu";
 import { DitheredCube } from "@/components/DitherCube.tsx";
 

@@ -3,7 +3,7 @@ import { CharmManager, compileRecipe } from "@commontools/charm";
 import {
   getCell,
   getEntityId,
-  setBobbyServerUrl,
+  setBlobbyServerUrl,
   storage,
 } from "@commontools/runner";
 import { type DID } from "@commontools/identity";
@@ -43,7 +43,7 @@ const identity = await getIdentity(
 );
 
 storage.setRemoteStorage(new URL(toolshedUrl));
-setBobbyServerUrl(toolshedUrl);
+setBlobbyServerUrl(toolshedUrl);
 
 async function castRecipe() {
   const spaceId = BG_SYSTEM_SPACE_ID;
@@ -64,17 +64,10 @@ async function castRecipe() {
     // Load and compile the recipe first
     console.log("Loading recipe...");
     const recipeSrc = await Deno.readTextFile(recipePath!);
-    const recipe = await compileRecipe(recipeSrc, "recipe", []);
-
-    if (!recipe) {
-      throw new Error(`Failed to compile recipe from ${recipePath}`);
-    }
 
     if (!cause) {
       throw new Error("Cell ID is required");
     }
-
-    console.log("Recipe compiled successfully");
 
     const targetCell = getCell(
       spaceId as DID,
@@ -100,6 +93,8 @@ async function castRecipe() {
 
     // Create charm manager for the specified space
     const charmManager = new CharmManager(session);
+    const recipe = await compileRecipe(recipeSrc, "recipe", charmManager);
+    console.log("Recipe compiled successfully");
 
     const charm = await charmManager.runPersistent(
       recipe,

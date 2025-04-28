@@ -1,14 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { DitheredCube } from "./DitherCube.tsx";
-import { animated, useSpring, useTransition } from "@react-spring/web";
-import { ToggleButton } from "./common/CommonToggle.tsx";
-import type {
-  ExecutionPlan,
-  WorkflowForm,
-  WorkflowType,
-} from "@commontools/charm";
-import { getRecipe } from "@commontools/runner";
-import { charmId } from "@commontools/charm";
+import { useSpring } from "@react-spring/web";
+import type { WorkflowForm, WorkflowType } from "@commontools/charm";
 import { SpellRecord, WORKFLOWS } from "../../../charm/src/workflow.ts";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";

@@ -17,14 +17,13 @@ import {
   getCell,
   getCellFromEntityId,
   getEntityId,
-  getRecipe,
   idle,
   isCell,
   isCellLink,
   isDoc,
   maybeGetCellLink,
+  recipeManager,
   runSynced,
-  syncRecipeBlobby,
 } from "@commontools/runner";
 import { storage } from "@commontools/runner";
 import { type Session } from "@commontools/identity";
@@ -267,7 +266,10 @@ export class CharmManager {
     if (!recipeId) throw new Error("Cannot duplicate charm: missing recipe ID");
 
     // Get the recipe
-    const recipe = getRecipe(recipeId);
+    const recipe = await recipeManager.loadRecipe({
+      recipeId,
+      space: this.space,
+    });
     if (!recipe) throw new Error("Cannot duplicate charm: recipe not found");
 
     // Get the original inputs
@@ -317,12 +319,15 @@ export class CharmManager {
       charm = doc.asCell();
     }
 
+    const recipeId = getRecipeIdFromCharm(charm);
+
     // Make sure we have the recipe so we can run it!
-    let recipeId: string | undefined;
     let recipe: Recipe | Module | undefined;
     try {
-      recipeId = await this.syncRecipe(charm);
-      recipe = getRecipe(recipeId!)!;
+      recipe = await recipeManager.loadRecipe({
+        recipeId,
+        space: this.space,
+      });
     } catch (e) {
       console.warn("recipeId", recipeId);
       console.warn("recipe", recipe);
@@ -1141,15 +1146,18 @@ export class CharmManager {
     );
   }
 
-  // Return Cell with argument content according to the schema of the charm.
-  getArgument<T = any>(charm: Cell<Charm | T>): Cell<T> | undefined {
+  // Return Cell with argument content of already loaded recipe according
+  // to the schema of the charm.
+  getArgument<T = any>(
+    charm: Cell<Charm | T>,
+  ): Cell<T> {
     const source = charm.getSourceCell(processSchema);
-    const recipeId = source?.get()?.[TYPE];
-    const recipe = getRecipe(recipeId);
-    const argumentSchema = recipe?.argumentSchema;
-    return source?.key("argument").asSchema(argumentSchema!) as
-      | Cell<T>
-      | undefined;
+    const recipeId = source?.get()?.[TYPE]!;
+    if (!recipeId) throw new Error("charm missing recipe ID");
+    const recipe = recipeManager.recipeById(recipeId);
+    if (!recipe) throw new Error(`Recipe ${recipeId} not loaded`);
+    // FIXME(ja): return should be Cell<Schema<T>> I think?
+    return source.key("argument").asSchema<T>(recipe.argumentSchema);
   }
 
   // note: removing a charm doesn't clean up the charm's cells
@@ -1248,39 +1256,36 @@ export class CharmManager {
       );
     }
 
+    await this.syncRecipe(charm);
+
     return charm;
   }
 
   // FIXME(JA): this really really really needs to be revisited
-  async syncRecipe(charm: Cell<Charm>): Promise<string> {
+  async syncRecipe(charm: Cell<Charm>) {
     await storage.syncCell(charm);
 
     const sourceCell = charm.getSourceCell();
-    if (!sourceCell) throw new Error("charm missing source cell");
-
     await storage.syncCell(sourceCell);
 
     const recipeId = sourceCell.get()?.[TYPE];
     if (!recipeId) throw new Error("charm missing recipe ID");
 
-    await Promise.all([
-      this.syncRecipeCells(recipeId),
-      this.syncRecipeBlobby(recipeId),
-    ]);
-    return recipeId;
+    await this.syncRecipeById(recipeId);
   }
 
-  async syncRecipeCells(recipeId: string) {
-    // NOTE(ja): this doesn't sync recipe to storage
-    if (recipeId) await storage.syncCellById(this.space, { "/": recipeId });
-  }
-
-  // FIXME(ja): blobby seems to be using toString not toJSON
-  async syncRecipeBlobby(recipeId: string) {
-    await syncRecipeBlobby(recipeId);
+  async syncRecipeById(recipeId: string) {
+    return await recipeManager.ensureRecipeAvailable({
+      recipeId,
+      space: this.space,
+    });
   }
 
   async sync(entity: Cell<any>, waitForStorage: boolean = false) {
     await storage.syncCell(entity, waitForStorage);
   }
 }
+
+export const getRecipeIdFromCharm = (charm: Cell<Charm>): string => {
+  return charm.getSourceCell(processSchema)?.get()?.[TYPE];
+};

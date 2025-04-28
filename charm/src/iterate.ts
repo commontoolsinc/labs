@@ -2,7 +2,7 @@ import {
   Cell,
   isCell,
   isStream,
-  registerNewRecipe,
+  recipeManager,
   runtime,
 } from "@commontools/runner";
 import { isObj } from "@commontools/utils";
@@ -12,11 +12,7 @@ import {
   JSONSchemaMutable,
 } from "@commontools/builder";
 import { Charm, CharmManager, charmSourceCellSchema } from "./manager.ts";
-import {
-  buildFullRecipe,
-  getIframeRecipe,
-  getRecipeFrom,
-} from "./iframe/recipe.ts";
+import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import {
   applyDefaults,
@@ -152,26 +148,32 @@ export const generateNewRecipeVersion = async (
   generationId?: string,
   llmRequestId?: string,
 ) => {
-  const { iframe } = getIframeRecipe(parent);
-  const { recipe, recipeId } = getRecipeFrom(parent);
+  const parentInfo = getIframeRecipe(parent);
+  if (!parentInfo.recipeId) {
+    throw new Error("No recipeId found for charm");
+  }
+  const parentRecipe = await recipeManager.loadRecipe({
+    space: charmManager.getSpace(),
+    recipeId: parentInfo.recipeId,
+  });
 
   const name = extractTitle(newRecipe.src, "<unknown>");
-  // If we have an iframe already, just spread everything
-  const fullSrc = buildFullRecipe(
-    iframe
-      ? {
-        ...iframe,
-        ...newRecipe,
-        name: name,
-      }
-      // otherwise, we are editing a non-iframe recipe and need to grab/fill the schema
-      : {
-        argumentSchema: recipe.argumentSchema ?? { type: "object" },
-        resultSchema: recipe.resultSchema ?? { type: "object" },
-        ...newRecipe,
-        name,
-      },
-  );
+  const argumentSchema =
+    (parentInfo.iframe
+      ? parentInfo.iframe.argumentSchema
+      : parentRecipe.argumentSchema) ?? { type: "object" };
+  const resultSchema =
+    (parentInfo.iframe
+      ? parentInfo.iframe.resultSchema
+      : parentRecipe.resultSchema) ?? { type: "object" };
+
+  const fullSrc = buildFullRecipe({
+    ...parentInfo.iframe, // ignored if undefined
+    argumentSchema,
+    resultSchema,
+    ...newRecipe,
+    name,
+  });
 
   globalThis.dispatchEvent(
     new CustomEvent("job-update", {
@@ -189,7 +191,7 @@ export const generateNewRecipeVersion = async (
     fullSrc,
     newRecipe.spec!,
     parent.getSourceCell()?.key("argument"),
-    recipeId ? [recipeId] : undefined,
+    parentInfo.recipeId ? [parentInfo.recipeId] : undefined,
     llmRequestId,
   );
 
@@ -502,6 +504,7 @@ export async function castNewRecipe(
 export async function compileRecipe(
   recipeSrc: string,
   spec: string,
+  charmManager: CharmManager,
   parents?: string[],
 ) {
   const recipe = await runtime.compile(recipeSrc);
@@ -509,7 +512,17 @@ export async function compileRecipe(
     throw new Error("No default recipe found in the compiled exports.");
   }
   const parentsIds = parents?.map((id) => id.toString());
-  registerNewRecipe(recipe, recipeSrc, spec, parentsIds);
+  recipeManager.registerRecipe({
+    recipeId: recipeManager.generateRecipeId(recipe),
+    space: charmManager.getSpace(),
+    recipe,
+    recipeMeta: {
+      id: recipeManager.generateRecipeId(recipe),
+      src: recipeSrc,
+      spec,
+      parents: parentsIds,
+    },
+  });
   return recipe;
 }
 
@@ -521,7 +534,7 @@ export async function compileAndRunRecipe(
   parents?: string[],
   llmRequestId?: string,
 ): Promise<Cell<Charm>> {
-  const recipe = await compileRecipe(recipeSrc, spec, parents);
+  const recipe = await compileRecipe(recipeSrc, spec, charmManager, parents);
   if (!recipe) {
     throw new Error("Failed to compile recipe");
   }
