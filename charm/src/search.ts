@@ -3,7 +3,6 @@ import {
   charmId,
   CharmManager,
   DEFAULT_MODEL,
-  getRecipeFrom,
 } from "@commontools/charm";
 import { NAME, Recipe } from "@commontools/builder";
 import { LLMClient } from "@commontools/llm";
@@ -42,6 +41,14 @@ export async function searchCharms(
       }),
     );
 
+    // Early return if no charms are found
+    if (!results.length) {
+      return {
+        thinking: "No charms are available to search through.",
+        charms: [],
+      };
+    }
+
     const response = await new LLMClient().sendRequest({
       system:
         `Pick up to the 3 most appropriate (if any) charms from the list that match the user's request:
@@ -56,7 +63,7 @@ export async function searchCharms(
         }
       </charms>
 
-      When responding, you may include reasoning within a <thinking> tag, then return a list of charms using <charm id="" name="...">Reason it's appropriate</charm> in the text.`,
+      When responding, you may include a terse paragraph of your reasoning within a <thinking> tag, then return a list of charms using <charm id="" name="...">Reason it's appropriate</charm> in the text.`,
       messages: [{ role: "user", content: input }],
       model: DEFAULT_MODEL,
       cache: false,
