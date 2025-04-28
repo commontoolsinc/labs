@@ -182,10 +182,15 @@ IMPORTANT:
 export function formatForm(form: WorkflowForm) {
   return `
 <goal>${form.input.processedInput}</goal>
-<plan>${
-    (form.plan?.features ?? []).map((step) => `<feature>${step}</feature>`)
-      .join("\n")
-  }</plan>
+${
+    form.plan?.features?.length
+      ? `<features>${
+        form.plan.features.map((step) => `<feature>${step}</feature>`).join(
+          "\n",
+        )
+      }</features>`
+      : ""
+  }
 <description>${form.plan?.description}</description>
 `;
 }
