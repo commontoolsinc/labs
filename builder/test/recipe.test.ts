@@ -459,7 +459,7 @@ describe("recipe with mixed ifc properties", () => {
   );
 
   it("has the correct classification in the schema of the ssn result", () => {
-    const { result, nodes, argumentSchema } = capitalizeSsnRecipe;
+    const { result, nodes, argumentSchema, resultSchema } = capitalizeSsnRecipe;
     expect(isRecipe(capitalizeSsnRecipe)).toBe(true);
     expect(argumentSchema).toMatchObject(UserSchema);
     expect(nodes).toHaveLength(1);
@@ -476,6 +476,10 @@ describe("recipe with mixed ifc properties", () => {
           schema: { ifc: { classification: ["confidential"] } },
         },
       },
+    });
+    expect(resultSchema).toEqual({
+      ...ResultSchema,
+      ...{ ifc: { classification: ["confidential"] } },
     });
   });
 
