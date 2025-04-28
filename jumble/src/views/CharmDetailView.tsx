@@ -893,6 +893,34 @@ const DataTab = () => {
   const [isLineageExpanded, setIsLineageExpanded] = useState(false);
   const [isReferencesExpanded, setIsReferencesExpanded] = useState(false);
 
+  const argumentJson = React.useMemo<Record<string, any>>(() => {
+    if (!isArgumentExpanded) {
+      return {};
+    }
+
+    try {
+      return translateCellsAndStreamsToPlainJSON(
+        charmManager.getArgument(charm)?.get(),
+      ) as Record<string, any>;
+    } catch (error) {
+      console.warn("Error translating argument to JSON:", error);
+      return {};
+    }
+  }, [isArgumentExpanded, charmManager, charm]);
+
+  const resultJson = React.useMemo<Record<string, any>>(() => {
+    if (!isResultExpanded) {
+      return {};
+    }
+
+    try {
+      return translateCellsAndStreamsToPlainJSON(charm.get()) ?? {};
+    } catch (error) {
+      console.warn("Error translating result to JSON:", error);
+      return {};
+    }
+  }, [isResultExpanded, charm]);
+
   if (!charm) return null;
 
   const lineage = charmManager.getLineage(charm);
@@ -913,20 +941,6 @@ const DataTab = () => {
       </div>
     </div>
   );
-
-  let argumentJson: Record<string, any>;
-  try {
-    if (isArgumentExpanded) {
-      argumentJson = translateCellsAndStreamsToPlainJSON(
-        charmManager.getArgument(charm).get(),
-      ) as Record<string, any>;
-    } else {
-      argumentJson = {};
-    }
-  } catch (error) {
-    console.warn("Error translating argument to JSON:", error);
-    argumentJson = {};
-  }
 
   return (
     <div className="h-full overflow-auto p-4">
@@ -970,7 +984,7 @@ const DataTab = () => {
           <div className="border border-gray-300 rounded bg-gray-50 p-2">
             {/* @ts-expect-error JsonView is imported as any */}
             <JsonView
-              value={translateCellsAndStreamsToPlainJSON(charm.get()) ?? {}}
+              value={resultJson}
               style={{
                 background: "transparent",
                 fontSize: "0.875rem",
