@@ -894,7 +894,7 @@ const DataTab = () => {
   const [isReferencesExpanded, setIsReferencesExpanded] = useState(false);
 
   const argumentJson = React.useMemo<Record<string, any>>(() => {
-    if (!isArgumentExpanded) {
+    if (!isArgumentExpanded || !charm) {
       return {};
     }
 
@@ -909,7 +909,7 @@ const DataTab = () => {
   }, [isArgumentExpanded, charmManager, charm]);
 
   const resultJson = React.useMemo<Record<string, any>>(() => {
-    if (!isResultExpanded) {
+    if (!isResultExpanded || !charm) {
       return {};
     }
 
