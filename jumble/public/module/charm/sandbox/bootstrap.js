@@ -8,7 +8,7 @@ window.React = React
 window.ReactDOM = ReactDOM
 window.Babel = Babel
 
-window.useDoc = function (key) {
+window.useReactiveCell = function (key) {
   // Track if we've received a response from the parent
   const [received, setReceived] = React.useState(false)
   // Initialize state with defaultValue
@@ -27,7 +27,7 @@ window.useDoc = function (key) {
 
         // Update the state with the received value or null if undefined
         const value = event.data.data[1]
-        console.log("useDoc", key, "updated", value)
+        console.log("useReactiveCell", key, "updated", value)
         setDocState(value)
       }
     }
@@ -49,7 +49,7 @@ window.useDoc = function (key) {
     if (typeof newValue === "function") {
       newValue = newValue(doc)
     }
-    console.log("useDoc", key, "written", newValue)
+    console.log("useReactiveCell", key, "written", newValue)
     setDocState(newValue)
     window.parent.postMessage({ type: "write", data: [key, newValue] }, "*")
   }
@@ -206,15 +206,13 @@ window.LoadingUI = function () {
     const libraryStatus = loadingState.libraries
       .map(
         lib =>
-          `<li class="text-sm ${
-            lib.loaded
-              ? "text-green-600"
-              : lib.error
+          `<li class="text-sm ${lib.loaded
+            ? "text-green-600"
+            : lib.error
               ? "text-red-600"
               : "text-blue-600"
           }">
-           ${lib.url.split("/").pop()} ${
-            lib.loaded ? "✓" : lib.error ? "✗" : "..."
+           ${lib.url.split("/").pop()} ${lib.loaded ? "✓" : lib.error ? "✗" : "..."
           }
         </li>`
       )
@@ -228,22 +226,20 @@ window.LoadingUI = function () {
         <div class="bg-white p-6 rounded-lg shadow-lg max-w-md">
           <h2 class="text-xl font-bold mb-4">Loading Application</h2>
           <p class="mb-2">${loadingState.status}</p>
-          ${
-            loadingState.libraries.length
-              ? `<div class="mb-3">
+          ${loadingState.libraries.length
+        ? `<div class="mb-3">
                <p class="font-semibold">Libraries:</p>
                <ul class="ml-4">${libraryStatus}</ul>
              </div>`
-              : ""
-          }
-             ${
-               errorMessages
-                 ? `<div class="mb-3">
+        : ""
+      }
+             ${errorMessages
+        ? `<div class="mb-3">
                <p class="font-semibold text-red-600">Errors:</p>
                <ul class="ml-4">${errorMessages}</ul>
              </div>`
-                 : ""
-             }
+        : ""
+      }
         </div>
       `
   }

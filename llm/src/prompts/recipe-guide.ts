@@ -12,7 +12,7 @@ export const recipeGuidePrompt = llmPrompt(
     2. React and Tailwind are already imported by the host. Do not import them again.
     3. Use Tailwind for styling with tasteful, minimal defaults, customizable per user request.
     4. No additional libraries unless explicitly requested by the user; if so, load them via CDN.
-    5. Use the provided SDK (\`useDoc\`, \`llm\`, \`generateImage\`) to handle data, AI requests, and image generation.  Do not use form post or get requests to fetch user data.
+    5. Use the provided SDK (\`useReactiveCell\`, \`llm\`, \`generateImage\`) to handle data, AI requests, and image generation.  Do not use form post or get requests to fetch user data.
     6. Handle any data as potentially undefined or changing at any time. Always code defensively (e.g., conditional checks, loading states).
     7. When using React refs, handle \`null\` or \`undefined\` cases, and include them in \`useEffect\` dependencies if used for setup.
     8. All react code must be contained within a function component.
@@ -23,9 +23,9 @@ export const recipeGuidePrompt = llmPrompt(
 
     This guide explains how to integrate the provided SDK functions into your React app. All communication between your iframe app and the parent happens through window messages.
 
-    ## 1. \`useDoc\` Hook
+    ## 1. \`useReactiveCell\` Hook
 
-    The \`useDoc\` hook subscribes to real-time updates for a given key and returns a tuple \`[doc, setDoc]\`:
+    The \`useReactiveCell\` hook subscribes to real-time updates for a given key and returns a tuple \`[doc, setDoc]\`:
 
     - **\`doc\`**: The current data (which may initially be \`undefined\`).
     - **\`setDoc\`**: A function used to update the document data.
@@ -38,7 +38,7 @@ export const recipeGuidePrompt = llmPrompt(
 
     \`\`\`jsx
     function CounterComponent() {
-      const [counter, setCounter] = useDoc("counter");
+      const [counter, setCounter] = useReactiveCell("counter");
 
       return (
         <div>
@@ -142,7 +142,7 @@ window.onerror = function (message, source, lineno, colno, error) {
   return false;
 };
 
-function useDoc(key) {
+function useReactiveCell(key) {
   const [doc, setDoc] = React.useState(undefined);
 
   React.useEffect(() => {

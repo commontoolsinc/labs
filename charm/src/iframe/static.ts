@@ -114,19 +114,19 @@ Create an interactive React component that fulfills the user's request. Focus on
 </code_structure>
 
 <charm_api>
-- **useDoc(key, defaultValue)** - Persistent data storage with reactive updates
+- **useReactiveCell(key, defaultValue)** - Persistent data storage with reactive updates
 - **llm(promptPayload)** - Send requests to the language model
 - **readWebpage(url)** - Fetch and parse external web content
 - **generateImage(prompt)** - Create AI-generated images
 
   <use_doc>
-  ## Important Note About useDoc
-  - **useDoc is a React Hook** and must follow all React hook rules
+  ## Important Note About useReactiveCell
+  - **useReactiveCell is a React Hook** and must follow all React hook rules
   - It should only be used for persistent state and must draw from the provided schema
     - For any ephemeral state, use \`React.useState\`
-  - Only call useDoc at the top level of your function components or custom hooks
-  - Do not call useDoc inside loops, conditions, or nested functions
-  - useDoc cannot be used outside of \`onReady\` components - it must be called during rendering
+  - Only call useReactiveCell at the top level of your function components or custom hooks
+  - Do not call useReactiveCell inside loops, conditions, or nested functions
+  - useReactiveCell cannot be used outside of \`onReady\` components - it must be called during rendering
   </use_doc>
 </charm_api>
 
@@ -148,11 +148,11 @@ ${security()}
 <guide>
 # SDK Usage Guide
 
-## 1. \`useDoc\` Hook
+## 1. \`useReactiveCell\` Hook
 
-The \`useDoc\` hook binds to a reactive cell given key and returns a tuple \`[doc, setDoc]\`:
+The \`useReactiveCell\` hook binds to a reactive cell given key and returns a tuple \`[doc, setDoc]\`:
 
-Any keys from the view-model-schema are valid for useDoc, any other keys will fail. Provide a default as the second argument, **do not set an initial value explicitly**.
+Any keys from the view-model-schema are valid for useReactiveCell, any other keys will fail. Provide a default as the second argument, **do not set an initial value explicitly**.
 
 For this schema:
 
@@ -173,12 +173,12 @@ For this schema:
 
 \`\`\`jsx
 function CounterComponent() {
-  // Correct: useDoc called at top level of component
-  const [counter, setCounter] = useDoc("counter", -1); // default
+  // Correct: useReactiveCell called at top level of component
+  const [counter, setCounter] = useReactiveCell("counter", -1); // default
 
   // Incorrect: would cause errors
   // if(something) {
-  //   const [data, setData] = useDoc("data", {}); // Never do this!
+  //   const [data, setData] = useReactiveCell("data", {}); // Never do this!
   // }
 
   const onIncrement = useCallback(() => {
@@ -439,8 +439,8 @@ function onReady(mount, sourceData, libs) {
   const { useSpring, animated } = libs['@react-spring/web']; // Access imported module
 
   function MyApp() {
-    const [count, setCount] = useDoc('count', 0);
-    const [todos, setTodos] = useDoc('todos', [
+    const [count, setCount] = useReactiveCell('count', 0);
+    const [todos, setTodos] = useReactiveCell('todos', [
       { id: 1, text: 'Learn React', completed: false },
       { id: 2, text: 'Build a Todo App', completed: false }
     ]);
@@ -497,18 +497,18 @@ Create an interactive React component that fulfills the user's request. Focus on
 4. For form handling, use \`onClick\` handlers instead of \`onSubmit\`
 
 ## Available APIs
-- **useDoc(key, defaultValue)** - Persistent data storage with reactive updates
+- **useReactiveCell(key, defaultValue)** - Persistent data storage with reactive updates
 - **llm(promptPayload)** - Send requests to the language model
 - **readWebpage(url)** - Fetch and parse external web content
 - **generateImage(prompt)** - Create AI-generated images
 
-## Important Note About useDoc
-- **useDoc is a React Hook** and must follow all React hook rules
+## Important Note About useReactiveCell
+- **useReactiveCell is a React Hook** and must follow all React hook rules
 - It should only be used for persistent state and must draw from the provided schema
   - For any ephemeral state, use \`React.useState\`
-- Only call useDoc at the top level of your function components or custom hooks
-- Do not call useDoc inside loops, conditions, or nested functions
-- useDoc cannot be used outside of \`onReady\` components - it must be called during rendering
+- Only call useReactiveCell at the top level of your function components or custom hooks
+- Do not call useReactiveCell inside loops, conditions, or nested functions
+- useReactiveCell cannot be used outside of \`onReady\` components - it must be called during rendering
 
 ## Library Usage
 - Request additional libraries in \`onLoad\` by returning an array of module names
@@ -521,11 +521,11 @@ ${security()}
 <guide>
 # SDK Usage Guide
 
-## 1. \`useDoc\` Hook
+## 1. \`useReactiveCell\` Hook
 
-The \`useDoc\` hook binds to a reactive cell given key and returns a tuple \`[doc, setDoc]\`:
+The \`useReactiveCell\` hook binds to a reactive cell given key and returns a tuple \`[doc, setDoc]\`:
 
-Any keys from the schema are valid for useDoc, any other keys will fail. Provide a default as the second argument, **do not set an initial value explicitly**.
+Any keys from the schema are valid for useReactiveCell, any other keys will fail. Provide a default as the second argument, **do not set an initial value explicitly**.
 
 For this schema:
 
@@ -546,12 +546,12 @@ For this schema:
 
 \`\`\`jsx
 function CounterComponent() {
-  // Correct: useDoc called at top level of component
-  const [counter, setCounter] = useDoc("counter", -1); // default
+  // Correct: useReactiveCell called at top level of component
+  const [counter, setCounter] = useReactiveCell("counter", -1); // default
 
   // Incorrect: would cause errors
   // if(something) {
-  //   const [data, setData] = useDoc("data", {}); // Never do this!
+  //   const [data, setData] = useReactiveCell("data", {}); // Never do this!
   // }
 
   const onIncrement = useCallback(() => {
@@ -759,8 +759,8 @@ function onReady(mount, sourceData, libs) {
   const { useSpring, animated } = libs['@react-spring/web']; // Access imported module
 
   function MyApp() {
-    const [count, setCount] = useDoc('count', 0);
-    const [todos, setTodos] = useDoc('todos', [
+    const [count, setCount] = useReactiveCell('count', 0);
+    const [todos, setTodos] = useReactiveCell('todos', [
       { id: 1, text: 'Learn React', completed: false },
       { id: 2, text: 'Build a Todo App', completed: false }
     ]);
