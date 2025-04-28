@@ -63,6 +63,8 @@ window.useReactiveCell = function (key) {
   return [received ? doc : window.sourceData[key], updateDoc]
 }
 
+window.useDoc = window.useReactiveCell;
+
 // Define llm utility with React available
 window.llm = (function () {
   const inflight = []
