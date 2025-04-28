@@ -124,8 +124,11 @@ export async function searchCharms(
       thinking,
       charms: selectedCharms,
     };
-  } catch (error) {
-    console.error("Search charms error:", error);
+  } catch (error: any) {
+    console.error(
+      "Search charms error:",
+      error?.message ?? JSON.stringify(error),
+    );
 
     return {
       thinking: "An error occurred while searching for charms.",
