@@ -151,13 +151,11 @@ jobs:
       
       - name: 📦 LLM Cache Status
         run: |
-          diff ./cache-log-pre ./cache-log-post > ./cache-analysis-diff
-          RESULT=$?
-          if [ $RESULT -eq 0 ]; then
+          if diff ./cache-log-pre ./cache-log-post > ./cache-analysis-diff ; then
             echo "No new LLM cache entries added!"
           else
             # `diff` outputs two lines per diff, one for location, one for content
-            ADDITIONS=$(cat ./cache_analysis-diff | wc -l)
+            ADDITIONS=$(cat ./cache-analysis-diff | wc -l)
             echo "LLM cache has added $((ADDITIONS / 2)) entries."
           fi
  
