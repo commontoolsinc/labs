@@ -115,7 +115,8 @@ Create an interactive React component that fulfills the user's request. Focus on
 
 <charm_api>
 - **useReactiveCell(key, defaultValue)** - Persistent data storage with reactive updates
-- **llm(promptPayload)** - Send requests to the language model
+- **generateText({ system, messages })** - Generate text via Large Language Model
+- **generateObject({ system, messages })** - Generate JSON object via Large Language Model
 - **readWebpage(url)** - Fetch and parse external web content
 - **generateImage(prompt)** - Create AI-generated images
 
@@ -194,118 +195,106 @@ function CounterComponent() {
 }
 \`\`\`
 
-## 2. llm Function
+## 2. \`generateText\` Function
 
 \`\`\`jsx
 async function fetchLLMResponse() {
-  // place user-level requirements in system prompt
-  const promptPayload = {
+  const result = await generateText({
     system: 'Translate all the messages to emojis, reply in JSON.',
     messages: ['Hi', 'How can I help you today?', 'tell me a joke']
-  };
-  const result = await llm(promptPayload)
+  })
   console.log('LLM responded:', result);
 }
 \`\`\`
 
+## 3. \`generateObject\` (JSON) Function
 
-## 3. llm Function with JSON
-
-If you need JSON to be returned from the LLM, you can enable the \`mode: 'json'\`
-in the \`promptPayload\`. However, if you do this, you'll need to make sure you
-define the schema you expect from the JSON response. Do this as plain english.
+Important: ensure you explain the intended schema of the response in the prompt.
 
 For example: "Generate a traditional Vietnamese recipe in JSON format, with the
 following properties: name (string), ingredients (array of strings),
 instructions (array of strings)"
 
-NOTE: You'll need to parse the result string into an object using \`JSON.parse()\`.
+\`generateObject\` returns a parsed object already, or \`undefined\`.
+
+\`\`\`jsx
+const promptPayload = ;
+const result = await generateObject({
+  system: 'Translate all the messages to emojis, reply in JSON with the following properties: an array of objects, each with original_text (string), emoji_translation (string)',
+  messages: ['Hi', 'How can I help you today?', 'tell me a joke'],
+});
+console.log('JSON response from llm:', result);
+
+// [
+//     {
+//         "original_text": "Hi",
+//         "emoji_translation": "👋"
+//     },
+//     {
+//         "original_text": "How can I help you today?",
+//         "emoji_translation": "🤔❓🙋‍♂️📅"
+//     },
+//     {
+//         "original_text": "tell me a joke",
+//         "emoji_translation": "🗣️👉😂"
+//     }
+// ]
+\`\`\`
 
 ANOTHER NOTE: Language model requests are globally cached based on your prompt.
 This means that identical requests will return the same result. If your llm use
 requires unique results on every request, make sure to introduce a cache-breaking
 string such as a timestamp or incrementing number/id.
 
-\`\`\`jsx
-const promptPayload = {
-  system: 'Translate all the messages to emojis, reply in JSON with the following properties: an array of objects, each with original_text (string), emoji_translation (string)',
-  messages: ['Hi', 'How can I help you today?', 'tell me a joke'],
-  mode: 'json'
-};
-const result = await llm(promptPayload);
-console.log('JSON response from llm:', JSON.parse(result));
-\`\`\`
-
-This \`result\` variable will be a stringified JSON object. Once you JSON.parse() it, you'll get the following object:
-
-[
-    {
-        "original_text": "Hi",
-        "emoji_translation": "👋"
-    },
-    {
-        "original_text": "How can I help you today?",
-        "emoji_translation": "🤔❓🙋‍♂️📅"
-    },
-    {
-        "original_text": "tell me a joke",
-        "emoji_translation": "🗣️👉😂"
-    }
-]
-
 Another example:
 
 \`\`\`jsx
-// Every time we run this prompt, we want a unique result, so we'll use a cache-breaking string.
+// To avoid the cache we'll use a cache-busting string.
 const cacheBreaker = Date.now();
 
-const promptPayload = {
+const result = await generateObject({
   system: "You are a professional chef specializing in Mexican cuisine. Generate a detailed, authentic Mexican recipe in JSON format with the following properties: title (string), ingredients (array of strings), instructions (array of strings), prepTime (integer in minutes), cookTime (integer in minutes)",
-  messages :["give me something spicy!" + " " + cacheBreaker],
-  mode: "json",
-};
-const result = await llm(promptPayload);
-console.log('JSON response from llm:', JSON.parse(result));
+  messages: ["give me something spicy!" + " " + cacheBreaker],
+});
+console.log('JSON response from llm:', result);
+
+// {
+//     "title": "Camarones a la Diabla (Devil Shrimp)",
+//     "ingredients": [
+//         "1.5 lbs Large Shrimp, peeled and deveined",
+//         "4 tbsp Olive Oil",
+//         "1 medium White Onion, finely chopped",
+//         "4 cloves Garlic, minced",
+//         "2-3 Habanero Peppers, finely chopped (adjust to your spice preference, remove seeds for less heat)",
+//         "1 (28 oz) can Crushed Tomatoes",
+//         "1/2 cup Chicken Broth",
+//         "2 tbsp Tomato Paste",
+//         "1 tbsp Apple Cider Vinegar",
+//         "1 tbsp Dried Oregano",
+//         "1 tsp Cumin",
+//         "1/2 tsp Smoked Paprika",
+//         "1/4 tsp Ground Cloves",
+//         "Salt and Black Pepper to taste",
+//         "Fresh Cilantro, chopped, for garnish",
+//         "Lime wedges, for serving"
+//     ],
+//     "instructions": [
+//         "In a large bowl, toss the shrimp with salt and pepper.",
+//         "Heat the olive oil in a large skillet or Dutch oven over medium-high heat.",
+//         "Add the onion and cook until softened, about 5 minutes.",
+//         "Add the garlic and habanero peppers and cook for 1 minute more, until fragrant.",
+//         "Stir in the crushed tomatoes, chicken broth, tomato paste, apple cider vinegar, oregano, cumin, smoked paprika, and cloves.",
+//         "Bring the sauce to a simmer and cook for 15 minutes, stirring occasionally, until slightly thickened.",
+//         "Add the shrimp to the sauce and cook for 3-5 minutes, or until the shrimp are pink and cooked through.",
+//         "Taste and adjust seasoning with salt and pepper as needed.",
+//         "Garnish with fresh cilantro and serve immediately with lime wedges. Serve with rice or tortillas."
+//     ],
+//     "prepTime": 20,
+//     "cookTime": 30
+// }
 \`\`\`
 
-The \`result\` variable will be a stringified JSON object. Once you JSON.parse() it, you'll get the following object:
-
-{
-    "title": "Camarones a la Diabla (Devil Shrimp)",
-    "ingredients": [
-        "1.5 lbs Large Shrimp, peeled and deveined",
-        "4 tbsp Olive Oil",
-        "1 medium White Onion, finely chopped",
-        "4 cloves Garlic, minced",
-        "2-3 Habanero Peppers, finely chopped (adjust to your spice preference, remove seeds for less heat)",
-        "1 (28 oz) can Crushed Tomatoes",
-        "1/2 cup Chicken Broth",
-        "2 tbsp Tomato Paste",
-        "1 tbsp Apple Cider Vinegar",
-        "1 tbsp Dried Oregano",
-        "1 tsp Cumin",
-        "1/2 tsp Smoked Paprika",
-        "1/4 tsp Ground Cloves",
-        "Salt and Black Pepper to taste",
-        "Fresh Cilantro, chopped, for garnish",
-        "Lime wedges, for serving"
-    ],
-    "instructions": [
-        "In a large bowl, toss the shrimp with salt and pepper.",
-        "Heat the olive oil in a large skillet or Dutch oven over medium-high heat.",
-        "Add the onion and cook until softened, about 5 minutes.",
-        "Add the garlic and habanero peppers and cook for 1 minute more, until fragrant.",
-        "Stir in the crushed tomatoes, chicken broth, tomato paste, apple cider vinegar, oregano, cumin, smoked paprika, and cloves.",
-        "Bring the sauce to a simmer and cook for 15 minutes, stirring occasionally, until slightly thickened.",
-        "Add the shrimp to the sauce and cook for 3-5 minutes, or until the shrimp are pink and cooked through.",
-        "Taste and adjust seasoning with salt and pepper as needed.",
-        "Garnish with fresh cilantro and serve immediately with lime wedges. Serve with rice or tortillas."
-    ],
-    "prepTime": 20,
-    "cookTime": 30
-}
-
-## 4. readWebpage Function
+## 4. \`readWebpage\` Function
 
 \`\`\`jsx
 async function fetchFromUrl() {
@@ -498,7 +487,8 @@ Create an interactive React component that fulfills the user's request. Focus on
 
 ## Available APIs
 - **useReactiveCell(key, defaultValue)** - Persistent data storage with reactive updates
-- **llm(promptPayload)** - Send requests to the language model
+- **generateText({ system, messages })** - Generate text via Large Language Model
+- **generateObject({ system, messages })** - Generate JSON object via Large Language Model
 - **readWebpage(url)** - Fetch and parse external web content
 - **generateImage(prompt)** - Create AI-generated images
 
@@ -567,63 +557,106 @@ function CounterComponent() {
 }
 \`\`\`
 
-## 2. Generating text with llm()
+## 2. \`generateText\` Function
 
 \`\`\`jsx
 async function fetchLLMResponse() {
-  // place user-level requirements in system prompt
-  const promptPayload = {
-    system: 'Repond to the user's request.',
+  const result = await generateText({
+    system: 'Translate all the messages to emojis, reply in JSON.',
     messages: ['Hi', 'How can I help you today?', 'tell me a joke']
-  };
-  const result = await llm(promptPayload)
+  })
   console.log('LLM responded:', result);
 }
 \`\`\`
 
+## 3. \`generateObject\` (JSON) Function
 
-## 3. Generating JSON with llm()
-
-Use \`mode: 'json'\` in the \`promptPayload\` with the expected schema. Do this in plain text.
+Important: ensure you explain the intended schema of the response in the prompt.
 
 For example: "Generate a traditional Vietnamese recipe in JSON format, with the
 following properties: name (string), ingredients (array of strings),
 instructions (array of strings)"
 
-NOTE: You'll need to parse the result string into an object using \`JSON.parse()\`.
-
-ANOTHER NOTE: llm() requests are cached based on input.
-Identical requests will return the same result.
-Inject entropy (datetime, counter) to produce unique results on every request.
+\`generateObject\` returns a parsed object already, or \`undefined\`.
 
 \`\`\`jsx
-const promptPayload = {
+const promptPayload = ;
+const result = await generateObject({
   system: 'Translate all the messages to emojis, reply in JSON with the following properties: an array of objects, each with original_text (string), emoji_translation (string)',
   messages: ['Hi', 'How can I help you today?', 'tell me a joke'],
-  mode: 'json'
-};
-const result = await llm(promptPayload);
-console.log('JSON response from llm:', JSON.parse(result));
+});
+console.log('JSON response from llm:', result);
+
+// [
+//     {
+//         "original_text": "Hi",
+//         "emoji_translation": "👋"
+//     },
+//     {
+//         "original_text": "How can I help you today?",
+//         "emoji_translation": "🤔❓🙋‍♂️📅"
+//     },
+//     {
+//         "original_text": "tell me a joke",
+//         "emoji_translation": "🗣️👉😂"
+//     }
+// ]
 \`\`\`
 
-This \`result\` variable will be a stringified JSON object. Once you JSON.parse() it, you'll get the following object:
+ANOTHER NOTE: Language model requests are globally cached based on your prompt.
+This means that identical requests will return the same result. If your llm use
+requires unique results on every request, make sure to introduce a cache-breaking
+string such as a timestamp or incrementing number/id.
 
-[
-    {
-        "original_text": "Hi",
-        "emoji_translation": "👋"
-    },
-    {
-        "original_text": "How can I help you today?",
-        "emoji_translation": "🤔❓🙋‍♂️📅"
-    },
-    {
-        "original_text": "tell me a joke",
-        "emoji_translation": "🗣️👉😂"
-    }
-]
+Another example:
 
-## 4. Fetch webpages with \`readWebpage\`
+\`\`\`jsx
+// To avoid the cache we'll use a cache-busting string.
+const cacheBreaker = Date.now();
+
+const result = await generateObject({
+  system: "You are a professional chef specializing in Mexican cuisine. Generate a detailed, authentic Mexican recipe in JSON format with the following properties: title (string), ingredients (array of strings), instructions (array of strings), prepTime (integer in minutes), cookTime (integer in minutes)",
+  messages: ["give me something spicy!" + " " + cacheBreaker],
+});
+console.log('JSON response from llm:', result);
+
+// {
+//     "title": "Camarones a la Diabla (Devil Shrimp)",
+//     "ingredients": [
+//         "1.5 lbs Large Shrimp, peeled and deveined",
+//         "4 tbsp Olive Oil",
+//         "1 medium White Onion, finely chopped",
+//         "4 cloves Garlic, minced",
+//         "2-3 Habanero Peppers, finely chopped (adjust to your spice preference, remove seeds for less heat)",
+//         "1 (28 oz) can Crushed Tomatoes",
+//         "1/2 cup Chicken Broth",
+//         "2 tbsp Tomato Paste",
+//         "1 tbsp Apple Cider Vinegar",
+//         "1 tbsp Dried Oregano",
+//         "1 tsp Cumin",
+//         "1/2 tsp Smoked Paprika",
+//         "1/4 tsp Ground Cloves",
+//         "Salt and Black Pepper to taste",
+//         "Fresh Cilantro, chopped, for garnish",
+//         "Lime wedges, for serving"
+//     ],
+//     "instructions": [
+//         "In a large bowl, toss the shrimp with salt and pepper.",
+//         "Heat the olive oil in a large skillet or Dutch oven over medium-high heat.",
+//         "Add the onion and cook until softened, about 5 minutes.",
+//         "Add the garlic and habanero peppers and cook for 1 minute more, until fragrant.",
+//         "Stir in the crushed tomatoes, chicken broth, tomato paste, apple cider vinegar, oregano, cumin, smoked paprika, and cloves.",
+//         "Bring the sauce to a simmer and cook for 15 minutes, stirring occasionally, until slightly thickened.",
+//         "Add the shrimp to the sauce and cook for 3-5 minutes, or until the shrimp are pink and cooked through.",
+//         "Taste and adjust seasoning with salt and pepper as needed.",
+//         "Garnish with fresh cilantro and serve immediately with lime wedges. Serve with rice or tortillas."
+//     ],
+//     "prepTime": 20,
+//     "cookTime": 30
+// }
+\`\`\`
+
+## 4. \`readWebpage\` Function
 
 \`\`\`jsx
 async function fetchFromUrl() {

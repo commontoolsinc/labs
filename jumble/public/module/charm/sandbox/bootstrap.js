@@ -100,6 +100,27 @@ window.llm = (function () {
   return llm
 })()
 
+window.generateText = function ({ system, messages }) {
+  return window.llm({
+    system,
+    messages,
+  })
+}
+
+window.generateObject = function ({ system, messages }) {
+  return window.llm({
+    system,
+    messages,
+    mode: 'json'
+  }).then(result => {
+    try {
+      return JSON.parse(result);
+    } catch (e) {
+      return undefined;
+    }
+  });
+}
+
 window.perform = (() => {
   const pending = new Map()
   return function perform(command) {
