@@ -3,11 +3,11 @@
   "messages": [
     {
       "role": "user",
-      "content": "count the values in `simpleValue2`"
+      "content": "show the data from `simpleValue2`"
     },
     {
       "role": "assistant",
-      "content": "<autocomplete>Count the occurrences of each value in the `simpleValue2` field, creating a 📊 frequency distribution chart</autocomplete>"
+      "content": "<autocomplete>Show the data from the `simpleValue2` charm, displaying its current value and any associated metadata.</autocomplete>"
     }
   ],
   "model": "anthropic:claude-3-7-sonnet-latest",
