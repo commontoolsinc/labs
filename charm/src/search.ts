@@ -4,9 +4,9 @@ import {
   CharmManager,
   DEFAULT_MODEL,
 } from "@commontools/charm";
-import { NAME, Recipe } from "@commontools/builder";
+import { NAME, Recipe, recipe } from "@commontools/builder";
 import { LLMClient } from "@commontools/llm";
-import { Cell, getRecipe } from "@commontools/runner";
+import { Cell, recipeManager } from "@commontools/runner";
 
 export type CharmSearchResult = {
   charm: Cell<Charm>;
@@ -30,7 +30,7 @@ export async function searchCharms(
         const title = data?.[NAME] ?? "Untitled";
 
         const recipeId = await charmManager.syncRecipe(charm);
-        const recipe = getRecipe(recipeId!)!;
+        const recipe = recipeManager.recipeById(recipeId!)!;
 
         return {
           title: title + ` (#${charmId(charm.entityId!)!.slice(-4)})`,

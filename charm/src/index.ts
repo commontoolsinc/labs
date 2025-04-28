@@ -28,11 +28,7 @@ export {
   modifyCharm,
   renameCharm,
 } from "./commands.ts";
-export {
-  getIframeRecipe,
-  getRecipeFrom,
-  type IFrameRecipe,
-} from "./iframe/recipe.ts";
+export { getIframeRecipe, type IFrameRecipe } from "./iframe/recipe.ts";
 export { type ParsedMention, type ProcessedPrompt } from "./imagine.ts";
 export { formatPromptWithMentions, parseComposerDocument } from "./format.ts";
 
