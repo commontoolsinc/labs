@@ -20,10 +20,10 @@ export type Command = {
 };
 
 export type CharmResult = {
-  id: string;
+  id: string | null;
   prompt: string;
   screenshotPath?: string;
-  status: string;
+  status: "PASS" | "FAIL" | "NOTVERIFIED";
   summary: string;
 };
 

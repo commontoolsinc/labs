@@ -1,21 +1,81 @@
-// FIXME(ja): all this should be in the utils module
+import {
+  Browser as AstralBrowser,
+  launch,
+  Page as AstralPage,
+} from "@astral/astral";
+import { login } from "@commontools/utils/integration";
+import { sleep } from "@commontools/utils/sleep";
 
-import { ConsoleEvent, launch } from "@astral/astral";
+// Wrapper around `@astral/astral`'s `Browser`.
+export class Browser {
+  private browser: AstralBrowser | null;
+  private page: AstralPage | null;
+  private apiUrl: string;
+  private constructor(
+    browser: AstralBrowser,
+    page: AstralPage,
+    apiUrl: string,
+  ) {
+    this.browser = browser;
+    this.page = page;
+    this.apiUrl = apiUrl;
+  }
 
-const HEADLESS = (Deno.env.get("HEADLESS") ?? "true") === "true";
-export const browser = await launch({
-  args: ["--window-size=1280,1024"],
-  headless: HEADLESS,
-});
-export const page = await browser.newPage();
+  static async launch(
+    { headless, apiUrl }: { headless: boolean; apiUrl: string },
+  ): Promise<Browser> {
+    const browser = await launch({
+      args: ["--window-size=1280,1024"],
+      headless,
+    });
+    const page = await browser.newPage();
+    return new Browser(browser, page, apiUrl);
+  }
 
-// export const logs: ConsoleEvent[] = [];
+  async screenshot(filename: string): Promise<void> {
+    this.checkIsOk();
+    const screenshot = await this.page!.screenshot();
+    return Deno.writeFile(filename, screenshot);
+  }
 
-// page.addEventListener("console", (e: ConsoleEvent) => {
-//   logs.push(e);
-// });
+  async goto(url: string) {
+    this.checkIsOk();
+    await this.page!.goto(new URL(url, this.apiUrl).toString());
+    await sleep(1000);
+    this.addErrorListeners();
+    await login(this.page!);
+  }
 
-// export const getLogs = () => [...logs];
-// export const clearLogs = () => {
-//   logs.length = 0;
-// };
+  async checkForErrors(): Promise<any> {
+    this.checkIsOk();
+    return await this.page!.evaluate(() => {
+      // @ts-ignore: this code is stringified and sent to browser context
+      return globalThis.charmRuntimeErrors;
+    });
+  }
+
+  async close(): Promise<void> {
+    this.checkIsOk();
+    const { page, browser } = this;
+    this.browser = null;
+    this.page = null;
+    await browser!.close();
+  }
+
+  private addErrorListeners() {
+    this.page!.evaluate(() => {
+      // @ts-ignore: this code is stringified and sent to browser context
+      globalThis.charmRuntimeErrors = [];
+      globalThis.addEventListener("common-iframe-error", (e) => {
+        // @ts-ignore: this code is stringified and sent to browser context
+        globalThis.charmRuntimeErrors.push(e.detail.description);
+      });
+    });
+  }
+
+  private checkIsOk() {
+    if (!this.browser || !this.page) {
+      throw new Error("Browser is already closed.");
+    }
+  }
+}

@@ -1,4 +1,4 @@
-import type { CharmResult, ExecutedScenario, Scenario } from "./interfaces.ts";
+import type { CharmResult, ExecutedScenario } from "./interfaces.ts";
 import { dirname, fromFileUrl, join } from "@std/path";
 
 // FIXME(ja): we should just use handlebars or something...  claude built a custom template engine for this...
@@ -18,50 +18,6 @@ export const ensureReportDir = async (name: string) => {
     await Deno.mkdir(reportDir, { recursive: true });
   }
 };
-
-// Helper function to group results by scenario
-function groupResultsByScenario(
-  results: CharmResult[],
-  scenarios: Scenario[],
-): Map<number, { name: string; results: CharmResult[] }> {
-  const groups = new Map<number, { name: string; results: CharmResult[] }>();
-  let currentScenario = 0;
-
-  // Initialize the first scenario group
-  groups.set(currentScenario, {
-    name: scenarios[currentScenario]?.name || `Scenario ${currentScenario + 1}`,
-    results: [],
-  });
-
-  // Process each result
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i];
-
-    // Check if we need to move to the next scenario
-    // We do this by checking if we've processed all steps in the current scenario
-    let stepsInCurrentScenario = 0;
-    for (let j = 0; j <= currentScenario; j++) {
-      if (j < scenarios.length) {
-        stepsInCurrentScenario += scenarios[j].steps.length;
-      }
-    }
-
-    // If we've processed all steps in the current scenario, move to the next one
-    if (i >= stepsInCurrentScenario && currentScenario < scenarios.length - 1) {
-      currentScenario++;
-      groups.set(currentScenario, {
-        name: scenarios[currentScenario]?.name ||
-          `Scenario ${currentScenario + 1}`,
-        results: [],
-      });
-    }
-
-    // Add the result to the current scenario group
-    groups.get(currentScenario)!.results.push(result);
-  }
-
-  return groups;
-}
 
 // Helper function to load and replace placeholders in a template
 async function loadTemplate(templateName: string): Promise<string> {
@@ -93,7 +49,6 @@ export async function generateReport(
   name: string,
   executedScenarios: ExecutedScenario[],
   toolshedUrl: string,
-  allScenarios: Scenario[],
 ) {
   // Calculate overall statistics
   const totalScenarios = executedScenarios.length;
@@ -150,6 +105,7 @@ export async function generateReport(
             ? `<a href="${relativePath}" target="_blank"><img src="${relativePath}" alt="Screenshot" class="w-full h-48 object-cover"></a>`
             : `<div class="w-full h-48 bg-gray-100 flex items-center justify-center"><p class="text-gray-500">No screenshot available</p></div>`;
 
+          const id = result.id ?? "none";
           return replaceTemplatePlaceholders(resultTemplate, {
             RESULT_DELAY: (groupIndex * 0.1) + (index * 0.05),
             SCREENSHOT_HTML: screenshotHtml,
@@ -157,8 +113,8 @@ export async function generateReport(
             STATUS: result.status,
             TOOLSHED_URL: toolshedUrl,
             NAME: name,
-            RESULT_ID: result.id,
-            SHORT_ID: result.id.slice(-6),
+            RESULT_ID: id,
+            SHORT_ID: id.slice(-6),
             PROMPT: result.prompt,
             SUMMARY: result.summary,
           });
