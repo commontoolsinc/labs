@@ -318,12 +318,10 @@ export const selectSchema = <Space extends MemorySpace>(
   mergeSelection(includedFacts, factSelection);
 
   const helper = new ServerTraverseHelper(session);
-  const tracker = new CycleTracker<JSONValue>();
 
   // Then filter the facts by the associated schemas, which will dereference
   // pointers as we walk through the structure.
-
-  loadDocFacts(helper, tracker, selectSchema, includedFacts);
+  loadDocFacts(helper, selectSchema, includedFacts);
 
   // Add any facts that we accessed while traversing the object with its schema
   // We'll need the same set of objects on the client to traverse it there.
@@ -363,10 +361,10 @@ export const selectSchema = <Space extends MemorySpace>(
 
 function loadDocFacts(
   helper: ServerTraverseHelper,
-  tracker: CycleTracker<JSONValue>,
   selectSchema: SchemaSelector,
   factSelection: FactSelection,
 ) {
+  const tracker = new CycleTracker<JSONValue>();
   for (const [of, ofValues] of Object.entries(factSelection)) {
     const schemaFilterOf = selectSchema[of as Entity] ??
       selectSchema[SelectAll];
