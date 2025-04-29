@@ -113,7 +113,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       return true;
     }
     return isObject(schema) &&
-      Object.keys(schema).some((k) => !this.isInternalSchemaKey(k));
+      Object.keys(schema).every((k) => this.isInternalSchemaKey(k));
   }
 
   // We don't need to check ID and ID_FIELD, since they won't be included
