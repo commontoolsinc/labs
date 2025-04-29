@@ -125,9 +125,27 @@ Create an interactive React component that fulfills the user's request. Focus on
   - **useReactiveCell is a React Hook** and must follow all React hook rules
   - It should only be used for persistent state and must draw from the provided schema
     - For any ephemeral state, use \`React.useState\`
-  - Only call useReactiveCell at the top level of your function components or custom hooks
+  - Only call useReactiveCell at the top level of your React function components or custom hooks
   - Do not call useReactiveCell inside loops, conditions, or nested functions
-  - useReactiveCell cannot be used outside of \`onReady\` components - it must be called during rendering
+  - Do not call useReactiveCell directly inside the onReady function - it can only be used inside React components
+  - The onReady function itself is not a React component and cannot use React hooks directly
+  - Example of correct usage:
+    \`\`\`jsx
+    function onReady(mount, sourceData, modules) {
+      // This is NOT a React component, so do NOT use hooks here!
+      
+      // Create a React component to use hooks properly:
+      function MyApp() {
+        // React hooks can be used here
+        const [data, setData] = useReactiveCell('myData', defaultValue);
+        return <div>{/* your JSX */}</div>;
+      }
+      
+      // Render the React component to the mount point
+      const root = ReactDOM.createRoot(mount);
+      root.render(<MyApp />);
+    }
+    \`\`\`
   </use_doc>
 </charm_api>
 
