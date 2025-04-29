@@ -703,7 +703,6 @@ const OperationTab = () => {
       {/* Content Container with single scrollbar */}
       <div className="flex-grow overflow-auto mt-3 -mx-4 px-4">
         <Variants />
-        <Suggestions />
       </div>
     </div>
   );
