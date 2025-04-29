@@ -105,7 +105,7 @@ export async function iterate(
   const { iframe } = getIframeRecipe(charm);
 
   const prevSpec = iframe?.spec;
-  if (!plan?.description) {
+  if (plan?.description === undefined) {
     throw new Error("No specification provided");
   }
   const newSpec = plan.description;
