@@ -106,7 +106,7 @@ window.generateText = function ({ system, messages }) {
   return window.llm({
     system,
     messages,
-  }).then(result => result.content)
+  }).then(result => typeof result === 'string' ? result : result?.content)
 }
 
 window.generateObject = function ({ system, messages }) {
