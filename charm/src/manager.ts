@@ -47,12 +47,12 @@ export const charmSchema = {
     [UI]: { type: "object" },
   },
   required: [UI, NAME],
-} as const satisfies JSONSchema satisfies JSONSchema;
+} as const satisfies JSONSchema;
 
 export const charmListSchema = {
   type: "array",
   items: { ...charmSchema, asCell: true },
-} as const satisfies JSONSchema satisfies JSONSchema;
+} as const satisfies JSONSchema;
 
 export const charmLineageSchema = {
   type: "object",
@@ -1271,7 +1271,7 @@ export class CharmManager {
     const recipeId = sourceCell.get()?.[TYPE];
     if (!recipeId) throw new Error("charm missing recipe ID");
 
-    await this.syncRecipeById(recipeId);
+    return await this.syncRecipeById(recipeId);
   }
 
   async syncRecipeById(recipeId: string) {

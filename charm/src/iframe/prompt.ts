@@ -59,7 +59,9 @@ ${newSpec}
         ? `
 
 by following the following steps:
-${steps.map((step, index) => `${index + 1}. ${step}`).join("\n")}`
+<steps>
+${steps.map((step, index) => `<step>${step}</step>`).join("\n")}
+</steps>`
         : ""
     }`,
   });

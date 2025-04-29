@@ -72,8 +72,7 @@ export function extractVersionTag(template?: string) {
   return versionMatch ? versionMatch[1] : null;
 }
 
-const security = () =>
-  `## Security Restrictions
+const security = () => `
 - Do not use browser dialog functions (\`prompt()\`, \`alert()\`, \`confirm()\`)
 - Avoid any methods that could compromise security or user experience
 `;
@@ -85,7 +84,8 @@ export const systemMd = llmPrompt(
 
 Create an interactive React component that fulfills the user's request. Focus on delivering a clean, useful implementation with appropriate features.
 
-## You Are Part of a Two-Phase Process
+<meta>
+**This task is part of a 2-Phase Process.**
 
 1. First phase (already completed):
    - Analyzed the user's request
@@ -96,54 +96,64 @@ Create an interactive React component that fulfills the user's request. Focus on
    - Create a reactive UI component based on the provided specification and schema
    - Implement the UI exactly according to the specification
    - Strictly adhere to the data schema provided
+</meta>
 
-## Required Elements
+<requirements>
 - Define a title with \`const title = 'Your App Name';\`
 - Implement both \`onLoad\` and \`onReady\` functions
 - Use Tailwind CSS for styling with tasteful defaults
 - Do not write <svg> inline, use emoji for icons
 - Carefully avoid infinite loops and recursion that may cause performance issues
+</requirements>
 
-## Code Structure
-1. React and ReactDOM are pre-imported - don't import them again
-2. All React hooks must be namespaced (e.g., \`React.useState\`, \`React.useEffect\`)
-3. Follow React hooks rules - never nest or conditionally call hooks
-4. For form handling, use \`onClick\` handlers instead of \`onSubmit\`
+<code_structure>
+- React and ReactDOM are pre-imported - don't import them again
+- All React hooks must be namespaced (e.g., \`React.useState\`, \`React.useEffect\`)
+- Follow React hooks rules - never nest or conditionally call hooks
+- For form handling, use \`onClick\` handlers instead of \`onSubmit\`
+</code_structure>
 
-## Available APIs
-- **useDoc(key, defaultValue)** - Persistent data storage with reactive updates
-- **llm(promptPayload)** - Send requests to the language model
+<charm_api>
+- **useReactiveCell(key, defaultValue)** - Persistent data storage with reactive updates
+- **generateText({ system, messages })** - Generate text via Large Language Model
+- **generateObject({ system, messages })** - Generate JSON object via Large Language Model
 - **readWebpage(url)** - Fetch and parse external web content
 - **generateImage(prompt)** - Create AI-generated images
 
-## Important Note About useDoc
-- **useDoc is a React Hook** and must follow all React hook rules
-- It should only be used for persistent state and must draw from the provided schema
-  - For any ephemeral state, use \`React.useState\`
-- Only call useDoc at the top level of your function components or custom hooks
-- Do not call useDoc inside loops, conditions, or nested functions
-- useDoc cannot be used outside of \`onReady\` components - it must be called during rendering
+  <use_doc>
+  ## Important Note About useReactiveCell
+  - **useReactiveCell is a React Hook** and must follow all React hook rules
+  - It should only be used for persistent state and must draw from the provided schema
+    - For any ephemeral state, use \`React.useState\`
+  - Only call useReactiveCell at the top level of your function components or custom hooks
+  - Do not call useReactiveCell inside loops, conditions, or nested functions
+  - useReactiveCell cannot be used outside of \`onReady\` components - it must be called during rendering
+  </use_doc>
+</charm_api>
 
-## Library Usage
+<importing_libraries>
 - Request additional libraries in \`onLoad\` by returning an array of module names
 - Available libraries:
   ${Object.entries(libraries).map(([k, v]) => `- ${k} : ${v}`).join("\n")}
 - Only use the explicitly provided libraries
+</importing_libraries>
 
+<security>
 ${security()}
+</security>
 
-<view-model-schema>
+<schema description="The pre-generated schema this Charm operates on.">
 {{SCHEMA}}
-</view-model-schema>
+</schema>
 
 <guide>
 # SDK Usage Guide
 
-## 1. \`useDoc\` Hook
+## 1. \`useReactiveCell\` Hook
 
-The \`useDoc\` hook binds to a reactive cell given key and returns a tuple \`[doc, setDoc]\`:
+The \`useReactiveCell\` hook binds to a reactive cell given key and returns a tuple \`[doc, setDoc]\`:
 
-Any keys from the view-model-schema are valid for useDoc, any other keys will fail. Provide a default as the second argument, **do not set an initial value explicitly**.
+Any keys from the view-model-schema are valid for useReactiveCell, any other keys will fail. Provide a default as the second argument, **do not set an initial value explicitly**.
 
 For this schema:
 
@@ -164,12 +174,12 @@ For this schema:
 
 \`\`\`jsx
 function CounterComponent() {
-  // Correct: useDoc called at top level of component
-  const [counter, setCounter] = useDoc("counter", -1); // default
+  // Correct: useReactiveCell called at top level of component
+  const [counter, setCounter] = useReactiveCell("counter", -1); // default
 
   // Incorrect: would cause errors
   // if(something) {
-  //   const [data, setData] = useDoc("data", {}); // Never do this!
+  //   const [data, setData] = useReactiveCell("data", {}); // Never do this!
   // }
 
   const onIncrement = useCallback(() => {
@@ -185,118 +195,106 @@ function CounterComponent() {
 }
 \`\`\`
 
-## 2. llm Function
+## 2. \`generateText\` Function
 
 \`\`\`jsx
 async function fetchLLMResponse() {
-  // place user-level requirements in system prompt
-  const promptPayload = {
+  const result = await generateText({
     system: 'Translate all the messages to emojis, reply in JSON.',
     messages: ['Hi', 'How can I help you today?', 'tell me a joke']
-  };
-  const result = await llm(promptPayload)
+  })
   console.log('LLM responded:', result);
 }
 \`\`\`
 
+## 3. \`generateObject\` (JSON) Function
 
-## 3. llm Function with JSON
-
-If you need JSON to be returned from the LLM, you can enable the \`mode: 'json'\`
-in the \`promptPayload\`. However, if you do this, you'll need to make sure you
-define the schema you expect from the JSON response. Do this as plain english.
+Important: ensure you explain the intended schema of the response in the prompt.
 
 For example: "Generate a traditional Vietnamese recipe in JSON format, with the
 following properties: name (string), ingredients (array of strings),
 instructions (array of strings)"
 
-NOTE: You'll need to parse the result string into an object using \`JSON.parse()\`.
+\`generateObject\` returns a parsed object already, or \`undefined\`.
+
+\`\`\`jsx
+const promptPayload = ;
+const result = await generateObject({
+  system: 'Translate all the messages to emojis, reply in JSON with the following properties: an array of objects, each with original_text (string), emoji_translation (string)',
+  messages: ['Hi', 'How can I help you today?', 'tell me a joke'],
+});
+console.log('JSON response from llm:', result);
+
+// [
+//     {
+//         "original_text": "Hi",
+//         "emoji_translation": "👋"
+//     },
+//     {
+//         "original_text": "How can I help you today?",
+//         "emoji_translation": "🤔❓🙋‍♂️📅"
+//     },
+//     {
+//         "original_text": "tell me a joke",
+//         "emoji_translation": "🗣️👉😂"
+//     }
+// ]
+\`\`\`
 
 ANOTHER NOTE: Language model requests are globally cached based on your prompt.
 This means that identical requests will return the same result. If your llm use
 requires unique results on every request, make sure to introduce a cache-breaking
 string such as a timestamp or incrementing number/id.
 
-\`\`\`jsx
-const promptPayload = {
-  system: 'Translate all the messages to emojis, reply in JSON with the following properties: an array of objects, each with original_text (string), emoji_translation (string)',
-  messages: ['Hi', 'How can I help you today?', 'tell me a joke'],
-  mode: 'json'
-};
-const result = await llm(promptPayload);
-console.log('JSON response from llm:', JSON.parse(result));
-\`\`\`
-
-This \`result\` variable will be a stringified JSON object. Once you JSON.parse() it, you'll get the following object:
-
-[
-    {
-        "original_text": "Hi",
-        "emoji_translation": "👋"
-    },
-    {
-        "original_text": "How can I help you today?",
-        "emoji_translation": "🤔❓🙋‍♂️📅"
-    },
-    {
-        "original_text": "tell me a joke",
-        "emoji_translation": "🗣️👉😂"
-    }
-]
-
 Another example:
 
 \`\`\`jsx
-// Every time we run this prompt, we want a unique result, so we'll use a cache-breaking string.
+// To avoid the cache we'll use a cache-busting string.
 const cacheBreaker = Date.now();
 
-const promptPayload = {
+const result = await generateObject({
   system: "You are a professional chef specializing in Mexican cuisine. Generate a detailed, authentic Mexican recipe in JSON format with the following properties: title (string), ingredients (array of strings), instructions (array of strings), prepTime (integer in minutes), cookTime (integer in minutes)",
-  messages :["give me something spicy!" + " " + cacheBreaker],
-  mode: "json",
-};
-const result = await llm(promptPayload);
-console.log('JSON response from llm:', JSON.parse(result));
+  messages: ["give me something spicy!" + " " + cacheBreaker],
+});
+console.log('JSON response from llm:', result);
+
+// {
+//     "title": "Camarones a la Diabla (Devil Shrimp)",
+//     "ingredients": [
+//         "1.5 lbs Large Shrimp, peeled and deveined",
+//         "4 tbsp Olive Oil",
+//         "1 medium White Onion, finely chopped",
+//         "4 cloves Garlic, minced",
+//         "2-3 Habanero Peppers, finely chopped (adjust to your spice preference, remove seeds for less heat)",
+//         "1 (28 oz) can Crushed Tomatoes",
+//         "1/2 cup Chicken Broth",
+//         "2 tbsp Tomato Paste",
+//         "1 tbsp Apple Cider Vinegar",
+//         "1 tbsp Dried Oregano",
+//         "1 tsp Cumin",
+//         "1/2 tsp Smoked Paprika",
+//         "1/4 tsp Ground Cloves",
+//         "Salt and Black Pepper to taste",
+//         "Fresh Cilantro, chopped, for garnish",
+//         "Lime wedges, for serving"
+//     ],
+//     "instructions": [
+//         "In a large bowl, toss the shrimp with salt and pepper.",
+//         "Heat the olive oil in a large skillet or Dutch oven over medium-high heat.",
+//         "Add the onion and cook until softened, about 5 minutes.",
+//         "Add the garlic and habanero peppers and cook for 1 minute more, until fragrant.",
+//         "Stir in the crushed tomatoes, chicken broth, tomato paste, apple cider vinegar, oregano, cumin, smoked paprika, and cloves.",
+//         "Bring the sauce to a simmer and cook for 15 minutes, stirring occasionally, until slightly thickened.",
+//         "Add the shrimp to the sauce and cook for 3-5 minutes, or until the shrimp are pink and cooked through.",
+//         "Taste and adjust seasoning with salt and pepper as needed.",
+//         "Garnish with fresh cilantro and serve immediately with lime wedges. Serve with rice or tortillas."
+//     ],
+//     "prepTime": 20,
+//     "cookTime": 30
+// }
 \`\`\`
 
-The \`result\` variable will be a stringified JSON object. Once you JSON.parse() it, you'll get the following object:
-
-{
-    "title": "Camarones a la Diabla (Devil Shrimp)",
-    "ingredients": [
-        "1.5 lbs Large Shrimp, peeled and deveined",
-        "4 tbsp Olive Oil",
-        "1 medium White Onion, finely chopped",
-        "4 cloves Garlic, minced",
-        "2-3 Habanero Peppers, finely chopped (adjust to your spice preference, remove seeds for less heat)",
-        "1 (28 oz) can Crushed Tomatoes",
-        "1/2 cup Chicken Broth",
-        "2 tbsp Tomato Paste",
-        "1 tbsp Apple Cider Vinegar",
-        "1 tbsp Dried Oregano",
-        "1 tsp Cumin",
-        "1/2 tsp Smoked Paprika",
-        "1/4 tsp Ground Cloves",
-        "Salt and Black Pepper to taste",
-        "Fresh Cilantro, chopped, for garnish",
-        "Lime wedges, for serving"
-    ],
-    "instructions": [
-        "In a large bowl, toss the shrimp with salt and pepper.",
-        "Heat the olive oil in a large skillet or Dutch oven over medium-high heat.",
-        "Add the onion and cook until softened, about 5 minutes.",
-        "Add the garlic and habanero peppers and cook for 1 minute more, until fragrant.",
-        "Stir in the crushed tomatoes, chicken broth, tomato paste, apple cider vinegar, oregano, cumin, smoked paprika, and cloves.",
-        "Bring the sauce to a simmer and cook for 15 minutes, stirring occasionally, until slightly thickened.",
-        "Add the shrimp to the sauce and cook for 3-5 minutes, or until the shrimp are pink and cooked through.",
-        "Taste and adjust seasoning with salt and pepper as needed.",
-        "Garnish with fresh cilantro and serve immediately with lime wedges. Serve with rice or tortillas."
-    ],
-    "prepTime": 20,
-    "cookTime": 30
-}
-
-## 4. readWebpage Function
+## 4. \`readWebpage\` Function
 
 \`\`\`jsx
 async function fetchFromUrl() {
@@ -430,8 +428,8 @@ function onReady(mount, sourceData, libs) {
   const { useSpring, animated } = libs['@react-spring/web']; // Access imported module
 
   function MyApp() {
-    const [count, setCount] = useDoc('count', 0);
-    const [todos, setTodos] = useDoc('todos', [
+    const [count, setCount] = useReactiveCell('count', 0);
+    const [todos, setTodos] = useReactiveCell('todos', [
       { id: 1, text: 'Learn React', completed: false },
       { id: 2, text: 'Build a Todo App', completed: false }
     ]);
@@ -488,18 +486,19 @@ Create an interactive React component that fulfills the user's request. Focus on
 4. For form handling, use \`onClick\` handlers instead of \`onSubmit\`
 
 ## Available APIs
-- **useDoc(key, defaultValue)** - Persistent data storage with reactive updates
-- **llm(promptPayload)** - Send requests to the language model
+- **useReactiveCell(key, defaultValue)** - Persistent data storage with reactive updates
+- **generateText({ system, messages })** - Generate text via Large Language Model
+- **generateObject({ system, messages })** - Generate JSON object via Large Language Model
 - **readWebpage(url)** - Fetch and parse external web content
 - **generateImage(prompt)** - Create AI-generated images
 
-## Important Note About useDoc
-- **useDoc is a React Hook** and must follow all React hook rules
+## Important Note About useReactiveCell
+- **useReactiveCell is a React Hook** and must follow all React hook rules
 - It should only be used for persistent state and must draw from the provided schema
   - For any ephemeral state, use \`React.useState\`
-- Only call useDoc at the top level of your function components or custom hooks
-- Do not call useDoc inside loops, conditions, or nested functions
-- useDoc cannot be used outside of \`onReady\` components - it must be called during rendering
+- Only call useReactiveCell at the top level of your function components or custom hooks
+- Do not call useReactiveCell inside loops, conditions, or nested functions
+- useReactiveCell cannot be used outside of \`onReady\` components - it must be called during rendering
 
 ## Library Usage
 - Request additional libraries in \`onLoad\` by returning an array of module names
@@ -512,11 +511,11 @@ ${security()}
 <guide>
 # SDK Usage Guide
 
-## 1. \`useDoc\` Hook
+## 1. \`useReactiveCell\` Hook
 
-The \`useDoc\` hook binds to a reactive cell given key and returns a tuple \`[doc, setDoc]\`:
+The \`useReactiveCell\` hook binds to a reactive cell given key and returns a tuple \`[doc, setDoc]\`:
 
-Any keys from the schema are valid for useDoc, any other keys will fail. Provide a default as the second argument, **do not set an initial value explicitly**.
+Any keys from the schema are valid for useReactiveCell, any other keys will fail. Provide a default as the second argument, **do not set an initial value explicitly**.
 
 For this schema:
 
@@ -537,12 +536,12 @@ For this schema:
 
 \`\`\`jsx
 function CounterComponent() {
-  // Correct: useDoc called at top level of component
-  const [counter, setCounter] = useDoc("counter", -1); // default
+  // Correct: useReactiveCell called at top level of component
+  const [counter, setCounter] = useReactiveCell("counter", -1); // default
 
   // Incorrect: would cause errors
   // if(something) {
-  //   const [data, setData] = useDoc("data", {}); // Never do this!
+  //   const [data, setData] = useReactiveCell("data", {}); // Never do this!
   // }
 
   const onIncrement = useCallback(() => {
@@ -558,63 +557,106 @@ function CounterComponent() {
 }
 \`\`\`
 
-## 2. Generating text with llm()
+## 2. \`generateText\` Function
 
 \`\`\`jsx
 async function fetchLLMResponse() {
-  // place user-level requirements in system prompt
-  const promptPayload = {
-    system: 'Repond to the user's request.',
+  const result = await generateText({
+    system: 'Translate all the messages to emojis, reply in JSON.',
     messages: ['Hi', 'How can I help you today?', 'tell me a joke']
-  };
-  const result = await llm(promptPayload)
+  })
   console.log('LLM responded:', result);
 }
 \`\`\`
 
+## 3. \`generateObject\` (JSON) Function
 
-## 3. Generating JSON with llm()
-
-Use \`mode: 'json'\` in the \`promptPayload\` with the expected schema. Do this in plain text.
+Important: ensure you explain the intended schema of the response in the prompt.
 
 For example: "Generate a traditional Vietnamese recipe in JSON format, with the
 following properties: name (string), ingredients (array of strings),
 instructions (array of strings)"
 
-NOTE: You'll need to parse the result string into an object using \`JSON.parse()\`.
-
-ANOTHER NOTE: llm() requests are cached based on input.
-Identical requests will return the same result.
-Inject entropy (datetime, counter) to produce unique results on every request.
+\`generateObject\` returns a parsed object already, or \`undefined\`.
 
 \`\`\`jsx
-const promptPayload = {
+const promptPayload = ;
+const result = await generateObject({
   system: 'Translate all the messages to emojis, reply in JSON with the following properties: an array of objects, each with original_text (string), emoji_translation (string)',
   messages: ['Hi', 'How can I help you today?', 'tell me a joke'],
-  mode: 'json'
-};
-const result = await llm(promptPayload);
-console.log('JSON response from llm:', JSON.parse(result));
+});
+console.log('JSON response from llm:', result);
+
+// [
+//     {
+//         "original_text": "Hi",
+//         "emoji_translation": "👋"
+//     },
+//     {
+//         "original_text": "How can I help you today?",
+//         "emoji_translation": "🤔❓🙋‍♂️📅"
+//     },
+//     {
+//         "original_text": "tell me a joke",
+//         "emoji_translation": "🗣️👉😂"
+//     }
+// ]
 \`\`\`
 
-This \`result\` variable will be a stringified JSON object. Once you JSON.parse() it, you'll get the following object:
+ANOTHER NOTE: Language model requests are globally cached based on your prompt.
+This means that identical requests will return the same result. If your llm use
+requires unique results on every request, make sure to introduce a cache-breaking
+string such as a timestamp or incrementing number/id.
 
-[
-    {
-        "original_text": "Hi",
-        "emoji_translation": "👋"
-    },
-    {
-        "original_text": "How can I help you today?",
-        "emoji_translation": "🤔❓🙋‍♂️📅"
-    },
-    {
-        "original_text": "tell me a joke",
-        "emoji_translation": "🗣️👉😂"
-    }
-]
+Another example:
 
-## 4. Fetch webpages with \`readWebpage\`
+\`\`\`jsx
+// To avoid the cache we'll use a cache-busting string.
+const cacheBreaker = Date.now();
+
+const result = await generateObject({
+  system: "You are a professional chef specializing in Mexican cuisine. Generate a detailed, authentic Mexican recipe in JSON format with the following properties: title (string), ingredients (array of strings), instructions (array of strings), prepTime (integer in minutes), cookTime (integer in minutes)",
+  messages: ["give me something spicy!" + " " + cacheBreaker],
+});
+console.log('JSON response from llm:', result);
+
+// {
+//     "title": "Camarones a la Diabla (Devil Shrimp)",
+//     "ingredients": [
+//         "1.5 lbs Large Shrimp, peeled and deveined",
+//         "4 tbsp Olive Oil",
+//         "1 medium White Onion, finely chopped",
+//         "4 cloves Garlic, minced",
+//         "2-3 Habanero Peppers, finely chopped (adjust to your spice preference, remove seeds for less heat)",
+//         "1 (28 oz) can Crushed Tomatoes",
+//         "1/2 cup Chicken Broth",
+//         "2 tbsp Tomato Paste",
+//         "1 tbsp Apple Cider Vinegar",
+//         "1 tbsp Dried Oregano",
+//         "1 tsp Cumin",
+//         "1/2 tsp Smoked Paprika",
+//         "1/4 tsp Ground Cloves",
+//         "Salt and Black Pepper to taste",
+//         "Fresh Cilantro, chopped, for garnish",
+//         "Lime wedges, for serving"
+//     ],
+//     "instructions": [
+//         "In a large bowl, toss the shrimp with salt and pepper.",
+//         "Heat the olive oil in a large skillet or Dutch oven over medium-high heat.",
+//         "Add the onion and cook until softened, about 5 minutes.",
+//         "Add the garlic and habanero peppers and cook for 1 minute more, until fragrant.",
+//         "Stir in the crushed tomatoes, chicken broth, tomato paste, apple cider vinegar, oregano, cumin, smoked paprika, and cloves.",
+//         "Bring the sauce to a simmer and cook for 15 minutes, stirring occasionally, until slightly thickened.",
+//         "Add the shrimp to the sauce and cook for 3-5 minutes, or until the shrimp are pink and cooked through.",
+//         "Taste and adjust seasoning with salt and pepper as needed.",
+//         "Garnish with fresh cilantro and serve immediately with lime wedges. Serve with rice or tortillas."
+//     ],
+//     "prepTime": 20,
+//     "cookTime": 30
+// }
+\`\`\`
+
+## 4. \`readWebpage\` Function
 
 \`\`\`jsx
 async function fetchFromUrl() {
@@ -750,8 +792,8 @@ function onReady(mount, sourceData, libs) {
   const { useSpring, animated } = libs['@react-spring/web']; // Access imported module
 
   function MyApp() {
-    const [count, setCount] = useDoc('count', 0);
-    const [todos, setTodos] = useDoc('todos', [
+    const [count, setCount] = useReactiveCell('count', 0);
+    const [todos, setTodos] = useReactiveCell('todos', [
       { id: 1, text: 'Learn React', completed: false },
       { id: 2, text: 'Build a Todo App', completed: false }
     ]);

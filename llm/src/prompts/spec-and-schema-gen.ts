@@ -10,14 +10,19 @@ export const SCHEMA_FROM_GOAL_PROMPT = llmPrompt(
   `
 You are creating a simple minimal viable product (MVP) based on a user's goal. Focus on the simplest implementation that works.
 
+<task>
 Given a user's feature request, you will:
 1. Create a short title (2-5 words) that names the artifact
 2. Create a one-sentence description in the format "A <artifact> to <goal>"
 3. Create a concise specification (3-5 sentences max)
 4. Generate a brief implementation plan (3 steps max)
 5. Design a minimal JSON schema that represents the core data model
+</task>
 
+<output_structure>
 Your response must be structured as follows:
+
+<thinking>Freeform reasoning for you to consider the solution.</thinking>
 
 <title>
 [Short title for the artifact, 2-5 words]
@@ -42,8 +47,9 @@ Your response must be structured as follows:
 <example_data>
 [Simple example data that conforms to the schema]
 </example_data>
+</output_structure>
 
-SCHEMA GUIDELINES:
+<schema_guidelines>
 1. Keep it minimal:
    - Include only essential fields (5-7 properties max)
    - Focus on the core functionality
@@ -94,6 +100,7 @@ SCHEMA GUIDELINES:
   "required": ["title", "content"]
 }
 \`\`\`
+</schema_guidelines>
 
 IMPORTANT:
 - Focus on the simplest working version
@@ -109,14 +116,19 @@ export const SPEC_FROM_SCHEMA_PROMPT = llmPrompt(
   `
 You are creating a simple MVP based on the user's goal, using an existing data schema. Focus on the simplest implementation that works with the provided schema.
 
+<task>
 Given a user's feature request and an existing data schema, you will:
 1. Create a short title (2-5 words) that names the artifact
 2. Create a one-sentence description in the format "A <artifact> to <goal>"
 3. Create a concise specification (3-5 sentences max) that works with the existing schema
 4. Generate a brief implementation plan (3 steps max)
 5. Design a minimal JSON schema that represents the core data model
+</task>
 
+<output_structure>
 Your response must be structured as follows:
+
+<thinking>Freeform reasoning for you to consider the solution.</thinking>
 
 <title>
 [Short title for the artifact, 2-5 words]
@@ -137,8 +149,9 @@ Your response must be structured as follows:
 <result_schema>
 [Minimal JSON Schema in valid JSON format that represents data created by the artifact]
 </result_schema>
+</output_structure>
 
-SCHEMA GUIDELINES:
+<schema_guidelines>
 1. Keep it minimal:
    - Include only essential fields (5-7 properties max)
    - Focus on the core functionality
@@ -195,12 +208,15 @@ GUIDELINES:
 - The specification should take into account the existing schema structure
 - Focus on what can be achieved quickly with the existing data model
 - Avoid suggesting modifications to the schema if possible
+</schema_guidelines>
 
+<high_level>
 IMPORTANT:
 - Focus on the simplest working version
 - Aim for fewer fields rather than more
 - But still capture all the important state the user is creating
 - The user can always iterate and improve the solution later
+</high_level>
 `,
 );
 
@@ -251,14 +267,17 @@ export async function generateSpecAndSchema(
       llmPrompt(
         "spec-from-schema-user",
         `
+<user_input>
 {{FORM}}
+</user_input>
 
-Existing Schema:
+<existing_schema>
 \`\`\`json
 {{EXISTING_SCHEMA}}
 \`\`\`
+</existing_schema>
 
-Based on this goal and the existing schema, please provide a title, description, any additional schema,detailed specification, and implementation plan.
+Based on this goal and the existing schema, please provide a title, description, any additional schema, detailed specification, and implementation plan.
 `,
       ),
       {
@@ -378,14 +397,17 @@ export async function generateSpecAndSchemaAndCode(
       llmPrompt(
         "spec-and-code-from-schema-user",
         `
+<user_input>
 {{FORM}}
+</user_input>
 
-Existing Schema:
+<existing_schema>
 \`\`\`json
 {{EXISTING_SCHEMA}}
 \`\`\`
+</existing_schema>
 
-Based on this goal and the existing schema, please provide a title, description, any additional schema,detailed specification, and implementation plan.
+Based on this goal and the existing schema, please provide a title, description, any additional schema, detailed specification, and implementation plan.
 `,
       ),
       {

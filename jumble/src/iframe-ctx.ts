@@ -298,7 +298,7 @@ export const setupIframe = () =>
           status: res.content ?? "Completed!",
           llmRequestId: res.id,
         });
-        return res as any;
+        return res.content as any;
       } catch (e: any) {
         console.error("onLLMRequest error", e);
         failJob(jobId, "LLM request failed", e.message);

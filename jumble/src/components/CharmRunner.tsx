@@ -87,6 +87,10 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
   const id = useMemo(() => charmId(charm), [charm]);
   const navigate = useNavigate();
 
+  if (!id) {
+    throw new Error("CharmRenderer has no id.");
+  }
+
   // Store a reference to the current charm to detect changes
   const prevCharmRef = useRef<Charm | null>(null);
 
@@ -121,6 +125,14 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
   const submitAutomaticErrorFeedback = React.useCallback(
     async (error: Error) => {
       try {
+        // Don't use `charm` from args as it's not guaranteed to be
+        // the same object. Instead, use `id` as a dependency,
+        // and recreate a charm instance here.
+        const charm = await charmManager.get(id);
+        if (!charm) {
+          throw new Error(`No charm found with id ${id}.`);
+        }
+
         const traceId = charmManager.getLLMTrace(charm);
 
         if (!traceId) {
@@ -152,7 +164,7 @@ function RawCharmRenderer({ charm, className = "" }: CharmRendererProps) {
         console.error("Failed to submit automatic feedback:", submissionError);
       }
     },
-    [charm, charmManager],
+    [id, charmManager],
   );
 
   React.useEffect(() => {
