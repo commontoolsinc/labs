@@ -782,7 +782,7 @@ export type Operation =
 
 export type QueryResult<Space extends MemorySpace = MemorySpace> = AwaitResult<
   Selection<Space>,
-  QueryError | ConnectionError
+  AuthorizationError | QueryError | ConnectionError
 >;
 
 export type CloseResult = AwaitResult<Unit, SystemError>;

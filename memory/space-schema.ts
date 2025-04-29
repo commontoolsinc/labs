@@ -11,7 +11,13 @@ import type {
   SchemaSelector,
 } from "./interface.ts";
 import { isNumber, isObject, isString } from "./util.ts";
-import { FactSelector, SelectAll, selectFacts, Session } from "./space.ts";
+import {
+  FactSelector,
+  SelectAll,
+  SelectedFact,
+  selectFacts,
+  Session,
+} from "./space.ts";
 import { FactAddress } from "../runner/src/storage/cache.ts";
 import {
   BaseObjectManager,
@@ -299,7 +305,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
 
 export const selectSchema = <Space extends MemorySpace>(
   session: Session<Space>,
-  { selectSchema, since }: SchemaQuery["args"],
+  { selectSchema, since, classification }: SchemaQuery["args"],
 ): FactSelection => {
   const factSelection: FactSelection = {}; // we'll store our initial facts here
   const includedFacts: FactSelection = {}; // we'll store all the raw facts we accesed here
@@ -323,6 +329,9 @@ export const selectSchema = <Space extends MemorySpace>(
   // pointers as we walk through the structure.
   loadDocFacts(helper, selectSchema, includedFacts);
 
+  // We want to collect the classification tags on our read docs
+  const metadataSelection: FactSelection = {};
+
   // Add any facts that we accessed while traversing the object with its schema
   // We'll need the same set of objects on the client to traverse it there.
   for (const value of helper.getReadDocs()) {
@@ -337,6 +346,30 @@ export const selectSchema = <Space extends MemorySpace>(
         ? { is: value.value, since: value.source.since }
         : { since: value.source.since },
     );
+
+    loadFacts(metadataSelection, session, {
+      the: "application/label+json",
+      of: value.source.of,
+      cause: "_",
+    });
+  }
+
+  const requiredClassifications = new Set<string>();
+  for (const metadata of iterateFacts(metadataSelection)) {
+    if (
+      isObject(metadata.is) && metadata.is !== undefined &&
+      metadata.is !== null && "labels" in (metadata.is as JSONObject)
+    ) {
+      const isObj = metadata.is as JSONObject;
+      const labels = isObj["labels"] as string[];
+      for (const label of labels) {
+        requiredClassifications.add(label);
+      }
+    }
+  }
+
+  if (!requiredClassifications.isSubsetOf(new Set<string>(classification))) {
+    throw "AuthorizationError";
   }
 
   // Any entities referenced in our selectSchema must be returned in the response
@@ -449,4 +482,22 @@ function loadFacts<Space extends MemorySpace>(
     );
   }
   return selection;
+}
+
+function* iterateFacts(
+  selection: FactSelection,
+): Iterable<SelectedFact> {
+  for (const [of, attributes] of Object.entries(selection)) {
+    for (const [the, revisions] of Object.entries(attributes)) {
+      for (const [cause, change] of Object.entries(revisions)) {
+        yield {
+          the,
+          of: of as Entity,
+          cause: cause,
+          since: change.since,
+          ...(change.is !== undefined ? { is: change.is } : {}),
+        };
+      }
+    }
+  }
 }
