@@ -17,7 +17,11 @@ import type {
   UCAN,
   Unit,
 } from "@commontools/memory/interface";
-import type { Cancel, EntityId } from "@commontools/runner";
+import {
+  type Cancel,
+  ContextualFlowControl,
+  type EntityId,
+} from "@commontools/runner";
 import {
   BaseStorageProvider,
   type StorageProvider,
@@ -403,12 +407,18 @@ export class Replica {
     // remote.
     const schemaSelector = {};
     const querySelector = {};
+    // We'll assert that we need all the classifications we expect to need.
+    // If we don't actually have those, the server will reject our request.
+    const cfc = new ContextualFlowControl();
+    const classifications = new Set<string>();
     for (const [{ the, of }, schemaContext] of entries) {
       if (this.useSchemaQueries && schemaContext !== undefined) {
         Changes.set(schemaSelector, [of, the], "_", {
           path: [],
           schemaContext: schemaContext,
         });
+        // Since we're accessing the entire document, we should base our classification on the rootSchema
+        cfc.joinSchema(classifications, schemaContext.rootSchema);
       } else {
         Changes.set(querySelector, [of], the, {});
       }
@@ -417,10 +427,14 @@ export class Replica {
     let fetchedEntries: [Revision<State>, SchemaContext | undefined][] = [];
     // Run all our schema queries first
     if (Object.entries(schemaSelector).length > 0) {
-      const query = this.remote.query({
+      const queryArgs: Memory.SchemaQueryArgs = {
         selectSchema: schemaSelector,
         subscribe: true,
-      });
+      };
+      if (classifications.size > 0) {
+        queryArgs.classification = [...classifications];
+      }
+      const query = this.remote.query(queryArgs);
       const { error } = await query.promise;
       // If query fails we propagate the error.
       if (error) {

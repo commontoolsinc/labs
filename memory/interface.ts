@@ -717,10 +717,17 @@ export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
   { source: InvocationURL<Reference<Subscribe<Space>>> }
 >;
 
+export type SchemaQueryArgs = {
+  selectSchema: SchemaSelector;
+  since?: number;
+  subscribe?: boolean;
+  classification?: string[];
+};
+
 export type SchemaQuery<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/graph/query",
   Space,
-  { selectSchema: SchemaSelector; since?: number; subscribe?: boolean }
+  SchemaQueryArgs
 >;
 
 // A normal Selector looks like this (with _ as wildcard cause):

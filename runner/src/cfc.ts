@@ -158,14 +158,18 @@ export class ContextualFlowControl {
     this.reachable = ContextualFlowControl.reachableNodes(lattice);
   }
 
+  // Collect any required classification tags required by the schema.
   // This could be made more conservative by combining the schema with the object
   // If our object lacks any of the fields that would have a higher classification,
   // we don't need to consider them.
   public joinSchema(
     joined: Set<string>,
-    schema: JSONSchema,
-    rootSchema?: JSONSchema,
-  ) {
+    schema: JSONSchema | boolean,
+    rootSchema: JSONSchema | boolean = schema,
+  ): Set<string> {
+    if (typeof schema === "boolean") {
+      return joined;
+    }
     if (schema.ifc) {
       if (schema.ifc?.classification) {
         console.log(
@@ -199,22 +203,26 @@ export class ContextualFlowControl {
 
   // Get the least upper bound classification from the schema.
   public lubSchema(
-    schema: JSONSchema,
-    rootSchema?: JSONSchema,
+    schema: JSONSchema | boolean,
+    rootSchema: JSONSchema | boolean = schema,
     extraClassifications?: Set<string>,
-  ) {
+  ): string {
     const classifications = (extraClassifications !== undefined)
       ? new Set<string>(extraClassifications)
       : new Set<string>();
-    return this.joinSchema(classifications, schema, rootSchema);
+    this.joinSchema(classifications, schema, rootSchema);
+    return this.lub(classifications);
   }
 
-  public lub(joined: Set<string>) {
+  public lub(joined: Set<string>): string {
     return ContextualFlowControl.findLub(this.lattice, joined);
   }
 
   // Return a copy of the schema with the least upper bound classifcation.
-  public schemaWithLub<T>(schema: JSONSchema, classification: string) {
+  public schemaWithLub(
+    schema: JSONSchema,
+    classification: string,
+  ): JSONSchema {
     const joined = new Set<string>([classification]);
     if (schema.ifc !== undefined) {
       if (schema.ifc.classification !== undefined) {

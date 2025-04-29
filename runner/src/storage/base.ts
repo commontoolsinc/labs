@@ -10,6 +10,7 @@ export interface StorageValue<T = any> {
   source?: EntityId;
   // This is used on writes to retry on conflicts.
   retry?: ((previousValue: T) => T)[];
+  labels?: string[];
 }
 
 export interface StorageProvider {

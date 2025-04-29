@@ -8,6 +8,7 @@ import type {
   MemorySpace,
   SchemaContext,
   SchemaQuery,
+  SchemaSelector,
 } from "./interface.ts";
 import { isNumber, isObject, isString } from "./util.ts";
 import { FactSelector, SelectAll, selectFacts, Session } from "./space.ts";
@@ -106,15 +107,28 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
     );
   }
 
+  // TODO(@ubik2): these two functions should be somewhere more general
+  isTrueSchema(schema: JSONSchema | boolean): boolean {
+    if (schema === true) {
+      return true;
+    }
+    return isObject(schema) &&
+      Object.keys(schema).some((k) => !this.isInternalSchemaKey(k));
+  }
+
+  // We don't need to check ID and ID_FIELD, since they won't be included
+  // in Object.keys return values.
+  isInternalSchemaKey(key: string): boolean {
+    return key === "ifc" || key === "asCell" || key === "asStream";
+  }
+
   traverseWithSchema(
     doc: K,
     docRoot: JSONValue,
     value: JSONValue,
     schema: JSONSchema | boolean,
   ): OptJSONValue {
-    if (
-      schema === true || (isObject(schema) && Object.keys(schema).length == 0)
-    ) {
+    if (schema === true || this.isTrueSchema(schema)) {
       // A value of true or {} means we match anything
       // Resolve the rest of the doc, and return
       return this.traverseDAG(doc, docRoot, value, this.tracker);
@@ -299,6 +313,7 @@ export const selectSchema = <Space extends MemorySpace>(
       }
     }
   }
+
   // All the top level facts we accessed should be included
   mergeSelection(includedFacts, factSelection);
 
@@ -308,6 +323,50 @@ export const selectSchema = <Space extends MemorySpace>(
   // Then filter the facts by the associated schemas, which will dereference
   // pointers as we walk through the structure.
 
+  loadDocFacts(helper, tracker, selectSchema, includedFacts);
+
+  // Add any facts that we accessed while traversing the object with its schema
+  // We'll need the same set of objects on the client to traverse it there.
+  for (const value of helper.getReadDocs()) {
+    if (value.source === undefined) {
+      continue;
+    }
+    set(
+      includedFacts,
+      [value.source.of, value.source.the],
+      value.source.cause,
+      (value.value !== undefined)
+        ? { is: value.value, since: value.source.since }
+        : { since: value.source.since },
+    );
+  }
+
+  // Any entities referenced in our selectSchema must be returned in the response
+  // I'm not sure this is the best behavior, but it matches the schema-free query code.
+  // Our returned stub objects will not have a cause.
+  for (const [ofKey, ofValues] of Object.entries(selectSchema)) {
+    if (ofKey === SelectAll) { // we don't need to return a stub for wildcard `of`
+      continue;
+    }
+    const ofFacts = includedFacts[ofKey as Entity] ?? {};
+    for (const [the, _value] of Object.entries(ofValues)) {
+      if (the in ofFacts) { // we already have a `the` fact for this entity
+        continue;
+      } else {
+        ofFacts[the] = {};
+      }
+    }
+    includedFacts[ofKey as Entity] = ofFacts;
+  }
+  return includedFacts;
+};
+
+function loadDocFacts(
+  helper: ServerTraverseHelper,
+  tracker: CycleTracker<JSONValue>,
+  selectSchema: SchemaSelector,
+  factSelection: FactSelection,
+) {
   for (const [of, ofValues] of Object.entries(factSelection)) {
     const schemaFilterOf = selectSchema[of as Entity] ??
       selectSchema[SelectAll];
@@ -361,42 +420,7 @@ export const selectSchema = <Space extends MemorySpace>(
       }
     }
   }
-
-  // Add any facts that we accessed while traversing the object with its schema
-  // We'll need the same set of objects on the client to traverse it there.
-  for (const value of helper.getReadDocs()) {
-    if (value.source === undefined) {
-      continue;
-    }
-    set(
-      includedFacts,
-      [value.source.of, value.source.the],
-      value.source.cause,
-      (value.value !== undefined)
-        ? { is: value.value, since: value.source.since }
-        : { since: value.source.since },
-    );
-  }
-
-  // Any entities referenced in our selectSchema must be returned in the response
-  // I'm not sure this is the best behavior, but it matches the schema-free query code.
-  // Our returned stub objects will not have a cause.
-  for (const [ofKey, ofValues] of Object.entries(selectSchema)) {
-    if (ofKey === SelectAll) { // we don't need to return a stub for wildcard `of`
-      continue;
-    }
-    const ofFacts = includedFacts[ofKey as Entity] ?? {};
-    for (const [the, _value] of Object.entries(ofValues)) {
-      if (the in ofFacts) { // we already have a `the` fact for this entity
-        continue;
-      } else {
-        ofFacts[the] = {};
-      }
-    }
-    includedFacts[ofKey as Entity] = ofFacts;
-  }
-  return includedFacts;
-};
+}
 
 // Merge the updates into the existing fact selection
 function mergeSelection(existing: FactSelection, updates: FactSelection) {
