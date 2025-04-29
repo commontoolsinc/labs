@@ -8,7 +8,7 @@ window.React = React
 window.ReactDOM = ReactDOM
 window.Babel = Babel
 
-window.useDoc = function (key) {
+window.useReactiveCell = function (key) {
   // Track if we've received a response from the parent
   const [received, setReceived] = React.useState(false)
   // Initialize state with defaultValue
@@ -27,7 +27,7 @@ window.useDoc = function (key) {
 
         // Update the state with the received value or null if undefined
         const value = event.data.data[1]
-        console.log("useDoc", key, "updated", value)
+        console.log("useReactiveCell", key, "updated", value)
         setDocState(value)
       }
     }
@@ -49,7 +49,7 @@ window.useDoc = function (key) {
     if (typeof newValue === "function") {
       newValue = newValue(doc)
     }
-    console.log("useDoc", key, "written", newValue)
+    console.log("useReactiveCell", key, "written", newValue)
     setDocState(newValue)
     window.parent.postMessage({ type: "write", data: [key, newValue] }, "*")
   }
@@ -62,6 +62,8 @@ window.useDoc = function (key) {
   // charm to make wrong conclusion and overwrite key.
   return [received ? doc : window.sourceData[key], updateDoc]
 }
+
+window.useDoc = window.useReactiveCell;
 
 // Define llm utility with React available
 window.llm = (function () {
@@ -99,6 +101,52 @@ window.llm = (function () {
   })
   return llm
 })()
+
+window.generateText = function ({ system, messages }) {
+  return window.llm({
+    system,
+    messages,
+  }).then(result => result.content)
+}
+
+window.generateObject = function ({ system, messages }) {
+  return window.llm({
+    system,
+    messages,
+    mode: 'json'
+  })
+    .then(result => result.content)
+    .then(result => {
+      try {
+        // Handle possible control characters and escape sequences
+        const cleanedResult = result.replace(/[\u0000-\u001F\u007F-\u009F]/g, match => {
+          // Keep common whitespace characters as they are
+          if (match === '\n' || match === '\r' || match === '\t') {
+            return match;
+          }
+          // Replace other control characters with space
+          return ' ';
+        });
+
+        return JSON.parse(cleanedResult);
+      } catch (e) {
+        console.error("JSON parse error:", e);
+
+        // Try to extract a valid JSON object from the text as fallback
+        try {
+          const jsonRegex = /\{.*\}/s;  // Matches anything between curly braces, including newlines
+          const match = result.match(jsonRegex);
+          if (match && match[0]) {
+            return JSON.parse(match[0]);
+          }
+        } catch (e2) {
+          // Silently fail the fallback attempt
+        }
+
+        return undefined;
+      }
+    });
+}
 
 window.perform = (() => {
   const pending = new Map()
@@ -206,15 +254,13 @@ window.LoadingUI = function () {
     const libraryStatus = loadingState.libraries
       .map(
         lib =>
-          `<li class="text-sm ${
-            lib.loaded
-              ? "text-green-600"
-              : lib.error
+          `<li class="text-sm ${lib.loaded
+            ? "text-green-600"
+            : lib.error
               ? "text-red-600"
               : "text-blue-600"
           }">
-           ${lib.url.split("/").pop()} ${
-            lib.loaded ? "✓" : lib.error ? "✗" : "..."
+           ${lib.url.split("/").pop()} ${lib.loaded ? "✓" : lib.error ? "✗" : "..."
           }
         </li>`
       )
@@ -228,22 +274,20 @@ window.LoadingUI = function () {
         <div class="bg-white p-6 rounded-lg shadow-lg max-w-md">
           <h2 class="text-xl font-bold mb-4">Loading Application</h2>
           <p class="mb-2">${loadingState.status}</p>
-          ${
-            loadingState.libraries.length
-              ? `<div class="mb-3">
+          ${loadingState.libraries.length
+        ? `<div class="mb-3">
                <p class="font-semibold">Libraries:</p>
                <ul class="ml-4">${libraryStatus}</ul>
              </div>`
-              : ""
-          }
-             ${
-               errorMessages
-                 ? `<div class="mb-3">
+        : ""
+      }
+             ${errorMessages
+        ? `<div class="mb-3">
                <p class="font-semibold text-red-600">Errors:</p>
                <ul class="ml-4">${errorMessages}</ul>
              </div>`
-                 : ""
-             }
+        : ""
+      }
         </div>
       `
   }

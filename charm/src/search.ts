@@ -26,23 +26,34 @@ export async function searchCharms(
     await charmManager.sync(charms);
     const results = await Promise.all(
       charms.get().map(async (charm) => {
-        const data = charm.get();
-        const title = data?.[NAME] ?? "Untitled";
+        try {
+          const data = charm.get();
+          const title = data?.[NAME] ?? "Untitled";
 
-        const recipeId = await charmManager.syncRecipe(charm);
-        const recipe = recipeManager.recipeById(recipeId!)!;
+          const recipe = await charmManager.syncRecipe(charm);
 
-        return {
-          title: title + ` (#${charmId(charm.entityId!)!.slice(-4)})`,
-          description: (recipe as Recipe).argumentSchema.description,
-          id: charmId(charm.entityId!)!,
-          value: charm.entityId!,
-        };
+          return {
+            title: title + ` (#${charmId(charm.entityId!)!.slice(-4)})`,
+            description: (recipe as Recipe).argumentSchema.description,
+            id: charmId(charm.entityId!)!,
+            value: charm.entityId!,
+          };
+        } catch (error) {
+          console.error(`Error processing charm:`, error);
+          // Return a minimal viable object to keep the array intact
+          return {
+            title: "Error loading charm",
+            description: "Failed to load charm details",
+            id: charm.entityId ? charmId(charm.entityId)! : "unknown",
+            value: charm.entityId || "unknown",
+          };
+        }
       }),
     );
 
     // Early return if no charms are found
     if (!results.length) {
+      console.warn("No charms are available to search through.");
       return {
         thinking: "No charms are available to search through.",
         charms: [],
@@ -85,7 +96,11 @@ export async function searchCharms(
       /<charm id="([^"]+)" name="([^"]+)">([\s\S]*?)<\/charm>/g,
     );
 
-    const selectedCharms = [];
+    const selectedCharms: {
+      charm: Cell<Charm>;
+      name: string;
+      reason: string;
+    }[] = [];
     if (charmMatches) {
       for (const match of charmMatches) {
         const charmId = match[1];
@@ -109,8 +124,11 @@ export async function searchCharms(
       thinking,
       charms: selectedCharms,
     };
-  } catch (error) {
-    console.error("Search charms error:", error);
+  } catch (error: any) {
+    console.error(
+      "Search charms error:",
+      error?.message ?? JSON.stringify(error),
+    );
 
     return {
       thinking: "An error occurred while searching for charms.",
