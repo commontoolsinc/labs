@@ -47,12 +47,12 @@ export const charmSchema = {
     [UI]: { type: "object" },
   },
   required: [UI, NAME],
-} as const satisfies JSONSchema satisfies JSONSchema;
+} as const satisfies JSONSchema;
 
 export const charmListSchema = {
   type: "array",
   items: { ...charmSchema, asCell: true },
-} as const satisfies JSONSchema satisfies JSONSchema;
+} as const satisfies JSONSchema;
 
 export const charmLineageSchema = {
   type: "object",
