@@ -7,6 +7,9 @@ import * as Babel from "https://esm.sh/@babel/standalone"
 window.React = React
 window.ReactDOM = ReactDOM
 window.Babel = Babel
+window.useState = window.React.useState
+window.useEffect = window.React.useEffect
+window.useCallback = window.React.useCallback
 
 window.useReactiveCell = function useReactiveCell(pathOrKey) {
   const pathArr = Array.isArray(pathOrKey) ? pathOrKey : [pathOrKey];
@@ -87,6 +90,7 @@ window.useReactiveCell = function useReactiveCell(pathOrKey) {
   return [received ? doc : fallback, updateDoc];
 };
 
+
 window.useDoc = window.useReactiveCell;
 
 // Define llm utility with React available
@@ -130,7 +134,7 @@ window.generateText = function ({ system, messages }) {
   return window.llm({
     system,
     messages,
-  }).then(result => typeof result === 'string' ? result : result?.content)
+  })
 }
 
 window.generateObject = function ({ system, messages }) {
@@ -139,7 +143,6 @@ window.generateObject = function ({ system, messages }) {
     messages,
     mode: 'json'
   })
-    .then(result => result.content)
     .then(result => {
       try {
         // Handle possible control characters and escape sequences
