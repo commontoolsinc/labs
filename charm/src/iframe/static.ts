@@ -148,6 +148,7 @@ ${security()}
 <guide>
 # SDK Usage Guide
 
+<persistent-reactive-state>
 ## 1. \`useReactiveCell\` Hook
 
 The \`useReactiveCell\` hook binds to a reactive cell given a key path and returns a tuple \`[doc, setDoc]\`:
@@ -189,8 +190,13 @@ function CounterComponent() {
   );
 }
 \`\`\`
+</persistent-reactive-state>
 
-## 2. \`generateText\` Function
+<generating_content>
+Several APIs exist for generating text, JSON or image urls.
+
+<text>
+\`generateText({ system, messages}): Promise<string>\`
 
 \`\`\`jsx
 async function fetchLLMResponse() {
@@ -201,17 +207,21 @@ async function fetchLLMResponse() {
   console.log('LLM responded:', result);
 }
 \`\`\`
+</text>
 
-## 3. \`generateObject\` (JSON) Function
+<json>
 
-Important: ensure you explain the intended schema of the response in the prompt.
+\`window.generateObject({ system, messages }): Promise<object>\`
+
+You must give the exact schema of the response in the prompt.
 
 For example: "Generate a traditional Vietnamese recipe in JSON format, with the
 following properties: name (string), ingredients (array of strings),
 instructions (array of strings)"
 
-\`generateObject\` returns a parsed object already, or \`undefined\`.
+\`generateObject\` returns a parsed object already, or \`undefined\`. Be defensive working with the response, the LLM may make mistakes.
 
+<example>
 \`\`\`jsx
 const promptPayload = ;
 const result = await generateObject({
@@ -235,13 +245,13 @@ console.log('JSON response from llm:', result);
 //     }
 // ]
 \`\`\`
+</example>
 
-ANOTHER NOTE: Language model requests are globally cached based on your prompt.
+<example>
+NOTE: Language model requests are globally cached based on your prompt.
 This means that identical requests will return the same result. If your llm use
 requires unique results on every request, make sure to introduce a cache-breaking
 string such as a timestamp or incrementing number/id.
-
-Another example:
 
 \`\`\`jsx
 // To avoid the cache we'll use a cache-busting string.
@@ -288,18 +298,12 @@ console.log('JSON response from llm:', result);
 //     "cookTime": 30
 // }
 \`\`\`
+</example>
 
-## 4. \`readWebpage\` Function
+</json>
 
-\`\`\`jsx
-async function fetchFromUrl() {
-  const url = 'https://twopm.studio';
-  const result = await readWebpage(url);
-  console.log('Markdown:', result.content);
-}
-\`\`\`
 
-<generateImageUrl>
+<images>
 
 Synchronous, generates a URL that will load the image.
 
@@ -309,9 +313,23 @@ function ImageComponent() {
 }
 \`\`\`
 
-</generateImageUrl>
+</images>
+</generating_content>
 
-## 6. Using the Interface Functions
+<fetching_content>
+\`readWebpage(url: string): Promise<string>\` Returns markdown format.
+
+\`\`\`jsx
+async function fetchFromUrl() {
+  const url = 'https://twopm.studio';
+  const result = await readWebpage(url);
+  console.log('Markdown:', result.content);
+}
+\`\`\`
+</fetching_content>
+
+<code_structure>
+All generated code must follow this pattern:
 
 \`\`\`javascript
 // Import from modern ESM libraries:
