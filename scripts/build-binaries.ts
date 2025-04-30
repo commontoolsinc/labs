@@ -139,6 +139,9 @@ async function buildJumble(config: BuildConfig): Promise<void> {
 async function buildToolshed(config: BuildConfig): Promise<void> {
   console.log("Building toolshed binary...");
   const { success } = await new Deno.Command(Deno.execPath(), {
+    env: {
+      OTEL_DENO: "true",
+    },
     args: [
       "compile",
       "--unstable-otel",
