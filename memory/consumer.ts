@@ -1,5 +1,6 @@
 import {
   Abilities,
+  AuthorizationError,
   Await,
   Cause,
   Changes,
@@ -146,6 +147,7 @@ class MemoryConsumerSession<
   }
   receive(command: ProviderCommand<MemoryProtocol>) {
     const id = command.of;
+    console.log("got command: ", command);
     if (command.the === "task/return") {
       const invocation = this.invocations.get(id);
       // TODO(@ubik2) this is really gross.
@@ -404,7 +406,10 @@ class QueryView<
       | ConsumerInvocation<"/memory/query", MemoryProtocol>
       | ConsumerInvocation<"/memory/graph/query", MemoryProtocol>,
     public promise: Promise<
-      Result<QueryView<Space, MemoryProtocol>, QueryError | ConnectionError>
+      Result<
+        QueryView<Space, MemoryProtocol>,
+        QueryError | AuthorizationError | ConnectionError
+      >
     >,
   ) {
     invocation.perform = (
@@ -433,7 +438,7 @@ class QueryView<
     onResolve: (
       value: Result<
         QueryView<Space, MemoryProtocol>,
-        QueryError | ConnectionError
+        QueryError | AuthorizationError | ConnectionError
       >,
     ) => T | PromiseLike<T>,
     onReject: (reason: any) => X | Promise<X>,
@@ -471,49 +476,6 @@ class QueryView<
     this.session.execute(subscription);
 
     return subscription;
-  }
-
-  // A SchemaSelector query will include results that aren't in the selector
-  // Since we already have these results, we don't want to re-fetch them, so
-  // make a QueryView available for subscriptions to use that lets us skip
-  // that step when we subscribe.
-  // TODO(@ubik2) Remove this code when we remove the rest of remote.ts
-  includedQueryView(): QueryView<MemorySpace, MemoryProtocol> | undefined {
-    const factSelection = this.selection[this.space];
-    const subSelector: Selector = {};
-    for (const [of, attributes] of Object.entries(factSelection)) {
-      if (of === "_" || of in this.selector) {
-        continue;
-      }
-      const entityEntry: Record<The, Record<Cause, any>> = {};
-      for (const [the, _causes] of Object.entries(attributes)) {
-        entityEntry[the as Entity] = { _: {} };
-      }
-      subSelector[of as Entity] = entityEntry;
-    }
-    if (Object.entries(subSelector).length == 0) {
-      // Nothing new
-      return undefined;
-    }
-    // If we included any entries in our selection that were not in our
-    // selector, create a new QueryView for them, and subscribe to that
-    // We pre-populate the query view with the results
-    const invocation = this.session.getInvocation({
-      cmd: "/memory/query" as const,
-      sub: this.space,
-      args: { select: subSelector },
-    });
-    invocation.return(Promise.resolve(this.selection));
-    const subQueryView = new QueryView(
-      this.session,
-      invocation,
-      Promise.resolve({ ok: this }),
-    );
-
-    subQueryView.selection = this.selection;
-    subQueryView.selector = subSelector;
-    subQueryView.promise = Promise.resolve({ ok: subQueryView });
-    return subQueryView;
   }
 
   // Get the schema context used to fetch the specified fact.

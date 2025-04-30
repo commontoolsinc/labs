@@ -34,6 +34,7 @@ import { JSONSchema } from "../builder/src/index.ts";
 export * from "./interface.ts";
 
 export type FullFactAddress = FactAddress & { cause: Cause; since: number };
+export const LABEL_THE = "application/label+json" as const;
 
 export class ServerTraverseHelper extends BaseObjectManager<
   FactAddress,
@@ -314,7 +315,7 @@ export const selectSchema = <Space extends MemorySpace>(
     for (const [the, theValues] of Object.entries(ofValues)) {
       // We'll use an object for each [of,the] combination
       for (const [cause, selector] of Object.entries(theValues)) {
-        const of = ofKey as (Entity | "_");
+        const of = ofKey as Entity;
         loadFacts(factSelection, session, { the, of, cause, since });
       }
     }
@@ -323,14 +324,11 @@ export const selectSchema = <Space extends MemorySpace>(
   // All the top level facts we accessed should be included
   mergeSelection(includedFacts, factSelection);
 
+  // Track any docs loaded while traversing the factSelection
   const helper = new ServerTraverseHelper(session);
-
   // Then filter the facts by the associated schemas, which will dereference
   // pointers as we walk through the structure.
   loadDocFacts(helper, selectSchema, includedFacts);
-
-  // We want to collect the classification tags on our read docs
-  const metadataSelection: FactSelection = {};
 
   // Add any facts that we accessed while traversing the object with its schema
   // We'll need the same set of objects on the client to traverse it there.
@@ -346,24 +344,22 @@ export const selectSchema = <Space extends MemorySpace>(
         ? { is: value.value, since: value.source.since }
         : { since: value.source.since },
     );
-
-    loadFacts(metadataSelection, session, {
-      the: "application/label+json",
-      of: value.source.of,
-      cause: "_",
-    });
   }
 
+  // We want to collect the classification tags on our included facts
   const requiredClassifications = new Set<string>();
-  for (const metadata of iterateFacts(metadataSelection)) {
-    if (
-      isObject(metadata.is) && metadata.is !== undefined &&
-      metadata.is !== null && "labels" in (metadata.is as JSONObject)
-    ) {
-      const isObj = metadata.is as JSONObject;
-      const labels = isObj["labels"] as string[];
-      for (const label of labels) {
-        requiredClassifications.add(label);
+  for (const includedFact of iterateFacts(includedFacts)) {
+    const factSelector = { the: LABEL_THE, of: includedFact.of, cause: "_" };
+    for (const metadata of selectFacts(session, factSelector)) {
+      if (
+        isObject(metadata.is) && metadata.is !== undefined &&
+        metadata.is !== null && "classification" in (metadata.is as JSONObject)
+      ) {
+        const isObj = metadata.is as JSONObject;
+        const labels = isObj["classification"] as string[];
+        for (const label of labels) {
+          requiredClassifications.add(label);
+        }
       }
     }
   }

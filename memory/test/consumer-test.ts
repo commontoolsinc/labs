@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
+import { assert, assertEquals, assertMatch } from "@std/assert";
 import * as Fact from "../fact.ts";
 import * as Transaction from "../transaction.ts";
 import * as Changes from "../changes.ts";
@@ -9,6 +9,8 @@ import * as Selection from "../selection.ts";
 import { refer } from "merkle-reference";
 import { alice, bob, space as subject } from "./principal.ts";
 import { UTCUnixTimestampInSeconds } from "../interface.ts";
+import { JSONSchema } from "@commontools/builder";
+import { LABEL_THE } from "../space-schema.ts";
 
 // Some generated service key.
 const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
@@ -25,6 +27,13 @@ class Clock {
 
 const doc = `of:${refer({ hello: "world" })}` as const;
 const the = "application/json";
+
+const VersionSchema = {
+  type: "object",
+  properties: {
+    v: { type: "number" },
+  },
+} as const satisfies JSONSchema;
 
 const test = (
   title: string,
@@ -726,3 +735,327 @@ test("subscribe to commits", store, async (session) => {
 
   reader.cancel();
 });
+
+test(
+  "can not read classified contents without claim",
+  store,
+  async (session) => {
+    const clock = new Clock();
+    const memory = Consumer.open({ as: alice, session, clock })
+      .mount(alice.did());
+
+    const v1 = Fact.assert({
+      the: "application/json",
+      of: doc,
+      is: { v: 1 },
+    });
+
+    const v1_label = Fact.assert({
+      the: LABEL_THE,
+      of: doc,
+      is: { classification: ["confidential"] },
+    });
+
+    const result = await memory.transact({
+      changes: Changes.from([v1, v1_label]),
+    });
+    assert(result.ok);
+
+    const query = await memory.query({
+      selectSchema: {
+        [doc]: {
+          "application/json": {
+            _: {
+              path: [],
+              schemaContext: {
+                schema: VersionSchema,
+                rootSchema: VersionSchema,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    assertEquals(query.error?.name, "AuthorizationError");
+    assertEquals(query.error?.message, "Insufficient authorization");
+  },
+);
+
+test(
+  "can read classified contents with claim",
+  store,
+  async (session) => {
+    const clock = new Clock();
+    const memory = Consumer.open({ as: alice, session, clock })
+      .mount(alice.did());
+
+    const v1 = Fact.assert({
+      the: "application/json",
+      of: doc,
+      is: { v: 1 },
+    });
+
+    const v1_label = Fact.assert({
+      the: LABEL_THE,
+      of: doc,
+      is: { classification: ["confidential"] },
+    });
+
+    const result = await memory.transact({
+      changes: Changes.from([v1, v1_label]),
+    });
+    assert(result.ok);
+
+    const query = await memory.query({
+      selectSchema: {
+        [doc]: {
+          "application/json": {
+            _: {
+              path: [],
+              schemaContext: {
+                schema: VersionSchema,
+                rootSchema: VersionSchema,
+              },
+            },
+          },
+        },
+      },
+      classification: ["confidential"],
+    });
+
+    assertEquals(
+      query.ok?.selection,
+      { [alice.did()]: Selection.from([[v1, 0]]) },
+      "lists alice's facts",
+    );
+  },
+);
+
+test(
+  "can not read classified contents through schema traversal without claim",
+  store,
+  async (session) => {
+    const clock = new Clock();
+    const memory = Consumer.open({ as: alice, session, clock })
+      .mount(alice.did());
+
+    const doc1 = doc; // convenient name
+    const doc2 = `of:${refer({ goodbye: "world" })}` as const;
+
+    const v1 = Fact.assert({
+      the,
+      of: doc1,
+      is: {
+        "value": {
+          "offices": {
+            "main": {
+              "$alias": {
+                "path": ["employees", "0", "addresses", "work"],
+              },
+            },
+          },
+          "employees": [
+            {
+              "name": "Bob",
+              "addresses": {
+                "home": {
+                  "name": "Mr. Bob Hope",
+                  "street": "2466 Southridge Drive",
+                  "city": "Palm Springs",
+                },
+                "work": {
+                  "name": "Bob Hope Airport",
+                  "street": "2627 N Hollywood Way",
+                  "city": "Burbank",
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const v1_label = Fact.assert({
+      the: LABEL_THE,
+      of: doc,
+      is: { classification: ["confidential"] },
+    });
+
+    const v2 = Fact.assert({
+      the,
+      of: doc2,
+      is: {
+        "value": {
+          "offices": {
+            "$alias": {
+              "cell": {
+                "/": doc1.slice(3), // strip off 'of:'
+              },
+              "path": ["offices"],
+            },
+          },
+        },
+      },
+    });
+
+    const write1 = await memory.transact({
+      changes: Changes.from([v1, v1_label]),
+    });
+    assert(write1.ok);
+
+    const write2 = await memory.transact({
+      changes: Changes.from([v2]),
+    });
+    assert(write2.ok);
+
+    const AddressSchema = {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "street": { "type": "string" },
+        "city": { "type": "string" },
+      },
+      "required": ["name", "street", "city"],
+    } as const satisfies JSONSchema;
+
+    // Without the local alias in doc1, the address would not match the schema
+    // We'll use a schema selector to grab Bob's name and work address
+    const schemaSelector = {
+      [doc2]: {
+        [the]: {
+          _: {
+            path: ["offices", "main"],
+            schemaContext: {
+              schema: AddressSchema,
+              rootSchema: {}, // not bothering with this spec
+            },
+          },
+        },
+      },
+    };
+
+    const query = await memory.query({
+      selectSchema: schemaSelector,
+    });
+
+    assertEquals(query.error?.name, "AuthorizationError");
+    assertEquals(query.error?.message, "Insufficient authorization");
+  },
+);
+
+test(
+  "can read classified contents through schema traversal with claim",
+  store,
+  async (session) => {
+    const clock = new Clock();
+    const memory = Consumer.open({ as: alice, session, clock })
+      .mount(alice.did());
+
+    const doc1 = doc; // convenient name
+    const doc2 = `of:${refer({ goodbye: "world" })}` as const;
+
+    const v1 = Fact.assert({
+      the,
+      of: doc1,
+      is: {
+        "value": {
+          "offices": {
+            "main": {
+              "$alias": {
+                "path": ["employees", "0", "addresses", "work"],
+              },
+            },
+          },
+          "employees": [
+            {
+              "name": "Bob",
+              "addresses": {
+                "home": {
+                  "name": "Mr. Bob Hope",
+                  "street": "2466 Southridge Drive",
+                  "city": "Palm Springs",
+                },
+                "work": {
+                  "name": "Bob Hope Airport",
+                  "street": "2627 N Hollywood Way",
+                  "city": "Burbank",
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const v1_label = Fact.assert({
+      the: LABEL_THE,
+      of: doc,
+      is: { classification: ["confidential"] },
+    });
+
+    const v2 = Fact.assert({
+      the,
+      of: doc2,
+      is: {
+        "value": {
+          "offices": {
+            "$alias": {
+              "cell": {
+                "/": doc1.slice(3), // strip off 'of:'
+              },
+              "path": ["offices"],
+            },
+          },
+        },
+      },
+    });
+
+    const write1 = await memory.transact({
+      changes: Changes.from([v1, v1_label]),
+    });
+    assert(write1.ok);
+
+    const write2 = await memory.transact({
+      changes: Changes.from([v2]),
+    });
+    assert(write2.ok);
+
+    const AddressSchema = {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "street": { "type": "string" },
+        "city": { "type": "string" },
+      },
+      "required": ["name", "street", "city"],
+    } as const satisfies JSONSchema;
+
+    // Without the local alias in doc1, the address would not match the schema
+    // We'll use a schema selector to grab Bob's name and work address
+    const schemaSelector = {
+      [doc2]: {
+        [the]: {
+          _: {
+            path: ["offices", "main"],
+            schemaContext: {
+              schema: AddressSchema,
+              rootSchema: {}, // not bothering with this spec
+            },
+          },
+        },
+      },
+    };
+
+    const query = await memory.query({
+      selectSchema: schemaSelector,
+      classification: ["confidential"],
+    });
+
+    assertEquals(
+      query.ok?.selection,
+      { [alice.did()]: Selection.from([[v1, 0], [v2, 1]]) },
+      "lists alice's facts",
+    );
+  },
+);

@@ -761,6 +761,8 @@ export type SchemaSelector = Select<
   Select<The, Select<Cause, SchemaPathSelector>>
 >;
 
+// Note: This could be altered to only pass the rootSchema (as schema), and rely on path
+// to narrow the schema to the appropriate section.
 export type SchemaPathSelector = {
   path: string[];
   schemaContext?: SchemaContext;

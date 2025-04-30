@@ -394,7 +394,7 @@ export class Replica {
   ): Promise<
     Result<
       Selection<FactAddress, Revision<State>>,
-      QueryError | ConnectionError | StoreError
+      StoreError | QueryError | AuthorizationError | ConnectionError
     >
   > {
     // If requested entry list is empty there is nothing to fetch so we return
@@ -506,7 +506,7 @@ export class Replica {
   ): Promise<
     Result<
       Selection<FactAddress, Revision<State>>,
-      StoreError | QueryError | ConnectionError
+      StoreError | QueryError | AuthorizationError | ConnectionError
     >
   > {
     // First we identify entries that we have need to load from the store.
