@@ -141,6 +141,7 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
   const { success } = await new Deno.Command(Deno.execPath(), {
     args: [
       "compile",
+      "--unstable-otel",
       "--output",
       config.distPath("toolshed"),
       "--include",
