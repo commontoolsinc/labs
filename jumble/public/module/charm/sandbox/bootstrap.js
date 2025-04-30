@@ -7,10 +7,15 @@ import * as Babel from "https://esm.sh/@babel/standalone"
 window.React = React
 window.ReactDOM = ReactDOM
 window.Babel = Babel
+// if LLM forgets the prefix
 window.useState = window.React.useState
 window.useEffect = window.React.useEffect
 window.useCallback = window.React.useCallback
 
+// bf: this got considerably more complicated when supporting key paths
+// but that's because the iframe RPC doesn't support it, so we're emulating it internally
+// we should revisit this, it's conceptually simple but I'm not quite sure what the solution looks like
+// iframe-ctx.ts is a better place to solve the problem.
 window.useReactiveCell = function useReactiveCell(pathOrKey) {
   const pathArr = Array.isArray(pathOrKey) ? pathOrKey : [pathOrKey];
   const rootKey = pathArr[0];                // the key used for IPC
