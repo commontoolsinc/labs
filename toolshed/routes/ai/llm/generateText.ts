@@ -1,7 +1,11 @@
 import { streamText } from "ai";
-import { trace } from "@opentelemetry/api";
+import { AttributeValue, trace } from "@opentelemetry/api";
 import { type LLMMessage, type LLMRequest } from "@commontools/llm/types";
 import { findModel } from "./models.ts";
+
+import { provider as otelProvider } from "@/lib/otel.ts";
+
+import env from "@/env.ts";
 
 // Constants for JSON mode
 const JSON_SYSTEM_PROMPTS = {
@@ -182,13 +186,38 @@ export async function generateText(
   streamParams.experimental_telemetry = {
     isEnabled: true,
     metadata: params.metadata,
+    tracer: otelProvider.getTracer(env.OTEL_SERVICE_NAME || "toolshed-dev"),
   };
 
   // This is where the LLM API call is made
   const llmStream = await streamText(streamParams as any);
 
-  // Get the active span ID from OpenTelemetry
-  const spanId = trace.getActiveSpan()?.spanContext().spanId;
+  // Get the active span from OpenTelemetry and set attributes
+  const activeSpan = trace.getActiveSpan();
+  const spanId = activeSpan?.spanContext().spanId;
+
+  // Attach metadata directly to the root span
+  if (activeSpan) {
+    // Add the metadata from params if available
+    if (params.metadata) {
+      Object.entries(params.metadata).forEach(([key, value]) => {
+        // Only set attributes with valid values (not undefined)
+        if (value !== undefined) {
+          // Handle different types to ensure we only use valid AttributeValue types
+          if (
+            typeof value === "string" ||
+            typeof value === "number" ||
+            typeof value === "boolean"
+          ) {
+            activeSpan.setAttribute(`metadata.${key}`, value);
+          } else if (typeof value === "object") {
+            // Convert objects to JSON strings
+            activeSpan.setAttribute(`metadata.${key}`, JSON.stringify(value));
+          }
+        }
+      });
+    }
+  }
 
   // If not streaming, handle regular response
   if (!params.stream) {

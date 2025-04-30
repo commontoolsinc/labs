@@ -91,7 +91,6 @@ toolshed/
 │   │       └── img.test.ts        # Test cases
 │   │   └── llm/              # Language model endpoints
 │   │       ├── cache.ts      # llm-specific caching
-│   │       ├── instrumentation.ts # Telemetry
 │   │       ├── llm.handlers.ts    # Request handlers
 │   │       ├── llm.index.ts       # Route definitions
 │   │       ├── llm.routes.ts      # Route schemas
