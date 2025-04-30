@@ -147,7 +147,6 @@ class MemoryConsumerSession<
   }
   receive(command: ProviderCommand<MemoryProtocol>) {
     const id = command.of;
-    console.log("got command: ", command);
     if (command.the === "task/return") {
       const invocation = this.invocations.get(id);
       // TODO(@ubik2) this is really gross.
