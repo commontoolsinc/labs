@@ -299,14 +299,18 @@ async function fetchFromUrl() {
 }
 \`\`\`
 
-## 5. generateImage Function
+<generateImageUrl>
+
+Synchronous, generates a URL that will load the image.
 
 \`\`\`jsx
 function ImageComponent() {
-  return <img src={generateImage("A beautiful sunset over mountains")} alt="Generated landscape" />;
+  return <img src={generateImageUrl("A beautiful sunset over mountains")} alt="Generated landscape" />;
 }
-
 \`\`\`
+
+</generateImageUrl>
+
 ## 6. Using the Interface Functions
 
 \`\`\`javascript

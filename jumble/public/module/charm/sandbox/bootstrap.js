@@ -239,10 +239,11 @@ window.readWebpage = (function () {
   return readWebpage
 })()
 
-// Define generateImage utility with React available
 window.generateImage = function (prompt) {
   return "/api/ai/img?prompt=" + encodeURIComponent(prompt)
 }
+
+window.generateImageUrl = window.generateImage;
 
 // Error handling
 window.onerror = function (message, source, lineno, colno, error) {
