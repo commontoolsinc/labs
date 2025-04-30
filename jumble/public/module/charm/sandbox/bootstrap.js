@@ -7,61 +7,94 @@ import * as Babel from "https://esm.sh/@babel/standalone"
 window.React = React
 window.ReactDOM = ReactDOM
 window.Babel = Babel
+// if LLM forgets the prefix
+window.useState = window.React.useState
+window.useEffect = window.React.useEffect
+window.useCallback = window.React.useCallback
 
-window.useReactiveCell = function (key) {
-  // Track if we've received a response from the parent
-  const [received, setReceived] = React.useState(false)
-  // Initialize state with defaultValue
-  const [doc, setDocState] = React.useState(undefined)
+// bf: this got considerably more complicated when supporting key paths
+// but that's because the iframe RPC doesn't support it, so we're emulating it internally
+// we should revisit this, it's conceptually simple but I'm not quite sure what the solution looks like
+// iframe-ctx.ts is a better place to solve the problem.
+window.useReactiveCell = function useReactiveCell(pathOrKey) {
+  const pathArr = Array.isArray(pathOrKey) ? pathOrKey : [pathOrKey];
+  const rootKey = pathArr[0];                // the key used for IPC
+  const nestedPath = pathArr.slice(1);       // [] when we stay at the root
 
+  /* ------------------------------------------------------------------ utils */
+  const getNested = (obj, p = []) =>
+    p.reduce((acc, k) => (acc != null ? acc[k] : undefined), obj);
+
+  const setNested = (obj, p, val) => {
+    if (p.length === 0) return val;
+    const [k, ...rest] = p;
+    const clone =
+      typeof k === "number"
+        ? Array.isArray(obj) ? obj.slice() : []          // keep arrays as arrays
+        : obj && typeof obj === "object"
+          ? { ...obj }
+          : {};
+    clone[k] = setNested(clone[k], rest, val);
+    return clone;
+  };
+  /* ------------------------------------------------------------------------ */
+
+  // Last full root value we have seen.
+  const rootRef = React.useRef(
+    window.sourceData ? window.sourceData[rootKey] : undefined,
+  );
+
+  // Local state holds ONLY the nested value the caller cares about.
+  const [received, setReceived] = React.useState(false);
+  const [doc, setDocState] = React.useState(() =>
+    getNested(rootRef.current, nestedPath)
+  );
+
+  /* -------------------------------- listen for updates from the host ------ */
   React.useEffect(() => {
-    // Handler for document updates
-    function handleMessage(event) {
+    function handleMessage(e) {
       if (
-        event.data &&
-        event.data.type === "update" &&
-        event.data.data[0] === key
+        e.data &&
+        e.data.type === "update" &&
+        e.data.data?.[0] === rootKey
       ) {
-        // Mark that we've received a response
-        setReceived(true)
-
-        // Update the state with the received value or null if undefined
-        const value = event.data.data[1]
-        console.log("useReactiveCell", key, "updated", value)
-        setDocState(value)
+        const newRoot = e.data.data[1];
+        rootRef.current = newRoot;
+        setDocState(getNested(newRoot, nestedPath));
+        setReceived(true);
       }
     }
 
-    window.addEventListener("message", handleMessage)
-
-    // Subscribe to the specific key
-    window.parent.postMessage({ type: "subscribe", data: [key] }, "*")
-    window.parent.postMessage({ type: "read", data: key }, "*")
+    window.addEventListener("message", handleMessage);
+    window.parent.postMessage({ type: "subscribe", data: [rootKey] }, "*");
+    window.parent.postMessage({ type: "read", data: rootKey }, "*");
 
     return () => {
-      window.removeEventListener("message", handleMessage)
-      window.parent.postMessage({ type: "unsubscribe", data: [key] }, "*")
-    }
-  }, [key])
+      window.removeEventListener("message", handleMessage);
+      window.parent.postMessage({ type: "unsubscribe", data: [rootKey] }, "*");
+    };
+  }, [rootKey, nestedPath.join(".")]); // Dependency on stringified path
+  /* ------------------------------------------------------------------------ */
 
-  // Update function
+  /* ----------------------------- setter ----------------------------------- */
   const updateDoc = newValue => {
-    if (typeof newValue === "function") {
-      newValue = newValue(doc)
-    }
-    console.log("useReactiveCell", key, "written", newValue)
-    setDocState(newValue)
-    window.parent.postMessage({ type: "write", data: [key, newValue] }, "*")
-  }
+    if (typeof newValue === "function") newValue = newValue(doc);
 
-  // If we have not yet received response from the host we use field from the
-  // sourceData which was preloaded via `subscribeToSource` during initialization
-  // in the `initializeApp`.
-  // ⚠️ Please note that value we prefetched still could be out of date because
-  // `*` subscription is removed in the iframe-ctx.ts file which could lead
-  // charm to make wrong conclusion and overwrite key.
-  return [received ? doc : window.sourceData[key], updateDoc]
-}
+    // Build the new *root* object immutably
+    const newRoot = setNested(rootRef.current ?? {}, nestedPath, newValue);
+    rootRef.current = newRoot;
+    setDocState(newValue);
+
+    window.parent.postMessage({ type: "write", data: [rootKey, newRoot] }, "*");
+  };
+  /* ------------------------------------------------------------------------ */
+
+  // If we never received an explicit update yet, fall back to pre-loaded data
+  const fallback = getNested(window.sourceData?.[rootKey], nestedPath);
+
+  return [received ? doc : fallback, updateDoc];
+};
+
 
 window.useDoc = window.useReactiveCell;
 
@@ -106,7 +139,7 @@ window.generateText = function ({ system, messages }) {
   return window.llm({
     system,
     messages,
-  }).then(result => result.content)
+  })
 }
 
 window.generateObject = function ({ system, messages }) {
@@ -115,7 +148,6 @@ window.generateObject = function ({ system, messages }) {
     messages,
     mode: 'json'
   })
-    .then(result => result.content)
     .then(result => {
       try {
         // Handle possible control characters and escape sequences
@@ -215,10 +247,11 @@ window.readWebpage = (function () {
   return readWebpage
 })()
 
-// Define generateImage utility with React available
 window.generateImage = function (prompt) {
   return "/api/ai/img?prompt=" + encodeURIComponent(prompt)
 }
+
+window.generateImageUrl = window.generateImage;
 
 // Error handling
 window.onerror = function (message, source, lineno, colno, error) {

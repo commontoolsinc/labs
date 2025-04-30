@@ -5,7 +5,7 @@ export const DEFAULT_MODEL_NAME: ModelName =
 
 // NOTE(ja): This should be an array of models, the first model will be tried, if it
 // fails, the second model will be tried, etc.
-export const DEFAULT_IFRAME_MODELS: ModelName = "google:gemini-2.0-flash";
+export const DEFAULT_IFRAME_MODELS: ModelName = "openai:gpt-4.1-nano";
 
 export type LLMResponse = {
   content: string;

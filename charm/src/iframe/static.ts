@@ -114,14 +114,14 @@ Create an interactive React component that fulfills the user's request. Focus on
 </code_structure>
 
 <charm_api>
-- **useReactiveCell(key, defaultValue)** - Persistent data storage with reactive updates
+- **useReactiveCell(keyPath: string[])** - Persistent data storage with reactive updates
 - **generateText({ system, messages })** - Generate text via Large Language Model
 - **generateObject({ system, messages })** - Generate JSON object via Large Language Model
 - **readWebpage(url)** - Fetch and parse external web content
 - **generateImage(prompt)** - Create AI-generated images
 
-  <use_doc>
-  ## Important Note About useReactiveCell
+  <use_reactive_cell>
+  ## Important Note About useReactiveCell(keyPath: string[])
   - **useReactiveCell is a React Hook** and must follow all React hook rules
   - It should only be used for persistent state and must draw from the provided schema
     - For any ephemeral state, use \`React.useState\`
@@ -146,7 +146,7 @@ Create an interactive React component that fulfills the user's request. Focus on
       root.render(<MyApp />);
     }
     \`\`\`
-  </use_doc>
+  </use_reactive_cell>
 </charm_api>
 
 <importing_libraries>
@@ -167,9 +167,10 @@ ${security()}
 <guide>
 # SDK Usage Guide
 
+<persistent-reactive-state>
 ## 1. \`useReactiveCell\` Hook
 
-The \`useReactiveCell\` hook binds to a reactive cell given key and returns a tuple \`[doc, setDoc]\`:
+The \`useReactiveCell\` hook binds to a reactive cell given a key path and returns a tuple \`[doc, setDoc]\`:
 
 Any keys from the view-model-schema are valid for useReactiveCell, any other keys will fail. Provide a default as the second argument, **do not set an initial value explicitly**.
 
@@ -193,12 +194,8 @@ For this schema:
 \`\`\`jsx
 function CounterComponent() {
   // Correct: useReactiveCell called at top level of component
-  const [counter, setCounter] = useReactiveCell("counter", -1); // default
-
-  // Incorrect: would cause errors
-  // if(something) {
-  //   const [data, setData] = useReactiveCell("data", {}); // Never do this!
-  // }
+  const [counter, setCounter] = useReactiveCell("counter");
+  const [maxValue, setMaxValue] = useReactiveCell(['settings', 'maxValue']);
 
   const onIncrement = useCallback(() => {
     // writing to the cell automatically triggers a re-render
@@ -212,8 +209,13 @@ function CounterComponent() {
   );
 }
 \`\`\`
+</persistent-reactive-state>
 
-## 2. \`generateText\` Function
+<generating_content>
+Several APIs exist for generating text, JSON or image urls.
+
+<text>
+\`generateText({ system, messages}): Promise<string>\`
 
 \`\`\`jsx
 async function fetchLLMResponse() {
@@ -224,17 +226,21 @@ async function fetchLLMResponse() {
   console.log('LLM responded:', result);
 }
 \`\`\`
+</text>
 
-## 3. \`generateObject\` (JSON) Function
+<json>
 
-Important: ensure you explain the intended schema of the response in the prompt.
+\`window.generateObject({ system, messages }): Promise<object>\`
+
+You must give the exact schema of the response in the prompt.
 
 For example: "Generate a traditional Vietnamese recipe in JSON format, with the
 following properties: name (string), ingredients (array of strings),
 instructions (array of strings)"
 
-\`generateObject\` returns a parsed object already, or \`undefined\`.
+\`generateObject\` returns a parsed object already, or \`undefined\`. Be defensive working with the response, the LLM may make mistakes.
 
+<example>
 \`\`\`jsx
 const promptPayload = ;
 const result = await generateObject({
@@ -258,13 +264,13 @@ console.log('JSON response from llm:', result);
 //     }
 // ]
 \`\`\`
+</example>
 
-ANOTHER NOTE: Language model requests are globally cached based on your prompt.
+<example>
+NOTE: Language model requests are globally cached based on your prompt.
 This means that identical requests will return the same result. If your llm use
 requires unique results on every request, make sure to introduce a cache-breaking
 string such as a timestamp or incrementing number/id.
-
-Another example:
 
 \`\`\`jsx
 // To avoid the cache we'll use a cache-busting string.
@@ -311,8 +317,26 @@ console.log('JSON response from llm:', result);
 //     "cookTime": 30
 // }
 \`\`\`
+</example>
 
-## 4. \`readWebpage\` Function
+</json>
+
+
+<images>
+
+Synchronous, generates a URL that will load the image.
+
+\`\`\`jsx
+function ImageComponent() {
+  return <img src={generateImageUrl("A beautiful sunset over mountains")} alt="Generated landscape" />;
+}
+\`\`\`
+
+</images>
+</generating_content>
+
+<fetching_content>
+\`readWebpage(url: string): Promise<string>\` Returns markdown format.
 
 \`\`\`jsx
 async function fetchFromUrl() {
@@ -321,16 +345,10 @@ async function fetchFromUrl() {
   console.log('Markdown:', result.content);
 }
 \`\`\`
+</fetching_content>
 
-## 5. generateImage Function
-
-\`\`\`jsx
-function ImageComponent() {
-  return <img src={generateImage("A beautiful sunset over mountains")} alt="Generated landscape" />;
-}
-
-\`\`\`
-## 6. Using the Interface Functions
+<code_structure>
+All generated code must follow this pattern:
 
 \`\`\`javascript
 // Import from modern ESM libraries:
@@ -446,11 +464,9 @@ function onReady(mount, sourceData, libs) {
   const { useSpring, animated } = libs['@react-spring/web']; // Access imported module
 
   function MyApp() {
-    const [count, setCount] = useReactiveCell('count', 0);
-    const [todos, setTodos] = useReactiveCell('todos', [
-      { id: 1, text: 'Learn React', completed: false },
-      { id: 2, text: 'Build a Todo App', completed: false }
-    ]);
+    const [count, setCount] = useReactiveCell('count');
+    const [todos, setTodos] = useReactiveCell('todos');
+
     const props = useSpring({
       from: { opacity: 0 },
       to: { opacity: 1 }
@@ -504,19 +520,18 @@ Create an interactive React component that fulfills the user's request. Focus on
 4. For form handling, use \`onClick\` handlers instead of \`onSubmit\`
 
 ## Available APIs
-- **useReactiveCell(key, defaultValue)** - Persistent data storage with reactive updates
+- **useReactiveCell(keyPath: string[])** - Persistent data storage with reactive updates
 - **generateText({ system, messages })** - Generate text via Large Language Model
 - **generateObject({ system, messages })** - Generate JSON object via Large Language Model
 - **readWebpage(url)** - Fetch and parse external web content
 - **generateImage(prompt)** - Create AI-generated images
 
-## Important Note About useReactiveCell
+## Important Note About useReactiveCell(keyPath: string[])
 - **useReactiveCell is a React Hook** and must follow all React hook rules
 - It should only be used for persistent state and must draw from the provided schema
   - For any ephemeral state, use \`React.useState\`
 - Only call useReactiveCell at the top level of your function components or custom hooks
 - Do not call useReactiveCell inside loops, conditions, or nested functions
-- useReactiveCell cannot be used outside of \`onReady\` components - it must be called during rendering
 
 ## Library Usage
 - Request additional libraries in \`onLoad\` by returning an array of module names
@@ -531,7 +546,7 @@ ${security()}
 
 ## 1. \`useReactiveCell\` Hook
 
-The \`useReactiveCell\` hook binds to a reactive cell given key and returns a tuple \`[doc, setDoc]\`:
+The \`useReactiveCell\` hook binds to a reactive cell given a key path and returns a tuple \`[doc, setDoc]\`:
 
 Any keys from the schema are valid for useReactiveCell, any other keys will fail. Provide a default as the second argument, **do not set an initial value explicitly**.
 
