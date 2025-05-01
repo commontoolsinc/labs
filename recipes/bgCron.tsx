@@ -102,7 +102,7 @@ function shouldTrigger(pattern: string, date: Date): boolean {
 
 /* Called automatically every minute by the platform. */
 const updater = handler<
-  {},
+  { nothing?: boolean },
   { count: number; pattern: string }
 >((_, state) => {
   if (shouldTrigger(state.pattern, new Date())) {
