@@ -41,7 +41,7 @@ const inputSchema = schema({
 const outputSchema = {
   type: "object",
   properties: {
-    count: { type: "number", asCell: true },
+    count: { type: "number" },
     bgUpdater: {
       asStream: true,
       ...updaterSchema,
