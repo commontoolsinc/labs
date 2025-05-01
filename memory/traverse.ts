@@ -3,7 +3,7 @@
 
 import { isAlias } from "../builder/src/index.ts";
 import { JSONObject, JSONValue } from "./consumer.ts";
-import { isObject } from "./provider.ts";
+import { isObject } from "@commontools/utils/types";
 
 export class CycleTracker<K> {
   private partial: Set<K>;
@@ -361,7 +361,8 @@ export function isPointer(value: any): boolean {
  * @returns {boolean}
  */
 function isJSONCellLink(value: any): value is JSONCellLink {
-  return (isObject(value) && isObject(value.cell) && "/" in value.cell &&
+  return (isObject(value) && "cell" in value && isObject(value.cell) &&
+    "/" in value.cell && "path" in value &&
     Array.isArray(value.path));
 }
 

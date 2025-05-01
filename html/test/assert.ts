@@ -1,3 +1,5 @@
+import { isRecord } from "@commontools/utils/types";
+
 export class AssertionError<A, E> extends Error {
   actual: A | undefined;
   expected: E | undefined;
@@ -43,7 +45,7 @@ export const matchObject = (
   expected: unknown,
   message = "",
 ) => {
-  if (!isObject(actual) || !isObject(expected)) {
+  if (!isRecord(actual) || !isRecord(expected)) {
     throw new AssertionError({
       message: message || "Both arguments must be objects",
       actual,
@@ -61,7 +63,7 @@ export const matchObject = (
         });
       }
 
-      if (isObject(expected[key]) && isObject(actual[key])) {
+      if (isRecord(expected[key]) && isRecord(actual[key])) {
         // Recursively check nested objects
         matchObject(actual[key], expected[key], message);
       } else if (actual[key] !== expected[key]) {
@@ -83,10 +85,6 @@ export const matchObject = (
     });
   }
 };
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
 
 export const throws = (run: () => void, message = "") => {
   try {

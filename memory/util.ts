@@ -41,15 +41,3 @@ export const fromDID = async <ID extends DIDKey>(
     }
   }
 };
-
-export function isObject(value: unknown): boolean {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export function isNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-export function isString(value: unknown): value is string {
-  return typeof value === "string";
-}

@@ -14,7 +14,7 @@ import {
   removeAction,
 } from "@commontools/runner";
 import { DEFAULT_IFRAME_MODELS, LLMClient } from "@commontools/llm";
-import { isObj } from "@commontools/utils";
+import { isObject } from "@commontools/utils/types";
 import {
   completeJob,
   failJob,
@@ -196,7 +196,7 @@ export const setupIframe = () =>
             : undefined;
           const type = context.key(key).schema?.type ??
             currentValueType ?? typeof value;
-          if (type === "object" && isObj(value) && !Array.isArray(value)) {
+          if (type === "object" && isObject(value)) {
             context.key(key).update(value);
           } else if (
             (type === "array" && Array.isArray(value)) ||

@@ -1,4 +1,1 @@
-export * from "./defer.ts";
-export * from "./env.ts";
-export * from "./isObj.ts";
-export * from "./sleep.ts";
+throw new Error(`Import individual exports for utils: \`import { defer } from "@commontools/utils/defer"\``);

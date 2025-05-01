@@ -1,5 +1,6 @@
 import { checkSchemaMatch } from "@/lib/schema-match.ts";
 import { Logger } from "@/lib/prefixed-logger.ts";
+import { isObject } from "@commontools/utils/types";
 
 export interface SchemaMatch<T = Record<string, unknown>> {
   key: string;
@@ -89,10 +90,6 @@ export function findExactSubtreeMatches(
   }
 
   return matches;
-}
-
-export function isObject(value: unknown): boolean {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function decomposeSchema(

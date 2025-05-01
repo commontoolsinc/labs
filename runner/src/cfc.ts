@@ -1,7 +1,7 @@
 // This is a simple form of the policy, where you express the basics of the partial ordering.
 
 import type { JSONSchema, JSONValue } from "@commontools/builder";
-import { isObject } from "../../memory/util.ts";
+import { isObject } from "@commontools/utils/types";
 import { extractDefaultValues } from "./utils.ts";
 
 // We'll often work with the transitive closure of this graph.
