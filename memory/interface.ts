@@ -240,7 +240,7 @@ export type Method<
     Effect
   >;
   Pending: {
-    return(result: Out): void;
+    return(result: Out): boolean;
     perform(effect: Effect): void;
   };
 };
@@ -355,7 +355,7 @@ export interface InvocationView<
   Return extends NonNullable<unknown>,
   Effect,
 > extends Invocation<Source["cmd"], Source["sub"], Source["args"]> {
-  return(result: Await<Return>): void;
+  return(result: Await<Return>): boolean;
   perform(effect: Effect): void;
 
   toJSON(): Source;

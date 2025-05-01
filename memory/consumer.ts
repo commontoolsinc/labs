@@ -149,15 +149,12 @@ class MemoryConsumerSession<
     const id = command.of;
     if (command.the === "task/return") {
       const invocation = this.invocations.get(id);
-      // TODO(@ubik2) this is really gross.
       if (
-        invocation === undefined || !("args" in invocation) ||
-        invocation.args === null || !(typeof invocation.args === "object") ||
-        !("subscribe" in invocation.args) || !invocation.args.subscribe
+        invocation !== undefined &&
+        !invocation.return(command.is as NonNullable<unknown>)
       ) {
         this.invocations.delete(id);
       }
-      invocation?.return(command.is as NonNullable<unknown>);
     } // If it is an effect it can be for one specific subscription, yet we may
     // have other subscriptions that will be affected.
     // We can't just send one message over, since the client needs to know
@@ -299,14 +296,15 @@ interface InvocationHandle {
 
 interface Job<Ability, Protocol extends Proto> {
   promise: Promise<ConsumerResultFor<Ability, Protocol>>;
-  return(input: Await<ConsumerResultFor<Ability, Protocol>>): void;
+  // Return false to remove listener
+  return(input: Await<ConsumerResultFor<Ability, Protocol>>): boolean;
   perform(effect: ConsumerEffectFor<Ability, Protocol>): void;
 }
 
 class ConsumerInvocation<Ability extends The, Protocol extends Proto> {
   promise: Promise<ConsumerResultFor<Ability, Protocol>>;
 
-  return: (input: ConsumerResultFor<Ability, Protocol>) => void;
+  return: (input: ConsumerResultFor<Ability, Protocol>) => boolean;
 
   #reference: Reference<Invocation>;
 
@@ -425,6 +423,7 @@ class QueryView<
 
   return(selection: Selection<InferOf<Protocol>>) {
     this.selection = selection;
+    return !("subscribe" in this.selector && this.selector.subscribe === true);
   }
 
   perform(effect: Selection<Space>) {

@@ -441,6 +441,9 @@ export class Replica {
         return { error };
       }
       fetchedEntries = query.schemaFacts;
+      // FIXME(@ubik2) verify that we're dealing with this subscription
+      // I know we're sending updates over from the provider, but make sure
+      // we're incorporating those in the cache.
     }
     // Now run our regular queries (this will include our commit+json)
     if (Object.entries(querySelector).length > 0) {
