@@ -4,6 +4,10 @@
   "tasks": {
     "test": "deno test --allow-env"
   },
-  "imports": {
+  "imports": {},
+  "compilerOptions": {
+    "jsx": "react",
+    "jsxFactory": "h",
+    "jsxFragmentFactory": "h.fragment"
   }
 }
