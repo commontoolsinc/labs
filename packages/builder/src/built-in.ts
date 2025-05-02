@@ -10,6 +10,7 @@ export interface BuiltInLLMParams {
   system?: string;
   stop?: string;
   maxTokens?: number;
+  mode?: "json";
 }
 
 export interface BuiltInLLMState<T> {
