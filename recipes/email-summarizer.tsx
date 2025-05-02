@@ -70,13 +70,13 @@ const EmailProperties = {
     title: "Markdown Content",
     description: "Email content converted to Markdown format",
   },
-} as const;
+} as const satisfies JSONSchema;
 
 const EmailSchema = {
   type: "object",
   properties: EmailProperties,
   required: Object.keys(EmailProperties),
-} as const as JSONSchema;
+} as const satisfies JSONSchema;
 
 type Email = Schema<typeof EmailSchema>;
 

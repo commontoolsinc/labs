@@ -143,7 +143,7 @@ const EmailDateExtractorInputSchema = {
           description: "Minimum confidence threshold for included dates (0-1)",
         },
       },
-      defailt: {},
+      default: {},
       required: [
         "includeEmailDate",
         "extractTimes",
@@ -154,7 +154,7 @@ const EmailDateExtractorInputSchema = {
   },
   required: ["emails", "settings"],
   description: "Email Date Extractor",
-} as const as JSONSchema;
+} as const satisfies JSONSchema;
 
 // Output Schema
 const ResultSchema = {
@@ -434,8 +434,8 @@ export default recipe(
     );
 
     // Count of emails and dates
-    const emailCount = derive(emails, (emails) => emails.length);
-    const dateCount = derive(allDates, (dates) => dates.length);
+    const emailCount = derive(emails, (emails) => emails?.length);
+    const dateCount = derive(allDates, (dates) => dates?.length);
 
     // Instantiate handlers
     const includeEmailDateHandler = updateIncludeEmailDate({
