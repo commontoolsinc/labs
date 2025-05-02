@@ -172,12 +172,8 @@ export class ContextualFlowControl {
     }
     if (schema.ifc) {
       if (schema.ifc?.classification) {
-        console.log(
-          "Found item with classification",
-          schema.ifc.classification,
-        );
         for (const classification of schema.ifc.classification) {
-          for (const reachable of this.reachable.get(classification)!) {
+          for (const reachable of this.reachable.get(classification) ?? []) {
             joined.add(reachable);
           }
         }
