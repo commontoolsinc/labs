@@ -2,7 +2,6 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { type DID, Identity } from "@commontools/identity";
 import { Provider as CachedStorageProvider } from "../runner/src/storage/cache.ts";
-//
 // Some examples of how you can use this to play with the classification labels
 // Store the empty list
 // > deno task curl --spaceName robin --data '[]' ct://did:key:z6MkjMowGqCog2ZfvNBNrx32p2Fa2bKR1nT7pUWiPQFWzVAg/baedreih5ute2slgsylwtbszccarx6ky2ca3mtticxug6sfj3nwamacefmn/application/json
@@ -32,7 +31,9 @@ const remoteStorageUrl = new URL(toolshedUrl);
 function usage() {
   console.log(
     "Usage: curl [--key <keyfile>] [--spaceName <spaceName>] [--admin] [--raw] [--schema <schema>] [--data <data>] url\n" +
-      "Example url: ct://did:key:z6MkjMowGqCog2ZfvNBNrx32p2Fa2bKR1nT7pUWiPQFWzVAg/baedreihxpwcmhvzpf5weuf4ceow4zbahqikvu5ploox36ipeuvqnminyba/application/json",
+      "Example URL: ct://did:key:z6MkjMowGqCog2ZfvNBNrx32p2Fa2bKR1nT7pUWiPQFWzVAg/baedreihxpwcmhvzpf5weuf4ceow4zbahqikvu5ploox36ipeuvqnminyba/application/json\n" +
+      "If you provide a spaceDID in the URL, you must either be using the admin flag, or provide the --spaceName option.\n" +
+      "You can also provide a spaceName in the URL if it does not include any colon or slash characters. In this case, you do not need to provide the --spaceName option.",
   );
 }
 async function main() {
@@ -45,18 +46,17 @@ async function main() {
   // Parse the url like ct://spaceDID/entityID/attribute
   // did key is base58btc; entity id is base32; attribute is mime type-ish
   const urlRegex: RegExp =
-    /^(ct:\/\/)?(?<at>(did:key:[1-9A-HJ-NP-Za-km-z]+))\/(?<of>[a-z2-7]+)(\/(?<the>\w+\/[-+.\w]+))?$/;
+    /^(ct:\/\/)?((?<spaceDID>(did:key:[1-9A-HJ-NP-Za-km-z]+))|(?<spaceName>[^/:]+))\/(?<of>[a-z2-7]+)(\/(?<the>\w+\/[-+.\w]+))?$/;
   const match = url.match(urlRegex);
   if (match === null || match.groups === undefined) {
     console.error("Invalid url");
     Deno.exit(1);
   }
-  const spaceDID = match.groups.at as DID;
   const entityId = { "/": match.groups.of };
   const the = (match.groups.the && match.groups.the !== "")
     ? match.groups.the
     : "application/json";
-  if (!flags.spaceName && !spaceDID) {
+  if (!match.groups.spaceName && !match.groups.spaceDID) {
     console.error("No space name or space DID found");
     Deno.exit(1);
   }
@@ -77,10 +77,13 @@ async function main() {
   }
 
   // Actual identity is derived from space name if we don't provide an admin key
-  if (!flags.admin && flags.spaceName !== undefined) {
-    identity = await identity.derive(flags.spaceName);
+  if (!flags.admin) {
+    const spaceName = match.groups.spaceName ?? flags.spaceName;
+    identity = await identity.derive(spaceName);
   }
-
+  const spaceDID = match.groups.spaceDID
+    ? match.groups.spaceDID as DID
+    : identity.did();
   const schema = flags.schema ? JSON.parse(flags.schema) : {};
 
   // TODO(@ubik2) - this constrains us to values that are json
