@@ -38,14 +38,10 @@ export default recipe(model, model, (cell) => {
     [UI]: (
       <div>
         <button type="button" onClick={increment(cell)}>+</button>
-        {/* <span>{derive(cell.value, String)}</p> */}
-
-        {ifElse(
-          derive(cell.value, isOdd),
-          <i>{cell.value}</i>,
-          <b>{cell.value}</b>,
-        )}
-
+        {/* use html fragment to test that it works  */}
+        <>
+          <b>{cell.value}</b>
+        </>
         <button type="button" onClick={decrement(cell)}>-</button>
       </div>
     ),
