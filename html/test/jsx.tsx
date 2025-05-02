@@ -10,9 +10,12 @@ describe("jsx dom fragments supprot", () => {
       </>
     );
 
-    assert.matchObject(fragment, [
-      <p>Hello world</p>,
-    ]);
+    assert.matchObject(
+      fragment,
+      <common-fragment>
+        <p>Hello world</p>
+      </common-fragment>,
+    );
   });
 
   it("dom fragments with multiple children", async () => {
@@ -25,12 +28,15 @@ describe("jsx dom fragments supprot", () => {
       </>
     );
 
-    assert.matchObject(fragment, [
-      <p>Grocery List</p>,
-      <ul>
-        <li>Buy Milk</li>
-      </ul>,
-    ]);
+    assert.matchObject(
+      fragment,
+      <common-fragment>
+        <p>Grocery List</p>
+        <ul>
+          <li>Buy Milk</li>
+        </ul>
+      </common-fragment>,
+    );
   });
 
   it("fragments inside the element", async () => {
@@ -46,10 +52,12 @@ describe("jsx dom fragments supprot", () => {
     assert.matchObject(
       <div>{grocery}</div>,
       <div>
-        <p>Grocery List</p>
-        <ul>
-          <li>Buy Milk</li>
-        </ul>
+        <common-fragment>
+          <p>Grocery List</p>
+          <ul>
+            <li>Buy Milk</li>
+          </ul>
+        </common-fragment>
       </div>,
     );
   });

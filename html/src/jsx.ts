@@ -1,11 +1,13 @@
 import type { Cell, Stream } from "@commontools/runner";
-// declare global {
-//   namespace JSX {
-//     interface IntrinsicElements {
-//       [elemName: string]: any;
-//     }
-//   }
-// }
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      [elemName: string]: any;
+    }
+  }
+}
+
+const FRAGMENT_ELEMENT = "common-fragment";
 
 export const h = Object.assign(function h(
   name: string | ((...args: any[]) => any),
@@ -27,7 +29,7 @@ export const h = Object.assign(function h(
   }
 }, {
   fragment({ children }: { children: Child[] }) {
-    return children;
+    return h(FRAGMENT_ELEMENT, null, children);
   },
 });
 
