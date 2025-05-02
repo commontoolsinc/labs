@@ -3,7 +3,7 @@ import * as assert from "./assert.ts";
 import { h } from "../src/jsx.ts";
 
 describe("jsx dom fragments supprot", () => {
-  it("dom fragments should work", async () => {
+  it("dom fragments should work", () => {
     const fragment = (
       <>
         <p>Hello world</p>
@@ -18,7 +18,7 @@ describe("jsx dom fragments supprot", () => {
     );
   });
 
-  it("dom fragments with multiple children", async () => {
+  it("dom fragments with multiple children", () => {
     const fragment = (
       <>
         <p>Grocery List</p>
@@ -39,7 +39,7 @@ describe("jsx dom fragments supprot", () => {
     );
   });
 
-  it("fragments inside the element", async () => {
+  it("fragments inside the element", () => {
     const grocery = (
       <>
         <p>Grocery List</p>
