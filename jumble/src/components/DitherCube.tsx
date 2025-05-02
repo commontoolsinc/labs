@@ -388,7 +388,6 @@ export const DitheredCube = ({
         <MorphingMesh animate={animate} animationSpeed={animationSpeed} />
         <OrbitControls enableZoom={false} />
         <Effects>
-          {/* @ts-expect-error DitheringPass is properly extended but TS doesn't recognize it */}
           <ditheringPass />
         </Effects>
       </Canvas>
