@@ -138,7 +138,7 @@ export const tsToExports = async (
       strict: true,
       jsx: ts.JsxEmit.React,
       jsxFactory: "h",
-      jsxFragmentFactory: "Fragment",
+      jsxFragmentFactory: "h.fragment",
       esModuleInterop: true,
       sourceMap: true, // Enable source map generation
       inlineSources: false, // Don't include original source in source maps

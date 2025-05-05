@@ -1,15 +1,15 @@
 import type { Cell, Stream } from "@commontools/runner";
-// declare global {
-//   namespace JSX {
-//     interface IntrinsicElements {
-//       [elemName: string]: any;
-//     }
-//   }
-// }
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      [elemName: string]: any;
+    }
+  }
+}
 
-export const Fragment = "Fragment";
+const FRAGMENT_ELEMENT = "common-fragment";
 
-export function h(
+export const h = Object.assign(function h(
   name: string | ((...args: any[]) => any),
   props: { [key: string]: any } | null,
   ...children: Child[]
@@ -27,7 +27,11 @@ export function h(
       children: children.flat(),
     };
   }
-}
+}, {
+  fragment({ children }: { children: Child[] }) {
+    return h(FRAGMENT_ELEMENT, null, children);
+  },
+});
 
 /**
  * Dynamic properties. Can either be string type (static) or a Mustache
