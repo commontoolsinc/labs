@@ -22,9 +22,9 @@ import { VolatileStorageProvider } from "./storage/volatile.ts";
 import { Signer } from "@commontools/identity";
 import { isBrowser } from "@commontools/utils/env";
 import { sleep } from "@commontools/utils/sleep";
+import { defer } from "@commontools/utils/defer";
 import { TransactionResult } from "@commontools/memory";
 import { refer } from "@commontools/memory/reference";
-import { defer } from "@commontools/utils";
 import { SchemaContext, SchemaNone } from "@commontools/memory/interface";
 
 export function log(fn: () => any[]) {

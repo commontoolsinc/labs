@@ -27,7 +27,7 @@ import {
 } from "@commontools/runner";
 import { storage } from "@commontools/runner";
 import { type Session } from "@commontools/identity";
-import { isObj } from "@commontools/utils";
+import { isObject } from "@commontools/utils/types";
 
 export function charmId(charm: Charm): string | undefined {
   const id = getEntityId(charm);
@@ -343,7 +343,7 @@ export class CharmManager {
     // If there is no result schema, create one from top level properties that omits UI, NAME
     if (!resultSchema) {
       const resultValue = charm.get();
-      if (isObj(resultValue)) {
+      if (isObject(resultValue)) {
         resultSchema = {
           type: "object",
           properties: Object.fromEntries(

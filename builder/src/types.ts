@@ -1,5 +1,4 @@
-import { isObj } from "@commontools/utils";
-import { Mutable } from "@commontools/utils/types";
+import { isObject, Mutable } from "@commontools/utils/types";
 
 export const ID: unique symbol = Symbol("ID, unique to the context");
 export const ID_FIELD: unique symbol = Symbol(
@@ -166,7 +165,8 @@ export type Alias = {
 };
 
 export function isAlias(value: any): value is Alias {
-  return isObj(value) && isObj(value.$alias) &&
+  return isObject(value) && "$alias" in value && isObject(value.$alias) &&
+    "path" in value.$alias &&
     Array.isArray(value.$alias.path);
 }
 

@@ -1,4 +1,4 @@
-import { sleep } from "@commontools/utils";
+import { sleep } from "@commontools/utils/sleep";
 import { Cell } from "@commontools/runner";
 import { type Cancel, useCancelGroup } from "@commontools/runner";
 import {
