@@ -1,4 +1,28 @@
 import { type JSONSchema } from "@commontools/builder";
+import { isObject } from "@commontools/utils/types";
+
+export const isJSONSchema = (source: unknown): source is JSONSchema => {
+  if (!isObject(source)) {
+    return false;
+  }
+
+  if (!("type" in source) || !source.type) {
+    return "anyOf" in source && Array.isArray(source.anyOf);
+  }
+
+  switch (source.type) {
+    case "object":
+    case "array":
+    case "string":
+    case "integer":
+    case "number":
+    case "boolean":
+    case "null":
+      return true;
+    default:
+      return false;
+  }
+};
 
 // Types used by the `common-iframe-sandbox` IPC.
 
@@ -107,34 +131,12 @@ export function isGuestError(e: object): e is GuestError {
     "stacktrace" in e && typeof e.stacktrace === "string";
 }
 
-const isObject = (source: unknown): source is Record<string, unknown> =>
-  typeof source === "object" && source != null;
 export const isTaskPerform = (source: unknown): source is TaskPerform =>
   isObject(source) &&
-  typeof source?.intent === "string" &&
-  typeof source?.description === "string" &&
-  isObject(source?.input) &&
-  isJSONSchema(source?.output);
-
-export const isJSONSchema = (source: unknown): source is JSONSchema => {
-  if (!isObject(source)) {
-    return false;
-  }
-
-  switch (source?.type) {
-    case "object":
-    case "array":
-    case "string":
-    case "integer":
-    case "number":
-    case "boolean":
-    case "null":
-      return true;
-    default: {
-      return Array.isArray(source?.anyOf);
-    }
-  }
-};
+  "intent" in source && typeof source.intent === "string" &&
+  "description" in source && typeof source.description === "string" &&
+  "input" in source && isObject(source.input) &&
+  "output" in source && isJSONSchema(source.output);
 
 export enum HostMessageType {
   Ping = "ping",

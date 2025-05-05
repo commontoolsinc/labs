@@ -12,7 +12,7 @@ import { captureException } from "@sentry/deno";
 import { FindSpellBySchemaRequest } from "@/routes/ai/spell/spell.handlers.ts";
 
 import { checkSchemaMatch } from "@/lib/schema-match.ts";
-import { isObject } from "@/routes/ai/spell/schema.ts";
+import { isObject } from "@commontools/utils/types";
 import { Schema } from "jsonschema";
 import { Recipe, RecipeSchema } from "../spell.ts";
 

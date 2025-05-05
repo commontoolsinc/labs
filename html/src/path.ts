@@ -1,8 +1,5 @@
 import * as logger from "./logger.ts";
-
-export const isObject = (value: unknown): value is object => {
-  return typeof value === "object" && value !== null;
-};
+import { isObject } from "@commontools/utils/types";
 
 /** A keypath is an array of property keys */
 export type KeyPath = Array<PropertyKey>;

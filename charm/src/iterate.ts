@@ -5,7 +5,7 @@ import {
   recipeManager,
   runtime,
 } from "@commontools/runner";
-import { isObj } from "@commontools/utils";
+import { isObject } from "@commontools/utils/types";
 import {
   createJsonSchema,
   JSONSchema,
@@ -215,7 +215,7 @@ export function scrub(data: any): any {
       // If there are properties, remove $UI and $NAME and any streams
       const scrubbed = Object.fromEntries(
         Object.entries(data.schema.properties).filter(([key, value]) =>
-          !key.startsWith("$") && (!isObj(value) || !value.asStream)
+          !key.startsWith("$") && (!isObject(value) || !value.asStream)
         ),
       );
       console.log("scrubbed modified schema", scrubbed, data.schema);
@@ -227,7 +227,7 @@ export function scrub(data: any): any {
       );
     } else {
       const value = data.asSchema().get();
-      if (isObj(value)) {
+      if (isObject(value)) {
         // Generate a new schema for all properties except $UI and $NAME and streams
         const scrubbed = {
           type: "object",
@@ -248,7 +248,7 @@ export function scrub(data: any): any {
     }
   } else if (Array.isArray(data)) {
     return data.map((value) => scrub(value));
-  } else if (isObj(data)) {
+  } else if (isObject(data)) {
     return Object.fromEntries(
       Object.entries(data).map(([key, value]) => [key, scrub(value)]),
     );
@@ -264,7 +264,7 @@ function turnCellsIntoAliases(data: any): any {
     return { $alias: data.getAsCellLink() };
   } else if (Array.isArray(data)) {
     return data.map((value) => turnCellsIntoAliases(value));
-  } else if (isObj(data)) {
+  } else if (isObject(data)) {
     return Object.fromEntries(
       Object.entries(data).map((
         [key, value],

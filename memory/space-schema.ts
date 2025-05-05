@@ -9,7 +9,7 @@ import type {
   SchemaContext,
   SchemaQuery,
 } from "./interface.ts";
-import { isNumber, isObject, isString } from "./util.ts";
+import { isNumber, isObject, isString } from "@commontools/utils/types";
 import { FactSelector, SelectAll, selectFacts, Session } from "./space.ts";
 import { FactAddress } from "../runner/src/storage/cache.ts";
 import {

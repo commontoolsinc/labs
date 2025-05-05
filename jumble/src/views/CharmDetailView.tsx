@@ -7,7 +7,7 @@ import {
 } from "@commontools/charm";
 import { useCharmReferences } from "@/hooks/use-charm-references.ts";
 import { isCell, isStream } from "@commontools/runner";
-import { isObj } from "@commontools/utils";
+import { isObject } from "@commontools/utils/types";
 import {
   CheckboxToggle,
   CommonCheckbox,
@@ -1339,7 +1339,7 @@ function translateCellsAndStreamsToPlainJSON(
     result = data.map((value) =>
       translateCellsAndStreamsToPlainJSON(value, partial, complete)
     );
-  } else if (isObj(data)) {
+  } else if (isObject(data)) {
     result = Object.fromEntries(
       Object.entries(data).map(([key, value]) => [
         key,
