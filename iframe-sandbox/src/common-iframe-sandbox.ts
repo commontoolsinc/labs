@@ -1,7 +1,7 @@
 import { css, html, LitElement, PropertyValues } from "lit";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
 import * as IPC from "./ipc.ts";
-import { getIframeContextHandler } from "./context.ts";
+import { type Cell, getIframeContextHandler } from "./context.ts";
 import OuterFrame from "./outer-frame.ts";
 import {
   HealthCheck,
@@ -43,7 +43,7 @@ export class CommonIframeSandboxElement extends LitElement {
     crashed: { type: Boolean, attribute: false, state: true },
   };
   declare src: string;
-  declare context?: object;
+  declare context?: Cell<object>;
   declare crashed: boolean;
 
   constructor() {
@@ -354,7 +354,7 @@ export class CommonIframeSandboxElement extends LitElement {
     const IframeHandler = getIframeContextHandler();
     if (IframeHandler != null) {
       for (const [_, receipt] of this.subscriptions) {
-        IframeHandler.unsubscribe(this, this.context, receipt);
+        IframeHandler.unsubscribe(this, this.context!, receipt);
       }
       this.subscriptions.clear();
     }
