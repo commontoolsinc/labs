@@ -2,7 +2,7 @@ import { beforeEach, describe, it } from "@std/testing/bdd";
 import * as assert from "./assert.ts";
 import { h } from "../src/jsx.ts";
 
-describe("jsx dom fragments supprot", () => {
+describe("jsx dom fragments support", () => {
   it("dom fragments should work", () => {
     const fragment = (
       <>
