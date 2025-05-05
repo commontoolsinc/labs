@@ -26,6 +26,7 @@ const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
 const FRONTEND_URL = Deno.env.get("FRONTEND_URL") ?? "http://localhost:5173/";
 const HEADLESS = true;
 const ASTRAL_TIMEOUT = 60_000;
+const RECIPE_PATH = "../../recipes/simpleValue.tsx";
 
 console.log(`TOOLSHED_API_URL=${TOOLSHED_API_URL}`);
 console.log(`FRONTEND_URL=${FRONTEND_URL}`);
@@ -45,7 +46,7 @@ Deno.test({
         name: "add charm via cli",
         ignore: failed || exceptions.length > 0,
         fn: async () => {
-          testCharm = await addCharm(TOOLSHED_API_URL);
+          testCharm = await addCharm(TOOLSHED_API_URL, RECIPE_PATH);
           console.log(`Charm added`, testCharm);
         },
       });

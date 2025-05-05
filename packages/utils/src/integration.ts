@@ -137,7 +137,7 @@ export const waitForSelectorWithText = async (
   throw new Error(`Timed out waiting for "${selector}" to have text "${text}"`);
 };
 
-export const addCharm = async (toolshedUrl: string) => {
+export const addCharm = async (toolshedUrl: string, recipePath: string) => {
   const name = `ci-${Date.now()}-${
     Math.random().toString(36).substring(2, 15)
   }`;
@@ -148,7 +148,7 @@ export const addCharm = async (toolshedUrl: string) => {
       "--spaceName",
       name,
       "--recipeFile",
-      "../recipes/simpleValue.tsx",
+      recipePath,
       "--cause",
       "ci",
       "--quit",

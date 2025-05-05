@@ -6265,7 +6265,7 @@
       "npm:zod@^3.24.1"
     ],
     "members": {
-      "deno-vite-plugin": {
+      "packages/deno-vite-plugin": {
         "packageJson": {
           "dependencies": [
             "npm:@types/node@^22.5.5",
@@ -6277,13 +6277,13 @@
           ]
         }
       },
-      "identity": {
+      "packages/identity": {
         "dependencies": [
           "npm:@noble/ed25519@^2.2.3",
           "npm:@scure/bip39@^1.5.4"
         ]
       },
-      "jumble": {
+      "packages/jumble": {
         "dependencies": [
           "npm:@codemirror/lang-javascript@^6.1.4",
           "npm:@codemirror/lang-json@^6.0.1",
@@ -6325,24 +6325,24 @@
           "npm:three@0.173"
         ]
       },
-      "llm": {
+      "packages/llm": {
         "dependencies": [
           "npm:json5@^2.2.3"
         ]
       },
-      "memory": {
+      "packages/memory": {
         "dependencies": [
           "jsr:@db/sqlite@0.12",
           "npm:@opentelemetry/api@^1.9.0"
         ]
       },
-      "seeder": {
+      "packages/seeder": {
         "dependencies": [
           "npm:@ai-sdk/anthropic@^1.1.6",
           "npm:@ai-sdk/openai@^1.1.9"
         ]
       },
-      "toolshed": {
+      "packages/toolshed": {
         "dependencies": [
           "jsr:@std/cli@^1.0.12",
           "npm:@ai-sdk/anthropic@^1.2.10",
@@ -6377,7 +6377,7 @@
           "npm:stoker@^1.4.2"
         ]
       },
-      "ui": {
+      "packages/ui": {
         "dependencies": [
           "npm:@shoelace-style/shoelace@^2.19.1"
         ]

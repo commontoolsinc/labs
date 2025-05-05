@@ -129,7 +129,7 @@ jobs:
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
       - name: 🧪 Run seeder
-        working-directory: seeder
+        working-directory: packages/seeder
         run: |
           FLAGS=""
           if [ ${{ env.test_size }} == "one" ]; then
@@ -171,4 +171,4 @@ jobs:
         with:
           name: seeder-results
           path: |
-            ./seeder/results
+            ./packages/seeder/results

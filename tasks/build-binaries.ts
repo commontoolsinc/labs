@@ -29,7 +29,7 @@ class BuildConfig {
   }
 
   workspaceManifestPath() {
-    return this.path("deno.jsonc");
+    return this.path("deno.json");
   }
 
   workspaceLockPath() {
@@ -41,35 +41,35 @@ class BuildConfig {
   }
 
   jumbleProjectPath() {
-    return this.path("jumble");
+    return this.path("packages", "jumble");
   }
 
   jumbleOutPath() {
-    return this.path("jumble", "dist");
+    return this.path("packages", "jumble", "dist");
   }
 
   toolshedProjectPath() {
-    return this.path("toolshed");
+    return this.path("packages", "toolshed");
   }
 
   toolshedFrontendPath() {
-    return this.path("toolshed", "jumble-frontend");
+    return this.path("packages", "toolshed", "jumble-frontend");
   }
 
   toolshedEntryPath() {
-    return this.path("toolshed", "index.ts");
+    return this.path("packages", "toolshed", "index.ts");
   }
 
   bgCharmServiceEntryPath() {
-    return this.path("background-charm-service", "src", "main.ts");
+    return this.path("packages", "background-charm-service", "src", "main.ts");
   }
 
   bgCharmServiceWorkerPath() {
-    return this.path("background-charm-service", "src", "worker.ts");
+    return this.path("packages", "background-charm-service", "src", "worker.ts");
   }
 
   toolshedEnvPath() {
-    return this.path("toolshed", "COMPILED");
+    return this.path("packages", "toolshed", "COMPILED");
   }
 
   distDir() {
