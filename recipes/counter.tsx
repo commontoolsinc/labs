@@ -1,10 +1,8 @@
+// deno-lint-ignore-file jsx-no-useless-fragment
 import { h } from "@commontools/html";
 import {
-  cell,
   derive,
   handler,
-  ifElse,
-  JSONSchema,
   NAME,
   recipe,
   schema,
@@ -29,8 +27,6 @@ const increment = handler({}, model, (_, state) => {
 const decrement = handler({}, model, (_, state) => {
   state.value.set(state.value.get() - 1);
 });
-
-const isOdd = (n: number) => n % 2 > 0;
 
 export default recipe(model, model, (cell) => {
   return {
