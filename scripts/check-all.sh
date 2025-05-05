@@ -13,5 +13,6 @@ deno check \
   jumble \
   memory \
   runner \
+  seeder \
   toolshed \
   ui
