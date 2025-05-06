@@ -537,14 +537,14 @@ export default recipe(
                     )}
                     <td>{date.context}</td>
                     <td>
-                      {derive(date, (d) =>
-                        (d?.confidence ?? 0 * 100).toFixed(0))}%
+                      {derive(
+                        date,
+                        (d) => ((d?.confidence ?? 0) * 100).toFixed(0),
+                      )}%
                     </td>
                     <td>
                       {derive(emailsWithDates, (items) =>
-                        items.find((e) =>
-                          e.dates.includes(date)
-                        )?.email
+                        items.find((e) => e.dates.includes(date))?.email
                           .subject ||
                         "")}
                     </td>
