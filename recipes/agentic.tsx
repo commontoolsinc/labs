@@ -51,6 +51,12 @@ import { lift, recipe } from "@commontools/builder";
 const math = lift((expression: string) => {
   return eval(expression);
 });
+
+export default recipe("action", () =>
+`;
+
+const codePostfix = `
+);
 `;
 
 const systemPrompt = `
@@ -112,8 +118,7 @@ const step = recipe(
       if (!src) return undefined; // No action found, likely final response
 
       try {
-        const code =
-          `${codePrefix}\nexport default recipe("action", () => ${src});\n`;
+        const code = codePrefix + src + codePostfix;
         const fn = await runtime.compile(code) as RecipeFactory<any, any>;
         if (!fn) return undefined;
         return str`<result>${fn(undefined)}</result>`;
