@@ -16,7 +16,7 @@ import {
   Identity,
   type Session,
 } from "@commontools/identity";
-import { isObj } from "@commontools/utils";
+import { isRecord } from "@commontools/utils/types";
 
 const {
   spaceName,
@@ -166,7 +166,7 @@ async function main() {
 
   function mapToCell(value: unknown): unknown {
     if (
-      isObj(value) && isObj(value.cell) &&
+      isRecord(value) && isRecord(value.cell) &&
       typeof value.cell["/"] === "string" &&
       Array.isArray(value.path)
     ) {
@@ -178,7 +178,7 @@ async function main() {
       });
     } else if (Array.isArray(value)) {
       return value.map(mapToCell);
-    } else if (isObj(value)) {
+    } else if (isRecord(value)) {
       return Object.fromEntries(
         Object.entries(value).map(([key, value]) => [key, mapToCell(value)]),
       );
