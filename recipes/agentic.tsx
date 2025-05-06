@@ -42,7 +42,7 @@ const OutputSchema = {
       description: "Final result from the agent",
     },
   },
-  required: ["result", "steps"],
+  required: ["result"],
 } as const satisfies JSONSchema;
 
 const codePrefix = `
@@ -155,6 +155,15 @@ Please try again.
   },
 );
 
+const finalAnswer = lift((messages: string[]) => {
+  if (!messages || !messages.length || messages.length % 2 === 1) {
+    return undefined;
+  }
+  const lastMessage = messages[messages.length - 1];
+  if (lastMessage.match(/<tool>(.*?)<\/tool>/is)) return undefined;
+  else return lastMessage;
+});
+
 export default recipe(
   InputSchema,
   OutputSchema,
@@ -164,11 +173,9 @@ export default recipe(
       steps: maxSteps,
     });
 
-    derive(messages, (messages) => {
-      if (messages?.length) {
-        console.log(messages[messages.length - 1]);
-      }
-    });
+    const answer = finalAnswer(messages);
+
+    derive(answer, (answer) => answer && console.log("Answer:", answer));
 
     // Return the recipe
     return {
@@ -178,6 +185,7 @@ export default recipe(
           {messages.map((message) => <div>{message}</div>)}
         </div>
       ),
+      result: finalAnswer(messages),
     };
   },
 );
