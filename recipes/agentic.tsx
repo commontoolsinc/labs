@@ -30,7 +30,7 @@ const InputSchema = {
       default: 5,
     },
   },
-  required: ["task", "systemPrompt", "maxSteps"],
+  required: ["task", "maxSteps"],
 } as const satisfies JSONSchema;
 
 // Define output schema
