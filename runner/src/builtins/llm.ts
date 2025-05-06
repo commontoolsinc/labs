@@ -73,7 +73,7 @@ export function llm(
     const llmParams: LLMRequest = {
       system: system ?? "",
       messages: (messages ?? []).map((content: string, index: number) => ({
-        role: index % 2 ? "user" : "assistant",
+        role: index % 2 ? "assistant" : "user",
         content,
       })),
       stop: stop ?? "",
