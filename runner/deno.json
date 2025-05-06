@@ -1,7 +1,7 @@
 {
   "name": "@commontools/runner",
   "tasks": {
-    "test": "deno test"
+    "test": "deno test --allow-env"
   },
   "exports": {
     ".": "./src/index.ts",

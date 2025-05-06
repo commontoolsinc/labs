@@ -2,6 +2,8 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
 import {
+  getCellFromLink,
+  getDocByEntityId,
   getEntityId,
   idle,
   isStream,
@@ -14,7 +16,7 @@ import {
   Identity,
   type Session,
 } from "@commontools/identity";
-import { assert } from "@commontools/memory/fact";
+import { isRecord } from "@commontools/utils/types";
 
 const {
   spaceName,
@@ -129,21 +131,62 @@ async function main() {
     // and replace them with the corresponding JSON object.
     //
     // Example: "@#bafed0de/path/to/value" and "{ foo: @#bafed0de/a/path }"
-    const regex = /(?<!"[^"]*?)@#([a-f0-9]+)((?:\/[^\/\s"',}]+)*?)(?![^"]*?")/g;
+    const regex = /(?:^|[:\s,{])(@#[a-zA-Z0-9]+(?:\/[^\/\s"',}]+)*)/g;
     const inputTransformed = input.replace(
       regex,
-      (_, hash, path) =>
-        JSON.stringify({
-          cell: { "/": hash, path: path.split("/").map(decodeURIComponent) },
-        }),
+      (match, fullRef) => {
+        // Extract hash and path from the full reference
+        // fullRef format is @#hash/path
+        const hashMatch = fullRef.match(
+          /@#([a-zA-Z0-9]+)((?:\/[^\/\s"',}]+)*)/,
+        );
+        if (!hashMatch) return match;
+
+        const [_, hash, path] = hashMatch;
+
+        // Create the cell JSON object
+        const linkJson = JSON.stringify({
+          cell: { "/": hash },
+          path: path.split("/").filter(Boolean).map(decodeURIComponent),
+        });
+
+        // If the match starts with @, it means the reference is at the beginning of the string
+        // or the entire string is a reference - don't prepend any character
+        return match.charAt(0) === "@" ? linkJson : match.charAt(0) + linkJson;
+      },
     );
     try {
+      console.log("inputTransformed:", inputTransformed);
       inputValue = JSON.parse(inputTransformed);
     } catch (error) {
       console.error("Error parsing input:", error);
       Deno.exit(1);
     }
   }
+
+  function mapToCell(value: unknown): unknown {
+    if (
+      isRecord(value) && isRecord(value.cell) &&
+      typeof value.cell["/"] === "string" &&
+      Array.isArray(value.path)
+    ) {
+      const space: string = (value.space as string) ?? spaceDID!;
+      return getCellFromLink({
+        space,
+        cell: getDocByEntityId(space, value.cell as { "/": string }, true)!,
+        path: value.path,
+      });
+    } else if (Array.isArray(value)) {
+      return value.map(mapToCell);
+    } else if (isRecord(value)) {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, value]) => [key, mapToCell(value)]),
+      );
+    }
+    return value;
+  }
+
+  inputValue = mapToCell(inputValue);
 
   if (recipeFile) {
     try {
