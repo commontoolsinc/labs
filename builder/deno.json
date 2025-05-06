@@ -2,6 +2,6 @@
   "name": "@commontools/builder",
   "exports": "./src/index.ts",
   "tasks": {
-    "test": "deno test"
+    "test": "deno test --allow-env"
   }
 }
