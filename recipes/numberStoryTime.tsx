@@ -69,21 +69,92 @@ export default recipe(inputSchema, ({ number }) => {
     [NAME]: str`The story of ${derive(number, (number) => number)}`,
     [UI]: (
       <div>
+        <style>
+          {`
+            .story-container {
+              position: relative;
+              min-height: 300px;
+              font-family: 'Segoe UI', 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif;
+              background: #f9f7f3;
+              border-radius: 16px;
+              box-shadow: 0 4px 24px rgba(0,0,0,0.07);
+              padding: 2em 2em 2em 1.5em;
+              margin-top: 1.5em;
+            }
+            .story-image {
+              float: right;
+              margin: 0 0 1em 2em;
+              max-width: 260px;
+              border-radius: 12px;
+              box-shadow: 0 2px 8px rgba(0,0,0,0.13);
+            }
+            .story-title {
+              font-size: 2.2em;
+              font-weight: 700;
+              margin-bottom: 0.2em;
+              color: #2d2d2d;
+              letter-spacing: 0.01em;
+            }
+            .story-number {
+              font-size: 1.2em;
+              color: #888;
+              margin-bottom: 1em;
+            }
+            .story-text {
+              white-space: pre-line;
+              font-size: 1.18em;
+              line-height: 1.7;
+              color: #333;
+              margin-top: 1em;
+            }
+            button {
+              font-size: 1em;
+              padding: 0.5em 1.2em;
+              margin: 0.5em 0.7em 0.5em 0;
+              border-radius: 8px;
+              border: 1px solid #ddd;
+              background: #f5f5fa;
+              cursor: pointer;
+              transition: background 0.2s;
+            }
+            button:hover {
+              background: #e0e0f7;
+            }
+            @media (max-width: 700px) {
+              .story-container {
+                padding: 1em 0.5em;
+              }
+              .story-image {
+                float: none;
+                display: block;
+                margin: 0 auto 1em auto;
+                max-width: 100%;
+              }
+            }
+          `}
+        </style>
         <button type="button" onClick={nextNumber({ number })}>
           Next Story!!
         </button>
         <button type="button" onClick={randomNumber({ number })}>
           Random Story!!
         </button>
-        <div>
-          <h1>{number}</h1>
+        <div className="story-container">
+          <div className="story-title">
+            The story of <span className="story-number">{number}</span>
+          </div>
           <img
+            className="story-image"
             src={getImageUrl({ prompt })}
             title={prompt}
-            width={512}
-            height={512}
+            width={256}
+            height={256}
           />
-          {ifElse(storyPending, <p>Hmm, let me think...</p>, <p>{story}</p>)}
+          {ifElse(
+            storyPending,
+            <p className="story-text">Hmm, let me think...</p>,
+            <div className="story-text">{story}</div>,
+          )}
         </div>
       </div>
     ),
