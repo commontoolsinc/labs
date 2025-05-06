@@ -1,27 +1,28 @@
 {
   "workspace": [
-    "./background-charm-service",
-    "./builder",
-    "./charm",
-    "./cli",
-    "./deno-vite-plugin",
-    "./deno-web-test",
-    "./html",
-    "./identity",
-    "./iframe-sandbox",
-    "./jumble",
-    "./llm",
-    "./memory",
-    "./runner",
-    "./seeder",
-    "./toolshed",
-    "./ui",
-    "./utils"
+    "./packages/background-charm-service",
+    "./packages/builder",
+    "./packages/charm",
+    "./packages/cli",
+    "./packages/deno-vite-plugin",
+    "./packages/deno-web-test",
+    "./packages/html",
+    "./packages/identity",
+    "./packages/iframe-sandbox",
+    "./packages/jumble",
+    "./packages/llm",
+    "./packages/memory",
+    "./packages/runner",
+    "./packages/seeder",
+    "./packages/toolshed",
+    "./packages/ui",
+    "./packages/utils"
   ],
   "tasks": {
-    "check": "./scripts/check-all.sh",
-    "test-all": "./scripts/test-all.ts",
-    "build-binaries": "./scripts/build-binaries.ts"
+    "check": "./tasks/check.sh",
+    "test": "./tasks/test.ts",
+    "test-all": "echo \"Use 'deno task test' instead.\" && exit 1",
+    "build-binaries": "./tasks/build-binaries.ts"
   },
   "compilerOptions": {
     "jsx": "react-jsxdev",
@@ -33,11 +34,11 @@
       "esnext"
     ],
     "types": [
-      "./jumble/src/global.d.ts"
+      "./packages/jumble/src/global.d.ts"
     ]
   },
   "exclude": [
-    "jumble/.vite/deps/",
+    "packages/jumble/.vite/deps/",
     "**/node_modules/",
     "**/.vite/",
     "**/dist/",
@@ -47,7 +48,7 @@
   ],
   "lint": {
     "exclude": [
-      "deno-vite-plugin"
+      "./packages/deno-vite-plugin"
     ],
     "rules": {
       "tags": [
@@ -71,7 +72,7 @@
     "singleQuote": false,
     "proseWrap": "always",
     "exclude": [
-      "jumble/integration/cache/llm-api-cache/"
+      "packages/jumble/integration/cache/llm-api-cache/"
     ]
   },
   "imports": {

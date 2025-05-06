@@ -1,6 +1,4 @@
-import * as path from "@std/path";
 import { Config, getConfig } from "./config.ts";
-import { exists } from "@std/fs/exists";
 
 export class Manifest {
   // The root directory path of the project being tested.

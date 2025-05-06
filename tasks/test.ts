@@ -29,19 +29,19 @@ export async function testPackage(packagePath: string): Promise<boolean> {
 
 export async function runTests(disabledPackages: string[]): Promise<boolean> {
   const workspaceCwd = Deno.cwd();
-  const manifest = JSON.parse(await Deno.readTextFile("./deno.jsonc"));
+  const manifest = JSON.parse(await Deno.readTextFile("./deno.json"));
   const members: string[] = manifest.workspace;
 
   let success = true;
   for (const memberPath of members) {
-    // Convert "./memory" to "memory"
-    const packageName = memberPath.substring(2);
+    // Convert "./packages/memory" to "memory"
+    const packageName = memberPath.substring(2).split("/")[1];
 
     if (disabledPackages.includes(packageName)) {
       continue;
     }
     console.log(`Testing ${packageName}...`);
-    const packagePath = path.join(workspaceCwd, packageName);
+    const packagePath = path.join(workspaceCwd, "packages", packageName);
     if (!await testPackage(packagePath)) {
       success = false;
     }

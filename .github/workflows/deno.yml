@@ -50,7 +50,7 @@ jobs:
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
       - name: 🧪 Run parallel workspace tests
-        run: deno task test-all
+        run: deno task test
 
   toolshed-tests:
     name: "Toolshed Tests"
@@ -87,11 +87,11 @@ jobs:
           key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
 
       - name: 📝 Verify code formatting
-        working-directory: toolshed
+        working-directory: packages/toolshed
         run: deno fmt --check
 
       - name: 🧪 Run Toolshed integration tests
-        working-directory: toolshed
+        working-directory: packages/toolshed
         run: deno test -A --env-file=.env.test
         env:
           ENV: test
@@ -139,7 +139,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: jumble-artifacts
-          path: ./toolshed/jumble-frontend
+          path: ./packages/toolshed/jumble-frontend
 
       # NOTE(jake): We need to upload the frontend artifacts to R2, to enable
       # localhost:8000 toolshed proxying of jumble.
@@ -151,7 +151,7 @@ jobs:
           r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           r2-bucket: ${{ secrets.R2_BUCKET }}
-          source-dir: ./toolshed/jumble-frontend
+          source-dir: ./packages/toolshed/jumble-frontend
           destination-dir: jumble/latest
 
       - name: 📤 Upload backend artifacts to R2 /jumble/${{ github.sha }}
@@ -162,7 +162,7 @@ jobs:
           r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           r2-bucket: ${{ secrets.R2_BUCKET }}
-          source-dir: ./toolshed/jumble-frontend
+          source-dir: ./packages/toolshed/jumble-frontend
           destination-dir: jumble/${{ github.sha }}
 
       - name: 🔐 Process & sign binaries
@@ -352,7 +352,7 @@ jobs:
         run: |
           chmod +x ./common-binaries/toolshed
           CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
-          CACHE_DIR=${GITHUB_WORKSPACE}/jumble/integration/cache \
+          CACHE_DIR=${GITHUB_WORKSPACE}/packages/jumble/integration/cache \
           ./common-binaries/toolshed &
 
       # For Astral
@@ -361,7 +361,7 @@ jobs:
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
       - name: 🧪 Run end-to-end integration tests
-        working-directory: jumble
+        working-directory: packages/jumble
         run: |
           TOOLSHED_API_URL=http://localhost:8000/ \
           FRONTEND_URL=http://localhost:8000/ \
@@ -406,11 +406,11 @@ jobs:
         run: |
           chmod +x ./common-binaries/toolshed
           CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
-          CACHE_DIR=${GITHUB_WORKSPACE}/jumble/integration/cache \
+          CACHE_DIR=${GITHUB_WORKSPACE}/packages/jumble/integration/cache \
           ./common-binaries/toolshed &
 
       - name: 🧪 Run seeder integration tests
-        working-directory: seeder
+        working-directory: packages/seeder
         run: |
           TOOLSHED_API_URL=http://localhost:8000/ \
           deno task start --tag smol --no-verify --no-report --name ${{ github.run_id }}
