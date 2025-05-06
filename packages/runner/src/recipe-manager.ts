@@ -82,16 +82,11 @@ class RecipeManager {
 
   generateRecipeId(recipe: Recipe | Module, src?: string) {
     let id = recipeMetaMap.get(recipe as Recipe)?.get()?.id;
-    if (id) {
-      console.log("generateRecipeId: existing recipe id", id);
-      return id;
-    }
+    if (id) return id;
 
     id = src
       ? createRef({ src }, "recipe source").toString()
       : createRef(recipe, "recipe").toString();
-
-    console.log("generateRecipeId: generated id", id);
 
     return id;
   }
