@@ -14,7 +14,7 @@ import {
   Identity,
   type Session,
 } from "@commontools/identity";
-import { assert } from "@commontools/memory/fact";
+import { setLLMUrl } from "@commontools/llm";
 
 const {
   spaceName,
@@ -48,6 +48,7 @@ const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "common user";
 
 storage.setRemoteStorage(new URL(toolshedUrl));
 setBlobbyServerUrl(toolshedUrl);
+setLLMUrl(toolshedUrl);
 
 async function main() {
   if (!spaceName && !spaceDID) {
