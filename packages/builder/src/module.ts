@@ -166,8 +166,8 @@ export function handler<E, T>(
 
 export const derive = <In, Out>(
   input: Opaque<In>,
-  f: (input: In) => Out,
-): OpaqueRef<Out> => lift(f)(input);
+  f: (input: In) => Out | Promise<Out>,
+): OpaqueRef<Out> => lift(f)(input) as OpaqueRef<Out>;
 
 // unsafe closures: like derive, but doesn't need any arguments
 export const compute: <T>(fn: () => T) => OpaqueRef<T> = (fn: () => any) =>
