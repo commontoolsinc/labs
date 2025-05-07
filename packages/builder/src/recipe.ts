@@ -51,19 +51,6 @@ import { SchemaWithoutCell } from "./schema-to-ts.ts";
  * @returns A recipe node factory that also serializes as recipe.
  */
 
-export function recipe<T>(
-  argumentSchema: string | JSONSchema,
-  fn: (input: OpaqueRef<Required<T>>) => any,
-): RecipeFactory<T, ReturnType<typeof fn>>;
-export function recipe<T, R>(
-  argumentSchema: string | JSONSchema,
-  fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
-): RecipeFactory<T, R>;
-export function recipe<T, R>(
-  argumentSchema: string | JSONSchema,
-  resultSchema: JSONSchema,
-  fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
-): RecipeFactory<T, R>;
 export function recipe<S extends JSONSchema>(
   argumentSchema: S,
   fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => any,
@@ -79,6 +66,19 @@ export function recipe<S extends JSONSchema, RS extends JSONSchema>(
     input: OpaqueRef<Required<SchemaWithoutCell<S>>>,
   ) => Opaque<SchemaWithoutCell<RS>>,
 ): RecipeFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
+export function recipe<T>(
+  argumentSchema: string | JSONSchema,
+  fn: (input: OpaqueRef<Required<T>>) => any,
+): RecipeFactory<T, ReturnType<typeof fn>>;
+export function recipe<T, R>(
+  argumentSchema: string | JSONSchema,
+  fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+): RecipeFactory<T, R>;
+export function recipe<T, R>(
+  argumentSchema: string | JSONSchema,
+  resultSchema: JSONSchema,
+  fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+): RecipeFactory<T, R>;
 export function recipe<T, R>(
   argumentSchema: string | JSONSchema,
   resultSchema:

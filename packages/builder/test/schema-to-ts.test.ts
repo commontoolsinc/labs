@@ -456,23 +456,13 @@ describe("Schema-to-TS Type Conversion", () => {
     // Verify that the recipe function parameter matches our expected input type
     expectType<ExpectedInput, InferredInput>();
 
-    // Test the actual nested OpaqueRef structure that recipe creates
-    type DeepOpaqueOutput = OpaqueRef<{
-      result: OpaqueRef<string>;
-      processedCount: OpaqueRef<number>;
-      status: {
-        success: OpaqueRef<boolean>;
-      };
-    }>;
+    // The expected output is the output schema wrapped in a single OpaqueRef.
+    type DeepOpaqueOutput = OpaqueRef<Schema<typeof outputSchema>>;
     expectType<DeepOpaqueOutput, InferredOutput>();
 
     // Uncomment for debugging - shows what the actual structure is
     // This should help us see what the real type looks like
     // type Debug = ReturnType<typeof processRecipe>;
-
-    // Since recipe returns an OpaqueRef rather than the actual value,
-    // we can't directly test the output type here.
-    // Instead, we verify that the Schema type correctly maps the JSONSchema
   });
 
   // Runtime tests to verify the Schema type works with actual data
