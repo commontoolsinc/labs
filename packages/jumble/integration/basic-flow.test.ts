@@ -1,32 +1,27 @@
-import { sleep } from "@commontools/utils/sleep";
+import { PageErrorEvent } from "@astral/astral";
 import {
   Browser,
-  ConsoleEvent,
-  DialogEvent,
-  launch,
+  dismissDialogs,
   Page,
-  PageErrorEvent,
-} from "@astral/astral";
+  pipeConsole,
+} from "@commontools/integration";
+import { login } from "@commontools/integration/jumble";
 import { assert } from "@std/assert";
-import {
-  addCharm,
-  inspectCharm,
-  login,
-  snapshot,
-  waitForSelectorClick,
-  waitForSelectorWithText,
-} from "@commontools/utils/integration";
 import * as path from "@std/path";
 import { ensureDirSync } from "@std/fs";
 import { join } from "@std/path";
-import { Mutable } from "@commontools/utils/types";
+import { sleep } from "@commontools/utils/sleep";
+import { decode } from "@commontools/utils/encoding";
 
+const TAKE_SNAPSHOTS = false;
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
   "http://localhost:8000/";
 const FRONTEND_URL = Deno.env.get("FRONTEND_URL") ?? "http://localhost:5173/";
 const HEADLESS = true;
 const ASTRAL_TIMEOUT = 60_000;
 const RECIPE_PATH = "../../recipes/simpleValue.tsx";
+const COMMON_CLI_PATH = path.join(import.meta.dirname!, "../../cli");
+const SNAPSHOTS_DIR = join(Deno.cwd(), "test_snapshots");
 
 console.log(`TOOLSHED_API_URL=${TOOLSHED_API_URL}`);
 console.log(`FRONTEND_URL=${FRONTEND_URL}`);
@@ -55,35 +50,23 @@ Deno.test({
         name: "renders homepage",
         ignore: failed || exceptions.length > 0,
         fn: async () => {
-          browser = await launch({ headless: HEADLESS });
+          browser = await Browser.launch({
+            timeout: ASTRAL_TIMEOUT,
+            headless: HEADLESS,
+          });
 
           console.log(`Opening empty page...`);
           page = await browser!.newPage();
           console.log(`Waiting to open website at ${FRONTEND_URL}`);
-          {
-            const mutPage: Mutable<Page> = page;
-            // @ts-ignore We wrap Page in a Mutable
-            // so we can override the readonly `timeout`
-            // property. Type checker doesn't like this.
-            mutPage.timeout = ASTRAL_TIMEOUT;
-          }
 
           // Add console log listeners
-          page.addEventListener("console", (e: ConsoleEvent) => {
-            console.log(`Browser Console [${e.detail.type}]: ${e.detail.text}`);
-          });
-
+          page.addEventListener("console", pipeConsole);
+          // Add dialog listeners (for alerts, confirms, etc.)
+          page.addEventListener("dialog", dismissDialogs);
           // Add error listeners
           page.addEventListener("pageerror", (e: PageErrorEvent) => {
             console.error("Browser Page Error:", e.detail.message);
             exceptions.push(e.detail.message);
-          });
-
-          // Add dialog listeners (for alerts, confirms, etc.)
-          page.addEventListener("dialog", async (e: DialogEvent) => {
-            const dialog = e.detail;
-            console.log(`Browser Dialog: ${dialog.type} - ${dialog.message}`);
-            await dialog.dismiss();
           });
 
           await page.goto(FRONTEND_URL);
@@ -108,7 +91,9 @@ Deno.test({
           assert(page, "Page should be defined");
           assert(testCharm, "Test charm should be defined");
 
-          await snapshot(page, "Initial state");
+          if (TAKE_SNAPSHOTS) {
+            await page.snapshot("Initial state", SNAPSHOTS_DIR);
+          }
 
           const anchor = await page.waitForSelector("nav a");
           assert(
@@ -119,14 +104,17 @@ Deno.test({
           await page.goto(
             `${FRONTEND_URL}${testCharm.name}/${testCharm.charmId}`,
           );
-          await snapshot(page, "Waiting for charm to render");
+          if (TAKE_SNAPSHOTS) {
+            await page.snapshot("Waiting for charm to render", SNAPSHOTS_DIR);
+          }
 
-          await waitForSelectorWithText(
-            page,
+          await page.waitForSelectorWithText(
             "a[aria-roledescription='charm-link']",
             "Simple Value: 1",
           );
-          await snapshot(page, "Charm rendered.");
+          if (TAKE_SNAPSHOTS) {
+            await page.snapshot("Charm rendered.", SNAPSHOTS_DIR);
+          }
           assert(true, "Charm rendered successfully");
         },
       });
@@ -143,8 +131,7 @@ Deno.test({
           );
 
           // Wait for initial render
-          await waitForSelectorWithText(
-            page,
+          await page.waitForSelectorWithText(
             "a[aria-roledescription='charm-link']",
             "Simple Value: 1",
           );
@@ -152,23 +139,26 @@ Deno.test({
           await sleep(1000);
           console.log("Clicking button");
 
-          await waitForSelectorClick(
-            page,
+          const el = await page.waitForSelector(
             "div[aria-label='charm-content'] button",
           );
-          await snapshot(page, "Button clicked");
+          await el.click();
+          if (TAKE_SNAPSHOTS) {
+            await page.snapshot("Button clicked", SNAPSHOTS_DIR);
+          }
 
           // Add more wait time after click
           await sleep(2000);
 
           console.log("Checking if title changed");
-          await waitForSelectorWithText(
-            page,
+          await page.waitForSelectorWithText(
             "a[aria-roledescription='charm-link']",
             "Simple Value: 2",
           );
 
-          await snapshot(page, "Title changed");
+          if (TAKE_SNAPSHOTS) {
+            await page.snapshot("Title changed", SNAPSHOTS_DIR);
+          }
 
           // Add additional wait time for persistence
           await sleep(2000);
@@ -236,8 +226,7 @@ Deno.test({
           assert(page, "Page should be defined");
 
           // check that we see the new charm
-          await waitForSelectorWithText(
-            page,
+          await page.waitForSelectorWithText(
             "a[aria-roledescription='charm-link']",
             "SimpleValue2 Viewer",
           );
@@ -284,4 +273,69 @@ function copyLLMCache() {
     console.log("Copying", file.name);
     Deno.copyFileSync(join(src, file.name), join(dest, file.name));
   }
+}
+
+async function addCharm(toolshedUrl: string, recipePath: string) {
+  const name = `ci-${Date.now()}-${
+    Math.random().toString(36).substring(2, 15)
+  }`;
+  const { success, stderr } = await (new Deno.Command(Deno.execPath(), {
+    args: [
+      "task",
+      "start",
+      "--spaceName",
+      name,
+      "--recipeFile",
+      recipePath,
+      "--cause",
+      "ci",
+      "--quit",
+      "true",
+    ],
+    env: {
+      "TOOLSHED_API_URL": toolshedUrl,
+      "OPERATOR_PASS": "common user",
+    },
+    cwd: COMMON_CLI_PATH,
+  })).output();
+
+  if (!success) {
+    throw new Error(`Failed to add charm: ${decode(stderr)}`);
+  }
+
+  return {
+    charmId: "baedreic5a2muxtlgvn6u36lmcp3tdoq5sih3nbachysw4srquvga5fjtem",
+    name,
+  };
+}
+
+async function inspectCharm(
+  toolshedUrl: string,
+  name: string,
+  charmId: string,
+) {
+  const { success, stdout, stderr } = await (new Deno.Command(Deno.execPath(), {
+    args: [
+      "task",
+      "start",
+      "--spaceName",
+      name,
+      "--charmId",
+      charmId,
+      "--quit",
+      "true",
+    ],
+    env: {
+      "TOOLSHED_API_URL": toolshedUrl,
+      "OPERATOR_PASS": "common user",
+    },
+    cwd: COMMON_CLI_PATH,
+  })).output();
+
+  if (!success) {
+    console.log(decode(stdout));
+    throw new Error(`Failed to inspect charm: ${decode(stderr)}`);
+  }
+
+  return decode(stdout);
 }

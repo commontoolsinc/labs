@@ -1,16 +1,25 @@
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
-import { Browser } from "./browser.ts";
 import { CharmResult } from "./interfaces.ts";
 import { sleep } from "@commontools/utils/sleep";
+import { Browser, Page, pipeConsole } from "@commontools/integration";
+import { login } from "@commontools/integration/jumble";
 
 const model = openai("gpt-4o-mini");
 
 export class Verifier {
   private browser: Browser;
+  private page: Page;
+  private apiUrl: string;
 
-  constructor({ browser }: { browser: Browser }) {
+  private constructor(
+    { browser, page, apiUrl }: { browser: Browser; page: Page; apiUrl: string },
+  ) {
     this.browser = browser;
+    this.page = page;
+    this.apiUrl = apiUrl;
+
+    page.addEventListener("console", pipeConsole);
   }
 
   static async initialize(
@@ -18,21 +27,31 @@ export class Verifier {
   ) {
     const browser = await Browser.launch({
       headless,
-      apiUrl,
+      args: ["--window-size=1280,1024"],
     });
-    return new Verifier({ browser });
+    try {
+      const page = await browser.newPage();
+      return new Verifier({ browser, page, apiUrl });
+    } catch (e) {
+      await browser.close();
+      throw e;
+    }
   }
 
   async verify(
     { id, prompt, name }: { id: string; prompt: string; name: string },
   ): Promise<CharmResult> {
     // FIXME(ja): can we navigate without causing a page reload?
-    await this.browser.goto(`/${name!}/${id}`);
+    await this.page.goto(`${this.apiUrl}/${name!}/${id}`);
+    await sleep(1000);
+    await addErrorListeners(this.page);
+    await login(this.page);
+
     // FIXME(ja): perhaps charm can emit a "ready" event and we can wait for it?
     await sleep(10000);
     const screenshotPath = `results/${name}/${id}.png`;
-    await this.browser.screenshot(screenshotPath);
-    const errors = await this.browser.checkForErrors();
+    await this.page.screenshot(screenshotPath);
+    const errors = await checkPageForErrors(this.page);
     if (errors.length > 0) {
       return {
         id,
@@ -101,4 +120,22 @@ async function llmVerifyCharm(
   const result = schema.parse(object);
   console.log({ result });
   return JSON.stringify(result);
+}
+
+async function checkPageForErrors(page: Page): Promise<any> {
+  return await page.evaluate(() => {
+    // @ts-ignore: this code is stringified and sent to browser context
+    return globalThis.charmRuntimeErrors;
+  });
+}
+
+async function addErrorListeners(page: Page): Promise<any> {
+  return await page.evaluate(() => {
+    // @ts-ignore: this code is stringified and sent to browser context
+    globalThis.charmRuntimeErrors = [];
+    globalThis.addEventListener("common-iframe-error", (e) => {
+      // @ts-ignore: this code is stringified and sent to browser context
+      globalThis.charmRuntimeErrors.push(e.detail.description);
+    });
+  });
 }
