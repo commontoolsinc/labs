@@ -15,6 +15,7 @@ import { hasValueAtPath, setValueAtPath } from "./utils.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { createNodeFactory } from "./module.ts";
 import { SchemaWithoutCell } from "./schema-to-ts.ts";
+import { ContextualFlowControl } from "../../runner/src/index.ts";
 
 let mapFactory: NodeFactory<any, any>;
 
@@ -54,12 +55,13 @@ export function opaqueRef<T>(
   };
 
   let unsafe_binding: { recipe: Recipe; path: PropertyKey[] } | undefined;
+  const cfc = new ContextualFlowControl();
 
   function createNestedProxy(
     path: PropertyKey[],
-    target?: any,
-    schema?: JSONSchema,
-    rootSchema: JSONSchema | undefined = schema,
+    target: any,
+    nestedSchema: JSONSchema | undefined,
+    rootSchema: JSONSchema | undefined,
   ): OpaqueRef<any> {
     const methods: OpaqueRefMethods<any> = {
       get: () => unsafe_materialize(unsafe_binding, path),
@@ -70,23 +72,14 @@ export function opaqueRef<T>(
       },
       key: (key: PropertyKey) => {
         // Determine child schema when accessing a property
-        let childSchema: JSONSchema | undefined;
-
-        if (schema?.type === "object") {
-          // For root object properties
-          childSchema = schema.properties?.[key as string] ||
-            (typeof schema.additionalProperties === "object"
-              ? schema.additionalProperties
-              : undefined);
-        } else if (schema?.type === "array") {
-          // For root array elements
-          childSchema = schema.items;
-        }
+        const childSchema = key in methods
+          ? undefined
+          : cfc.getSchemaAtPath(nestedSchema, [key.toString()], schema);
         return createNestedProxy(
           [...path, key],
           key in methods ? methods[key as keyof OpaqueRefMethods<any>] : store,
           childSchema,
-          childSchema ? rootSchema : undefined, // Only pass rootSchema if we have a child schema
+          childSchema === undefined ? undefined : rootSchema,
         );
       },
       setDefault: (newValue: Opaque<any>) => {
@@ -102,13 +95,13 @@ export function opaqueRef<T>(
       setSchema: (newSchema: JSONSchema) => {
         // This sets the schema of the nested proxy, but does not alter the parent store's
         // schema. Our schema variable shadows that one.
-        schema = newSchema;
+        nestedSchema = newSchema;
       },
       connect: (node: NodeRef) => store.nodes.add(node),
       export: () => {
         // Store's schema won't be the same as ours as a nested proxy
         // We also don't adjust the defaultValue to be relative to our path
-        return { cell: top, path, rootSchema, ...store, schema };
+        return { cell: top, ...store, path, rootSchema, schema: nestedSchema };
       },
       unsafe_bindToRecipeAndPath: (
         recipe: Recipe,
@@ -159,9 +152,17 @@ export function opaqueRef<T>(
                 "Can't use iterator over an opaque value in an unlimited loop.",
               );
             }
+            const childSchema = cfc.getSchemaAtPath(nestedSchema, [
+              index.toString(),
+            ], rootSchema);
             return {
               done: false,
-              value: createNestedProxy([...path, index++]),
+              value: createNestedProxy(
+                [...path, index++],
+                target,
+                childSchema,
+                childSchema === undefined ? undefined : rootSchema,
+              ),
             };
           },
         };
@@ -191,7 +192,7 @@ export function opaqueRef<T>(
     return proxy;
   }
 
-  const top = createNestedProxy([], store, schema) as OpaqueRef<T>;
+  const top = createNestedProxy([], store, schema, schema) as OpaqueRef<T>;
 
   store.frame.opaqueRefs.add(top);
 

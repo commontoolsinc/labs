@@ -380,18 +380,22 @@ describe("recipe with ifc property", () => {
         schema: { ifc: ArgumentSchema.properties.x.ifc },
       },
     });
-    // I don't like that we don't know our input is classified here
     expect(nodes[1].inputs).toEqual({
       x: {
         $alias: {
           path: ["internal", "__#0", "double"],
+          schema: {
+            ifc: ArgumentSchema.properties.x.ifc,
+          },
         },
       },
     });
-    // I don't like that we don't know our output is classified here
     expect(nodes[1].outputs).toEqual({
       $alias: {
         path: ["internal", "__#1"],
+        schema: {
+          ifc: ArgumentSchema.properties.x.ifc,
+        },
       },
     });
   });

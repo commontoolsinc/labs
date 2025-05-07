@@ -31,6 +31,7 @@ import {
   ValueEntry,
 } from "./traverse.ts";
 import { JSONSchema } from "../builder/src/index.ts";
+import { ContextualFlowControl } from "../runner/src/index.ts";
 export * from "./interface.ts";
 
 export type FullFactAddress = FactAddress & { cause: Cause; since: number };
@@ -114,35 +115,20 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
     );
   }
 
-  // TODO(@ubik2): these two functions should be somewhere more general
-  isTrueSchema(schema: JSONSchema | boolean): boolean {
-    if (schema === true) {
-      return true;
-    }
-    return isObject(schema) &&
-      Object.keys(schema).every((k) => this.isInternalSchemaKey(k));
-  }
-
-  // We don't need to check ID and ID_FIELD, since they won't be included
-  // in Object.keys return values.
-  isInternalSchemaKey(key: string): boolean {
-    return key === "ifc" || key === "asCell" || key === "asStream";
-  }
-
   traverseWithSchema(
     doc: K,
     docRoot: JSONValue,
     value: JSONValue,
     schema: JSONSchema | boolean,
   ): OptJSONValue {
-    if (schema === true || this.isTrueSchema(schema)) {
+    if (ContextualFlowControl.isTrueSchema(schema)) {
       // A value of true or {} means we match anything
       // Resolve the rest of the doc, and return
       return this.traverseDAG(doc, docRoot, value, this.tracker);
     } else if (schema === false) {
       // This value rejects all objects - just return
       return undefined;
-    } else if (!isObject(schema)) {
+    } else if (typeof schema !== "object") {
       console.warn("Invalid schema is not an object", schema);
       return undefined;
     }

@@ -27,6 +27,12 @@ import { refer } from "@commontools/memory/reference";
 import { defer } from "@commontools/utils";
 import { SchemaContext, SchemaNone } from "@commontools/memory/interface";
 
+// This type is used to tag a document with any important metadata.
+// Currently, the only supported type is the classification.
+export type Labels = {
+  classification?: string[];
+};
+
 export function log(fn: () => any[]) {
   debug(() => {
     // Get absolute time in milliseconds since Unix epoch
@@ -416,7 +422,7 @@ class StorageImpl implements Storage {
 
   // Prepares value for storage, and updates dependencies, triggering doc loads
   // if necessary. Updates this.writeValues and this.writeDependentDocs.
-  private _batchForStorage(doc: DocImpl<any>): void {
+  private _batchForStorage(doc: DocImpl<any>, labels?: Labels): void {
     // If the doc is ephemeral, this is a no-op.
     if (doc.ephemeral) {
       console.warn(
@@ -470,6 +476,7 @@ class StorageImpl implements Storage {
     const value: StorageValue = {
       value: traverse(doc.get(), []),
       source: doc.sourceCell?.entityId,
+      ...(labels !== undefined) ? { labels: labels } : {},
     };
 
     // 🤔 I'm guessing we should be storing schema here
@@ -924,7 +931,7 @@ class StorageImpl implements Storage {
 
     // Subscribe to doc changes, send updates to storage
     this.addCancel(
-      doc.updates((value) => {
+      doc.updates((value, _path, labels) => {
         log(
           () => [
             "got from doc",
@@ -932,7 +939,7 @@ class StorageImpl implements Storage {
             JSON.stringify(value),
           ],
         );
-        return this._batchForStorage(doc);
+        return this._batchForStorage(doc, labels);
       }),
     );
 

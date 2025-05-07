@@ -202,12 +202,12 @@ export class ContextualFlowControl {
     schema: JSONSchema | boolean,
     rootSchema: JSONSchema | boolean = schema,
     extraClassifications?: Set<string>,
-  ): string {
+  ): string | undefined {
     const classifications = (extraClassifications !== undefined)
       ? new Set<string>(extraClassifications)
       : new Set<string>();
     this.joinSchema(classifications, schema, rootSchema);
-    return this.lub(classifications);
+    return (classifications.size === 0) ? undefined : this.lub(classifications);
   }
 
   public lub(joined: Set<string>): string {
@@ -277,11 +277,32 @@ export class ContextualFlowControl {
     throw Error("Improper lattice");
   }
 
+  // This is a variant of schemaAtPath that allows for an undefined schema.
+  // It will return the empty object instead of true and undefined instead of false.
+  getSchemaAtPath(
+    schema: JSONSchema | boolean | undefined,
+    path: string[],
+    rootSchema: JSONSchema | boolean | undefined = schema,
+    extraClassifications?: Set<string>,
+  ): JSONSchema | undefined {
+    if (schema === undefined) {
+      return undefined;
+    }
+    const result = this.schemaAtPath(
+      schema,
+      path,
+      rootSchema,
+      extraClassifications,
+    );
+    return result === false ? undefined : result === true ? {} : result;
+  }
+
   schemaAtPath(
     schema: JSONSchema | boolean,
     path: string[],
+    rootSchema?: JSONSchema | boolean,
     extraClassifications?: Set<string>,
-  ): JSONSchema | boolean | undefined {
+  ): JSONSchema | boolean {
     const joined = (extraClassifications !== undefined)
       ? new Set<string>(extraClassifications)
       : new Set<string>();
@@ -290,10 +311,20 @@ export class ContextualFlowControl {
       if (typeof cursor === "boolean") {
         break;
       } else if ("$ref" in cursor) {
-        // We'd need a rootSchema to make this work
-        // We don't need to do real cycle detection, since the path is limited
-        throw new Error("schemaAtPath doesn't yet support following $ref");
-      } else if (isObject(cursor) && Object.keys(cursor).length == 0) {
+        if (rootSchema === undefined) {
+          // We'd need a rootSchema to make this work
+          // We don't need to do real cycle detection, since the path is limited
+          throw new Error("schemaAtPath encountered $ref without rootSchema");
+        } else if (cursor["$ref"] === "#") {
+          cursor = rootSchema;
+        } else {
+          throw new Error(
+            "schemaAtPath doesn't support definitions yet, and encountered complex $ref",
+          );
+        }
+      } else if (
+        isObject(cursor) && ContextualFlowControl.isTrueSchema(cursor)
+      ) {
         // wildcard schema -- equivalent to true, but we can add ifc tags
         break;
       } else if (cursor.type === "object") {
@@ -321,10 +352,10 @@ export class ContextualFlowControl {
               }
             }
           }
-        } else if (cursor.additionalProperties) {
+        } else if (cursor.additionalProperties !== undefined) {
           cursor = cursor.additionalProperties;
-        } else {
-          return false;
+        } else { // no additionalProperties field is the same as having one that is true
+          cursor = true;
         }
       } else if (cursor.type === "array" && cursor.items) {
         const numericKeyValue = new Number(part).valueOf();
@@ -390,5 +421,21 @@ export class ContextualFlowControl {
       }
     }
     return [nodeCount, edges];
+  }
+
+  // Check to see if the specified schema is one of the special values meaning
+  // it should always validate.
+  static isTrueSchema(schema: JSONSchema | boolean): boolean {
+    if (schema === true) {
+      return true;
+    }
+    return isObject(schema) &&
+      Object.keys(schema).every((k) => this.isInternalSchemaKey(k));
+  }
+
+  // We don't need to check ID and ID_FIELD, since they won't be included
+  // in Object.keys return values.
+  static isInternalSchemaKey(key: string): boolean {
+    return key === "ifc" || key === "asCell" || key === "asStream";
   }
 }

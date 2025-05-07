@@ -38,6 +38,7 @@ export * from "@commontools/memory/interface";
 import * as Codec from "@commontools/memory/codec";
 import { Channel, RawCommand } from "./inspector.ts";
 import { isBrowser } from "@commontools/utils/env";
+import { deepEqual } from "@commontools/builder";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -834,6 +835,7 @@ export class Provider implements StorageProvider {
 
     return () => workspace.unsubscribe(address, subscriber);
   }
+
   sync(
     entityId: EntityId,
     expectedInStorage?: boolean,
@@ -866,6 +868,7 @@ export class Provider implements StorageProvider {
     >
   > {
     const { the, workspace } = this;
+    const TheLabel = "application/label+json" as const;
 
     const changes = [];
     for (const { entityId, value } of batch) {
@@ -873,7 +876,6 @@ export class Provider implements StorageProvider {
       const content = JSON.stringify(value);
 
       const current = workspace.get({ the, of });
-
       if (JSON.stringify(current?.is) !== content) {
         changes.push({
           the,
@@ -882,6 +884,16 @@ export class Provider implements StorageProvider {
           // cause problems with serialization.
           is: JSON.parse(content) as JSONValue,
         });
+      }
+      if (value.labels !== undefined) {
+        const currentLabel = workspace.get({ the: TheLabel, of });
+        if (!deepEqual(currentLabel?.is, value.labels)) {
+          changes.push({
+            the: TheLabel,
+            of,
+            is: value.labels as JSONValue,
+          });
+        }
       }
     }
 

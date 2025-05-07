@@ -222,7 +222,11 @@ export function scrub(data: any): any {
       // If this resulted in an empty schema, return without a schema
       return data.asSchema(
         Object.keys(scrubbed).length > 0
-          ? { ...data.schema, properties: scrubbed }
+          ? {
+            ...data.schema,
+            properties: scrubbed,
+            additionalProperties: false,
+          }
           : undefined,
       );
     } else {
@@ -238,6 +242,7 @@ export function scrub(data: any): any {
               (key) => [key, {}],
             ),
           ),
+          additionalProperties: false,
         } as const satisfies JSONSchema;
         console.log("scrubbed generated schema", scrubbed);
         // Only if we found any properties, return the scrubbed schema

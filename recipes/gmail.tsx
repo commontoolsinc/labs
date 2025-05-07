@@ -13,8 +13,15 @@ import {
   str,
   UI,
 } from "@commontools/builder";
-import { Cell, Classification } from "@commontools/runner";
 import TurndownService from "turndown";
+import { Cell } from "@commontools/runner";
+
+const Classification = {
+  Unclassified: "unclassified",
+  Confidential: "confidential",
+  Secret: "secret",
+  TopSecret: "topsecret",
+} as const;
 
 // Initialize turndown service
 const turndown = new TurndownService({
