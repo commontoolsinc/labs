@@ -1,0 +1,10 @@
+{
+  "name": "@commontools/integration",
+  "tasks": {
+    "test": "echo 'No tests to run.'"
+  },
+  "exports": {
+    ".": "./index.ts",
+    "./jumble": "./jumble.ts"
+  }
+}

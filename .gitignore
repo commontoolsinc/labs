@@ -11,7 +11,7 @@ cache
 artifact
 _deno.lock
 
-!/jumble/integration/cache
+!/packages/jumble/integration/cache
 .claude-prompt.tmp
 .pr-desc.tmp
 dist/

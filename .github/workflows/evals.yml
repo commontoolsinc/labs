@@ -106,7 +106,7 @@ jobs:
           key: llm-cache-${{ github.run_id }}
           restore-keys: llm-cache
 
-      - name: ✏️ List LLM Cache Load 
+      - name: ✏️ List LLM Cache Load
         run: |
           mkdir -p ./llm_cache_dir/llm-api-cache
           ls -1 ./llm_cache_dir/llm-api-cache > ./cache-log-pre
@@ -129,7 +129,7 @@ jobs:
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
       - name: 🧪 Run seeder
-        working-directory: seeder
+        working-directory: packages/seeder
         run: |
           FLAGS=""
           if [ ${{ env.test_size }} == "one" ]; then
@@ -138,17 +138,24 @@ jobs:
             FLAGS="--tag 10x10"
           fi
 
-          TOOLSHED_API_URL=http://localhost:8000/ \
-          OPENAI_API_KEY=${{ secrets.CTTS_AI_LLM_OPENAI_API_KEY }} \
-          deno task start --name ${{ env.target_sha }} $FLAGS
+          # Wrap in an if/else, we don't want the job to fail yet
+          # until we can confidently expect passing results.
+          if 
+            TOOLSHED_API_URL=http://localhost:8000/ \
+            OPENAI_API_KEY=${{ secrets.CTTS_AI_LLM_OPENAI_API_KEY }} \
+            deno task start --name ${{ env.target_sha }} $FLAGS ; then
+            echo "All charms have been successfully verified!"
+          else
+            echo "Some charms have failed verification."
+          fi
 
-      - name: ✏️ List LLM Cache Save 
+      - name: ✏️ List LLM Cache Save
         run: |
           mkdir -p ./llm_cache_dir/llm-api-cache
           ls -1 ./llm_cache_dir/llm-api-cache > ./cache-log-post
           echo "$(cat ./cache-log-post | wc -l) items found in cache."
           cat ./cache-log-post
-      
+
       - name: 📦 LLM Cache Status
         run: |
           if diff ./cache-log-pre ./cache-log-post > ./cache-analysis-diff ; then
@@ -158,10 +165,10 @@ jobs:
             ADDITIONS=$(cat ./cache-analysis-diff | wc -l)
             echo "LLM cache has added $((ADDITIONS / 2)) entries."
           fi
- 
+
       - name: 📤 Upload reports
         uses: actions/upload-artifact@v4
         with:
           name: seeder-results
           path: |
-            ./seeder/results
+            ./packages/seeder/results

@@ -1,9 +1,0 @@
-{
-  "name": "@commontools/html",
-  "exports": "./src/index.ts",
-  "tasks": {
-    "test": "deno test --allow-env"
-  },
-  "imports": {
-  }
-}

@@ -1,0 +1,117 @@
+{
+  "workspace": [
+    "./packages/background-charm-service",
+    "./packages/builder",
+    "./packages/charm",
+    "./packages/cli",
+    "./packages/deno-vite-plugin",
+    "./packages/deno-web-test",
+    "./packages/html",
+    "./packages/identity",
+    "./packages/iframe-sandbox",
+    "./packages/integration",
+    "./packages/jumble",
+    "./packages/llm",
+    "./packages/memory",
+    "./packages/runner",
+    "./packages/seeder",
+    "./packages/toolshed",
+    "./packages/ui",
+    "./packages/utils"
+  ],
+  "tasks": {
+    "check": "./tasks/check.sh",
+    "test": "./tasks/test.ts",
+    "test-all": "echo \"Use 'deno task test' instead.\" && exit 1",
+    "build-binaries": "./tasks/build-binaries.ts"
+  },
+  "compilerOptions": {
+    "jsx": "react-jsxdev",
+    "lib": [
+      "deno.ns",
+      "dom",
+      "dom.iterable",
+      "dom.asynciterable",
+      "esnext"
+    ],
+    "types": [
+      "./packages/jumble/src/global.d.ts"
+    ]
+  },
+  "exclude": [
+    "packages/jumble/.vite/deps/",
+    "**/node_modules/",
+    "**/.vite/",
+    "**/dist/",
+    "**/build/",
+    "**/.cache/",
+    "**/coverage/"
+  ],
+  "lint": {
+    "exclude": [
+      "./packages/deno-vite-plugin"
+    ],
+    "rules": {
+      "tags": [
+        "recommended"
+      ],
+      "include": [
+        "ban-untagged-todo",
+        "no-external-import"
+      ],
+      "exclude": [
+        "no-unused-vars",
+        "no-explicit-any",
+        "require-yield"
+      ]
+    }
+  },
+  "fmt": {
+    "indentWidth": 2,
+    "lineWidth": 80,
+    "semiColons": true,
+    "singleQuote": false,
+    "proseWrap": "always",
+    "exclude": [
+      "packages/jumble/integration/cache/llm-api-cache/"
+    ]
+  },
+  "imports": {
+    "@astral/astral": "jsr:@astral/astral",
+    "@cfworker/json-schema": "npm:@cfworker/json-schema@^4.1.0",
+    "@cmd-johnson/oauth2-client": "jsr:@cmd-johnson/oauth2-client@^2.0.0",
+    "@codemirror/lang-javascript": "npm:@codemirror/lang-javascript@^6.2.2",
+    "@codemirror/lang-markdown": "npm:@codemirror/lang-markdown@^6.3.2",
+    "@codemirror/lang-json": "npm:@codemirror/lang-json@^6.0.1",
+    "@hono/hono": "npm:hono@^4.7.0",
+    "@luca/esbuild-deno-loader": "jsr:@luca/esbuild-deno-loader",
+    "@std/assert": "jsr:@std/assert@^1",
+    "@std/async": "jsr:@std/async@^1",
+    "@std/cli": "jsr:@std/cli@^1",
+    "@std/crypto": "jsr:@std/crypto@^1",
+    "@std/dotenv": "jsr:@std/dotenv@^0.225.3",
+    "@std/encoding": "jsr:@std/encoding@^1",
+    "@std/expect": "jsr:@std/expect@^1",
+    "@std/fs": "jsr:@std/fs@^1",
+    "@std/http": "jsr:@std/http@^1",
+    "@std/path": "jsr:@std/path@^1",
+    "@std/testing": "jsr:@std/testing@^1",
+    "@types/jsdom": "npm:@types/jsdom@^21.1.7",
+    "@vercel/otel": "npm:@vercel/otel@^1.10.1",
+    "@web/test-runner": "npm:@web/test-runner",
+    "ai": "npm:ai@^4.3.9",
+    "esbuild": "npm:esbuild",
+    "jsdom": "npm:jsdom",
+    "lit": "npm:lit@^3.2.1",
+    "merkle-reference": "npm:merkle-reference@^2.0.1",
+    "multiformats": "npm:multiformats@^13.3.2",
+    "react": "npm:react@^18.3.1",
+    "react-dom": "npm:react-dom@^18.3.1",
+    "source-map-js": "npm:source-map-js@^1.2.1",
+    "turndown": "npm:turndown@^7.1.2",
+    "typescript": "npm:typescript",
+    "vite": "npm:vite@^6.2.1",
+    "zod-to-json-schema": "npm:zod-to-json-schema@^3.24.1",
+    "zod": "npm:zod@^3.24.1"
+  }
+}

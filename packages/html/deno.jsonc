@@ -1,0 +1,14 @@
+{
+  "name": "@commontools/html",
+  "exports": "./src/index.ts",
+  "tasks": {
+    // JSDOM dependencies require env.
+    "test": "deno test --allow-env"
+  },
+  "imports": {},
+  "compilerOptions": {
+    "jsx": "react",
+    "jsxFactory": "h",
+    "jsxFragmentFactory": "h.fragment"
+  }
+}
