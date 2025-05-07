@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertMatch } from "@std/assert";
+import { assert, assertEquals, assertMatch } from "https://deno.land/std/assert/mod.ts";
 import * as Memory from "../memory.ts";
 import * as Fact from "../fact.ts";
 import * as Transaction from "../transaction.ts";
@@ -6,7 +6,7 @@ import * as Changes from "../changes.ts";
 import * as Selection from "../selection.ts";
 import * as Commit from "../commit.ts";
 import * as Query from "../query.ts";
-import { refer } from "merkle-reference";
+import { refer } from "npm:merkle-reference";
 
 const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
 const bob = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";

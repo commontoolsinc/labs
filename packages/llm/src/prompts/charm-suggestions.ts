@@ -1,6 +1,6 @@
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
-import JSON5 from "json5";
+import JSON5 from "npm:json5";
 import { describeCharm } from "./charm-describe.ts";
 import { applyDefaults, llmPrompt } from "../index.ts";
 import { DEFAULT_MODEL_NAME } from "../types.ts";

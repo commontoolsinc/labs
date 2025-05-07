@@ -1,4 +1,4 @@
-import { fromJSON, refer } from "merkle-reference";
+import { fromJSON, refer } from "npm:merkle-reference";
 
 export interface Entity<T extends null | NonNullable<unknown>> {
   "@": ToString<Entity<T>>;

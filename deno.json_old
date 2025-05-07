@@ -25,7 +25,8 @@
     "build-binaries": "./tasks/build-binaries.ts"
   },
   "compilerOptions": {
-    "jsx": "react-jsxdev",
+    "jsx": "react-jsx",
+    "jsxImportSource": "@commontools/html",
     "lib": [
       "deno.ns",
       "dom",

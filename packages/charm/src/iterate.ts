@@ -4,13 +4,13 @@ import {
   isStream,
   recipeManager,
   runtime,
-} from "@commontools/runner";
-import { isObject } from "@commontools/utils/types";
+} from "../../runner/src/index.ts";
+import { isObject } from "../../utils/src/types.ts";
 import {
   createJsonSchema,
   JSONSchema,
   JSONSchemaMutable,
-} from "@commontools/builder";
+} from "../../builder/src/index.ts";
 import { Charm, CharmManager, charmSourceCellSchema } from "./manager.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
@@ -21,7 +21,7 @@ import {
   generateSpecAndSchema,
   type GenerationOptions,
   LLMClient,
-} from "@commontools/llm";
+} from "../../llm/src/index.ts";
 import { injectUserCode } from "./iframe/static.ts";
 import { IFrameRecipe, WorkflowForm } from "./index.ts";
 

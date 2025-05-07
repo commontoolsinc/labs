@@ -1,4 +1,4 @@
-import type { Cell, Stream } from "@commontools/runner";
+import type { Cell, Stream } from "../../runner/src/index.ts";
 declare global {
   namespace JSX {
     interface IntrinsicElements {

@@ -1,4 +1,4 @@
-import { Recipe } from "@commontools/builder";
+import { Recipe } from "../../../builder/src/index.ts";
 
 export type RuntimeFunction = (input: any) => void;
 export interface Runtime extends EventTarget {

@@ -4,8 +4,8 @@ import {
   parseTagListFromResponse,
 } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
-import type { JSONSchema } from "@commontools/builder";
-import { WorkflowForm, WorkflowType } from "@commontools/charm";
+import type { JSONSchema } from "../../../builder/src/index.ts";
+import { WorkflowForm, WorkflowType } from "../../../charm/src/index.ts";
 import { llmPrompt } from "../index.ts";
 import { DEFAULT_MODEL_NAME } from "../types.ts";
 

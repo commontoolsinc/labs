@@ -3,7 +3,7 @@
 
 import { isAlias } from "../builder/src/index.ts";
 import { JSONObject, JSONValue } from "./consumer.ts";
-import { isObject } from "@commontools/utils/types";
+import { isObject } from "../utils/src/types.ts";
 
 export class CycleTracker<K> {
   private partial: Set<K>;

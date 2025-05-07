@@ -1,4 +1,4 @@
-import { getTopFrame, toOpaqueRef } from "@commontools/builder";
+import { getTopFrame, toOpaqueRef } from "../../builder/src/index.ts";
 import { type DocImpl, getDoc, makeOpaqueRef } from "./doc.ts";
 import { type CellLink } from "./cell.ts";
 import { queueEvent, type ReactivityLog } from "./scheduler.ts";

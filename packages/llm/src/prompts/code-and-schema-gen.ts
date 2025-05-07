@@ -1,7 +1,7 @@
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
-import type { JSONSchema, JSONSchemaMutable } from "@commontools/builder";
-import { WorkflowForm } from "@commontools/charm";
+import type { JSONSchema, JSONSchemaMutable } from "../../../builder/src/index.ts";
+import { WorkflowForm } from "../../../charm/src/index.ts";
 import { systemMdConcise } from "../../../charm/src/iframe/static.ts";
 import { formatForm } from "./spec-and-schema-gen.ts";
 import { llmPrompt } from "../index.ts";

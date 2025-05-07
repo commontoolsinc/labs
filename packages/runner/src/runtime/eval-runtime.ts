@@ -1,4 +1,4 @@
-import { Recipe } from "@commontools/builder";
+import { Recipe } from "../../../builder/src/index.ts";
 import { mapSourceMapsOnStacktrace, tsToExports } from "./local-build.ts";
 import { Runtime, RuntimeFunction } from "./runtime.ts";
 import { Console } from "./console.ts";

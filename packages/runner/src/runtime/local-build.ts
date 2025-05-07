@@ -1,7 +1,7 @@
 import ts from "typescript";
 import { RawSourceMap, SourceMapConsumer } from "source-map-js";
-import * as commonHtml from "@commontools/html";
-import * as commonBuilder from "@commontools/builder";
+import * as commonHtml from "../../../html/src/index.ts";
+import * as commonBuilder from "../../../builder/src/index.ts";
 import * as zod from "zod";
 import * as zodToJsonSchema from "zod-to-json-schema";
 import * as merkleReference from "merkle-reference";

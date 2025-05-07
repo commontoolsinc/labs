@@ -1,5 +1,5 @@
-import { refer, type Reference } from "merkle-reference";
-import { JSONSchema } from "../builder/src/types.ts";
+import { refer, type Reference } from "npm:merkle-reference";
+import { JSONSchema } from "../builder/src/index.ts";
 
 export type { Reference };
 

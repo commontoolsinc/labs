@@ -9,7 +9,7 @@ import {
   type Schema,
   setValueAtPath,
   toOpaqueRef,
-} from "@commontools/builder";
+} from "../../builder/src/index.ts";
 import { type Cell, createCell } from "./cell.ts";
 import {
   createQueryResultProxy,
@@ -24,7 +24,7 @@ import {
 import { type ReactivityLog } from "./scheduler.ts";
 import { type Cancel } from "./cancel.ts";
 import { arrayEqual } from "./utils.ts";
-import { refer } from "@commontools/memory/reference";
+import { refer } from "../../memory/reference.ts";
 
 /**
  * Lowest level cell implementation.

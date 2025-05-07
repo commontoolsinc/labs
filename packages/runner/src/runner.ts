@@ -15,7 +15,7 @@ import {
   unsafe_materializeFactory,
   unsafe_originalRecipe,
   type UnsafeBinding,
-} from "@commontools/builder";
+} from "../../builder/src/index.ts";
 import { type DocImpl, getDoc, isDoc } from "./doc.ts";
 import { type Cell, getCellFromLink } from "./cell.ts";
 import { recipeManager } from "./recipe-manager.ts";

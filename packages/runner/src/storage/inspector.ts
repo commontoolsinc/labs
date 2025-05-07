@@ -13,7 +13,7 @@ import {
   TransactionError,
   UCAN,
   Variant,
-} from "@commontools/memory/interface";
+} from "../../../memory/interface.ts";
 import { JSONValue } from "../../../builder/src/index.ts";
 
 export type Status<Pending extends object, Ready = Pending> =

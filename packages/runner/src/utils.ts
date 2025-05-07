@@ -11,7 +11,7 @@ import {
   unsafe_originalRecipe,
   unsafe_parentRecipe,
   UnsafeBinding,
-} from "@commontools/builder";
+} from "../../builder/src/index.ts";
 import { type DocImpl, getDoc, isDoc } from "./doc.ts";
 import {
   getCellLinkOrThrow,

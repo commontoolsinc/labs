@@ -1,8 +1,8 @@
 import { hydratePrompt, llmPrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
 import { DEFAULT_MODEL_NAME } from "../types.ts";
-import type { JSONSchema, JSONSchemaMutable } from "@commontools/builder";
-import { WorkflowForm } from "@commontools/charm";
+import type { JSONSchema, JSONSchemaMutable } from "../../../builder/src/index.ts";
+import { WorkflowForm } from "../../../charm/src/workflow.ts";
 
 // Prompt for generating schema and specification from a goal
 export const SCHEMA_FROM_GOAL_PROMPT = llmPrompt(

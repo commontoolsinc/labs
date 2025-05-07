@@ -10,17 +10,17 @@
  * 6. Spell search and casting
  */
 
-import { Cell, recipeManager } from "@commontools/runner";
+import { Cell, recipeManager } from "../../runner/src/index.ts";
 import { Charm, charmId, CharmManager } from "./manager.ts";
-import { JSONSchema } from "@commontools/builder";
-import { classifyWorkflow, generateWorkflowPlan } from "@commontools/llm";
+import { JSONSchema } from "../../builder/src/index.ts";
+import { classifyWorkflow, generateWorkflowPlan } from "../../llm/src/index.ts";
 import { iterate } from "./iterate.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode } from "./iframe/static.ts";
 import { formatPromptWithMentions } from "./format.ts";
 import { castNewRecipe } from "./iterate.ts";
-import { VNode } from "@commontools/html";
-import { applyDefaults, GenerationOptions } from "@commontools/llm";
+import { VNode } from "../../html/src/index.ts";
+import { applyDefaults, GenerationOptions } from "../../llm/src/index.ts";
 import { CharmSearchResult, searchCharms } from "./search.ts";
 
 export interface RecipeRecord {

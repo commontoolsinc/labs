@@ -3,10 +3,10 @@ import {
   charmId,
   CharmManager,
   DEFAULT_MODEL,
-} from "@commontools/charm";
-import { NAME, Recipe, recipe } from "@commontools/builder";
-import { LLMClient } from "@commontools/llm";
-import { Cell, recipeManager } from "@commontools/runner";
+} from "./index.ts";
+import { NAME, Recipe, recipe } from "../../builder/src/index.ts";
+import { LLMClient } from "../../llm/src/index.ts";
+import { Cell, recipeManager } from "../../runner/src/index.ts";
 
 export type CharmSearchResult = {
   charm: Cell<Charm>;

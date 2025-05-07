@@ -1,4 +1,4 @@
-import { Cell } from "@commontools/runner";
+import { Cell } from "../../runner/src/index.ts";
 import { Charm } from "./manager.ts";
 
 // Re-export workflow types and functions from workflow module

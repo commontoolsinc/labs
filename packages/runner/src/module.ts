@@ -2,7 +2,7 @@ import {
   createNodeFactory,
   type Module,
   type ModuleFactory,
-} from "@commontools/builder";
+} from "../../builder/src/index.ts";
 import type { Action } from "./scheduler.ts";
 import type { DocImpl } from "./doc.ts";
 import type { AddCancel } from "./cancel.ts";

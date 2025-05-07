@@ -3,4 +3,4 @@
 export {
   getRecipeEnvironment,
   setRecipeEnvironment,
-} from "@commontools/builder";
+} from "../../builder/src/index.ts";

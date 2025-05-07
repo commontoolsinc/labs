@@ -1,4 +1,4 @@
-import JSON5 from "json5";
+import JSON5 from "npm:json5";
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
 import { llmPrompt } from "../index.ts";

@@ -1,9 +1,9 @@
 import { type DocImpl, getDoc } from "../doc.ts";
-import { DEFAULT_MODEL_NAME, LLMClient, LLMRequest } from "@commontools/llm";
+import { DEFAULT_MODEL_NAME, LLMClient, LLMRequest } from "../../../llm/src/index.ts"
 import { type Action, idle } from "../scheduler.ts";
 import { refer } from "merkle-reference";
 import { type ReactivityLog } from "../scheduler.ts";
-import { BuiltInLLMParams, BuiltInLLMState } from "@commontools/builder";
+import { BuiltInLLMParams, BuiltInLLMState } from "../../../builder/src/index.ts";
 
 const client = new LLMClient();
 

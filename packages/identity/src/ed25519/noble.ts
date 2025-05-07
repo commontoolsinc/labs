@@ -1,4 +1,4 @@
-import * as ed25519 from "@noble/ed25519";
+import * as ed25519 from "npm:@noble/ed25519";
 import {
   AsBytes,
   DIDKey,

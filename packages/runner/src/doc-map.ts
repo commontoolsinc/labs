@@ -1,4 +1,4 @@
-import { isOpaqueRef } from "@commontools/builder";
+import { isOpaqueRef } from "../../builder/src/index.ts";
 import { createDoc, type DocImpl, isDoc } from "./doc.ts";
 import {
   getCellLinkOrThrow,

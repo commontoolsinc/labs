@@ -9,9 +9,20 @@ import type {
   SchemaContext,
   SchemaQuery,
 } from "./interface.ts";
-import { isNumber, isObject, isString } from "@commontools/utils/types";
+// We'll define these utility functions inline rather than importing them
+function isObject(value: unknown): value is object {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
 import { FactSelector, SelectAll, selectFacts, Session } from "./space.ts";
-import { FactAddress } from "../runner/src/storage/cache.ts";
+import type { FactAddress } from "../runner/src/storage/cache.ts";
 import {
   BaseObjectManager,
   BaseObjectTraverser,

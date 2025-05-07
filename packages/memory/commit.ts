@@ -10,7 +10,7 @@ import type {
   Transaction,
 } from "./interface.ts";
 import { assert } from "./fact.ts";
-import { fromString } from "merkle-reference";
+import { fromString } from "npm:merkle-reference";
 
 export const the = "application/commit+json" as const;
 export const create = <Space extends MemorySpace>({

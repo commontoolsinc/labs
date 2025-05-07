@@ -1,4 +1,4 @@
-import { Identity } from "@commontools/identity";
+import { Identity } from "../../identity/src/index.ts";
 
 export const alice = await Identity.fromString(
   "MU+bzp2GaFQHso587iSFWPSeCzbSfn/CbNHEz7ilKRZ0=",

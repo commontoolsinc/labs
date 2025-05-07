@@ -47,7 +47,7 @@ export * as Subscription from "./subscription.ts";
 import { refer } from "./reference.ts";
 import * as Access from "./access.ts";
 import { Fact as FactModule, SelectionBuilder } from "./lib.ts";
-import { assert } from "@std/assert/assert";
+import { assert } from "https://deno.land/std/assert/assert.ts";
 
 // Convenient shorthand so I don't need this long type for this string
 type JobId = InvocationURL<Reference<ConsumerCommandInvocation<Protocol>>>;

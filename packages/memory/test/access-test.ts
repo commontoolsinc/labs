@@ -1,7 +1,7 @@
-import { assert, assertEquals, assertMatch } from "@std/assert";
+import { assert, assertEquals, assertMatch } from "https://deno.land/std/assert/mod.ts";
 import { alice, bob, mallory, space } from "./principal.ts";
 import * as Access from "../access.ts";
-import { type DID } from "@commontools/identity";
+import { type DID } from "../../identity/src/index.ts";
 import { refer } from "../reference.ts";
 import { Invocation } from "../interface.ts";
 

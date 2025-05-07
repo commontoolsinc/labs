@@ -1,5 +1,5 @@
 import * as logger from "./logger.ts";
-import { isObject } from "@commontools/utils/types";
+import { isObject } from "../../utils/src/types.ts";
 
 /** A keypath is an array of property keys */
 export type KeyPath = Array<PropertyKey>;

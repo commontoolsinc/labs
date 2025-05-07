@@ -11,7 +11,7 @@ import {
   The,
   Unclaimed,
 } from "./interface.ts";
-import { fromString, is as isReference, refer } from "merkle-reference";
+import { fromString, is as isReference, refer } from "npm:merkle-reference";
 
 /**
  * Creates an unclaimed fact.

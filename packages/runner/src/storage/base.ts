@@ -1,7 +1,7 @@
-import type { Cancel, EntityId } from "@commontools/runner";
-import type { Entity, Result, Unit } from "@commontools/memory/interface";
+import type { Cancel, EntityId } from "../index.ts";
+import type { Entity, Result, Unit } from "../../../memory/interface.ts";
 import { log } from "../storage.ts";
-import { SchemaContext } from "@commontools/memory/interface";
+import { SchemaContext } from "../../../memory/interface.ts";
 
 export type { Result, Unit };
 

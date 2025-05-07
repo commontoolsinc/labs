@@ -1,4 +1,4 @@
-import { llmPrompt } from "@commontools/llm";
+import { llmPrompt } from "../../../llm/src/index.ts";
 
 const libraries = {
   "imports": {

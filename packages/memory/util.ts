@@ -1,6 +1,6 @@
-import * as Path from "@std/path";
+import * as Path from "https://deno.land/std/path/mod.ts";
 import { AsyncResult, DID, DIDKey } from "./interface.ts";
-import { VerifierIdentity } from "@commontools/identity";
+import { VerifierIdentity } from "../identity/src/index.ts";
 
 /**
  * Returns file URL for the current working directory.

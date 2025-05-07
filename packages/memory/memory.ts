@@ -1,6 +1,6 @@
 import * as Space from "./space.ts";
 import * as Error from "./error.ts";
-import * as FS from "@std/fs";
+import * as FS from "https://deno.land/std/fs/mod.ts";
 import {
   addChangesAttributes,
   addMemoryAttributes,
@@ -24,7 +24,7 @@ import {
   TransactionResult,
 } from "./interface.ts";
 export * from "./interface.ts";
-import { type DID } from "@commontools/identity";
+import { type DID } from "../identity/src/index.ts";
 
 interface Session {
   store: URL;

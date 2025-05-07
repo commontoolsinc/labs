@@ -1,5 +1,5 @@
-import * as Reference from "merkle-reference";
-export * from "merkle-reference";
+import * as Reference from "npm:merkle-reference";
+export * from "npm:merkle-reference";
 
 // Don't know why deno does not seem to see there is a `fromString` so we just
 // workaround it like this.

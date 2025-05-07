@@ -1,9 +1,9 @@
 import * as Provider from "./provider.ts";
 import * as Socket from "./socket.ts";
-import * as Path from "@std/path";
+import * as Path from "https://deno.land/std/path/mod.ts";
 import * as UCAN from "./ucan.ts";
 import * as Receipt from "./receipt.ts";
-import { type DID, isDID } from "@commontools/identity";
+import { type DID, isDID } from "../identity/src/index.ts";
 
 const serviceDid: DID = (() => {
   // Derived from passphrase "implicit trust"

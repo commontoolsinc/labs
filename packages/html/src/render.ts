@@ -6,9 +6,9 @@ import {
   isCell,
   isStream,
   useCancelGroup,
-} from "@commontools/runner";
-import { JSONSchema } from "@commontools/builder";
-import { isObject } from "@commontools/utils/types";
+} from "../../runner/src/index.ts";
+import { JSONSchema } from "../../builder/src/index.ts";
+import { isObject } from "../../utils/src/types.ts";
 import * as logger from "./logger.ts";
 
 const vdomSchema: JSONSchema = {

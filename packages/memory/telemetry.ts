@@ -4,7 +4,7 @@ import {
   SpanKind,
   SpanStatusCode,
   trace,
-} from "@opentelemetry/api";
+} from "npm:@opentelemetry/api";
 
 const tracer = trace.getTracer("common-memory", "1.0.0");
 

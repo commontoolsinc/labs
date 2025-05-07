@@ -16,24 +16,24 @@ import type {
   TransactionError,
   UCAN,
   Unit,
-} from "@commontools/memory/interface";
-import type { Cancel, EntityId } from "@commontools/runner";
+} from "../../../memory/interface.ts";
+import type { Cancel, EntityId } from "../index.ts";
 import {
   BaseStorageProvider,
   type StorageProvider,
   type StorageValue,
 } from "./base.ts";
-import type { MemorySpaceSession } from "@commontools/memory/consumer";
-import { assert, retract, unclaimed } from "@commontools/memory/fact";
+import type { MemorySpaceSession } from "../../../memory/consumer.ts";
+import { assert, retract, unclaimed } from "../../../memory/fact.ts";
 import { fromString, refer } from "merkle-reference";
-import * as Changes from "@commontools/memory/changes";
-import { the, toChanges, toRevision } from "@commontools/memory/commit";
+import * as Changes from "../../../memory/changes.ts";
+import { the, toChanges, toRevision } from "../../../memory/commit.ts";
 import * as IDB from "./idb.ts";
-import * as Memory from "@commontools/memory/consumer";
-export * from "@commontools/memory/interface";
-import * as Codec from "@commontools/memory/codec";
+import * as Memory from "../../../memory/consumer.ts";
+export * from "../../../memory/interface.ts";
+import * as Codec from "../../../memory/codec.ts";
 import { Channel, RawCommand } from "./inspector.ts";
-import { isBrowser } from "@commontools/utils/env";
+import { isBrowser } from "../../../utils/src/env.ts";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {

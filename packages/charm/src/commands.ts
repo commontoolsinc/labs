@@ -1,12 +1,12 @@
-import { DEFAULT_MODEL_NAME, fixRecipePrompt } from "@commontools/llm";
-import { Cell, recipeManager } from "@commontools/runner";
+import { DEFAULT_MODEL_NAME, fixRecipePrompt } from "../../llm/src/index.ts";
+import { Cell, recipeManager } from "../../runner/src/index.ts";
 import { Charm, CharmManager } from "./manager.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode, injectUserCode } from "./iframe/static.ts";
 import { compileAndRunRecipe, generateNewRecipeVersion } from "./iterate.ts";
-import { NAME } from "@commontools/builder";
+import { NAME } from "../../builder/src/index.ts";
 import { WorkflowForm } from "./index.ts";
-import { createJsonSchema, type JSONSchema } from "@commontools/builder";
+import { createJsonSchema, type JSONSchema } from "../../builder/src/index.ts";
 import { processWorkflow, ProcessWorkflowOptions } from "./workflow.ts";
 
 export const castSpellAsCharm = async (
@@ -44,8 +44,8 @@ export const createDataCharm = (
     `    ${key}: data.${key},\n`
   ).join("\n");
 
-  const dataRecipeSrc = `import { h } from "@commontools/html";
-  import { recipe, UI, NAME, derive, type JSONSchema } from "@commontools/builder";
+  const dataRecipeSrc = `import { h } from "../../html/src/index.ts";
+  import { recipe, UI, NAME, derive, type JSONSchema } from "../../builder/src/index.ts";
 
   const schema = ${schemaString};
 

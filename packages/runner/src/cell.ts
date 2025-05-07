@@ -1,10 +1,10 @@
-import { isStreamAlias, TYPE } from "@commontools/builder";
+import { isStreamAlias, TYPE } from "../../builder/src/index.ts";
 import {
   getTopFrame,
   ID,
   ID_FIELD,
   type JSONSchema,
-} from "@commontools/builder";
+} from "../../builder/src/index.ts";
 import { type DeepKeyLookup, type DocImpl, getDoc, isDoc } from "./doc.ts";
 import {
   createQueryResultProxy,
@@ -19,7 +19,7 @@ import { queueEvent, type ReactivityLog, subscribe } from "./scheduler.ts";
 import { type EntityId, getDocByEntityId, getEntityId } from "./doc-map.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import { validateAndTransform } from "./schema.ts";
-import { type Schema } from "@commontools/builder";
+import { type Schema } from "../../builder/src/index.ts";
 import { compactifyPaths } from "./scheduler.ts";
 
 /**

@@ -1,4 +1,4 @@
-import { assert, assertEquals, AssertionError, assertMatch } from "@std/assert";
+import { assert, assertEquals, AssertionError, assertMatch } from "https://deno.land/std/assert/mod.ts";
 import * as Provider from "../provider.ts";
 import * as Consumer from "../consumer.ts";
 import * as Changes from "../changes.ts";

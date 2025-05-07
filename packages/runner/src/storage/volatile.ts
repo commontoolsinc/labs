@@ -1,4 +1,4 @@
-import type { EntityId } from "@commontools/runner";
+import type { EntityId } from "../index.ts";
 import { log } from "../storage.ts";
 import {
   BaseStorageProvider,
@@ -6,7 +6,7 @@ import {
   type StorageValue,
   type Unit,
 } from "./base.ts";
-import { SchemaContext } from "@commontools/memory/interface";
+import { SchemaContext } from "../../../memory/interface.ts";
 
 /**
  * Volatile (in-memory) storage provider. Just for testing.

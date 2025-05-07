@@ -1,4 +1,4 @@
-import { base64 } from "multiformats/bases/base64";
+import { base64 } from "npm:multiformats/bases/base64";
 
 export type AsJSON = {
   "/": {

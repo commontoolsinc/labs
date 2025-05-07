@@ -7,7 +7,7 @@ import {
   Schema,
   TYPE,
   UI,
-} from "@commontools/builder";
+} from "../../builder/src/index.ts";
 import {
   type Cell,
   createRef,
@@ -24,10 +24,10 @@ import {
   maybeGetCellLink,
   recipeManager,
   runSynced,
-} from "@commontools/runner";
-import { storage } from "@commontools/runner";
-import { type Session } from "@commontools/identity";
-import { isObject } from "@commontools/utils/types";
+} from "../../runner/src/index.ts";
+import { storage } from "../../runner/src/index.ts";
+import { type Session } from "../../identity/src/index.ts";
+import { isObject } from "../../utils/src/types.ts";
 
 export function charmId(charm: Charm): string | undefined {
   const id = getEntityId(charm);

@@ -7,9 +7,9 @@ import {
   Reference,
   Signer,
 } from "./interface.ts";
-import { refer } from "merkle-reference";
+import { refer } from "npm:merkle-reference";
 import { unauthorized } from "./error.ts";
-import { type DID } from "@commontools/identity";
+import { type DID } from "../identity/src/index.ts";
 import { fromDID } from "./util.ts";
 
 /**

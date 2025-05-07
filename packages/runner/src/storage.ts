@@ -7,7 +7,7 @@ import {
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { idle } from "./scheduler.ts";
-import { isStatic, markAsStatic } from "@commontools/builder";
+import { isStatic, markAsStatic } from "../../builder/src/index.ts";
 import {
   BaseStorageProvider,
   StorageProvider,
@@ -17,15 +17,15 @@ import {
   Provider as CachedStorageProvider,
   RemoteStorageProviderSettings,
 } from "./storage/cache.ts";
-import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
+import { debug } from "../../html/src/index.ts"; // FIXME(ja): can we move debug to somewhere else?
 import { VolatileStorageProvider } from "./storage/volatile.ts";
-import { Signer } from "@commontools/identity";
-import { isBrowser } from "@commontools/utils/env";
-import { sleep } from "@commontools/utils/sleep";
-import { defer } from "@commontools/utils/defer";
-import { TransactionResult } from "@commontools/memory";
-import { refer } from "@commontools/memory/reference";
-import { SchemaContext, SchemaNone } from "@commontools/memory/interface";
+import { Signer } from "../../identity/src/index.ts";
+import { isBrowser } from "../../utils/src/env.ts";
+import { sleep } from "../../utils/src/sleep.ts";
+import { defer } from "../../utils/src/defer.ts";
+import { TransactionResult } from "../../memory/lib.ts";
+import { refer } from "../../memory/reference.ts";
+import { SchemaContext, SchemaNone } from "../../memory/interface.ts";
 
 export function log(fn: () => any[]) {
   debug(() => {

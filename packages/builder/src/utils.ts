@@ -26,7 +26,7 @@ import {
   isCell,
   isCellLink,
   isDoc,
-} from "@commontools/runner";
+} from "../../runner/src/index.ts";
 
 /**
  * Traverse a value, _not_ entering cells

@@ -18,12 +18,12 @@
  * - For new code, prefer the `recipeManager` object
  */
 
-import { JSONSchema, Module, Recipe, Schema } from "@commontools/builder";
+import { JSONSchema, Module, Recipe, Schema } from "../../builder/src/index.ts";
 import { storage } from "./storage.ts";
 import { Cell } from "./cell.ts";
 import { createRef } from "./doc-map.ts";
 import { getCell } from "./cell.ts";
-import { runtime } from "@commontools/runner";
+import { runtime } from "./runtime/index.ts";
 import { getBlobbyServerUrl } from "./blobby-storage.ts";
 
 const inProgressCompilations = new Map<string, Promise<Recipe>>();

@@ -1,4 +1,4 @@
-import { JSONSchema } from "@commontools/builder";
+import { JSONSchema } from "../../../builder/src/index.ts";
 import {
   DEFAULT_MODEL_NAME,
   hydratePrompt,
@@ -6,7 +6,7 @@ import {
   type LLMRequest,
   applyDefaults,
   type GenerationOptions
-} from "@commontools/llm";
+} from "../../../llm/src/index.ts";
 
 import { extractUserCode, systemMd } from "./static.ts";
 

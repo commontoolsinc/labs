@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
+import { assert, assertEquals, assertExists, assertMatch } from "https://deno.land/std/assert/mod.ts";
 import * as Space from "../space.ts";
 import * as Changes from "../changes.ts";
 import * as Selection from "../selection.ts";
@@ -6,7 +6,7 @@ import * as Commit from "../commit.ts";
 import * as Transaction from "../transaction.ts";
 import * as Fact from "../fact.ts";
 import { createTemporaryDirectory } from "../util.ts";
-import { refer } from "merkle-reference";
+import { refer } from "npm:merkle-reference";
 
 import { alice, space } from "./principal.ts";
 import { SchemaSelector } from "../space.ts";

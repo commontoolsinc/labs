@@ -1,4 +1,4 @@
-import { isObject, Mutable } from "@commontools/utils/types";
+import { isObject, Mutable } from "../../utils/src/types.ts";
 
 export const ID: unique symbol = Symbol("ID, unique to the context");
 export const ID_FIELD: unique symbol = Symbol(

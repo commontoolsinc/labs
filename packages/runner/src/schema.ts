@@ -1,4 +1,4 @@
-import { isAlias, JSONSchema } from "@commontools/builder";
+import { isAlias, JSONSchema } from "../../builder/src/index.ts";
 import { type DocImpl, getDoc } from "./doc.ts";
 import {
   type CellLink,

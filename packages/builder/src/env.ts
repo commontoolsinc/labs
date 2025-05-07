@@ -1,4 +1,4 @@
-import { isDeno } from "@commontools/utils/env";
+import { isDeno } from "../../utils/src/env.ts";
 
 // Environment configuration provided to recipes. Could
 // eventually be e.g. `import.meta` exposed to recipes.
