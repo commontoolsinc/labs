@@ -9,6 +9,7 @@
     "./packages/html",
     "./packages/identity",
     "./packages/iframe-sandbox",
+    "./packages/integration",
     "./packages/jumble",
     "./packages/llm",
     "./packages/memory",

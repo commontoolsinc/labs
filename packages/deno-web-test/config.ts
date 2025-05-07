@@ -19,6 +19,7 @@ export const applyDefaults = (config: object): Config => {
   return Object.assign({
     headless: true,
     devtools: false,
+    pipeConsole: true,
   }, config);
 };
 

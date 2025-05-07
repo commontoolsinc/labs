@@ -9,8 +9,9 @@ deno check \
   packages/html \
   packages/identity \
   packages/iframe-sandbox \
-  packages/llm \
+  packages/integration \
   packages/jumble \
+  packages/llm \
   packages/memory \
   packages/runner \
   packages/seeder \
