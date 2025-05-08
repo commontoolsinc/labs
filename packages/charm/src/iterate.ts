@@ -378,6 +378,8 @@ async function twoPhaseCodeGeneration(
     }),
   );
   // Phase 1: Generate spec/plan and schema based on goal and possibly existing schema
+  console.log("existingSchema", existingSchema);
+  console.log("model", form.meta.model);
   const {
     spec,
     resultSchema,
