@@ -1,6 +1,6 @@
 import { hydratePrompt, llmPrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
-import { DEFAULT_MODEL_NAME, LLMRequest } from "../types.ts";
+import { DEFAULT_MODEL_NAME } from "../types.ts";
 import type { JSONSchema, JSONSchemaMutable } from "@commontools/builder";
 import { WorkflowForm } from "@commontools/charm";
 
@@ -292,7 +292,7 @@ Based on this goal and the existing schema, please provide a title, description,
   }
 
   // Send the request to the LLM using the specified model or default
-  const request = {
+  const response = await new LLMClient().sendRequest({
     model: model,
     system: systemPrompt.text,
     stream: false,
@@ -311,10 +311,7 @@ Based on this goal and the existing schema, please provide a title, description,
       userPrompt: userContent.version,
       space: form.meta.charmManager.getSpaceName(),
     },
-  } as LLMRequest;
-  console.log("About to send llm request", request);
-  const response = await new LLMClient().sendRequest(request);
-  console.log("Got llm response", response);
+  });
 
   // Extract sections from the response
   const title = parseTagFromResponse(response.content, "title") || "New Charm";
