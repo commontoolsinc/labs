@@ -728,7 +728,7 @@ export const query = <Space extends MemorySpace>(
 export const querySchema = <Space extends MemorySpace>(
   session: Session<Space>,
   command: SchemaQuery<Space>,
-): AwaitResult<Selection<Space>, AuthorizationError | QueryError> => {
+): Result<Selection<Space>, AuthorizationError | QueryError> => {
   return traceSync("space.querySchema", (span) => {
     addMemoryAttributes(span, {
       operation: "querySchema",
