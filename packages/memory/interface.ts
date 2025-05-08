@@ -355,6 +355,7 @@ export interface InvocationView<
   Return extends NonNullable<unknown>,
   Effect,
 > extends Invocation<Source["cmd"], Source["sub"], Source["args"]> {
+  // Return false to remove listener
   return(result: Await<Return>): boolean;
   perform(effect: Effect): void;
 
