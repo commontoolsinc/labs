@@ -225,6 +225,7 @@ describe("Schema propagation end-to-end example", () => {
               type: "string",
             },
           },
+          additionalProperties: false,
         },
       },
       // TODO(seefeld): Fix type inference and replace any
@@ -265,6 +266,7 @@ describe("Schema propagation end-to-end example", () => {
     expect(c.get().props.value.schema).toEqual({
       type: "object",
       properties: { name: { type: "string" } },
+      additionalProperties: false,
     });
     expect(c.get().props.value.get()).toEqual({ name: "hello" });
   });

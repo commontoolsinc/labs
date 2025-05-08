@@ -4,6 +4,7 @@
     "google-importer": "deno run --allow-read --allow-env --allow-net google-importer.ts",
     "background-runner": "deno run --allow-read --allow-env --allow-net background-charm-runner.ts",
     "memorydemo": "deno run --allow-read --allow-env --allow-net memory_demo.ts",
+    "curl": "deno run --allow-read --allow-env --allow-net curl.ts",
     "test": "deno test",
     "charmdemo": "deno run --allow-read --allow-env --allow-net charm_demo.ts",
     "name2did": "deno run -A name2did.ts",

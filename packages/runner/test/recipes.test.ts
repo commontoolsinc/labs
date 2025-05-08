@@ -462,7 +462,7 @@ describe("Recipe Runner", () => {
         multiplier: { type: "number" },
       },
       required: ["settings"],
-    } satisfies JSONSchema;
+    } as const satisfies JSONSchema;
 
     const multiplyRecipe = recipe<{
       settings: { value: number };
@@ -471,7 +471,7 @@ describe("Recipe Runner", () => {
       const result = lift(
         schema,
         { type: "number" },
-        ({ settings, multiplier }) => settings.value * multiplier,
+        ({ settings, multiplier }) => settings.value * multiplier!,
       )({ settings, multiplier });
       return { result };
     });
@@ -528,7 +528,7 @@ describe("Recipe Runner", () => {
         },
       },
       required: ["data"],
-    } satisfies JSONSchema;
+    } as const satisfies JSONSchema;
 
     const sumRecipe = recipe<{ data: { items: Array<{ value: number }> } }>(
       "Sum Items",
@@ -583,7 +583,7 @@ describe("Recipe Runner", () => {
           },
         },
       },
-    } satisfies JSONSchema;
+    } as const satisfies JSONSchema;
 
     const dynamicRecipe = recipe<{ context: Record<PropertyKey, number> }>(
       "Dynamic Context",

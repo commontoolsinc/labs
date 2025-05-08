@@ -1,4 +1,5 @@
 import {
+  deepEqual,
   ID,
   ID_FIELD,
   isAlias,
@@ -20,6 +21,7 @@ import {
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { createRef, getDocByEntityId } from "./doc-map.ts";
+import { ContextualFlowControl } from "./index.ts";
 
 export function extractDefaultValues(schema: any): any {
   if (typeof schema !== "object" || schema === null) return undefined;
@@ -331,9 +333,11 @@ export function resolveLinkToValue(
   doc: DocImpl<any>,
   path: PropertyKey[],
   log?: ReactivityLog,
+  schema?: JSONSchema,
+  rootSchema?: JSONSchema,
 ): CellLink {
   const visits = createVisits();
-  const ref = resolvePath(doc, path, log, visits);
+  const ref = resolvePath(doc, path, log, schema, rootSchema, visits);
   return followLinks(ref, log, visits);
 }
 
@@ -341,9 +345,11 @@ export function resolveLinkToAlias(
   doc: DocImpl<any>,
   path: PropertyKey[],
   log?: ReactivityLog,
+  schema?: JSONSchema,
+  rootSchema?: JSONSchema,
 ): CellLink {
   const visits = createVisits();
-  const ref = resolvePath(doc, path, log, visits);
+  const ref = resolvePath(doc, path, log, schema, rootSchema, visits);
   return followLinks(ref, log, visits, true);
 }
 
@@ -356,6 +362,8 @@ function resolvePath(
   doc: DocImpl<any>,
   path: PropertyKey[],
   log?: ReactivityLog,
+  schema?: JSONSchema,
+  rootSchema?: JSONSchema,
   visits: Visits = createVisits(),
 ): CellLink { // Follow aliases, doc links, etc. in path, so that we end up on the right
   // doc, meaning the one that contains the value we want to access without any
@@ -376,7 +384,9 @@ function resolvePath(
   // Check if we already resolved this exact path
   const fullPathKey = createPathCacheKey(doc, path);
   const exactMatch = visits.resolvePathCache.get(fullPathKey);
-  if (exactMatch) return exactMatch;
+  if (exactMatch) {
+    return exactMatch;
+  }
 
   // Try to find a cached result for a shorter path
   let startRef: CellLink = { cell: doc, path: [] };
@@ -395,6 +405,7 @@ function resolvePath(
     }
   }
 
+  const cfc = new ContextualFlowControl();
   let ref = startRef;
 
   while (keys.length) {
@@ -404,18 +415,24 @@ function resolvePath(
     // Now access the key.
     const key = keys.shift()!;
 
-    const childSchema = ref.schema?.type === "object"
-      ? ref.schema.properties?.[key as string] ||
-        (typeof ref.schema.additionalProperties === "object"
-          ? ref.schema.additionalProperties
-          : undefined)
-      : ref.schema?.type === "array"
-      ? ref.schema.items
-      : undefined;
-
+    const childPath = [...ref.path, key];
+    let childSchema = ref.schema;
+    if (
+      ref.schema === undefined && schema !== undefined &&
+      arrayEqual(path, childPath)
+    ) {
+      // Since path is childPath, restore schema
+      childSchema = schema;
+    } else {
+      childSchema = cfc.getSchemaAtPath(
+        ref.schema,
+        [key.toString()],
+        ref.rootSchema,
+      );
+    }
     ref = {
       cell: ref.cell,
-      path: [...ref.path, key],
+      path: childPath,
       schema: childSchema,
       rootSchema: childSchema ? ref.rootSchema : undefined,
     };
@@ -438,7 +455,9 @@ function followLinks(
   // Check if we already followed these links
   const cacheKey = createPathCacheKey(ref.cell, ref.path, onlyAliases);
   const cached = visits.followLinksCache.get(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    return cached;
+  }
 
   let nextRef: CellLink | undefined;
   let result = ref;
@@ -448,6 +467,8 @@ function followLinks(
       result.cell,
       result.path,
       log,
+      result.schema,
+      result.rootSchema,
       visits,
     );
 
@@ -465,7 +486,7 @@ function followLinks(
       ? maybeGetCellLink(target, result.cell)
       : undefined;
 
-    if (nextRef) {
+    if (nextRef !== undefined) {
       // Add schema back if we didn't get a new one
       if (!nextRef.schema && result.schema) {
         nextRef = {
@@ -476,7 +497,7 @@ function followLinks(
       }
 
       // Log all the refs that were followed, but not the final value they point to.
-      log?.reads.push({ cell: result.cell, path: result.path });
+      log?.reads.push({ ...result });
 
       result = nextRef;
 
@@ -553,7 +574,7 @@ export function diffAndUpdate(
   return changes.length > 0;
 }
 
-export type ChangeSet = { location: CellLink; value: any }[];
+type ChangeSet = { location: CellLink; value: any }[];
 
 /**
  * Traverses objects and returns an array of changes that should be written. An
@@ -649,7 +670,7 @@ export function normalizeAndDiff(
   // Handle alias in current value (at this point: if newValue is not an alias)
   if (isAlias(currentValue)) {
     // Log reads of the alias, so that changing aliases cause refreshes
-    log?.reads.push({ cell: current.cell, path: current.path });
+    log?.reads.push({ ...current });
     const ref = followAliases(currentValue, current.cell, log);
     return normalizeAndDiff(ref, newValue, log, context);
   }
@@ -693,7 +714,12 @@ export function normalizeAndDiff(
       true,
       current.cell,
     )!;
-    const ref = { cell: doc, path: [] };
+    const ref = {
+      cell: doc,
+      path: [],
+      schema: current.schema,
+      rootSchema: current.rootSchema,
+    };
     return [
       // If it wasn't already, set the current value to be a doc link to this doc
       ...normalizeAndDiff(current, ref, log, context),
@@ -702,6 +728,7 @@ export function normalizeAndDiff(
     ];
   }
 
+  const cfc = new ContextualFlowControl();
   // Handle arrays
   if (Array.isArray(newValue)) {
     // If the current value is not an array, set it to an empty array
@@ -710,8 +737,18 @@ export function normalizeAndDiff(
     }
 
     for (let i = 0; i < newValue.length; i++) {
+      const childSchema = cfc.getSchemaAtPath(
+        current.schema,
+        [i.toString()],
+        current.rootSchema,
+      );
       const nestedChanges = normalizeAndDiff(
-        { cell: current.cell, path: [...current.path, i.toString()] },
+        {
+          cell: current.cell,
+          path: [...current.path, i.toString()],
+          schema: childSchema,
+          rootSchema: current.rootSchema,
+        },
         newValue[i],
         log,
         context,
@@ -721,8 +758,21 @@ export function normalizeAndDiff(
 
     // Handle array length changes
     if (Array.isArray(currentValue) && currentValue.length > newValue.length) {
+      // We need to add the schema here, since the array may be secret, so the length should be too
+      const lub = (current.schema !== undefined)
+        ? cfc.lubSchema(current.schema)
+        : undefined;
+      // We have to cast these, since the type could be changed to another value
+      const childSchema = (lub !== undefined)
+        ? { type: "number", ifc: { classification: [lub] } } as JSONSchema
+        : { type: "number" } as JSONSchema;
       changes.push({
-        location: { cell: current.cell, path: [...current.path, "length"] },
+        location: {
+          cell: current.cell,
+          path: [...current.path, "length"],
+          schema: childSchema,
+          rootSchema: current.rootSchema,
+        },
         value: newValue.length,
       });
     }
@@ -742,8 +792,18 @@ export function normalizeAndDiff(
     }
 
     for (const key in newValue) {
+      const childSchema = cfc.getSchemaAtPath(
+        current.schema,
+        [key],
+        current.rootSchema,
+      );
       const nestedChanges = normalizeAndDiff(
-        { cell: current.cell, path: [...current.path, key] },
+        {
+          cell: current.cell,
+          path: [...current.path, key],
+          schema: childSchema,
+          rootSchema: current.rootSchema,
+        },
         newValue[key],
         log,
         context,
@@ -754,8 +814,18 @@ export function normalizeAndDiff(
     // Handle removed keys
     for (const key in currentValue) {
       if (!(key in newValue)) {
+        const childSchema = cfc.getSchemaAtPath(
+          current.schema,
+          [key],
+          current.rootSchema,
+        );
         changes.push({
-          location: { cell: current.cell, path: [...current.path, key] },
+          location: {
+            cell: current.cell,
+            path: [...current.path, key],
+            schema: childSchema,
+            rootSchema: current.rootSchema,
+          },
           value: undefined,
         });
       }
@@ -786,6 +856,8 @@ export function applyChangeSet(
     change.location.cell.setAtPath(
       change.location.path,
       change.value,
+      undefined,
+      change.location.schema,
     );
     log?.writes.push(change.location);
   }

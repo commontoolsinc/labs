@@ -179,7 +179,9 @@ export const transact = async (session: Session, transaction: Transaction) => {
           );
 
           const promises = [];
-          for (const subscriber of session.subscribers) {
+          // Copy here, in case a subscriber modifies the set of subscribers
+          const subscribers = [...session.subscribers];
+          for (const subscriber of subscribers) {
             promises.push(subscriber.commit(result.ok));
           }
           await Promise.all(promises);

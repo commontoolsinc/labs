@@ -9,6 +9,7 @@ import {
 } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { resolveLinks, resolveLinkToAlias } from "./utils.ts";
+import { ContextualFlowControl } from "./index.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -42,7 +43,7 @@ export function resolveSchema(
   // Treat undefined/null/{} or any other non-object as no schema
   if (
     typeof schema !== "object" || schema === null ||
-    Object.keys(schema).length === 0
+    ContextualFlowControl.isTrueSchema(schema)
   ) {
     return undefined;
   }
@@ -67,10 +68,7 @@ export function resolveSchema(
   // object without properties.
   if (
     resolvedSchema === undefined ||
-    Object.keys(resolvedSchema).length === 0 ||
-    (resolvedSchema.type === "object" &&
-      !resolvedSchema.additionalProperties &&
-      !resolvedSchema.properties)
+    ContextualFlowControl.isTrueSchema(resolvedSchema)
   ) {
     return undefined;
   }
@@ -266,9 +264,15 @@ export function validateAndTransform(
   let resolvedSchema = resolveSchema(schema, rootSchema, true);
 
   // Follow aliases, etc. to last element on path + just aliases on that last one
-  // When we generate cells below, we want them to be based of this value, as that
+  // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
-  const resolvedRef = resolveLinkToAlias(doc, path, log);
+  const resolvedRef = resolveLinkToAlias(
+    doc,
+    path,
+    log,
+    resolvedSchema,
+    rootSchema,
+  );
   doc = resolvedRef.cell;
   path = resolvedRef.path;
 
@@ -309,29 +313,51 @@ export function validateAndTransform(
       }
       if (isCellLink(value)) {
         log?.reads.push({ cell: doc, path: path.slice(0, i + 1) });
+        const extraPath = [...path.slice(i + 1)];
+        const newPath = [...value.path, ...extraPath];
+        const cfc = new ContextualFlowControl();
+        let newSchema;
+        if (value.schema !== undefined) {
+          newSchema = cfc.getSchemaAtPath(
+            value.schema,
+            extraPath.map((key) => key.toString()),
+            rootSchema,
+          );
+        } else if (i === path.length - 1) {
+          // we don't have a schema provided directly for this cell link,
+          // but we can apply the one from our parent, since we are at
+          // the end of the path.
+          newSchema = cfc.getSchemaAtPath(resolvedSchema, []);
+        }
         return createCell(
           value.cell,
-          [...value.path, ...path.slice(i + 1)],
+          newPath,
           log,
-          resolvedSchema,
+          newSchema,
           rootSchema,
         );
       }
     }
-
     return createCell(doc, path, log, resolvedSchema, rootSchema);
   }
 
   // If there is no schema, return as raw data via query result proxy
-  if (!resolvedSchema) return doc.getAsQueryResult(path, log);
+  if (resolvedSchema === undefined) {
+    return doc.getAsQueryResult(path, log);
+  }
 
   // Now resolve further links until we get the actual value. Note that `doc`
   // and `path` will still point to the parent, as in e.g. the `anyOf` case
   // below we might still create a new Cell and it should point to the top of
   // this set of links.
-  const ref = resolveLinks({ cell: doc, path }, log);
+  const ref = resolveLinks({
+    cell: doc,
+    path,
+    schema: resolvedSchema,
+    rootSchema,
+  }, log);
   let value = ref.cell.getAtPath(ref.path);
-  log?.reads.push({ cell: ref.cell, path: ref.path });
+  log?.reads.push({ ...ref });
 
   // Check for undefined value and return processed default if available
   if (value === undefined && resolvedSchema?.default !== undefined) {
@@ -496,26 +522,33 @@ export function validateAndTransform(
     const result: Record<string, any> = {};
 
     // Handle explicitly defined properties
+    const cfc = new ContextualFlowControl();
     if (resolvedSchema.properties) {
-      for (
-        const [key, propSchema] of Object.entries(resolvedSchema.properties)
-      ) {
-        if (propSchema.asCell || propSchema.asStream || key in value) {
+      for (const key of Object.keys(resolvedSchema.properties)) {
+        const childSchema = cfc.getSchemaAtPath(
+          resolvedSchema,
+          [key],
+          rootSchema,
+        );
+        if (childSchema === undefined) {
+          continue;
+        }
+        if (childSchema.asCell || childSchema.asStream || key in value) {
           result[key] = validateAndTransform(
             doc,
             [...path, key],
-            propSchema,
+            childSchema,
             log,
             rootSchema,
             seen,
           );
-        } else if (propSchema.default !== undefined) {
+        } else if (childSchema.default !== undefined) {
           // Process default value for missing properties that have defaults
           result[key] = processDefaultValue(
             doc,
             [...path, key],
-            propSchema.default,
-            propSchema,
+            childSchema.default,
+            childSchema,
             log,
             rootSchema,
           );
@@ -524,24 +557,25 @@ export function validateAndTransform(
     }
 
     // Handle additional properties if defined
-    if (resolvedSchema.additionalProperties) {
-      // For `additionalProperties: true` we assume no schema
-      const additionalPropertiesSchema =
-        typeof resolvedSchema.additionalProperties === "object"
-          ? resolvedSchema.additionalProperties
-          : undefined;
-      const keys = Object.keys(value);
-      for (const key of keys) {
-        if (!resolvedSchema.properties || !(key in resolvedSchema.properties)) {
-          result[key] = validateAndTransform(
-            doc,
-            [...path, key],
-            additionalPropertiesSchema,
-            log,
-            rootSchema,
-            seen,
-          );
+    const keys = Object.keys(value);
+    for (const key of keys) {
+      if (!resolvedSchema.properties || !(key in resolvedSchema.properties)) {
+        const childSchema = cfc.getSchemaAtPath(
+          resolvedSchema,
+          [key],
+          rootSchema,
+        );
+        if (childSchema === undefined) {
+          continue;
         }
+        result[key] = validateAndTransform(
+          doc,
+          [...path, key],
+          childSchema,
+          log,
+          rootSchema,
+          seen,
+        );
       }
     }
 

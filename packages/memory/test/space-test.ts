@@ -41,7 +41,10 @@ function getResultAtPath(
 }
 
 function getResultForDoc(
-  result: Space.Result<Space.Selection<Space.DIDKey>, Space.QueryError>,
+  result: Space.Result<
+    Space.Selection<Space.DIDKey>,
+    Space.AuthorizationError | Space.QueryError
+  >,
   space: Space.DIDKey,
   doc: Space.Entity | "_",
 ) {

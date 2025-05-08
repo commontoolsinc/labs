@@ -244,6 +244,8 @@ describe("Schema Support", () => {
         cell: doc.toJSON(),
         path: ["current", "label"],
         space: "test",
+        schema: current.schema,
+        rootSchema: current.rootSchema,
       });
 
       // .get() the currently selected cell. This should not change when
@@ -262,10 +264,13 @@ describe("Schema Support", () => {
       const first = root.key("current").withLog(log).get();
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqual({ label: "first" });
+      const { asCell: _ignore, ...omitSchema } = schema.properties.current;
       expect(JSON.parse(JSON.stringify(first.getAsCellLink()))).toEqual({
         cell: initialDoc.toJSON(),
         path: ["foo"],
         space: "test",
+        schema: omitSchema,
+        rootSchema: schema,
       });
       expect(log.reads.length).toEqual(4);
       expect(

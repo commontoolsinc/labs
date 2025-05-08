@@ -215,7 +215,7 @@ describe("OpaqueRef Schema Support", () => {
       expect(exported.rootSchema).toEqual(schema);
     });
 
-    it("should return undefined schema for properties that aren't included in the schema", () => {
+    it("should return undefined schema for properties that aren't allowed by the schema", () => {
       // Set a schema with nested objects
       const schema = {
         type: "object",
@@ -228,6 +228,7 @@ describe("OpaqueRef Schema Support", () => {
             },
           },
         },
+        additionalProperties: false,
       } as const satisfies JSONSchema;
 
       // Create an opaque ref with nested objects, and a property that isn't in the schema

@@ -2,17 +2,13 @@ import * as Memory from "./memory.ts";
 import type {
   AsyncResult,
   Await,
-  Cause,
-  Changes,
   CloseResult,
   Commit,
-  CommitData,
   ConnectionError,
   ConsumerCommandInvocation,
   ConsumerInvocationFor,
   ConsumerResultFor,
   Fact,
-  FactSelection,
   Invocation,
   InvocationURL,
   MemorySession,
@@ -28,16 +24,13 @@ import type {
   Result,
   Revision,
   SchemaQuery,
-  Select,
   Selection,
   Subscribe,
   Subscriber,
-  The,
   Transaction,
   UCAN,
 } from "./interface.ts";
 import * as Subscription from "./subscription.ts";
-
 export * from "./interface.ts";
 export * from "./util.ts";
 export * as Error from "./error.ts";
@@ -47,7 +40,7 @@ export * as Subscription from "./subscription.ts";
 import { refer } from "./reference.ts";
 import * as Access from "./access.ts";
 import { Fact as FactModule, SelectionBuilder } from "./lib.ts";
-import { assert } from "@std/assert/assert";
+import { FactAddress } from "../runner/src/storage/cache.ts";
 
 // Convenient shorthand so I don't need this long type for this string
 type JobId = InvocationURL<Reference<ConsumerCommandInvocation<Protocol>>>;
@@ -234,6 +227,7 @@ class MemoryProviderSession<
         const result = await this.memory.querySchema(invocation);
         if (invocation.args.subscribe && result.ok !== undefined) {
           this.addSchemaSubscription(of, invocation, result.ok);
+          this.memory.subscribe(this);
         }
         return this.perform({
           the: "task/return",
@@ -300,7 +294,6 @@ class MemoryProviderSession<
     // It is important that we send it to the right kind of listener.
     if (lastId !== undefined) {
       //this.setCommitData(commit, maxSince, changes);
-      console.log("Sending facts", facts, "to", lastId);
       this.perform({
         the: "task/effect",
         of: lastId,
@@ -323,15 +316,23 @@ class MemoryProviderSession<
     return { ok: {} };
   }
 
+  private formatAddress<Space extends MemorySpace>(
+    space: Space,
+    fv: FactAddress,
+  ) {
+    return Subscription.formatAddress({ at: space, the: fv.the, of: fv.of });
+  }
+
   private addSchemaSubscription<Space extends MemorySpace>(
     of: JobId,
     invocation: SchemaQuery<Space>,
     result: Selection<Space>,
   ) {
-    const factSelection = result[invocation.sub];
-    const factVersions = Array.from(FactModule.iterate(factSelection));
+    const space = invocation.sub;
+    const factSelection = result[space];
+    const factVersions = [...FactModule.iterate(factSelection)];
     const includedFacts = new Set(
-      factVersions.map((fv) => Subscription.formatAddress(fv)),
+      factVersions.map((fv) => this.formatAddress(space, fv)),
     );
     const since = factVersions.reduce(
       (acc, cur, _i) => cur.since > acc ? cur.since : acc,
@@ -345,22 +346,34 @@ class MemoryProviderSession<
     this.schemaChannels.set(of, subscription);
   }
 
-  private async getSchemaSubscriptionMatches(
+  private async getSchemaSubscriptionMatches<Space extends MemorySpace>(
     commit: Commit<Space>,
   ): Promise<[JobId | undefined, number, Selection<Space>]> {
     const schemaMatches = new Map<string, Revision<Fact>>();
     let maxSince = -1;
     let lastId;
-    const [[space, _attributes]] = Object.entries(commit);
+    const [[spaceStr, _attributes]] = Object.entries(commit);
+    const space = spaceStr as Space;
     // Eventually, we should support multiple spaces, but currently the since handling is per-space
     // Our websockets are also per-space, so there's larger issues involved.
     for (const [id, subscription] of this.schemaChannels) {
       if (Subscription.match(commit, subscription.watchedObjects)) {
-        const result = await this.memory.querySchema(subscription.invocation);
-        const factSelection = result.ok![space as Space];
-        const factVersions = Array.from(FactModule.iterate(factSelection));
+        // Re-run our original query, but not as a subscription
+        const newArgs = { ...subscription.invocation.args, subscribe: false };
+        const newInvocation = { ...subscription.invocation, args: newArgs };
+        // We need to bypass the perform queue to avoid a deadlock
+        const result = await Memory.querySchema(
+          this.memory as Memory.Memory,
+          newInvocation,
+        );
+        if (result.error) {
+          console.log(result.error);
+          continue;
+        }
+        const factSelection = result.ok![space];
+        const factVersions = [...FactModule.iterate(factSelection)];
         const includedFacts = new Map(
-          factVersions.map((fv) => [Subscription.formatAddress(fv), fv]),
+          factVersions.map((fv) => [this.formatAddress(space, fv), fv]),
         );
         const since = factVersions.reduce(
           (acc, cur, _i) => cur.since > acc ? cur.since : acc,

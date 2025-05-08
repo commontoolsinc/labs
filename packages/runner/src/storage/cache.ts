@@ -17,7 +17,11 @@ import type {
   UCAN,
   Unit,
 } from "@commontools/memory/interface";
-import type { Cancel, EntityId } from "@commontools/runner";
+import {
+  type Cancel,
+  ContextualFlowControl,
+  type EntityId,
+} from "@commontools/runner";
 import {
   BaseStorageProvider,
   type StorageProvider,
@@ -34,6 +38,7 @@ export * from "@commontools/memory/interface";
 import * as Codec from "@commontools/memory/codec";
 import { Channel, RawCommand } from "./inspector.ts";
 import { isBrowser } from "@commontools/utils/env";
+import { deepEqual } from "@commontools/builder";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -390,7 +395,7 @@ export class Replica {
   ): Promise<
     Result<
       Selection<FactAddress, Revision<State>>,
-      QueryError | ConnectionError | StoreError
+      StoreError | QueryError | AuthorizationError | ConnectionError
     >
   > {
     // If requested entry list is empty there is nothing to fetch so we return
@@ -403,12 +408,18 @@ export class Replica {
     // remote.
     const schemaSelector = {};
     const querySelector = {};
+    // We'll assert that we need all the classifications we expect to need.
+    // If we don't actually have those, the server will reject our request.
+    const cfc = new ContextualFlowControl();
+    const classifications = new Set<string>();
     for (const [{ the, of }, schemaContext] of entries) {
       if (this.useSchemaQueries && schemaContext !== undefined) {
         Changes.set(schemaSelector, [of, the], "_", {
           path: [],
           schemaContext: schemaContext,
         });
+        // Since we're accessing the entire document, we should base our classification on the rootSchema
+        cfc.joinSchema(classifications, schemaContext.rootSchema);
       } else {
         Changes.set(querySelector, [of], the, {});
       }
@@ -417,16 +428,23 @@ export class Replica {
     let fetchedEntries: [Revision<State>, SchemaContext | undefined][] = [];
     // Run all our schema queries first
     if (Object.entries(schemaSelector).length > 0) {
-      const query = this.remote.query({
+      const queryArgs: Memory.SchemaQueryArgs = {
         selectSchema: schemaSelector,
         subscribe: true,
-      });
+      };
+      if (classifications.size > 0) {
+        queryArgs.classification = [...classifications];
+      }
+      const query = this.remote.query(queryArgs);
       const { error } = await query.promise;
       // If query fails we propagate the error.
       if (error) {
         return { error };
       }
       fetchedEntries = query.schemaFacts;
+      // FIXME(@ubik2) verify that we're dealing with this subscription
+      // I know we're sending updates over from the provider, but make sure
+      // we're incorporating those in the cache.
     }
     // Now run our regular queries (this will include our commit+json)
     if (Object.entries(querySelector).length > 0) {
@@ -492,7 +510,7 @@ export class Replica {
   ): Promise<
     Result<
       Selection<FactAddress, Revision<State>>,
-      StoreError | QueryError | ConnectionError
+      StoreError | QueryError | AuthorizationError | ConnectionError
     >
   > {
     // First we identify entries that we have need to load from the store.
@@ -817,6 +835,7 @@ export class Provider implements StorageProvider {
 
     return () => workspace.unsubscribe(address, subscriber);
   }
+
   sync(
     entityId: EntityId,
     expectedInStorage?: boolean,
@@ -849,6 +868,7 @@ export class Provider implements StorageProvider {
     >
   > {
     const { the, workspace } = this;
+    const TheLabel = "application/label+json" as const;
 
     const changes = [];
     for (const { entityId, value } of batch) {
@@ -856,7 +876,6 @@ export class Provider implements StorageProvider {
       const content = JSON.stringify(value);
 
       const current = workspace.get({ the, of });
-
       if (JSON.stringify(current?.is) !== content) {
         changes.push({
           the,
@@ -865,6 +884,16 @@ export class Provider implements StorageProvider {
           // cause problems with serialization.
           is: JSON.parse(content) as JSONValue,
         });
+      }
+      if (value.labels !== undefined) {
+        const currentLabel = workspace.get({ the: TheLabel, of });
+        if (!deepEqual(currentLabel?.is, value.labels)) {
+          changes.push({
+            the: TheLabel,
+            of,
+            is: value.labels as JSONValue,
+          });
+        }
       }
     }
 

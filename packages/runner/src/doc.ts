@@ -24,7 +24,8 @@ import {
 import { type ReactivityLog } from "./scheduler.ts";
 import { type Cancel } from "./cancel.ts";
 import { arrayEqual } from "./utils.ts";
-import { refer } from "@commontools/memory/reference";
+import { ContextualFlowControl } from "./index.ts";
+import { Labels } from "./storage.ts";
 
 /**
  * Lowest level cell implementation.
@@ -117,9 +118,15 @@ export type DocImpl<T> = {
    * @param path - Path to set.
    * @param newValue - New value.
    * @param log - Reactivity log.
+   * @param schema - JSON Schema to validate against.
    * @returns Whether the value changed.
    */
-  setAtPath(path: PropertyKey[], newValue: any, log?: ReactivityLog): boolean;
+  setAtPath(
+    path: PropertyKey[],
+    newValue: any,
+    log?: ReactivityLog,
+    schema?: JSONSchema,
+  ): boolean;
 
   /**
    * Add callback for updates. Will call on first change.
@@ -127,7 +134,9 @@ export type DocImpl<T> = {
    * @param callback - Callback to call on updates.
    * @returns Cancel function.
    */
-  updates(callback: (value: T, path: PropertyKey[]) => void): Cancel;
+  updates(
+    callback: (value: T, path: PropertyKey[], labels?: Labels) => void,
+  ): Cancel;
 
   /**
    * Freeze cell, making it read-only.
@@ -244,7 +253,10 @@ export function createDoc<T>(
   entityId: EntityId,
   space: string,
 ): DocImpl<T> {
-  const callbacks = new Set<(value: T, path: PropertyKey[]) => void>();
+  const callbacks = new Set<
+    (value: T, path: PropertyKey[], labels?: Labels) => void
+  >();
+  const cfc = new ContextualFlowControl();
   let readOnly = false;
   let sourceCell: DocImpl<any> | undefined;
   let ephemeral = false;
@@ -266,12 +278,19 @@ export function createDoc<T>(
     ) => createCell<Q>(self, path || [], log, schema, rootSchema),
     send: (newValue: T, log?: ReactivityLog) =>
       self.setAtPath([], newValue, log),
-    updates: (callback: (value: T, path: PropertyKey[]) => void) => {
+    updates: (
+      callback: (value: T, path: PropertyKey[], labels?: Labels) => void,
+    ) => {
       callbacks.add(callback);
       return () => callbacks.delete(callback);
     },
     getAtPath: (path: PropertyKey[]) => getValueAtPath(value, path),
-    setAtPath: (path: PropertyKey[], newValue: any, log?: ReactivityLog) => {
+    setAtPath: (
+      path: PropertyKey[],
+      newValue: any,
+      log?: ReactivityLog,
+      schema?: JSONSchema,
+    ) => {
       if (readOnly) throw new Error("Cell is read-only");
 
       let changed = false;
@@ -282,10 +301,18 @@ export function createDoc<T>(
         value = newValue;
       }
       if (changed) {
-        log?.writes.push({ cell: self, path });
+        log?.writes.push({ cell: self, path, schema: schema });
+        const lubSchema = (schema !== undefined)
+          ? cfc.lubSchema(schema)
+          : undefined;
+        const labels = (lubSchema !== undefined)
+          ? { classification: [lubSchema] }
+          : undefined;
         // Call each callback. Snapshot via [...callbacks] as the set of
         // callbacks can change during the execution of the callbacks.
-        for (const callback of [...callbacks]) callback(value as T, path);
+        for (const callback of [...callbacks]) {
+          callback(value as T, path, labels);
+        }
       }
       return changed;
     },

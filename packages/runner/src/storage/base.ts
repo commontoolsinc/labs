@@ -1,6 +1,6 @@
 import type { Cancel, EntityId } from "@commontools/runner";
 import type { Entity, Result, Unit } from "@commontools/memory/interface";
-import { log } from "../storage.ts";
+import { Labels, log } from "../storage.ts";
 import { SchemaContext } from "@commontools/memory/interface";
 
 export type { Result, Unit };
@@ -10,6 +10,7 @@ export interface StorageValue<T = any> {
   source?: EntityId;
   // This is used on writes to retry on conflicts.
   retry?: ((previousValue: T) => T)[];
+  labels?: Labels;
 }
 
 export interface StorageProvider {
