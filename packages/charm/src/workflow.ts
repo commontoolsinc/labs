@@ -878,8 +878,7 @@ export async function processWorkflow(
     return form;
   } catch (error) {
     const totalTime = performance.now() - startTime;
-    // Provide a stringified version for Astral/integration tests
-    console.warn("workflow failed:", error, error ?? JSON.stringify(error));
+    console.warn("workflow failed:", error);
     console.log(`Workflow failed after ${totalTime.toFixed(2)}ms`);
 
     globalThis.dispatchEvent(
