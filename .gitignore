@@ -12,6 +12,7 @@ artifact
 _deno.lock
 
 !/packages/jumble/integration/cache
+packages/seeder/results
 .claude-prompt.tmp
 .pr-desc.tmp
 dist/

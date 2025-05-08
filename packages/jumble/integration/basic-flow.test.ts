@@ -70,6 +70,7 @@ Deno.test({
           });
 
           await page.goto(FRONTEND_URL);
+          await page.applyConsoleFormatter();
 
           console.log(`Opened website at ${FRONTEND_URL}`);
         },
@@ -104,6 +105,7 @@ Deno.test({
           await page.goto(
             `${FRONTEND_URL}${testCharm.name}/${testCharm.charmId}`,
           );
+          await page.applyConsoleFormatter();
           if (TAKE_SNAPSHOTS) {
             await page.snapshot("Waiting for charm to render", SNAPSHOTS_DIR);
           }
@@ -129,6 +131,7 @@ Deno.test({
           await page.goto(
             `${FRONTEND_URL}${testCharm.name}/${testCharm.charmId}`,
           );
+          await page.applyConsoleFormatter();
 
           // Wait for initial render
           await page.waitForSelectorWithText(
