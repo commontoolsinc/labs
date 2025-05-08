@@ -778,7 +778,7 @@ test(
     });
 
     assertEquals(query.error?.name, "AuthorizationError");
-    assertEquals(query.error?.message, "Insufficient authorization");
+    assertEquals(query.error?.message, "Insufficient access");
   },
 );
 
@@ -940,7 +940,7 @@ test(
     });
 
     assertEquals(query.error?.name, "AuthorizationError");
-    assertEquals(query.error?.message, "Insufficient authorization");
+    assertEquals(query.error?.message, "Insufficient access");
   },
 );
 
