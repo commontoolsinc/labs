@@ -721,8 +721,8 @@ export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
 export type SchemaQueryArgs = {
   selectSchema: SchemaSelector;
   since?: number;
-  subscribe?: boolean;
-  classification?: string[];
+  subscribe?: boolean; // set to true to be notified of changes to any reachable entities
+  classification?: string[]; // classifications to claim for access
 };
 
 export type SchemaQuery<Space extends MemorySpace = MemorySpace> = Invocation<
