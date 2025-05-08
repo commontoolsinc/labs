@@ -32,6 +32,7 @@ import {
 } from "./traverse.ts";
 import { JSONSchema } from "../builder/src/index.ts";
 import { ContextualFlowControl } from "../runner/src/index.ts";
+import { TheAuthorizationError } from "./error.ts";
 export * from "./interface.ts";
 
 export type FullFactAddress = FactAddress & { cause: Cause; since: number };
@@ -351,7 +352,7 @@ export const selectSchema = <Space extends MemorySpace>(
   }
 
   if (!requiredClassifications.isSubsetOf(new Set<string>(classification))) {
-    throw "AuthorizationError";
+    throw new TheAuthorizationError("Insufficient access");
   }
 
   // Any entities referenced in our selectSchema must be returned in the response
