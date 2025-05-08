@@ -74,7 +74,7 @@ export function opaqueRef<T>(
         // Determine child schema when accessing a property
         const childSchema = key in methods
           ? undefined
-          : cfc.getSchemaAtPath(nestedSchema, [key.toString()], schema);
+          : cfc.getSchemaAtPath(nestedSchema, [key.toString()], rootSchema);
         return createNestedProxy(
           [...path, key],
           key in methods ? methods[key as keyof OpaqueRefMethods<any>] : store,
