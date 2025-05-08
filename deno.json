@@ -73,7 +73,8 @@
     "singleQuote": false,
     "proseWrap": "always",
     "exclude": [
-      "packages/jumble/integration/cache/llm-api-cache/"
+      "packages/jumble/integration/cache/llm-api-cache/",
+      "packages/seeder/templates/"
     ]
   },
   "imports": {
