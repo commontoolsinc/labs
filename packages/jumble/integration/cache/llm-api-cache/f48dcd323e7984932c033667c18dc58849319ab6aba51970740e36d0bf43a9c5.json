@@ -7,7 +7,7 @@
     },
     {
       "role": "assistant",
-      "content": "<autocomplete>Create a 🎮 2048 game charm with a grid-based UI, sliding tile mechanics, and score tracking. The charm will need to handle game state, tile merging logic, and win/lose conditions. Could add 🏆 high score persistence and 🔄 game reset functionality.</autocomplete>"
+      "content": "<autocomplete>Create a 🎮 2048 game charm with a grid-based UI, sliding tile mechanics, and score tracking. The charm will need a game board, tile merging logic, and win/lose conditions. Could add 🏆 high score tracking and 🔄 game reset functionality.</autocomplete>"
     }
   ],
   "model": "anthropic:claude-3-7-sonnet-20250219",
