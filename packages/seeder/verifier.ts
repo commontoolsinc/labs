@@ -43,6 +43,7 @@ export class Verifier {
   ): Promise<CharmResult> {
     // FIXME(ja): can we navigate without causing a page reload?
     await this.page.goto(`${this.apiUrl}/${name!}/${id}`);
+    await this.page.applyConsoleFormatter();
     await sleep(1000);
     await addErrorListeners(this.page);
     await login(this.page);
