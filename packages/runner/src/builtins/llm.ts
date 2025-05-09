@@ -224,8 +224,7 @@ export function generateObject(
     const generateObjectParams: LLMGenerateObjectRequest = {
       prompt,
       maxTokens: maxTokens ?? 8192,
-      model,
-      schema,
+      schema: JSON.parse(JSON.stringify(schema)),
       metadata: {
         context: "charm",
       },
@@ -251,8 +250,7 @@ export function generateObject(
     const resultPromise = client.generateObject(generateObjectParams);
 
     resultPromise
-      .then(async (generateObjectResult) => {
-        const object = generateObjectResult.object;
+      .then(async (object) => {
         if (thisRun !== currentRun) return;
 
         await idle();

@@ -21,7 +21,7 @@ export class LLMClient {
   async generateObject(
     request: LLMGenerateObjectRequest,
   ): Promise<LLMGenerateObjectResponse> {
-    const response = await fetch(llmApiUrl, {
+    const response = await fetch(llmApiUrl + "/generateObject", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
