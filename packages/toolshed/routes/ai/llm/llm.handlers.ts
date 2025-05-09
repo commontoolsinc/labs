@@ -2,6 +2,7 @@ import * as HttpStatusCodes from "stoker/http-status-codes";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
   FeedbackRoute,
+  GenerateObjectRoute,
   GenerateTextRoute,
   GetModelsRoute,
 } from "./llm.routes.ts";
@@ -9,9 +10,14 @@ import { ALIAS_NAMES, ModelList, MODELS, TASK_MODELS } from "./models.ts";
 import { hashKey, loadFromCache, saveToCache } from "./cache.ts";
 import type { Context } from "@hono/hono";
 import { generateText as generateTextCore } from "./generateText.ts";
+import { generateObject as generateObjectInternal } from "./generateObject.ts";
 import { findModel } from "./models.ts";
 import env from "@/env.ts";
-import { isLLMRequest, type LLMMessage } from "@commontools/llm/types";
+import {
+  isLLMRequest,
+  type LLMGenerateObjectRequest,
+  type LLMMessage,
+} from "@commontools/llm/types";
 
 const removeNonCacheableFields = (obj: any) => {
   const { cache, metadata, ...rest } = obj;
@@ -95,6 +101,28 @@ export const getModels: AppRouteHandler<GetModelsRoute> = (c) => {
   );
 
   return c.json(modelInfo);
+};
+
+export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (
+  c,
+) => {
+  const payload = await c.req.json() as LLMGenerateObjectRequest;
+
+  if (!payload.schema) {
+    return c.json(
+      { error: "Schema is required." },
+      HttpStatusCodes.BAD_REQUEST,
+    );
+  }
+
+  try {
+    const result = await generateObjectInternal(payload);
+    return c.json({ object: result.object }, HttpStatusCodes.OK);
+  } catch (error) {
+    return c.json({
+      error: error instanceof Error ? error.message : "Unknown error",
+    }, HttpStatusCodes.BAD_REQUEST);
+  }
 };
 
 /**

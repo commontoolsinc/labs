@@ -23,9 +23,11 @@ export {
   recipeFromFrame,
 } from "./recipe.ts";
 export {
+  type BuiltInGenerateObjectParams,
   type BuiltInLLMParams,
   type BuiltInLLMState,
   fetchData,
+  generateObject,
   ifElse,
   llm,
   navigateTo,
