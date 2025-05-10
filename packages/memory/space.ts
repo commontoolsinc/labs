@@ -5,15 +5,14 @@ import {
 } from "@db/sqlite";
 import { fromString, refer } from "./reference.ts";
 import { unclaimed } from "./fact.ts";
-import { from as toChanges, set } from "./changes.ts";
 import { create as createCommit, the as COMMIT_THE } from "./commit.ts";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
   Assert,
+  AssertFact,
   Assertion,
   AsyncResult,
   AuthorizationError,
-  AwaitResult,
   Cause,
   Claim,
   Commit,
@@ -23,14 +22,17 @@ import type {
   DIDKey,
   Entity,
   Fact,
+  FactSelection,
   JSONValue,
   MemorySpace,
+  OfTheCause,
   Query,
   QueryError,
   Reference,
   Result,
   Retract,
   SchemaQuery,
+  SelectAll,
   Selection,
   SpaceSession,
   SystemError,
@@ -40,9 +42,19 @@ import type {
   TransactionError,
   Unit,
 } from "./interface.ts";
+import {
+  getRevision,
+  iterate,
+  iterateSelector,
+  set,
+  setEmptyObj,
+  setRevision,
+} from "./selection.ts";
+import { SelectAllString } from "./interface.ts";
 import * as Error from "./error.ts";
 import { selectSchema } from "./space-schema.ts";
-export * from "./interface.ts";
+import { isObject } from "../utils/src/types.ts";
+export type * from "./interface.ts";
 
 export const PREPARE = `
 BEGIN TRANSACTION;
@@ -392,54 +404,39 @@ const recall = <Space extends MemorySpace>(
 };
 
 const select = <Space extends MemorySpace>(
-  { store }: Session<Space>,
+  session: Session<Space>,
   { since, select }: Query["args"],
 ): Selection<Space>[Space] => {
-  const selection = {};
-  const all = [[SelectAll, {}]] as const;
-  const selector = Object.entries(select);
-  for (const [of, attributes] of selector.length > 0 ? selector : all) {
-    if (of !== SelectAll) {
-      set(selection, [], of, {});
-    }
-
-    const selector = Object.entries(attributes);
-    for (const [the, revisions] of selector.length > 0 ? selector : all) {
-      if (the !== SelectAll && of !== SelectAll) {
-        set(selection, [of], the, {});
-      }
-
-      const selector = Object.entries(revisions);
-      for (const [cause, match] of selector.length > 0 ? selector : all) {
-        const rows = store.prepare(EXPORT).all({
-          the: the === SelectAll ? null : the,
-          of: of === SelectAll ? null : of,
-          cause: cause === SelectAll ? null : cause,
-          is: (match as { is?: Unit }).is === undefined ? null : {},
-          since: since ?? null,
-        }) as StateRow[];
-
-        for (const row of rows) {
-          set(
-            selection,
-            [row.of, row.the],
-            row.cause ?? refer(unclaimed(row)).toString(),
-            row.is
-              ? { is: JSON.parse(row.is), since: row.since }
-              : { since: row.since },
-          );
+  const factSelection: FactSelection = {}; // we'll store our facts here
+  // First, collect all the potentially relevant facts (without dereferencing pointers)
+  for (const entry of iterateSelector(select)) {
+    const factSelector = {
+      of: entry.of,
+      the: entry.the,
+      cause: entry.cause,
+      since,
+      ...entry.value.is ? { is: entry.value.is } : {},
+    };
+    loadFacts(factSelection, session, factSelector);
+    if (entry.of !== SelectAllString) {
+      const existing = getRevision(factSelection, entry.of, entry.the);
+      if (existing === undefined) {
+        // We return a result for each object queried, even if we didn't find it in the database
+        if (entry.the === SelectAllString) {
+          setEmptyObj(factSelection, entry.of);
+        } else {
+          setEmptyObj(factSelection, entry.of, entry.the);
         }
       }
     }
   }
-
-  return selection;
+  return factSelection;
 };
 
 export type FactSelector = {
-  the: The | "_";
-  of: Entity | "_";
-  cause: Cause | "_";
+  the: The | SelectAll;
+  of: Entity | SelectAll;
+  cause: Cause | SelectAll;
   is?: undefined | Record<string | number | symbol, never>;
   since?: number;
 };
@@ -452,15 +449,14 @@ export type SelectedFact = {
   since: number;
 };
 
-export const SelectAll = "_";
 export const selectFacts = function* <Space extends MemorySpace>(
   { store }: Session<Space>,
   { the, of, cause, is, since }: FactSelector,
 ): Iterable<SelectedFact> {
   const rows = store.prepare(EXPORT).all({
-    the: the === SelectAll ? null : the,
-    of: of === SelectAll ? null : of,
-    cause: cause === SelectAll ? null : cause,
+    the: the === SelectAllString ? null : the,
+    of: of === SelectAllString ? null : of,
+    cause: cause === SelectAllString ? null : cause,
     is: is === undefined ? null : {},
     since: since ?? null,
   }) as StateRow[];
@@ -500,7 +496,7 @@ const importDatum = <Space extends MemorySpace>(
   }
 };
 
-const iterate = function* (
+const iterateTransaction = function* (
   transaction: Transaction,
 ): Iterable<Retract | Assert | Claim> {
   for (const [of, attributes] of Object.entries(transaction.args.changes)) {
@@ -630,13 +626,22 @@ const commit = <Space extends MemorySpace>(
 
   const commit = createCommit({ space: of, since, transaction, cause });
 
-  for (const fact of iterate(transaction)) {
+  for (const fact of iterateTransaction(transaction)) {
     swap(session, fact, commit.is);
   }
 
   swap(session, { assert: commit }, commit.is);
 
-  return toChanges([commit]);
+  // attach labels to the commit, so the provider can remove any classified entries from the commit before we send it to subscribers
+  const labels = getLabels(session, commit.is.transaction.args.changes);
+  if (Object.keys(labels).length > 0) {
+    commit.is.labels = labels;
+  }
+  const changes: Commit<Space> = {} as Commit<Space>;
+  set(changes, commit.of, commit.the, commit.cause.toString(), {
+    is: commit.is,
+  });
+  return changes;
 };
 
 const execute = <
@@ -770,3 +775,89 @@ export const querySchema = <Space extends MemorySpace>(
     }
   });
 };
+
+export const LABEL_THE = "application/label+json" as const;
+export function getLabels<Space extends MemorySpace, T>(
+  session: Session<Space>,
+  includedFacts: OfTheCause<T>,
+) {
+  const labels: OfTheCause<AssertFact> = {};
+  for (const fact of iterate(includedFacts)) {
+    const factSelector = {
+      the: LABEL_THE,
+      of: fact.of,
+      cause: SelectAllString,
+    };
+    for (const metadata of selectFacts(session, factSelector)) {
+      if (metadata.is) {
+        setRevision<AssertFact>(
+          labels,
+          metadata.of,
+          metadata.the,
+          metadata.cause,
+          {
+            is: metadata.is,
+          },
+        );
+      }
+    }
+  }
+  return labels;
+}
+
+// Get the various classification tags required based on the collection of labels.
+export function collectClassifications(
+  labels: OfTheCause<AssertFact>,
+) {
+  const classifications = new Set<string>();
+  for (const fact of iterate(labels)) {
+    if (!isObject(fact.value.is) || !("classification" in fact.value.is)) {
+      continue;
+    }
+    const labels = fact.value.is["classification"] as string[];
+    for (const label of labels) {
+      classifications.add(label);
+    }
+  }
+  return classifications;
+}
+
+// Modifies the commit in place to remove any classified documents
+export function redactCommit(commit: Commit) {
+  for (const item of iterate(commit)) {
+    const commitData = item.value.is;
+    // remove any classified entries from the commit before we send it to subscribers
+    if (commitData.labels === undefined) {
+      continue;
+    }
+    const removeList = [];
+    for (const fact of iterate(commitData.transaction.args.changes)) {
+      if (getRevision(commitData.labels, fact.of, fact.the)) {
+        removeList.push(fact);
+      }
+    }
+    for (const redacted of removeList) {
+      setEmptyObj(
+        commitData.transaction.args.changes,
+        redacted.of,
+        redacted.the,
+      );
+    }
+  }
+}
+
+export function loadFacts<Space extends MemorySpace>(
+  selection: FactSelection,
+  session: Session<Space>,
+  factSelector: FactSelector,
+): FactSelection {
+  for (
+    const fact of selectFacts(session, factSelector)
+  ) {
+    const value = (fact.is !== undefined)
+      ? { is: fact.is, since: fact.since }
+      : { since: fact.since };
+    setRevision(selection, fact.of, fact.the, fact.cause, value);
+  }
+  return selection;
+}

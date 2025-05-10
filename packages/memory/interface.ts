@@ -1,4 +1,4 @@
-import { refer, type Reference } from "merkle-reference";
+import type { Reference } from "merkle-reference";
 import { JSONSchema } from "../builder/src/types.ts";
 
 export type { Reference };
@@ -639,6 +639,7 @@ export type Commit<Subject extends string = MemorySpace> = {
 export type CommitData = {
   since: number;
   transaction: Transaction;
+  labels?: OfTheCause<AssertFact>;
 };
 
 export type CommitFact<Subject extends MemorySpace = MemorySpace> = Assertion<
@@ -647,12 +648,23 @@ export type CommitFact<Subject extends MemorySpace = MemorySpace> = Assertion<
   CommitData
 >;
 
+// This allows a consumer to check that their entities match the current cause
+// state before making local changes that would be discarded on conflict.
 export type ClaimFact = true;
 
-// ⚠️ Note we use `void` as opposed to `undefined` because later makes it
+// ⚠️ Note we use `void` as opposed to `undefined` because the latter makes it
 // incompatible with JSONValue.
 export type RetractFact = { is?: void };
 export type AssertFact<Is extends JSONValue = JSONValue> = { is: Is };
+
+// This is the structure of a bunch of our objects
+export type OfTheCause<T> = {
+  [of in Entity]: {
+    [the in The]: {
+      [cause: Cause]: T;
+    };
+  };
+};
 
 export type Changes<
   T extends The = The,
@@ -687,6 +699,9 @@ export type DID = `did:${string}:${string}`;
 
 export type DIDKey = `did:key:${string}`;
 
+export type URI = `${string}:${string}`;
+export type MIME = `${string}/${string}`;
+
 export type Transaction<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/transact",
   Space,
@@ -699,10 +714,12 @@ export type TransactionResult<Space extends MemorySpace = MemorySpace> =
     ConflictError | TransactionError | ConnectionError | AuthorizationError
   >;
 
+export type QueryArgs = { select: Selector; since?: number };
+
 export type Query<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/query",
   Space,
-  { select: Selector; since?: number }
+  QueryArgs
 >;
 
 export type Subscribe<Space extends MemorySpace = MemorySpace> = Invocation<
@@ -767,6 +784,7 @@ export type SchemaSelector = Select<
 export type SchemaPathSelector = {
   path: string[];
   schemaContext?: SchemaContext;
+  is?: Unit;
 };
 
 // This is a schema, together with its rootSchema for resolving $ref entries
@@ -986,3 +1004,5 @@ export const SchemaAll: SchemaContext = { schema: true, rootSchema: true };
 
 // This is equivalent to a standard query, and will only match the specified documents
 export const SchemaNone: SchemaContext = { schema: false, rootSchema: false };
+
+export const SelectAllString = "_";

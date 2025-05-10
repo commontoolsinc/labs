@@ -10,7 +10,7 @@ import { refer } from "merkle-reference";
 import { alice, bob, space as subject } from "./principal.ts";
 import { UTCUnixTimestampInSeconds } from "../interface.ts";
 import { JSONSchema } from "@commontools/builder";
-import { LABEL_THE } from "../space-schema.ts";
+import { LABEL_THE } from "../space.ts";
 
 // Some generated service key.
 const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";

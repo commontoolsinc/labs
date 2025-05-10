@@ -30,7 +30,6 @@ import {
 import type { MemorySpaceSession } from "@commontools/memory/consumer";
 import { assert, retract, unclaimed } from "@commontools/memory/fact";
 import { fromString, refer } from "merkle-reference";
-import * as Changes from "@commontools/memory/changes";
 import { the, toChanges, toRevision } from "@commontools/memory/commit";
 import * as IDB from "./idb.ts";
 import * as Memory from "@commontools/memory/consumer";
@@ -39,6 +38,7 @@ import * as Codec from "@commontools/memory/codec";
 import { Channel, RawCommand } from "./inspector.ts";
 import { isBrowser } from "@commontools/utils/env";
 import { deepEqual } from "@commontools/builder";
+import { set, setSelector } from "@commontools/memory/selection";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -366,12 +366,24 @@ export class Replica {
 
   async poll() {
     // Poll re-fetches the commit log, then subscribes to that
+    // We don't use the autosubscribing query, since we want the
+    // Commit object, and the autosubscribe returns a Selection.
+    // TODO: Investigate
     const query = this.remote.query({
-      select: {
-        [this.space]: {
-          [the]: {},
-        },
-      },
+      // selectSchema: {
+      //   [this.space]: {
+      //     [the]: {
+      //       "_": {
+      //         path: [],
+      //         schemaContext: {
+      //           schema: {},
+      //           rootSchema: {},
+      //         },
+      //       },
+      //     },
+      //   },
+      // },
+      select: { [this.space]: { [the]: { "_": {} } } },
     });
 
     const reader = query.subscribe().getReader();
@@ -412,16 +424,19 @@ export class Replica {
     // If we don't actually have those, the server will reject our request.
     const cfc = new ContextualFlowControl();
     const classifications = new Set<string>();
-    for (const [{ the, of }, schemaContext] of entries) {
-      if (this.useSchemaQueries && schemaContext !== undefined) {
-        Changes.set(schemaSelector, [of, the], "_", {
+    for (const [{ the, of }, context] of entries) {
+      if (this.useSchemaQueries) {
+        // If we don't have a schema, use SchemaNone, which will only fetch the specified object
+        const schemaContext = context ?? Memory.SchemaNone;
+        setSelector(schemaSelector, of, the, "_", {
           path: [],
           schemaContext: schemaContext,
         });
         // Since we're accessing the entire document, we should base our classification on the rootSchema
         cfc.joinSchema(classifications, schemaContext.rootSchema);
       } else {
-        Changes.set(querySelector, [of], the, {});
+        // We're using the "cached" mode, and we don't use schema queries
+        setSelector(querySelector, of, the, "_", {});
       }
     }
 
@@ -641,7 +656,7 @@ export class Replica {
 
       // These push transaction that will commit desired state to a remote.
       const result = await this.remote.transact({
-        changes: Changes.from(facts),
+        changes: getChanges(facts),
       });
 
       // If transaction fails we delete facts from the nursery so that new
@@ -1134,3 +1149,24 @@ export class Provider implements StorageProvider {
     return this.workspace.space;
   }
 }
+
+export const getChanges = <
+  T extends The,
+  Of extends Entity,
+  Is extends JSONValue,
+>(
+  statements: Iterable<Memory.Statement>,
+) => {
+  const changes = {} as Memory.Changes<T, Of, Is>;
+  for (const statement of statements) {
+    if (statement.cause) {
+      const cause = statement.cause.toString();
+      const value = statement.is === undefined ? {} : { is: statement.is };
+      set(changes, statement.of, statement.the, cause, value);
+    } else {
+      const cause = statement.fact.toString();
+      set(changes, statement.of, statement.the, cause, true);
+    }
+  }
+  return changes;
+};
