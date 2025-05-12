@@ -9,7 +9,7 @@ import {
   isStream,
 } from "../src/cell.ts";
 import type { JSONSchema } from "@commontools/builder";
-import { idle } from "../src/scheduler.ts";
+import { idle, running } from "../src/scheduler.ts";
 
 describe("Schema Support", () => {
   describe("Examples", () => {
@@ -1612,6 +1612,57 @@ describe("Schema Support", () => {
       expect(value?.cellData?.get()?.value).toBe(42);
 
       expect(isStream(value.streamData)).toBe(true);
+    });
+  });
+
+  describe("Running Promise", () => {
+    it("should allow setting a promise when none is running", async () => {
+      await idle();
+
+      const { promise, resolve } = Promise.withResolvers();
+      running.promise = promise;
+      expect(running.promise).toBeDefined();
+      resolve("test");
+      await promise;
+      expect(running.promise).toBeUndefined();
+    });
+
+    it("should throw when trying to set a promise while one is running", async () => {
+      await idle();
+
+      const { promise: promise1, resolve: resolve1 } = Promise.withResolvers();
+      running.promise = promise1;
+      expect(running.promise).toBeDefined();
+
+      const { promise: promise2, resolve: resolve2 } = Promise.withResolvers();
+      expect(() => {
+        running.promise = promise2;
+      }).toThrow("Cannot set running while another promise is in progress");
+
+      resolve1("test");
+      await promise1;
+      expect(running.promise).toBeUndefined();
+    });
+
+    it("should clear the promise after it rejects", async () => {
+      await idle();
+
+      const { promise, reject } = Promise.withResolvers();
+      running.promise = promise.catch(() => {});
+
+      // Now reject after the handler is in place
+      reject(new Error("test error"));
+
+      // Wait for both the rejection to be handled and the promise to be cleared
+      await running.promise;
+      expect(running.promise).toBeUndefined();
+    });
+
+    it("should allow setting undefined when no promise is running", async () => {
+      await idle();
+
+      running.promise = undefined;
+      expect(running.promise).toBeUndefined();
     });
   });
 });
