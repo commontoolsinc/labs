@@ -12,6 +12,8 @@ import type {
   Assert,
   Assertion,
   AsyncResult,
+  AuthorizationError,
+  AwaitResult,
   Cause,
   Claim,
   Commit,
@@ -726,7 +728,7 @@ export const query = <Space extends MemorySpace>(
 export const querySchema = <Space extends MemorySpace>(
   session: Session<Space>,
   command: SchemaQuery<Space>,
-): Result<Selection<Space>, QueryError> => {
+): Result<Selection<Space>, AuthorizationError | QueryError> => {
   return traceSync("space.querySchema", (span) => {
     addMemoryAttributes(span, {
       operation: "querySchema",
@@ -755,6 +757,9 @@ export const querySchema = <Space extends MemorySpace>(
         } as Selection<Space>,
       };
     } catch (error) {
+      if ((error as Error)?.name === "AuthorizationError") {
+        return { error: error as AuthorizationError };
+      }
       return {
         error: Error.query(
           command.sub,

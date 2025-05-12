@@ -1204,7 +1204,7 @@ describe("asCell with schema", () => {
     const schema = {
       type: "array",
       default: [10, 20],
-    } as JSONSchema;
+    } as const satisfies JSONSchema;
 
     const c = getDoc({}, "push-to-undefined-schema", "test");
     const arrayCell = c.asCell(["items"], undefined, schema);

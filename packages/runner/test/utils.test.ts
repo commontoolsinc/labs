@@ -439,6 +439,8 @@ describe("normalizeAndDiff", () => {
     expect(changes[0].location).toEqual({
       cell: testCell,
       path: ["items", "length"],
+      schema: { type: "number" },
+      rootSchema: undefined,
     });
     expect(changes[0].value).toBe(2);
   });

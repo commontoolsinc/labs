@@ -240,7 +240,7 @@ export type Method<
     Effect
   >;
   Pending: {
-    return(result: Out): void;
+    return(result: Out): boolean;
     perform(effect: Effect): void;
   };
 };
@@ -355,7 +355,8 @@ export interface InvocationView<
   Return extends NonNullable<unknown>,
   Effect,
 > extends Invocation<Source["cmd"], Source["sub"], Source["args"]> {
-  return(result: Await<Return>): void;
+  // Return false to remove listener
+  return(result: Await<Return>): boolean;
   perform(effect: Effect): void;
 
   toJSON(): Source;
@@ -717,10 +718,17 @@ export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
   { source: InvocationURL<Reference<Subscribe<Space>>> }
 >;
 
+export type SchemaQueryArgs = {
+  selectSchema: SchemaSelector;
+  since?: number;
+  subscribe?: boolean; // set to true to be notified of changes to any reachable entities
+  classification?: string[]; // classifications to claim for access
+};
+
 export type SchemaQuery<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/graph/query",
   Space,
-  { selectSchema: SchemaSelector; since?: number; subscribe?: boolean }
+  SchemaQueryArgs
 >;
 
 // A normal Selector looks like this (with _ as wildcard cause):
@@ -754,6 +762,8 @@ export type SchemaSelector = Select<
   Select<The, Select<Cause, SchemaPathSelector>>
 >;
 
+// Note: This could be altered to only pass the rootSchema (as schema), and rely on path
+// to narrow the schema to the appropriate section.
 export type SchemaPathSelector = {
   path: string[];
   schemaContext?: SchemaContext;
@@ -775,7 +785,7 @@ export type Operation =
 
 export type QueryResult<Space extends MemorySpace = MemorySpace> = AwaitResult<
   Selection<Space>,
-  QueryError | ConnectionError
+  AuthorizationError | QueryError | ConnectionError
 >;
 
 export type CloseResult = AwaitResult<Unit, SystemError>;

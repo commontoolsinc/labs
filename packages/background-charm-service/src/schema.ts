@@ -25,7 +25,7 @@ export const BGCharmEntrySchema = {
     "lastRun",
     "status",
   ],
-} as const as JSONSchema;
+} as const satisfies JSONSchema;
 export type BGCharmEntry = Schema<typeof BGCharmEntrySchema>;
 
 export const BGCharmEntriesSchema = {

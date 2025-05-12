@@ -380,18 +380,22 @@ describe("recipe with ifc property", () => {
         schema: { ifc: ArgumentSchema.properties.x.ifc },
       },
     });
-    // I don't like that we don't know our input is classified here
     expect(nodes[1].inputs).toEqual({
       x: {
         $alias: {
           path: ["internal", "__#0", "double"],
+          schema: {
+            ifc: ArgumentSchema.properties.x.ifc,
+          },
         },
       },
     });
-    // I don't like that we don't know our output is classified here
     expect(nodes[1].outputs).toEqual({
       $alias: {
         path: ["internal", "__#1"],
+        schema: {
+          ifc: ArgumentSchema.properties.x.ifc,
+        },
       },
     });
   });
@@ -459,7 +463,7 @@ describe("recipe with mixed ifc properties", () => {
   );
 
   it("has the correct classification in the schema of the ssn result", () => {
-    const { result, nodes, argumentSchema } = capitalizeSsnRecipe;
+    const { result, nodes, argumentSchema, resultSchema } = capitalizeSsnRecipe;
     expect(isRecipe(capitalizeSsnRecipe)).toBe(true);
     expect(argumentSchema).toMatchObject(UserSchema);
     expect(nodes).toHaveLength(1);
@@ -476,6 +480,10 @@ describe("recipe with mixed ifc properties", () => {
           schema: { ifc: { classification: ["confidential"] } },
         },
       },
+    });
+    expect(resultSchema).toEqual({
+      ...ResultSchema,
+      ...{ ifc: { classification: ["confidential"] } },
     });
   });
 
