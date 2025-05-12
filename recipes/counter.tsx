@@ -1,12 +1,8 @@
 // deno-lint-ignore-file jsx-no-useless-fragment
 import { h } from "@commontools/html";
 import {
-  type BuiltInLLMParams,
   derive,
   handler,
-  ifElse,
-  lift,
-  llm,
   NAME,
   recipe,
   schema,
@@ -32,30 +28,17 @@ const decrement = handler({}, model, (_, state) => {
   state.value.set(state.value.get() - 1);
 });
 
-const genRequest = lift(({ number: number }): BuiltInLLMParams | undefined => {
-  return {
-    system:
-      "You are a helpful assistant that returns a short random facts about a number, reply with a JSON object with the following properties: number (number), story (string), origin (string), related_numbers (array of numbers)",
-    messages: [`${number}`],
-    mode: "json",
-  };
-});
-
 export default recipe(model, model, (cell) => {
-  const { result: story } = llm<{
-    story: string;
-    origin: string;
-    number: number;
-    related_numbers: number[];
-  }>(genRequest({ number: cell.value }));
   return {
-    [NAME]: str`Number time: ${derive(cell.value, String)}`,
+    [NAME]: str`Simple counter: ${derive(cell.value, String)}`,
     [UI]: (
       <div>
         <button type="button" onClick={increment(cell)}>+</button>
-        <b>{cell.value}</b>
+        {/* use html fragment to test that it works  */}
+        <>
+          <b>{cell.value}</b>
+        </>
         <button type="button" onClick={decrement(cell)}>-</button>
-        <p>{derive(story, JSON.stringify)}</p>
       </div>
     ),
     value: cell.value,
