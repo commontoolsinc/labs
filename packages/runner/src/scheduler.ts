@@ -32,7 +32,7 @@ let consoleHandler = function (
   // Call `onConsole` to override default handler.
   return args;
 };
-let running: Promise<void> | undefined = undefined;
+let running: Promise<unknown> | undefined = undefined;
 let scheduled = false;
 
 const MAX_ITERATIONS_PER_RUN = 100;
@@ -92,6 +92,9 @@ export async function run(action: Action): Promise<any> {
 
   let result: any;
   running = new Promise((resolve) => {
+    // This weird combination of try clauses is required to handle both sync and
+    // async implementations of the action.
+
     const finalizeAction = (error?: unknown) => {
       // handlerError() might throw, so let's make sure to resolve the promise.
       try {
@@ -103,7 +106,6 @@ export async function run(action: Action): Promise<any> {
         // re-run of the action if it changed a r/w doc. Note that this also
         // means that those actions can't loop on themselves.
         subscribe(action, log);
-        running = undefined;
         resolve(result);
       }
     };
@@ -118,6 +120,8 @@ export async function run(action: Action): Promise<any> {
     } catch (error) {
       finalizeAction(error);
     }
+  }).finally(() => {
+    running = undefined;
   });
 
   return running;
@@ -229,15 +233,17 @@ async function execute() {
   // Process next event from the event queue. Will mark more docs as dirty.
   const handler = eventQueue.shift();
   if (handler) {
+    // This weird combination of try clauses is required to handle both sync and
+    // async implementations of the handler.
     try {
       running = Promise.resolve(handler()).catch((error) => {
         handleError(error as Error, handler);
+      }).finally(() => {
+        running = undefined;
       });
       await running;
     } catch (error) {
       handleError(error as Error, handler);
-    } finally {
-      running = undefined;
     }
   }
 
