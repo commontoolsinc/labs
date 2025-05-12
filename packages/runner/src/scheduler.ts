@@ -32,28 +32,8 @@ let consoleHandler = function (
   // Call `onConsole` to override default handler.
   return args;
 };
-let scheduled = false;
-
-// Enforces that `running.promise` is only set once and becomes undefined once
-// the promise is resolved.
 let _running: Promise<unknown> | undefined = undefined;
-const running = {
-  get promise(): Promise<unknown> | undefined {
-    return _running;
-  },
-  set promise(promise: Promise<unknown> | undefined) {
-    if (_running !== undefined) {
-      throw new Error(
-        "Cannot set running while another promise is in progress",
-      );
-    }
-    if (promise !== undefined) {
-      _running = promise.finally(() => {
-        _running = undefined;
-      });
-    }
-  },
-};
+let scheduled = false;
 
 const MAX_ITERATIONS_PER_RUN = 100;
 
@@ -145,6 +125,26 @@ export async function run(action: Action): Promise<any> {
   return running.promise;
 }
 
+// Enforces that `running.promise` is only set once and becomes undefined once
+// the promise is resolved.
+export const running = {
+  get promise(): Promise<unknown> | undefined {
+    return _running;
+  },
+  set promise(promise: Promise<unknown> | undefined) {
+    if (_running !== undefined) {
+      throw new Error(
+        "Cannot set running while another promise is in progress",
+      );
+    }
+    if (promise !== undefined) {
+      _running = promise.finally(() => {
+        _running = undefined;
+      });
+    }
+  },
+};
+
 // Returns a promise that resolves when there is no more work to do.
 export function idle() {
   return new Promise<void>((resolve) => {
@@ -157,12 +157,6 @@ export function idle() {
     else if (pending.size === 0 && eventQueue.length === 0) resolve();
     else idlePromises.push(resolve);
   });
-}
-
-export function onError(
-  fn: ((error: Error) => void) | ((error: ErrorWithContext) => void),
-) {
-  errorHandlers.add(fn);
 }
 
 // Replace the default console hook with a function that accepts context metadata,
@@ -232,6 +226,12 @@ export type ErrorWithContext = Error & {
 export function isErrorWithContext(error: unknown): error is ErrorWithContext {
   return error instanceof Error && "action" in error && "charmId" in error &&
     "space" in error && "recipeId" in error;
+}
+
+export function onError(
+  fn: ((error: Error) => void) | ((error: ErrorWithContext) => void),
+) {
+  errorHandlers.add(fn);
 }
 
 function handleError(error: Error, action: any) {
