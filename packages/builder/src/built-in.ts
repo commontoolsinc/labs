@@ -18,11 +18,12 @@ export interface BuiltInLLMState<T> {
 }
 
 export interface BuiltInGenerateObjectParams {
-  system?: string;
   prompt?: string;
-  schema: JSONSchema;
+  schema?: JSONSchema;
+  system?: string;
   cache?: boolean;
   maxTokens?: number;
+  metadata?: Record<string, string | undefined | object>;
 }
 
 export const llm = createNodeFactory({

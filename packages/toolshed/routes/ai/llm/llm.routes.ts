@@ -45,6 +45,7 @@ export const GenerateObjectRequestSchema = toZod<LLMGenerateObjectRequest>()
   .with({
     prompt: z.string(),
     schema: z.record(z.string(), z.any()),
+    system: z.string().optional(),
     cache: z.boolean().default(true).optional(),
     maxTokens: z.number().optional(),
     model: z.string().optional(),

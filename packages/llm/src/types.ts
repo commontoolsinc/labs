@@ -12,7 +12,7 @@ export const DEFAULT_GENERATE_OBJECT_MODELS: ModelName = "openai:gpt-4.1-nano";
 export type LLMResponse = {
   content: string;
   // The trace span ID
-  id: string;
+  id?: string;
 };
 
 export type ModelName = string;
@@ -40,17 +40,18 @@ export interface LLMRequest {
 }
 
 export interface LLMGenerateObjectRequest {
-  model?: ModelName;
+  schema: Record<string, unknown>;
   prompt: string;
+  model?: ModelName;
+  system?: string;
   cache?: boolean;
   maxTokens?: number;
-  schema: Record<string, unknown>;
   metadata?: LLMRequestMetadata;
 }
 
 export interface LLMGenerateObjectResponse {
   object: Record<string, unknown>;
-  id: string;
+  id?: string;
 }
 
 function isArrayOf<T>(

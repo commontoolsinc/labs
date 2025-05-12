@@ -63,8 +63,8 @@ export async function generateObject(
     });
 
     return {
-      object,
-      spanId,
+      object: object as Record<string, unknown>,
+      id: spanId,
     };
   } catch (error) {
     console.error("Error generating object:", error);

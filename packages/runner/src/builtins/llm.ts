@@ -213,7 +213,7 @@ export function generateObject(
   return (log: ReactivityLog) => {
     const thisRun = ++currentRun;
 
-    const { prompt, maxTokens, model, schema } =
+    const { prompt, maxTokens, model, schema, system, cache, metadata } =
       inputsCell.getAsQueryResult([], log) ?? {};
 
     if (!prompt || !schema) {
@@ -223,12 +223,14 @@ export function generateObject(
 
     const generateObjectParams: LLMGenerateObjectRequest = {
       prompt,
+      system,
       maxTokens: maxTokens ?? 8192,
       schema: JSON.parse(JSON.stringify(schema)),
       metadata: {
+        ...metadata,
         context: "charm",
       },
-      cache: true,
+      cache: cache ?? true,
     };
 
     const hash = refer(generateObjectParams).toString();
