@@ -41,15 +41,34 @@ const OutputSchema = {
       type: "string",
       description: "Final result from the agent",
     },
+    messages: {
+      type: "array",
+      items: { type: "string" },
+      description: "The internal reasoning and steps taken by the agent",
+    },
   },
-  required: ["result"],
+  required: ["result", "messages"],
 } as const satisfies JSONSchema;
 
 const codePrefix = `
-import { lift, recipe } from "@commontools/builder";
+import { lift, recipe, derive, handler, llm } from "@commontools/builder";
 
 const math = lift((expression: string) => {
   return eval(expression);
+});
+
+const webresearch = lift((query: string) => {
+  const call = llm({ messages: [query], model: "gpt-4o", stream: true });
+  derive(call.pending, (pending) => {
+    console.log("pending", pending);
+  });
+  derive(call.partial, (partial) => {
+    console.log("partial", partial);
+  });
+  derive(call.result, (result) => {
+    console.log("result", result);
+  });
+  return call.result;
 });
 
 export default recipe("action", () =>
@@ -67,7 +86,8 @@ Respond with a javascript snippet that calls the tools. Avoid any control flow o
 Tool responses are wrapped in <result>...</result> tags.
 
 Available tools are:
- - math(expression: string) -> number
+ - math(expression: string) -> number // any valid javascript expression
+ - webresearch(query: string) -> string // deep research, returns markdown
 
 Example:
 User:
@@ -121,8 +141,9 @@ const step = recipe(
         const code = codePrefix + src + codePostfix;
         const fn = await runtime.compile(code) as RecipeFactory<any, any>;
         if (!fn) return undefined;
-        return str`<result>${fn(undefined)}</result>`;
+        return fn(undefined);
       } catch (error) {
+        console.error("error", error);
         if (error instanceof Error) {
           return `
 Got an error:
@@ -147,12 +168,18 @@ Please try again.
       ({ messages, result, actionResult, steps }): { messages: string[] } => {
         if (!result) return { messages };
         if (!actionResult) return { messages: [...messages, result] };
-        if (steps <= 0) {
-          return { messages: [...messages, result, actionResult] };
-        }
+
+        console.log("actionResult", actionResult);
+
+        const nextMessages = [
+          ...messages,
+          result,
+          str`<result>${actionResult}</result>`,
+        ];
+        if (steps <= 0) return { messages: nextMessages };
 
         return step({
-          messages: [...messages, result, actionResult],
+          messages: nextMessages,
           steps: steps - 1,
         });
       },
@@ -184,12 +211,13 @@ export default recipe(
 
     // Return the recipe
     return {
-      [NAME]: "Agentic Tool",
+      [NAME]: str`Answering: ${task}`,
       [UI]: (
         <div>
           {messages.map((message) => <div>{message}</div>)}
         </div>
       ),
+      messages,
       result: finalAnswer(messages),
     };
   },
