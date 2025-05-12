@@ -44,7 +44,7 @@ const {
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
 
-const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
+const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "common user";
 
 storage.setRemoteStorage(new URL(toolshedUrl));
 setBlobbyServerUrl(toolshedUrl);
