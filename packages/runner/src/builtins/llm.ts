@@ -99,10 +99,7 @@ export function llm(
     result.setAtPath([], undefined, log);
     partial.setAtPath([], undefined, log);
 
-    if (
-      ((prompt === undefined || prompt.length === 0) &&
-        (messages === undefined || messages.length === 0))
-    ) {
+    if (!Array.isArray(messages) || messages.length === 0) {
       pending.setAtPath([], false, log);
       return;
     }
