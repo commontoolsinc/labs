@@ -127,9 +127,15 @@ export async function run(action: Action): Promise<any> {
   return running;
 }
 
+// Returns a promise that resolves when there is no more work to do.
 export function idle() {
   return new Promise<void>((resolve) => {
+    // NOTE: This relies on `running`'s finally clause to set it to undefined to
+    // prevent infinite loops.
     if (running) running.then(() => idle().then(resolve));
+    // Once nothing is running, see if more work is queued up. If not, then
+    // resolve the idle promise, otherwise add it to the idle promises list that
+    // will be resolved once all the work is done.
     else if (pending.size === 0 && eventQueue.length === 0) resolve();
     else idlePromises.push(resolve);
   });
