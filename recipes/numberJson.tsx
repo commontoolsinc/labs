@@ -1,5 +1,6 @@
 import { h } from "@commontools/html";
 import {
+  derive,
   generateObject,
   handler,
   ifElse,
@@ -70,36 +71,39 @@ const generateImageUrl = lift(({ imagePrompt }) => {
 });
 
 export default recipe(inputSchema, outputSchema, ({ number }) => {
-  const { result: { story, storyOrigin, seeAlso, title, imagePrompt } } =
-    generateObject(generatePrompt({ number }));
+  const { result: object } = generateObject(generatePrompt({ number }));
 
   return {
-    [NAME]: str`Story: ${title}`,
+    [NAME]: str`Story: ${object?.title}`,
     [UI]: (
       <div>
         <button type="button" onClick={adder({ number })}>
           {number} (inc)
         </button>
-        {ifElse(title, <h1>{title}</h1>, <p>no title</p>)}
+        {ifElse(object?.title, <h1>{object.title}</h1>, <p>no title</p>)}
         {ifElse(
-          imagePrompt,
+          object?.imagePrompt,
           <p>
-            <img src={generateImageUrl({ imagePrompt })} />
+            <img src={generateImageUrl({ imagePrompt: object.imagePrompt })} />
           </p>,
           <p>no image prompt</p>,
         )}
-        {ifElse(story, <p>{story}</p>, <p>no story yet</p>)}
+        {ifElse(object?.story, <p>{object.story}</p>, <p>no story yet</p>)}
         {ifElse(
-          storyOrigin,
+          object?.storyOrigin,
           <p>
-            <em>{storyOrigin}</em>
+            <em>{object.storyOrigin}</em>
           </p>,
           <p>no story origin</p>,
         )}
         {ifElse(
-          seeAlso,
+          object?.seeAlso,
           <ul>
-            {seeAlso.map((n: number) => (
+            <li>
+              See also one of{" "}
+              {derive(object.seeAlso, (numbers) => numbers.length)} numbers:
+            </li>
+            {object.seeAlso.map((n: number) => (
               <li onClick={setNumber({ number, n })}>{n}</li>
             ))}
           </ul>,
@@ -107,11 +111,7 @@ export default recipe(inputSchema, outputSchema, ({ number }) => {
         )}
       </div>
     ),
-    story,
     number,
-    seeAlso,
-    imagePrompt,
-    storyOrigin,
-    title,
+    ...object,
   };
 });

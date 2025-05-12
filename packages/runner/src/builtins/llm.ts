@@ -221,17 +221,24 @@ export function generateObject(
       return;
     }
 
+    const readyMetadata = metadata ? JSON.parse(JSON.stringify(metadata)) : {};
+
     const generateObjectParams: LLMGenerateObjectRequest = {
       prompt,
-      system,
       maxTokens: maxTokens ?? 8192,
       schema: JSON.parse(JSON.stringify(schema)),
       metadata: {
-        ...metadata,
+        ...readyMetadata,
         context: "charm",
       },
       cache: cache ?? true,
     };
+
+    if (system) {
+      generateObjectParams.system = system;
+    }
+
+    console.log("generateObjectParams", generateObjectParams);
 
     const hash = refer(generateObjectParams).toString();
 
