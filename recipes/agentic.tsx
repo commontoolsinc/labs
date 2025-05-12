@@ -1,6 +1,7 @@
 import { h } from "@commontools/html";
 import {
   derive,
+  ifElse,
   JSONSchema,
   lift,
   llm,
@@ -203,8 +204,35 @@ export default recipe(
     return {
       [NAME]: str`Answering: ${task}`,
       [UI]: (
-        <div>
-          {messages.map((message) => <div>{message}</div>)}
+        <div className="p-4 space-y-6">
+          <section>
+            <h2 className="text-lg font-semibold text-gray-800 mb-2">Task</h2>
+            <p className="rounded bg-slate-100 p-3 text-sm whitespace-pre-wrap">
+              {task}
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-lg font-semibold text-gray-800 mb-2">
+              Agent Steps
+            </h2>
+            <ol className="space-y-2 list-decimal list-inside">
+              {messages.map((message) => (
+                <li className="rounded border border-gray-200 bg-white p-3 text-sm whitespace-pre-wrap">
+                  {message}
+                </li>
+              ))}
+            </ol>
+          </section>
+
+          <section>
+            <h2 className="text-lg font-semibold text-gray-800 mb-2">
+              Result
+            </h2>
+            <p className="rounded bg-green-100 p-3 text-sm whitespace-pre-wrap">
+              {result}
+            </p>
+          </section>
         </div>
       ),
       messages,
