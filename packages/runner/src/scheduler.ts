@@ -32,8 +32,28 @@ let consoleHandler = function (
   // Call `onConsole` to override default handler.
   return args;
 };
-let running: Promise<unknown> | undefined = undefined;
 let scheduled = false;
+
+// Enforces that `running.promise` is only set once and becomes undefined once
+// the promise is resolved.
+let _running: Promise<unknown> | undefined = undefined;
+const running = {
+  get promise(): Promise<unknown> | undefined {
+    return _running;
+  },
+  set promise(promise: Promise<unknown> | undefined) {
+    if (_running !== undefined) {
+      throw new Error(
+        "Cannot set running while another promise is in progress",
+      );
+    }
+    if (promise !== undefined) {
+      _running = promise.finally(() => {
+        _running = undefined;
+      });
+    }
+  },
+};
 
 const MAX_ITERATIONS_PER_RUN = 100;
 
@@ -88,10 +108,10 @@ export function subscribe(action: Action, log: ReactivityLog): Cancel {
 export async function run(action: Action): Promise<any> {
   const log: ReactivityLog = { reads: [], writes: [] };
 
-  if (running) await running;
+  if (running.promise) await running.promise;
 
   let result: any;
-  running = new Promise((resolve) => {
+  running.promise = new Promise((resolve) => {
     // This weird combination of try clauses is required to handle both sync and
     // async implementations of the action.
 
@@ -120,11 +140,9 @@ export async function run(action: Action): Promise<any> {
     } catch (error) {
       finalizeAction(error);
     }
-  }).finally(() => {
-    running = undefined;
   });
 
-  return running;
+  return running.promise;
 }
 
 // Returns a promise that resolves when there is no more work to do.
@@ -132,7 +150,7 @@ export function idle() {
   return new Promise<void>((resolve) => {
     // NOTE: This relies on `running`'s finally clause to set it to undefined to
     // prevent infinite loops.
-    if (running) running.then(() => idle().then(resolve));
+    if (running.promise) running.promise.then(() => idle().then(resolve));
     // Once nothing is running, see if more work is queued up. If not, then
     // resolve the idle promise, otherwise add it to the idle promises list that
     // will be resolved once all the work is done.
@@ -234,7 +252,7 @@ function handleError(error: Error, action: any) {
 
 async function execute() {
   // In case a directly invoked `run` is still running, wait for it to finish.
-  if (running) await running;
+  if (running.promise) await running.promise;
 
   // Process next event from the event queue. Will mark more docs as dirty.
   const handler = eventQueue.shift();
@@ -242,12 +260,10 @@ async function execute() {
     // This weird combination of try clauses is required to handle both sync and
     // async implementations of the handler.
     try {
-      running = Promise.resolve(handler()).catch((error) => {
+      running.promise = Promise.resolve(handler()).catch((error) => {
         handleError(error as Error, handler);
-      }).finally(() => {
-        running = undefined;
       });
-      await running;
+      await running.promise;
     } catch (error) {
       handleError(error as Error, handler);
     }
