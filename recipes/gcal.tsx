@@ -23,6 +23,26 @@ const CalendarEventSchema = {
     end: { type: "string" },
     location: { type: "string" },
     eventType: { type: "string" },
+    hangoutLink: { type: "string" },
+    attendees: { 
+      type: "array", 
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          email: { type: "string" },
+          displayName: { type: "string" },
+          organizer: { type: "boolean" },
+          self: { type: "boolean" },
+          resource: { type: "boolean" },
+          optional: { type: "boolean" },
+          responseStatus: { type: "string" },
+          comment: { type: "string" },
+          additionalGuests: { type: "integer" },
+        },
+        required: ["email"], // or add others as needed
+      },
+    },
   },
   required: ["id", "start", "end"],
 } as const satisfies JSONSchema;
@@ -238,6 +258,8 @@ export async function fetchCalendar(
       end: event.end ? event.end.dateTime || event.end.date || "" : "",
       location: event.location || "",
       eventType: event.eventType || "",
+      hangoutLink: event.hangoutLink || "",
+      attendees: event.attendees || [],
     }));
 
   if (newEvents.length > 0) {
@@ -429,6 +451,8 @@ export default recipe(
                   <th style="padding: 10px;">SUMMARY</th>
                   <th style="padding: 10px;">LOCATION</th>
                   <th style="padding: 10px;">TYPE</th>
+                  <th style="padding: 10px;">HANGOUTLINK</th>
+                  <th style="padding: 10px;">ATTENDEES</th>
                 </tr>
               </thead>
               <tbody>
@@ -448,6 +472,15 @@ export default recipe(
                     </td>
                     <td style="border: 1px solid black; padding: 10px;">
                       &nbsp;{event.eventType}&nbsp;
+                    </td>
+                    <td style="border: 1px solid black; padding: 10px;">
+                      &nbsp;{event.hangoutLink}&nbsp;
+                    </td>
+                    <td style="border: 1px solid black; padding: 10px;">
+                      &nbsp;{derive(
+                        event,
+                        (event) => event?.attendees?.map((a) => a.email).join(", "),
+                      )}&nbsp;
                     </td>
                   </tr>
                 ))}
