@@ -52,6 +52,7 @@ const OutputSchema = {
 
 const codePrefix = `
 import { lift, recipe, derive, handler, llm } from "@commontools/builder";
+import { Result } from '../packages/memory/interface';
 
 const math = lift((expression: string) => {
   return eval(expression);
@@ -59,15 +60,6 @@ const math = lift((expression: string) => {
 
 const webresearch = lift((query: string) => {
   const call = llm({ messages: [query], model: "gpt-4o", stream: true });
-  derive(call.pending, (pending) => {
-    console.log("pending", pending);
-  });
-  derive(call.partial, (partial) => {
-    console.log("partial", partial);
-  });
-  derive(call.result, (result) => {
-    console.log("result", result);
-  });
   return call.result;
 });
 
@@ -169,8 +161,6 @@ Please try again.
         if (!result) return { messages };
         if (!actionResult) return { messages: [...messages, result] };
 
-        console.log("actionResult", actionResult);
-
         const nextMessages = [
           ...messages,
           result,
@@ -205,9 +195,9 @@ export default recipe(
       steps: maxSteps,
     });
 
-    const answer = finalAnswer(messages);
+    const result = finalAnswer(messages);
 
-    derive(answer, (answer) => answer && console.log("Answer:", answer));
+    derive(result, (result) => result && console.log("Answer:", result));
 
     // Return the recipe
     return {
@@ -218,7 +208,7 @@ export default recipe(
         </div>
       ),
       messages,
-      result: finalAnswer(messages),
+      result,
     };
   },
 );
