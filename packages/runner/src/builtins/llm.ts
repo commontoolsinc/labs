@@ -101,8 +101,7 @@ export function llm(
 
     if (
       ((prompt === undefined || prompt.length === 0) &&
-        (messages === undefined || messages.length === 0)) ||
-      system === undefined
+        (messages === undefined || messages.length === 0))
     ) {
       pending.setAtPath([], false, log);
       return;
