@@ -1,10 +1,10 @@
+import { JSONValue } from "@commontools/builder";
 import {
   Assertion,
   Entity,
   Fact,
   FactSelection,
   Invariant,
-  JSONValue,
   Reference,
   Retraction,
   Revision,

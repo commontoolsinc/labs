@@ -5,7 +5,6 @@ import type {
   ConnectionError,
   Entity,
   Fact,
-  JSONValue,
   MemorySpace,
   QueryError,
   Result,
@@ -38,7 +37,7 @@ export * from "@commontools/memory/interface";
 import * as Codec from "@commontools/memory/codec";
 import { Channel, RawCommand } from "./inspector.ts";
 import { isBrowser } from "@commontools/utils/env";
-import { deepEqual } from "@commontools/builder";
+import { deepEqual, JSONValue } from "@commontools/builder";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {

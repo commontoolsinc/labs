@@ -3,8 +3,6 @@ import type {
   Cause,
   Entity,
   FactSelection,
-  JSONObject,
-  JSONValue,
   MemorySpace,
   SchemaContext,
   SchemaQuery,
@@ -30,9 +28,10 @@ import {
   OptJSONValue,
   ValueEntry,
 } from "./traverse.ts";
-import { JSONSchema } from "../builder/src/index.ts";
-import { ContextualFlowControl } from "../runner/src/index.ts";
+import { JSONSchema, JSONValue } from "@commontools/builder";
+import { ContextualFlowControl } from "@commontools/runner";
 import { TheAuthorizationError } from "./error.ts";
+import { JSONObject } from "../builder/src/types.ts";
 export * from "./interface.ts";
 
 export type FullFactAddress = FactAddress & { cause: Cause; since: number };
