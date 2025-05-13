@@ -204,7 +204,7 @@ class GmailClient {
       },
     );
     if (!res.ok) {
-      throw new Error("Could not acquired a refresh token.");
+      throw new Error("Could not acquir a refresh token.");
     }
     const json = await res.json();
     const authData = json.tokenInfo as Auth;
@@ -326,7 +326,7 @@ Accept: application/json
     options.headers.set("Authorization", `Bearer ${token}`);
 
     if (options.body && typeof options.body === "string") {
-      // Rewrite the authorization in the body here incase reauth was necessary
+      // Rewrite the authorization in the body here in case reauth was necessary
       options.body = options.body.replace(
         /Authorization: Bearer [^\n]*/g,
         `Authorization: Bearer ${token}`,

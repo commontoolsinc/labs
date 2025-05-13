@@ -3,9 +3,11 @@ import {
   AuthSchema,
   cell,
   derive,
+  getRecipeEnvironment,
   handler,
   ID,
   JSONSchema,
+  Mutable,
   NAME,
   recipe,
   Schema,
@@ -13,6 +15,17 @@ import {
   UI,
 } from "@commontools/builder";
 import { Cell } from "@commontools/runner";
+
+const Classification = {
+  Unclassified: "unclassified",
+  Confidential: "confidential",
+  Secret: "secret",
+  TopSecret: "topsecret",
+} as const;
+
+const env = getRecipeEnvironment();
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const CalendarEventSchema = {
   type: "object",
@@ -46,8 +59,9 @@ const CalendarEventSchema = {
     },
   },
   required: ["id", "start", "end"],
+  ifc: { classification: [Classification.Confidential] },
 } as const satisfies JSONSchema;
-type CalendarEvent = Schema<typeof CalendarEventSchema>;
+type CalendarEvent = Mutable<Schema<typeof CalendarEventSchema>>;
 
 type Auth = Schema<typeof AuthSchema>;
 
@@ -131,15 +145,19 @@ const refreshAuthToken = async (auth: Cell<Auth>) => {
 
   console.log("refreshAuthToken", body);
 
-  const refresh_response = await fetch(
-    "/api/integrations/google-oauth/refresh",
+  const res = await fetch(
+    new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
     {
       method: "POST",
       body: JSON.stringify(body),
     },
-  ).then((res) => res.json());
-
-  return refresh_response.tokenInfo as Auth;
+  );
+  if (!res.ok) {
+    throw new Error("Could not acquir a refresh token.");
+  }
+  const json = await res.json();
+  const authData = json.tokenInfo as Auth;
+  return authData;
 };
 
 const calendarUpdater = handler(
@@ -175,6 +193,75 @@ const calendarUpdater = handler(
   },
 );
 
+async function googleRequest(
+  auth: Cell<Auth>,
+  url: URL,
+  _options?: RequestInit,
+  _retries?: number,
+): Promise<Response> {
+  const token = auth.get().token;
+  if (!token) {
+    throw new Error("No authorization token.");
+  }
+
+  const retries = _retries ?? 3;
+  const options = _options ?? {};
+  options.headers = new Headers(options.headers);
+  options.headers.set("Authorization", `Bearer ${token}`);
+
+  if (options.body && typeof options.body === "string") {
+    // Rewrite the authorization in the body here in case reauth was necessary
+    options.body = options.body.replace(
+      /Authorization: Bearer [^\n]*/g,
+      `Authorization: Bearer ${token}`,
+    );
+  }
+
+  const res = await fetch(url, options);
+  let { ok, status, statusText } = res;
+
+  // Batch requests expect a text response on success, but upon error, we get a 200 status code
+  // with error details in the json response.
+  if (options.method === "POST") {
+    // `body` can only be consumed once. Clone the body before consuming as json.
+    try {
+      const json = await res.clone().json();
+      if (json?.error?.code) {
+        ok = false;
+        status = json.error.code;
+        statusText = json.error?.message;
+      }
+    } catch (e) {
+      // If parsing as json failed, then this is probably a real 200 scenario
+    }
+  }
+
+  // Allow all 2xx status
+  if (ok) {
+    console.log(`${url}: ${status} ${statusText}`);
+    return res;
+  }
+
+  console.warn(
+    `${url}: ${status} ${statusText}`,
+    `Remaining retries: ${retries}`,
+  );
+  if (retries === 0) {
+    throw new Error("Too many failed attempts.");
+  }
+
+  await sleep(1000);
+
+  if (status === 401) {
+    const refreshed = await refreshAuthToken(auth);
+    auth.update(refreshed);
+  } else if (status === 429) {
+    console.log("429 rate limiting, sleeping");
+    await sleep(5000);
+  }
+  return googleRequest(auth, url, _options, retries - 1);
+}
+
 export async function fetchCalendar(
   auth: Cell<Auth>,
   maxResults: number = 250,
@@ -183,21 +270,6 @@ export async function fetchCalendar(
     events: Cell<CalendarEvent[]>;
   },
 ) {
-  let cur = auth.get();
-
-  if (cur.expiresAt && Date.now() > cur.expiresAt) {
-    const resp = await refreshAuthToken(auth);
-    auth.update(resp);
-    console.log("refresh_data", resp);
-  }
-
-  cur = auth.get();
-
-  if (!cur.token) {
-    console.warn("no token");
-    return;
-  }
-
   // Get existing event IDs for lookup
   const existingEventIds = new Set(
     state.events.get().map((event) => event.id),
@@ -207,19 +279,17 @@ export async function fetchCalendar(
   // Get current date in ISO format for timeMin parameter
   const now = new Date().toISOString();
 
-  const listResponse = await fetch(
+  const google_cal_url = new URL(
     `https://www.googleapis.com/calendar/v3/calendars/${
       encodeURIComponent(
         calendarId.trim(),
       )
     }/events?maxResults=${maxResults}&timeMin=${
       encodeURIComponent(now)
-    }&singleEvents=true&orderBy=startTime`,
-    {
-      headers: {
-        Authorization: `Bearer ${cur.token}`,
-      },
-    },
+    }&singleEvents=true&orderBy=startTime`);
+  const listResponse = await googleRequest(
+    auth,
+    google_cal_url,
   );
 
   const listData = await listResponse.json();
@@ -289,11 +359,9 @@ const getCalendars = handler(
       return;
     }
 
-    fetch(
-      `https://www.googleapis.com/calendar/v3/users/me/calendarList`,
-      {
-        headers: { Authorization: `Bearer ${auth.token}` },
-      },
+    googleRequest(
+      auth,
+      new URL(`https://www.googleapis.com/calendar/v3/users/me/calendarList`),
     )
       .then((res) => res.json())
       .then((data) => {
@@ -473,6 +541,8 @@ export default recipe(
         </div>
       ),
       events,
+      auth,
+      settings,
       bgUpdater: calendarUpdater({ events, auth, settings }),
     };
   },
