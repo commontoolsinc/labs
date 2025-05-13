@@ -1,10 +1,6 @@
 import type {
-  AssertFact,
   Cause,
-  Entity,
   FactSelection,
-  JSONObject,
-  JSONValue,
   MemorySpace,
   SchemaContext,
   SchemaQuery,
@@ -15,7 +11,6 @@ import { isNumber, isObject, isString } from "@commontools/utils/types";
 import {
   collectClassifications,
   FactSelector,
-  getClassifications,
   getLabels,
   loadFacts,
   selectFacts,
@@ -33,8 +28,8 @@ import {
   OptJSONValue,
   ValueEntry,
 } from "./traverse.ts";
-import { JSONSchema } from "../builder/src/index.ts";
-import { ContextualFlowControl } from "../runner/src/index.ts";
+import { JSONSchema, JSONValue } from "@commontools/builder";
+import { ContextualFlowControl } from "@commontools/runner";
 import { TheAuthorizationError } from "./error.ts";
 import {
   getRevision,
@@ -46,6 +41,8 @@ import {
   setRevision,
 } from "./selection.ts";
 export type * from "./interface.ts";
+import { JSONObject } from "../builder/src/types.ts";
+export * from "./interface.ts";
 
 type FullFactAddress = FactAddress & { cause: Cause; since: number };
 

@@ -19,7 +19,6 @@ import {
   InferOf,
   Invocation,
   InvocationURL,
-  JSONValue,
   MemorySpace,
   OfTheCause,
   Proto,
@@ -49,6 +48,7 @@ import {
   UCAN,
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
+import type { JSONValue } from "@commontools/builder";
 import { refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
 import {
