@@ -43,6 +43,7 @@ export {
   isRecipe,
   isStatic,
   isStreamAlias,
+  type JSONObject,
   type JSONSchema,
   type JSONSchemaMutable,
   type JSONValue,

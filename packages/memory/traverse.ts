@@ -1,9 +1,8 @@
 // This is the same structure as in space.ts, but there's also a different
 // Session interface in memory/interface, so the space version isn't exported.
 
-import { isAlias, JSONValue } from "@commontools/builder";
+import { isAlias, JSONObject, JSONValue } from "@commontools/builder";
 import { isObject } from "@commontools/utils/types";
-import { JSONObject } from "../builder/src/types.ts";
 
 export class CycleTracker<K> {
   private partial: Set<K>;
