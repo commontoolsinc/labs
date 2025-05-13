@@ -37,8 +37,9 @@ export * from "@commontools/memory/interface";
 import * as Codec from "@commontools/memory/codec";
 import { Channel, RawCommand } from "./inspector.ts";
 import { isBrowser } from "@commontools/utils/env";
-import { deepEqual } from "@commontools/builder";
+import { deepEqual, JSONSchema } from "@commontools/builder";
 import { set, setSelector } from "@commontools/memory/selection";
+import { isObject } from "@commontools/utils/types";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -580,7 +581,9 @@ export class Replica {
       // Otherwise we are able to complete checkout and we schedule a pull in
       // the background so we can get latest entries if there are some available.
       else {
-        this.queue.add(need);
+        const simple = need.filter(([_addr, schema]) => schema === undefined);
+        // schedule an update for any entries without a schema.
+        this.queue.add(simple);
         this.sync();
         return { ok: pulled };
       }
@@ -621,7 +624,7 @@ export class Replica {
     // First we pull all the affected entries into heap so we can build a
     // transaction that is aware of latest state.
     const { error } = await this.load(
-      changes.map((change) => [change, undefined]),
+      changes.map((change) => [change, getSchema(change)]),
     );
     if (error) {
       return { error };
@@ -1169,4 +1172,13 @@ export const getChanges = <
     }
   }
   return changes;
+};
+
+// Given an Assert statement with labels, return a SchemaContext with the ifc tags
+const getSchema = (change: Assert | Retract): SchemaContext | undefined => {
+  if (isObject(change?.is) && "labels" in change.is) {
+    const schema = { ifc: change.is.labels } as JSONSchema;
+    return { schema: schema, rootSchema: schema };
+  }
+  return undefined;
 };

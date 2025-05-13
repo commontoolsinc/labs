@@ -304,9 +304,9 @@ class MemoryProviderSession<
     }
 
     // Now we need to remove any classified results from our commit
-    redactCommit(commit);
+    const redactedCommit = redactCommit(commit);
     for (const [id, channels] of this.channels) {
-      if (Subscription.match(commit, channels)) {
+      if (Subscription.match(redactedCommit, channels)) {
         // Note that we don't exit on the first match anymore because we need
         // to keep these subscriptions distinct.
         // TODO(@ubik2) - can I go back to just one here now that remote is gone?
@@ -314,7 +314,7 @@ class MemoryProviderSession<
         this.perform({
           the: "task/effect",
           of: id,
-          is: commit,
+          is: redactedCommit,
         });
       }
     }

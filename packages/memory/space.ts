@@ -811,39 +811,65 @@ export function collectClassifications(
 ) {
   const classifications = new Set<string>();
   for (const fact of iterate(labels)) {
-    if (!isObject(fact.value.is) || !("classification" in fact.value.is)) {
-      continue;
-    }
-    const labels = fact.value.is["classification"] as string[];
-    for (const label of labels) {
-      classifications.add(label);
-    }
+    getClassifications(fact.value, classifications);
   }
   return classifications;
 }
 
-// Modifies the commit in place to remove any classified documents
+export function getClassifications(
+  fact: AssertFact | undefined,
+  classifications = new Set<string>(),
+) {
+  if (
+    fact === undefined || !isObject(fact.is) || !("classification" in fact.is)
+  ) {
+    return classifications;
+  }
+  const labels = fact.is["classification"] as string[];
+  for (const label of labels) {
+    classifications.add(label);
+  }
+  return classifications;
+}
+
+// Removes a copy of the commit with any classifed documents excluded
 export function redactCommit(commit: Commit) {
+  const newCommit = {};
   for (const item of iterate(commit)) {
     const commitData = item.value.is;
-    // remove any classified entries from the commit before we send it to subscribers
     if (commitData.labels === undefined) {
+      set(newCommit, item.of, item.the, item.cause, { is: commitData });
       continue;
     }
-    const removeList = [];
+    const labels = new Map<Entity, AssertFact>();
     for (const fact of iterate(commitData.transaction.args.changes)) {
-      if (getRevision(commitData.labels, fact.of, fact.the)) {
-        removeList.push(fact);
+      if (!labels.has(fact.of)) { // don't reload if we've seen this before
+        const labelObj = getRevision(commitData.labels, fact.of, LABEL_THE);
+        if (labelObj !== undefined) {
+          labels.set(fact.of, labelObj);
+        }
       }
     }
-    for (const redacted of removeList) {
-      setEmptyObj(
-        commitData.transaction.args.changes,
-        redacted.of,
-        redacted.the,
-      );
+    // Make a copy of the transaction with no changes
+    const newChanges = {};
+    const newCommitData = {
+      ...commitData,
+      transaction: {
+        ...commitData.transaction,
+        args: { ...commitData.transaction.args, changes: newChanges },
+      },
+    };
+    set(newCommit, item.of, item.the, item.cause, { is: newCommitData });
+    // Add any non-redacted changes to the newCommitData
+    for (const fact of iterate(commitData.transaction.args.changes)) {
+      if (labels.has(fact.of)) {
+        setEmptyObj(newChanges, fact.of, fact.the);
+      } else {
+        set(newChanges, fact.of, fact.the, fact.cause, fact.value);
+      }
     }
   }
+  return newCommit;
 }
 
 export function loadFacts<Space extends MemorySpace>(

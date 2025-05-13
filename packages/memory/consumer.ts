@@ -51,7 +51,12 @@ import {
 } from "./interface.ts";
 import { refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
-import { getSelectorRevision, iterate, setRevision } from "./selection.ts";
+import {
+  getSelectorRevision,
+  iterate,
+  setEmptyObj,
+  setRevision,
+} from "./selection.ts";
 import * as FactModule from "./fact.ts";
 import * as Access from "./access.ts";
 import * as Subscription from "./subscription.ts";
@@ -564,45 +569,59 @@ class QuerySubscriptionInvocation<
 
     await unsubscribe;
   }
+
+  // This function is called for both subscriptions to the commit log as well as subscriptions
+  // to individual docs.
   override perform(commit: Commit<Space>) {
     const selection = this.selection[this.space];
     // Here we will collect subset of changes that match the query.
     const differential: OfTheCause<{ is?: JSONValue; since: number }> = {};
-
     const fact = toRevision(commit);
 
     const { the, of, is } = fact;
     const cause = fact.cause.toString();
     const { transaction, since } = is;
-    for (const pattern of this.patterns) {
-      const match = (!pattern.of || pattern.of === of) &&
-        (!pattern.the || pattern.the === the) &&
-        (!pattern.cause || pattern.cause === cause);
+    const matchCommit = this.patterns.some((pattern) =>
+      (!pattern.of || pattern.of === of) &&
+      (!pattern.the || pattern.the === the) &&
+      (!pattern.cause || pattern.cause === cause)
+    );
 
-      if (match) {
-        // Update the main application/commit+json record for the space
-        setRevision(differential, of, the, cause, { is, since });
-      }
-      for (const [of, attributes] of Object.entries(transaction.args.changes)) {
-        for (const [the, changes] of Object.entries(attributes)) {
-          const [[cause, change]] = Object.entries(changes);
+    if (matchCommit) {
+      // Update the main application/commit+json record for the space
+      setRevision(differential, of, the, cause, { is, since });
+    }
+    for (const [of, attributes] of Object.entries(transaction.args.changes)) {
+      for (const [the, changes] of Object.entries(attributes)) {
+        const causeEntries = Object.entries(changes);
+        if (causeEntries.length === 0) {
+          // A classified object will not have a cause/change pair
+          const matchDoc = this.patterns.some((pattern) =>
+            (!pattern.of || pattern.of === of) &&
+            (!pattern.the || pattern.the === the) && !pattern.cause
+          );
+          if (matchDoc) {
+            setEmptyObj(differential, of as Entity, the);
+          }
+        } else {
+          const [[cause, change]] = causeEntries;
           if (change !== true) {
             const state = Object.entries(
               selection?.[of as Entity]?.[the] ?? {},
             );
             const [current] = state.length > 0 ? state[0] : [];
             if (cause !== current) {
-              for (const pattern of this.patterns) {
-                const match = (!pattern.of || pattern.of === of) &&
-                  (!pattern.the || pattern.the === the) &&
-                  (!pattern.cause || pattern.cause === cause);
+              const matchDoc = this.patterns.some((pattern) =>
+                (!pattern.of || pattern.of === of) &&
+                (!pattern.the || pattern.the === the) &&
+                (!pattern.cause || pattern.cause === cause)
+              );
 
-                if (match) {
-                  const value = change.is
-                    ? { is: change.is, since: since }
-                    : { since: since };
-                  setRevision(differential, of as Entity, the, cause, value);
-                }
+              if (matchDoc) {
+                const value = change.is
+                  ? { is: change.is, since: since }
+                  : { since: since };
+                setRevision(differential, of as Entity, the, cause, value);
               }
             }
           }

@@ -1,13 +1,8 @@
 import { OAuth2Client, Tokens } from "@cmd-johnson/oauth2-client";
 import env from "@/env.ts";
-import {
-  type CellLink,
-  Classification,
-  getCellFromLink,
-  storage,
-} from "@commontools/runner";
+import { type CellLink, getCellFromLink, storage } from "@commontools/runner";
 import { Context } from "@hono/hono";
-import { JSONSchema, Mutable, Schema } from "@commontools/builder";
+import { AuthSchema, Mutable, Schema } from "@commontools/builder";
 // Types
 
 export interface OAuth2Tokens {
@@ -38,33 +33,6 @@ export interface CallbackResult extends Record<string, unknown> {
   details?: Record<string, unknown>;
 }
 
-const AuthSchema = {
-  type: "object",
-  properties: {
-    token: {
-      type: "string",
-      default: "",
-      ifc: { classification: [Classification.Secret] },
-    },
-    tokenType: { type: "string", default: "" },
-    scope: { type: "array", items: { type: "string" }, default: [] },
-    expiresIn: { type: "number", default: 0 },
-    expiresAt: { type: "number", default: 0 },
-    refreshToken: {
-      type: "string",
-      default: "",
-      ifc: { classification: [Classification.Secret] },
-    },
-    user: {
-      type: "object",
-      properties: {
-        email: { type: "string", default: "" },
-        name: { type: "string", default: "" },
-        picture: { type: "string", default: "" },
-      },
-    },
-  },
-} as const satisfies JSONSchema;
 type AuthData = Mutable<Schema<typeof AuthSchema>>;
 
 // Create OAuth client with credentials from environment variables
@@ -180,12 +148,10 @@ export async function getAuthCellAndStorage(docLink: CellLink | string) {
       throw new Error("Unable to talk to storage: not configured.");
     }
 
-    // FIXME(ja): add the authcell schema!
-    const authCell = getCellFromLink(
-      parsedDocLink,
-      AuthSchema,
-    );
-
+    // We already should have the schema on the parsedDocLink (from our state),
+    // but if it's missing, we can add it  here.
+    parsedDocLink.schema = parsedDocLink.schema ?? AuthSchema;
+    const authCell = getCellFromLink(parsedDocLink);
     // make sure the cell is live!
     await storage.syncCell(authCell, true);
     await storage.synced();

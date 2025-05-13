@@ -70,6 +70,7 @@ export {
   type UnsafeBinding,
 } from "./types.ts";
 export { type Schema, schema } from "./schema-to-ts.ts";
+export { AuthSchema } from "./schema-lib.ts";
 
 // This should be a separate package, but for now it's easier to keep it here.
 export {

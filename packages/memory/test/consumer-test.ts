@@ -1059,3 +1059,100 @@ test(
     );
   },
 );
+
+test(
+  "subscribe to commits does not return classified objects",
+  store,
+  async (session) => {
+    const clock = new Clock();
+    const memory = Consumer.open({ as: alice, session, clock })
+      .mount(alice.did());
+
+    const v1 = Fact.assert({
+      the: "application/json",
+      of: doc,
+      is: { v: 1 },
+    });
+
+    const r1 = await memory.transact({
+      changes: Changes.from([v1]),
+    });
+    assert(r1.ok);
+
+    const v2 = Fact.assert({
+      the: "application/json",
+      of: doc,
+      is: { v: 2 },
+      cause: v1,
+    });
+
+    const r2 = await memory.transact({
+      changes: Changes.from([v2]),
+    });
+
+    assert(r2.ok);
+
+    const query = memory.query({
+      select: {
+        [alice.did()]: {
+          "application/commit+json": {
+            _: {},
+          },
+        },
+      },
+    });
+
+    const subscription = query.subscribe();
+    const reader = subscription.getReader();
+    const p1 = reader.read();
+
+    const v3 = Fact.assert({
+      the: "application/json",
+      of: doc,
+      is: { v: 3 },
+      cause: v2,
+    });
+    const v3_label = Fact.assert({
+      the: LABEL_THE,
+      of: doc,
+      is: { classification: ["confidential"] },
+    });
+
+    const r3 = await memory.transact({
+      changes: Changes.from([v3, v3_label]),
+    });
+    assert(r3.ok);
+    const c3 = Commit.toRevision(r3.ok);
+
+    assertEquals(await p1, {
+      done: false,
+      value: {
+        [alice.did()]: {
+          [alice.did()]: {
+            ["application/commit+json"]: {
+              [c3.cause.toString()]: {
+                is: {
+                  ...c3.is,
+                  transaction: {
+                    ...c3.is.transaction,
+                    args: {
+                      changes: {
+                        [doc]: {
+                          "application/json": {},
+                          "application/label+json": {},
+                        },
+                      },
+                    },
+                  },
+                },
+                since: c3.is.since,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    reader.cancel();
+  },
+);

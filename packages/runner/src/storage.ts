@@ -318,11 +318,11 @@ class StorageImpl implements Storage {
     let provider = this.storageProviders.get(space);
 
     if (!provider) {
-      // Default to "remote", but let either custom URL (used in tests) or
+      // Default to "schema", but let either custom URL (used in tests) or
       // environment variable override this.
       const type = this.remoteStorageUrl?.protocol === "volatile:"
         ? "volatile"
-        : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "cached");
+        : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "schema");
 
       if (type === "volatile") {
         provider = new VolatileStorageProvider(space);
@@ -365,10 +365,12 @@ class StorageImpl implements Storage {
     space: string,
     id: EntityId | string,
     expectedInStorage: boolean = false,
+    schemaContext?: SchemaContext,
   ): DocImpl<T> {
     return this._ensureIsSynced(
       getDocByEntityId<T>(space, id, true)!,
       expectedInStorage,
+      schemaContext,
     );
   }
 
@@ -531,6 +533,9 @@ class StorageImpl implements Storage {
             doc.space,
             value.cell,
             true,
+            value.schema
+              ? { schema: value.schema, rootSchema: value.schema }
+              : undefined,
           );
           dependencies.add(dependency);
           return { ...value, cell: dependency };

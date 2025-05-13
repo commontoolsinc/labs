@@ -1,10 +1,11 @@
 import type {
+  AssertFact,
   Cause,
+  Entity,
   FactSelection,
   JSONObject,
   JSONValue,
   MemorySpace,
-  OfTheCause,
   SchemaContext,
   SchemaQuery,
   SchemaSelector,
@@ -14,6 +15,7 @@ import { isNumber, isObject, isString } from "@commontools/utils/types";
 import {
   collectClassifications,
   FactSelector,
+  getClassifications,
   getLabels,
   loadFacts,
   selectFacts,
@@ -319,7 +321,9 @@ export const selectSchema = <Space extends MemorySpace>(
   }
 
   // All the top level facts we accessed should be included
-  mergeSelection(includedFacts, factSelection);
+  for (const entry of iterate(factSelection)) {
+    setRevision(includedFacts, entry.of, entry.the, entry.cause, entry.value);
+  }
 
   // Track any docs loaded while traversing the factSelection
   const helper = new ServerTraverseHelper(session);
@@ -347,23 +351,20 @@ export const selectSchema = <Space extends MemorySpace>(
   // We want to collect the classification tags on our included facts
   const labelFacts = getLabels(session, includedFacts);
   const requiredClassifications = collectClassifications(labelFacts);
-
-  if (!requiredClassifications.isSubsetOf(new Set<string>(classification))) {
+  const providedClassifications = new Set<string>(classification);
+  if (!requiredClassifications.isSubsetOf(providedClassifications)) {
     throw new TheAuthorizationError("Insufficient access");
   }
-
   // Any entities referenced in our selectSchema must be returned in the response
   // I'm not sure this is the best behavior, but it matches the schema-free query code.
   // Our returned stub objects will not have a cause.
-  // TODO: See if I can remove this
+  // TODO(@ubik2) See if I can remove this
   for (const factSelector of iterateSelector(selectSchema)) {
     if (
-      factSelector.of === SelectAllString ||
-      factSelector.the === SelectAllString
+      factSelector.of !== SelectAllString &&
+      factSelector.the !== SelectAllString &&
+      !getRevision(includedFacts, factSelector.of, factSelector.the)
     ) {
-      continue;
-    }
-    if (!getRevision(includedFacts, factSelector.of, factSelector.the)) {
       setEmptyObj(includedFacts, factSelector.of, factSelector.the);
     }
   }
@@ -408,12 +409,5 @@ function loadDocFacts(
         helper.load(factAddress);
       }
     }
-  }
-}
-
-// Merge the updates into the existing fact selection
-function mergeSelection<T>(existing: OfTheCause<T>, updates: OfTheCause<T>) {
-  for (const entry of iterate(updates)) {
-    setRevision(existing, entry.of, entry.the, entry.cause, entry.value);
   }
 }

@@ -1,5 +1,6 @@
 import { h } from "@commontools/html";
 import {
+  AuthSchema,
   cell,
   derive,
   handler,
@@ -24,8 +25,8 @@ const CalendarEventSchema = {
     location: { type: "string" },
     eventType: { type: "string" },
     hangoutLink: { type: "string" },
-    attendees: { 
-      type: "array", 
+    attendees: {
+      type: "array",
       items: {
         type: "object",
         properties: {
@@ -48,25 +49,6 @@ const CalendarEventSchema = {
 } as const satisfies JSONSchema;
 type CalendarEvent = Schema<typeof CalendarEventSchema>;
 
-const AuthSchema = {
-  type: "object",
-  properties: {
-    token: { type: "string", default: "" },
-    tokenType: { type: "string", default: "" },
-    scope: { type: "array", items: { type: "string" }, default: [] },
-    expiresIn: { type: "number", default: 0 },
-    expiresAt: { type: "number", default: 0 },
-    refreshToken: { type: "string", default: "" },
-    user: {
-      type: "object",
-      properties: {
-        email: { type: "string", default: "" },
-        name: { type: "string", default: "" },
-        picture: { type: "string", default: "" },
-      },
-    },
-  },
-} as const satisfies JSONSchema;
 type Auth = Schema<typeof AuthSchema>;
 
 const GcalImporterInputs = {
@@ -479,7 +461,8 @@ export default recipe(
                     <td style="border: 1px solid black; padding: 10px;">
                       &nbsp;{derive(
                         event,
-                        (event) => event?.attendees?.map((a) => a.email).join(", "),
+                        (event) =>
+                          event?.attendees?.map((a) => a.email).join(", "),
                       )}&nbsp;
                     </td>
                   </tr>
