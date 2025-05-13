@@ -28,7 +28,7 @@ import {
   OptJSONValue,
   ValueEntry,
 } from "./traverse.ts";
-import { JSONSchema, JSONValue } from "@commontools/builder";
+import { JSONObject, JSONSchema, JSONValue } from "@commontools/builder";
 import { ContextualFlowControl } from "@commontools/runner";
 import { TheAuthorizationError } from "./error.ts";
 import {
@@ -41,7 +41,6 @@ import {
   setRevision,
 } from "./selection.ts";
 export type * from "./interface.ts";
-import { JSONObject } from "../builder/src/types.ts";
 export * from "./interface.ts";
 
 type FullFactAddress = FactAddress & { cause: Cause; since: number };
