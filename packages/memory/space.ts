@@ -821,7 +821,8 @@ export function getClassifications(
   classifications = new Set<string>(),
 ) {
   if (
-    fact === undefined || !isObject(fact.is) || !("classification" in fact.is)
+    fact === undefined || !isObject(fact.is) ||
+    !("classification" in fact.is) || !Array.isArray(fact.is["classification"])
   ) {
     return classifications;
   }
