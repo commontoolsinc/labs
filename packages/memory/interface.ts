@@ -626,6 +626,7 @@ export type Claim = {
   retract?: undefined;
 };
 
+// This is essentially an OfTheCause tree with one special record whose value is another OfTheCause tree.
 export type Commit<Subject extends string = MemorySpace> = {
   [of in Subject]: {
     ["application/commit+json"]: {
@@ -636,6 +637,8 @@ export type Commit<Subject extends string = MemorySpace> = {
   };
 };
 
+// We include labels here so we can use the commit data to redact the transaction
+// results before sending them to subscribers with insufficient access.
 export type CommitData = {
   since: number;
   transaction: Transaction;

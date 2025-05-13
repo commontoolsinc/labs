@@ -294,7 +294,6 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
     return QueryView.create(this.session, query);
   }
 
-  // FIXME: this is going to mess up the commit+json subscription
   private static asSelectSchema(queryArg: QueryArgs): SchemaQueryArgs {
     const selectSchema: OfTheCause<SchemaPathSelector> = {};
     for (const [of, attributes] of Object.entries(queryArg.select)) {

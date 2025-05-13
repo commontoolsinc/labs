@@ -369,16 +369,16 @@ export class Replica {
     // Poll re-fetches the commit log, then subscribes to that
     // We don't use the autosubscribing query, since we want the
     // Commit object, and the autosubscribe returns a Selection.
-    // TODO: Investigate
+    // TODO(@ubik2) Investigate whether I *can* use autosub.
     const query = this.remote.query({
       // selectSchema: {
       //   [this.space]: {
       //     [the]: {
-      //       "_": {
+      //       SelectAllString: {
       //         path: [],
       //         schemaContext: {
-      //           schema: {},
-      //           rootSchema: {},
+      //           schema: SchemaNone,
+      //           rootSchema: SchemaNone,
       //         },
       //       },
       //     },

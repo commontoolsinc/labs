@@ -103,8 +103,7 @@ export const iterate = function* <T>(
 
 type EmptyObj = Record<string | number | symbol, never>;
 // Selectors can have wildcard strings
-// If we're missing a "the" or "cause", we treat these as
-// wildcards
+// If we're missing a "the" or "cause", we treat these as wildcards
 export const iterateSelector = function* <T>(
   selector: Select<Entity, Select<The, Select<Cause, T>>>,
 ): Iterable<
@@ -137,6 +136,7 @@ export const iterateSelector = function* <T>(
   }
 };
 
+// This gets what should be the only cause/value pair for an of/the pair.
 export const getRevision = <T>(
   selection: OfTheCause<T>,
   of: Entity,
@@ -166,7 +166,8 @@ export const getRevision = <T>(
   return undefined;
 };
 
-// Selectors can have wildcard strings
+// Selectors can have wildcard strings, so we can't use the standard version
+// This gets what should be the only cause/value pair for an of/the pair.
 export const getSelectorRevision = <T>(
   selector: Select<Entity, Select<The, Select<Cause, T>>>,
   of: Entity,
