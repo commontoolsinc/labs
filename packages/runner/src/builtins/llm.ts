@@ -74,7 +74,7 @@ export function llm(
       system: system ?? "",
       messages: (messages ?? []).map((content: string, index: number) => ({
         role: index % 2 ? "assistant" : "user",
-        content,
+        content: content?.toString() ?? "",
       })),
       stop: stop ?? "",
       maxTokens: maxTokens ?? 4096,
@@ -88,7 +88,7 @@ export function llm(
       cache: true,
     };
 
-    const hash = refer(llmParams).toString();
+    const hash = refer(JSON.stringify(llmParams)).toString();
 
     // Return if the same request is being made again, either concurrently (same
     // as previousCallHash) or when rehydrated from storage (same as the
