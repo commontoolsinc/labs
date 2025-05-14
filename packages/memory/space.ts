@@ -13,7 +13,6 @@ import type {
   Assertion,
   AsyncResult,
   AuthorizationError,
-  AwaitResult,
   Cause,
   Claim,
   Commit,
@@ -23,7 +22,6 @@ import type {
   DIDKey,
   Entity,
   Fact,
-  JSONValue,
   MemorySpace,
   Query,
   QueryError,
@@ -42,6 +40,7 @@ import type {
 } from "./interface.ts";
 import * as Error from "./error.ts";
 import { selectSchema } from "./space-schema.ts";
+import { JSONValue } from "@commontools/builder";
 export * from "./interface.ts";
 
 export const PREPARE = `

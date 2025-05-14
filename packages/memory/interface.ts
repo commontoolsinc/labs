@@ -1,5 +1,5 @@
 import { refer, type Reference } from "merkle-reference";
-import { JSONSchema } from "../builder/src/types.ts";
+import { JSONSchema, JSONValue } from "@commontools/builder";
 
 export type { Reference };
 
@@ -829,18 +829,6 @@ export type Unit = NonNullable<unknown>;
  * Generic type used to annotate underlying type with a context of the replica.
  */
 export type In<T> = { [For: MemorySpace]: T };
-
-export type JSONValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JSONObject
-  | JSONArray;
-
-export interface JSONObject extends Record<string, JSONValue> {}
-
-export interface JSONArray extends ArrayLike<JSONValue> {}
 
 export type AsyncResult<T extends Unit = Unit, E extends Error = Error> =
   Promise<Result<T, E>>;
