@@ -6,6 +6,7 @@ import {
   CharmManager,
   compileAndRunRecipe,
   createDataCharm,
+  parseComposerDocument,
   processWorkflow,
   renameCharm,
   searchCharms,
@@ -286,13 +287,21 @@ async function handleRenameCharm(
   ctx: CommandContext,
   input: string | undefined,
 ) {
-  if (!input || !ctx.focusedCharmId || !ctx.focusedReplicaId) return;
-  ctx.setLoading(true);
+  try {
+    if (!input || !ctx.focusedCharmId || !ctx.focusedReplicaId) return;
+    ctx.setLoading(true);
 
-  await renameCharm(ctx.charmManager, ctx.focusedCharmId, input);
-
-  ctx.setLoading(false);
-  ctx.setOpen(false);
+    // input is a slate editor document, parse out the new name
+    const parsedDoc = await parseComposerDocument(input);
+    const newName = parsedDoc.text?.trim();
+    if (!newName) {
+      throw new Error("renaming charm but name is empty");
+    }
+    await renameCharm(ctx.charmManager, ctx.focusedCharmId, newName);
+  } finally {
+    ctx.setLoading(false);
+    ctx.setOpen(false);
+  }
 }
 
 async function handleDeleteCharm(ctx: CommandContext) {
