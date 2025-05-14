@@ -46,6 +46,7 @@ import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import { getCellLinkOrThrow } from "./query-result-proxy.ts";
 import { storage } from "./storage.ts";
 import { runtime } from "./runtime/index.ts";
+import { createRef } from "./doc-map.ts";
 
 export const cancels = new WeakMap<DocImpl<any>, Cancel>();
 
@@ -561,7 +562,7 @@ function instantiateRawNode(
     (result: any) =>
       sendValueToBinding(processCell, mappedOutputBindings, result),
     addCancel,
-    inputCells, // cause
+    cause,
     processCell,
   );
 
