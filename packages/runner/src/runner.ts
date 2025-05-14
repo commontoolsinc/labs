@@ -543,6 +543,9 @@ function instantiateRawNode(
   const inputCells = findAllAliasedCells(mappedInputBindings, processCell);
   const outputCells = findAllAliasedCells(mappedOutputBindings, processCell);
 
+  // If no input cells were provided, we have only static inputs, so use that as cause
+  const cause = inputCells.length > 0 ? inputCells : inputBindings;
+
   const action = module.implementation(
     getDoc(
       mappedInputBindings,
