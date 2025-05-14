@@ -642,7 +642,7 @@ export type Commit<Subject extends string = MemorySpace> = {
 export type CommitData = {
   since: number;
   transaction: Transaction;
-  labels?: OfTheCause<AssertFact>;
+  labels?: FactSelection;
 };
 
 export type CommitFact<Subject extends MemorySpace = MemorySpace> = Assertion<

@@ -826,7 +826,7 @@ test(
 
     assertEquals(
       query.ok?.selection,
-      { [alice.did()]: Selection.from([[v1, 0]]) },
+      { [alice.did()]: Selection.from([[v1, 0], [v1_label, 0]]) },
       "lists alice's facts",
     );
   },
@@ -1054,7 +1054,7 @@ test(
 
     assertEquals(
       query.ok?.selection,
-      { [alice.did()]: Selection.from([[v1, 0], [v2, 1]]) },
+      { [alice.did()]: Selection.from([[v1, 0], [v1_label, 0], [v2, 1]]) },
       "lists alice's facts",
     );
   },

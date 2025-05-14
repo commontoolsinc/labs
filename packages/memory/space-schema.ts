@@ -36,7 +36,6 @@ import {
   getSelectorRevision,
   iterate,
   iterateSelector,
-  set,
   setEmptyObj,
   setRevision,
 } from "./selection.ts";
@@ -247,9 +246,9 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
         )
         ? schemaProperties[propKey]
         : (isObject(schema["additionalProperties"]) ||
-            schema["additionalProperties"] === true)
+            schema["additionalProperties"] === false)
         ? schema["additionalProperties"] as JSONSchema | boolean
-        : false;
+        : true;
       const val = this.traverseWithSchema(doc, docRoot, propValue, propSchema);
       if (val !== undefined) {
         filteredObj[propKey] = val;
@@ -333,7 +332,7 @@ export const selectSchema = <Space extends MemorySpace>(
     if (value.source === undefined) {
       continue;
     }
-    set(
+    setRevision(
       includedFacts,
       value.source.of,
       value.source.the,
@@ -351,6 +350,14 @@ export const selectSchema = <Space extends MemorySpace>(
   if (!requiredClassifications.isSubsetOf(providedClassifications)) {
     throw new TheAuthorizationError("Insufficient access");
   }
+
+  // We want to include all the labels for the selected entities as well,
+  // since the client may want to change the label, and they'll want the
+  // original with a cause for that to be valid.
+  for (const entry of iterate(labelFacts)) {
+    setRevision(includedFacts, entry.of, entry.the, entry.cause, entry.value);
+  }
+
   // Any entities referenced in our selectSchema must be returned in the response
   // I'm not sure this is the best behavior, but it matches the schema-free query code.
   // Our returned stub objects will not have a cause.

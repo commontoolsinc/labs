@@ -1466,6 +1466,7 @@ test(
                   "street": { "type": "string" },
                   "city": { "type": "string" },
                 },
+                "additionalProperties": false,
               },
               rootSchema: {
                 "type": "object",
@@ -1473,6 +1474,7 @@ test(
                   "street": { "type": "string" },
                   "city": { "type": "string" },
                 },
+                "additionalProperties": false,
               },
             },
           },

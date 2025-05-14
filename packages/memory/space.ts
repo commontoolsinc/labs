@@ -777,11 +777,15 @@ export const querySchema = <Space extends MemorySpace>(
 };
 
 export const LABEL_THE = "application/label+json" as const;
-export function getLabels<Space extends MemorySpace, T>(
+type FactSelectionValue = { is?: JSONValue; since: number };
+export function getLabels<
+  Space extends MemorySpace,
+  T,
+>(
   session: Session<Space>,
   includedFacts: OfTheCause<T>,
 ) {
-  const labels: OfTheCause<AssertFact> = {};
+  const labels: OfTheCause<FactSelectionValue> = {};
   for (const fact of iterate(includedFacts)) {
     const factSelector = {
       the: LABEL_THE,
@@ -789,17 +793,10 @@ export function getLabels<Space extends MemorySpace, T>(
       cause: SelectAllString,
     };
     for (const metadata of selectFacts(session, factSelector)) {
-      if (metadata.is) {
-        setRevision<AssertFact>(
-          labels,
-          metadata.of,
-          metadata.the,
-          metadata.cause,
-          {
-            is: metadata.is,
-          },
-        );
-      }
+      setRevision(labels, metadata.of, metadata.the, metadata.cause, {
+        since: metadata.since,
+        ...(metadata.is ? { is: metadata.is } : {}),
+      });
     }
   }
   return labels;
@@ -807,7 +804,7 @@ export function getLabels<Space extends MemorySpace, T>(
 
 // Get the various classification tags required based on the collection of labels.
 export function collectClassifications(
-  labels: OfTheCause<AssertFact>,
+  labels: OfTheCause<FactSelectionValue>,
 ) {
   const classifications = new Set<string>();
   for (const fact of iterate(labels)) {
@@ -817,7 +814,7 @@ export function collectClassifications(
 }
 
 export function getClassifications(
-  fact: AssertFact | undefined,
+  fact: FactSelectionValue,
   classifications = new Set<string>(),
 ) {
   if (
@@ -842,7 +839,8 @@ export function redactCommit(commit: Commit) {
       set(newCommit, item.of, item.the, item.cause, { is: commitData });
       continue;
     }
-    const labels = new Map<Entity, AssertFact>();
+    // Collect our labels for easier lookup
+    const labels = new Map<Entity, FactSelectionValue>();
     for (const fact of iterate(commitData.transaction.args.changes)) {
       if (!labels.has(fact.of)) { // don't reload if we've seen this before
         const labelObj = getRevision(commitData.labels, fact.of, LABEL_THE);
