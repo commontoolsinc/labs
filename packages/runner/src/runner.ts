@@ -448,6 +448,7 @@ function instantiateJavaScriptNode(
     inputsCell.freeze(); // Freezes the bindings, not aliased cells.
 
     let resultCell: DocImpl<any> | undefined;
+    let previousResultRecipeAsString: string | undefined;
 
     const action: Action = (log: ReactivityLog) => {
       const argument = module.argumentSchema
@@ -471,6 +472,11 @@ function instantiateJavaScriptNode(
             undefined,
             () => result,
           );
+
+          // If nothing changed, don't rerun the recipe
+          const resultRecipeAsString = JSON.stringify(resultRecipe);
+          if (previousResultRecipeAsString === resultRecipeAsString) return;
+          previousResultRecipeAsString = resultRecipeAsString;
 
           resultCell = run(
             resultRecipe,
