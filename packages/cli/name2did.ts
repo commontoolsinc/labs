@@ -1,6 +1,6 @@
 import { Identity } from "@commontools/identity";
 
-const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "implicit trust";
+const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "common user";
 
 export const name2did = async (name: string) => {
   const account = await Identity.fromPassphrase(OPERATOR_PASS);
