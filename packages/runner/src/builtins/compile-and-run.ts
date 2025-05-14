@@ -104,7 +104,6 @@ export function compileAndRun(
 
     compilePromise.then((recipe) => {
       if (thisRun !== currentRun) return;
-      console.log("got new compiled recipe for ", files[main]);
       if (recipe) run(recipe, input, result);
       // TODO(seefeld): Add capturing runtime errors.
     });
