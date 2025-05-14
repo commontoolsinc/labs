@@ -19,6 +19,25 @@ export interface BuiltInLLMState<T> {
   error: any;
 }
 
+export interface BuiltInCompileAndRunParams<T> {
+  files: Record<string, string>;
+  main: string;
+  input?: T;
+}
+
+export interface BuiltInCompileAndRunState<T> {
+  pending: boolean;
+  result?: T;
+  error?: any;
+}
+
+export const compileAndRun = createNodeFactory({
+  type: "ref",
+  implementation: "compileAndRun",
+}) as <T = any, S = any>(
+  params: Opaque<BuiltInCompileAndRunParams<T>>,
+) => OpaqueRef<BuiltInCompileAndRunState<S>>;
+
 export const llm = createNodeFactory({
   type: "ref",
   implementation: "llm",

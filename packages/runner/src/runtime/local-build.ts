@@ -207,9 +207,6 @@ export const tsToExports = async (
         return commonHtml;
       case "@commontools/builder":
         return commonBuilder;
-      case "@commontools/runner":
-        // FIXME(seefeld): Expose compiliation as builtin instead
-        return commonRunner;
       case "zod":
         return zod;
       case "merkle-reference":

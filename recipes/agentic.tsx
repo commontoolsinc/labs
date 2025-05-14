@@ -1,5 +1,6 @@
 import { h } from "@commontools/html";
 import {
+  compileAndRun,
   derive,
   ifElse,
   JSONSchema,
@@ -7,11 +8,9 @@ import {
   llm,
   NAME,
   recipe,
-  RecipeFactory,
   str,
   UI,
 } from "@commontools/builder";
-import { runtime } from "@commontools/runner";
 
 // Define input schema
 const InputSchema = {
@@ -51,24 +50,19 @@ const OutputSchema = {
   required: ["result", "messages"],
 } as const satisfies JSONSchema;
 
-const codePrefix = `
+const wrapCode = (src: string) => `
 import { lift, recipe, derive, handler, llm } from "@commontools/builder";
-import { Result } from '../packages/memory/interface';
 
 const math = lift((expression: string) => {
   return eval(expression);
 });
 
 const webresearch = lift((query: string) => {
-  const call = llm({ messages: [query], model: "gpt-4o", stream: true });
+  const call = llm({ messages: [query], model: "gpt-4o" });
   return call.result;
 });
 
-export default recipe("action", () =>
-`;
-
-const codePostfix = `
-);
+export default recipe("action", () => ${src});
 `;
 
 const systemPrompt = `
@@ -123,32 +117,23 @@ const step = recipe(
       system: systemPrompt,
     });
 
-    const actionResult = derive(result, async (result) => {
-      if (!result) return undefined;
+    const actionResult = derive(result, (action) => {
+      if (!action) return undefined;
 
-      const actionMatch = result.match(/<tool>(.*?)<\/tool>/is);
+      const actionMatch = action.match(/<tool>(.*?)<\/tool>/is);
       const src = actionMatch?.[1].trim();
-      if (!src) return undefined; // No action found, likely final response
+      if (!src) return undefined;
 
-      try {
-        const code = codePrefix + src + codePostfix;
-        const fn = await runtime.compile(code) as RecipeFactory<any, any>;
-        if (!fn) return undefined;
-        return fn(undefined);
-      } catch (error) {
-        console.error("error", error);
-        if (error instanceof Error) {
-          return `
-Got an error:
+      const { result, error } = compileAndRun({
+        files: { "toolcall.ts": wrapCode(src) },
+        main: "toolcall.ts",
+      });
 
-${error.message}
-${error.stack ?? ""}
-
-Please try again.
-`;
-        }
-        return `Error: ${error}`;
-      }
+      return ifElse(
+        error,
+        str`Got an error:\n${error}\n\nPlease try again.`,
+        result,
+      );
     });
 
     // We need to wrap this in a derive that checks for undefined to wait for the

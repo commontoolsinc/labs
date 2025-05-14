@@ -4,9 +4,11 @@ import { fetchData } from "./fetch-data.ts";
 import { streamData } from "./stream-data.ts";
 import { llm } from "./llm.ts";
 import { ifElse } from "./if-else.ts";
+import { compileAndRun } from "./compile-and-run.ts";
 
 addModuleByRef("map", raw(map));
 addModuleByRef("fetchData", raw(fetchData));
 addModuleByRef("streamData", raw(streamData));
 addModuleByRef("llm", raw(llm));
 addModuleByRef("ifElse", raw(ifElse));
+addModuleByRef("compileAndRun", raw(compileAndRun));
