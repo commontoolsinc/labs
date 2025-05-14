@@ -204,7 +204,7 @@ class GmailClient {
       },
     );
     if (!res.ok) {
-      throw new Error("Could not acquir a refresh token.");
+      throw new Error("Could not acquire a refresh token.");
     }
     const json = await res.json();
     const authData = json.tokenInfo as Auth;
