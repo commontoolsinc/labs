@@ -448,7 +448,7 @@ function instantiateJavaScriptNode(
     const inputsCell = getDoc(inputs, { immutable: inputs }, processCell.space);
     inputsCell.freeze(); // Freezes the bindings, not aliased cells.
 
-    let previousResultCell: DocImpl<any> | undefined;
+    let previousResultDoc: DocImpl<any> | undefined;
     let previousResultRecipeAsString: string | undefined;
 
     const action: Action = (log: ReactivityLog) => {
@@ -479,24 +479,24 @@ function instantiateJavaScriptNode(
           if (previousResultRecipeAsString === resultRecipeAsString) return;
           previousResultRecipeAsString = resultRecipeAsString;
 
-          const resultCell = run(
+          const resultDoc = run(
             resultRecipe,
             undefined,
-            previousResultCell ??
+            previousResultDoc ??
               getDoc(
                 undefined,
                 { resultFor: { inputs, outputs, fn: fn.toString() } },
                 processCell.space,
               ),
           );
-          addCancel(cancels.get(resultCell));
+          addCancel(cancels.get(resultDoc));
 
-          if (!previousResultCell) {
-            previousResultCell = resultCell;
+          if (!previousResultDoc) {
+            previousResultDoc = resultDoc;
             sendValueToBinding(
               processCell,
               outputs,
-              { cell: resultCell, path: [] },
+              { cell: resultDoc, path: [] },
               log,
             );
           }
