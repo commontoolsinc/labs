@@ -27,6 +27,7 @@ export default {
   product: "chrome",
   args: ["--enable-experimental-web-platform-features"],
   pipeConsole: true,
+  include: ["path/static-asset.json"],
 };
 ```
 

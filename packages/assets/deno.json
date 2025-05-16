@@ -1,0 +1,17 @@
+{
+  "name": "@commontools/assets",
+  "tasks": {
+    "test": {
+      "dependencies": [
+        "deno-test",
+        "browser-test"
+      ]
+    },
+    "deno-test": "deno test --allow-read",
+    "browser-test": "deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts test/*.test.ts",
+    "compile-type-lib": "./scripts/compile-type-lib.ts ../../../TypeScript/src/lib/ static/es2023.d.ts"
+  },
+  "exports": {
+    ".": "./index.ts"
+  }
+}

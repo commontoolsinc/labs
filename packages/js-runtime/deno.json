@@ -1,0 +1,12 @@
+{
+  "name": "@commontools/js-runtime",
+  "tasks": {
+    "test": "deno test --allow-read"
+  },
+  "imports": {
+    "source-map-js": "npm:source-map-js"
+  },
+  "exports": {
+    ".": "./mod.ts"
+  }
+}
