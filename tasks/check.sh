@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
 deno check \
+  packages/assets/*.ts \
+  packages/assets/test \
+  packages/assets/scripts \
   packages/background-charm-service \
   packages/builder \
   packages/charm \
@@ -10,6 +13,7 @@ deno check \
   packages/identity \
   packages/iframe-sandbox \
   packages/integration \
+  packages/js-runtime \
   packages/jumble \
   packages/llm \
   packages/memory \

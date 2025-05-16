@@ -13,6 +13,8 @@ export type Config = {
   args?: string[];
   // Whether or not console commands should be propagated to the deno-web-test process.
   pipeConsole?: boolean;
+  // An array of files to host on the test http server.
+  include?: string[];
 };
 
 export const applyDefaults = (config: object): Config => {

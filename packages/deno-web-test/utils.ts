@@ -20,6 +20,17 @@ export const buildTestDir = async (manifest: Manifest) => {
     await bundle(input, output);
   }
 
+  // Bundle all extra includes and move to server root.
+  for (const staticPath of (manifest.config.include ?? [])) {
+    const filename = path.basename(staticPath);
+    const input = path.join(manifest.projectDir, staticPath);
+    const output = path.join(
+      manifest.serverDir,
+      filename,
+    );
+    await Deno.copyFile(input, output);
+  }
+
   // Deploy harness files to server root.
   if (!import.meta.dirname) {
     throw new Error("Cannot resolve local dirname");
