@@ -9,11 +9,11 @@ import { create as createCommit, the as COMMIT_THE } from "./commit.ts";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
   Assert,
-  AssertFact,
   Assertion,
   AsyncResult,
   AuthorizationError,
   Cause,
+  Changes,
   Claim,
   Commit,
   CommitData,
@@ -30,6 +30,7 @@ import type {
   Reference,
   Result,
   Retract,
+  Revision,
   SchemaQuery,
   SelectAll,
   Selection,
@@ -163,6 +164,8 @@ WHERE
   AND (:is IS NULL OR state.'is' IS NOT NULL)
   AND (:cause is NULL OR state.cause = :cause)
   AND (:since is NULL or state.since > :since)
+ORDER BY
+  since ASC
 `;
 
 export type Options = {
@@ -449,6 +452,7 @@ export type SelectedFact = {
   since: number;
 };
 
+// Select facts matching the selector. Facts are ordered by since.
 export const selectFacts = function* <Space extends MemorySpace>(
   { store }: Session<Space>,
   { the, of, cause, is, since }: FactSelector,
@@ -633,7 +637,12 @@ const commit = <Space extends MemorySpace>(
   swap(session, { assert: commit }, commit.is);
 
   // attach labels to the commit, so the provider can remove any classified entries from the commit before we send it to subscribers
-  const labels = getLabels(session, commit.is.transaction.args.changes);
+  // For this, we need since fields on our objects
+  const changedFacts = toSelection(
+    commit.is.since,
+    commit.is.transaction.args.changes,
+  );
+  const labels = getLabels(session, changedFacts);
   if (Object.keys(labels).length > 0) {
     commit.is.labels = labels;
   }
@@ -777,29 +786,70 @@ export const querySchema = <Space extends MemorySpace>(
 };
 
 export const LABEL_THE = "application/label+json" as const;
-type FactSelectionValue = { is?: JSONValue; since: number };
+export type FactSelectionValue = { is?: JSONValue; since: number };
+// Get the labels associated with a set of commits.
+// It's possible to get more than one label for a single doc because our
+// includedFacts may include more than one cause for a single doc.
 export function getLabels<
   Space extends MemorySpace,
   T,
 >(
   session: Session<Space>,
-  includedFacts: OfTheCause<T>,
-) {
+  includedFacts: OfTheCause<Revision<T>>,
+): OfTheCause<FactSelectionValue> {
   const labels: OfTheCause<FactSelectionValue> = {};
   for (const fact of iterate(includedFacts)) {
-    const factSelector = {
-      the: LABEL_THE,
-      of: fact.of,
-      cause: SelectAllString,
-    };
-    for (const metadata of selectFacts(session, factSelector)) {
-      setRevision(labels, metadata.of, metadata.the, metadata.cause, {
-        since: metadata.since,
-        ...(metadata.is ? { is: metadata.is } : {}),
-      });
+    const labelFact = getLabelForFact(session, fact);
+    if (labelFact !== undefined) {
+      set<FactSelectionValue, OfTheCause<FactSelectionValue>>(
+        labels,
+        labelFact.of,
+        labelFact.the,
+        labelFact.cause,
+        {
+          since: labelFact.since,
+          ...(labelFact.is ? { is: labelFact.is } : {}),
+        },
+      );
     }
   }
   return labels;
+}
+
+// Return the most recent label that applied to the specified fact
+function getLabelForFact<Space extends MemorySpace, T>(
+  session: Session<Space>,
+  fact: { of: Entity; the: The; cause: Cause; value: Revision<T> },
+) {
+  // We're only interested in the labels that applied to this fact during
+  // the period it was active, so get the subsequent fact to find max since.
+  const nextFactSelector = {
+    of: fact.of,
+    the: fact.the,
+    cause: SelectAllString,
+    since: fact.value.since + 1,
+  };
+  const [nextFact] = selectFacts(session, nextFactSelector);
+  const end = nextFact ? nextFact.since : undefined;
+  return getLabel(session, fact.of, end);
+}
+
+// Get the last label that applied to the entity before the specified since.
+// If end is undefined, just returns the last label.
+function getLabel<Space extends MemorySpace>(
+  session: Session<Space>,
+  of: Entity,
+  end?: number,
+) {
+  const labelSelector = { of, the: LABEL_THE, cause: SelectAllString };
+  const labelFacts = [...selectFacts(session, labelSelector)].reverse();
+  // Apply the last label that was active for the selected fact
+  for (const metadata of labelFacts) {
+    if (end === undefined || metadata.since < end) {
+      return metadata;
+    }
+  }
+  return undefined;
 }
 
 // Get the various classification tags required based on the collection of labels.
@@ -813,7 +863,7 @@ export function collectClassifications(
   return classifications;
 }
 
-export function getClassifications(
+function getClassifications(
   fact: FactSelectionValue,
   classifications = new Set<string>(),
 ) {
@@ -830,45 +880,44 @@ export function getClassifications(
   return classifications;
 }
 
-// Removes a copy of the commit with any classifed documents excluded
-export function redactCommit(commit: Commit) {
+export function redactCommit(commit: Commit): Commit {
   const newCommit = {};
   for (const item of iterate(commit)) {
-    const commitData = item.value.is;
-    if (commitData.labels === undefined) {
-      set(newCommit, item.of, item.the, item.cause, { is: commitData });
-      continue;
-    }
-    // Collect our labels for easier lookup
-    const labels = new Map<Entity, FactSelectionValue>();
-    for (const fact of iterate(commitData.transaction.args.changes)) {
-      if (!labels.has(fact.of)) { // don't reload if we've seen this before
-        const labelObj = getRevision(commitData.labels, fact.of, LABEL_THE);
-        if (labelObj !== undefined) {
-          labels.set(fact.of, labelObj);
-        }
-      }
-    }
-    // Make a copy of the transaction with no changes
-    const newChanges = {};
-    const newCommitData = {
-      ...commitData,
-      transaction: {
-        ...commitData.transaction,
-        args: { ...commitData.transaction.args, changes: newChanges },
-      },
-    };
-    set(newCommit, item.of, item.the, item.cause, { is: newCommitData });
-    // Add any non-redacted changes to the newCommitData
-    for (const fact of iterate(commitData.transaction.args.changes)) {
-      if (labels.has(fact.of)) {
-        setEmptyObj(newChanges, fact.of, fact.the);
-      } else {
-        set(newChanges, fact.of, fact.the, fact.cause, fact.value);
-      }
-    }
+    const redactedData = redactCommitData(item.value.is);
+    set(newCommit, item.of, item.the, item.cause, { is: redactedData });
   }
   return newCommit;
+}
+
+// Return the item with any classified results and the labels removed.
+export function redactCommitData(
+  commitData?: CommitData,
+): CommitData | undefined {
+  if (commitData === undefined || commitData.labels === undefined) {
+    return commitData;
+  }
+  // Make a copy of the transaction with no changes
+  const newChanges: Changes = {};
+  // Add any non-redacted changes to the newCommitData
+  for (const fact of iterate(commitData.transaction.args.changes)) {
+    if (fact.value === true) {
+      continue;
+    }
+    const labelFact = getRevision(commitData.labels, fact.of, LABEL_THE);
+    if (labelFact !== undefined && getClassifications(labelFact).size > 0) {
+      setEmptyObj(newChanges, fact.of, fact.the);
+    } else {
+      set(newChanges, fact.of, fact.the, fact.cause, fact.value);
+    }
+  }
+  const newCommitData = {
+    since: commitData.since,
+    transaction: {
+      ...commitData.transaction,
+      args: { ...commitData.transaction.args, changes: newChanges },
+    },
+  };
+  return newCommitData;
 }
 
 export function loadFacts<Space extends MemorySpace>(
@@ -885,4 +934,27 @@ export function loadFacts<Space extends MemorySpace>(
     setRevision(selection, fact.of, fact.the, fact.cause, value);
   }
   return selection;
+}
+
+// Converts a Changes object to a FactSelection
+export function toSelection(
+  since: number,
+  commitChanges: Changes,
+) {
+  const result = {};
+  for (const change of iterate(commitChanges)) {
+    if (change.value === true) {
+      continue;
+    }
+    setRevision(
+      result,
+      change.of,
+      change.the,
+      change.cause,
+      change.value.is
+        ? { is: change.value.is, since: since }
+        : { since: since },
+    );
+  }
+  return result;
 }

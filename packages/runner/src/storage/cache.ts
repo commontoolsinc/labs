@@ -528,7 +528,7 @@ export class Replica {
       StoreError | QueryError | AuthorizationError | ConnectionError
     >
   > {
-    // First we identify entries that we have need to load from the store.
+    // First we identify entries that we need to load from the store.
     const need: [FactAddress, SchemaContext?][] = [];
     for (const [address, schema] of entries) {
       if (!this.get(address)) {

@@ -303,7 +303,8 @@ class MemoryProviderSession<
       });
     }
 
-    // Now we need to remove any classified results from our commit
+    // Now we need to remove any classified results from our commit.
+    // The schema subscription has a classification claim, but these don't.
     const redactedCommit = redactCommit(commit);
     for (const [id, channels] of this.channels) {
       if (Subscription.match(redactedCommit, channels)) {
