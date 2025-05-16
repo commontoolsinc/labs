@@ -284,7 +284,8 @@ export function getCellFromLink(
   } else {
     throw new Error("Cell link has no space");
   }
-  return createCell(doc, cellLink.path, log, schema);
+  // If we aren't passed a schema, use the one in the cellLink
+  return createCell(doc, cellLink.path, log, schema ?? cellLink.schema);
 }
 
 export function getImmutableCell<T>(

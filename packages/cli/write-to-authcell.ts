@@ -1,6 +1,7 @@
 // Load .env file
 import { type CellLink, getCellFromLink, storage } from "@commontools/runner";
 import { parseArgs } from "@std/cli/parse-args";
+import { AuthSchema } from "@commontools/builder";
 
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ||
   "https://toolshed.saga-castor.ts.net";
@@ -22,6 +23,7 @@ async function main(
     space: replica,
     cell: doc,
     path: ["argument", "auth"],
+    schema: AuthSchema,
   } satisfies CellLink;
 
   const authCell = getCellFromLink(authCellEntity);

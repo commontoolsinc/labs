@@ -1,18 +1,18 @@
-import { set } from "./changes.ts";
 import type {
   Cause,
-  Entity,
   FactSelection,
   MemorySpace,
   SchemaContext,
   SchemaQuery,
   SchemaSelector,
 } from "./interface.ts";
+import { SelectAllString } from "./interface.ts";
 import { isNumber, isObject, isString } from "@commontools/utils/types";
 import {
+  collectClassifications,
   FactSelector,
-  SelectAll,
-  SelectedFact,
+  getLabels,
+  loadFacts,
   selectFacts,
   Session,
 } from "./space.ts";
@@ -31,10 +31,18 @@ import {
 import { JSONObject, JSONSchema, JSONValue } from "@commontools/builder";
 import { ContextualFlowControl } from "@commontools/runner";
 import { TheAuthorizationError } from "./error.ts";
+import {
+  getRevision,
+  getSelectorRevision,
+  iterate,
+  iterateSelector,
+  setEmptyObj,
+  setRevision,
+} from "./selection.ts";
+export type * from "./interface.ts";
 export * from "./interface.ts";
 
-export type FullFactAddress = FactAddress & { cause: Cause; since: number };
-export const LABEL_THE = "application/label+json" as const;
+type FullFactAddress = FactAddress & { cause: Cause; since: number };
 
 export class ServerTraverseHelper extends BaseObjectManager<
   FactAddress,
@@ -66,7 +74,7 @@ export class ServerTraverseHelper extends BaseObjectManager<
     const factSelector: FactSelector = {
       of: doc.of,
       the: doc.the,
-      cause: SelectAll,
+      cause: SelectAllString,
     };
     // we should only have one match
     for (const fact of selectFacts(this.session, factSelector)) {
@@ -238,9 +246,9 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
         )
         ? schemaProperties[propKey]
         : (isObject(schema["additionalProperties"]) ||
-            schema["additionalProperties"] === true)
+            schema["additionalProperties"] === false)
         ? schema["additionalProperties"] as JSONSchema | boolean
-        : false;
+        : true;
       const val = this.traverseWithSchema(doc, docRoot, propValue, propSchema);
       if (val !== undefined) {
         filteredObj[propKey] = val;
@@ -296,18 +304,21 @@ export const selectSchema = <Space extends MemorySpace>(
   const factSelection: FactSelection = {}; // we'll store our initial facts here
   const includedFacts: FactSelection = {}; // we'll store all the raw facts we accesed here
   // First, collect all the potentially relevant facts (without dereferencing pointers)
-  for (const [ofKey, ofValues] of Object.entries(selectSchema)) {
-    for (const [the, theValues] of Object.entries(ofValues)) {
-      // We'll use an object for each [of,the] combination
-      for (const [cause, selector] of Object.entries(theValues)) {
-        const of = ofKey as Entity;
-        loadFacts(factSelection, session, { the, of, cause, since });
-      }
-    }
+  for (const entry of iterateSelector(selectSchema)) {
+    const factSelector = {
+      of: entry.of,
+      the: entry.the,
+      cause: entry.cause,
+      since,
+      ...entry.value.is ? { is: entry.value.is } : {},
+    };
+    loadFacts(factSelection, session, factSelector);
   }
 
   // All the top level facts we accessed should be included
-  mergeSelection(includedFacts, factSelection);
+  for (const entry of iterate(factSelection)) {
+    setRevision(includedFacts, entry.of, entry.the, entry.cause, entry.value);
+  }
 
   // Track any docs loaded while traversing the factSelection
   const helper = new ServerTraverseHelper(session);
@@ -321,9 +332,10 @@ export const selectSchema = <Space extends MemorySpace>(
     if (value.source === undefined) {
       continue;
     }
-    set(
+    setRevision(
       includedFacts,
-      [value.source.of, value.source.the],
+      value.source.of,
+      value.source.the,
       value.source.cause,
       (value.value !== undefined)
         ? { is: value.value, since: value.source.since }
@@ -332,43 +344,32 @@ export const selectSchema = <Space extends MemorySpace>(
   }
 
   // We want to collect the classification tags on our included facts
-  const requiredClassifications = new Set<string>();
-  for (const includedFact of iterateFacts(includedFacts)) {
-    const factSelector = { the: LABEL_THE, of: includedFact.of, cause: "_" };
-    for (const metadata of selectFacts(session, factSelector)) {
-      if (
-        isObject(metadata.is) && metadata.is !== undefined &&
-        metadata.is !== null && "classification" in (metadata.is as JSONObject)
-      ) {
-        const isObj = metadata.is as JSONObject;
-        const labels = isObj["classification"] as string[];
-        for (const label of labels) {
-          requiredClassifications.add(label);
-        }
-      }
-    }
+  const labelFacts = getLabels(session, includedFacts);
+  const requiredClassifications = collectClassifications(labelFacts);
+  const providedClassifications = new Set<string>(classification);
+  if (!requiredClassifications.isSubsetOf(providedClassifications)) {
+    throw new TheAuthorizationError("Insufficient access");
   }
 
-  if (!requiredClassifications.isSubsetOf(new Set<string>(classification))) {
-    throw new TheAuthorizationError("Insufficient access");
+  // We want to include all the labels for the selected entities as well,
+  // since the client may want to change the label, and they'll want the
+  // original with a cause for that to be valid.
+  for (const entry of iterate(labelFacts)) {
+    setRevision(includedFacts, entry.of, entry.the, entry.cause, entry.value);
   }
 
   // Any entities referenced in our selectSchema must be returned in the response
   // I'm not sure this is the best behavior, but it matches the schema-free query code.
   // Our returned stub objects will not have a cause.
-  for (const [ofKey, ofValues] of Object.entries(selectSchema)) {
-    if (ofKey === SelectAll) { // we don't need to return a stub for wildcard `of`
-      continue;
+  // TODO(@ubik2) See if I can remove this
+  for (const factSelector of iterateSelector(selectSchema)) {
+    if (
+      factSelector.of !== SelectAllString &&
+      factSelector.the !== SelectAllString &&
+      !getRevision(includedFacts, factSelector.of, factSelector.the)
+    ) {
+      setEmptyObj(includedFacts, factSelector.of, factSelector.the);
     }
-    const ofFacts = includedFacts[ofKey as Entity] ?? {};
-    for (const [the, _value] of Object.entries(ofValues)) {
-      if (the in ofFacts) { // we already have a `the` fact for this entity
-        continue;
-      } else {
-        ofFacts[the] = {};
-      }
-    }
-    includedFacts[ofKey as Entity] = ofFacts;
   }
   return includedFacts;
 };
@@ -379,105 +380,36 @@ function loadDocFacts(
   factSelection: FactSelection,
 ) {
   const tracker = new CycleTracker<JSONValue>();
-  for (const [of, ofValues] of Object.entries(factSelection)) {
-    const schemaFilterOf = selectSchema[of as Entity] ??
-      selectSchema[SelectAll];
-    if (schemaFilterOf === undefined) {
+  for (const fact of iterate(factSelection)) {
+    const selector = getSelectorRevision(selectSchema, fact.of, fact.the);
+    if (selector === undefined) {
       continue;
     }
-    for (const [the, theValues] of Object.entries(ofValues)) {
-      const schemaFilterThe = schemaFilterOf[the] ?? schemaFilterOf[SelectAll];
-      if (schemaFilterThe === undefined) {
-        continue;
-      }
-      for (const [cause, factEntry] of Object.entries(theValues)) {
-        const selector = schemaFilterThe[cause] ?? schemaFilterThe[SelectAll];
-        if (selector === undefined) {
+    if (isObject(fact.value.is)) {
+      const factAddress = { the: fact.the, of: fact.of };
+      if (selector.schemaContext !== undefined) {
+        const factValue = (fact.value.is as JSONObject).value;
+        const [newDoc, newDocRoot, newValue] = getAtPath<
+          FactAddress,
+          FullFactAddress
+        >(helper, factAddress, factValue, factValue, selector.path, tracker);
+        if (newValue === undefined) {
           continue;
         }
-        if (isObject(factEntry.is)) {
-          const factAddress = { the: the, of: of as Entity };
-          if (selector.schemaContext !== undefined) {
-            const factValue = (factEntry.is as JSONObject).value;
-            const [newDoc, newDocRoot, newValue] = getAtPath<
-              FactAddress,
-              FullFactAddress
-            >(
-              helper,
-              factAddress,
-              factValue,
-              factValue,
-              selector.path,
-              tracker,
-            );
-            if (newValue === undefined) {
-              continue;
-            }
-            // We've provided a schema context for this, so traverse it
-            const traverser = new SchemaObjectTraverser(
-              helper,
-              selector.schemaContext,
-              selector.schemaContext.rootSchema,
-              tracker,
-            );
-            // We don't actually use the return value here, but we've built up
-            // a list of all the documents we need to watch.
-            traverser.traverse(newDoc, newDocRoot, newValue);
-          } else {
-            // If we didn't provide a schema context, we still want the selected
-            // object in our helper, so load it directly.
-            helper.load(factAddress);
-          }
-        }
-      }
-    }
-  }
-}
-
-// Merge the updates into the existing fact selection
-function mergeSelection(existing: FactSelection, updates: FactSelection) {
-  for (const [of, ofValue] of Object.entries(updates)) {
-    for (const [the, theValue] of Object.entries(ofValue)) {
-      for (const [cause, causeValue] of Object.entries(theValue)) {
-        set(existing, [of, the], cause, causeValue);
-      }
-    }
-  }
-}
-
-function loadFacts<Space extends MemorySpace>(
-  selection: FactSelection,
-  session: Session<Space>,
-  factSelector: FactSelector,
-): FactSelection {
-  for (
-    const fact of selectFacts(session, factSelector)
-  ) {
-    set(
-      selection,
-      [fact.of, fact.the],
-      fact.cause,
-      (fact.is !== undefined)
-        ? { is: fact.is, since: fact.since }
-        : { since: fact.since },
-    );
-  }
-  return selection;
-}
-
-function* iterateFacts(
-  selection: FactSelection,
-): Iterable<SelectedFact> {
-  for (const [of, attributes] of Object.entries(selection)) {
-    for (const [the, revisions] of Object.entries(attributes)) {
-      for (const [cause, change] of Object.entries(revisions)) {
-        yield {
-          the,
-          of: of as Entity,
-          cause: cause,
-          since: change.since,
-          ...(change.is !== undefined ? { is: change.is } : {}),
-        };
+        // We've provided a schema context for this, so traverse it
+        const traverser = new SchemaObjectTraverser(
+          helper,
+          selector.schemaContext,
+          selector.schemaContext.rootSchema,
+          tracker,
+        );
+        // We don't actually use the return value here, but we've built up
+        // a list of all the documents we need to watch.
+        traverser.traverse(newDoc, newDocRoot, newValue);
+      } else {
+        // If we didn't provide a schema context, we still want the selected
+        // object in our helper, so load it directly.
+        helper.load(factAddress);
       }
     }
   }

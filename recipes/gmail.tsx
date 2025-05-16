@@ -1,5 +1,6 @@
 import { h } from "@commontools/html";
 import {
+  AuthSchema,
   cell,
   derive,
   getRecipeEnvironment,
@@ -105,33 +106,6 @@ const EmailSchema = {
 } as const satisfies JSONSchema;
 type Email = Mutable<Schema<typeof EmailSchema>>;
 
-const AuthSchema = {
-  type: "object",
-  properties: {
-    token: {
-      type: "string",
-      default: "",
-      ifc: { classification: [Classification.Secret] },
-    },
-    tokenType: { type: "string", default: "" },
-    scope: { type: "array", items: { type: "string" }, default: [] },
-    expiresIn: { type: "number", default: 0 },
-    expiresAt: { type: "number", default: 0 },
-    refreshToken: {
-      type: "string",
-      default: "",
-      ifc: { classification: [Classification.Secret] },
-    },
-    user: {
-      type: "object",
-      properties: {
-        email: { type: "string", default: "" },
-        name: { type: "string", default: "" },
-        picture: { type: "string", default: "" },
-      },
-    },
-  },
-} as const satisfies JSONSchema;
 type Auth = Schema<typeof AuthSchema>;
 
 const GmailImporterInputs = {
@@ -230,7 +204,7 @@ class GmailClient {
       },
     );
     if (!res.ok) {
-      throw new Error("Could not acquired a refresh token.");
+      throw new Error("Could not acquire a refresh token.");
     }
     const json = await res.json();
     const authData = json.tokenInfo as Auth;
@@ -352,7 +326,7 @@ Accept: application/json
     options.headers.set("Authorization", `Bearer ${token}`);
 
     if (options.body && typeof options.body === "string") {
-      // Rewrite the authorization in the body here incase reauth was necessary
+      // Rewrite the authorization in the body here in case reauth was necessary
       options.body = options.body.replace(
         /Authorization: Bearer [^\n]*/g,
         `Authorization: Bearer ${token}`,

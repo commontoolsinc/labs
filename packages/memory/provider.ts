@@ -41,6 +41,7 @@ import { refer } from "./reference.ts";
 import * as Access from "./access.ts";
 import { Fact as FactModule, SelectionBuilder } from "./lib.ts";
 import { FactAddress } from "../runner/src/storage/cache.ts";
+import { redactCommit } from "./space.ts";
 
 // Convenient shorthand so I don't need this long type for this string
 type JobId = InvocationURL<Reference<ConsumerCommandInvocation<Protocol>>>;
@@ -286,14 +287,15 @@ class MemoryProviderSession<
 
   async commit(commit: Commit<Space>) {
     // First, check to see if any of our schema queries need to be notified
+    // Any queries that lack access are skipped (with a console log)
     const [lastId, maxSince, facts] = await this.getSchemaSubscriptionMatches(
       commit,
     );
     // It doesn't really matter who we say we're responding to as long as we
     // return all the relevant objects, the client will dispatch.
-    // It is important that we send it to the right kind of listener.
+    // It *is* important that we send it to the right kind of listener.
     if (lastId !== undefined) {
-      //this.setCommitData(commit, maxSince, changes);
+      // this is sent to a schemaSubscription
       this.perform({
         the: "task/effect",
         of: lastId,
@@ -301,14 +303,18 @@ class MemoryProviderSession<
       });
     }
 
+    // Now we need to remove any classified results from our commit
+    const redactedCommit = redactCommit(commit);
     for (const [id, channels] of this.channels) {
-      if (Subscription.match(commit, channels)) {
+      if (Subscription.match(redactedCommit, channels)) {
         // Note that we don't exit on the first match anymore because we need
         // to keep these subscriptions distinct.
+        // TODO(@ubik2) - can I go back to just one here now that remote is gone?
+        // this is sent to a standard subscription (application/commit+json)
         this.perform({
           the: "task/effect",
           of: id,
-          is: commit,
+          is: redactedCommit,
         });
       }
     }
@@ -367,7 +373,7 @@ class MemoryProviderSession<
           newInvocation,
         );
         if (result.error) {
-          console.log(result.error);
+          console.warn("Encountered querySchema error", result.error);
           continue;
         }
         const factSelection = result.ok![space];

@@ -3,7 +3,6 @@ import {
   AuthorizationError,
   Await,
   Cause,
-  Changes,
   Clock,
   Command,
   Commit,
@@ -16,24 +15,30 @@ import {
   DID,
   Entity,
   Fact,
+  FactSelection,
   InferOf,
   Invocation,
   InvocationURL,
   MemorySpace,
+  OfTheCause,
   Proto,
   Protocol,
   ProviderChannel,
   ProviderCommand,
   Query,
+  QueryArgs,
   QueryError,
   Reference,
   Result,
   Revision,
   SchemaContext,
+  SchemaNone,
   SchemaPathSelector,
   SchemaQuery,
+  SchemaQueryArgs,
   SchemaSelector,
   Seconds,
+  Select,
   Selection,
   Selector,
   Signer,
@@ -43,9 +48,15 @@ import {
   UCAN,
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
+import type { JSONValue } from "@commontools/builder";
 import { refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
-import * as ChangesBuilder from "./changes.ts";
+import {
+  getSelectorRevision,
+  iterate,
+  setEmptyObj,
+  setRevision,
+} from "./selection.ts";
 import * as FactModule from "./fact.ts";
 import * as Access from "./access.ts";
 import * as Subscription from "./subscription.ts";
@@ -272,21 +283,49 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
   query(
     source: Query["args"] | SchemaQuery["args"],
   ): QueryView<Space, Protocol<Space>> {
-    if ("select" in source) {
-      const query = this.session.invoke({
-        cmd: "/memory/query" as const,
-        sub: this.space,
-        args: source,
-      });
-      return QueryView.create(this.session, query);
-    } else { // selectSchema
-      const query = this.session.invoke({
-        cmd: "/memory/graph/query" as const,
-        sub: this.space,
-        args: source,
-      });
-      return QueryView.create(this.session, query);
+    const selectSchema = ("select" in source)
+      ? MemorySpaceConsumerSession.asSelectSchema(source)
+      : source;
+    const query = this.session.invoke({
+      cmd: "/memory/graph/query" as const,
+      sub: this.space,
+      args: selectSchema,
+    });
+    return QueryView.create(this.session, query);
+  }
+
+  private static asSelectSchema(queryArg: QueryArgs): SchemaQueryArgs {
+    const selectSchema: OfTheCause<SchemaPathSelector> = {};
+    for (const [of, attributes] of Object.entries(queryArg.select)) {
+      const entityEntry: Select<The, Select<Cause, SchemaPathSelector>> = {};
+      selectSchema[of as Entity] = entityEntry;
+      let attrEntries = Object.entries(attributes);
+      // A Selector may not have a "the", but SchemaSelector needs all three levels
+      if (attrEntries.length === 0) {
+        attrEntries = [["_", {}]];
+      }
+      for (const [the, causes] of attrEntries) {
+        const attributeEntry: Select<Cause, SchemaPathSelector> = {};
+        entityEntry[the] = attributeEntry;
+        // A Selector may not have a cause, but SchemaSelector needs all three levels
+        let causeEntries = Object.entries(causes);
+        if (causeEntries.length === 0) {
+          causeEntries = [["_", {}]];
+        }
+        for (const [cause, selector] of causeEntries) {
+          const causeEntry: SchemaPathSelector = {
+            path: [],
+            schemaContext: SchemaNone,
+            ...selector.is ? { is: selector.is } : {},
+          };
+          attributeEntry[cause] = causeEntry;
+        }
+      }
     }
+    return {
+      selectSchema: selectSchema,
+      ...queryArg.since ? { since: queryArg.since } : {},
+    };
   }
 }
 
@@ -427,7 +466,7 @@ class QueryView<
   }
 
   perform(effect: Selection<Space>) {
-    const differential = { ...effect[this.space] } as Selection<Space>;
+    const differential = effect[this.space];
     this.integrate(differential);
     return { ok: effect };
   }
@@ -448,14 +487,10 @@ class QueryView<
     return this.invocation.sub as MemorySpace as Space;
   }
 
-  integrate(differential: Changes) {
+  integrate(differential: FactSelection) {
     const selection = this.selection[this.space];
-    for (const [of, attributes] of Object.entries(differential)) {
-      for (const [the, changes] of Object.entries(attributes)) {
-        for (const [cause, change] of Object.entries(changes)) {
-          ChangesBuilder.set(selection, [of], the, { [cause]: change });
-        }
-      }
+    for (const change of iterate(differential)) {
+      setRevision(selection, change.of, change.the, change.cause, change.value);
     }
   }
 
@@ -479,15 +514,10 @@ class QueryView<
   // Get the schema context used to fetch the specified fact.
   // If the fact was included from another fact, it will not have a schemaContext.
   getSchema(fact: Revision<Fact>): SchemaContext | undefined {
-    const factSelector = this.selector;
-    const attributes = factSelector[fact.of];
-    if (attributes !== undefined) {
-      const causes = attributes[fact.the] as Record<Cause, SchemaPathSelector>;
-      if (causes !== undefined) {
-        for (const [_cause, selector] of Object.entries(causes)) {
-          return selector.schemaContext;
-        }
-      }
+    const factSelector = this.selector as SchemaSelector;
+    const revision = getSelectorRevision(factSelector, fact.of, fact.the);
+    if (revision !== undefined) {
+      return revision.schemaContext;
     }
     return undefined;
   }
@@ -538,51 +568,59 @@ class QuerySubscriptionInvocation<
 
     await unsubscribe;
   }
+
+  // This function is called for both subscriptions to the commit log as well as subscriptions
+  // to individual docs.
   override perform(commit: Commit<Space>) {
     const selection = this.selection[this.space];
     // Here we will collect subset of changes that match the query.
-    let differential = null;
-
+    const differential: OfTheCause<{ is?: JSONValue; since: number }> = {};
     const fact = toRevision(commit);
 
     const { the, of, is } = fact;
     const cause = fact.cause.toString();
     const { transaction, since } = is;
-    for (const pattern of this.patterns) {
-      const match = (!pattern.of || pattern.of === of) &&
-        (!pattern.the || pattern.the === the) &&
-        (!pattern.cause || pattern.cause === cause);
+    const matchCommit = this.patterns.some((pattern) =>
+      (!pattern.of || pattern.of === of) &&
+      (!pattern.the || pattern.the === the) &&
+      (!pattern.cause || pattern.cause === cause)
+    );
 
-      if (match) {
-        differential = differential ?? {};
-        ChangesBuilder.set(differential, [of], the, {
-          [cause]: {
-            is,
-            since,
-          },
-        });
-      }
-
-      for (const [of, attributes] of Object.entries(transaction.args.changes)) {
-        for (const [the, changes] of Object.entries(attributes)) {
-          const [[cause, change]] = Object.entries(changes);
+    if (matchCommit) {
+      // Update the main application/commit+json record for the space
+      setRevision(differential, of, the, cause, { is, since });
+    }
+    for (const [of, attributes] of Object.entries(transaction.args.changes)) {
+      for (const [the, changes] of Object.entries(attributes)) {
+        const causeEntries = Object.entries(changes);
+        if (causeEntries.length === 0) {
+          // A classified object will not have a cause/change pair
+          const matchDoc = this.patterns.some((pattern) =>
+            (!pattern.of || pattern.of === of) &&
+            (!pattern.the || pattern.the === the) && !pattern.cause
+          );
+          if (matchDoc) {
+            setEmptyObj(differential, of as Entity, the);
+          }
+        } else {
+          const [[cause, change]] = causeEntries;
           if (change !== true) {
             const state = Object.entries(
               selection?.[of as Entity]?.[the] ?? {},
             );
             const [current] = state.length > 0 ? state[0] : [];
             if (cause !== current) {
-              for (const pattern of this.patterns) {
-                const match = (!pattern.of || pattern.of === of) &&
-                  (!pattern.the || pattern.the === the) &&
-                  (!pattern.cause || pattern.cause === cause);
+              const matchDoc = this.patterns.some((pattern) =>
+                (!pattern.of || pattern.of === of) &&
+                (!pattern.the || pattern.the === the) &&
+                (!pattern.cause || pattern.cause === cause)
+              );
 
-                if (match) {
-                  differential = differential ?? {};
-                  ChangesBuilder.set(differential, [of], the, {
-                    [cause]: { ...change, since },
-                  });
-                }
+              if (matchDoc) {
+                const value = change.is
+                  ? { is: change.is, since: since }
+                  : { since: since };
+                setRevision(differential, of as Entity, the, cause, value);
               }
             }
           }
@@ -590,7 +628,7 @@ class QuerySubscriptionInvocation<
       }
     }
 
-    if (differential) {
+    if (Object.keys(differential).length !== 0) {
       this.query.integrate(differential);
       this.integrate({ [this.space]: differential } as Selection<Space>);
     }
