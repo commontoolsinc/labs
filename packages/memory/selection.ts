@@ -1,5 +1,6 @@
 import {
   Cause,
+  Changes,
   Entity,
   Fact,
   FactSelection,
@@ -17,7 +18,10 @@ export const from = (
   const selection = {} as FactSelection;
   for (const [fact, since] of source) {
     const { cause, is } = fact;
-    set<{ is?: JSONValue; since: number }>(
+    set<
+      { is?: JSONValue; since: number },
+      OfTheCause<{ is?: JSONValue; since: number }>
+    >(
       selection,
       fact.of,
       fact.the as The,
@@ -31,13 +35,13 @@ export const from = (
 // We include the permutations of selector or selection,
 // setting with or without a cause, empty or non-empty
 
-export const set = <T>(
-  selection: OfTheCause<T>,
+export const set = <T, U extends OfTheCause<T> | Changes<The, Entity>>(
+  selection: U,
   of: Entity,
   the: The,
   cause: Cause,
   value: T,
-): OfTheCause<T> => {
+): U => {
   const attributes = (of in selection) ? selection[of] : {};
   const causes = (the in attributes) ? attributes[the] : {};
   causes[cause] = value;
@@ -142,6 +146,15 @@ export const getRevision = <T>(
   of: Entity,
   the: The | SelectAll,
 ): T | undefined => {
+  const [_cause, value] = getChange(selection, of, the) ?? [null, undefined];
+  return value;
+};
+
+export const getChange = <T>(
+  selection: OfTheCause<T>,
+  of: Entity,
+  the: The | SelectAll,
+): [Cause, T] | undefined => {
   if (of in selection) {
     const attributes = selection[of];
     let attrEntries;
@@ -158,8 +171,7 @@ export const getRevision = <T>(
     for (const [_the, causes] of attrEntries) {
       const [change] = Object.entries(causes);
       if (change) {
-        const [_cause, value] = change;
-        return value;
+        return change;
       }
     }
   }

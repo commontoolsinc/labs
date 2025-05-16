@@ -1132,7 +1132,7 @@ test(
             ["application/commit+json"]: {
               [c3.cause.toString()]: {
                 is: {
-                  ...c3.is,
+                  since: c3.is.since,
                   transaction: {
                     ...c3.is.transaction,
                     args: {
