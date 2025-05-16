@@ -4,6 +4,7 @@ import { jsonContent } from "stoker/openapi/helpers";
 import { z } from "zod";
 import { toZod } from "@commontools/utils/zod-utils";
 import {
+  type LLMGenerateObjectRequest,
   type LLMMessage,
   type LLMRequest,
   LLMTypedContent,
@@ -39,6 +40,17 @@ export const LLMRequestSchema = toZod<LLMRequest>().with({
   metadata: z.record(z.union([z.string(), z.any()])).optional(),
   cache: z.boolean().default(true).optional(),
 });
+
+export const GenerateObjectRequestSchema = toZod<LLMGenerateObjectRequest>()
+  .with({
+    prompt: z.string(),
+    schema: z.record(z.string(), z.any()),
+    system: z.string().optional(),
+    cache: z.boolean().default(true).optional(),
+    maxTokens: z.number().optional(),
+    model: z.string().optional(),
+    metadata: z.record(z.string(), z.any()).optional(),
+  });
 
 export const ModelInfoSchema = z.object({
   capabilities: z.object({
@@ -170,16 +182,69 @@ export const generateText = createRoute({
       description:
         "Generated text response. NOTE: If you make a request with `stream: true`, the server response will just be a stream of newline separated strings returned from the LLM, without a structured message object.",
     },
-    [HttpStatusCodes.BAD_REQUEST]: {
+    [HttpStatusCodes.BAD_REQUEST]: jsonContent(
+      z.object({
+        error: z.string(),
+      }),
+      "Invalid request parameters",
+    ),
+  },
+});
+
+export const generateObject = createRoute({
+  path: "/api/ai/llm/generateObject",
+  method: "post",
+  tags,
+  request: {
+    body: {
       content: {
         "application/json": {
-          schema: z.object({
-            error: z.string(),
+          schema: GenerateObjectRequestSchema.openapi({
+            example: {
+              prompt:
+                "What is the first thing that comes to mind when I say 'apple'?",
+              schema: {
+                type: "object",
+                properties: {
+                  idea: { type: "string" },
+                  reason: { type: "string" },
+                  silliness: { type: "number" },
+                },
+                required: ["idea", "reason", "silliness"],
+              },
+            },
           }),
         },
       },
-      description: "Invalid request parameters",
     },
+  },
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      z.object({
+        object: z.any(),
+        spanId: z.string().optional(),
+      }).openapi({
+        example: {
+          object: {
+            idea: "apple",
+            reason: "It's a fruit",
+            silliness: 0.5,
+          },
+          spanId: "123",
+        },
+      }),
+      "Generated object",
+    ),
+    [HttpStatusCodes.BAD_REQUEST]: jsonContent(
+      z.object({
+        error: z.string(),
+      }).openapi({
+        example: {
+          error: "idea is missing",
+        },
+      }),
+      "Invalid request parameters",
+    ),
   },
 });
 
@@ -218,19 +283,16 @@ export const feedback = createRoute({
       }),
       "Feedback submitted successfully",
     ),
-    [HttpStatusCodes.BAD_REQUEST]: {
-      content: {
-        "application/json": {
-          schema: z.object({
-            error: z.string(),
-          }),
-        },
-      },
-      description: "Invalid request parameters",
-    },
+    [HttpStatusCodes.BAD_REQUEST]: jsonContent(
+      z.object({
+        error: z.string(),
+      }),
+      "Invalid request parameters",
+    ),
   },
 });
 
 export type GetModelsRoute = typeof getModels;
 export type GenerateTextRoute = typeof generateText;
 export type FeedbackRoute = typeof feedback;
+export type GenerateObjectRoute = typeof generateObject;

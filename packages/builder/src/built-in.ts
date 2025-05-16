@@ -1,5 +1,5 @@
 import { createNodeFactory, lift } from "./module.ts";
-import type { NodeFactory, Opaque, OpaqueRef } from "./types.ts";
+import type { JSONSchema, NodeFactory, Opaque, OpaqueRef } from "./types.ts";
 
 export interface BuiltInLLMParams {
   messages?: string[];
@@ -7,6 +7,7 @@ export interface BuiltInLLMParams {
   system?: string;
   stop?: string;
   maxTokens?: number;
+  mode?: "json" | "text";
 }
 
 export interface BuiltInLLMState<T> {
@@ -16,11 +17,27 @@ export interface BuiltInLLMState<T> {
   error: any;
 }
 
+export interface BuiltInGenerateObjectParams {
+  prompt?: string;
+  schema?: JSONSchema;
+  system?: string;
+  cache?: boolean;
+  maxTokens?: number;
+  metadata?: Record<string, string | undefined | object>;
+}
+
 export const llm = createNodeFactory({
   type: "ref",
   implementation: "llm",
 }) as <T = string>(
   params: Opaque<BuiltInLLMParams>,
+) => OpaqueRef<BuiltInLLMState<T>>;
+
+export const generateObject = createNodeFactory({
+  type: "ref",
+  implementation: "generateObject",
+}) as <T = any>(
+  params: Opaque<BuiltInGenerateObjectParams>,
 ) => OpaqueRef<BuiltInLLMState<T>>;
 
 export const fetchData = createNodeFactory({
