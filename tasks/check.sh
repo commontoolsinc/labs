@@ -10,12 +10,14 @@ deno check \
   packages/identity \
   packages/iframe-sandbox \
   packages/integration \
+  packages/js-runtime \
   packages/jumble \
   packages/llm \
   packages/memory \
   packages/runner \
   packages/seeder \
   packages/static/*.ts \
+  packages/static/scripts \
   packages/static/test \
   packages/toolshed \
   packages/ui \

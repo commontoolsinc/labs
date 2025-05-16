@@ -69,6 +69,10 @@ class BuildConfig {
     return this.path("packages", "background-charm-service", "src", "worker.ts");
   }
 
+  staticBundleFilePath(filename: string): string[] {
+    return this.path("packages", "static-bundle", "assets", filename);
+  }
+
   toolshedEnvPath() {
     return this.path("packages", "toolshed", "COMPILED");
   }
@@ -149,6 +153,11 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
     },
     args: [
       "compile",
+      // Run `--no-check` here, as the `--include`'d
+      // `es2023.d.ts` file will attempt to be checked
+      // as a non-static asset. Checking should be done
+      // prior to building.
+      "--no-check",
       "--unstable-otel",
       "--output",
       config.distPath("toolshed"),
@@ -177,6 +186,11 @@ async function buildBgCharmService(config: BuildConfig): Promise<void> {
   const { success } = await new Deno.Command(Deno.execPath(), {
     args: [
       "compile",
+      // Run `--no-check` here, as the `--include`'d
+      // `es2023.d.ts` file will attempt to be checked
+      // as a non-static asset. Checking should be done
+      // prior to building.
+      "--no-check",
       "--output",
       config.distPath("bg-charm-service"),
       "--include",
