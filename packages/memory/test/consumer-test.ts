@@ -1156,3 +1156,93 @@ test(
     reader.cancel();
   },
 );
+
+test(
+  "can not read previously classified contents without claim",
+  store,
+  async (session) => {
+    const clock = new Clock();
+    const memory = Consumer.open({ as: alice, session, clock })
+      .mount(alice.did());
+
+    const selector = {
+      path: [],
+      schemaContext: { schema: VersionSchema, rootSchema: VersionSchema },
+    };
+
+    const v1 = Fact.assert({
+      the: "application/json",
+      of: doc,
+      is: { v: 1 },
+    });
+
+    const v1_label = Fact.assert({
+      the: LABEL_THE,
+      of: doc,
+      is: { classification: ["confidential"] },
+    });
+
+    const c1 = Changes.from([v1, v1_label]);
+    const r1 = await memory.transact({ changes: c1 });
+    assert(r1.ok);
+
+    const q1 = await memory.query({
+      selectSchema: { [doc]: { "application/json": { _: selector } } },
+    });
+
+    assertEquals(q1.error?.name, "AuthorizationError");
+
+    const q1_claimed = await memory.query({
+      selectSchema: { [doc]: { "application/json": { _: selector } } },
+      classification: ["confidential"],
+    });
+    // works because it's claimed
+    assert(q1_claimed.ok);
+
+    const v2 = Fact.assert({
+      the: "application/json",
+      of: doc,
+      is: { v: 2 },
+      cause: v1,
+    });
+
+    const v2_label = Fact.retract(v1_label);
+    const r2 = await memory.transact({
+      changes: Changes.from([v2, v2_label]),
+    });
+    assert(r2.ok);
+
+    const q2 = await memory.query({
+      selectSchema: { [doc]: { "application/json": { _: selector } } },
+    });
+
+    // works because it's no longer protected
+    assert(q2.ok);
+
+    const attrs1 = c1[doc] as Record<string, Record<string, object>>;
+    const changes1 = attrs1["application/json"];
+    const [[cause1, _value1]] = Object.entries(changes1);
+    const q3 = await memory.query({
+      selectSchema: { [doc]: { "application/json": { [cause1]: selector } } },
+    });
+
+    // TODO(@ubik2): this violated my assumptions. i was under the impression we could query
+    // for older causes, but it looks like that's not supported, so we get nothing. This is
+    // ok, but it means that my code is more complicated than it needs to be, and I should
+    // do a pruning pass that removes that extra complexity if this is the desired behavior.
+    assert(q3.ok);
+    const attrs3 = q3.ok.selection[alice.did()][doc] as Record<
+      string,
+      Record<string, object>
+    >;
+    const changes3 = attrs3["application/json"];
+    assertEquals(Object.entries(changes3).length, 0);
+
+    const q3_claimed = await memory.query({
+      selectSchema: { [doc]: { "application/json": { [cause1]: selector } } },
+      classification: ["confidential"],
+    });
+
+    assert(q3_claimed.ok);
+  },
+);

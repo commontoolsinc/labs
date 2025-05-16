@@ -799,17 +799,7 @@ export function getLabels<
 ): OfTheCause<FactSelectionValue> {
   const labels: OfTheCause<FactSelectionValue> = {};
   for (const fact of iterate(includedFacts)) {
-    // We're only interested in the labels that applied to this fact during
-    // the period it was active, so get the subsequent fact to find max since.
-    const nextFactSelector = {
-      of: fact.of,
-      the: fact.the,
-      cause: SelectAllString,
-      since: fact.value.since + 1,
-    };
-    const [nextFact] = selectFacts(session, nextFactSelector);
-    const end = nextFact ? nextFact.since : undefined;
-    const labelFact = getLabel(session, fact.of, end);
+    const labelFact = getLabelForFact(session, fact);
     if (labelFact !== undefined) {
       set<FactSelectionValue, OfTheCause<FactSelectionValue>>(
         labels,
@@ -826,9 +816,27 @@ export function getLabels<
   return labels;
 }
 
+// Return the most recent label that applied to the specified fact
+function getLabelForFact<Space extends MemorySpace, T>(
+  session: Session<Space>,
+  fact: { of: Entity; the: The; cause: Cause; value: Revision<T> },
+) {
+  // We're only interested in the labels that applied to this fact during
+  // the period it was active, so get the subsequent fact to find max since.
+  const nextFactSelector = {
+    of: fact.of,
+    the: fact.the,
+    cause: SelectAllString,
+    since: fact.value.since + 1,
+  };
+  const [nextFact] = selectFacts(session, nextFactSelector);
+  const end = nextFact ? nextFact.since : undefined;
+  return getLabel(session, fact.of, end);
+}
+
 // Get the last label that applied to the entity before the specified since.
 // If end is undefined, just returns the last label.
-export function getLabel<Space extends MemorySpace>(
+function getLabel<Space extends MemorySpace>(
   session: Session<Space>,
   of: Entity,
   end?: number,
@@ -855,7 +863,7 @@ export function collectClassifications(
   return classifications;
 }
 
-export function getClassifications(
+function getClassifications(
   fact: FactSelectionValue,
   classifications = new Set<string>(),
 ) {
