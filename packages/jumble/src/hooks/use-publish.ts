@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { TYPE } from "@commontools/builder";
-import { saveSpell } from "@/services/spellbook.ts";
+import { saveSpell } from "@commontools/charm";
 import { createPath } from "@/routes.ts";
 
 export function usePublish() {
@@ -49,9 +49,10 @@ export function usePublish() {
         const spellId = spell?.[TYPE];
         if (!spellId) throw new Error("Spell not found");
 
+        const recipe = await charmManager.syncRecipeById(spellId);
         const success = await saveSpell(
           spellId,
-          spell,
+          recipe,
           data.title,
           data.description,
           data.tags,

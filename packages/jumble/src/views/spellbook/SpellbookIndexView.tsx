@@ -6,7 +6,7 @@ import { SearchBox } from "@/components/spellbook/SearchBox.tsx";
 import SpellCard from "@/components/spellbook/SpellCard.tsx";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader.tsx";
 import { LoadingSpinner } from "@/components/Loader.tsx";
-import { listAllSpells, type Spell } from "@/services/spellbook.ts";
+import { listAllSpells, type Spell } from "@commontools/charm";
 
 export default function SpellbookIndexView() {
   const [spells, setSpells] = useState<Spell[]>([]);
