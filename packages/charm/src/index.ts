@@ -66,3 +66,4 @@ export {
   WORKFLOWS,
   type WorkflowType,
 } from "./workflow.ts";
+export * from "./spellbook.ts";

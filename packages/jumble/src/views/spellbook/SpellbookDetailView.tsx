@@ -24,7 +24,7 @@ import {
   trackRun,
   type UserProfile,
   whoami,
-} from "@/services/spellbook.ts";
+} from "@commontools/charm";
 import { ActionButton } from "@/components/spellbook/ActionButton.tsx";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader.tsx";
 import { SpellPreview } from "@/components/spellbook/SpellPreview.tsx";

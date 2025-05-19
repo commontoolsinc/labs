@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { TYPE } from "@commontools/builder";
-import { saveSpell } from "@/services/spellbook.ts";
+import { saveSpell } from "@commontools/charm";
 import { createPath } from "@/routes.ts";
 
 export function usePublish() {
