@@ -27,34 +27,37 @@ export const getProp = (value: unknown, key: PropertyKey): unknown => {
  * Otherwise, gets properties along path.
  */
 export const path = <T>(parent: T, keyPath: Array<PropertyKey>): unknown => {
-  if (parent == null) {
-    return undefined;
-  }
-  if (keyPath.length === 0) {
-    return parent;
-  }
-  const key = keyPath.shift()!;
-  if (isKeyable(parent)) {
-    const child = parent.key(key);
+  const traverse = (current: unknown, idx: number): unknown => {
+    if (current == null) {
+      return undefined;
+    }
+    if (idx >= keyPath.length) {
+      return current;
+    }
+    const key = keyPath[idx];
+    if (isKeyable(current)) {
+      const child = current.key(key as any);
+      logger.debug({
+        msg: "call .key()",
+        fn: "path()",
+        parent: current,
+        key,
+        child,
+      });
+      return traverse(child, idx + 1);
+    }
+    const child = getProp(current, key);
     logger.debug({
-      msg: "call .key()",
+      msg: "get prop",
       fn: "path()",
-      parent,
+      parent: current,
       key,
       child,
     });
-    return path(child, keyPath);
-  }
-  // We checked the length, so we know this is not undefined.
-  const child = getProp(parent, key);
-  logger.debug({
-    msg: "get prop",
-    fn: "path()",
-    parent,
-    key,
-    child,
-  });
-  return path(child, keyPath);
+    return traverse(child, idx + 1);
+  };
+
+  return traverse(parent, 0);
 };
 
 export default path;
