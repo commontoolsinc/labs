@@ -49,9 +49,10 @@ export function usePublish() {
         const spellId = spell?.[TYPE];
         if (!spellId) throw new Error("Spell not found");
 
+        const recipe = await charmManager.syncRecipeById(spellId);
         const success = await saveSpell(
           spellId,
-          spell,
+          recipe,
           data.title,
           data.description,
           data.tags,
