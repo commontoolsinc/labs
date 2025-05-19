@@ -119,13 +119,21 @@ export class Processor {
             },
           },
         });
-        const { cell: charm } = await castNewRecipe(this.charmManager, form);
-        const id = getEntityId(charm);
-        if (id) {
-          console.log(`Charm added: ${id["/"]}`);
-          return this.verify({ id: id["/"], prompt, name: this.name });
+
+        const charm = form.generation?.charm;
+        if (charm) {
+          const id = getEntityId(charm);
+          if (id) {
+            return this.verify({ id: id["/"], prompt, name: this.name });
+          }
         }
-        break;
+
+        return {
+          id: null,
+          prompt,
+          status: "FAIL",
+          summary: `Charm not generated during 'New' workflow: ${prompt}`,
+        };
       }
       case CommandType.Extend: {
         console.log(`Extending: "${prompt}"`);
@@ -146,15 +154,20 @@ export class Processor {
           },
         });
 
-        const extendedCharm = form.generation?.charm;
-        const id = getEntityId(extendedCharm);
-        if (id) {
-          console.log(`Charm added: ${id["/"]}`);
-          return this.verify({ id: id["/"], prompt, name: this.name });
-        } else {
-          console.error(`Charm not added: ${prompt}`);
+        const newCharm = form.generation?.charm;
+        if (newCharm) {
+          const id = getEntityId(newCharm);
+          if (id) {
+            return this.verify({ id: id["/"], prompt, name: this.name });
+          }
         }
-        break;
+
+        return {
+          id: null,
+          prompt,
+          status: "FAIL",
+          summary: `Charm not generated during 'Extend' workflow: ${prompt}`,
+        };
       }
       case CommandType.ImportJSON: {
         console.log(`Importing JSON for: "${prompt}"`);
