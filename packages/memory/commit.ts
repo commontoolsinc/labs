@@ -61,8 +61,8 @@ export const toChanges = function* (
   const commit = toRevision(source);
   const { since, transaction } = commit.is;
   for (const [of, attributes] of Object.entries(transaction.args.changes)) {
-    for (const [the, revesion] of Object.entries(attributes)) {
-      for (const [cause, state] of Object.entries(revesion)) {
+    for (const [the, revision] of Object.entries(attributes)) {
+      for (const [cause, state] of Object.entries(revision)) {
         if (state !== true) {
           const { is } = state;
           const change = is == null

@@ -10,11 +10,14 @@ import { SelectAllString } from "./interface.ts";
 import { isNumber, isObject, isString } from "@commontools/utils/types";
 import {
   collectClassifications,
+  FactSelectionValue,
   FactSelector,
   getLabels,
   loadFacts,
+  redactCommitData,
   selectFacts,
   Session,
+  toSelection,
 } from "./space.ts";
 import { FactAddress } from "../runner/src/storage/cache.ts";
 import {
@@ -32,6 +35,7 @@ import { JSONObject, JSONSchema, JSONValue } from "@commontools/builder";
 import { ContextualFlowControl } from "@commontools/runner";
 import { TheAuthorizationError } from "./error.ts";
 import {
+  getChange,
   getRevision,
   getSelectorRevision,
   iterate,
@@ -39,6 +43,8 @@ import {
   setEmptyObj,
   setRevision,
 } from "./selection.ts";
+import { the as COMMIT_THE } from "./commit.ts";
+import { CommitData } from "./consumer.ts";
 export type * from "./interface.ts";
 export * from "./interface.ts";
 
@@ -354,9 +360,18 @@ export const selectSchema = <Space extends MemorySpace>(
   // We want to include all the labels for the selected entities as well,
   // since the client may want to change the label, and they'll want the
   // original with a cause for that to be valid.
-  for (const entry of iterate(labelFacts)) {
+  // We sort them first, so the client will just see the latest included label
+  const sortedLabelFacts = [...iterate(labelFacts)].sort((a, b) =>
+    a.value.since - b.value.since
+  );
+  for (const entry of sortedLabelFacts) {
     setRevision(includedFacts, entry.of, entry.the, entry.cause, entry.value);
   }
+
+  // We may have included the application/commit+json of the space in the query
+  // If so, we should redact that based on available classifications.
+  // Our result will contain at most one revision of that doc.
+  redactCommits(includedFacts, session);
 
   // Any entities referenced in our selectSchema must be returned in the response
   // I'm not sure this is the best behavior, but it matches the schema-free query code.
@@ -414,3 +429,36 @@ function loadDocFacts(
     }
   }
 }
+
+const redactCommits = <Space extends MemorySpace>(
+  includedFacts: FactSelection,
+  session: Session<Space>,
+) => {
+  const change = getChange(includedFacts, session.subject, COMMIT_THE);
+  if (change !== undefined) {
+    const [cause, value] = change;
+    const commitData = value.is as CommitData;
+    // attach labels to the commit, so the provider can remove any classified entries from the commit before we send it to subscribers
+    // For this, we need since fields on our objects to determine labels
+    const changedFacts = toSelection(
+      commitData.since,
+      commitData.transaction.args.changes,
+    );
+    const labels = getLabels(session, changedFacts);
+    if (Object.keys(labels).length > 0) {
+      commitData.labels = labels;
+    }
+    // we don't need the since field anymore for these facts
+    const redactedData = redactCommitData(commitData);
+    const redactedValue = (redactedData !== undefined)
+      ? { is: redactedData, since: commitData.since }
+      : { since: commitData.since };
+    setRevision<FactSelectionValue>(
+      includedFacts,
+      session.subject,
+      COMMIT_THE,
+      cause,
+      redactedValue,
+    );
+  }
+};
