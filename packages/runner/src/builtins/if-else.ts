@@ -19,6 +19,6 @@ export function ifElse(
     const ref = inputsCell.withLog(log).key(condition ? 1 : 2)
       .getAsCellLink();
 
-    result.send(ref.cell.getAtPath(ref.path), log);
+    result.send(ref, log);
   };
 }
