@@ -1,11 +1,8 @@
-import { type Charm, charmListSchema, CharmManager } from "@commontools/charm";
+import { type Charm, CharmManager } from "@commontools/charm";
 import {
   Cell,
   ConsoleMethod,
-  getCell,
   idle,
-  isCell,
-  isCellLink,
   isErrorWithContext,
   isStream,
   onConsole,
