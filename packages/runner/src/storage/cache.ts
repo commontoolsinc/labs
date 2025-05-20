@@ -891,7 +891,7 @@ export class Provider implements StorageProvider {
     for (const { entityId, value } of batch) {
       const of = BaseStorageProvider.toEntity(entityId);
       const content = value.value != undefined
-        ? JSON.stringify({ value: value.value })
+        ? JSON.stringify({ value: value.value, source: value.source })
         : undefined;
 
       const current = workspace.get({ the, of });
