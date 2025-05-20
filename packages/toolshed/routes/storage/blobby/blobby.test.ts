@@ -13,6 +13,7 @@ if (env.ENV !== "test") {
 
 const app = createApp().route("/", router);
 const TEST_DATA_DIR = `${env.CACHE_DIR}/blobby-test`;
+const BASE_URL = "http://localhost";
 
 // Setup function to run before all tests
 async function setup() {
@@ -50,13 +51,16 @@ Deno.test({
 
       await t.step("POST /api/storage/blobby/{key} uploads blob", async () => {
         const response = await app.fetch(
-          new Request(`http://localhost/api/storage/blobby/${key}`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
+          new Request(
+            new URL(`/api/storage/blobby/${key}`, BASE_URL),
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(testContent),
             },
-            body: JSON.stringify(testContent),
-          }),
+          ),
         );
 
         assertEquals(response.status, 200);
@@ -66,7 +70,7 @@ Deno.test({
 
       await t.step("GET /api/storage/blobby/{key} retrieves blob", async () => {
         const response = await app.fetch(
-          new Request(`http://localhost/api/storage/blobby/${key}`),
+          new Request(new URL(`/api/storage/blobby/${key}`, BASE_URL)),
         );
         assertEquals(response.status, 200);
 
@@ -78,7 +82,7 @@ Deno.test({
 
       await t.step("GET /api/storage/blobby lists blobs", async () => {
         const response = await app.fetch(
-          new Request("http://localhost/api/storage/blobby"),
+          new Request(new URL("/api/storage/blobby", BASE_URL)),
         );
         assertEquals(response.status, 200);
 
@@ -91,7 +95,9 @@ Deno.test({
         "GET /api/storage/blobby?allWithData=true lists blobs with data",
         async () => {
           const response = await app.fetch(
-            new Request("http://localhost/api/storage/blobby?allWithData=true"),
+            new Request(
+              new URL("/api/storage/blobby?allWithData=true", BASE_URL),
+            ),
           );
           assertEquals(response.status, 200);
 
@@ -107,7 +113,9 @@ Deno.test({
         "GET /api/storage/blobby/{key}/message gets nested path",
         async () => {
           const response = await app.fetch(
-            new Request(`http://localhost/api/storage/blobby/${key}/message`),
+            new Request(
+              new URL(`/api/storage/blobby/${key}/message`, BASE_URL),
+            ),
           );
           assertEquals(response.status, 200);
 
@@ -120,7 +128,9 @@ Deno.test({
         "GET /api/storage/blobby/{key}/invalid returns 404",
         async () => {
           const response = await app.fetch(
-            new Request(`http://localhost/api/storage/blobby/${key}/invalid`),
+            new Request(
+              new URL(`/api/storage/blobby/${key}/invalid`, BASE_URL),
+            ),
           );
           assertEquals(response.status, 404);
 
@@ -147,23 +157,31 @@ Deno.test({
           )}`;
 
           await app.fetch(
-            new Request(`http://localhost/api/storage/blobby/${testKey}`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(testPrefixContent),
-            }),
+            new Request(
+              new URL(`/api/storage/blobby/${testKey}`, BASE_URL),
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(testPrefixContent),
+              },
+            ),
           );
 
           await app.fetch(
-            new Request(`http://localhost/api/storage/blobby/${otherKey}`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(otherContent),
-            }),
+            new Request(
+              new URL(`/api/storage/blobby/${otherKey}`, BASE_URL),
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(otherContent),
+              },
+            ),
           );
 
           const response = await app.fetch(
-            new Request("http://localhost/api/storage/blobby?prefix=test-"),
+            new Request(
+              new URL("/api/storage/blobby?prefix=test-", BASE_URL),
+            ),
           );
           assertEquals(response.status, 200);
 
@@ -179,7 +197,10 @@ Deno.test({
         async () => {
           const response = await app.fetch(
             new Request(
-              "http://localhost/api/storage/blobby?prefix=test-&allWithData=true",
+              new URL(
+                "/api/storage/blobby?prefix=test-&allWithData=true",
+                BASE_URL,
+              ),
             ),
           );
           assertEquals(response.status, 200);
@@ -222,16 +243,19 @@ Deno.test({
 
           // Upload both blobs
           await app.fetch(
-            new Request(`http://localhost/api/storage/blobby/${matchingKey}`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(matchingContent),
-            }),
+            new Request(
+              new URL(`/api/storage/blobby/${matchingKey}`, BASE_URL),
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(matchingContent),
+              },
+            ),
           );
 
           await app.fetch(
             new Request(
-              `http://localhost/api/storage/blobby/${nonMatchingKey}`,
+              new URL(`/api/storage/blobby/${nonMatchingKey}`, BASE_URL),
               {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -242,7 +266,7 @@ Deno.test({
 
           // Test fulltext search
           const response = await app.fetch(
-            new Request("http://localhost/api/storage/blobby?search=test"),
+            new Request(new URL("/api/storage/blobby?search=test", BASE_URL)),
           );
           assertEquals(response.status, 200);
 
@@ -258,7 +282,10 @@ Deno.test({
         async () => {
           const response = await app.fetch(
             new Request(
-              "http://localhost/api/storage/blobby?search=test&allWithData=true",
+              new URL(
+                "/api/storage/blobby?search=test&allWithData=true",
+                BASE_URL,
+              ),
             ),
           );
           assertEquals(response.status, 200);
@@ -279,7 +306,7 @@ Deno.test({
         async () => {
           const response = await app.fetch(
             new Request(
-              "http://localhost/api/storage/blobby?prefix=test-&search=blob",
+              new URL("/api/storage/blobby?prefix=test-&search=blob", BASE_URL),
             ),
           );
           assertEquals(response.status, 200);
@@ -291,7 +318,7 @@ Deno.test({
           for (const key of json.blobs) {
             assertEquals(key.startsWith("test-"), true);
             const blobResponse = await app.fetch(
-              new Request(`http://localhost/api/storage/blobby/${key}`),
+              new Request(new URL(`/api/storage/blobby/${key}`, BASE_URL)),
             );
             const blobContent = await blobResponse.json();
             const stringified = JSON.stringify(blobContent).toLowerCase();
@@ -327,18 +354,21 @@ Deno.test({
             const [content, key] of blobs
           ) {
             await app.fetch(
-              new Request(`http://localhost/api/storage/blobby/${key}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(content),
-              }),
+              new Request(
+                new URL(`/api/storage/blobby/${key}`, BASE_URL),
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(content),
+                },
+              ),
             );
           }
 
           // Fetch only two of the blobs
           const response = await app.fetch(
             new Request(
-              `http://localhost/api/storage/blobby?keys=${key1},${key2}`,
+              new URL(`/api/storage/blobby?keys=${key1},${key2}`, BASE_URL),
             ),
           );
           assertEquals(response.status, 200);
@@ -365,7 +395,7 @@ Deno.test({
         async () => {
           const response = await app.fetch(
             new Request(
-              "http://localhost/api/storage/blobby?keys=invalid1,invalid2",
+              new URL("/api/storage/blobby?keys=invalid1,invalid2", BASE_URL),
             ),
           );
           assertEquals(response.status, 200);

@@ -59,8 +59,10 @@ export function usePublish() {
         );
 
         if (success) {
-          const fullUrl =
-            `${globalThis.location.protocol}//${globalThis.location.host}/spellbook/${spellId}`;
+          const fullUrl = new URL(
+            `/spellbook/${spellId}`,
+            globalThis.location.origin,
+          ).toString();
           try {
             await navigator.clipboard.writeText(fullUrl);
           } catch (err) {

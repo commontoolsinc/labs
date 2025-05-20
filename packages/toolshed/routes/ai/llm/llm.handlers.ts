@@ -224,7 +224,10 @@ export const submitFeedback: AppRouteHandler<FeedbackRoute> = async (c) => {
     };
 
     const response = await fetch(
-      `${env.CTTS_AI_LLM_PHOENIX_API_URL}/span_annotations?sync=false`,
+      new URL(
+        "/span_annotations?sync=false",
+        env.CTTS_AI_LLM_PHOENIX_API_URL,
+      ),
       phoenixAnnotationPayload,
     );
 

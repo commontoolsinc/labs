@@ -16,8 +16,7 @@ export interface SpellSearchResult {
 
 export async function castSpell(replica: string, value: string) {
   const searchUrl = typeof window !== "undefined"
-    ? globalThis.location.protocol + "//" + globalThis.location.host +
-      "/api/ai/spell/search"
+    ? new URL("/api/ai/spell/search", globalThis.location.origin).toString()
     : "//api/ai/spell/search";
 
   // Search for suggested spells based on input

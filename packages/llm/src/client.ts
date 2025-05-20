@@ -3,8 +3,7 @@ import { LLMContent, LLMMessage, LLMRequest, LLMResponse } from "./types.ts";
 type PartialCallback = (text: string) => void;
 
 let llmApiUrl = typeof globalThis.location !== "undefined"
-  ? globalThis.location.protocol + "//" + globalThis.location.host +
-    "/api/ai/llm"
+  ? new URL("/api/ai/llm", globalThis.location.origin).toString()
   : "//api/ai/llm";
 
 export const setLLMUrl = (toolshedUrl: string) => {

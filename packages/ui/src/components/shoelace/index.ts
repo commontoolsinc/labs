@@ -18,9 +18,10 @@ export const registerShoelaceIcons = () => {
     resolver: (name: string) => {
       const match = name.match(/^(.*?)(_(round|sharp))?$/);
       return match
-        ? `https://cdn.jsdelivr.net/npm/@material-icons/svg@1.0.5/svg/${
-          match[1]
-        }/${match[3] || "outline"}.svg`
+        ? new URL(
+          `${match[1]}/${match[3] || "outline"}.svg`,
+          "https://cdn.jsdelivr.net/npm/@material-icons/svg@1.0.5/svg/",
+        ).toString()
         : "about:blank";
     },
     mutator: (svg: SVGElement) => svg.setAttribute("fill", "currentColor"),

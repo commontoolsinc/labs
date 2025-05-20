@@ -4,7 +4,7 @@ import { parseArgs } from "@std/cli/parse-args";
 import { colors } from "@/routes/ai/llm/cli.ts";
 
 const API_URL = Deno.env.get("TOOLSHED_API_URL")
-  ? `${Deno.env.get("TOOLSHED_API_URL")}/api/ai/llm`
+  ? new URL("/api/ai/llm", Deno.env.get("TOOLSHED_API_URL")!).toString()
   : "http://localhost:8000/api/ai/llm";
 const TEST_SYSTEM_PROMPT = "Be creative.";
 const current_time = new Date().toISOString();

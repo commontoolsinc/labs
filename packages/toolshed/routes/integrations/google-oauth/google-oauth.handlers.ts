@@ -44,9 +44,10 @@ export const login: AppRouteHandler<LoginRoute> = async (c) => {
       return createLoginErrorResponse(c, "Missing authCellId in request");
     }
 
-    const redirectUri = `${
-      getBaseUrl(c.req.url)
-    }/api/integrations/google-oauth/callback`;
+    const redirectUri = new URL(
+      "/api/integrations/google-oauth/callback",
+      getBaseUrl(c.req.url),
+    ).toString();
     logger.debug({ redirectUri }, "Created redirect URI");
 
     // Create OAuth client
@@ -151,14 +152,17 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
 
     // Get the redirect URL for token exchange
     const baseUrl = getBaseUrl(c.req.url);
-    const redirectUri = `${baseUrl}/api/integrations/google-oauth/callback`;
+    const redirectUri = new URL(
+      "/api/integrations/google-oauth/callback",
+      baseUrl,
+    ).toString();
 
     // Create OAuth client
     const client = createOAuthClient(redirectUri);
 
     // Exchange authorization code for tokens
     const tokens = await client.code.getToken(
-      new URL(`${redirectUri}?code=${code}`),
+      new URL(`?code=${code}`, redirectUri),
       {
         codeVerifier,
       },
@@ -259,7 +263,10 @@ export const refresh: AppRouteHandler<RefreshRoute> = async (c) => {
 
     // Get redirect URI for client creation
     const baseUrl = getBaseUrl(c.req.url);
-    const redirectUri = `${baseUrl}/api/integrations/google-oauth/callback`;
+    const redirectUri = new URL(
+      "/api/integrations/google-oauth/callback",
+      baseUrl,
+    ).toString();
 
     // Create OAuth client
     const client = createOAuthClient(redirectUri);

@@ -31,9 +31,8 @@ const toJSON = <T>(source: T) => JSON.parse(JSON.stringify(source));
 
 Deno.test("test transaction", async (t) => {
   const server = Deno.serve({ port: 9000 }, app.fetch);
-  const address = new URL(
-    `http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
-  );
+  const base = `http://${server.addr.hostname}:${server.addr.port}`;
+  const address = new URL("/api/storage/memory", base);
 
   try {
     const memory = Consumer.connect({
@@ -76,9 +75,8 @@ Deno.test("test transaction", async (t) => {
 
 Deno.test("test consumer", async (t) => {
   const server = Deno.serve({ port: 9000 }, app.fetch);
-  const address = new URL(
-    `http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
-  );
+  const base = `http://${server.addr.hostname}:${server.addr.port}`;
+  const address = new URL("/api/storage/memory", base);
   try {
     const session = Consumer.connect({ address, as: alice });
     const memory = session.mount(alice.did());
