@@ -130,31 +130,6 @@ async function cleanup(): Promise<void> {
   initialized = false;
 }
 
-async function isInCharmList(
-  spaceId: string,
-  charmsListCause: string,
-  charmId: string,
-) {
-  // Check that the charm is active in its space
-  const spaceCharmsList = getCell(spaceId, charmsListCause, charmListSchema);
-  // By loading with a false schema, we will avoid traversing into children
-  await storage.syncCell(spaceCharmsList, false, {
-    rootSchema: false,
-    schema: false,
-  });
-  const len = spaceCharmsList.key("length").get();
-  for (let i = 0; i < len; i++) {
-    const entry = spaceCharmsList.key(i).get();
-    if (isCellLink(entry) || isCell(entry)) {
-      const entryCharmId = entry.entityId ? entry.entityId["/"] : undefined;
-      if (entryCharmId === charmId) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 async function runCharm(data: RunData): Promise<void> {
   if (!manager) {
     throw new Error("Worker session not initialized");
