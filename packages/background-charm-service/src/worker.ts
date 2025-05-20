@@ -167,6 +167,12 @@ async function runCharm(data: RunData): Promise<void> {
     // Reset error tracking
     latestError = null;
 
+    // Check whether the charm is still active (in charms or pinned-charms)
+    if (!manager.isActiveCharm({ "/": charmId })) {
+      // Skip any charms that aren't still in one of the lists
+      throw new Error(`No charms list entry found for charm: ${charmId}`);
+    }
+
     // Check if we've already loaded this charm
     let runningCharm = loadedCharms.get(charmId);
 
@@ -183,15 +189,6 @@ async function runCharm(data: RunData): Promise<void> {
       loadedCharms.set(charmId, runningCharm);
     } else {
       console.log(`Using previously loaded charm ${charmId}`);
-    }
-
-    if (
-      !await isInCharmList(spaceId, "charms", charmId) &&
-      !await isInCharmList(spaceId, "pinned-charms", charmId)
-    ) {
-      // Skip any charms that aren't still in one of the lists
-      console.log("Not found in charm list", charmId);
-      throw new Error(`No charms list entry found for charm: ${charmId}`);
     }
 
     // Find the updater stream

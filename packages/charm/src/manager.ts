@@ -1284,6 +1284,11 @@ export class CharmManager {
   async sync(entity: Cell<any>, waitForStorage: boolean = false) {
     await storage.syncCell(entity, waitForStorage);
   }
+
+  isActiveCharm(charmId: Cell<Charm> | EntityId | string) {
+    return (this.charms.get().some((charm) => isSameEntity(charm, charmId)) ||
+      this.pinnedCharms.get().some((charm) => isSameEntity(charm, charmId)));
+  }
 }
 
 export const getRecipeIdFromCharm = (charm: Cell<Charm>): string => {
