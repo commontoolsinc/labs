@@ -407,7 +407,14 @@ class StorageImpl implements Storage {
     // Start loading the doc and safe the promise for processBatch to await for
     const loadingPromise = this._getStorageProviderForSpace(doc.space)
       .sync(doc.entityId!, expectedInStorage, schemaContext)
-      .then(() => doc);
+      .then((result) => {
+        if (result.error) {
+          // This will be a decoupled doc that is not persisted and cannot be edited
+          doc.ephemeral = true;
+          doc.freeze();
+        }
+        return doc;
+      });
     this.loadingPromises.set(doc, loadingPromise);
 
     // Create a promise that gets resolved once the doc and all its
