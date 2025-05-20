@@ -6,9 +6,9 @@ export class CommonFragmentElement extends HTMLElement {
       .appendChild(document.createElement("slot"));
   }
 
-  connectedCallback = () => {
+  connectedCallback() {
     this.style.display = "contents";
-  };
+  }
 }
 
 globalThis.customElements.define("common-fragment", CommonFragmentElement);
