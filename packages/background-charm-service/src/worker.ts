@@ -1,8 +1,11 @@
-import { type Charm, CharmManager } from "@commontools/charm";
+import { type Charm, charmListSchema, CharmManager } from "@commontools/charm";
 import {
   Cell,
   ConsoleMethod,
+  getCell,
   idle,
+  isCell,
+  isCellLink,
   isErrorWithContext,
   isStream,
   onConsole,
@@ -127,6 +130,31 @@ async function cleanup(): Promise<void> {
   initialized = false;
 }
 
+async function isInCharmList(
+  spaceId: string,
+  charmsListCause: string,
+  charmId: string,
+) {
+  // Check that the charm is active in its space
+  const spaceCharmsList = getCell(spaceId, charmsListCause, charmListSchema);
+  // By loading with a false schema, we will avoid traversing into children
+  await storage.syncCell(spaceCharmsList, false, {
+    rootSchema: false,
+    schema: false,
+  });
+  const len = spaceCharmsList.key("length").get();
+  for (let i = 0; i < len; i++) {
+    const entry = spaceCharmsList.key(i).get();
+    if (isCellLink(entry) || isCell(entry)) {
+      const entryCharmId = entry.entityId ? entry.entityId["/"] : undefined;
+      if (entryCharmId === charmId) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 async function runCharm(data: RunData): Promise<void> {
   if (!manager) {
     throw new Error("Worker session not initialized");
@@ -155,6 +183,15 @@ async function runCharm(data: RunData): Promise<void> {
       loadedCharms.set(charmId, runningCharm);
     } else {
       console.log(`Using previously loaded charm ${charmId}`);
+    }
+
+    if (
+      !await isInCharmList(spaceId, "charms", charmId) &&
+      !await isInCharmList(spaceId, "pinned-charms", charmId)
+    ) {
+      // Skip any charms that aren't still in one of the lists
+      console.log("Not found in charm list", charmId);
+      throw new Error(`No charms list entry found for charm: ${charmId}`);
     }
 
     // Find the updater stream
