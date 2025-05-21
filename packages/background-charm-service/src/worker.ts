@@ -139,6 +139,12 @@ async function runCharm(data: RunData): Promise<void> {
     // Reset error tracking
     latestError = null;
 
+    // Check whether the charm is still active (in charms or pinned-charms)
+    if (!manager.isActiveCharm({ "/": charmId })) {
+      // Skip any charms that aren't still in one of the lists
+      throw new Error(`No charms list entry found for charm: ${charmId}`);
+    }
+
     // Check if we've already loaded this charm
     let runningCharm = loadedCharms.get(charmId);
 
