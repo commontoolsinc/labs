@@ -32,6 +32,7 @@ import {
   extractDefaultValues,
   findAllAliasedCells,
   followAliases,
+  maybeGetCellLink,
   mergeObjects,
   sendValueToBinding,
   unsafe_noteParentOnRecipes,
@@ -615,12 +616,12 @@ function instantiateRecipeNode(
 
 export async function runSynced(
   resultCell: Cell<any>,
-  recipe?: Recipe | Module,
+  recipe: Recipe | Module,
   inputs?: any,
 ) {
   await storage.syncCell(resultCell);
 
-  const synced = await syncCellsForRunningRecipe(resultCell);
+  const synced = await syncCellsForRunningRecipe(resultCell, recipe, inputs);
 
   run(recipe, inputs, resultCell.getDoc());
 
@@ -630,12 +631,8 @@ export async function runSynced(
   // finishing the computation. Should be fixed by changing conflict resolution
   // for derived values to be based on what they are derived from.
   if (recipe || !synced) {
-    await syncCellsForRunningRecipe(resultCell.getSourceCell());
+    await syncCellsForRunningRecipe(resultCell, recipe);
   }
-
-  // Now get used recipe to extract schema
-  const recipeId = resultCell.getSourceCell().get()[TYPE]!;
-  recipe = recipeManager.recipeById(recipeId);
 
   return recipe?.resultSchema
     ? resultCell.asSchema(recipe.resultSchema)
@@ -644,7 +641,29 @@ export async function runSynced(
 
 async function syncCellsForRunningRecipe(
   resultCell: Cell<any>,
+  recipe: Module | Recipe,
+  inputs?: any,
 ): Promise<boolean> {
+  const seen = new Set<Cell<any>>();
+  const promises = new Set<Promise<any>>();
+
+  const syncAllMentionedCells = (value: any) => {
+    if (seen.has(value)) return;
+    seen.add(value);
+
+    const link = maybeGetCellLink(value);
+
+    if (link && link.cell) {
+      const maybePromise = storage.syncCell(link.cell);
+      if (maybePromise instanceof Promise) promises.add(maybePromise);
+    } else if (typeof value === "object" && value !== null) {
+      for (const key in value) syncAllMentionedCells(value[key]);
+    }
+  };
+
+  syncAllMentionedCells(inputs);
+  await Promise.all(promises);
+
   const sourceCell = resultCell.getSourceCell({
     type: "object",
     properties: { [TYPE]: { type: "string" } },
@@ -653,17 +672,6 @@ async function syncCellsForRunningRecipe(
   if (!sourceCell) return false;
 
   await storage.syncCell(sourceCell);
-
-  const recipeId = sourceCell.get()[TYPE];
-  if (!recipeId) throw new Error(`No recipe ID found in source cell`);
-
-  await recipeManager.ensureRecipeAvailable({
-    space: sourceCell.getAsCellLink().space!,
-    recipeId,
-  });
-
-  const recipe = recipeManager.recipeById(recipeId);
-  if (!recipe) throw new Error(`Unknown recipe: ${recipeId}`);
 
   // We could support this by replicating what happens in runner, but since
   // we're calling this again when returning false, this is good enough for now.
