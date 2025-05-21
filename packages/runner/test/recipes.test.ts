@@ -163,6 +163,42 @@ describe("Recipe Runner", () => {
     });
   });
 
+  it("should handle map nodes when the list becomes undefined", async () => {
+    const double = lift<number>((x) => x * 2);
+
+    const mapRecipe = recipe<{ values: number[] }>(
+      "Double numbers maybe",
+      ({ values }) => {
+        const doubled = values.map((x) => double(x));
+        return { doubled };
+      },
+    );
+
+    const result = run(
+      mapRecipe,
+      { values: [1, 2] },
+      getDoc(
+        undefined,
+        "should handle map nodes when the list becomes undefined",
+        "test",
+      ),
+    );
+
+    await idle();
+
+    expect(result.getAsQueryResult()).toMatchObject({ doubled: [2, 4] });
+
+    result.sourceCell!.setAtPath(["argument", "values"], undefined);
+    await idle();
+
+    expect(result.getAsQueryResult()).toMatchObject({ doubled: [] });
+
+    result.sourceCell!.setAtPath(["argument", "values"], [3, 4]);
+    await idle();
+
+    expect(result.getAsQueryResult()).toMatchObject({ doubled: [6, 8] });
+  });
+
   it("should execute handlers", async () => {
     const incHandler = handler<
       { amount: number },

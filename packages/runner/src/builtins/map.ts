@@ -57,6 +57,10 @@ export function map(
   // between the source list and the result list.
   let initializedUpTo = 0;
 
+  // Keep track of result cells so they can be cancelled when the list shrinks
+  const resultCells: DocImpl<any>[] = [];
+  const resultCancels: Array<(() => void) | undefined> = [];
+
   return (log: ReactivityLog) => {
     let { list, op } = inputsCell.getAsQueryResult([], log);
 
@@ -64,6 +68,12 @@ export function map(
     // Correspondingly, the result should be []. TODO: Maybe it's important to
     // distinguish empty inputs from undefined inputs?
     if (list === undefined) {
+      // Cancel all existing result cells and reset state
+      for (const cancel of resultCancels) cancel?.();
+      resultCells.length = 0;
+      resultCancels.length = 0;
+      initializedUpTo = 0;
+
       result.setAtPath([], [], log);
       return;
     }
@@ -104,7 +114,10 @@ export function map(
       resultCell.sourceCell!.sourceCell = parentDoc;
 
       // TODO(seefeld): Have `run` return cancel, once we make resultCell required
-      addCancel(cancels.get(resultCell));
+      const cancel = cancels.get(resultCell);
+      addCancel(cancel);
+      resultCells.push(resultCell);
+      resultCancels.push(cancel);
 
       // Send the result value to the result doc
       result.setAtPath([initializedUpTo], { cell: resultCell, path: [] }, log);
@@ -115,7 +128,13 @@ export function map(
     // Shorten the result if the list got shorter
     if (result.get().length > list.length) {
       result.setAtPath(["length"], list.length, log);
-      initializedUpTo = list.length;
+      while (resultCells.length > list.length) {
+        const cancel = resultCancels.pop();
+        resultCells.pop();
+        cancel?.();
+        // Keep addCancel group aware? cancels are already part of group, canceling them is enough
+      }
+      initializedUpTo = Math.min(initializedUpTo, list.length);
     }
 
     // NOTE: We leave prior results in the list for now, so they reuse prior
