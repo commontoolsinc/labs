@@ -65,6 +65,9 @@ export function map(
     // distinguish empty inputs from undefined inputs?
     if (list === undefined) {
       result.setAtPath([], [], log);
+      // Reset progress so that once the list becomes defined again we
+      // recompute from the beginning.
+      initializedUpTo = 0;
       return;
     }
 
