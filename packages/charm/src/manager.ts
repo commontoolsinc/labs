@@ -136,13 +136,10 @@ export class CharmManager {
     this.pinnedCharms = getCell(this.space, "pinned-charms", charmListSchema);
     this.trashedCharms = getCell(this.space, "trash", charmListSchema);
 
-    // FIXME(@ubik2) We use elevated permissions here temporarily.
+    // TODO(@ubik2) We use elevated permissions here temporarily.
     // Our request for the charm list will walk the schema tree, and that will
     // take us into classified data of charms. If that happens, we still want
     // this bit to work, so we elevate this request.
-    // If we don't do this, we get an error, and wipe out the charms list,
-    // since we think we've loaded it, but it's undefined, so we write the
-    // undefined value.
     const privilegedSchema = {
       ...charmListSchema,
       ifc: { classification: [Classification.Secret] },
