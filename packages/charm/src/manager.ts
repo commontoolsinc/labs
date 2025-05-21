@@ -34,13 +34,27 @@ export function charmId(charm: Charm): string | undefined {
   return id ? id["/"] : undefined;
 }
 
-export type Charm = {
+/**
+ * A lightweight representation of a charm that only contains the
+ * information necessary for displaying a charm in lists.  The full
+ * charm object may contain many additional properties which are not
+ * loaded when browsing pinned/trashed charms.
+ */
+export type CharmPreview = {
   [NAME]?: string;
   [UI]?: any;
+};
+
+/**
+ * A full charm.  This currently extends {@link CharmPreview} but can
+ * contain arbitrary additional properties when fully loaded.
+ */
+export type Charm = CharmPreview & {
   [key: string]: any;
 };
 
-export const charmSchema = {
+/** Schema describing {@link CharmPreview}. */
+export const charmPreviewSchema = {
   type: "object",
   properties: {
     [NAME]: { type: "string" },
@@ -49,10 +63,18 @@ export const charmSchema = {
   required: [UI, NAME],
 } as const satisfies JSONSchema;
 
-export const charmListSchema = {
+// Backwards compatibility - many consumers still import `charmSchema`
+// directly.  Export it as an alias so existing code continues to work
+// while we migrate to `charmPreviewSchema`.
+export const charmSchema = charmPreviewSchema;
+
+export const charmPreviewListSchema = {
   type: "array",
-  items: { ...charmSchema, asCell: true },
+  items: { ...charmPreviewSchema, asCell: true },
 } as const satisfies JSONSchema;
+
+// Alias for backwards compatibility
+export const charmListSchema = charmPreviewListSchema;
 
 export const charmLineageSchema = {
   type: "object",
@@ -131,9 +153,17 @@ export class CharmManager {
 
     storage.setSigner(session.as);
 
-    this.charms = getCell(this.space, "charms", charmListSchema);
-    this.pinnedCharms = getCell(this.space, "pinned-charms", charmListSchema);
-    this.trashedCharms = getCell(this.space, "trash", charmListSchema);
+    this.charms = getCell(this.space, "charms", charmPreviewListSchema);
+    this.pinnedCharms = getCell(
+      this.space,
+      "pinned-charms",
+      charmPreviewListSchema,
+    );
+    this.trashedCharms = getCell(
+      this.space,
+      "trash",
+      charmPreviewListSchema,
+    );
 
     this.ready = Promise.all([
       storage.syncCell(this.charms),

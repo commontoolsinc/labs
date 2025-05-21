@@ -3,6 +3,9 @@ export {
   charmId,
   charmListSchema,
   CharmManager,
+  type CharmPreview,
+  charmPreviewListSchema,
+  charmPreviewSchema,
   charmSchema,
   processSchema,
 } from "./manager.ts";
