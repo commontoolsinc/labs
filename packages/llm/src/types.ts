@@ -1,4 +1,5 @@
 import { LlmPrompt } from "./prompts/prompting.ts";
+import { JSONSchema } from "@commontools/builder";
 
 export const DEFAULT_MODEL_NAME: ModelName =
   "anthropic:claude-3-7-sonnet-latest";
@@ -6,11 +7,12 @@ export const DEFAULT_MODEL_NAME: ModelName =
 // NOTE(ja): This should be an array of models, the first model will be tried, if it
 // fails, the second model will be tried, etc.
 export const DEFAULT_IFRAME_MODELS: ModelName = "openai:gpt-4.1-nano";
+export const DEFAULT_GENERATE_OBJECT_MODELS: ModelName = "openai:gpt-4.1-nano";
 
 export type LLMResponse = {
   content: string;
   // The trace span ID
-  id: string;
+  id?: string;
 };
 
 export type ModelName = string;
@@ -35,6 +37,21 @@ export interface LLMRequest {
   stop?: string;
   mode?: "json";
   metadata?: LLMRequestMetadata;
+}
+
+export interface LLMGenerateObjectRequest {
+  schema: Record<string, unknown>;
+  prompt: string;
+  model?: ModelName;
+  system?: string;
+  cache?: boolean;
+  maxTokens?: number;
+  metadata?: LLMRequestMetadata;
+}
+
+export interface LLMGenerateObjectResponse {
+  object: Record<string, unknown>;
+  id?: string;
 }
 
 function isArrayOf<T>(

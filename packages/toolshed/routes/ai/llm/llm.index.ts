@@ -6,6 +6,7 @@ import { cors } from "@hono/hono/cors";
 
 const router = createRouter()
   .openapi(routes.getModels, handlers.getModels)
+  .openapi(routes.generateObject, handlers.generateObject)
   .openapi(routes.generateText, handlers.generateText)
   .openapi(routes.feedback, handlers.submitFeedback);
 

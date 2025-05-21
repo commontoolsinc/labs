@@ -1,4 +1,10 @@
-import { LLMContent, LLMMessage, LLMRequest, LLMResponse } from "./types.ts";
+import {
+  LLMGenerateObjectRequest,
+  LLMGenerateObjectResponse,
+  LLMMessage,
+  LLMRequest,
+  LLMResponse,
+} from "./types.ts";
 
 type PartialCallback = (text: string) => void;
 
@@ -12,6 +18,30 @@ export const setLLMUrl = (toolshedUrl: string) => {
 };
 
 export class LLMClient {
+  async generateObject(
+    request: LLMGenerateObjectRequest,
+  ): Promise<LLMGenerateObjectResponse> {
+    const response = await fetch(llmApiUrl + "/generateObject", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `HTTP error! status: ${response.status}, body: ${errorText}`,
+      );
+    }
+
+    if (!response.body) {
+      throw new Error("No response body");
+    }
+
+    const { object } = await response.json();
+    return object;
+  }
+
   /**
    * Sends a request to the LLM service.
    *
