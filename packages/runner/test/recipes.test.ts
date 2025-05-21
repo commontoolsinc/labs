@@ -163,6 +163,32 @@ describe("Recipe Runner", () => {
     });
   });
 
+  it("should handle map nodes with undefined input", async () => {
+    const double = lift((x: number) => x * 2);
+
+    const doubleArray = recipe<{ values?: number[] }>(
+      "Double numbers maybe undefined",
+      ({ values }) => {
+        const doubled = values.map((x) => double(x));
+        return { doubled };
+      },
+    );
+
+    const result = run(
+      doubleArray,
+      { values: undefined },
+      getDoc(
+        undefined,
+        "should handle map nodes with undefined input",
+        "test",
+      ),
+    );
+
+    await idle();
+
+    expect(result.getAsQueryResult()).toMatchObject({ doubled: [] });
+  });
+
   it("should execute handlers", async () => {
     const incHandler = handler<
       { amount: number },
