@@ -63,7 +63,7 @@ export function map(
     // If the list is undefined it means the input isn't available yet.
     // Correspondingly, the result should be []. TODO: Maybe it's important to
     // distinguish empty inputs from undefined inputs?
-    if (list === undefined) {
+    if (list === undefined || result.get() === undefined) {
       result.setAtPath([], [], log);
       return;
     }
