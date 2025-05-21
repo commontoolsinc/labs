@@ -890,26 +890,28 @@ export class Provider implements StorageProvider {
     const changes = [];
     for (const { entityId, value } of batch) {
       const of = BaseStorageProvider.toEntity(entityId);
-      const content = JSON.stringify(value);
+      const content = value.value != undefined
+        ? JSON.stringify({ value: value.value, source: value.source })
+        : undefined;
 
       const current = workspace.get({ the, of });
       if (JSON.stringify(current?.is) !== content) {
-        changes.push({
-          the,
-          of,
-          // ⚠️ We do JSON roundtrips to strip of the undefined values that
+        if (content !== undefined) {
+          // ⚠️ We do JSON roundtrips to strip off the undefined values that
           // cause problems with serialization.
-          is: JSON.parse(content) as JSONValue,
-        });
+          changes.push({ the, of, is: JSON.parse(content) as JSONValue });
+        } else {
+          changes.push({ the, of });
+        }
       }
       if (value.labels !== undefined) {
         const currentLabel = workspace.get({ the: TheLabel, of });
         if (!deepEqual(currentLabel?.is, value.labels)) {
-          changes.push({
-            the: TheLabel,
-            of,
-            is: value.labels as JSONValue,
-          });
+          if (value.labels !== undefined) {
+            changes.push({ the: TheLabel, of, is: value.labels as JSONValue });
+          } else {
+            changes.push({ the: TheLabel, of });
+          }
         }
       }
     }

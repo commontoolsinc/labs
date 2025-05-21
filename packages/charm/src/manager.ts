@@ -10,6 +10,7 @@ import {
 } from "@commontools/builder";
 import {
   type Cell,
+  Classification,
   createRef,
   DocImpl,
   EntityId,
@@ -135,10 +136,23 @@ export class CharmManager {
     this.pinnedCharms = getCell(this.space, "pinned-charms", charmListSchema);
     this.trashedCharms = getCell(this.space, "trash", charmListSchema);
 
+    // TODO(@ubik2) We use elevated permissions here temporarily.
+    // Our request for the charm list will walk the schema tree, and that will
+    // take us into classified data of charms. If that happens, we still want
+    // this bit to work, so we elevate this request.
+    const privilegedSchema = {
+      ...charmListSchema,
+      ifc: { classification: [Classification.Secret] },
+    } as const satisfies JSONSchema;
+    const schemaContext = {
+      schema: privilegedSchema,
+      rootSchema: privilegedSchema,
+    };
+
     this.ready = Promise.all([
-      storage.syncCell(this.charms),
-      storage.syncCell(this.pinnedCharms),
-      storage.syncCell(this.trashedCharms),
+      storage.syncCell(this.charms, false, schemaContext),
+      storage.syncCell(this.pinnedCharms, false, schemaContext),
+      storage.syncCell(this.trashedCharms, false, schemaContext),
     ]);
   }
 
