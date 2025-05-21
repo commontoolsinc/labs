@@ -167,7 +167,7 @@ class RecipeManager {
     if (!recipeMeta.src) {
       throw new Error(`Recipe ${recipeId} has no stored source`);
     }
-    const recipe = await runtime.compile(recipeMeta.src);
+    const recipe = await runtime.runSingle(recipeMeta.src);
 
     metaCell.set(recipeMeta);
     await storage.syncCell(metaCell);
@@ -216,7 +216,7 @@ class RecipeManager {
       parents?: string[];
     };
 
-    const recipe = await runtime.compile(recipeJson.src!);
+    const recipe = await runtime.runSingle(recipeJson.src!);
 
     return {
       recipe,

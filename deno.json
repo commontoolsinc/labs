@@ -1,5 +1,6 @@
 {
   "workspace": [
+    "./packages/assets",
     "./packages/background-charm-service",
     "./packages/builder",
     "./packages/charm",
@@ -10,6 +11,7 @@
     "./packages/identity",
     "./packages/iframe-sandbox",
     "./packages/integration",
+    "./packages/js-runtime",
     "./packages/jumble",
     "./packages/llm",
     "./packages/memory",
@@ -49,6 +51,7 @@
   ],
   "lint": {
     "exclude": [
+      "./packages/assets/static",
       "./packages/deno-vite-plugin"
     ],
     "rules": {
