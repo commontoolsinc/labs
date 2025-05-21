@@ -666,7 +666,10 @@ async function syncCellsForRunningRecipe(
 
   const sourceCell = resultCell.getSourceCell({
     type: "object",
-    properties: { [TYPE]: { type: "string" } },
+    properties: {
+      [TYPE]: { type: "string" },
+      argument: recipe.argumentSchema ?? {},
+    },
     required: [TYPE],
   });
   if (!sourceCell) return false;
