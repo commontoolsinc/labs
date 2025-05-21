@@ -6,6 +6,7 @@ export class CommonFragmentElement extends HTMLElement {
       .appendChild(document.createElement("slot"));
   }
 
+  // Tell engine to ignore this element for layout purposes
   connectedCallback() {
     this.style.display = "contents";
   }
