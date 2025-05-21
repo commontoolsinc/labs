@@ -1,9 +1,12 @@
 export {
   type Charm,
+  type CharmPreview,
   charmId,
-  charmListSchema,
+  charmPreviewListSchema,
   CharmManager,
+  charmPreviewSchema,
   charmSchema,
+  charmListSchema,
   processSchema,
 } from "./manager.ts";
 export { searchCharms } from "./search.ts";

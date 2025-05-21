@@ -5,7 +5,11 @@
  * I'm starting from the bottom (common memory) up and purposely calling
  * APIs that would normally call into common memory.
  */
-import { Charm, charmListSchema, CharmManager } from "../charm/src/manager.ts";
+import {
+  Charm,
+  charmPreviewListSchema,
+  CharmManager,
+} from "../charm/src/manager.ts";
 import { Cell, type CellLink } from "../runner/src/cell.ts";
 import { Session } from "../identity/src/index.ts";
 import { DocImpl, getDoc } from "../runner/src/doc.ts";
@@ -49,7 +53,7 @@ async function main() {
   storage.syncCell(charmsDoc);
 
   // the list of charms
-  const charms: Cell<any> = charmsDoc.asCell([], undefined, charmListSchema);
+  const charms: Cell<any> = charmsDoc.asCell([], undefined, charmPreviewListSchema);
   charms.sink((charmList) => {
     if (charmList.length > 0) {
       console.log(`\nFound ${charmList.length} charms`);

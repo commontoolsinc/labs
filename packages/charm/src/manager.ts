@@ -34,13 +34,21 @@ export function charmId(charm: Charm): string | undefined {
   return id ? id["/"] : undefined;
 }
 
-export type Charm = {
+/**
+ * Minimal information loaded for items in the pinned, trashed and main lists.
+ * These are not full charms, just a subset used for previews.
+ */
+export type CharmPreview = {
   [NAME]?: string;
   [UI]?: any;
   [key: string]: any;
 };
 
-export const charmSchema = {
+// Alias maintained for backwards compatibility
+export type Charm = CharmPreview;
+
+// Schema describing the minimal preview information stored in charm lists
+export const charmPreviewSchema = {
   type: "object",
   properties: {
     [NAME]: { type: "string" },
@@ -49,10 +57,17 @@ export const charmSchema = {
   required: [UI, NAME],
 } as const satisfies JSONSchema;
 
-export const charmListSchema = {
+// Alias retained for compatibility with older code
+export const charmSchema = charmPreviewSchema;
+
+// List of charm previews referenced by cells
+export const charmPreviewListSchema = {
   type: "array",
-  items: { ...charmSchema, asCell: true },
+  items: { ...charmPreviewSchema, asCell: true },
 } as const satisfies JSONSchema;
+
+// Backwards compatibility export
+export const charmListSchema = charmPreviewListSchema;
 
 export const charmLineageSchema = {
   type: "object",
@@ -103,9 +118,9 @@ function isSameEntity(
  * Filters an array of charms by removing any that match the target entity
  */
 function filterOutEntity(
-  list: Cell<Cell<Charm>[]>,
-  target: Cell<Charm> | string | EntityId,
-): Cell<Charm>[] {
+  list: Cell<Cell<CharmPreview>[]>,
+  target: Cell<CharmPreview> | string | EntityId,
+): Cell<CharmPreview>[] {
   const targetId = getEntityId(target);
   if (!targetId) return list.get();
 
@@ -115,9 +130,9 @@ function filterOutEntity(
 export class CharmManager {
   private space: string;
 
-  private charms: Cell<Cell<Charm>[]>;
-  private pinnedCharms: Cell<Cell<Charm>[]>;
-  private trashedCharms: Cell<Cell<Charm>[]>;
+  private charms: Cell<Cell<CharmPreview>[]>;
+  private pinnedCharms: Cell<Cell<CharmPreview>[]>;
+  private trashedCharms: Cell<Cell<CharmPreview>[]>;
 
   /**
    * Promise resolved when the charm manager gets the charm list.
@@ -188,12 +203,12 @@ export class CharmManager {
     return await this.unpinById(id);
   }
 
-  getPinned(): Cell<Cell<Charm>[]> {
+  getPinned(): Cell<Cell<CharmPreview>[]> {
     storage.syncCell(this.pinnedCharms);
     return this.pinnedCharms;
   }
 
-  getTrash(): Cell<Cell<Charm>[]> {
+  getTrash(): Cell<Cell<CharmPreview>[]> {
     storage.syncCell(this.trashedCharms);
     return this.trashedCharms;
   }
@@ -233,7 +248,7 @@ export class CharmManager {
   // FIXME(ja): this says it returns a list of charm, but it isn't! you will
   // have to call .get() to get the actual charm (this is missing the schema)
   // how can we fix the type here?
-  getCharms(): Cell<Cell<Charm>[]> {
+  getCharms(): Cell<Cell<CharmPreview>[]> {
     // Start syncing if not already syncing. Will trigger a change to the list
     // once loaded.
     storage.syncCell(this.charms);
