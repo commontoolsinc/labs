@@ -60,10 +60,14 @@ export function map(
   return (log: ReactivityLog) => {
     let { list, op } = inputsCell.getAsQueryResult([], log);
 
+    // If the result's value is undefined, set it to the empty array.
+    if (result.get() === undefined) {
+      result.setAtPath([], [], log);
+    }
     // If the list is undefined it means the input isn't available yet.
     // Correspondingly, the result should be []. TODO: Maybe it's important to
     // distinguish empty inputs from undefined inputs?
-    if (list === undefined || result.get() === undefined) {
+    if (list === undefined) {
       result.setAtPath([], [], log);
       return;
     }
