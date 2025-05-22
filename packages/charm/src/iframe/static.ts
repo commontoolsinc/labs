@@ -1,4 +1,5 @@
-import { llmPrompt } from "@commontools/llm";
+import { hydratePrompt, LlmPrompt, llmPrompt } from "@commontools/llm";
+import { cache as promptCache } from "@commontools/static";
 
 const libraries = {
   "imports": {
@@ -539,7 +540,9 @@ Create an interactive React component that fulfills the user's request. Focus on
   ${Object.entries(libraries).map(([k, v]) => `- ${k} : ${v}`).join("\n")}
 - Only use the explicitly provided libraries
 
+<security>
 ${security()}
+</security>
 
 <guide>
 # SDK Usage Guide
@@ -858,3 +861,21 @@ function onReady(mount, sourceData, libs) {
 </guide>
 `,
 );
+
+// Update the system message to reflect the new interface
+export const staticSystemMd = async (): Promise<LlmPrompt> => {
+  const promptText = await promptCache.getText("prompts/system.md");
+  const prompt = llmPrompt(
+    "iframe-react-system",
+    promptText,
+  );
+  return hydratePrompt(prompt, {
+    SECURITY: security(),
+    AVAILABLE_LIBRARIES: Object.entries(libraries).map(([k, v]) =>
+      `- ${k} : ${v}`
+    ).join("\n"),
+    IMPORT_LIBRARIES: Object.keys(libraries.imports).map((lib) =>
+      `//   - ${lib}`
+    ).join("\n"),
+  });
+};

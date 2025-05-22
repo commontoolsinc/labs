@@ -2,28 +2,7 @@ import { exists } from "@std/fs";
 import * as path from "@std/path";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { AppBindings } from "@/lib/types.ts";
-
-function getMimeType(reqPath: string): string {
-  if (reqPath.endsWith(".js")) {
-    return "text/javascript";
-  }
-  if (reqPath.endsWith(".css")) {
-    return "text/css";
-  }
-  if (reqPath.endsWith(".svg")) {
-    return "image/svg+xml";
-  }
-  if (reqPath.endsWith(".html")) {
-    return "text/html";
-  }
-  if (reqPath.endsWith(".ttf")) {
-    return "font/ttf";
-  }
-  if (reqPath.endsWith(".map")) {
-    return "application/json";
-  }
-  throw new Error("Unknown mimetype");
-}
+import { getMimeType } from "@/lib/mime-type.ts";
 
 type CachedValue = {
   mimeType: string;
