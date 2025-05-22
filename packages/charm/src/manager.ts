@@ -372,7 +372,9 @@ export class CharmManager {
     if (runIt) {
       // Make sure the charm is running. This is re-entrant and has no effect if
       // the charm is already running.
-      return (await runSynced(charm)).asSchema(asSchema ?? resultSchema);
+      return (await runSynced(charm, recipe)).asSchema(
+        asSchema ?? resultSchema,
+      );
     } else {
       return charm.asSchema<T>(asSchema ?? resultSchema);
     }
@@ -1234,26 +1236,6 @@ export class CharmManager {
   ): Promise<Cell<Charm>> {
     await idle();
 
-    const seen = new Set<Cell<any>>();
-    const promises = new Set<Promise<any>>();
-
-    const syncAllMentionedCells = (value: any) => {
-      if (seen.has(value)) return;
-      seen.add(value);
-
-      const link = maybeGetCellLink(value);
-
-      if (link && link.cell) {
-        const maybePromise = storage.syncCell(link.cell);
-        if (maybePromise instanceof Promise) promises.add(maybePromise);
-      } else if (typeof value === "object" && value !== null) {
-        for (const key in value) syncAllMentionedCells(value[key]);
-      }
-    };
-
-    syncAllMentionedCells(inputs);
-    await Promise.all(promises);
-
     const charm = getCellFromEntityId(
       this.space,
       createRef({ recipe, inputs }, cause),
@@ -1269,8 +1251,6 @@ export class CharmManager {
         llmRequestId,
       );
     }
-
-    await this.syncRecipe(charm);
 
     return charm;
   }
