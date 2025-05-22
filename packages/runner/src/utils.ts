@@ -912,6 +912,7 @@ export function isEqualCellLink(a: CellLink, b: CellLink): boolean {
 
 export function containsOpaqueRef(value: any): boolean {
   if (isOpaqueRef(value)) return true;
+  if (isCell(value) || isCellLink(value) || isDoc(value)) return false;
   if (typeof value === "object" && value !== null) {
     return Object.values(value).some(containsOpaqueRef);
   }
