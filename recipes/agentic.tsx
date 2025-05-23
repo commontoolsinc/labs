@@ -124,6 +124,7 @@ const step = recipe(
       const src = actionMatch?.[1].trim();
       if (!src) return undefined;
 
+      console.log("got action", src);
       const { result, error } = compileAndRun({
         files: { "toolcall.ts": wrapCode(src) },
         main: "toolcall.ts",
@@ -144,15 +145,26 @@ const step = recipe(
     return derive(
       { messages, result, actionResult, steps },
       ({ messages, result, actionResult, steps }): { messages: string[] } => {
+        console.log(
+          "derive step",
+          messages.length,
+          !!result,
+          !!actionResult,
+          steps,
+          JSON.stringify([messages, result, actionResult]),
+        );
         if (!result) return { messages };
         if (!actionResult) return { messages: [...messages, result] };
 
         const nextMessages = [
           ...messages,
           result,
-          str`<result>${actionResult}</result>`,
+          `<result>${actionResult}</result>`,
         ];
-        if (steps <= 0) return { messages: nextMessages };
+        if (typeof steps !== "number") steps = 5 as any; // Default to 5 steps
+        if (steps <= 0) {
+          return { messages: nextMessages };
+        }
 
         return step({
           messages: nextMessages,
