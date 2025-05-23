@@ -122,7 +122,7 @@ export function createCell<T = any>(
   const cellLink = frame?.unsafe_binding?.materialize([]);
   if (!frame || !frame.cause || !cellLink) {
     throw new Error(
-      "Can't invoke namedCell outside of a lifted function or handler",
+      "Can't invoke createCell outside of a lifted function or handler",
     );
   }
   const space = getCellLinkOrThrow(cellLink).cell.space;
