@@ -239,6 +239,13 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
     : any
   : any;
 
+/**
+ * Gets or creates a document for the given value, cause, and space.
+ * @param value - The value to wrap in a document
+ * @param cause - The cause for creating the document
+ * @param space - The space identifier
+ * @returns A document implementation wrapping the value
+ */
 export function getDoc<T>(value: T, cause: any, space: string): DocImpl<T> {
   // If cause is provided, generate ID and return pre-existing cell if any.
   const entityId = generateEntityId(value, cause);
@@ -248,6 +255,13 @@ export function getDoc<T>(value: T, cause: any, space: string): DocImpl<T> {
   return createDoc(value, entityId, space);
 }
 
+/**
+ * Creates a new document with the specified value, entity ID, and space.
+ * @param value - The value to wrap in a document
+ * @param entityId - The entity identifier
+ * @param space - The space identifier
+ * @returns A new document implementation
+ */
 export function createDoc<T>(
   value: T,
   entityId: EntityId,

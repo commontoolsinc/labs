@@ -1,13 +1,19 @@
-import { type DocImpl, isDoc } from "./doc.ts";
+import { isStatic, markAsStatic } from "@commontools/builder";
+import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
+import { Signer } from "@commontools/identity";
+import { defer } from "@commontools/utils/defer";
+import { isBrowser } from "@commontools/utils/env";
+import { sleep } from "@commontools/utils/sleep";
+
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { Cell, type CellLink, isCell, isCellLink, isStream } from "./cell.ts";
+import { type DocImpl, isDoc } from "./doc.ts";
 import { type EntityId, getDocByEntityId } from "./doc-map.ts";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { idle } from "./scheduler.ts";
-import { isStatic, markAsStatic } from "@commontools/builder";
 import {
   BaseStorageProvider,
   StorageProvider,
@@ -17,12 +23,7 @@ import {
   Provider as CachedStorageProvider,
   RemoteStorageProviderSettings,
 } from "./storage/cache.ts";
-import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
 import { VolatileStorageProvider } from "./storage/volatile.ts";
-import { Signer } from "@commontools/identity";
-import { isBrowser } from "@commontools/utils/env";
-import { sleep } from "@commontools/utils/sleep";
-import { defer } from "@commontools/utils/defer";
 import { TransactionResult } from "@commontools/memory";
 import { refer } from "@commontools/memory/reference";
 import { SchemaContext, SchemaNone } from "@commontools/memory/interface";

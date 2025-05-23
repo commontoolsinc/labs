@@ -212,6 +212,14 @@ export type CellLink = {
   rootSchema?: JSONSchema;
 };
 
+/**
+ * Gets a cell from the specified space with the given cause and schema.
+ * @param space - The space identifier
+ * @param cause - The cause for creating for the cell, used to generate an ID
+ * @param schema - Optional JSON schema for the cell
+ * @param log - Optional reactivity log
+ * @returns A cell of type T
+ */
 export function getCell<T>(
   space: string,
   cause: any,
@@ -594,6 +602,11 @@ export function isCell(value: any): value is Cell<any> {
 
 const isCellMarker = Symbol("isCell");
 
+/**
+ * Type guard to check if a value is a Stream.
+ * @param value - The value to check
+ * @returns True if the value is a Stream
+ */
 export function isStream(value: any): value is Stream<any> {
   return typeof value === "object" && value !== null &&
     value[isStreamMarker] === true;

@@ -1,12 +1,12 @@
+import { createJsonSchema, NAME, type JSONSchema } from "@commontools/builder";
 import { DEFAULT_MODEL_NAME, fixRecipePrompt } from "@commontools/llm";
 import { Cell, recipeManager } from "@commontools/runner";
-import { Charm, CharmManager } from "./manager.ts";
+
 import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode, injectUserCode } from "./iframe/static.ts";
-import { compileAndRunRecipe, generateNewRecipeVersion } from "./iterate.ts";
-import { NAME } from "@commontools/builder";
 import { WorkflowForm } from "./index.ts";
-import { createJsonSchema, type JSONSchema } from "@commontools/builder";
+import { compileAndRunRecipe, generateNewRecipeVersion } from "./iterate.ts";
+import { Charm, CharmManager } from "./manager.ts";
 import { processWorkflow, ProcessWorkflowOptions } from "./workflow.ts";
 
 export const castSpellAsCharm = async (
