@@ -30,6 +30,11 @@ import { storage } from "@commontools/runner";
 import { type Session } from "@commontools/identity";
 import { isObject } from "@commontools/utils/types";
 
+/**
+ * Extracts the ID from a charm.
+ * @param charm - The charm to extract ID from
+ * @returns The charm ID string, or undefined if no ID is found
+ */
 export function charmId(charm: Charm): string | undefined {
   const id = getEntityId(charm);
   return id ? id["/"] : undefined;

@@ -36,7 +36,12 @@ const vdomSchema: JSONSchema = {
   },
 } as const;
 
-/** Render a view into a parent element */
+/**
+ * Renders a view into a parent element, supporting both static VNodes and reactive cells.
+ * @param parent - The HTML element to render into
+ * @param view - The VNode or reactive cell containing a VNode to render
+ * @returns A cancel function to clean up the rendering
+ */
 export const render = (
   parent: HTMLElement,
   view: VNode | Cell<VNode>,
@@ -46,6 +51,12 @@ export const render = (
   return effect(view, (view: VNode) => renderImpl(parent, view));
 };
 
+/**
+ * Internal implementation that renders a VNode into a parent element.
+ * @param parent - The HTML element to render into
+ * @param view - The VNode to render
+ * @returns A cancel function to remove the rendered content
+ */
 export const renderImpl = (parent: HTMLElement, view: VNode): Cancel => {
   const [root, cancel] = renderNode(view);
   if (!root) {

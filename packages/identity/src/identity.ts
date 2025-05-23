@@ -1,10 +1,11 @@
+import { base64pad } from "multiformats/bases/base64";
+
 import {
   Ed25519CreateConfig,
   Ed25519Signer,
   Ed25519Verifier,
 } from "./ed25519/index.ts";
 import { AsBytes, DIDKey, KeyPairRaw, Signer, Verifier } from "./interface.ts";
-import { base64pad } from "multiformats/bases/base64";
 import { hash } from "./utils.ts";
 
 const textEncoder = new TextEncoder();

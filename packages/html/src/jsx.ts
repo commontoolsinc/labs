@@ -7,8 +7,18 @@ declare global {
   }
 }
 
+/**
+ * Fragment element name used for JSX fragments.
+ */
 const FRAGMENT_ELEMENT = "common-fragment";
 
+/**
+ * JSX factory function for creating virtual DOM nodes.
+ * @param name - The element name or component function
+ * @param props - Element properties
+ * @param children - Child elements
+ * @returns A virtual DOM node
+ */
 export const h = Object.assign(function h(
   name: string | ((...args: any[]) => any),
   props: { [key: string]: any } | null,
@@ -66,6 +76,11 @@ export type VNode = {
   children: Array<Child> | Cell<Array<Child>>;
 };
 
+/**
+ * Type guard to check if a value is a VNode.
+ * @param value - The value to check
+ * @returns True if the value is a VNode
+ */
 export const isVNode = (value: unknown): value is VNode => {
   return (value as VNode)?.type === "vnode";
 };
