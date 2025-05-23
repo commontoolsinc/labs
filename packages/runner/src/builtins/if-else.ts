@@ -1,9 +1,9 @@
 import { type DocImpl, getDoc } from "../doc.ts";
 import { type Action } from "../scheduler.ts";
 import { type ReactivityLog } from "../scheduler.ts";
-import { getCellLinkOrThrow } from "../query-result-proxy.ts";
+
 export function ifElse(
-  inputsCell: DocImpl<[any, any, any]>,
+  inputsDoc: DocImpl<[any, any, any]>,
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: DocImpl<any>[],
@@ -12,12 +12,13 @@ export function ifElse(
   const result = getDoc<any>(undefined, { ifElse: cause }, parentDoc.space);
   sendResult(result);
 
+  const inputsCell = inputsDoc.asCell();
   return (log: ReactivityLog) => {
-    const condition = inputsCell.getAsQueryResult([0], log);
+    const condition = inputsCell.withLog(log).key(0).get();
 
-    const ref = getCellLinkOrThrow(
-      inputsCell.getAsQueryResult([condition ? 1 : 2], log),
-    );
-    result.send(ref.cell.getAtPath(ref.path), log);
+    const ref = inputsCell.withLog(log).key(condition ? 1 : 2)
+      .getAsCellLink();
+
+    result.send(ref, log);
   };
 }
