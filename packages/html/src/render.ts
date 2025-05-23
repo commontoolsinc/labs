@@ -136,8 +136,10 @@ const bindChildren = (
   };
 
   // When the children array changes, diff its flattened values against what we previously rendered.
-  const updateChildren = (childrenArr: Array<Child | Array<Child>>) => {
-    const newChildren = childrenArr.flat();
+  const updateChildren = (
+    childrenArr: Array<Child | Array<Child>> | undefined | null,
+  ) => {
+    const newChildren = Array.isArray(childrenArr) ? childrenArr.flat() : [];
     const newKeyOrder: string[] = [];
     const newMapping = new Map<string, { node: ChildNode; cancel: Cancel }>();
     const occurrence = new Map<string, number>();
