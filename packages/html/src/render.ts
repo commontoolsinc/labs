@@ -139,10 +139,7 @@ const bindChildren = (
   const updateChildren = (
     childrenArr: Array<Child | Array<Child>> | undefined | null,
   ) => {
-    if (!Array.isArray(childrenArr)) {
-      childrenArr = [];
-    }
-    const newChildren = childrenArr.flat();
+    const newChildren = Array.isArray(childrenArr) ? childrenArr.flat() : [];
     const newKeyOrder: string[] = [];
     const newMapping = new Map<string, { node: ChildNode; cancel: Cancel }>();
     const occurrence = new Map<string, number>();
