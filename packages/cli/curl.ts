@@ -18,8 +18,8 @@ const flags = parseArgs(Deno.args, {
     "data",
     "schema",
   ],
-  boolean: ["admin"],
-  default: { the: "application/json", admin: false, raw: false },
+  boolean: ["admin", "delete", "raw"],
+  default: { the: "application/json", admin: false, raw: false, delete: false },
 });
 
 const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
@@ -105,14 +105,16 @@ async function main() {
       useSchemaQueries: true,
     },
   });
-  if (!putData) {
-    const result = await provider.sync(entityId, true, {
-      schema: schema,
-      rootSchema: schema,
-    });
-    if (result.error) {
-      console.log("Failed to sync object", result.error);
-    }
+  // Before writing data, we need to read it to check if it's changed.
+  // Since we need to read in either case, just do that here
+  const syncResult = await provider.sync(entityId, true, {
+    schema: schema,
+    rootSchema: schema,
+  });
+  if (syncResult.error) {
+    console.log("Failed to sync object", syncResult.error);
+  }
+  if (!putData && !flags.delete) {
     const storageValue = provider.get(entityId);
     const data = flags.raw ? storageValue : storageValue?.value;
 
@@ -123,12 +125,25 @@ async function main() {
     // so we need to do the same for the value we provide to StorageValue for send.
     const result = await provider.send([{
       entityId: entityId,
-      value: flags.raw ? putData : { value: putData },
+      value: flags.delete
+        ? { value: undefined }
+        : flags.raw
+        ? putData
+        : { value: putData },
     }]);
     if (result.ok) {
+      if (flags.delete) {
+        console.log(
+          `Deleted (retracted) at ct://${spaceDID}/${
+            entityId["/"]
+          }/${provider.the}`,
+        );
+      }
       const putDataJSON = JSON.stringify(putData);
       console.log(
-        `Stored ${putDataJSON} at ct://${spaceDID}/${entityId["/"]}/${the}`,
+        `Stored ${putDataJSON} at ct://${spaceDID}/${
+          entityId["/"]
+        }/${provider.the}`,
       );
     } else {
       console.error("Failed to put data:", result.error);
