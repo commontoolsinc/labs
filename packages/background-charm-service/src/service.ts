@@ -38,7 +38,11 @@ export class BackgroundCharmService {
   async initialize() {
     this.storage.setRemoteStorage(new URL(this.toolshedUrl));
     this.storage.setSigner(this.identity);
-    this.charmsCell = await getBGCharms({ bgSpace: this.bgSpace, bgCause: this.bgCause, storage: this.storage });
+    this.charmsCell = await getBGCharms({
+      bgSpace: this.bgSpace,
+      bgCause: this.bgCause,
+      storage: this.storage,
+    });
     await this.storage.syncCell(this.charmsCell, true);
     await this.storage.synced();
 
