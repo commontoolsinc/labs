@@ -514,7 +514,7 @@ export async function compileRecipe(
   charmManager: CharmManager,
   parents?: string[],
 ) {
-  const recipe = await runtime.compile(recipeSrc);
+  const recipe = await runtime.runSingle(recipeSrc);
   if (!recipe) {
     throw new Error("No default recipe found in the compiled exports.");
   }
