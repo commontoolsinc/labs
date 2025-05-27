@@ -1,11 +1,19 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { byRef, handler, JSONSchema, lift, recipe } from "@commontools/builder";
+import {
+  byRef,
+  createCell,
+  handler,
+  JSONSchema,
+  lift,
+  recipe,
+} from "@commontools/builder";
 import { run } from "../src/runner.ts";
 import { addModuleByRef } from "../src/module.ts";
 import { getDoc } from "../src/doc.ts";
 import { type ErrorWithContext, idle, onError } from "../src/scheduler.ts";
-import { type Cell } from "../src/cell.ts";
+import { type Cell, getCell, isCell } from "../src/cell.ts";
+import { resolveLinks } from "../src/utils.ts";
 import { getRecipeIdFromCharm } from "../../charm/src/manager.ts";
 
 describe("Recipe Runner", () => {
@@ -968,5 +976,62 @@ describe("Recipe Runner", () => {
     await timeoutPromise;
     expect(timeoutCalled).toBe(true);
     expect(charm.asCell().get()).toMatchObject({ result: 10 });
+  });
+
+  it("should create and use a named cell inside a lift", async () => {
+    const wrapperRecipe = recipe<{ value: number }>(
+      "Wrapper with Named Cell",
+      ({ value }) => {
+        // Create a named cell to store the counter
+        const wrapper = lift((v: number) => {
+          const cell = createCell({ type: "number" }, "wrapper", v);
+          return { value: cell };
+        })(value);
+
+        return wrapper;
+      },
+    );
+
+    const input = getCell(
+      "test",
+      "should create and use a named cell inside a lift input",
+      { type: "number" },
+    );
+    input.set(5);
+
+    const result = run(
+      wrapperRecipe,
+      { value: input },
+      getDoc(
+        undefined,
+        "should create and use a named cell inside a lift",
+        "test",
+      ),
+    );
+
+    await idle();
+
+    // Initial state
+    const wrapper = result.asCell([], undefined, {
+      type: "object",
+      properties: { value: { type: "number", asCell: true } },
+      required: ["value"],
+    });
+    const wrapperCell = wrapper.get().value;
+    expect(isCell(wrapperCell)).toBe(true);
+    expect(wrapperCell.get()).toBe(5);
+
+    // Follow all the links until we get to the doc holding the value
+    const ref = resolveLinks(wrapperCell.getAsCellLink());
+    expect(ref.path).toEqual([]); // = This is stored in its own document
+
+    // And let's make sure the value is correct
+    expect(ref.cell.get()).toBe(5);
+
+    input.send(10);
+    await idle();
+
+    // That same value was updated, which shows that the id was stable
+    expect(ref.cell.get()).toBe(10);
   });
 });

@@ -1,18 +1,16 @@
 import { JSONSchema } from "@commontools/builder";
 import {
-  DEFAULT_MODEL_NAME,
+  applyDefaults,
+  type GenerationOptions,
   hydratePrompt,
   type LLMMessage,
   type LLMRequest,
-  applyDefaults,
-  type GenerationOptions
 } from "@commontools/llm";
-
-import { extractUserCode, systemMd } from "./static.ts";
+import { extractUserCode, staticSystemMd } from "./static.ts";
 
 export const RESPONSE_PREFILL = "```javascript\n";
 
-export const buildPrompt = ({
+export const buildPrompt = async ({
   src,
   spec,
   newSpec,
@@ -24,7 +22,7 @@ export const buildPrompt = ({
   newSpec: string;
   schema: JSONSchema;
   steps?: string[];
-}, options: GenerationOptions): LLMRequest => {
+}, options: GenerationOptions): Promise<LLMRequest> => {
   const { model, cache, space, generationId } = applyDefaults(options);
 
   const messages: LLMMessage[] = [];
@@ -71,7 +69,8 @@ ${steps.map((step, index) => `<step>${step}</step>`).join("\n")}
     content: RESPONSE_PREFILL,
   });
 
-  const system = hydratePrompt(systemMd, {
+  const systemPrompt = await staticSystemMd();
+  const system = hydratePrompt(systemPrompt, {
     SCHEMA: JSON.stringify(schema, null, 2),
   });
 

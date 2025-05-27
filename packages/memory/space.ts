@@ -3,9 +3,10 @@ import {
   SqliteError,
   Transaction as DBTransaction,
 } from "@db/sqlite";
-import { fromString, refer } from "./reference.ts";
-import { unclaimed } from "./fact.ts";
+
 import { create as createCommit, the as COMMIT_THE } from "./commit.ts";
+import { unclaimed } from "./fact.ts";
+import { fromString, refer } from "./reference.ts";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
   Assert,

@@ -71,7 +71,7 @@ onConsole(
       }
     }
     ctx = ctx ?? "Charm(NO_CHARM)";
-    return [ctx, ...fmtConsole(args)];
+    return [ctx, ...args.map((arg) => safeFormat(arg))];
   },
 );
 
@@ -199,17 +199,15 @@ async function runCharm(data: RunData): Promise<void> {
 // Logs here are often viewed through observability dashboards
 // that don't render objects well. Attempt to stringify any objects
 // here.
-function fmtConsole(args: any[]): any[] {
-  return [...args].map((value) => {
-    if (value && typeof value === "object") {
-      try {
-        return JSON.stringify(value);
-      } catch (_e) {
-        // satisfy typescript's empty block
-      }
+function safeFormat(value: any): any {
+  if (value && typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch (_e) {
+      // satisfy typescript's empty block
     }
-    return value;
-  });
+  }
+  return value;
 }
 
 self.addEventListener("unhandledrejection", (e: PromiseRejectionEvent) => {
@@ -223,7 +221,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
 
   try {
     if (!isWorkerIPCRequest(message)) {
-      throw new Error("Invalid IPC request.");
+      throw new Error(`Invalid IPC request: ${safeFormat(message)}`);
     }
     switch (message.type) {
       case WorkerIPCMessageType.Initialize: {

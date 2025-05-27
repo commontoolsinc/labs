@@ -49,7 +49,7 @@ export const genSrc = async (
   const optionsWithDefaults = applyDefaults(options);
   const { model, cache, space, generationId } = optionsWithDefaults;
 
-  const request = buildPrompt({
+  const request = await buildPrompt({
     src,
     spec,
     newSpec,

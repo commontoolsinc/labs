@@ -13,6 +13,10 @@ export type Config = {
   args?: string[];
   // Whether or not console commands should be propagated to the deno-web-test process.
   pipeConsole?: boolean;
+  // A map of relative file paths to copy to the static server during testing.
+  // The keys are relative file paths and the values are the destination from
+  // the server root.
+  include?: Record<string, string>;
 };
 
 export const applyDefaults = (config: object): Config => {
