@@ -5,6 +5,8 @@ type PartialCallback = (text: string) => void;
 let llmApiUrl = typeof globalThis.location !== "undefined"
   ? globalThis.location.protocol + "//" + globalThis.location.host +
     "/api/ai/llm"
+  : Deno?.env.get("TOOLSHED_API_URL")
+  ? new URL("/api/ai/llm", Deno.env.get("TOOLSHED_API_URL")).toString()
   : "//api/ai/llm";
 
 export const setLLMUrl = (toolshedUrl: string) => {
