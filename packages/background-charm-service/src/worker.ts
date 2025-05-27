@@ -202,7 +202,11 @@ async function runCharm(data: RunData): Promise<void> {
 function safeFormat(value: any): any {
   if (value && typeof value === "object") {
     try {
-      return JSON.stringify(value);
+      // While we use this formatter for runtime code, we also use
+      // this for formatting worker errors within the scope, where
+      // key material may be in use. Filter it out here until
+      // we properly handle sensitive logging. 
+      return JSON.stringify(value, (key, value) => key === "rawIdentity" ? "<REDACTED>" : value);
     } catch (_e) {
       // satisfy typescript's empty block
     }
