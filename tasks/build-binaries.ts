@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-env --allow-run
+import { assets, cache as staticCache } from "@commontools/static";
 import { exists } from "@std/fs";
 import * as path from "@std/path";
 
@@ -70,6 +71,10 @@ class BuildConfig {
 
   toolshedEnvPath() {
     return this.path("packages", "toolshed", "COMPILED");
+  }
+
+  staticAssetsPath() {
+    return this.path("packages", "static", "assets");
   }
 
   distDir() {
@@ -151,6 +156,8 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
       config.toolshedFrontendPath(),
       "--include",
       config.toolshedEnvPath(),
+      "--include",
+      config.staticAssetsPath(),
       ...config.toolshedFlags,
       config.toolshedEntryPath(),
     ],
@@ -174,6 +181,8 @@ async function buildBgCharmService(config: BuildConfig): Promise<void> {
       config.distPath("bg-charm-service"),
       "--include",
       config.bgCharmServiceWorkerPath(),
+      "--include",
+      config.staticAssetsPath(),
       "-A", // All permissions
       "--unstable-worker-options", // Required by bg-charm-service
       config.bgCharmServiceEntryPath(),

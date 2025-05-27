@@ -25,6 +25,7 @@ export {
 export {
   type BuiltInLLMParams,
   type BuiltInLLMState,
+  createCell,
   fetchData,
   ifElse,
   llm,

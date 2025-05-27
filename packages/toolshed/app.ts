@@ -14,6 +14,7 @@ import frontendProxy from "@/routes/frontend/frontend.index.ts";
 import spellbook from "@/routes/spellbook/spellbook.index.ts";
 import whoami from "@/routes/whoami/whoami.index.ts";
 import meta from "@/routes/meta/meta.index.ts";
+import staticRoute from "@/routes/static/static.index.ts";
 
 const app = createApp();
 
@@ -33,6 +34,7 @@ const routes = [
   spellbook,
   whoami,
   meta,
+  staticRoute,
   frontendProxy, // This is the frontend proxy for jumble in the CDN.
 ] as const;
 

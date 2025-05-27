@@ -15,6 +15,8 @@ deno check \
   packages/memory \
   packages/runner \
   packages/seeder \
+  packages/static/*.ts \
+  packages/static/test \
   packages/toolshed \
   packages/ui \
   packages/utils

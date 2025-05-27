@@ -3,6 +3,7 @@ import { denoPlugins } from "@luca/esbuild-deno-loader";
 import * as path from "@std/path";
 import { Manifest } from "./manifest.ts";
 import { Summary, TestFileResults } from "./interface.ts";
+import { copy } from "@std/fs";
 
 export const tsToJs = (path: string): string => path.replace(/\.ts$/, ".js");
 
@@ -18,6 +19,18 @@ export const buildTestDir = async (manifest: Manifest) => {
       tsToJs(testPath),
     );
     await bundle(input, output);
+  }
+
+  // Bundle all extra includes and move to server root.
+  for (
+    const [filepath, outpath] of Object.entries(manifest.config.include ?? {})
+  ) {
+    const input = path.join(manifest.projectDir, filepath);
+    const output = path.join(
+      manifest.serverDir,
+      outpath,
+    );
+    await copy(input, output);
   }
 
   // Deploy harness files to server root.

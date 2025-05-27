@@ -15,6 +15,7 @@
     "./packages/memory",
     "./packages/runner",
     "./packages/seeder",
+    "./packages/static",
     "./packages/toolshed",
     "./packages/ui",
     "./packages/utils"

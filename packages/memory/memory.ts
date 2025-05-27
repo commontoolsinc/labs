@@ -1,6 +1,7 @@
-import * as Space from "./space.ts";
-import * as Error from "./error.ts";
 import * as FS from "@std/fs";
+
+import * as Error from "./error.ts";
+import * as Space from "./space.ts";
 import {
   addChangesAttributes,
   addMemoryAttributes,
@@ -93,6 +94,12 @@ export class Memory implements Session, MemorySession {
   }
 }
 
+/**
+ * Subscribes a subscriber to memory changes.
+ * @param session - The memory session
+ * @param subscriber - The subscriber to add
+ * @returns Success result
+ */
 export const subscribe = (session: Session, subscriber: Subscriber) => {
   return traceSync("memory.subscribe", (span) => {
     addMemoryAttributes(span, { operation: "subscribe" });
@@ -102,6 +109,12 @@ export const subscribe = (session: Session, subscriber: Subscriber) => {
   });
 };
 
+/**
+ * Unsubscribes a subscriber from memory changes.
+ * @param session - The memory session
+ * @param subscriber - The subscriber to remove
+ * @returns Success result
+ */
 export const unsubscribe = (session: Session, subscriber: Subscriber) => {
   return traceSync("memory.unsubscribe", (span) => {
     addMemoryAttributes(span, { operation: "unsubscribe" });

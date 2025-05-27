@@ -23,6 +23,11 @@ import { type ReactivityLog } from "./scheduler.ts";
 import { createRef, getDocByEntityId } from "./doc-map.ts";
 import { ContextualFlowControl } from "./index.ts";
 
+/**
+ * Extracts default values from a JSON schema object.
+ * @param schema - The JSON schema to extract defaults from
+ * @returns An object containing the default values, or undefined if none found
+ */
 export function extractDefaultValues(schema: any): any {
   if (typeof schema !== "object" || schema === null) return undefined;
 
@@ -43,9 +48,13 @@ export function extractDefaultValues(schema: any): any {
   return schema.default;
 }
 
-// Merges objects into a single object, preferring values from later objects.
-// Recursively calls itself for nested objects, passing on any objects that
-// matching properties.
+/**
+ * Merges objects into a single object, preferring values from later objects.
+ * Recursively calls itself for nested objects, passing on any objects that
+ * matching properties.
+ * @param objects - Objects to merge
+ * @returns A merged object, or undefined if no objects provided
+ */
 export function mergeObjects(...objects: any[]): any {
   objects = objects.filter((obj) => obj !== undefined);
   if (objects.length === 0) return undefined;
@@ -83,11 +92,17 @@ export function mergeObjects(...objects: any[]): any {
   return result;
 }
 
-// Sends a value to a binding. If the binding is an array or object, it'll
-// traverse the binding and the value in parallel accordingly. If the binding is
-// an alias, it will follow all aliases and send the value to the last aliased
-// doc. If the binding is a literal, we verify that it matches the value and
-// throw an error otherwise.
+/**
+ * Sends a value to a binding. If the binding is an array or object, it'll
+ * traverse the binding and the value in parallel accordingly. If the binding is
+ * an alias, it will follow all aliases and send the value to the last aliased
+ * doc. If the binding is a literal, we verify that it matches the value and
+ * throw an error otherwise.
+ * @param doc - The document context
+ * @param binding - The binding to send to
+ * @param value - The value to send
+ * @param log - Optional reactivity log
+ */
 export function sendValueToBinding(
   doc: DocImpl<any>,
   binding: any,
@@ -912,6 +927,7 @@ export function isEqualCellLink(a: CellLink, b: CellLink): boolean {
 
 export function containsOpaqueRef(value: any): boolean {
   if (isOpaqueRef(value)) return true;
+  if (isCell(value) || isCellLink(value) || isDoc(value)) return false;
   if (typeof value === "object" && value !== null) {
     return Object.values(value).some(containsOpaqueRef);
   }

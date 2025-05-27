@@ -1,0 +1,16 @@
+{
+  "name": "@commontools/static",
+  "tasks": {
+    "test": {
+      "dependencies": [
+        "deno-test",
+        "browser-test"
+      ]
+    },
+    "deno-test": "deno test --allow-read",
+    "browser-test": "deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts test/*.test.ts"
+  },
+  "exports": {
+    ".": "./index.ts"
+  }
+}
