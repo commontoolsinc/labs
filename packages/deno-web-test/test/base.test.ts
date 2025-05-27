@@ -20,6 +20,9 @@ Deno.test("smoke test", async function () {
   assert(/add-async ... ok/.test(stdoutText), "test output ok");
   assert(/ok | 2 passed | 0 failed/.test(stdoutText), "test output ok");
   assert(/deno run/.test(stderrText), "stderr has deno task run");
-  assert(stderrText.split("\n").length === 2, "stderr has no other messages");
-  assert(stderrText.split("\n")[1] === "", "stderr has no other messages");
+  assert(
+    stderrText.split(/\r?\n/).length === 2,
+    "stderr has no other messages",
+  );
+  assert(stderrText.split(/\r?\n/)[1] === "", "stderr has no other messages");
 });
