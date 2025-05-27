@@ -939,8 +939,11 @@ test(
       selectSchema: schemaSelector,
     });
 
-    assertEquals(query.error?.name, "AuthorizationError");
-    assertEquals(query.error?.message, "Insufficient access");
+    assertEquals(
+      query.ok?.selection,
+      { [alice.did()]: Selection.from([[v2, 1]]) },
+      "includes the fact we queried, but not the linked classified fact",
+    );
   },
 );
 
