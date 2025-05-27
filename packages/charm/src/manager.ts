@@ -140,10 +140,24 @@ export class CharmManager {
     this.charms = getCell(this.space, "charms", charmListSchema);
     this.pinnedCharms = getCell(this.space, "pinned-charms", charmListSchema);
     this.trashedCharms = getCell(this.space, "trash", charmListSchema);
+
+    // TODO(@ubik2) We use elevated permissions here temporarily.
+    // Our request for the charm list will walk the schema tree, and that will
+    // take us into classified data of charms. If that happens, we still want
+    // this bit to work, so we elevate this request.
+    const privilegedSchema = {
+      ...charmListSchema,
+      ifc: { classification: [Classification.Secret] },
+    } as const satisfies JSONSchema;
+    const schemaContext = {
+      schema: privilegedSchema,
+      rootSchema: privilegedSchema,
+    };
+
     this.ready = Promise.all([
-      this.syncCharms(this.charms),
-      this.syncCharms(this.pinnedCharms),
-      this.syncCharms(this.trashedCharms),
+      storage.syncCell(this.charms, false, schemaContext),
+      storage.syncCell(this.pinnedCharms, false, schemaContext),
+      storage.syncCell(this.trashedCharms, false, schemaContext),
     ]);
   }
 
@@ -161,7 +175,7 @@ export class CharmManager {
   }
 
   async pin(charm: Cell<Charm>) {
-    await this.syncCharms(this.pinnedCharms);
+    await storage.syncCell(this.pinnedCharms);
     // Check if already pinned
     if (
       !filterOutEntity(this.pinnedCharms, charm).some((c) =>
@@ -174,7 +188,7 @@ export class CharmManager {
   }
 
   async unpinById(charmId: EntityId) {
-    await this.syncCharms(this.pinnedCharms);
+    await storage.syncCell(this.pinnedCharms);
     const newPinnedCharms = filterOutEntity(this.pinnedCharms, charmId);
 
     if (newPinnedCharms.length !== this.pinnedCharms.get().length) {
@@ -194,18 +208,18 @@ export class CharmManager {
   }
 
   getPinned(): Cell<Cell<Charm>[]> {
-    this.syncCharms(this.pinnedCharms);
+    storage.syncCell(this.pinnedCharms);
     return this.pinnedCharms;
   }
 
   getTrash(): Cell<Cell<Charm>[]> {
-    this.syncCharms(this.trashedCharms);
+    storage.syncCell(this.trashedCharms);
     return this.trashedCharms;
   }
 
   async restoreFromTrash(idOrCharm: string | EntityId | Cell<Charm>) {
-    await this.syncCharms(this.trashedCharms);
-    await this.syncCharms(this.charms);
+    await storage.syncCell(this.trashedCharms);
+    await storage.syncCell(this.charms);
 
     const id = getEntityId(idOrCharm);
     if (!id) return false;
@@ -229,7 +243,7 @@ export class CharmManager {
   }
 
   async emptyTrash() {
-    await this.syncCharms(this.trashedCharms);
+    await storage.syncCell(this.trashedCharms);
     this.trashedCharms.set([]);
     await idle();
     return true;
@@ -241,12 +255,12 @@ export class CharmManager {
   getCharms(): Cell<Cell<Charm>[]> {
     // Start syncing if not already syncing. Will trigger a change to the list
     // once loaded.
-    this.syncCharms(this.charms);
+    storage.syncCell(this.charms);
     return this.charms;
   }
 
   private async add(newCharms: Cell<Charm>[]) {
-    await this.syncCharms(this.charms);
+    await storage.syncCell(this.charms);
     await idle();
 
     newCharms.forEach((charm) => {
@@ -256,22 +270,6 @@ export class CharmManager {
     });
 
     await idle();
-  }
-
-  syncCharms(cell: Cell<Cell<Charm>[]>) {
-    // TODO(@ubik2) We use elevated permissions here temporarily.
-    // Our request for the charm list will walk the schema tree, and that will
-    // take us into classified data of charms. If that happens, we still want
-    // this bit to work, so we elevate this request.
-    const privilegedSchema = {
-      ...charmListSchema,
-      ifc: { classification: [Classification.Secret] },
-    } as const satisfies JSONSchema;
-    const schemaContext = {
-      schema: privilegedSchema,
-      rootSchema: privilegedSchema,
-    };
-    return storage.syncCell(cell, false, schemaContext);
   }
 
   // copies the recipe for a charm but clones the argument cell
@@ -1187,9 +1185,9 @@ export class CharmManager {
   // Now moves the charm to trash instead of just removing it
   async remove(idOrCharm: string | EntityId | Cell<Charm>) {
     await Promise.all([
-      this.syncCharms(this.charms),
-      this.syncCharms(this.pinnedCharms),
-      this.syncCharms(this.trashedCharms),
+      storage.syncCell(this.charms),
+      storage.syncCell(this.pinnedCharms),
+      storage.syncCell(this.trashedCharms),
     ]);
 
     const id = getEntityId(idOrCharm);
@@ -1219,7 +1217,7 @@ export class CharmManager {
 
   // Permanently delete a charm (from trash or directly)
   async permanentlyDelete(idOrCharm: string | EntityId | Cell<Charm>) {
-    await this.syncCharms(this.trashedCharms);
+    await storage.syncCell(this.trashedCharms);
 
     const id = getEntityId(idOrCharm);
     if (!id) return false;
@@ -1286,11 +1284,9 @@ export class CharmManager {
     await storage.syncCell(entity, waitForStorage);
   }
 
-  // Returns the charm from one of our active charm lists if it is present,
-  // or undefined if it is not
-  getActiveCharm(charmId: Cell<Charm> | EntityId | string) {
-    return this.charms.get().find((charm) => isSameEntity(charm, charmId)) ??
-      this.pinnedCharms.get().find((charm) => isSameEntity(charm, charmId));
+  isActiveCharm(charmId: Cell<Charm> | EntityId | string) {
+    return (this.charms.get().some((charm) => isSameEntity(charm, charmId)) ||
+      this.pinnedCharms.get().some((charm) => isSameEntity(charm, charmId)));
   }
 }
 

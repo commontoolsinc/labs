@@ -104,7 +104,6 @@ async function initialize(
 
   // Initialize charm manager
   manager = new CharmManager(currentSession);
-  await manager.ready;
 
   console.log(`Initialized`);
   initialized = true;
@@ -141,8 +140,7 @@ async function runCharm(data: RunData): Promise<void> {
     latestError = null;
 
     // Check whether the charm is still active (in charms or pinned-charms)
-    const charmsEntryCell = manager.getActiveCharm({ "/": charmId });
-    if (charmsEntryCell === undefined) {
+    if (!manager.isActiveCharm({ "/": charmId })) {
       // Skip any charms that aren't still in one of the lists
       throw new Error(`No charms list entry found for charm: ${charmId}`);
     }
@@ -153,7 +151,7 @@ async function runCharm(data: RunData): Promise<void> {
     if (!runningCharm) {
       // If not loaded yet, get it from the manager
       console.log(`Loading charm ${charmId} for the first time`);
-      runningCharm = await manager.get(charmsEntryCell, true);
+      runningCharm = await manager.get(charmId, true);
 
       if (!runningCharm) {
         throw new Error(`Charm not found: ${charmId}`);
@@ -194,7 +192,7 @@ async function runCharm(data: RunData): Promise<void> {
     // FIXME(ja): this isn't enough to ensure we reload/stop the charm
     loadedCharms.delete(charmId);
 
-    throw new Error(errorMessage, { cause: error });
+    throw new Error(errorMessage);
   }
 }
 
