@@ -23,8 +23,11 @@ export {
   recipeFromFrame,
 } from "./recipe.ts";
 export {
+  type BuiltInCompileAndRunParams,
+  type BuiltInCompileAndRunState,
   type BuiltInLLMParams,
   type BuiltInLLMState,
+  compileAndRun,
   createCell,
   fetchData,
   ifElse,

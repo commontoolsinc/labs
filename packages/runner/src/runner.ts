@@ -46,6 +46,7 @@ import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import { getCellLinkOrThrow } from "./query-result-proxy.ts";
 import { storage } from "./storage.ts";
 import { runtime } from "./runtime/index.ts";
+import { createRef } from "./doc-map.ts";
 
 export const cancels = new WeakMap<DocImpl<any>, Cancel>();
 
@@ -447,7 +448,8 @@ function instantiateJavaScriptNode(
     const inputsCell = getDoc(inputs, { immutable: inputs }, processCell.space);
     inputsCell.freeze(); // Freezes the bindings, not aliased cells.
 
-    let resultCell: DocImpl<any> | undefined;
+    let previousResultDoc: DocImpl<any> | undefined;
+    let previousResultRecipeAsString: string | undefined;
 
     const action: Action = (log: ReactivityLog) => {
       const argument = module.argumentSchema
@@ -472,24 +474,32 @@ function instantiateJavaScriptNode(
             () => result,
           );
 
-          resultCell = run(
+          // If nothing changed, don't rerun the recipe
+          const resultRecipeAsString = JSON.stringify(resultRecipe);
+          if (previousResultRecipeAsString === resultRecipeAsString) return;
+          previousResultRecipeAsString = resultRecipeAsString;
+
+          const resultDoc = run(
             resultRecipe,
             undefined,
-            resultCell ??
+            previousResultDoc ??
               getDoc(
                 undefined,
                 { resultFor: { inputs, outputs, fn: fn.toString() } },
                 processCell.space,
               ),
           );
-          addCancel(cancels.get(resultCell));
+          addCancel(cancels.get(resultDoc));
 
-          sendValueToBinding(
-            processCell,
-            outputs,
-            { cell: resultCell, path: [] },
-            log,
-          );
+          if (!previousResultDoc) {
+            previousResultDoc = resultDoc;
+            sendValueToBinding(
+              processCell,
+              outputs,
+              { cell: resultDoc, path: [] },
+              log,
+            );
+          }
         } else {
           sendValueToBinding(processCell, outputs, result, log);
         }
@@ -543,6 +553,9 @@ function instantiateRawNode(
   const inputCells = findAllAliasedCells(mappedInputBindings, processCell);
   const outputCells = findAllAliasedCells(mappedOutputBindings, processCell);
 
+  // If no input cells were provided, we have only static inputs, so use that as cause
+  const cause = inputCells.length > 0 ? inputCells : inputBindings;
+
   const action = module.implementation(
     getDoc(
       mappedInputBindings,
@@ -552,7 +565,7 @@ function instantiateRawNode(
     (result: any) =>
       sendValueToBinding(processCell, mappedOutputBindings, result),
     addCancel,
-    inputCells, // cause
+    cause,
     processCell,
   );
 
