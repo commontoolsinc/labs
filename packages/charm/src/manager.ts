@@ -1281,9 +1281,11 @@ export class CharmManager {
     await storage.syncCell(entity, waitForStorage);
   }
 
-  isActiveCharm(charmId: Cell<Charm> | EntityId | string) {
-    return (this.charms.get().some((charm) => isSameEntity(charm, charmId)) ||
-      this.pinnedCharms.get().some((charm) => isSameEntity(charm, charmId)));
+  // Returns the charm from one of our active charm lists if it is present,
+  // or undefined if it is not
+  getActiveCharm(charmId: Cell<Charm> | EntityId | string) {
+    return this.charms.get().find((charm) => isSameEntity(charm, charmId)) ??
+      this.pinnedCharms.get().find((charm) => isSameEntity(charm, charmId));
   }
 }
 

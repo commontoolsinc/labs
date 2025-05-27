@@ -1,6 +1,7 @@
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { Cell, type CellLink, isCell, isCellLink, isStream } from "./cell.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import { type EntityId, getDocByEntityId } from "./doc-map.ts";
 import {
   getCellLinkOrThrow,
@@ -144,6 +145,7 @@ export interface Storage {
 type Job = {
   doc: DocImpl<any>;
   type: "doc" | "storage" | "sync";
+  label?: string;
 };
 
 /**
@@ -236,6 +238,8 @@ class StorageImpl implements Storage {
 
   private cancel: Cancel;
   private addCancel: AddCancel;
+
+  private cfc: ContextualFlowControl = new ContextualFlowControl();
 
   get id() {
     return this.#id;
@@ -423,7 +427,11 @@ class StorageImpl implements Storage {
     this.loadingResolves.set(doc, resolve);
     this.docIsLoading.set(doc, promise.then(() => doc));
 
-    this._addToBatch([{ doc: doc, type: "sync" }]);
+    // If we needed privilege to get this doc, we likely need it for included docs
+    const lubLabel = schemaContext === undefined
+      ? undefined
+      : this.cfc.lubSchema(schemaContext.schema);
+    this._addToBatch([{ doc: doc, type: "sync", label: lubLabel }]);
 
     // Return the doc, to make calls chainable.
     return doc;
@@ -511,6 +519,7 @@ class StorageImpl implements Storage {
     doc: DocImpl<any>,
     value: any,
     source?: EntityId,
+    label?: string,
   ): void {
     log(() => [
       "prep for doc",
@@ -533,6 +542,10 @@ class StorageImpl implements Storage {
           "/" in value.cell &&
           Array.isArray(value.path)
         ) {
+          // If we had a classification earlier, carry it to the dependent object
+          if (label !== undefined) {
+            value.schema = this.cfc.schemaWithLub(value.schema ?? {}, label);
+          }
           // If the doc is not yet loaded, load it. As it's referenced in
           // something that came from storage, the id is known in storage and so
           // we have to wait for it to load. Hence true as second parameter.
@@ -597,7 +610,7 @@ class StorageImpl implements Storage {
   // because once a doc is loaded, updates come in via listeners only, and they
   // add entries to tbe batch.
   private async _processCurrentBatch(): Promise<void> {
-    const loading = new Set<DocImpl<any>>();
+    const loading = new Map<DocImpl<any>, string | undefined>();
     const loadedDocs = new Set<DocImpl<any>>();
 
     log(() => [
@@ -610,18 +623,20 @@ class StorageImpl implements Storage {
     do {
       // Load everything in loading
       const loaded = await Promise.all(
-        Array.from(loading).map((doc) => this.loadingPromises.get(doc)!),
+        Array.from(loading.keys()).map((doc) => this.loadingPromises.get(doc)!),
       );
       if (loading.size === 0) {
         // If there was nothing queued, let the event loop settle before
         // continuing. We might have gotten new data from storage.
         await sleep(0);
       }
+      // Keep track of labels we used to load, so we can pass these to our dependent loads
+      const loadedLabels = new Map(loading);
       loading.clear();
 
       for (const doc of loaded) {
         loadedDocs.add(doc);
-
+        const label = loadedLabels.get(doc);
         // After first load, we set up sync: If storage doesn't know about the
         // doc, we need to persist the current value. If it does, we need to
         // update the doc value.
@@ -629,7 +644,7 @@ class StorageImpl implements Storage {
           doc.entityId!,
         );
         if (value === undefined) this._batchForStorage(doc);
-        else this._batchForDoc(doc, value.value, value.source);
+        else this._batchForDoc(doc, value.value, value.source, label);
 
         // From now on, we'll get updates via listeners
         this._subscribeToChanges(doc);
@@ -639,10 +654,10 @@ class StorageImpl implements Storage {
       // Note that this includes both docs just added above, after loading and
       // docs that were updated in the meantime and possibly gained
       // dependencies.
-      for (const { doc, type } of this.currentBatch) {
+      for (const { doc, type, label } of this.currentBatch) {
         if (type === "sync") {
           if (this.docIsLoading.has(doc) && !loadedDocs.has(doc)) {
-            loading.add(doc);
+            loading.set(doc, label);
           }
         } else {
           // Invariant: Jobs with "doc" or "storage" type are already loaded.
@@ -662,12 +677,15 @@ class StorageImpl implements Storage {
                   this.docIsLoading.has(dependent) &&
                   !loadedDocs.has(dependent),
               )
-              .forEach((dependent) => loading.add(dependent));
+              .forEach((dependent) => loading.set(dependent, label));
           }
         }
       }
       log(
-        () => ["loading", [...loading].map((c) => JSON.stringify(c.entityId))],
+        () => [
+          "loading",
+          [...loading.keys()].map((c) => JSON.stringify(c.entityId)),
+        ],
       );
       log(() => [
         "docIsLoading",
