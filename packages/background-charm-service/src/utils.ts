@@ -199,7 +199,15 @@ export async function getBGCharms(
   // Ensure the cell is synced
   // FIXME(ja): does True do the right thing here? Does this mean: I REALLY REALLY
   // INSIST THAT YOU HAVE THIS CELL ON THE SERVER!
-  await storage.syncCell(charmsCell, true);
+  const privilegedSchema = {
+    ...schema,
+    ifc: { classification: ["secret"] },
+  } as const satisfies JSONSchema;
+  const schemaContext = {
+    schema: privilegedSchema,
+    rootSchema: privilegedSchema,
+  };
+  await storage.syncCell(charmsCell, true, schemaContext);
   await storage.synced();
 
   return charmsCell;

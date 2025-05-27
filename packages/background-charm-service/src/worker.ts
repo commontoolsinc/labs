@@ -104,6 +104,7 @@ async function initialize(
 
   // Initialize charm manager
   manager = new CharmManager(currentSession);
+  await manager.ready;
 
   console.log(`Initialized`);
   initialized = true;
@@ -192,7 +193,7 @@ async function runCharm(data: RunData): Promise<void> {
     // FIXME(ja): this isn't enough to ensure we reload/stop the charm
     loadedCharms.delete(charmId);
 
-    throw new Error(errorMessage);
+    throw new Error(errorMessage, { cause: error });
   }
 }
 

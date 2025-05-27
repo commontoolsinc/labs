@@ -454,6 +454,7 @@ export class Replica {
       const { error } = await query.promise;
       // If query fails we propagate the error.
       if (error) {
+        console.log("query error", error);
         return { error };
       }
       fetchedEntries = query.schemaFacts;
