@@ -3,7 +3,7 @@ import { runtime } from "../runtime/index.ts";
 import { type Action, idle } from "../scheduler.ts";
 import { refer } from "merkle-reference";
 import { type ReactivityLog } from "../scheduler.ts";
-import { cancels, run, stop } from "../runner.ts";
+import { cancels, runSynced, stop } from "../runner.ts";
 import {
   BuiltInCompileAndRunParams,
   RecipeFactory,
@@ -102,9 +102,9 @@ export function compileAndRun(
       compiling.setAtPath([], false, log);
     });
 
-    compilePromise.then((recipe) => {
+    compilePromise.then(async (recipe) => {
       if (thisRun !== currentRun) return;
-      if (recipe) run(recipe, input, result);
+      if (recipe) await runSynced(result.asCell(), recipe, input);
       // TODO(seefeld): Add capturing runtime errors.
     });
   };
