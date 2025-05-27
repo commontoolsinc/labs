@@ -1,12 +1,14 @@
 {
   "name": "@commontools/js-runtime",
   "tasks": {
-    "test": "deno test --allow-env --allow-read"
+    "run": "deno run --deny-env --allow-read ./cli/mod.ts",
+    "test": "deno test --deny-env --allow-read --allow-run test/*.test.ts"
   },
   "imports": {
     "source-map-js": "npm:source-map-js"
   },
   "exports": {
-    ".": "./mod.ts"
+    ".": "./mod.ts",
+    "./cli": "./cli/mod.ts"
   }
 }
