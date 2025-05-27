@@ -12,6 +12,8 @@ import {
   collectClassifications,
   FactSelectionValue,
   FactSelector,
+  getClassifications,
+  getLabelForFact,
   getLabels,
   loadFacts,
   redactCommitData,
@@ -57,6 +59,7 @@ export class ServerTraverseHelper extends BaseObjectManager<
 > {
   constructor(
     private session: Session<MemorySpace>,
+    private providedClassifications: Set<string>,
   ) {
     super();
   }
@@ -93,6 +96,24 @@ export class ServerTraverseHelper extends BaseObjectManager<
         },
         value: fact.is ? (fact.is as JSONObject) : undefined,
       };
+      const labelEntry = getLabelForFact(this.session, {
+        of: fact.of,
+        the: fact.the,
+        cause: fact.cause,
+        value: { since: fact.since },
+      });
+      if (labelEntry?.is) {
+        const requiredClassifications = getClassifications({
+          is: labelEntry.is,
+          since: labelEntry.since,
+        });
+        if (!requiredClassifications.isSubsetOf(this.providedClassifications)) {
+          console.log(
+            `Skipping inclusion of ${fact.of}, due to classification`,
+          );
+          return null;
+        }
+      }
       this.readValues.set(doc, valueEntry);
       return valueEntry;
     }
@@ -326,8 +347,10 @@ export const selectSchema = <Space extends MemorySpace>(
     setRevision(includedFacts, entry.of, entry.the, entry.cause, entry.value);
   }
 
+  const providedClassifications = new Set<string>(classification);
+
   // Track any docs loaded while traversing the factSelection
-  const helper = new ServerTraverseHelper(session);
+  const helper = new ServerTraverseHelper(session, providedClassifications);
   // Then filter the facts by the associated schemas, which will dereference
   // pointers as we walk through the structure.
   loadDocFacts(helper, selectSchema, includedFacts);
@@ -352,7 +375,6 @@ export const selectSchema = <Space extends MemorySpace>(
   // We want to collect the classification tags on our included facts
   const labelFacts = getLabels(session, includedFacts);
   const requiredClassifications = collectClassifications(labelFacts);
-  const providedClassifications = new Set<string>(classification);
   if (!requiredClassifications.isSubsetOf(providedClassifications)) {
     throw new TheAuthorizationError("Insufficient access");
   }

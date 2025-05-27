@@ -818,7 +818,7 @@ export function getLabels<
 }
 
 // Return the most recent label that applied to the specified fact
-function getLabelForFact<Space extends MemorySpace, T>(
+export function getLabelForFact<Space extends MemorySpace, T>(
   session: Session<Space>,
   fact: { of: Entity; the: The; cause: Cause; value: Revision<T> },
 ) {
@@ -864,7 +864,7 @@ export function collectClassifications(
   return classifications;
 }
 
-function getClassifications(
+export function getClassifications(
   fact: FactSelectionValue,
   classifications = new Set<string>(),
 ) {
