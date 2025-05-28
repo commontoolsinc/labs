@@ -30,7 +30,7 @@ declare global {
   var [MULTI_RUNTIME_CONSOLE_HOOK]: any;
 }
 
-export class UnsafeEvalRuntimeMulti extends EventTarget implements Harness {
+export class UnsafeEvalHarnessMulti extends EventTarget implements Harness {
   private compiler: TypeScriptCompiler | undefined;
   constructor() {
     super();
