@@ -18,10 +18,6 @@ export const recipeMetaSchema = {
 
 export type RecipeMeta = Schema<typeof recipeMetaSchema>;
 
-function isRecipe(obj: Recipe | Module): obj is Recipe {
-  return "result" in obj && "nodes" in obj;
-}
-
 export class RecipeManager implements IRecipeManager {
   private inProgressCompilations = new Map<string, Promise<Recipe>>();
   private recipeMetaMap = new WeakMap<Recipe, Cell<RecipeMeta>>();

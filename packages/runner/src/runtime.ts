@@ -111,6 +111,23 @@ export interface IRuntime {
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
+
+  // Convenience methods that delegate to the runner
+  run<T, R>(
+    recipeFactory: NodeFactory<T, R>,
+    argument: T,
+    resultCell: DocImpl<R>,
+  ): DocImpl<R>;
+  run<T, R = any>(
+    recipe: Recipe | Module | undefined,
+    argument: T,
+    resultCell: DocImpl<R>,
+  ): DocImpl<R>;
+  runSynced(
+    resultCell: Cell<any>,
+    recipe: Recipe | Module,
+    inputs?: any,
+  ): any;
 }
 
 export interface IScheduler {
@@ -148,7 +165,6 @@ export interface IRecipeManager {
   compileRecipe(source: string, space?: string): Promise<any>;
   recipeById(id: string): any;
   generateRecipeId(recipe: any, src?: string): string;
-  // Add other recipe manager methods as needed
 }
 
 export interface IModuleRegistry {
@@ -202,6 +218,11 @@ export interface IRunner {
     resultCell: DocImpl<R>,
   ): DocImpl<R>;
 
+  runSynced(
+    resultCell: Cell<any>,
+    recipe: Recipe | Module,
+    inputs?: any,
+  ): any;
   stop<T>(resultCell: DocImpl<T>): void;
   stopAll(): void;
   isRunning<T>(doc: DocImpl<T>): boolean;
@@ -306,7 +327,7 @@ export class Runtime implements IRuntime {
   /**
    * Wait for all pending operations to complete
    */
-  async idle(): Promise<void> {
+  idle(): Promise<void> {
     return this.scheduler.idle();
   }
 
@@ -460,5 +481,32 @@ export class Runtime implements IRuntime {
     const doc = this.documentMap.getDoc<any>(data, { immutable: data }, space);
     doc.freeze();
     return doc.asCell([], log, schema);
+  }
+
+  // Convenience methods that delegate to the runner
+  run<T, R>(
+    recipeFactory: NodeFactory<T, R>,
+    argument: T,
+    resultCell: DocImpl<R>,
+  ): DocImpl<R>;
+  run<T, R = any>(
+    recipe: Recipe | Module | undefined,
+    argument: T,
+    resultCell: DocImpl<R>,
+  ): DocImpl<R>;
+  run<T, R = any>(
+    recipeOrModule: Recipe | Module | undefined,
+    argument: T,
+    resultCell: DocImpl<R>,
+  ): DocImpl<R> {
+    return this.runner.run(recipeOrModule, argument, resultCell);
+  }
+
+  runSynced(
+    resultCell: Cell<any>,
+    recipe: Recipe | Module,
+    inputs?: any,
+  ) {
+    return this.runner.runSynced(resultCell, recipe, inputs);
   }
 }

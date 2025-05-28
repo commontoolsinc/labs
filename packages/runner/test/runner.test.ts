@@ -39,7 +39,7 @@ describe("runRecipe", () => {
       ],
     } as Recipe;
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       recipe,
       { input: 1 },
       runtime.documentMap.getDoc(
@@ -48,7 +48,7 @@ describe("runRecipe", () => {
         "test",
       ),
     );
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(result.sourceCell?.getAsQueryResult()).toMatchObject({
       argument: { input: 1 },
