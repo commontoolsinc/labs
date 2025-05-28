@@ -36,7 +36,7 @@ export function createRef(
 
     // If there is a .toJSON method, replace obj with it, then descend.
     if (
-      typeof obj === "object" && obj !== null &&
+      (typeof obj === "object" || typeof obj === "function") && obj !== null &&
       typeof obj.toJSON === "function"
     ) {
       obj = obj.toJSON() ?? obj;
@@ -184,12 +184,16 @@ export class DocumentMap implements IDocumentMap {
     createIfNotFound = true,
     sourceIfCreated?: DocImpl<any>,
   ): DocImpl<T> | undefined {
-    const id = typeof entityId === "string" ? entityId : JSON.stringify(entityId);
+    const id = typeof entityId === "string"
+      ? entityId
+      : JSON.stringify(entityId);
     let doc = this.entityIdToDocMap.get(space, id);
     if (doc) return doc;
     if (!createIfNotFound) return undefined;
 
-    if (typeof entityId === "string") entityId = JSON.parse(entityId) as EntityId;
+    if (typeof entityId === "string") {
+      entityId = JSON.parse(entityId) as EntityId;
+    }
     doc = createDoc<T>(undefined as T, entityId, space, this.runtime);
     doc.sourceCell = sourceIfCreated;
     this.entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
@@ -226,9 +230,9 @@ export class DocumentMap implements IDocumentMap {
 
   removeDoc(space: string, entityId: EntityId): boolean {
     const id = JSON.stringify(entityId);
-    const map = this.entityIdToDocMap['maps']?.get(space);
-    if (map && map['map']) {
-      return map['map'].delete(id);
+    const map = this.entityIdToDocMap["maps"]?.get(space);
+    if (map && map["map"]) {
+      return map["map"].delete(id);
     }
     return false;
   }
@@ -270,7 +274,11 @@ export class DocumentMap implements IDocumentMap {
     );
   }
 
-  private createDoc<T>(value: T, entityId: EntityId, space: string): DocImpl<T> {
+  private createDoc<T>(
+    value: T,
+    entityId: EntityId,
+    space: string,
+  ): DocImpl<T> {
     // Use the full createDoc implementation with runtime parameter
     const doc = createDoc(value, entityId, space, this.runtime);
     this.registerDoc(entityId, doc, space);

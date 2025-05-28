@@ -250,7 +250,11 @@ export class Runner implements IRunner {
   ) {
     await this.runtime.storage.syncCell(resultCell);
 
-    const synced = await this.syncCellsForRunningRecipe(resultCell, recipe, inputs);
+    const synced = await this.syncCellsForRunningRecipe(
+      resultCell,
+      recipe,
+      inputs,
+    );
 
     this.run(recipe, inputs, resultCell.getDoc());
 
@@ -324,7 +328,9 @@ export class Runner implements IRunner {
       });
     }
 
-    if (recipe.resultSchema) cells.push(resultCell.asSchema(recipe.resultSchema));
+    if (recipe.resultSchema) {
+      cells.push(resultCell.asSchema(recipe.resultSchema));
+    }
 
     await Promise.all(cells.map((c) => this.runtime.storage.syncCell(c)));
 
@@ -505,7 +511,8 @@ export class Runner implements IRunner {
             eventInputs[key].$alias.cell === stream.cell &&
             eventInputs[key].$alias.path.length === stream.path.length &&
             eventInputs[key].$alias.path.every(
-              (value: PropertyKey, index: number) => value === stream.path[index],
+              (value: PropertyKey, index: number) =>
+                value === stream.path[index],
             )
           ) {
             eventInputs[key] = event;
@@ -513,7 +520,11 @@ export class Runner implements IRunner {
           }
         }
 
-        const inputsCell = processCell.runtime!.documentMap.getDoc(eventInputs, cause, processCell.space);
+        const inputsCell = processCell.runtime!.documentMap.getDoc(
+          eventInputs,
+          cause,
+          processCell.space,
+        );
         inputsCell.freeze();
 
         const frame = pushFrameFromCause(cause, {
@@ -538,7 +549,9 @@ export class Runner implements IRunner {
             const resultCell = this.run(
               resultRecipe,
               undefined,
-              processCell.runtime!.documentMap.getDoc(undefined, { resultFor: cause }, processCell.space),
+              processCell.runtime!.documentMap.getDoc(undefined, {
+                resultFor: cause,
+              }, processCell.space),
             );
             addCancel(this.cancels.get(resultCell));
           }
@@ -557,10 +570,13 @@ export class Runner implements IRunner {
       addCancel(this.runtime.scheduler.addEventHandler(handler, stream));
     } else {
       // Schedule the action to run when the inputs change
-      const inputsCell = processCell.runtime!.documentMap.getDoc(inputs, { immutable: inputs }, processCell.space);
+      const inputsCell = processCell.runtime!.documentMap.getDoc(inputs, {
+        immutable: inputs,
+      }, processCell.space);
       inputsCell.freeze();
 
-      let resultCell: DocImpl<any> | undefined;
+      let previousResultDoc: DocImpl<any> | undefined;
+      let previousResultRecipeAsString: string | undefined;
 
       const action: Action = (log: ReactivityLog) => {
         const argument = module.argumentSchema
@@ -585,24 +601,32 @@ export class Runner implements IRunner {
               () => result,
             );
 
-            resultCell = this.run(
+            // If nothing changed, don't rerun the recipe
+            const resultRecipeAsString = JSON.stringify(resultRecipe);
+            if (previousResultRecipeAsString === resultRecipeAsString) return;
+            previousResultRecipeAsString = resultRecipeAsString;
+
+            const resultDoc = this.run(
               resultRecipe,
               undefined,
-              resultCell ??
+              previousResultDoc ??
                 processCell.runtime!.documentMap.getDoc(
                   undefined,
                   { resultFor: { inputs, outputs, fn: fn.toString() } },
                   processCell.space,
                 ),
             );
-            addCancel(this.cancels.get(resultCell));
+            addCancel(this.cancels.get(resultDoc));
 
-            sendValueToBinding(
-              processCell,
-              outputs,
-              { cell: resultCell, path: [] },
-              log,
-            );
+            if (!previousResultDoc) {
+              previousResultDoc = resultDoc;
+              sendValueToBinding(
+                processCell,
+                outputs,
+                { cell: resultDoc, path: [] },
+                log,
+              );
+            }
           } else {
             sendValueToBinding(processCell, outputs, result, log);
           }
@@ -618,7 +642,12 @@ export class Runner implements IRunner {
         }
       };
 
-      addCancel(this.runtime.scheduler.schedule(action, { reads, writes } satisfies ReactivityLog));
+      addCancel(
+        this.runtime.scheduler.schedule(
+          action,
+          { reads, writes } satisfies ReactivityLog,
+        ),
+      );
     }
   }
 
@@ -665,7 +694,12 @@ export class Runner implements IRunner {
       processCell,
     );
 
-    addCancel(this.runtime.scheduler.schedule(action, { reads: inputCells, writes: outputCells }));
+    addCancel(
+      this.runtime.scheduler.schedule(action, {
+        reads: inputCells,
+        writes: outputCells,
+      }),
+    );
   }
 
   private instantiatePassthroughNode(
@@ -677,7 +711,9 @@ export class Runner implements IRunner {
     recipe: Recipe,
   ) {
     const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
-    const inputsCell = processCell.runtime!.documentMap.getDoc(inputs, { immutable: inputs }, processCell.space);
+    const inputsCell = processCell.runtime!.documentMap.getDoc(inputs, {
+      immutable: inputs,
+    }, processCell.space);
     const reads = findAllAliasedCells(inputs, processCell);
 
     const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
@@ -688,7 +724,12 @@ export class Runner implements IRunner {
       sendValueToBinding(processCell, outputBindings, inputsProxy, log);
     };
 
-    addCancel(this.runtime.scheduler.schedule(action, { reads, writes } satisfies ReactivityLog));
+    addCancel(
+      this.runtime.scheduler.schedule(
+        action,
+        { reads, writes } satisfies ReactivityLog,
+      ),
+    );
   }
 
   private instantiateRecipeNode(

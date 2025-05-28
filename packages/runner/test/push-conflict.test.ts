@@ -1,21 +1,27 @@
-import { describe, it } from "@std/testing/bdd";
+import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { ID } from "@commontools/builder";
 import { Identity } from "@commontools/identity";
-import { Storage } from "../src/storage.ts";
-import { Runtime } from "../src/runtime.ts";
+import { Runtime, type IStorage } from "../src/runtime.ts";
 // Remove getDoc import - use runtime.documentMap.getDoc instead
 import { isCellLink } from "../src/cell.ts";
 import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 
-// Create runtime for storage tests
-const runtime = new Runtime({
-  storageUrl: "volatile://test"
-});
-const storage = runtime.storage;
-storage.setSigner(await Identity.fromPassphrase("test operator"));
-
 describe("Push conflict", () => {
+  let runtime: Runtime;
+  let storage: IStorage;
+
+  beforeEach(async () => {
+    runtime = new Runtime({
+      storageUrl: "volatile://"
+    });
+    storage = runtime.storage;
+    storage.setSigner(await Identity.fromPassphrase("test operator"));
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+  });
   it("should resolve push conflicts", async () => {
     const listDoc = runtime.documentMap.getDoc<any[]>([], "list", "push conflict");
     const list = listDoc.asCell();

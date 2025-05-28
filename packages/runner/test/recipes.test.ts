@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   byRef,
@@ -19,7 +19,7 @@ describe("Recipe Runner", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://test"
+      storageUrl: "volatile://test",
     });
   });
 
@@ -38,10 +38,14 @@ describe("Recipe Runner", () => {
     const result = runtime.runner.run(
       simpleRecipe,
       { value: 5 },
-      runtime.documentMap.getDoc(undefined, "should run a simple recipe", "test"),
+      runtime.documentMap.getDoc(
+        undefined,
+        "should run a simple recipe",
+        "test",
+      ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(result.getAsQueryResult()).toMatchObject({ result: 10 });
   });
@@ -68,10 +72,14 @@ describe("Recipe Runner", () => {
     const result = runtime.runner.run(
       outerRecipe,
       { value: 4 },
-      runtime.documentMap.getDoc(undefined, "should handle nested recipes", "test"),
+      runtime.documentMap.getDoc(
+        undefined,
+        "should handle nested recipes",
+        "test",
+      ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(result.getAsQueryResult()).toEqual({ result: 17 });
   });
@@ -97,7 +105,7 @@ describe("Recipe Runner", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(result1.getAsQueryResult()).toMatchObject({ sum: 15 });
 
@@ -111,7 +119,7 @@ describe("Recipe Runner", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(result2.getAsQueryResult()).toMatchObject({ sum: 30 });
   });
@@ -140,7 +148,7 @@ describe("Recipe Runner", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(result.getAsQueryResult()).toMatchObject({
       multiplied: [{ multiplied: 3 }, { multiplied: 12 }, { multiplied: 27 }],
@@ -173,7 +181,7 @@ describe("Recipe Runner", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(result.getAsQueryResult()).toMatchObject({
       doubled: [3, 6, 9],
@@ -201,7 +209,7 @@ describe("Recipe Runner", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(result.getAsQueryResult()).toMatchObject({ doubled: [] });
   });
@@ -229,14 +237,14 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(undefined, "should execute handlers", "test"),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     result.asCell(["stream"]).send({ amount: 1 });
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 1 } });
 
     result.asCell(["stream"]).send({ amount: 2 });
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
   });
 
@@ -269,14 +277,14 @@ describe("Recipe Runner", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     result.asCell(["stream"]).send({ amount: 1 });
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 1 } });
 
     result.asCell(["stream"]).send({ amount: 2 });
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
   });
 
@@ -305,14 +313,14 @@ describe("Recipe Runner", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     result.asCell(["stream"]).send({ amount: 1 });
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 1 } });
 
     result.asCell(["stream"]).send({ amount: 2 });
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
   });
 
@@ -364,14 +372,14 @@ describe("Recipe Runner", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     result.asCell(["stream"]).send({ amount: 1 });
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(values).toEqual([[1, 1, 0]]);
 
     result.asCell(["stream"]).send({ amount: 2 });
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(values).toEqual([
       [1, 1, 0],
       // Next is the first logger called again when counter changes, since this
@@ -436,7 +444,7 @@ describe("Recipe Runner", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(result.getAsQueryResult()).toMatchObject({
       result1: 6,
@@ -450,7 +458,7 @@ describe("Recipe Runner", () => {
     });
 
     x.send(3);
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(runCounts).toMatchObject({
       multiply: 4,
@@ -483,10 +491,14 @@ describe("Recipe Runner", () => {
     const result = runtime.runner.run(
       simpleRecipe,
       { value: 5 },
-      runtime.documentMap.getDoc(undefined, "should support referenced modules", "test"),
+      runtime.documentMap.getDoc(
+        undefined,
+        "should support referenced modules",
+        "test",
+      ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(result.getAsQueryResult()).toMatchObject({ result: 10 });
   });
@@ -537,14 +549,14 @@ describe("Recipe Runner", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(result.getAsQueryResult()).toEqual({ result: 15 });
 
     // Update the cell and verify the recipe recomputes
     settingsCell.send({ value: 10 });
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(result.getAsQueryResult()).toEqual({ result: 30 });
   });
@@ -609,7 +621,7 @@ describe("Recipe Runner", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(result.getAsQueryResult()).toEqual({ result: 3 });
   });
@@ -669,7 +681,7 @@ describe("Recipe Runner", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(result.getAsQueryResult()).toEqual({ result: 12 });
   });
@@ -709,14 +721,14 @@ describe("Recipe Runner", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     result.asCell(["stream"]).send({ amount: 1 });
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: 1 });
 
     result.asCell(["stream"]).send({ amount: 2 });
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: 3 });
   });
 
@@ -751,19 +763,23 @@ describe("Recipe Runner", () => {
     const charm = runtime.runner.run(
       divRecipe,
       { result: 1 },
-      runtime.documentMap.getDoc(undefined, "failed handlers should be ignored", "test"),
+      runtime.documentMap.getDoc(
+        undefined,
+        "failed handlers should be ignored",
+        "test",
+      ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     charm.asCell(["updater"]).send({ divisor: 5, dividend: 1 });
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(errors).toBe(0);
 
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
 
     charm.asCell(["updater"]).send({ divisor: 10, dividend: 0 });
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
 
@@ -776,7 +792,7 @@ describe("Recipe Runner", () => {
     // NOTE(ja): this test is really important after a handler
     // fails the entire system crashes!!!!
     charm.asCell(["updater"]).send({ divisor: 10, dividend: 5 });
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(charm.getAsQueryResult()).toMatchObject({ result: 2 });
   });
 
@@ -817,16 +833,20 @@ describe("Recipe Runner", () => {
     const charm = runtime.runner.run(
       divRecipe,
       { divisor: 10, dividend },
-      runtime.documentMap.getDoc(undefined, "failed lifted handlers should be ignored", "test"),
+      runtime.documentMap.getDoc(
+        undefined,
+        "failed lifted handlers should be ignored",
+        "test",
+      ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(errors).toBe(0);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 10 });
 
     dividend.send(0);
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 10 });
 
@@ -838,7 +858,7 @@ describe("Recipe Runner", () => {
 
     // Make sure it recovers:
     dividend.send(2);
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect((charm.get() as any).result.$alias.cell).toBe(charm.sourceCell);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
   });
@@ -880,7 +900,7 @@ describe("Recipe Runner", () => {
     expect(liftCalled).toBe(true);
     expect(timeoutCalled).toBe(false);
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(timeoutCalled).toBe(true);
     expect(result.asCell().get()).toMatchObject({ result: 2 });
   });
@@ -920,7 +940,7 @@ describe("Recipe Runner", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     // Trigger the handler
     charm.asCell(["updater"]).send({ value: 5 });
@@ -931,7 +951,7 @@ describe("Recipe Runner", () => {
     expect(timeoutCalled).toBe(false);
 
     // Now idle should wait for the handler's promise to resolve
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(timeoutCalled).toBe(true);
     expect(charm.asCell().get()).toMatchObject({ result: 10 });
   });
@@ -972,12 +992,12 @@ describe("Recipe Runner", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     // Trigger the handler
     charm.asCell(["updater"]).send({ value: 5 });
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(handlerCalled).toBe(true);
     expect(timeoutCalled).toBe(false);
 
@@ -1018,7 +1038,7 @@ describe("Recipe Runner", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     // Initial state
     const wrapper = result.asCell([], undefined, {
@@ -1038,7 +1058,7 @@ describe("Recipe Runner", () => {
     expect(ref.cell.get()).toBe(5);
 
     input.send(10);
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     // That same value was updated, which shows that the id was stable
     expect(ref.cell.get()).toBe(10);

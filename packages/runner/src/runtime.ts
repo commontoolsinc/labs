@@ -16,6 +16,7 @@ import type {
   Recipe,
   Schema,
 } from "@commontools/builder";
+import { isBrowser } from "@commontools/utils/env";
 
 // Interface definitions that were previously in separate files
 
@@ -168,7 +169,9 @@ export interface IRecipeManager {
   generateRecipeId(recipe: any, src?: string): string;
   loadRecipe(id: string, space?: string): Promise<any>;
   getRecipeMeta(input: any): any;
-  registerRecipe(params: { recipeId: string; space: string; recipe: any; recipeMeta: any }): Promise<boolean>;
+  registerRecipe(
+    params: { recipeId: string; space: string; recipe: any; recipeMeta: any },
+  ): Promise<boolean>;
 }
 
 export interface IModuleRegistry {
@@ -273,25 +276,15 @@ export class Runtime implements IRuntime {
       options.errorHandlers,
     );
 
-    // Parse storage URL and create appropriate storage provider
-    const storageUrl = new URL(options.storageUrl);
-    let storageProvider: StorageProvider;
-    let remoteStorageUrl: URL | undefined;
-
-    if (storageUrl.protocol === "volatile:") {
-      storageProvider = new VolatileStorageProvider(storageUrl.pathname || "default");
-      remoteStorageUrl = undefined;
-    } else {
-      // For remote storage, we might need different providers based on the protocol
-      // For now, use VolatileStorageProvider as fallback but set remoteStorageUrl
-      storageProvider = new VolatileStorageProvider("remote");
-      remoteStorageUrl = storageUrl;
-    }
+    // Parse storage URL for remote storage configuration
+    const storageUrl = new URL(
+      options.storageUrl,
+      isBrowser() ? globalThis.location.origin : undefined,
+    );
 
     this.storage = new Storage(this, {
-      remoteStorageUrl,
+      remoteStorageUrl: storageUrl,
       signer: options.signer,
-      storageProvider,
       enableCache: options.enableCache ?? true,
       id: crypto.randomUUID(),
     });
