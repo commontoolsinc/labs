@@ -20,6 +20,7 @@ export { createRef, getEntityId } from "./doc-map.ts";
 export type { QueryResult } from "./query-result-proxy.ts";
 export type { Action, ErrorWithContext, ReactivityLog } from "./scheduler.ts";
 export * as StorageInspector from "./storage/inspector.ts";
+export { VolatileStorageProvider } from "./storage/volatile.ts";
 export { isDoc } from "./doc.ts"; // getDoc removed - use runtime.documentMap.getDoc instead
 
 // Minimal compatibility exports for external packages only - DO NOT USE IN NEW CODE
@@ -37,8 +38,12 @@ function getCompatRuntime() {
   return _compatRuntime;
 }
 
-export function getCell(space: string, cause: any, schema?: any, log?: any) {
-  return getCompatRuntime().getCell(space, cause, schema, log);
+export function getCell<T = any>(space: string, cause: any, schema?: any, log?: any) {
+  return getCompatRuntime().getCell<T>(space, cause, schema, log);
+}
+
+export function getImmutableCell<T = any>(space: string, value: T, schema?: any) {
+  return getCompatRuntime().getImmutableCell<T>(space, value, schema);
 }
 
 // getEntityId and createRef are now standalone functions exported from doc-map.ts above
