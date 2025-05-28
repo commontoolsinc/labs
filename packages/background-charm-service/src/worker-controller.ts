@@ -6,6 +6,7 @@ import {
   isWorkerIPCResponse,
   WorkerIPCMessageType,
   WorkerIPCRequest,
+  WorkerIPCResponse,
 } from "./worker-ipc.ts";
 
 const DEFAULT_TASK_TIMEOUT = 60_000;
@@ -34,6 +35,13 @@ export class WorkerControllerErrorEvent extends Event {
   }
 }
 
+interface Task {
+  msgId: number;
+  startTime: number;
+  type: WorkerIPCMessageType;
+  deferred: Deferred;
+}
+
 /**
  * @event error A terminal error occurred in the worker.
  */
@@ -44,7 +52,10 @@ export class WorkerController extends EventTarget {
   private identity: Identity;
   private timeoutMs: number;
   private msgId: number = 0;
-  private pending = new Map<number, Deferred<void>>();
+  private pending = new Map<
+    number,
+    Task
+  >();
   private state = WorkerState.Uninitialized;
 
   constructor(options: WorkerOptions) {
@@ -73,7 +84,6 @@ export class WorkerController extends EventTarget {
     }
     this.state = WorkerState.Initializing;
     try {
-      console.log(`WORKER INITIALIZATION MESSAGE FOR ${this.did}`);
       await this.exec(WorkerIPCMessageType.Initialize, {
         did: this.did,
         toolshedUrl: this.toolshedUrl,
@@ -106,8 +116,8 @@ export class WorkerController extends EventTarget {
     }
     this.state = WorkerState.Terminating;
 
-    for (const [_, deferred] of this.pending.entries()) {
-      deferred.reject(new Error("Worker shutting down."));
+    for (const [msgId, task] of this.pending.entries()) {
+      task.deferred.reject(new Error("Worker shutting down."));
     }
     this.pending.clear();
 
@@ -135,20 +145,31 @@ export class WorkerController extends EventTarget {
       data,
     };
 
-    const deferred = defer<void, Error>();
+    const deferred = defer();
 
     const timeout = setTimeout(() => {
       // The request has timed out. This is most likely unexpected.
       // Whatever processing is occurring in the worker graph should be
       // terminated and recreated in the future.
-      deferred.reject(new Error(`Worker timed out after ${this.timeoutMs}ms`));
+      deferred.reject(new Error(`Worker timed out.`));
     }, this.timeoutMs);
 
-    this.pending.set(msgId, deferred);
+    const task = {
+      startTime: performance.now(),
+      msgId,
+      type,
+      deferred,
+    };
+    this.pending.set(msgId, task);
 
     this.worker.postMessage(message);
 
-    return deferred.promise.finally(() => {
+    return deferred.promise.then(() => {
+      this.logTaskResults(task);
+    }, (error: Error) => {
+      this.logTaskResults(task, error.message);
+      throw new Error(error.message);
+    }).finally(() => {
       clearTimeout(timeout);
       this.pending.delete(msgId);
     });
@@ -170,9 +191,9 @@ export class WorkerController extends EventTarget {
       return;
     }
     if ("error" in response) {
-      pending.reject(new Error(response.error));
+      pending.deferred.reject(new Error(response.error));
     } else {
-      pending.resolve();
+      pending.deferred.resolve();
     }
     this.pending.delete(response.msgId);
   };
@@ -188,4 +209,18 @@ export class WorkerController extends EventTarget {
 
     this.dispatchEvent(new WorkerControllerErrorEvent(err));
   };
+
+  private logTaskResults(task: Task, error?: string) {
+    const errorMessage = error ? `: ${error}` : "";
+    const state = error ? "completed" : "failed";
+    const id = `"${task.type}/${task.msgId}"`;
+    const duration = (performance.now() - task.startTime).toFixed(0);
+    const message =
+      `${this.did}: Worker task ${state}: ${id} (${duration}ms)${errorMessage}`;
+    if (error) {
+      console.warn(message);
+    } else {
+      console.log(message);
+    }
+  }
 }
