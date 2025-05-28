@@ -16,7 +16,7 @@ import type {
   Recipe,
   Schema,
 } from "@commontools/builder";
-import { isBrowser } from "@commontools/utils/env";
+import { isBrowser, isDeno } from "@commontools/utils/env";
 
 // Interface definitions that were previously in separate files
 
@@ -276,14 +276,8 @@ export class Runtime implements IRuntime {
       options.errorHandlers,
     );
 
-    // Parse storage URL for remote storage configuration
-    const storageUrl = new URL(
-      options.storageUrl,
-      isBrowser() ? globalThis.location.origin : undefined,
-    );
-
     this.storage = new Storage(this, {
-      remoteStorageUrl: storageUrl,
+      remoteStorageUrl: new URL(options.storageUrl),
       signer: options.signer,
       enableCache: options.enableCache ?? true,
       id: crypto.randomUUID(),
