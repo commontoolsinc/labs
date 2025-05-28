@@ -135,8 +135,9 @@ export class Scheduler implements IScheduler {
     errorHandlers?: ErrorHandler[],
   ) {
     this.consoleHandler = consoleHandler ||
-      function (event: ConsoleEvent) {
-        return event.args;
+      function (_metadata, _method, args) {
+        // Default console handler returns arguments unaffected.
+        return args;
       };
 
     if (errorHandlers) {
@@ -145,11 +146,12 @@ export class Scheduler implements IScheduler {
 
     // Set up harness event listeners
     this.runtime.harness.addEventListener("console", (e: Event) => {
-      const consoleEvent = e as ConsoleEvent;
-      const result = this.consoleHandler(consoleEvent);
-      if (Array.isArray(result)) {
-        console[consoleEvent.method].apply(console, result as any);
-      }
+      // Called synchronously when `console` methods are
+      // called within the runtime.
+      const { method, args } = e as ConsoleEvent;
+      const metadata = getCharmMetadataFromFrame();
+      const result = this.consoleHandler(metadata, method, args);
+      console[method].apply(console, result);
     });
   }
 

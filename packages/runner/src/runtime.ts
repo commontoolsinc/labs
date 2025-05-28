@@ -28,7 +28,12 @@ export type ErrorWithContext = Error & {
 };
 
 import type { ConsoleEvent } from "./harness/console.ts";
-export type ConsoleHandler = (event: ConsoleEvent) => void;
+import { ConsoleMethod } from "./harness/console.ts";
+export type ConsoleHandler = (
+  metadata: { charmId?: string; recipeId?: string; space?: string } | undefined,
+  method: ConsoleMethod,
+  args: any[],
+) => any[];
 export type ErrorHandler = (error: ErrorWithContext) => void;
 
 // ConsoleEvent and ConsoleMethod are now imported from harness/console.ts
@@ -139,6 +144,7 @@ export interface IScheduler {
   subscribe(action: Action, log: ReactivityLog): Cancel;
   run(action: Action): Promise<any>;
   unschedule(action: Action): void;
+  onConsole(fn: ConsoleHandler): void;
   onError(fn: ErrorHandler): void;
   queueEvent(eventRef: CellLink, event: any): void;
   addEventHandler(handler: EventHandler, ref: CellLink): Cancel;
