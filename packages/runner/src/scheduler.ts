@@ -233,7 +233,7 @@ export class Scheduler implements IScheduler {
     this.unschedule(action);
   }
 
-  async idle(): Promise<void> {
+  idle(): Promise<void> {
     return new Promise<void>((resolve) => {
       // NOTE: This relies on the finally clause to set runningPromise to undefined to
       // prevent infinite loops.
