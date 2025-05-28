@@ -513,12 +513,16 @@ export async function compileRecipe(
     throw new Error("No default recipe found in the compiled exports.");
   }
   const parentsIds = parents?.map((id) => id.toString());
+  const recipeId = charmManager.runtime.recipeManager.generateRecipeId(
+    recipe,
+    recipeSrc,
+  );
   charmManager.runtime.recipeManager.registerRecipe({
-    recipeId: charmManager.runtime.recipeManager.generateRecipeId(recipe),
+    recipeId,
     space: charmManager.getSpace(),
     recipe,
     recipeMeta: {
-      id: charmManager.runtime.recipeManager.generateRecipeId(recipe),
+      id: recipeId,
       src: recipeSrc,
       spec,
       parents: parentsIds,
