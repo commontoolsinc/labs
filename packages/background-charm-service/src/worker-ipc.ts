@@ -45,14 +45,14 @@ export function isWorkerIPCRequest(value: any): value is WorkerIPCRequest {
   if (!value || typeof value !== "object" || typeof value.msgId !== "number") {
     return false;
   }
+  if (value.type === WorkerIPCMessageType.Cleanup) {
+    return true;
+  }
   if (value.type === WorkerIPCMessageType.Initialize) {
     return isInitializationData(value.data);
   }
   if (value.type === WorkerIPCMessageType.Run) {
     return isRunData(value.data);
-  }
-  if (value.type === WorkerIPCMessageType.Cleanup) {
-    return !("data" in value);
   }
   return false;
 }

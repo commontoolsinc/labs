@@ -6,8 +6,8 @@ import { Identity } from "@commontools/identity";
 describe("isWorkerIPCRequest", () => {
   it("validates cleanup messages", () => {
     assert(isWorkerIPCRequest({ msgId: 1, type: "cleanup" }));
+    assert(isWorkerIPCRequest({ msgId: 1, type: "cleanup", data: {} }));
     assert(!isWorkerIPCRequest({ type: "cleanup" }));
-    assert(!isWorkerIPCRequest({ msgId: 1, type: "cleanup", data: {} }));
   });
   it("validates initialize messages", async () => {
     const did = "did:key:abc";
