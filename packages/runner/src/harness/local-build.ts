@@ -6,6 +6,8 @@ import * as zod from "zod";
 import * as zodToJsonSchema from "zod-to-json-schema";
 import * as merkleReference from "merkle-reference";
 import turndown from "turndown";
+import { createCellFactory } from "./create-cell.ts";
+import { type IRuntime } from "../runtime.ts";
 
 let DOMParser: any;
 
@@ -103,6 +105,7 @@ const ensureRequires = async (
         const importedModule = await tsToExports(importSrc, {
           injection: config.injection,
           fileName: modulePath,
+          runtime: config.runtime,
         });
         if (importedModule.errors) {
           throw new Error(
@@ -120,6 +123,7 @@ const ensureRequires = async (
 export interface EvalBuildConfig {
   injection?: string;
   fileName?: string;
+  runtime: IRuntime;
 }
 
 export const tsToExports = async (
@@ -243,6 +247,10 @@ return exports;
 //# ${"sourceURL"}=${fileName}
 `;
   }
+
+  // TODO(seefeld): This should eventually be how we create the entire builder
+  // interface - as context for the eval.
+  const createCell = createCellFactory(config.runtime);
 
   try {
     return await eval(wrappedCode)(customRequire);
