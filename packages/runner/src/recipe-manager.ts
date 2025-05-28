@@ -92,7 +92,6 @@ export class RecipeManager implements IRecipeManager {
 
     const recipeMetaCell = await this.getRecipeMetaCell({ recipeId, space });
     recipeMetaCell.set(recipeMeta);
-    this.recipeMetaMap.set(recipe as Recipe, recipeMetaCell);
     await this.runtime.storage.syncCell(recipeMetaCell);
     await this.runtime.storage.synced();
 
@@ -178,11 +177,23 @@ export class RecipeManager implements IRecipeManager {
       throw new Error(`Failed to fetch recipe ${recipeId} from blobby`);
     }
 
-    const recipeJson = await response.json() as {
-      src: string;
-      spec?: string;
-      parents?: string[];
-    };
+    let recipeJson:
+      | { src: string; spec?: string; parents?: string[] }
+      | undefined;
+    try {
+      recipeJson = await response.json() as {
+        src: string;
+        spec?: string;
+        parents?: string[];
+      };
+    } catch (error) {
+      console.error(
+        "Failed to fetch recipe from blobby",
+        error,
+        await response.text(),
+      );
+      throw error;
+    }
 
     const recipe = await this.runtime.harness.runSingle(recipeJson.src!);
 

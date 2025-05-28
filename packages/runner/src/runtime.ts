@@ -292,6 +292,10 @@ export class Runtime implements IRuntime {
       options.errorHandlers,
     );
 
+    if (!options.storageUrl) {
+      throw new Error("storageUrl is required");
+    }
+
     this.storage = new Storage(this, {
       remoteStorageUrl: new URL(options.storageUrl),
       signer: options.signer,
@@ -309,11 +313,11 @@ export class Runtime implements IRuntime {
     // Set this runtime as the current runtime for global cell compatibility
     // Removed setCurrentRuntime call - no longer using singleton pattern
 
-    // Handle blobby server URL configuration if provided
-    if (options.blobbyServerUrl) {
-      // The blobby server URL would be used by recipe manager for publishing
-      this.blobbyServerUrl = options.blobbyServerUrl;
-    }
+    // The blobby server URL would be used by recipe manager for publishing
+    this.blobbyServerUrl = new URL(
+      "/api/storage/blobby",
+      options.blobbyServerUrl ?? options.storageUrl,
+    ).toString();
 
     // Handle recipe environment configuration
     if (options.recipeEnvironment) {
