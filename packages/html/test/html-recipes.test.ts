@@ -1,14 +1,14 @@
-import { beforeEach, describe, it } from "@std/testing/bdd";
+import { beforeEach, describe, it, afterEach } from "@std/testing/bdd";
 import { h, render, VNode } from "../src/index.ts";
 import { lift, recipe, str, UI } from "@commontools/builder";
-import { idle, run } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
 import * as assert from "./assert.ts";
-import { getDoc } from "@commontools/runner";
 import { JSDOM } from "jsdom";
 
 describe("recipes with HTML", () => {
   let dom: JSDOM;
   let document: Document;
+  let runtime: Runtime;
 
   beforeEach(() => {
     // Set up a fresh JSDOM instance for each test
@@ -20,6 +20,15 @@ describe("recipes with HTML", () => {
     globalThis.Element = dom.window.Element;
     globalThis.Node = dom.window.Node;
     globalThis.Text = dom.window.Text;
+
+    // Set up runtime
+    runtime = new Runtime({
+      storageUrl: "volatile://test"
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
   });
   it("should render a simple UI", async () => {
     const simpleRecipe = recipe<{ value: number }>(
@@ -31,10 +40,10 @@ describe("recipes with HTML", () => {
     );
 
     const space = "test";
-    const resultCell = getDoc(undefined, "simple-ui-result", space);
-    const result = run(simpleRecipe, { value: 5 }, resultCell);
+    const resultCell = runtime.documentMap.getDoc(undefined, "simple-ui-result", space);
+    const result = runtime.runner.run(simpleRecipe, { value: 5 }, resultCell);
 
-    await idle();
+    await runtime.idle();
     const resultValue = result.get();
 
     if (resultValue && (resultValue[UI] as any)?.children?.[0]?.$alias) {
@@ -73,8 +82,8 @@ describe("recipes with HTML", () => {
     });
 
     const space = "test";
-    const resultCell = getDoc(undefined, "todo-list-result", space);
-    const result = run(todoList, {
+    const resultCell = runtime.documentMap.getDoc(undefined, "todo-list-result", space);
+    const result = runtime.runner.run(todoList, {
       title: "test",
       items: [
         { title: "item 1", done: false },
@@ -82,7 +91,7 @@ describe("recipes with HTML", () => {
       ],
     }, resultCell);
 
-    await idle();
+    await runtime.idle();
 
     const parent = document.createElement("div");
     document.body.appendChild(parent);
@@ -113,8 +122,8 @@ describe("recipes with HTML", () => {
     });
 
     const space = "test";
-    const resultCell = getDoc(undefined, "nested-todo-result", space);
-    const result = run(todoList, {
+    const resultCell = runtime.documentMap.getDoc(undefined, "nested-todo-result", space);
+    const result = runtime.runner.run(todoList, {
       title: { name: "test" },
       items: [
         { title: "item 1", done: false },
@@ -122,7 +131,7 @@ describe("recipes with HTML", () => {
       ],
     }, resultCell);
 
-    await idle();
+    await runtime.idle();
 
     const parent = document.createElement("div");
     document.body.appendChild(parent);
@@ -138,10 +147,10 @@ describe("recipes with HTML", () => {
     });
 
     const space = "test";
-    const resultCell = getDoc(undefined, "str-recipe-result", space);
-    const result = run(strRecipe, { name: "world" }, resultCell);
+    const resultCell = runtime.documentMap.getDoc(undefined, "str-recipe-result", space);
+    const result = runtime.runner.run(strRecipe, { name: "world" }, resultCell);
 
-    await idle();
+    await runtime.idle();
 
     const parent = document.createElement("div");
     document.body.appendChild(parent);
@@ -177,10 +186,10 @@ describe("recipes with HTML", () => {
     }));
 
     const space = "test";
-    const resultCell = getDoc(undefined, "nested-map-result", space);
-    const result = run(nestedMapRecipe, data, resultCell);
+    const resultCell = runtime.documentMap.getDoc(undefined, "nested-map-result", space);
+    const result = runtime.runner.run(nestedMapRecipe, data, resultCell);
 
-    await idle();
+    await runtime.idle();
 
     const parent = document.createElement("div");
     document.body.appendChild(parent);
