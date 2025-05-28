@@ -41,7 +41,7 @@ export function useStatusMonitor() {
 export const DummyModelInspector: React.FC = () => {
   const runtime = useRuntime();
   const { status, updateStatus } = useStatusMonitor();
-  useStorageBroadcast(runtime.storage.id, updateStatus);
+  useStorageBroadcast(runtime.id, updateStatus);
   if (!status.current) return null;
 
   return <ModelInspector model={status.current} />;
@@ -56,7 +56,7 @@ export const ToggleableNetworkInspector: React.FC<
 ) => {
   const runtime = useRuntime();
   const { status, updateStatus } = useStatusMonitor();
-  const scope = fullscreen ? "" : runtime.storage.id;
+  const scope = fullscreen ? "" : runtime.id;
   useStorageBroadcast(scope, updateStatus);
 
   if (!visible || !status.current) return null;

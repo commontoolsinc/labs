@@ -61,7 +61,6 @@ type Job = {
 };
 
 export class Storage implements IStorage {
-  private _id: string;
   private storageProviders = new Map<string, StorageProvider>();
   private remoteStorageUrl: URL | undefined;
   private signer: Signer | undefined;
@@ -98,13 +97,11 @@ export class Storage implements IStorage {
       signer?: Signer;
       storageProvider?: StorageProvider;
       enableCache?: boolean;
-      id?: string;
     } = {},
   ) {
     const [cancel, addCancel] = useCancelGroup();
     this.cancel = cancel;
     this.addCancel = addCancel;
-    this._id = options.id || crypto.randomUUID();
 
     // Set configuration from constructor options
     if (options.remoteStorageUrl) {
@@ -123,9 +120,6 @@ export class Storage implements IStorage {
     }
   }
 
-  get id(): string {
-    return this._id;
-  }
 
   setSigner(signer: Signer): void {
     this.signer = signer;
@@ -227,7 +221,7 @@ export class Storage implements IStorage {
         }
 
         provider = new CachedStorageProvider({
-          id: this.id,
+          id: this.runtime.id,
           address: new URL("/api/storage/memory", this.remoteStorageUrl!),
           space: space as `did:${string}:${string}`,
           as: this.signer,
@@ -245,7 +239,7 @@ export class Storage implements IStorage {
           useSchemaQueries: true,
         };
         provider = new CachedStorageProvider({
-          id: this.id,
+          id: this.runtime.id,
           address: new URL("/api/storage/memory", this.remoteStorageUrl!),
           space: space as `did:${string}:${string}`,
           as: this.signer,

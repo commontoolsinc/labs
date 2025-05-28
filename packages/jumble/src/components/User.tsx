@@ -178,7 +178,7 @@ export function User() {
   // Listen for events
   // Use storage-scope, since, if we've authenticated,
   // we're using a space-scoped inspector
-  useStorageBroadcast(runtime.storage.id, updateStatus);
+  useStorageBroadcast(runtime.id, updateStatus);
 
   // Animation logic
   useEffect(() => {

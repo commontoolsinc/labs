@@ -55,6 +55,7 @@ export interface RuntimeOptions {
 }
 
 export interface IRuntime {
+  readonly id: string;
   readonly scheduler: IScheduler;
   readonly storage: IStorage;
   readonly recipeManager: IRecipeManager;
@@ -149,7 +150,6 @@ export interface IScheduler {
 
 export interface IStorage {
   readonly runtime: IRuntime;
-  readonly id: string;
   syncCell<T = any>(
     cell: DocImpl<T> | Cell<any>,
     expectedInStorage?: boolean,
@@ -267,6 +267,7 @@ import { registerBuiltins } from "./builtins/index.ts";
  * ```
  */
 export class Runtime implements IRuntime {
+  readonly id: string;
   readonly scheduler: IScheduler;
   readonly storage: IStorage;
   readonly recipeManager: IRecipeManager;
@@ -276,6 +277,9 @@ export class Runtime implements IRuntime {
   readonly runner: IRunner;
 
   constructor(options: RuntimeOptions) {
+    // Generate unique ID for this runtime instance
+    this.id = crypto.randomUUID();
+
     // Create harness first (no dependencies on other services)
     this.harness = new UnsafeEvalRuntimeMulti();
 
@@ -290,7 +294,6 @@ export class Runtime implements IRuntime {
       remoteStorageUrl: new URL(options.storageUrl),
       signer: options.signer,
       enableCache: options.enableCache ?? true,
-      id: crypto.randomUUID(),
     });
 
     this.documentMap = new DocumentMap(this);
