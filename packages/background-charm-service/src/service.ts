@@ -15,6 +15,7 @@ export interface BackgroundCharmServiceOptions {
   storage: Storage;
   bgSpace?: string;
   bgCause?: string;
+  workerTimeoutMs?: number;
 }
 
 export class BackgroundCharmService {
@@ -26,6 +27,7 @@ export class BackgroundCharmService {
   private storage: Storage;
   private bgSpace: string;
   private bgCause: string;
+  private workerTimeoutMs?: number;
 
   constructor(options: BackgroundCharmServiceOptions) {
     this.identity = options.identity;
@@ -33,6 +35,7 @@ export class BackgroundCharmService {
     this.storage = options.storage;
     this.bgSpace = options.bgSpace ?? BG_SYSTEM_SPACE_ID;
     this.bgCause = options.bgCause ?? BG_CELL_CAUSE;
+    this.workerTimeoutMs = options.workerTimeoutMs;
   }
 
   async initialize() {
@@ -94,6 +97,7 @@ export class BackgroundCharmService {
           did,
           toolshedUrl: this.toolshedUrl,
           identity: this.identity,
+          timeoutMs: this.workerTimeoutMs,
         });
         this.charmSchedulers.set(did, scheduler);
         scheduler.start();

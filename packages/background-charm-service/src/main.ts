@@ -1,13 +1,34 @@
+import { parseArgs } from "@std/cli/parse-args";
 import { storage } from "@commontools/runner";
 import { BackgroundCharmService } from "./service.ts";
 import { getIdentity, log } from "./utils.ts";
 import { env } from "./env.ts";
+
+const { timeout } = parseArgs(Deno.args, {
+  string: [
+    "timeout",
+  ],
+});
+
+// 10 minute timeout
+const DEFAULT_WORKER_TIMEOUT_MS = 10 * 60000;
+
+const workerTimeoutMs = (() => {
+  if (timeout) {
+    const parsed = parseInt(timeout, 10);
+    if (!isNaN(parsed)) {
+      return parsed;
+    }
+  }
+  return DEFAULT_WORKER_TIMEOUT_MS;
+})();
 
 const identity = await getIdentity(env.IDENTITY, env.OPERATOR_PASS);
 const service = new BackgroundCharmService({
   identity,
   toolshedUrl: env.TOOLSHED_API_URL,
   storage,
+  workerTimeoutMs,
 });
 
 const shutdown = () => {

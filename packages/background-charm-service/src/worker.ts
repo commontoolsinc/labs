@@ -207,8 +207,11 @@ function safeFormat(value: any): any {
       // While we use this formatter for runtime code, we also use
       // this for formatting worker errors within the scope, where
       // key material may be in use. Filter it out here until
-      // we properly handle sensitive logging. 
-      return JSON.stringify(value, (key, value) => key === "rawIdentity" ? "<REDACTED>" : value);
+      // we properly handle sensitive logging.
+      return JSON.stringify(
+        value,
+        (key, value) => key === "rawIdentity" ? "<REDACTED>" : value,
+      );
     } catch (_e) {
       // satisfy typescript's empty block
     }
@@ -224,7 +227,6 @@ self.addEventListener("unhandledrejection", (e: PromiseRejectionEvent) => {
 
 self.addEventListener("message", async (event: MessageEvent) => {
   const message = event.data;
-
   try {
     if (!isWorkerIPCRequest(message)) {
       throw new Error(`Invalid IPC request: ${safeFormat(message)}`);
