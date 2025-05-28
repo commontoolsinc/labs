@@ -1,6 +1,6 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { ConsoleMethod, Runtime, type ConsoleEvent } from "@commontools/runner";
+import { ConsoleMethod, Runtime } from "@commontools/runner";
 import {
   BrowserRouter as Router,
   createBrowserRouter,
@@ -97,11 +97,14 @@ const runtime = new Runtime({
     // Also send to Sentry
     Sentry.captureException(error);
   }],
-  consoleHandler: (event: ConsoleEvent) => {
+  consoleHandler: (metadata, method, args) => {
     // Handle console messages depending on charm context.
     // This is essentially the same as the default handling currently,
     // but adding this here for future use.
-    console.log(`Console [${event.method}]:`, ...event.args);
+    if (metadata?.charmId) {
+      return [`Charm(${metadata.charmId}) [${method}]:`, ...args];
+    }
+    return [`Console [${method}]:`, ...args];
   },
 });
 

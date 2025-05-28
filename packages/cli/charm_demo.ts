@@ -8,9 +8,9 @@
 import { Charm, charmListSchema, CharmManager } from "../charm/src/manager.ts";
 import { Cell, type CellLink } from "../runner/src/cell.ts";
 import { Session } from "../identity/src/index.ts";
-import { DocImpl, getDoc } from "../runner/src/doc.ts";
+import { DocImpl } from "../runner/src/doc.ts";
 import { EntityId } from "../runner/src/doc-map.ts";
-import { storage } from "../runner/src/storage.ts";
+import { Runtime } from "../runner/src/runtime.ts";
 import { Identity } from "../identity/src/index.ts";
 import { getEntityId } from "../runner/src/doc-map.ts";
 
@@ -29,16 +29,15 @@ async function main() {
   const as_space = await account.derive("some name");
   const space_did = as_space.did();
 
-  // this feels like magic and wrong,
-  // but we crash when we call syncCell otherwise
-  storage.setRemoteStorage(
-    new URL(TOOLSHED_API_URL),
-  );
-  storage.setSigner(as_space);
+  // Create runtime with proper configuration
+  const runtime = new Runtime({
+    storageUrl: TOOLSHED_API_URL,
+    signer: as_space,
+  });
 
   // get them charms, we can also call charmManager.getCharms()
   // this way is to show what these objects really are
-  const charmsDoc: DocImpl<CellLink[]> = getDoc<CellLink[]>(
+  const charmsDoc: DocImpl<CellLink[]> = runtime.documentMap.getDoc<CellLink[]>(
     [],
     "charms",
     SPACE,
@@ -46,7 +45,7 @@ async function main() {
 
   // start syncing on this document
   // notice that we call syncCell on a DocImpl
-  storage.syncCell(charmsDoc);
+  runtime.storage.syncCell(charmsDoc);
 
   // the list of charms
   const charms: Cell<any> = charmsDoc.asCell([], undefined, charmListSchema);

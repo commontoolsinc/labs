@@ -1,5 +1,5 @@
 // Load .env file
-import { type CellLink, getCellFromLink, storage } from "@commontools/runner";
+import { type CellLink, Runtime } from "@commontools/runner";
 import { parseArgs } from "@std/cli/parse-args";
 import { AuthSchema } from "@commontools/builder";
 
@@ -12,13 +12,16 @@ async function main(
   cause?: string,
   jsonData?: any,
 ) {
-  storage.setRemoteStorage(new URL(TOOLSHED_API_URL));
+  // Create runtime with proper configuration
+  const runtime = new Runtime({
+    storageUrl: TOOLSHED_API_URL,
+  });
 
   const cellId = {
     "/": "baedreiajxdvqjxmgpfzjix4h6vd4pl77unvet2k3acfvhb6ottafl7gpua",
   };
 
-  const doc = await storage.syncCellById(replica, cellId, true);
+  const doc = await runtime.storage.syncCellById(replica, cellId, true);
   const authCellEntity = {
     space: replica,
     cell: doc,
@@ -26,9 +29,9 @@ async function main(
     schema: AuthSchema,
   } satisfies CellLink;
 
-  const authCell = getCellFromLink(authCellEntity);
+  const authCell = runtime.getCellFromLink(authCellEntity);
   // authCell.set({ token: "wat" });
-  await storage.synced();
+  await runtime.storage.synced();
 
   console.log("AUTH CELL AFTER SET", authCell.get());
 

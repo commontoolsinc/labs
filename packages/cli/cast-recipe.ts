@@ -3,8 +3,6 @@ import { CharmManager, compileRecipe } from "@commontools/charm";
 import {
   getEntityId,
   isStream,
-  setBlobbyServerUrl,
-  storage,
   Runtime,
 } from "@commontools/runner";
 import { createAdminSession, type DID, Identity } from "@commontools/identity";
@@ -33,14 +31,13 @@ const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
 
 const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "common user";
 
-setBlobbyServerUrl(toolshedUrl);
+// setBlobbyServerUrl is now handled in Runtime constructor
 
 async function castRecipe() {
   console.log(`Casting recipe from ${recipePath} in space ${spaceId}`);
 
   console.log("OPERATOR_PASS", OPERATOR_PASS);
   const signer = await Identity.fromPassphrase(OPERATOR_PASS);
-  storage.setSigner(signer);
 
   console.log("params:", {
     spaceId,
@@ -50,6 +47,8 @@ async function castRecipe() {
     toolshedUrl,
     quit,
   });
+
+  let runtime: Runtime | undefined;
 
   try {
     // Load and compile the recipe first
@@ -66,8 +65,10 @@ async function castRecipe() {
     });
 
     // Create charm manager for the specified space
-    const runtime = new Runtime({
-      storageUrl: toolshedUrl
+    runtime = new Runtime({
+      storageUrl: toolshedUrl,
+      blobbyServerUrl: toolshedUrl,
+      signer: signer
     });
     const charmManager = new CharmManager(session, runtime);
     const recipe = await compileRecipe(recipeSrc, "recipe", charmManager);
@@ -96,7 +97,7 @@ async function castRecipe() {
 
     // Wait for storage to sync and exit if quit is specified
     if (quit) {
-      await storage.synced();
+      await runtime.storage.synced();
       console.log("Storage synced, exiting");
       Deno.exit(0);
     } else {
@@ -109,7 +110,9 @@ async function castRecipe() {
   } catch (error) {
     console.error("Error casting recipe:", error);
     if (quit) {
-      await storage.synced();
+      if (runtime) {
+        await runtime.storage.synced();
+      }
       Deno.exit(1);
     }
   }

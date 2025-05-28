@@ -5,10 +5,7 @@ import {
   getCellFromLink,
   getDocByEntityId,
   getEntityId,
-  idle,
   isStream,
-  setBlobbyServerUrl,
-  storage,
   Runtime,
 } from "@commontools/runner";
 import {
@@ -49,7 +46,7 @@ const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
 
 const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "common user";
 
-setBlobbyServerUrl(toolshedUrl);
+// setBlobbyServerUrl is now handled in Runtime constructor
 
 async function main() {
   if (!spaceName && !spaceDID) {
@@ -97,7 +94,9 @@ async function main() {
 
   // TODO(seefeld): It only wants the space, so maybe we simplify the above and just space the space did?
   const runtime = new Runtime({
-    storageUrl: toolshedUrl
+    storageUrl: toolshedUrl,
+    blobbyServerUrl: toolshedUrl,
+    signer: identity
   });
   const charmManager = new CharmManager(session, runtime);
   const charms = charmManager.getCharms();
@@ -206,14 +205,14 @@ async function main() {
         updater.send({ newValues: ["test"] });
       }
       if (quit) {
-        await idle();
-        await storage.synced();
+        await runtime.idle();
+        await runtime.storage.synced();
         Deno.exit(0);
       }
     } catch (error) {
       console.error("Error loading and compiling recipe:", error);
       if (quit) {
-        await storage.synced();
+        await runtime.storage.synced();
         Deno.exit(1);
       }
     }
