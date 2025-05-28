@@ -2,14 +2,13 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { Recipe } from "@commontools/builder";
 import { Runtime } from "../src/runtime.ts";
-import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 
 describe("runRecipe", () => {
   let runtime: Runtime;
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageProvider: new VolatileStorageProvider("test"),
+      storageUrl: "volatile://test",
     });
   });
 

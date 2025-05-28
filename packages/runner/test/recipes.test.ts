@@ -9,7 +9,6 @@ import {
   recipe,
 } from "@commontools/builder";
 import { Runtime } from "../src/runtime.ts";
-import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { type Cell, isCell } from "../src/cell.ts";
 import { resolveLinks } from "../src/utils.ts";
@@ -20,7 +19,7 @@ describe("Recipe Runner", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageProvider: new VolatileStorageProvider("test")
+      storageUrl: "volatile://test"
     });
   });
 

@@ -4,7 +4,6 @@ import { assertSpyCall, assertSpyCalls, spy } from "@std/testing/mock";
 // getDoc removed - using runtime.documentMap.getDoc instead
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { Runtime } from "../src/runtime.ts";
-import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 import {
   type Action,
   type EventHandler,
@@ -16,7 +15,7 @@ describe("scheduler", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageProvider: new VolatileStorageProvider("test")
+      storageUrl: "volatile://test"
     });
   });
 
@@ -329,7 +328,7 @@ describe("event handling", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageProvider: new VolatileStorageProvider("test")
+      storageUrl: "volatile://test"
     });
   });
 
@@ -499,7 +498,7 @@ describe("compactifyPaths", () => {
   
   beforeEach(() => {
     runtime = new Runtime({
-      storageProvider: new VolatileStorageProvider("test")
+      storageUrl: "volatile://test"
     });
   });
   

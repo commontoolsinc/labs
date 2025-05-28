@@ -65,4 +65,14 @@ export function idle() {
   return getCompatRuntime().idle();
 }
 
-export const storage = getCompatRuntime().storage;
+export function getStorage() {
+  return getCompatRuntime().storage;
+}
+
+// Legacy compatibility - DO NOT USE IN NEW CODE
+export const storage = new Proxy({} as any, {
+  get(target, prop) {
+    const storageInstance = getCompatRuntime().storage;
+    return storageInstance[prop as keyof typeof storageInstance];
+  }
+});

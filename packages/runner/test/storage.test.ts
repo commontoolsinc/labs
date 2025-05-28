@@ -16,13 +16,18 @@ describe("Storage", () => {
   let n = 0;
 
   beforeEach(() => {
+    // Create shared storage provider for testing
+    storage2 = new VolatileStorageProvider("test");
+    
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      remoteStorageUrl: new URL("volatile://"),
-      signer: signer,
-      storageProvider: new VolatileStorageProvider("test")
+      storageUrl: "volatile://test",
+      signer: signer
     });
     
-    storage2 = new VolatileStorageProvider("test");
+    // Replace the storage's default provider with our shared storage
+    (runtime.storage as any).storageProviders.set("default", storage2);
     testDoc = runtime.documentMap.getDoc<string>(
       undefined as unknown as string,
       `storage test cell ${n++}`,

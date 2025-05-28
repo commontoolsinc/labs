@@ -6,7 +6,6 @@ import { isQueryResult } from "../src/query-result-proxy.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { ID, JSONSchema, popFrame, pushFrame } from "@commontools/builder";
 import { Runtime } from "../src/runtime.ts";
-import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 import { addCommonIDfromObjectID } from "../src/utils.ts";
 
 describe("Cell", () => {
@@ -14,7 +13,7 @@ describe("Cell", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageProvider: new VolatileStorageProvider("test")
+      storageUrl: "volatile://test"
     });
   });
 
@@ -103,7 +102,7 @@ describe("Cell utility functions", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageProvider: new VolatileStorageProvider("test")
+      storageUrl: "volatile://test"
     });
   });
 
@@ -141,7 +140,7 @@ describe("createProxy", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageProvider: new VolatileStorageProvider("test")
+      storageUrl: "volatile://test"
     });
   });
 
@@ -460,7 +459,7 @@ describe("asCell", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageProvider: new VolatileStorageProvider("test")
+      storageUrl: "volatile://test"
     });
   });
 
@@ -576,7 +575,7 @@ describe("asCell with schema", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageProvider: new VolatileStorageProvider("test")
+      storageUrl: "volatile://test"
     });
   });
 
@@ -1442,7 +1441,7 @@ describe("JSON.stringify bug", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageProvider: new VolatileStorageProvider("test")
+      storageUrl: "volatile://test"
     });
   });
 

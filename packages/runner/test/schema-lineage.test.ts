@@ -3,7 +3,6 @@ import { expect } from "@std/expect";
 import { getDoc } from "../src/index.ts";
 import { type Cell, isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
-import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 import { type JSONSchema, recipe, UI } from "@commontools/builder";
 
 describe.skip("Schema Lineage", () => {
@@ -218,7 +217,7 @@ describe("Schema propagation end-to-end example", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageProvider: new VolatileStorageProvider("test")
+      storageUrl: "volatile://test"
     });
   });
 

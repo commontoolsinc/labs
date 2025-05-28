@@ -8,14 +8,13 @@ import {
 } from "../src/cell.ts";
 import type { JSONSchema } from "@commontools/builder";
 import { Runtime } from "../src/runtime.ts";
-import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 
 describe("Schema Support", () => {
   let runtime: Runtime;
   
   beforeEach(() => {
     runtime = new Runtime({
-      storageProvider: new VolatileStorageProvider("test")
+      storageUrl: "volatile://test"
     });
   });
   

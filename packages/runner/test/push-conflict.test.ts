@@ -10,7 +10,7 @@ import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 
 // Create runtime for storage tests
 const runtime = new Runtime({
-  storageProvider: new VolatileStorageProvider("test")
+  storageUrl: "volatile://test"
 });
 const storage = runtime.storage;
 storage.setSigner(await Identity.fromPassphrase("test operator"));

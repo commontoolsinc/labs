@@ -3,7 +3,6 @@ import { expect } from "@std/expect";
 import { type EntityId, createRef } from "../src/doc-map.ts";
 import { refer } from "merkle-reference";
 import { Runtime } from "../src/runtime.ts";
-import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 
 describe("refer", () => {
   it("should create a reference that is equal to another reference with the same source", () => {
@@ -18,7 +17,7 @@ describe("cell-map", () => {
   
   beforeEach(() => {
     runtime = new Runtime({
-      storageProvider: new VolatileStorageProvider("test")
+      storageUrl: "volatile://test"
     });
   });
   
