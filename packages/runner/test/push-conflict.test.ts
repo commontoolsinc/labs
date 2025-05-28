@@ -2,17 +2,22 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { ID } from "@commontools/builder";
 import { Identity } from "@commontools/identity";
-import { storage } from "../src/storage.ts";
-import { getDoc } from "../src/doc.ts";
+import { Storage } from "../src/storage.ts";
+import { Runtime } from "../src/runtime.ts";
+// Remove getDoc import - use runtime.documentMap.getDoc instead
 import { isCellLink } from "../src/cell.ts";
 import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 
-storage.setRemoteStorage(new URL(`volatile:`));
+// Create runtime for storage tests
+const runtime = new Runtime({
+  storageProvider: new VolatileStorageProvider("test")
+});
+const storage = runtime.storage;
 storage.setSigner(await Identity.fromPassphrase("test operator"));
 
 describe("Push conflict", () => {
   it("should resolve push conflicts", async () => {
-    const listDoc = getDoc<any[]>([], "list", "push conflict");
+    const listDoc = runtime.documentMap.getDoc<any[]>([], "list", "push conflict");
     const list = listDoc.asCell();
     await storage.syncCell(list);
 
@@ -48,12 +53,12 @@ describe("Push conflict", () => {
   });
 
   it("should resolve push conflicts among other conflicts", async () => {
-    const nameDoc = getDoc<string | undefined>(
+    const nameDoc = runtime.documentMap.getDoc<string | undefined>(
       undefined,
       "name",
       "push and set",
     );
-    const listDoc = getDoc<any[]>([], "list 2", "push and set");
+    const listDoc = runtime.documentMap.getDoc<any[]>([], "list 2", "push and set");
 
     const name = nameDoc.asCell();
     const list = listDoc.asCell();
@@ -100,12 +105,12 @@ describe("Push conflict", () => {
   });
 
   it("should resolve push conflicts with ID among other conflicts", async () => {
-    const nameDoc = getDoc<string | undefined>(
+    const nameDoc = runtime.documentMap.getDoc<string | undefined>(
       undefined,
       "name 2",
       "push and set",
     );
-    const listDoc = getDoc<any[]>([], "list 3", "push and set");
+    const listDoc = runtime.documentMap.getDoc<any[]>([], "list 3", "push and set");
 
     const name = nameDoc.asCell();
     const list = listDoc.asCell();

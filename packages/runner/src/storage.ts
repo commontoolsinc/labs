@@ -1,5 +1,5 @@
 import { isStatic, markAsStatic } from "@commontools/builder";
-import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
+import { debug } from "@commontools/html";
 import { Signer } from "@commontools/identity";
 import { defer } from "@commontools/utils/defer";
 import { isBrowser } from "@commontools/utils/env";
@@ -9,12 +9,11 @@ import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { Cell, type CellLink, isCell, isCellLink, isStream } from "./cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
-import { type EntityId, getDocByEntityId } from "./doc-map.ts";
+import { type EntityId } from "./doc-map.ts";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { idle } from "./scheduler.ts";
 import {
   BaseStorageProvider,
   StorageProvider,
@@ -22,26 +21,23 @@ import {
 } from "./storage/base.ts";
 import {
   Provider as CachedStorageProvider,
-  RemoteStorageProviderSettings,
+  RemoteStorageProviderOptions,
 } from "./storage/cache.ts";
 import { VolatileStorageProvider } from "./storage/volatile.ts";
 import { TransactionResult } from "@commontools/memory";
 import { refer } from "@commontools/memory/reference";
 import { SchemaContext, SchemaNone } from "@commontools/memory/interface";
+import type { IRuntime, IStorage } from "./runtime.ts";
 
-// This type is used to tag a document with any important metadata.
-// Currently, the only supported type is the classification.
 export type Labels = {
   classification?: string[];
 };
 
 export function log(fn: () => any[]) {
   debug(() => {
-    // Get absolute time in milliseconds since Unix epoch
     const absoluteMs = (performance.timeOrigin % 3600000) +
       (performance.now() % 1000);
 
-    // Extract components
     const totalSeconds = Math.floor(absoluteMs / 1000);
     const minutes = Math.floor((totalSeconds % 3600) / 60)
       .toString()
@@ -58,170 +54,23 @@ export function log(fn: () => any[]) {
   });
 }
 
-export interface Storage {
-  /**
-   * Unique identifier that can be used as a name of the `BroadcastChannel` in
-   * order to monitor this storage instance.
-   */
-  readonly id: string;
-
-  /**
-   * Set remote storage URL.
-   *
-   * @param url - URL to set.
-   */
-  setRemoteStorage(url: URL): void;
-
-  /**
-   * Check if remote storage URL is set.
-   *
-   * @returns True if remote storage URL is set, false otherwise.
-   */
-  hasRemoteStorage(): boolean;
-
-  /**
-   * Set signer for authenticating storage operations.
-   *
-   * @param signer - Signer to set.
-   */
-  setSigner(signer: Signer): void;
-
-  /**
-   * Check if signer is set.
-   *
-   * @returns True if signer is set, false otherwise.
-   */
-  hasSigner(): boolean;
-
-  /**
-   * Load cell from storage. Will also subscribe to new changes.
-   *
-   * This will currently also follow all encountered cell references and load
-   * these cells as well.
-   *
-   * This works also for cells that haven't been persisted yet. In that case,
-   * it'll write the current value into storage.
-   *
-   * @param cell - Document / Cell to load into.
-   * @param expectedInStorage - Whether the cell is expected to be in storage.
-   * @param schemaContext - Schema Context to use for the cell to override cell default.
-   * @returns Promise that resolves to the cell when it is loaded.
-   * @throws Will throw if called on a cell without an entity ID.
-   */
-  syncCell<T = any>(
-    cell: DocImpl<T> | Cell<any>,
-    expectedInStorage?: boolean,
-    schemaContext?: SchemaContext,
-  ): Promise<DocImpl<T>> | DocImpl<T>;
-
-  /**
-   * Same as above.
-   *
-   * @param space - Space to load from.
-   * @param id - Entity ID as EntityId or string.
-   * @param expectedInStorage - Whether the cell is expected to be in storage.
-   * @returns Promise that resolves to the cell when it is loaded.
-   */
-  syncCellById<T = any>(
-    space: string,
-    cell: EntityId | string,
-    expectedInStorage?: boolean,
-  ): Promise<DocImpl<T>> | DocImpl<T>;
-
-  /**
-   * Wait for all cells to be synced.
-   *
-   * @returns Promise that resolves when all cells are synced.
-   */
-  synced(): Promise<void>;
-
-  /**
-   * Cancel all subscriptions and stop syncing.
-   *
-   * @returns Promise that resolves when the storage is destroyed.
-   */
-  cancelAll(): Promise<void>;
-}
-
 type Job = {
   doc: DocImpl<any>;
   type: "doc" | "storage" | "sync";
   label?: string;
 };
 
-/**
- * Storage implementation.
- *
- * Life-cycle of a doc: (1) not known to storage – a doc might just be a
- *  temporary doc, e.g. holding input bindings or so (2) known to storage, but
- *  not yet loaded – we know about the doc, but don't have the data yet. (3)
- *  Once loaded, if there was data in storage, we overwrite the current value of
- *  the doc, and if there was no data in storage, we use the current value of
- *  the doc and write it to storage. (4) The doc is subscribed to updates from
- *  storage and docs, and each time the doc changes, the new value is written
- *  to storage, and vice versa.
- *
- * But reading and writing don't happen in one step: We follow all doc
- * references and make sure all docs are loaded before we start writing. This
- * is recursive, so if doc A references doc B, and doc B references doc C,
- * then doc C will also be loaded when we process doc A. We might receive
- * updates for docs (either locally or from storage), while we wait for the
- * docs to load, and this might introduce more dependencies, and we'll pick
- * those up as well. For now, we wait until we reach a stable point, i.e. no
- * loading docs pending, but we might instead want to eventually queue up
- * changes instead.
- *
- * Following references depends on the direction of the write: When writing from
- * a doc to storage, we turn doc references into ids. When writing from
- * storage to a doc, we turn ids into doc references.
- *
- * In the future we should be smarter about whether the local state or remote
- * state is more up to date. For now we assume that the remote state is always
- * more current. The idea is that the local state is optimistically executing
- * on possibly stale state, while if there is something in storage, another node
- * is probably already further ahead.
- */
-class StorageImpl implements Storage {
-  constructor(id = crypto.randomUUID()) {
-    const [cancel, addCancel] = useCancelGroup();
-    this.cancel = cancel;
-    this.addCancel = addCancel;
-    this.#id = id;
-
-    // Check if we're in a browser environment before accessing location
-    if (isBrowser()) {
-      this.setRemoteStorage(new URL(globalThis.location.href));
-    }
-  }
-
-  #id: string;
-
-  // Map from space to storage provider. TODO: Push spaces to storage providers.
+export class Storage implements IStorage {
+  private _id: string;
   private storageProviders = new Map<string, StorageProvider>();
   private remoteStorageUrl: URL | undefined;
-
   private signer: Signer | undefined;
 
-  // Any doc here is being synced or in the process of spinning up syncing.
-  // See also docIsLoading, which is a promise while the document is loading,
-  // and is deleted after it is loaded.
-  // FIXME(@ubik2) All four of these should probably be keyed by a combination of a doc and a schema
-  // If we load the same entity with different schemas, we want to track their resolution
-  // differently. If we only use one schema per doc, this will work ok.
   private docIsSyncing = new Set<DocImpl<any>>();
-
-  // Map from doc to promise of loading doc, set at stage 2. Resolves when
-  // doc and all it's dependencies are loaded.
   private docIsLoading = new Map<DocImpl<any>, Promise<DocImpl<any>>>();
-
-  // Resolves for the promisxes above. Only called by batch processor.
   private loadingPromises = new Map<DocImpl<any>, Promise<DocImpl<any>>>();
   private loadingResolves = new Map<DocImpl<any>, () => void>();
 
-  // Map from doc to latest transformed values and set of docs that depend on
-  // it. "Write" is from doc to storage, "read" is from storage to doc. For
-  // values that means either all doc ids (write) or all docs (read) in doc
-  // references.
   private writeDependentDocs = new Map<DocImpl<any>, Set<DocImpl<any>>>();
   private writeValues = new Map<DocImpl<any>, StorageValue<any>>();
   private readDependentDocs = new Map<DocImpl<any>, Set<DocImpl<any>>>();
@@ -242,8 +91,40 @@ class StorageImpl implements Storage {
 
   private cfc: ContextualFlowControl = new ContextualFlowControl();
 
-  get id() {
-    return this.#id;
+  constructor(
+    readonly runtime: IRuntime,
+    options: {
+      remoteStorageUrl?: URL;
+      signer?: Signer;
+      storageProvider?: StorageProvider;
+      enableCache?: boolean;
+      id?: string;
+    } = {},
+  ) {
+    const [cancel, addCancel] = useCancelGroup();
+    this.cancel = cancel;
+    this.addCancel = addCancel;
+    this._id = options.id || crypto.randomUUID();
+
+    // Set configuration from constructor options
+    if (options.remoteStorageUrl) {
+      this.remoteStorageUrl = options.remoteStorageUrl;
+    } else if (isBrowser()) {
+      this.remoteStorageUrl = new URL(globalThis.location.href);
+    }
+
+    if (options.signer) {
+      this.signer = options.signer;
+    }
+
+    // Set up default storage provider if provided
+    if (options.storageProvider) {
+      this.storageProviders.set("default", options.storageProvider);
+    }
+  }
+
+  get id(): string {
+    return this._id;
   }
 
   setRemoteStorage(url: URL): void {
@@ -262,43 +143,46 @@ class StorageImpl implements Storage {
     return this.signer !== undefined;
   }
 
-  syncCellById<T>(
-    space: string,
-    id: EntityId | string,
-    expectedInStorage: boolean = false,
-  ): Promise<DocImpl<T>> | DocImpl<T> {
-    return this.syncCell(
-      getDocByEntityId<T>(space, id, true)!,
-      expectedInStorage,
-    );
-  }
-
-  syncCell<T>(
-    subject: DocImpl<T> | Cell<any>,
-    expectedInStorage: boolean = false,
+  /**
+   * Load cell from storage. Will also subscribe to new changes.
+   */
+  syncCell<T = any>(
+    cell: DocImpl<T> | Cell<any>,
+    expectedInStorage?: boolean,
     schemaContext?: SchemaContext,
   ): Promise<DocImpl<T>> | DocImpl<T> {
     // If we aren't overriding the schema context, and we have a schema in the cell, use that
     if (
-      schemaContext === undefined && isCell(subject) &&
-      subject.schema !== undefined
+      schemaContext === undefined && isCell(cell) &&
+      cell.schema !== undefined
     ) {
       schemaContext = {
-        schema: subject.schema,
-        rootSchema: (subject.rootSchema !== undefined)
-          ? subject.rootSchema
-          : subject.schema,
+        schema: cell.schema,
+        rootSchema: (cell.rootSchema !== undefined)
+          ? cell.rootSchema
+          : cell.schema,
       };
     }
 
     const entityCell = this._ensureIsSynced(
-      subject,
+      cell,
       expectedInStorage,
       schemaContext,
     );
 
     // If doc is loading, return the promise. Otherwise return immediately.
     return this.docIsLoading.get(entityCell) ?? entityCell;
+  }
+
+  syncCellById<T>(
+    space: string,
+    id: EntityId | string,
+    expectedInStorage: boolean = false,
+  ): Promise<DocImpl<T>> | DocImpl<T> {
+    return this.syncCell(
+      this.runtime.documentMap.getDocByEntityId<T>(space, id, true)!,
+      expectedInStorage,
+    );
   }
 
   synced(): Promise<void> {
@@ -315,14 +199,25 @@ class StorageImpl implements Storage {
     this.cancel();
   }
 
-  // TODO(seefeld,gozala): Should just be one again.
   private _getStorageProviderForSpace(space: string): StorageProvider {
     if (!space) throw new Error("No space set");
-    if (!this.signer) throw new Error("No signer set");
 
     let provider = this.storageProviders.get(space);
 
     if (!provider) {
+      // Check if we have a default storage provider from constructor
+      const defaultProvider = this.storageProviders.get("default");
+      if (defaultProvider) {
+        // Use the default provider for all spaces
+        this.storageProviders.set(space, defaultProvider);
+        return defaultProvider;
+      }
+
+      // Only require signer for remote storage types
+      if (!this.signer && this.remoteStorageUrl?.protocol !== "volatile:") {
+        throw new Error("No signer set for remote storage");
+      }
+
       // Default to "schema", but let either custom URL (used in tests) or
       // environment variable override this.
       const type = this.remoteStorageUrl?.protocol === "volatile:"
@@ -335,6 +230,9 @@ class StorageImpl implements Storage {
         if (!this.remoteStorageUrl) {
           throw new Error("No remote storage URL set");
         }
+        if (!this.signer) {
+          throw new Error("No signer set for cached storage");
+        }
 
         provider = new CachedStorageProvider({
           id: this.id,
@@ -346,7 +244,10 @@ class StorageImpl implements Storage {
         if (!this.remoteStorageUrl) {
           throw new Error("No remote storage URL set");
         }
-        const settings: RemoteStorageProviderSettings = {
+        if (!this.signer) {
+          throw new Error("No signer set for schema storage");
+        }
+        const settings = {
           maxSubscriptionsPerSpace: 50_000,
           connectionTimeout: 30_000,
           useSchemaQueries: true,
@@ -373,7 +274,7 @@ class StorageImpl implements Storage {
     schemaContext?: SchemaContext,
   ): DocImpl<T> {
     return this._ensureIsSynced(
-      getDocByEntityId<T>(space, id, true)!,
+      this.runtime.documentMap.getDocByEntityId<T>(space, id, true)!,
       expectedInStorage,
       schemaContext,
     );
@@ -391,10 +292,6 @@ class StorageImpl implements Storage {
     if (!doc.entityId) throw new Error("Doc has no entity ID");
 
     const entityId = JSON.stringify(doc.entityId);
-    // const entity = `of:${doc.entityId["/"]}` as Entity;
-    // const schemaRef = schemaContext === undefined
-    //   ? SchemaNoneRef
-    //   : refer(schemaContext).toString();
 
     // If the doc is ephemeral, we don't need to load it from storage. We still
     // add it to the map of known docs, so that we don't try to keep loading
@@ -497,8 +394,6 @@ class StorageImpl implements Storage {
       ...(labels !== undefined) ? { labels: labels } : {},
     };
 
-    // 🤔 I'm guessing we should be storing schema here
-
     if (JSON.stringify(value) !== JSON.stringify(this.writeValues.get(doc))) {
       log(() => [
         "prep for storage",
@@ -596,20 +491,6 @@ class StorageImpl implements Storage {
     }
   }
 
-  // Processes the current batch, returns final operations to apply all at once
-  // while clearing the batch.
-  //
-  // In a loop will:
-  // - For all loaded docs, collect dependencies and add those to list of docs
-  // - Await loading of all remaining docs, then add read/write to batch,
-  //   install listeners, resolve loading promise
-  // - Once no docs are left to load, convert batch jobs to ops by copying over
-  //   the current values
-  //
-  // An invariant we can use: If a doc is loaded and _not_ in the batch, then
-  // it is current, and we don't need to verify it's dependencies. That's
-  // because once a doc is loaded, updates come in via listeners only, and they
-  // add entries to tbe batch.
   private async _processCurrentBatch(): Promise<void> {
     const loading = new Map<DocImpl<any>, string | undefined>();
     const loadedDocs = new Set<DocImpl<any>>();
@@ -724,7 +605,7 @@ class StorageImpl implements Storage {
     this.currentBatch = [];
 
     // Don't update docs while they might be updating.
-    await idle();
+    await this.runtime.scheduler.idle();
 
     // Storage jobs override doc jobs. Write remaining doc jobs to doc.
     docJobs.forEach(({ value, source }, doc) => {
@@ -765,24 +646,11 @@ class StorageImpl implements Storage {
     > => {
       const storage = this._getStorageProviderForSpace(space);
 
-      // This is a violating abstractions as it's specific to remote storage.
-      // Most of storage.ts should eventually be refactored away between what
-      // docs do and remote storage does.
-      //
-      // Also, this is a hacky version to do retries, and what we instead want
-      // is a coherent concept of a transaction across the stack, all the way
-      // to scheduler, tied to events, etc. and then retry logic will happen
-      // at that level.
-      //
-      // So consider the below a hack to implement transaction retries just
-      // for Cell.push, to solve some short term pain around loosing charms
-      // when the charm list is being updated.
-
       const updatesFromRetry: [DocImpl<any>, StorageValue][] = [];
       let retries = 0;
-      function retryOnConflict(
+      const retryOnConflict = (
         result: Awaited<ReturnType<typeof storage.send>>,
-      ): ReturnType<typeof storage.send> {
+      ): ReturnType<typeof storage.send> => {
         const txResult = result as Awaited<TransactionResult>;
         if (txResult.error?.name === "ConflictError") {
           const conflict = txResult.error.conflict;
@@ -828,7 +696,10 @@ class StorageImpl implements Storage {
               log(() => ["retry with", newValue]);
 
               updatesFromRetry.push([
-                getDocByEntityId(space, conflictJob.entityId)!,
+                this.runtime.documentMap.getDocByEntityId(
+                  space,
+                  conflictJob.entityId,
+                )!,
                 newValue,
               ]);
 
@@ -851,7 +722,7 @@ class StorageImpl implements Storage {
         }
 
         return Promise.resolve(result);
-      }
+      };
 
       log(() => ["sending to storage", jobs]);
       return storage.send(jobs).then((result) => retryOnConflict(result))
@@ -984,5 +855,4 @@ class StorageImpl implements Storage {
   }
 }
 
-export const storage = new StorageImpl();
 const SchemaNoneRef = refer(SchemaNone).toString();

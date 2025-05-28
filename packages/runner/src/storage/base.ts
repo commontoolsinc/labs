@@ -1,6 +1,7 @@
-import type { Cancel, EntityId } from "@commontools/runner";
+import type { Cancel } from "../cancel.ts";
+import type { EntityId } from "../doc-map.ts";
 import type { Entity, Result, Unit } from "@commontools/memory/interface";
-import { Labels, log } from "../storage.ts";
+import { Labels, log } from "./shared.ts";
 import { SchemaContext } from "@commontools/memory/interface";
 
 export type { Result, Unit };

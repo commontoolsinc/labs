@@ -1,22 +1,52 @@
 import {
   createNodeFactory,
-  type Module,
+  Module,
   type ModuleFactory,
 } from "@commontools/builder";
-import type { Action } from "./scheduler.ts";
 import type { DocImpl } from "./doc.ts";
+import type { Action } from "./scheduler.ts";
 import type { AddCancel } from "./cancel.ts";
-const moduleMap = new Map<string, Module>();
+import type { IModuleRegistry, IRuntime } from "./runtime.ts";
 
-export function addModuleByRef(ref: string, module: Module) {
-  moduleMap.set(ref, module);
-}
+export class ModuleRegistry implements IModuleRegistry {
+  private moduleMap = new Map<string, Module>();
+  readonly runtime: IRuntime;
 
-export function getModuleByRef(ref: string): Module {
-  if (typeof ref !== "string") throw new Error(`Unknown module ref: ${ref}`);
-  const module = moduleMap.get(ref);
-  if (!module) throw new Error(`Unknown module ref: ${ref}`);
-  return module;
+  constructor(runtime: IRuntime) {
+    this.runtime = runtime;
+  }
+
+  register(name: string, module: any): void {
+    this.moduleMap.set(name, module);
+  }
+
+  get(name: string): any {
+    return this.moduleMap.get(name);
+  }
+
+  addModuleByRef(ref: string, module: Module): void {
+    this.moduleMap.set(ref, module);
+  }
+
+  getModule(ref: string): Module | undefined {
+    return this.moduleMap.get(ref);
+  }
+
+  hasModule(ref: string): boolean {
+    return this.moduleMap.has(ref);
+  }
+
+  removeModule(ref: string): boolean {
+    return this.moduleMap.delete(ref);
+  }
+
+  listModules(): string[] {
+    return Array.from(this.moduleMap.keys());
+  }
+
+  clear(): void {
+    this.moduleMap.clear();
+  }
 }
 
 // This corresponds to the node factory factories in common-builder:module.ts.

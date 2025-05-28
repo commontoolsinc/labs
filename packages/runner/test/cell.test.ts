@@ -1,16 +1,28 @@
-import { describe, it } from "@std/testing/bdd";
+import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { type DocImpl, getDoc, isDoc } from "../src/doc.ts";
+import { type DocImpl, isDoc } from "../src/doc.ts";
 import { isCell, isCellLink } from "../src/cell.ts";
 import { isQueryResult } from "../src/query-result-proxy.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { ID, JSONSchema, popFrame, pushFrame } from "@commontools/builder";
-import { addEventHandler, idle } from "../src/scheduler.ts";
+import { Runtime } from "../src/runtime.ts";
+import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 import { addCommonIDfromObjectID } from "../src/utils.ts";
 
 describe("Cell", () => {
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    runtime = new Runtime({
+      storageProvider: new VolatileStorageProvider("test")
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+  });
   it("should create a cell with initial value", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       10,
       "should create a cell with initial value",
       "test",
@@ -19,7 +31,7 @@ describe("Cell", () => {
   });
 
   it("should update cell value using send", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       10,
       "should update cell value using send",
       "test",
@@ -29,7 +41,7 @@ describe("Cell", () => {
   });
 
   it("should create a proxy for the cell", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { x: 1, y: 2 },
       "should create a proxy for the cell",
       "test",
@@ -40,7 +52,7 @@ describe("Cell", () => {
   });
 
   it("should update cell value through proxy", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { x: 1, y: 2 },
       "should update cell value through proxy",
       "test",
@@ -51,7 +63,7 @@ describe("Cell", () => {
   });
 
   it("should get value at path", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { a: { b: { c: 42 } } },
       "should get value at path",
       "test",
@@ -60,7 +72,7 @@ describe("Cell", () => {
   });
 
   it("should set value at path", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { a: { b: { c: 42 } } },
       "should set value at path",
       "test",
@@ -70,7 +82,7 @@ describe("Cell", () => {
   });
 
   it("should call updates callback when value changes", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       0,
       "should call updates callback when value changes",
       "test",
@@ -87,21 +99,33 @@ describe("Cell", () => {
 });
 
 describe("Cell utility functions", () => {
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    runtime = new Runtime({
+      storageProvider: new VolatileStorageProvider("test")
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+  });
+
   it("should identify a cell", () => {
-    const c = getDoc(10, "should identify a cell", "test");
+    const c = runtime.documentMap.getDoc(10, "should identify a cell", "test");
     expect(isDoc(c)).toBe(true);
     expect(isDoc({})).toBe(false);
   });
 
   it("should identify a cell reference", () => {
-    const c = getDoc(10, "should identify a cell reference", "test");
+    const c = runtime.documentMap.getDoc(10, "should identify a cell reference", "test");
     const ref = { cell: c, path: ["x"] };
     expect(isCellLink(ref)).toBe(true);
     expect(isCellLink({})).toBe(false);
   });
 
   it("should identify a cell proxy", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { x: 1 },
       "should identify a cell proxy",
       "test",
@@ -113,8 +137,20 @@ describe("Cell utility functions", () => {
 });
 
 describe("createProxy", () => {
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    runtime = new Runtime({
+      storageProvider: new VolatileStorageProvider("test")
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+  });
+
   it("should create a proxy for nested objects", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { a: { b: { c: 42 } } },
       "should create a proxy for nested objects",
       "test",
@@ -124,7 +160,7 @@ describe("createProxy", () => {
   });
 
   it("should support regular assigments", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { x: 1 },
       "should support regular assigments",
       "test",
@@ -135,7 +171,7 @@ describe("createProxy", () => {
   });
 
   it("should handle $alias in objects", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { x: { $alias: { path: ["y"] } }, y: 42 },
       "should handle $alias in objects",
       "test",
@@ -145,7 +181,7 @@ describe("createProxy", () => {
   });
 
   it("should handle aliases when writing", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { x: { $alias: { path: ["y"] } }, y: 42 },
       "should handle aliases when writing",
       "test",
@@ -156,12 +192,12 @@ describe("createProxy", () => {
   });
 
   it("should handle nested cells", () => {
-    const innerCell = getDoc(
+    const innerCell = runtime.documentMap.getDoc(
       42,
       "should handle nested cells",
       "test",
     );
-    const outerCell = getDoc(
+    const outerCell = runtime.documentMap.getDoc(
       { x: innerCell },
       "should handle nested cells",
       "test",
@@ -171,7 +207,7 @@ describe("createProxy", () => {
   });
 
   it("should handle cell references", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { x: 42 },
       "should handle cell references",
       "test",
@@ -183,7 +219,7 @@ describe("createProxy", () => {
   });
 
   it("should handle infinite loops in cell references", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { x: 42 },
       "should handle infinite loops in cell references",
       "test",
@@ -196,7 +232,7 @@ describe("createProxy", () => {
 
   it("should support modifying array methods and log reads and writes", () => {
     const log: ReactivityLog = { reads: [], writes: [] };
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { array: [1, 2, 3] },
       "should support modifying array methods and log reads and writes",
       "test",
@@ -219,7 +255,7 @@ describe("createProxy", () => {
 
   it("should handle array methods on previously undefined arrays", () => {
     const log: ReactivityLog = { reads: [], writes: [] };
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { data: {} },
       "should handle array methods on previously undefined arrays",
       "test",
@@ -249,7 +285,7 @@ describe("createProxy", () => {
   });
 
   it("should handle array results from array methods", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { array: [1, 2, 3, 4, 5] },
       "should handle array results from array methods",
       "test",
@@ -277,7 +313,7 @@ describe("createProxy", () => {
   });
 
   it("should maintain reactivity with nested array operations", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { nested: { arrays: [[1, 2], [3, 4]] } },
       "should maintain reactivity with nested array operations",
       "test",
@@ -311,7 +347,7 @@ describe("createProxy", () => {
   });
 
   it("should support pop() and only read the popped element", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { a: [] as number[] },
       "should support pop() and only read the popped element",
       "test",
@@ -329,7 +365,7 @@ describe("createProxy", () => {
   });
 
   it("should correctly sort() with cell references", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { a: [] as number[] },
       "should correctly sort() with cell references",
       "test",
@@ -343,7 +379,7 @@ describe("createProxy", () => {
   });
 
   it("should support readonly array methods and log reads", () => {
-    const c = getDoc<any>(
+    const c = runtime.documentMap.getDoc<any>(
       [1, 2, 3],
       "should support readonly array methods and log reads",
       "test",
@@ -358,7 +394,7 @@ describe("createProxy", () => {
   });
 
   it("should support mapping over a proxied array", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { a: [1, 2, 3] },
       "should support mapping over a proxied array",
       "test",
@@ -377,7 +413,7 @@ describe("createProxy", () => {
   });
 
   it("should allow changing array lengths by writing length", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       [1, 2, 3],
       "should allow changing array lengths by writing length",
       "test",
@@ -402,7 +438,7 @@ describe("createProxy", () => {
   });
 
   it("should allow changing array by splicing", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       [1, 2, 3],
       "should allow changing array by splicing",
       "test",
@@ -420,8 +456,20 @@ describe("createProxy", () => {
 });
 
 describe("asCell", () => {
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    runtime = new Runtime({
+      storageProvider: new VolatileStorageProvider("test")
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+  });
+
   it("should create a simple cell interface", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { x: 1, y: 2 },
       "should create a simple cell interface",
       "test",
@@ -438,7 +486,7 @@ describe("asCell", () => {
   });
 
   it("should create a simple cell for nested properties", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { nested: { value: 42 } },
       "should create a simple cell for nested properties",
       "test",
@@ -452,7 +500,7 @@ describe("asCell", () => {
   });
 
   it("should support the key method for nested access", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { a: { b: { c: 42 } } },
       "should support the key method for nested access",
       "test",
@@ -467,7 +515,7 @@ describe("asCell", () => {
   });
 
   it("should return a Sendable for stream aliases", async () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { stream: { $stream: true } },
       "should return a Sendable for stream aliases",
       "test",
@@ -482,8 +530,8 @@ describe("asCell", () => {
     let lastEventSeen = "";
     let eventCount = 0;
 
-    addEventHandler(
-      (event) => {
+    runtime.scheduler.addEventHandler(
+      (event: any) => {
         eventCount++;
         lastEventSeen = event;
       },
@@ -491,7 +539,7 @@ describe("asCell", () => {
     );
 
     streamCell.send("event");
-    await idle();
+    await runtime.scheduler.idle();
 
     expect(c.get()).toStrictEqual({ stream: { $stream: true } });
     expect(eventCount).toBe(1);
@@ -499,7 +547,7 @@ describe("asCell", () => {
   });
 
   it("should call sink only when the cell changes on the subpath", async () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { a: { b: 42, c: 10 }, d: 5 },
       "should call sink only when the cell changes on the subpath",
       "test",
@@ -510,22 +558,34 @@ describe("asCell", () => {
     });
     expect(values).toEqual([42]); // Initial call
     c.setAtPath(["d"], 50);
-    await idle();
+    await runtime.scheduler.idle();
     c.setAtPath(["a", "c"], 100);
-    await idle();
+    await runtime.scheduler.idle();
     c.setAtPath(["a", "b"], 42);
-    await idle();
+    await runtime.scheduler.idle();
     expect(values).toEqual([42]); // Didn't get called again
     c.setAtPath(["a", "b"], 300);
-    await idle();
+    await runtime.scheduler.idle();
     expect(c.get()).toEqual({ a: { b: 300, c: 100 }, d: 50 });
     expect(values).toEqual([42, 300]); // Got called again
   });
 });
 
 describe("asCell with schema", () => {
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    runtime = new Runtime({
+      storageProvider: new VolatileStorageProvider("test")
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+  });
+
   it("should validate and transform according to schema", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       {
         name: "test",
         age: 42,
@@ -568,7 +628,7 @@ describe("asCell with schema", () => {
   });
 
   it("should return a Cell for reference properties", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       {
         id: 1,
         metadata: {
@@ -604,7 +664,7 @@ describe("asCell with schema", () => {
   });
 
   it("should handle recursive schemas with $ref", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       {
         name: "root",
         children: [
@@ -648,7 +708,7 @@ describe("asCell with schema", () => {
   });
 
   it("should propagate schema through key() navigation", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       {
         user: {
           profile: {
@@ -710,7 +770,7 @@ describe("asCell with schema", () => {
   });
 
   it("should fall back to query result proxy when no schema is present", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       {
         data: {
           value: 42,
@@ -731,7 +791,7 @@ describe("asCell with schema", () => {
   });
 
   it("should allow changing schema with asSchema", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       {
         id: 1,
         metadata: {
@@ -799,7 +859,7 @@ describe("asCell with schema", () => {
   });
 
   it("should handle objects with additional properties as references", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       {
         id: 1,
         context: {
@@ -845,7 +905,7 @@ describe("asCell with schema", () => {
   });
 
   it("should handle additional properties with just reference: true", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       {
         context: {
           number: 42,
@@ -887,14 +947,14 @@ describe("asCell with schema", () => {
 
   it("should handle references in underlying cell", () => {
     // Create a cell with a reference
-    const innerCell = getDoc(
+    const innerCell = runtime.documentMap.getDoc(
       { value: 42 },
       "should handle references in underlying cell",
       "test",
     );
 
     // Create a cell that uses that reference
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       {
         context: {
           inner: innerCell,
@@ -929,7 +989,7 @@ describe("asCell with schema", () => {
 
   it("should handle all types of references in underlying cell", () => {
     // Create cells with different types of references
-    const innerCell = getDoc(
+    const innerCell = runtime.documentMap.getDoc(
       { value: 42 },
       "should handle all types of references in underlying cell: inner",
       "test",
@@ -938,7 +998,7 @@ describe("asCell with schema", () => {
     const aliasRef = { $alias: { cell: innerCell, path: [] } };
 
     // Create a cell that uses all reference types
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       {
         context: {
           cell: innerCell,
@@ -983,14 +1043,14 @@ describe("asCell with schema", () => {
 
   it("should handle nested references", () => {
     // Create a chain of references
-    const innerCell = getDoc(
+    const innerCell = runtime.documentMap.getDoc(
       { value: 42 },
       "should handle nested references: inner",
       "test",
     );
     const ref1 = { cell: innerCell, path: [] };
     const ref2 = {
-      cell: getDoc(
+      cell: runtime.documentMap.getDoc(
         { ref: ref1 },
         "should handle nested references: ref2",
         "test",
@@ -998,7 +1058,7 @@ describe("asCell with schema", () => {
       path: ["ref"],
     };
     const ref3 = {
-      cell: getDoc(
+      cell: runtime.documentMap.getDoc(
         { ref: ref2 },
         "should handle nested references: ref3",
         "test",
@@ -1007,7 +1067,7 @@ describe("asCell with schema", () => {
     };
 
     // Create a cell that uses the nested reference
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       {
         context: {
           nested: ref3,
@@ -1049,7 +1109,7 @@ describe("asCell with schema", () => {
   });
 
   it("should handle array schemas in key() navigation", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       {
         items: [
           { name: "item1", value: 1 },
@@ -1088,7 +1148,7 @@ describe("asCell with schema", () => {
   });
 
   it("should handle additionalProperties in key() navigation", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       {
         defined: "known property",
         extra1: { value: 1 },
@@ -1125,7 +1185,7 @@ describe("asCell with schema", () => {
   });
 
   it("should handle additionalProperties: true in key() navigation", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       {
         defined: "known property",
         extra: { anything: "goes" },
@@ -1158,7 +1218,7 @@ describe("asCell with schema", () => {
   });
 
   it("should partially update object values using update method", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { name: "test", age: 42, tags: ["a", "b"] },
       "should partially update object values using update method",
       "test",
@@ -1182,7 +1242,7 @@ describe("asCell with schema", () => {
   });
 
   it("should push values to array using push method", () => {
-    const c = getDoc({ items: [1, 2, 3] }, "push-test", "test");
+    const c = runtime.documentMap.getDoc({ items: [1, 2, 3] }, "push-test", "test");
     const arrayCell = c.asCell(["items"]);
     expect(arrayCell.get()).toEqual([1, 2, 3]);
     arrayCell.push(4);
@@ -1193,7 +1253,7 @@ describe("asCell with schema", () => {
   });
 
   it("should throw when pushing values to `null`", () => {
-    const c = getDoc({ items: null }, "push-to-null", "test");
+    const c = runtime.documentMap.getDoc({ items: null }, "push-to-null", "test");
     const arrayCell = c.asCell(["items"]);
     expect(arrayCell.get()).toBeNull();
 
@@ -1206,7 +1266,7 @@ describe("asCell with schema", () => {
       default: [10, 20],
     } as const satisfies JSONSchema;
 
-    const c = getDoc({}, "push-to-undefined-schema", "test");
+    const c = runtime.documentMap.getDoc({}, "push-to-undefined-schema", "test");
     const arrayCell = c.asCell(["items"], undefined, schema);
 
     arrayCell.push(30);
@@ -1223,7 +1283,7 @@ describe("asCell with schema", () => {
       default: [{ [ID]: "test", value: 10 }, { [ID]: "test2", value: 20 }],
     } as const satisfies JSONSchema;
 
-    const c = getDoc({}, "push-to-undefined-schema-stable-id", "test");
+    const c = runtime.documentMap.getDoc({}, "push-to-undefined-schema-stable-id", "test");
     const arrayCell = c.asCell(["items"], undefined, schema);
 
     arrayCell.push({ [ID]: "test3", "value": 30 });
@@ -1261,7 +1321,7 @@ describe("asCell with schema", () => {
       },
     } as const satisfies JSONSchema;
 
-    const testDoc = getDoc<any>(
+    const testDoc = runtime.documentMap.getDoc<any>(
       undefined,
       "should transparently update ids when context changes",
       "test",
@@ -1324,14 +1384,14 @@ describe("asCell with schema", () => {
   });
 
   it("should push values that are already cells reusing the reference", () => {
-    const c = getDoc<{ items: { value: number }[] }>(
+    const c = runtime.documentMap.getDoc<{ items: { value: number }[] }>(
       { items: [] },
       "should push values that are already cells reusing the reference",
       "test",
     );
     const arrayCell = c.asCell().key("items");
 
-    const d = getDoc<{ value: number }>(
+    const d = runtime.documentMap.getDoc<{ value: number }>(
       { value: 1 },
       "should push values that are already cells reusing the reference",
       "test",
@@ -1352,7 +1412,7 @@ describe("asCell with schema", () => {
   });
 
   it("should handle push method on non-array values", () => {
-    const c = getDoc(
+    const c = runtime.documentMap.getDoc(
       { value: "not an array" },
       "should handle push method on non-array values",
       "test",
@@ -1363,7 +1423,7 @@ describe("asCell with schema", () => {
   });
 
   it("should create new entities when pushing to array in frame, but reuse IDs", () => {
-    const c = getDoc({ items: [] }, "push-with-id", "test");
+    const c = runtime.documentMap.getDoc({ items: [] }, "push-with-id", "test");
     const arrayCell = c.asCell(["items"]);
     const frame = pushFrame();
     arrayCell.push({ value: 42 });
@@ -1378,14 +1438,26 @@ describe("asCell with schema", () => {
 });
 
 describe("JSON.stringify bug", () => {
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    runtime = new Runtime({
+      storageProvider: new VolatileStorageProvider("test")
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+  });
+
   it("should not modify the value of the cell", () => {
-    const c = getDoc({ result: { data: 1 } }, "json-test", "test");
-    const d = getDoc(
+    const c = runtime.documentMap.getDoc({ result: { data: 1 } }, "json-test", "test");
+    const d = runtime.documentMap.getDoc(
       { internal: { "__#2": { cell: c, path: ["result"] } } },
       "json-test2",
       "test",
     );
-    const e = getDoc(
+    const e = runtime.documentMap.getDoc(
       {
         internal: {
           a: { $alias: { cell: d, path: ["internal", "__#2", "data"] } },

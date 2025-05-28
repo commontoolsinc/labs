@@ -1,7 +1,7 @@
 import { getTopFrame, toOpaqueRef } from "@commontools/builder";
-import { type DocImpl, getDoc, makeOpaqueRef } from "./doc.ts";
+import { type DocImpl, makeOpaqueRef } from "./doc.ts";
 import { type CellLink } from "./cell.ts";
-import { queueEvent, type ReactivityLog } from "./scheduler.ts";
+import { type ReactivityLog } from "./scheduler.ts";
 import { diffAndUpdate, resolveLinkToValue, setNestedValue } from "./utils.ts";
 
 // Array.prototype's entries, and whether they modify the array
@@ -153,7 +153,10 @@ export function createQueryResultProxy<T>(
                 context: getTopFrame()?.cause ?? "unknown",
               };
 
-              const resultCell = getDoc<any[]>(
+              if (!valueCell.runtime) {
+                throw new Error("No runtime available in document for getDoc");
+              }
+              const resultCell = valueCell.runtime.documentMap.getDoc<any[]>(
                 undefined as unknown as any[],
                 cause,
                 valueCell.space,
@@ -195,7 +198,9 @@ export function createQueryResultProxy<T>(
             i++
           ) {
             log?.writes.push({ cell: valueCell, path: [...valuePath, i] });
-            queueEvent({ cell: valueCell, path: [...valuePath, i] }, undefined);
+            if (valueCell.runtime) {
+              valueCell.runtime.scheduler.queueEvent({ cell: valueCell, path: [...valuePath, i] }, undefined);
+            }
           }
         }
         return true;

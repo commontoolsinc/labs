@@ -1,4 +1,4 @@
-import { type DocImpl, getDoc } from "../doc.ts";
+import { type DocImpl } from "../doc.ts";
 import { type Action } from "../scheduler.ts";
 import { type ReactivityLog } from "../scheduler.ts";
 
@@ -8,8 +8,9 @@ export function ifElse(
   _addCancel: (cancel: () => void) => void,
   cause: DocImpl<any>[],
   parentDoc: DocImpl<any>,
+  runtime?: any, // Runtime will be injected by the registration function
 ): Action {
-  const result = getDoc<any>(undefined, { ifElse: cause }, parentDoc.space);
+  const result = parentDoc.runtime!.documentMap.getDoc<any>(undefined, { ifElse: cause }, parentDoc.space);
   sendResult(result);
 
   const inputsCell = inputsDoc.asCell();

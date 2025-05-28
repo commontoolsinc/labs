@@ -1,5 +1,6 @@
-import { type DocImpl, getDoc } from "../doc.ts";
-import { type Action, idle } from "../scheduler.ts";
+import { type DocImpl } from "../doc.ts";
+import { type Action } from "../scheduler.ts";
+import type { IRuntime } from "../runtime.ts";
 import { type ReactivityLog } from "../scheduler.ts";
 
 /**
@@ -23,20 +24,21 @@ export function streamData(
   _addCancel: (cancel: () => void) => void,
   cause: DocImpl<any>[],
   parentDoc: DocImpl<any>,
+  runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  const pending = getDoc(
+  const pending = runtime.documentMap.getDoc(
     false,
     { streamData: { pending: cause } },
     parentDoc.space,
   );
-  const result = getDoc<any | undefined>(
+  const result = runtime.documentMap.getDoc<any | undefined>(
     undefined,
     {
       streamData: { result: cause },
     },
     parentDoc.space,
   );
-  const error = getDoc<any | undefined>(
+  const error = runtime.documentMap.getDoc<any | undefined>(
     undefined,
     {
       streamData: { error: cause },
@@ -135,7 +137,7 @@ export function streamData(
               data: JSON.parse(data),
             };
 
-            await idle();
+            await runtime.idle();
 
             result.setAtPath([], parsedData, log);
             id = undefined;
@@ -157,7 +159,7 @@ export function streamData(
         // FIXME(ja): also pending should probably be more like "live"?
         console.error(e);
 
-        await idle();
+        await runtime.idle();
         pending.setAtPath([], false, log);
         result.setAtPath([], undefined, log);
         error.setAtPath([], e, log);

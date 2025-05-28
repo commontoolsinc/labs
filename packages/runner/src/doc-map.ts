@@ -6,6 +6,7 @@ import {
 } from "./query-result-proxy.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { refer } from "merkle-reference";
+import type { IDocumentMap, IRuntime } from "./runtime.ts";
 
 export type EntityId = {
   "/": string | Uint8Array;
@@ -13,15 +14,13 @@ export type EntityId = {
 };
 
 /**
- * Generates an entity ID.
- *
- * @param source - The source object.
- * @param cause - Optional causal source. Otherwise a random n is used.
+ * Creates an entity ID from a source object and cause.
+ * This is a pure function that doesn't require runtime dependencies.
  */
-export const createRef = (
+export function createRef(
   source: Record<string | number | symbol, any> = {},
   cause: any = crypto.randomUUID(),
-): EntityId => {
+): EntityId {
   const seen = new Set<any>();
 
   // Unwrap query result proxies, replace docs with their ids and remove
@@ -63,16 +62,13 @@ export const createRef = (
   }
 
   return refer(traverse({ ...source, causal: cause }));
-};
+}
 
 /**
- * Extracts an entity ID from a cell or cell representation. Creates a stable
- * derivative entity ID for path references.
- *
- * @param value - The value to extract the entity ID from.
- * @returns The entity ID, or undefined if the value is not a cell or doc.
+ * Extracts an entity ID from a cell or cell representation.
+ * This is a pure function that doesn't require runtime dependencies.
  */
-export const getEntityId = (value: any): { "/": string } | undefined => {
+export function getEntityId(value: any): EntityId | undefined {
   if (typeof value === "string") {
     return value.startsWith("{") ? JSON.parse(value) : { "/": value };
   }
@@ -94,29 +90,7 @@ export const getEntityId = (value: any): { "/": string } | undefined => {
       JSON.stringify(createRef({ path: ref.path }, ref.cell.entityId)),
     );
   } else return JSON.parse(JSON.stringify(ref.cell.entityId));
-};
-
-/**
- * A map that holds weak references to its values per space.
- */
-class SpaceAwareCleanableMap<T extends object> {
-  private maps = new Map<string, CleanableMap<T>>();
-
-  set(space: string, key: string, value: T) {
-    let map = this.maps.get(space);
-    if (!map) {
-      map = new CleanableMap<T>();
-      this.maps.set(space, map);
-    }
-    map.set(key, value);
-  }
-
-  get(space: string, key: string): T | undefined {
-    return this.maps.get(space)?.get(key);
-  }
 }
-
-const entityIdToDocMap = new SpaceAwareCleanableMap<DocImpl<any>>();
 
 /**
  * A map that holds weak references to its values. Triggers a cleanup of the map
@@ -162,32 +136,147 @@ class CleanableMap<T extends object> {
   }
 }
 
-export function getDocByEntityId<T = any>(
-  space: string,
-  entityId: EntityId | string,
-  createIfNotFound = true,
-  sourceIfCreated?: DocImpl<any>,
-): DocImpl<T> | undefined {
-  const id = typeof entityId === "string" ? entityId : JSON.stringify(entityId);
-  let doc = entityIdToDocMap.get(space, id);
-  if (doc) return doc;
-  if (!createIfNotFound) return undefined;
+/**
+ * A map that holds weak references to its values per space.
+ */
+class SpaceAwareCleanableMap<T extends object> {
+  private maps = new Map<string, CleanableMap<T>>();
 
-  if (typeof entityId === "string") entityId = JSON.parse(entityId) as EntityId;
-  doc = createDoc<T>(undefined as T, entityId, space);
-  doc.sourceCell = sourceIfCreated;
-  return doc;
-}
-
-export const setDocByEntityId = (
-  space: string,
-  entityId: EntityId,
-  doc: DocImpl<any>,
-) => {
-  // throw if doc already exists
-  if (entityIdToDocMap.get(space, JSON.stringify(entityId))) {
-    throw new Error("Doc already exists");
+  set(space: string, key: string, value: T) {
+    let map = this.maps.get(space);
+    if (!map) {
+      map = new CleanableMap<T>();
+      this.maps.set(space, map);
+    }
+    map.set(key, value);
   }
 
-  entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
-};
+  get(space: string, key: string): T | undefined {
+    return this.maps.get(space)?.get(key);
+  }
+
+  cleanup() {
+    this.maps.clear();
+  }
+}
+
+export class DocumentMap implements IDocumentMap {
+  private entityIdToDocMap = new SpaceAwareCleanableMap<DocImpl<any>>();
+
+  constructor(readonly runtime: IRuntime) {}
+
+  /**
+   * Generates an entity ID.
+   *
+   * @param source - The source object.
+   * @param cause - Optional causal source. Otherwise a random n is used.
+   */
+  createRef(
+    source: Record<string | number | symbol, any> = {},
+    cause: any = crypto.randomUUID(),
+  ): EntityId {
+    return createRef(source, cause);
+  }
+
+  getDocByEntityId<T = any>(
+    space: string,
+    entityId: EntityId | string,
+    createIfNotFound = true,
+    sourceIfCreated?: DocImpl<any>,
+  ): DocImpl<T> | undefined {
+    const id = typeof entityId === "string" ? entityId : JSON.stringify(entityId);
+    let doc = this.entityIdToDocMap.get(space, id);
+    if (doc) return doc;
+    if (!createIfNotFound) return undefined;
+
+    if (typeof entityId === "string") entityId = JSON.parse(entityId) as EntityId;
+    doc = createDoc<T>(undefined as T, entityId, space, this.runtime);
+    doc.sourceCell = sourceIfCreated;
+    this.entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
+    return doc;
+  }
+
+  setDocByEntityId(
+    space: string,
+    entityId: EntityId,
+    doc: DocImpl<any>,
+  ): void {
+    // throw if doc already exists
+    if (this.entityIdToDocMap.get(space, JSON.stringify(entityId))) {
+      throw new Error("Doc already exists");
+    }
+
+    this.entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
+  }
+
+  /**
+   * Extracts an entity ID from a cell or cell representation. Creates a stable
+   * derivative entity ID for path references.
+   *
+   * @param value - The value to extract the entity ID from.
+   * @returns The entity ID, or undefined if the value is not a cell or doc.
+   */
+  getEntityId(value: any): EntityId | undefined {
+    return getEntityId(value);
+  }
+
+  registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: string): void {
+    this.entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
+  }
+
+  removeDoc(space: string, entityId: EntityId): boolean {
+    const id = JSON.stringify(entityId);
+    const map = this.entityIdToDocMap['maps']?.get(space);
+    if (map && map['map']) {
+      return map['map'].delete(id);
+    }
+    return false;
+  }
+
+  hasDoc(space: string, entityId: EntityId): boolean {
+    return !!this.entityIdToDocMap.get(space, JSON.stringify(entityId));
+  }
+
+  listDocs(): EntityId[] {
+    // This is a simplified implementation since WeakMap doesn't support iteration
+    // In practice, this would need to be tracked differently if listing functionality is needed
+    return [];
+  }
+
+  cleanup(): void {
+    this.entityIdToDocMap.cleanup();
+  }
+
+  /**
+   * Get or create a document with the specified value, cause, and space
+   */
+  getDoc<T>(value: T, cause: any, space: string): DocImpl<T> {
+    // Generate entity ID from value and cause
+    const entityId = this.generateEntityId(value, cause);
+    const existing = this.getDocByEntityId<T>(space, entityId, false);
+    if (existing) return existing;
+
+    return this.createDoc(value, entityId, space);
+  }
+
+  private generateEntityId(value: any, cause?: any): EntityId {
+    return this.createRef(
+      typeof value === "object" && value !== null
+        ? (value as object)
+        : value !== undefined
+        ? { value }
+        : {},
+      cause,
+    );
+  }
+
+  private createDoc<T>(value: T, entityId: EntityId, space: string): DocImpl<T> {
+    // Use the full createDoc implementation with runtime parameter
+    const doc = createDoc(value, entityId, space, this.runtime);
+    this.registerDoc(entityId, doc, space);
+    return doc;
+  }
+}
+
+// These functions are removed to eliminate singleton pattern
+// Use runtime.documentMap methods directly instead

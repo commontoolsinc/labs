@@ -1,4 +1,4 @@
-import { describe, it } from "@std/testing/bdd";
+import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { ID, ID_FIELD } from "@commontools/builder";
 import {
@@ -14,9 +14,23 @@ import {
   setNestedValue,
   unwrapOneLevelAndBindtoDoc,
 } from "../src/utils.ts";
-import { getDoc } from "../src/doc.ts";
+import { Runtime } from "../src/runtime.ts";
+import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 import { CellLink, isCellLink } from "../src/cell.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
+
+describe("Utils", () => {
+  let runtime: Runtime;
+  
+  beforeEach(() => {
+    runtime = new Runtime({
+      storageProvider: new VolatileStorageProvider("test")
+    });
+  });
+  
+  afterEach(() => {
+    runtime.dispose();
+  });
 
 describe("extractDefaultValues", () => {
   it("should extract default values from a schema", () => {
@@ -81,7 +95,7 @@ describe("mergeObjects", () => {
   });
 
   it("should treat cell aliases and references as values", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       undefined,
       "should treat cell aliases and references as values 1",
       "test",
@@ -103,7 +117,7 @@ describe("mergeObjects", () => {
 
 describe("sendValueToBinding", () => {
   it("should send value to a simple binding", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { value: 0 },
       "should send value to a simple binding 1",
       "test",
@@ -113,7 +127,7 @@ describe("sendValueToBinding", () => {
   });
 
   it("should handle array bindings", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { arr: [0, 0, 0] },
       "should handle array bindings 1",
       "test",
@@ -127,7 +141,7 @@ describe("sendValueToBinding", () => {
   });
 
   it("should handle bindings with multiple levels", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       {
         user: {
           name: {
@@ -177,7 +191,7 @@ describe("sendValueToBinding", () => {
 
 describe("setNestedValue", () => {
   it("should set a value at a path", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { a: 1, b: { c: 2 } },
       "should set a value at a path 1",
       "test",
@@ -188,7 +202,7 @@ describe("setNestedValue", () => {
   });
 
   it("should delete no longer used fields when setting a nested value", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { a: 1, b: { c: 2, d: 3 } },
       "should delete no longer used fields 1",
       "test",
@@ -199,7 +213,7 @@ describe("setNestedValue", () => {
   });
 
   it("should log no changes when setting a nested value that is already set", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { a: 1, b: { c: 2 } },
       "should log no changes 1",
       "test",
@@ -212,7 +226,7 @@ describe("setNestedValue", () => {
   });
 
   it("should log minimal changes when setting a nested value", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { a: 1, b: { c: 2 } },
       "should log minimal changes 1",
       "test",
@@ -226,7 +240,7 @@ describe("setNestedValue", () => {
   });
 
   it("should fail when setting a nested value on a frozen cell", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { a: 1, b: { c: 2 } },
       "should fail when setting a nested value on a frozen cell 1",
       "test",
@@ -238,7 +252,7 @@ describe("setNestedValue", () => {
   });
 
   it("should correctly update with shorter arrays", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { a: [1, 2, 3] },
       "should correctly update with shorter arrays 1",
       "test",
@@ -249,7 +263,7 @@ describe("setNestedValue", () => {
   });
 
   it("should correctly update with a longer arrays", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { a: [1, 2, 3] },
       "should correctly update with a longer arrays 1",
       "test",
@@ -260,7 +274,7 @@ describe("setNestedValue", () => {
   });
 
   it("should overwrite an object with an array", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { a: { b: 1 } },
       "should overwrite an object with an array 1",
       "test",
@@ -275,7 +289,7 @@ describe("setNestedValue", () => {
 
 describe("mapBindingToCell", () => {
   it("should map bindings to cell aliases", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { a: 1, b: { c: 2 } },
       "should map bindings to cell aliases 1",
       "test",
@@ -297,7 +311,7 @@ describe("mapBindingToCell", () => {
 
 describe("followAliases", () => {
   it("should follow a simple alias", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { value: 42 },
       "should follow a simple alias 1",
       "test",
@@ -308,12 +322,12 @@ describe("followAliases", () => {
   });
 
   it("should follow nested aliases", () => {
-    const innerCell = getDoc(
+    const innerCell = runtime.documentMap.getDoc(
       { inner: 10 },
       "should follow nested aliases 1",
       "test",
     );
-    const outerCell = getDoc(
+    const outerCell = runtime.documentMap.getDoc(
       {
         outer: { $alias: { cell: innerCell, path: ["inner"] } },
       },
@@ -328,12 +342,12 @@ describe("followAliases", () => {
   });
 
   it("should throw an error on circular aliases", () => {
-    const cellA = getDoc(
+    const cellA = runtime.documentMap.getDoc(
       {},
       "should throw an error on circular aliases 1",
       "test",
     );
-    const cellB = getDoc(
+    const cellB = runtime.documentMap.getDoc(
       {},
       "should throw an error on circular aliases 2",
       "test",
@@ -345,7 +359,7 @@ describe("followAliases", () => {
   });
 
   it("should allow aliases in aliased paths", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       {
         a: { a: { $alias: { path: ["a", "b"] } }, b: { c: 1 } },
       },
@@ -362,7 +376,7 @@ describe("followAliases", () => {
 
 describe("normalizeAndDiff", () => {
   it("should detect simple value changes", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { value: 42 },
       "normalizeAndDiff simple value changes",
       "test",
@@ -376,7 +390,7 @@ describe("normalizeAndDiff", () => {
   });
 
   it("should detect object property changes", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { user: { name: "John", age: 30 } },
       "normalizeAndDiff object property changes",
       "test",
@@ -393,7 +407,7 @@ describe("normalizeAndDiff", () => {
   });
 
   it("should detect added object properties", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { user: { name: "John" } },
       "normalizeAndDiff added object properties",
       "test",
@@ -410,7 +424,7 @@ describe("normalizeAndDiff", () => {
   });
 
   it("should detect removed object properties", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { user: { name: "John", age: 30 } },
       "normalizeAndDiff removed object properties",
       "test",
@@ -427,7 +441,7 @@ describe("normalizeAndDiff", () => {
   });
 
   it("should handle array length changes", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { items: [1, 2, 3] },
       "normalizeAndDiff array length changes",
       "test",
@@ -446,7 +460,7 @@ describe("normalizeAndDiff", () => {
   });
 
   it("should handle array element changes", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { items: [1, 2, 3] },
       "normalizeAndDiff array element changes",
       "test",
@@ -463,7 +477,7 @@ describe("normalizeAndDiff", () => {
   });
 
   it("should follow aliases", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       {
         value: 42,
         alias: { $alias: { path: ["value"] } },
@@ -481,7 +495,7 @@ describe("normalizeAndDiff", () => {
   });
 
   it("should update aliases", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       {
         value: 42,
         value2: 200,
@@ -518,7 +532,7 @@ describe("normalizeAndDiff", () => {
   });
 
   it("should handle nested changes", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       {
         user: {
           profile: {
@@ -554,7 +568,7 @@ describe("normalizeAndDiff", () => {
 
   it("should handle ID-based entity objects", () => {
     const testSpace = "test";
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { items: [] },
       "should handle ID-based entity objects",
       testSpace,
@@ -581,7 +595,7 @@ describe("normalizeAndDiff", () => {
 
   it("should update the same document with ID-based entity objects", () => {
     const testSpace = "test";
-    const testDoc = getDoc<any>(
+    const testDoc = runtime.documentMap.getDoc<any>(
       { items: [] },
       "should update the same document with ID-based entity objects",
       testSpace,
@@ -619,7 +633,7 @@ describe("normalizeAndDiff", () => {
 
   it("should update the same document with numeric ID-based entity objects", () => {
     const testSpace = "test";
-    const testDoc = getDoc<any>(
+    const testDoc = runtime.documentMap.getDoc<any>(
       { items: [] },
       "should update the same document with ID-based entity objects",
       testSpace,
@@ -657,7 +671,7 @@ describe("normalizeAndDiff", () => {
 
   it("should handle ID_FIELD redirects and reuse existing documents", () => {
     const testSpace = "test";
-    const testDoc = getDoc<any>(
+    const testDoc = runtime.documentMap.getDoc<any>(
       { items: [] },
       "should handle ID_FIELD redirects",
       testSpace,
@@ -701,7 +715,7 @@ describe("normalizeAndDiff", () => {
 
   it("should treat different properties as different ID namespaces", () => {
     const testSpace = "test";
-    const testDoc = getDoc<any>(
+    const testDoc = runtime.documentMap.getDoc<any>(
       undefined,
       "it should treat different properties as different ID namespaces",
       testSpace,
@@ -727,7 +741,7 @@ describe("normalizeAndDiff", () => {
   });
 
   it("should return empty array when no changes", () => {
-    const testCell = getDoc(
+    const testCell = runtime.documentMap.getDoc(
       { value: 42 },
       "normalizeAndDiff no changes",
       "test",
@@ -739,12 +753,12 @@ describe("normalizeAndDiff", () => {
   });
 
   it("should handle doc and cell references", () => {
-    const docA = getDoc(
+    const docA = runtime.documentMap.getDoc(
       { name: "Doc A" },
       "normalizeAndDiff doc reference A",
       "test",
     );
-    const docB = getDoc(
+    const docB = runtime.documentMap.getDoc(
       { value: { name: "Original" } },
       "normalizeAndDiff doc reference B",
       "test",
@@ -759,12 +773,12 @@ describe("normalizeAndDiff", () => {
   });
 
   it("should handle doc and cell references that don't change", () => {
-    const docA = getDoc(
+    const docA = runtime.documentMap.getDoc(
       { name: "Doc A" },
       "normalizeAndDiff doc reference no change A",
       "test",
     );
-    const docB = getDoc(
+    const docB = runtime.documentMap.getDoc(
       { value: { name: "Original" } },
       "normalizeAndDiff doc reference no change B",
       "test",
@@ -793,12 +807,12 @@ describe("addCommonIDfromObjectID", () => {
   });
 
   it("should reuse items", () => {
-    const itemDoc = getDoc(
+    const itemDoc = runtime.documentMap.getDoc(
       { id: "item1", name: "Original Item" },
       "addCommonIDfromObjectID reuse items",
       "test",
     );
-    const testDoc = getDoc(
+    const testDoc = runtime.documentMap.getDoc(
       { items: [{ cell: itemDoc, path: [] }] },
       "addCommonIDfromObjectID arrays",
       "test",
@@ -824,4 +838,5 @@ describe("addCommonIDfromObjectID", () => {
       );
     expect(result.items[1].cell.get().name).toBe("New Item");
   });
+});
 });

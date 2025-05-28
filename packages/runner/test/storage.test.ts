@@ -1,22 +1,29 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { storage } from "../src/storage.ts";
+import { Runtime } from "../src/runtime.ts";
 import { StorageProvider } from "../src/storage/base.ts";
-import { CellLink, createRef, DocImpl, getDoc } from "@commontools/runner";
+import { type CellLink } from "../src/cell.ts";
+import { type DocImpl } from "../src/doc.ts";
 import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 import { Identity } from "@commontools/identity";
 
-storage.setRemoteStorage(new URL("volatile://"));
-storage.setSigner(await Identity.fromPassphrase("test operator"));
+const signer = await Identity.fromPassphrase("test operator");
 
 describe("Storage", () => {
+  let runtime: Runtime;
   let storage2: StorageProvider;
   let testDoc: DocImpl<any>;
   let n = 0;
 
   beforeEach(() => {
+    runtime = new Runtime({
+      remoteStorageUrl: new URL("volatile://"),
+      signer: signer,
+      storageProvider: new VolatileStorageProvider("test")
+    });
+    
     storage2 = new VolatileStorageProvider("test");
-    testDoc = getDoc<string>(
+    testDoc = runtime.documentMap.getDoc<string>(
       undefined as unknown as string,
       `storage test cell ${n++}`,
       "test",
@@ -24,7 +31,7 @@ describe("Storage", () => {
   });
 
   afterEach(async () => {
-    await storage?.cancelAll();
+    await runtime?.storage.cancelAll();
     await storage2?.destroy();
   });
 
@@ -33,7 +40,7 @@ describe("Storage", () => {
       const testValue = { data: "test" };
       testDoc.send(testValue);
 
-      await storage.syncCell(testDoc);
+      await runtime.storage.syncCell(testDoc);
 
       await storage2.sync(testDoc.entityId!);
       const value = storage2.get(testDoc.entityId!);
@@ -41,7 +48,7 @@ describe("Storage", () => {
     });
 
     it("should persist a cells and referenced cell references within it", async () => {
-      const refDoc = getDoc(
+      const refDoc = runtime.documentMap.getDoc(
         "hello",
         "should persist a cells and referenced cell references within it",
         "test",
@@ -53,7 +60,7 @@ describe("Storage", () => {
       };
       testDoc.send(testValue);
 
-      await storage.syncCell(testDoc);
+      await runtime.storage.syncCell(testDoc);
 
       await storage2.sync(refDoc.entityId!);
       const value = storage2.get(refDoc.entityId!);
@@ -61,7 +68,7 @@ describe("Storage", () => {
     });
 
     it("should persist a cells and referenced cells within it", async () => {
-      const refDoc = getDoc(
+      const refDoc = runtime.documentMap.getDoc(
         "hello",
         "should persist a cells and referenced cells 1",
         "test",
@@ -73,7 +80,7 @@ describe("Storage", () => {
       };
       testDoc.send(testValue);
 
-      await storage.syncCell(testDoc);
+      await runtime.storage.syncCell(testDoc);
 
       await storage2.sync(refDoc.entityId!);
       const value = storage2.get(refDoc.entityId!);
@@ -83,12 +90,12 @@ describe("Storage", () => {
 
   describe("doc updates", () => {
     it("should persist doc updates", async () => {
-      await storage.syncCell(testDoc);
+      await runtime.storage.syncCell(testDoc);
 
       testDoc.send("value 1");
       testDoc.send("value 2");
 
-      await storage.synced();
+      await runtime.storage.synced();
 
       await storage2.sync(testDoc.entityId!);
       const value = storage2.get(testDoc.entityId!);
@@ -103,7 +110,7 @@ describe("Storage", () => {
       expect(synced).toBe(false);
 
       testDoc.send("test");
-      await storage.syncCell(testDoc);
+      await runtime.storage.syncCell(testDoc);
       expect(synced).toBe(true);
     });
 
@@ -112,16 +119,16 @@ describe("Storage", () => {
       storage2.sync(testDoc.entityId!, true).then(() => (synced = true));
       expect(synced).toBe(false);
 
-      await storage.syncCell(testDoc);
+      await runtime.storage.syncCell(testDoc);
       expect(synced).toBe(true);
     });
   });
 
   describe("ephemeral docs", () => {
     it("should not be loaded from storage", async () => {
-      const ephemeralDoc = getDoc("transient", "ephemeral", "test");
+      const ephemeralDoc = runtime.documentMap.getDoc("transient", "ephemeral", "test");
       ephemeralDoc.ephemeral = true;
-      await storage.syncCell(ephemeralDoc);
+      await runtime.storage.syncCell(ephemeralDoc);
 
       await storage2.sync(ephemeralDoc.entityId!);
       const value = storage2.get(ephemeralDoc.entityId!);
@@ -131,7 +138,7 @@ describe("Storage", () => {
 
   describe("doc updates", () => {
     it("should persist doc updates with schema", async () => {
-      await storage.syncCell(testDoc, false, {
+      await runtime.storage.syncCell(testDoc, false, {
         schema: true,
         rootSchema: true,
       });
@@ -139,7 +146,7 @@ describe("Storage", () => {
       testDoc.send("value 1");
       testDoc.send("value 2");
 
-      await storage.synced();
+      await runtime.storage.synced();
 
       await storage2.sync(testDoc.entityId!);
       const value = storage2.get(testDoc.entityId!);

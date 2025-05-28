@@ -1,8 +1,9 @@
-import { describe, it } from "@std/testing/bdd";
+import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { getDoc } from "../src/doc.ts";
+import { getDoc } from "../src/index.ts";
 import { type Cell, isCell } from "../src/cell.ts";
-import { run } from "../src/runner.ts";
+import { Runtime } from "../src/runtime.ts";
+import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 import { type JSONSchema, recipe, UI } from "@commontools/builder";
 
 describe.skip("Schema Lineage", () => {
@@ -213,6 +214,18 @@ describe.skip("Schema Lineage", () => {
 });
 
 describe("Schema propagation end-to-end example", () => {
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    runtime = new Runtime({
+      storageProvider: new VolatileStorageProvider("test")
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+  });
+
   it("should propagate schema through a recipe", () => {
     // Create a recipe with schema
     const testRecipe = recipe({
@@ -244,7 +257,7 @@ describe("Schema propagation end-to-end example", () => {
       "should propagate schema through a recipe",
       "test",
     );
-    run(testRecipe, { details: { name: "hello", age: 14 } }, result);
+    runtime.runner.run(testRecipe, { details: { name: "hello", age: 14 } }, result);
 
     const c = result.asCell(
       [UI],
