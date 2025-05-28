@@ -15,18 +15,13 @@ import {
   DocImpl,
   EntityId,
   followAliases,
-  getCell,
-  getCellFromEntityId,
   getEntityId,
-  idle,
   isCell,
   isCellLink,
   isDoc,
   maybeGetCellLink,
-  recipeManager,
-  runSynced,
+  Runtime,
 } from "@commontools/runner";
-import { storage } from "@commontools/runner";
 import { type Session } from "@commontools/identity";
 import { isObject } from "@commontools/utils/types";
 
@@ -37,7 +32,9 @@ import { isObject } from "@commontools/utils/types";
  */
 export function charmId(charm: Charm): string | undefined {
   const id = getEntityId(charm);
-  return id ? id["/"] : undefined;
+  if (!id) return undefined;
+  const idValue = id["/"];
+  return typeof idValue === "string" ? idValue : undefined;
 }
 
 export type Charm = {
@@ -132,18 +129,32 @@ export class CharmManager {
 
   constructor(
     private session: Session,
+    public runtime: Runtime,
   ) {
     this.space = this.session.space;
 
-    storage.setSigner(session.as);
+    this.runtime.storage.setSigner(session.as);
 
-    this.charms = getCell(this.space, "charms", charmListSchema);
-    this.pinnedCharms = getCell(this.space, "pinned-charms", charmListSchema);
-    this.trashedCharms = getCell(this.space, "trash", charmListSchema);
+    this.charms = this.runtime.storage.getCell(
+      this.space,
+      "charms",
+      charmListSchema,
+    );
+    this.pinnedCharms = this.runtime.storage.getCell(
+      this.space,
+      "pinned-charms",
+      charmListSchema,
+    );
+    this.trashedCharms = this.runtime.storage.getCell(
+      this.space,
+      "trash",
+      charmListSchema,
+    );
+
     this.ready = Promise.all([
-      this.syncCharms(this.charms),
-      this.syncCharms(this.pinnedCharms),
-      this.syncCharms(this.trashedCharms),
+      this.runtime.storage.syncCell(this.charms, false, schemaContext),
+      this.runtime.storage.syncCell(this.pinnedCharms, false, schemaContext),
+      this.runtime.storage.syncCell(this.trashedCharms, false, schemaContext),
     ]);
   }
 
@@ -157,7 +168,7 @@ export class CharmManager {
 
   async synced(): Promise<void> {
     await this.ready;
-    return await storage.synced();
+    return await this.runtime.storage.synced();
   }
 
   async pin(charm: Cell<Charm>) {
@@ -169,7 +180,7 @@ export class CharmManager {
       )
     ) {
       this.pinnedCharms.push(charm);
-      await idle();
+      await this.runtime.idle();
     }
   }
 
@@ -179,7 +190,7 @@ export class CharmManager {
 
     if (newPinnedCharms.length !== this.pinnedCharms.get().length) {
       this.pinnedCharms.set(newPinnedCharms);
-      await idle();
+      await this.runtime.idle();
       return true;
     }
 
@@ -224,14 +235,14 @@ export class CharmManager {
     // Add back to charms
     await this.add([trashedCharm]);
 
-    await idle();
+    await this.runtime.idle();
     return true;
   }
 
   async emptyTrash() {
     await this.syncCharms(this.trashedCharms);
     this.trashedCharms.set([]);
-    await idle();
+    await this.runtime.idle();
     return true;
   }
 
@@ -255,7 +266,7 @@ export class CharmManager {
       }
     });
 
-    await idle();
+    await this.runtime.idle();
   }
 
   syncCharms(cell: Cell<Cell<Charm>[]>) {
@@ -271,7 +282,7 @@ export class CharmManager {
       schema: privilegedSchema,
       rootSchema: privilegedSchema,
     };
-    return storage.syncCell(cell, false, schemaContext);
+    return this.runtime.storage.syncCell(cell, false, schemaContext);
   }
 
   // copies the recipe for a charm but clones the argument cell
@@ -287,10 +298,10 @@ export class CharmManager {
     if (!recipeId) throw new Error("Cannot duplicate charm: missing recipe ID");
 
     // Get the recipe
-    const recipe = await recipeManager.loadRecipe({
+    const recipe = await this.runtime.recipeManager.loadRecipe(
       recipeId,
-      space: this.space,
-    });
+      this.space,
+    );
     if (!recipe) throw new Error("Cannot duplicate charm: recipe not found");
 
     // Get the original inputs
@@ -336,7 +347,10 @@ export class CharmManager {
       charm = id;
     } else {
       const idAsDocId = JSON.stringify({ "/": id });
-      const doc = await storage.syncCellById(this.space, idAsDocId);
+      const doc = await this.runtime.storage.syncCellById(
+        this.space,
+        idAsDocId,
+      );
       charm = doc.asCell();
     }
 
@@ -345,10 +359,10 @@ export class CharmManager {
     // Make sure we have the recipe so we can run it!
     let recipe: Recipe | Module | undefined;
     try {
-      recipe = await recipeManager.loadRecipe({
+      recipe = await this.runtime.recipeManager.loadRecipe(
         recipeId,
-        space: this.space,
-      });
+        this.space,
+      );
     } catch (e) {
       console.warn("recipeId", recipeId);
       console.warn("recipe", recipe);
@@ -379,7 +393,10 @@ export class CharmManager {
     if (runIt) {
       // Make sure the charm is running. This is re-entrant and has no effect if
       // the charm is already running.
-      return (await runSynced(charm, recipe)).asSchema(
+      if (!recipe) {
+        throw new Error(`Recipe not found for charm ${getEntityId(charm)}`);
+      }
+      return (await this.runtime.runSynced(charm, recipe)).asSchema(
         asSchema ?? resultSchema,
       );
     } else {
@@ -1162,7 +1179,7 @@ export class CharmManager {
     path: string[] = [],
     schema?: JSONSchema,
   ): Promise<Cell<T>> {
-    return (await storage.syncCellById(this.space, id)).asCell(
+    return (await this.runtime.storage.syncCellById(this.space, id)).asCell(
       path,
       undefined,
       schema,
@@ -1177,7 +1194,7 @@ export class CharmManager {
     const source = charm.getSourceCell(processSchema);
     const recipeId = source?.get()?.[TYPE]!;
     if (!recipeId) throw new Error("charm missing recipe ID");
-    const recipe = recipeManager.recipeById(recipeId);
+    const recipe = this.runtime.recipeManager.recipeById(recipeId);
     if (!recipe) throw new Error(`Recipe ${recipeId} not loaded`);
     // FIXME(ja): return should be Cell<Schema<T>> I think?
     return source.key("argument").asSchema<T>(recipe.argumentSchema);
@@ -1210,7 +1227,7 @@ export class CharmManager {
     const newCharms = filterOutEntity(this.charms, id);
     if (newCharms.length !== this.charms.get().length) {
       this.charms.set(newCharms);
-      await idle();
+      await this.runtime.idle();
       return true;
     }
 
@@ -1228,7 +1245,7 @@ export class CharmManager {
     const newTrashedCharms = filterOutEntity(this.trashedCharms, id);
     if (newTrashedCharms.length !== this.trashedCharms.get().length) {
       this.trashedCharms.set(newTrashedCharms);
-      await idle();
+      await this.runtime.idle();
       return true;
     }
 
@@ -1241,15 +1258,15 @@ export class CharmManager {
     cause?: any,
     llmRequestId?: string,
   ): Promise<Cell<Charm>> {
-    await idle();
+    await this.runtime.idle();
 
-    const charm = getCellFromEntityId(
+    const charm = this.runtime.getCellFromEntityId(
       this.space,
       createRef({ recipe, inputs }, cause),
       [],
       charmSchema,
     );
-    await runSynced(charm, recipe, inputs);
+    await this.runtime.runSynced(charm, recipe, inputs);
     await this.syncRecipe(charm);
     await this.add([charm]);
 
@@ -1264,10 +1281,10 @@ export class CharmManager {
 
   // FIXME(JA): this really really really needs to be revisited
   async syncRecipe(charm: Cell<Charm>) {
-    await storage.syncCell(charm);
+    await this.runtime.storage.syncCell(charm);
 
     const sourceCell = charm.getSourceCell();
-    await storage.syncCell(sourceCell);
+    await this.runtime.storage.syncCell(sourceCell);
 
     const recipeId = sourceCell.get()?.[TYPE];
     if (!recipeId) throw new Error("charm missing recipe ID");
@@ -1276,14 +1293,11 @@ export class CharmManager {
   }
 
   async syncRecipeById(recipeId: string) {
-    return await recipeManager.ensureRecipeAvailable({
-      recipeId,
-      space: this.space,
-    });
+    return await this.runtime.recipeManager.loadRecipe(recipeId, this.space);
   }
 
   async sync(entity: Cell<any>, waitForStorage: boolean = false) {
-    await storage.syncCell(entity, waitForStorage);
+    await this.runtime.storage.syncCell(entity, waitForStorage);
   }
 
   // Returns the charm from one of our active charm lists if it is present,

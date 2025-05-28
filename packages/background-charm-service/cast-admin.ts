@@ -5,6 +5,8 @@ import {
   getEntityId,
   setBlobbyServerUrl,
   storage,
+  Runtime,
+  VolatileStorageProvider,
 } from "@commontools/runner";
 import { type DID } from "@commontools/identity";
 import { createAdminSession } from "@commontools/identity";
@@ -92,7 +94,10 @@ async function castRecipe() {
     });
 
     // Create charm manager for the specified space
-    const charmManager = new CharmManager(session);
+    const runtime = new Runtime({
+      storageProvider: new VolatileStorageProvider(session.space)
+    });
+    const charmManager = new CharmManager(session, runtime);
     const recipe = await compileRecipe(recipeSrc, "recipe", charmManager);
     console.log("Recipe compiled successfully");
 

@@ -42,9 +42,8 @@ export interface CharmMetadata {
 }
 
 export interface RuntimeOptions {
-  remoteStorageUrl?: URL;
+  storageUrl: string;
   signer?: Signer;
-  storageProvider?: StorageProvider;
   enableCache?: boolean;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
@@ -167,6 +166,9 @@ export interface IRecipeManager {
   compileRecipe(source: string, space?: string): Promise<any>;
   recipeById(id: string): any;
   generateRecipeId(recipe: any, src?: string): string;
+  loadRecipe(id: string, space?: string): Promise<any>;
+  getRecipeMeta(input: any): any;
+  registerRecipe(params: { recipeId: string; space: string; recipe: any; recipeMeta: any }): Promise<boolean>;
 }
 
 export interface IModuleRegistry {
@@ -260,7 +262,7 @@ export class Runtime implements IRuntime {
   readonly harness: Harness;
   readonly runner: IRunner;
 
-  constructor(options: RuntimeOptions = {}) {
+  constructor(options: RuntimeOptions) {
     // Create harness first (no dependencies on other services)
     this.harness = new UnsafeEvalHarness(this);
 
@@ -271,10 +273,25 @@ export class Runtime implements IRuntime {
       options.errorHandlers,
     );
 
+    // Parse storage URL and create appropriate storage provider
+    const storageUrl = new URL(options.storageUrl);
+    let storageProvider: StorageProvider;
+    let remoteStorageUrl: URL | undefined;
+
+    if (storageUrl.protocol === "volatile:") {
+      storageProvider = new VolatileStorageProvider(storageUrl.pathname || "default");
+      remoteStorageUrl = undefined;
+    } else {
+      // For remote storage, we might need different providers based on the protocol
+      // For now, use VolatileStorageProvider as fallback but set remoteStorageUrl
+      storageProvider = new VolatileStorageProvider("remote");
+      remoteStorageUrl = storageUrl;
+    }
+
     this.storage = new Storage(this, {
-      remoteStorageUrl: options.remoteStorageUrl,
+      remoteStorageUrl,
       signer: options.signer,
-      storageProvider: options.storageProvider || new VolatileStorageProvider(),
+      storageProvider,
       enableCache: options.enableCache ?? true,
       id: crypto.randomUUID(),
     });
@@ -360,6 +377,7 @@ export class Runtime implements IRuntime {
   private _getOptions(): RuntimeOptions {
     // Return current configuration for forking
     return {
+      storageUrl: "volatile://external-compat",
       blobbyServerUrl: (globalThis as any).__BLOBBY_SERVER_URL,
       recipeEnvironment: (globalThis as any).__RECIPE_ENVIRONMENT,
       // Note: We can't easily extract other options like signer, handlers, etc.

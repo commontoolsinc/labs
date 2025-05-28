@@ -14,7 +14,6 @@ import {
   setValueAtPath,
 } from "../src/utils.ts";
 import { Runtime } from "@commontools/runner";
-import { VolatileStorageProvider } from "@commontools/runner";
 
 describe("value type", () => {
   it("can destructure a value without TS errors", () => {
@@ -142,7 +141,7 @@ describe("createJsonSchema", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageProvider: new VolatileStorageProvider("test")
+      storageUrl: "volatile://test"
     });
   });
 

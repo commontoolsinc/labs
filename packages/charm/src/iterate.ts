@@ -1,10 +1,4 @@
-import {
-  Cell,
-  isCell,
-  isStream,
-  recipeManager,
-  runtime,
-} from "@commontools/runner";
+import { Cell, isCell, isStream } from "@commontools/runner";
 import { isObject } from "@commontools/utils/types";
 import {
   createJsonSchema,
@@ -102,7 +96,7 @@ export async function iterate(
 ): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
   const optionsWithDefaults = applyDefaults(options);
   const { model, cache, space, generationId } = optionsWithDefaults;
-  const { iframe } = getIframeRecipe(charm);
+  const { iframe } = getIframeRecipe(charm, charmManager);
 
   const prevSpec = iframe?.spec;
   if (plan?.description === undefined) {
@@ -148,14 +142,14 @@ export const generateNewRecipeVersion = async (
   generationId?: string,
   llmRequestId?: string,
 ) => {
-  const parentInfo = getIframeRecipe(parent);
+  const parentInfo = getIframeRecipe(parent, charmManager);
   if (!parentInfo.recipeId) {
     throw new Error("No recipeId found for charm");
   }
-  const parentRecipe = await recipeManager.loadRecipe({
-    space: charmManager.getSpace(),
-    recipeId: parentInfo.recipeId,
-  });
+  const parentRecipe = await charmManager.runtime.recipeManager.loadRecipe(
+    parentInfo.recipeId,
+    charmManager.getSpace(),
+  );
 
   const name = extractTitle(newRecipe.src, "<unknown>");
   const argumentSchema =
@@ -519,12 +513,12 @@ export async function compileRecipe(
     throw new Error("No default recipe found in the compiled exports.");
   }
   const parentsIds = parents?.map((id) => id.toString());
-  recipeManager.registerRecipe({
-    recipeId: recipeManager.generateRecipeId(recipe),
+  charmManager.runtime.recipeManager.registerRecipe({
+    recipeId: charmManager.runtime.recipeManager.generateRecipeId(recipe),
     space: charmManager.getSpace(),
     recipe,
     recipeMeta: {
-      id: recipeManager.generateRecipeId(recipe),
+      id: charmManager.runtime.recipeManager.generateRecipeId(recipe),
       src: recipeSrc,
       spec,
       parents: parentsIds,

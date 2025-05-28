@@ -5,6 +5,7 @@ import {
   isStream,
   setBlobbyServerUrl,
   storage,
+  Runtime,
 } from "@commontools/runner";
 import { createAdminSession, type DID, Identity } from "@commontools/identity";
 
@@ -32,7 +33,6 @@ const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
 
 const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "common user";
 
-storage.setRemoteStorage(new URL(toolshedUrl));
 setBlobbyServerUrl(toolshedUrl);
 
 async function castRecipe() {
@@ -66,7 +66,10 @@ async function castRecipe() {
     });
 
     // Create charm manager for the specified space
-    const charmManager = new CharmManager(session);
+    const runtime = new Runtime({
+      storageUrl: toolshedUrl
+    });
+    const charmManager = new CharmManager(session, runtime);
     const recipe = await compileRecipe(recipeSrc, "recipe", charmManager);
 
     const charm = await charmManager.runPersistent(

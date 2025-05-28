@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useMemo } from "react";
 import { CharmManager } from "@commontools/charm";
+import { Runtime, VolatileStorageProvider } from "@commontools/runner";
 import { useParams } from "react-router-dom";
 import { type CharmRouteParams } from "@/routes.ts";
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
@@ -36,7 +37,10 @@ export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = (
       localStorage.setItem("lastReplica", replicaName);
     }
 
-    return new CharmManager(session);
+    const runtime = new Runtime({
+      storageProvider: new VolatileStorageProvider(session.space)
+    });
+    return new CharmManager(session, runtime);
   }, [replicaName, session]);
 
   return (

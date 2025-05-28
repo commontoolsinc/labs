@@ -6,7 +6,6 @@ import { str } from "../src/built-in.ts";
 import { type Frame, type JSONSchema, type OpaqueRef } from "../src/types.ts";
 import { popFrame, pushFrame, recipe } from "../src/recipe.ts";
 import { Cell, Runtime } from "@commontools/runner";
-import { VolatileStorageProvider } from "@commontools/runner";
 
 // Helper function to check type compatibility at compile time
 // This doesn't run any actual tests, but ensures types are correct
@@ -18,7 +17,7 @@ describe("Schema-to-TS Type Conversion", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageProvider: new VolatileStorageProvider("test")
+      storageUrl: "volatile://test"
     });
     frame = pushFrame();
   });

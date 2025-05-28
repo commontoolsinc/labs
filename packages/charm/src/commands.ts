@@ -1,6 +1,6 @@
 import { createJsonSchema, NAME, type JSONSchema } from "@commontools/builder";
 import { DEFAULT_MODEL_NAME, fixRecipePrompt } from "@commontools/llm";
-import { Cell, recipeManager } from "@commontools/runner";
+import { Cell } from "@commontools/runner";
 
 import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode, injectUserCode } from "./iframe/static.ts";
@@ -73,7 +73,7 @@ export async function fixItCharm(
   error: Error,
   model = DEFAULT_MODEL_NAME,
 ): Promise<Cell<Charm>> {
-  const iframeRecipe = getIframeRecipe(charm);
+  const iframeRecipe = getIframeRecipe(charm, charmManager);
   if (!iframeRecipe.iframe) {
     throw new Error("Fixit only works for iframe charms");
   }

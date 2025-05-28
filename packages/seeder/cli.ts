@@ -1,5 +1,5 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { setBlobbyServerUrl, storage } from "@commontools/runner";
+import { setBlobbyServerUrl, storage, Runtime, VolatileStorageProvider } from "@commontools/runner";
 import { setLLMUrl } from "@commontools/llm";
 import { createSession, Identity } from "@commontools/identity";
 import { CharmManager } from "@commontools/charm";
@@ -43,12 +43,14 @@ storage.setRemoteStorage(new URL(apiUrl));
 setBlobbyServerUrl(apiUrl);
 setLLMUrl(apiUrl);
 
-const charmManager = new CharmManager(
-  await createSession({
-    identity: await Identity.fromPassphrase("common user"),
-    name,
-  }),
-);
+const session = await createSession({
+  identity: await Identity.fromPassphrase("common user"),
+  name,
+});
+const runtime = new Runtime({
+  storageProvider: new VolatileStorageProvider(session.space)
+});
+const charmManager = new CharmManager(session, runtime);
 
 const verifier =
   await (noVerify ? undefined : Verifier.initialize({ apiUrl, headless }));

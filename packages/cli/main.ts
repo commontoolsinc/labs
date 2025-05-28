@@ -9,6 +9,7 @@ import {
   isStream,
   setBlobbyServerUrl,
   storage,
+  Runtime,
 } from "@commontools/runner";
 import {
   createAdminSession,
@@ -48,7 +49,6 @@ const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
 
 const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "common user";
 
-storage.setRemoteStorage(new URL(toolshedUrl));
 setBlobbyServerUrl(toolshedUrl);
 
 async function main() {
@@ -96,7 +96,10 @@ async function main() {
   }) satisfies Session;
 
   // TODO(seefeld): It only wants the space, so maybe we simplify the above and just space the space did?
-  const charmManager = new CharmManager(session);
+  const runtime = new Runtime({
+    storageUrl: toolshedUrl
+  });
+  const charmManager = new CharmManager(session, runtime);
   const charms = charmManager.getCharms();
   charms.sink((charms) => {
     console.log(

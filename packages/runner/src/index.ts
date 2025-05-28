@@ -15,7 +15,6 @@ export { createRef, getEntityId } from "./doc-map.ts";
 export type { QueryResult } from "./query-result-proxy.ts";
 export type { Action, ErrorWithContext, ReactivityLog } from "./scheduler.ts";
 export * as StorageInspector from "./storage/inspector.ts";
-export { VolatileStorageProvider } from "./storage/volatile.ts";
 export { isDoc } from "./doc.ts";
 export { isCell, isCellLink, isStream } from "./cell.ts";
 export {
@@ -36,3 +35,34 @@ export {
 } from "./utils.ts";
 export { Classification, ContextualFlowControl } from "./cfc.ts";
 export * from "./recipe-manager.ts";
+
+// Minimal compatibility exports for builder package - DO NOT USE IN NEW CODE
+import { Runtime } from "./runtime.ts";
+
+let _compatRuntime: Runtime | undefined;
+function getCompatRuntime() {
+  if (!_compatRuntime) {
+    _compatRuntime = new Runtime({ 
+      storageUrl: "volatile://external-compat" 
+    });
+  }
+  return _compatRuntime;
+}
+
+export function getCell<T = any>(space: string, cause: any, schema?: any, log?: any) {
+  return getCompatRuntime().getCell<T>(space, cause, schema, log);
+}
+
+export function getImmutableCell<T = any>(space: string, value: T, schema?: any) {
+  return getCompatRuntime().getImmutableCell<T>(space, value, schema);
+}
+
+export function getDoc<T = any>(value: any, cause: any, space: string) {
+  return getCompatRuntime().documentMap.getDoc<T>(value, cause, space);
+}
+
+export function idle() {
+  return getCompatRuntime().idle();
+}
+
+export const storage = getCompatRuntime().storage;
