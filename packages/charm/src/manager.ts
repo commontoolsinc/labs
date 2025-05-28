@@ -355,6 +355,7 @@ export class CharmManager {
     }
 
     const recipeId = getRecipeIdFromCharm(charm);
+    if (!recipeId) throw new Error("recipeId is required");
 
     // Make sure we have the recipe so we can run it!
     let recipe: Recipe | Module | undefined;
@@ -1293,6 +1294,7 @@ export class CharmManager {
   }
 
   async syncRecipeById(recipeId: string) {
+    if (!recipeId) throw new Error("recipeId is required");
     return await this.runtime.recipeManager.loadRecipe(recipeId, this.space);
   }
 
