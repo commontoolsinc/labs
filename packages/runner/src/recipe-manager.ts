@@ -208,7 +208,9 @@ export class RecipeManager implements IRecipeManager {
     };
   }
 
-  async publishToBlobby(recipeId: string): Promise<void> {
+  async publishToBlobby(
+    recipeId: string,
+  ): Promise<void> {
     try {
       const recipe = this.recipeIdMap.get(recipeId);
       if (!recipe) {
@@ -222,17 +224,23 @@ export class RecipeManager implements IRecipeManager {
         return;
       }
 
+      const data = {
+        src: meta.src,
+        recipe: JSON.parse(JSON.stringify(recipe)),
+        spec: meta.spec,
+        parents: meta.parents,
+        recipeName: meta.recipeName,
+      };
+
+      console.log(`Saving spell-${recipeId}`);
       const response = await fetch(
-        `${this.runtime.blobbyServerUrl}/recipes/${recipeId}`,
+        `${this.runtime.blobbyServerUrl}/spell-${recipeId}`,
         {
-          method: "PUT",
+          method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            id: recipeId,
-            source: meta.src,
-          }),
+          body: JSON.stringify(data),
         },
       );
 

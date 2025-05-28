@@ -517,7 +517,7 @@ export async function compileRecipe(
     recipe,
     recipeSrc,
   );
-  charmManager.runtime.recipeManager.registerRecipe({
+  await charmManager.runtime.recipeManager.registerRecipe({
     recipeId,
     space: charmManager.getSpace(),
     recipe,
