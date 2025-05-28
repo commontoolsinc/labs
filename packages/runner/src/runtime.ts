@@ -1,6 +1,5 @@
 // Import types from various modules
 import type { Signer } from "@commontools/identity";
-import type { StorageProvider } from "./storage/base.ts";
 import type { Cell, CellLink } from "./cell.ts";
 import type { DocImpl } from "./doc.ts";
 import { isDoc } from "./doc.ts";
@@ -63,6 +62,8 @@ export interface IRuntime {
   readonly documentMap: IDocumentMap;
   readonly harness: Harness;
   readonly runner: IRunner;
+  readonly blobbyServerUrl: string | undefined;
+
   idle(): Promise<void>;
   dispose(): Promise<void>;
 
@@ -275,6 +276,7 @@ export class Runtime implements IRuntime {
   readonly documentMap: IDocumentMap;
   readonly harness: Harness;
   readonly runner: IRunner;
+  readonly blobbyServerUrl: string | undefined;
 
   constructor(options: RuntimeOptions) {
     // Generate unique ID for this runtime instance
@@ -310,8 +312,7 @@ export class Runtime implements IRuntime {
     // Handle blobby server URL configuration if provided
     if (options.blobbyServerUrl) {
       // The blobby server URL would be used by recipe manager for publishing
-      // This is handled internally by the getBlobbyServerUrl() function
-      this._setBlobbyServerUrl(options.blobbyServerUrl);
+      this.blobbyServerUrl = options.blobbyServerUrl;
     }
 
     // Handle recipe environment configuration
@@ -362,27 +363,10 @@ export class Runtime implements IRuntime {
     // Removed setCurrentRuntime call - no longer using singleton pattern
   }
 
-  private _setBlobbyServerUrl(url: string): void {
-    // This would need to integrate with the blobby storage configuration
-    // For now, we'll store it for future use
-    (globalThis as any).__BLOBBY_SERVER_URL = url;
-  }
-
   private _setRecipeEnvironment(environment: string): void {
     // This would need to integrate with recipe environment configuration
     // For now, we'll store it for future use
     (globalThis as any).__RECIPE_ENVIRONMENT = environment;
-  }
-
-  private _getOptions(): RuntimeOptions {
-    // Return current configuration for forking
-    return {
-      storageUrl: "volatile://external-compat",
-      blobbyServerUrl: (globalThis as any).__BLOBBY_SERVER_URL,
-      recipeEnvironment: (globalThis as any).__RECIPE_ENVIRONMENT,
-      // Note: We can't easily extract other options like signer, handlers, etc.
-      // This would need to be improved if forking with full config is needed
-    };
   }
 
   // Cell factory methods

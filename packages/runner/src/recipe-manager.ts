@@ -1,6 +1,5 @@
 import { JSONSchema, Module, Recipe, Schema } from "@commontools/builder";
 import { Cell } from "./cell.ts";
-import { getBlobbyServerUrl } from "./blobby-storage.ts";
 import type { IRecipeManager, IRuntime } from "./runtime.ts";
 import { createRef } from "./doc-map.ts";
 
@@ -172,7 +171,9 @@ export class RecipeManager implements IRecipeManager {
   private async importFromBlobby(
     { recipeId }: { recipeId: string },
   ): Promise<{ recipe: Recipe; recipeMeta: RecipeMeta }> {
-    const response = await fetch(`${getBlobbyServerUrl()}/spell-${recipeId}`);
+    const response = await fetch(
+      `${this.runtime.blobbyServerUrl}/spell-${recipeId}`,
+    );
     if (!response.ok) {
       throw new Error(`Failed to fetch recipe ${recipeId} from blobby`);
     }
@@ -211,7 +212,7 @@ export class RecipeManager implements IRecipeManager {
       }
 
       const response = await fetch(
-        `${getBlobbyServerUrl()}/recipes/${recipeId}`,
+        `${this.runtime.blobbyServerUrl}/recipes/${recipeId}`,
         {
           method: "PUT",
           headers: {
