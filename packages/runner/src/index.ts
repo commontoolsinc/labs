@@ -1,11 +1,11 @@
 // New Runtime class and interfaces
 export { Runtime } from "./runtime.ts";
-export type { 
-  RuntimeOptions, 
-  ConsoleHandler, 
-  ErrorHandler,
+export type {
   CharmMetadata,
-  ErrorWithContext as RuntimeErrorWithContext
+  ConsoleHandler,
+  ErrorHandler,
+  ErrorWithContext as RuntimeErrorWithContext,
+  RuntimeOptions,
 } from "./runtime.ts";
 
 // Legacy singleton exports removed - use Runtime instance methods instead
@@ -31,18 +31,27 @@ import { VolatileStorageProvider } from "./storage/volatile.ts";
 let _compatRuntime: Runtime | undefined;
 function getCompatRuntime() {
   if (!_compatRuntime) {
-    _compatRuntime = new Runtime({ 
-      storageProvider: new VolatileStorageProvider("external-compat") 
+    _compatRuntime = new Runtime({
+      storageProvider: new VolatileStorageProvider("external-compat"),
     });
   }
   return _compatRuntime;
 }
 
-export function getCell<T = any>(space: string, cause: any, schema?: any, log?: any) {
+export function getCell<T = any>(
+  space: string,
+  cause: any,
+  schema?: any,
+  log?: any,
+) {
   return getCompatRuntime().getCell<T>(space, cause, schema, log);
 }
 
-export function getImmutableCell<T = any>(space: string, value: T, schema?: any) {
+export function getImmutableCell<T = any>(
+  space: string,
+  value: T,
+  schema?: any,
+) {
   return getCompatRuntime().getImmutableCell<T>(space, value, schema);
 }
 
@@ -65,15 +74,13 @@ export {
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 export { effect } from "./reactivity.ts";
-export {
-  // Removed singleton functions: createRef, getDocByEntityId, getEntityId - use runtime.documentMap methods instead
-  // EntityId is now exported above
-} from "./doc-map.ts";
+export {} from // Removed singleton functions: createRef, getDocByEntityId, getEntityId - use runtime.documentMap methods instead
+// EntityId is now exported above
+"./doc-map.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export { Storage } from "./storage.ts";
 export { getBlobbyServerUrl, setBlobbyServerUrl } from "./blobby-storage.ts";
 export { ConsoleMethod } from "./harness/console.ts";
-export { runtime as harnessRuntime } from "./harness/index.ts";
 
 // Removed old backward compatibility singletons - use Runtime instances instead
 export {
