@@ -136,6 +136,10 @@ export class ServerTraverseHelper extends BaseObjectManager<
   getReadDocs(): Iterable<ValueEntry<FullFactAddress, JSONValue | undefined>> {
     return this.readValues.values();
   }
+
+  getLabels(): Iterable<[Entity, SelectedFact | undefined]> {
+    return this.readLabels.entries();
+  }
 }
 
 export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {

@@ -817,16 +817,14 @@ export function getLabels<
   return labels;
 }
 
-// Get the last label that applied to the entity before the specified since.
-// If end is undefined, just returns the last label.
+// Get the label that applies to the entity.
 export function getLabel<Space extends MemorySpace>(
   session: Session<Space>,
   of: Entity,
 ) {
   const labelSelector = { of, the: LABEL_THE, cause: SelectAllString };
-  const labelFacts = [...selectFacts(session, labelSelector)].reverse();
   // Apply the last label that was active for the selected fact
-  for (const metadata of labelFacts) {
+  for (const metadata of selectFacts(session, labelSelector)) {
     return metadata;
   }
   return undefined;
