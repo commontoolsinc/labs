@@ -105,13 +105,17 @@ export function str(
  *   by the order of invocation, which is less stable.
  * @param value - Optional, the initial value of the cell.
  */
-export declare function createCell<T>(
-  schema?: JSONSchema,
-  name?: string,
-  value?: T,
-): Cell<T>;
-export declare function createCell<S extends JSONSchema = JSONSchema>(
-  schema: S,
-  name?: string,
-  value?: Schema<S>,
-): Cell<Schema<S>>;
+declare global {
+  function createCell<T>(
+    schema?: JSONSchema,
+    name?: string,
+    value?: T,
+  ): Cell<T>;
+  function createCell<S extends JSONSchema = JSONSchema>(
+    schema: S,
+    name?: string,
+    value?: Schema<S>,
+  ): Cell<Schema<S>>;
+}
+
+export { createCell };
