@@ -12,15 +12,17 @@ import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { type Cell, isCell } from "../src/cell.ts";
 import { resolveLinks } from "../src/utils.ts";
-// import { getRecipeIdFromCharm } from "../../charm/src/manager.ts"; // TODO: Fix external dependency
+import { createCellFactory } from "../src/harness/create-cell.ts";
 
 describe("Recipe Runner", () => {
   let runtime: Runtime;
+  let createCell: ReturnType<typeof createCellFactory>;
 
   beforeEach(() => {
     runtime = new Runtime({
       storageUrl: "volatile://test",
     });
+    createCell = createCellFactory(runtime);
   });
 
   afterEach(async () => {
