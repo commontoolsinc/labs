@@ -118,4 +118,4 @@ declare global {
   ): Cell<Schema<S>>;
 }
 
-export { createCell };
+export type { createCell };
