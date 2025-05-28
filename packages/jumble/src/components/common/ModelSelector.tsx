@@ -21,8 +21,18 @@ const MODEL_OPTIONS = [
   } as const,
   // Full model list
   {
+    value: "anthropic:claude-sonnet-4-latest",
+    label: "Claude 4 Sonnet ✨",
+    isPreset: false,
+  } as const,
+  {
+    value: "anthropic:claude-opus-4-latest",
+    label: "Claude 4 Opus ✨",
+    isPreset: false,
+  } as const,
+  {
     value: "anthropic:claude-3-7-sonnet-latest",
-    label: "Claude 3.7 ✨",
+    label: "Claude 3.7",
     isPreset: false,
   } as const,
   {

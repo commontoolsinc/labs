@@ -7,8 +7,7 @@ const API_URL = Deno.env.get("TOOLSHED_API_URL")
   ? `${Deno.env.get("TOOLSHED_API_URL")}/api/ai/llm`
   : "http://localhost:8000/api/ai/llm";
 const TEST_SYSTEM_PROMPT = "Be creative.";
-const current_time = new Date().toISOString();
-const TEST_PROMPT = `What's your favorite color? (cachebust:${current_time})`;
+const TEST_PROMPT = `What's your favorite color?`;
 
 async function testLlm(modelName: string) {
   const payload = {
@@ -16,6 +15,7 @@ async function testLlm(modelName: string) {
     system: TEST_SYSTEM_PROMPT,
     messages: [{ role: "user", content: TEST_PROMPT }],
     stream: false,
+    cache: false,
   };
 
   console.log(
@@ -92,8 +92,12 @@ async function main() {
         // "openai:o4-mini-low",
         // "openai:o4-mini-medium",
         // "openai:o4-mini-high",
-        "groq:llama-4-maverick",
-        "groq:llama-4-scout",
+        // "groq:llama-4-maverick",
+        // "groq:llama-4-scout",
+        "anthropic:claude-sonnet-4-20250514",
+        "anthropic:claude-opus-4-20250514",
+        "anthropic:claude-sonnet-4-20250514-thinking",
+        "anthropic:claude-opus-4-20250514-thinking",
       ];
     }
   } else if (args._ && args._[0]) {
