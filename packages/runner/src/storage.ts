@@ -54,11 +54,11 @@ export function log(fn: () => any[]) {
   });
 }
 
-type Job =
-  | { doc: DocImpl<any>; type: "sync" }
-  | { doc: DocImpl<any>; type: "save"; labels?: Labels }
-  | { doc: DocImpl<any>; type: "doc" }
-  | { doc: DocImpl<any>; type: "storage" };
+type Job = {
+  doc: DocImpl<any>;
+  type: "doc" | "storage" | "sync";
+  label?: string;
+};
 
 export class Storage implements IStorage {
   private _id: string;

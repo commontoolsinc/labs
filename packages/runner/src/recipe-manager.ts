@@ -238,7 +238,7 @@ export class RecipeManager implements IRecipeManager {
     }
   }
 
-  publishRecipe(recipeId: string, space: string = "default"): Promise<void> {
+  publishRecipe(recipeId: string): Promise<void> {
     return this.publishToBlobby(recipeId);
   }
 
@@ -246,7 +246,7 @@ export class RecipeManager implements IRecipeManager {
     return Array.from(this.recipeIdMap.keys());
   }
 
-  removeRecipe(id: string): Promise<void> {
+  removeRecipe(id: string): void {
     const recipe = this.recipeIdMap.get(id);
     if (recipe) {
       this.recipeIdMap.delete(id);

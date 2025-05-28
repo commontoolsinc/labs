@@ -135,26 +135,26 @@ export class CharmManager {
 
     this.runtime.storage.setSigner(session.as);
 
-    this.charms = this.runtime.storage.getCell(
+    this.charms = this.runtime.getCell(
       this.space,
       "charms",
       charmListSchema,
     );
-    this.pinnedCharms = this.runtime.storage.getCell(
+    this.pinnedCharms = this.runtime.getCell(
       this.space,
       "pinned-charms",
       charmListSchema,
     );
-    this.trashedCharms = this.runtime.storage.getCell(
+    this.trashedCharms = this.runtime.getCell(
       this.space,
       "trash",
       charmListSchema,
     );
 
     this.ready = Promise.all([
-      this.runtime.storage.syncCell(this.charms, false, schemaContext),
-      this.runtime.storage.syncCell(this.pinnedCharms, false, schemaContext),
-      this.runtime.storage.syncCell(this.trashedCharms, false, schemaContext),
+      this.syncCharms(this.charms),
+      this.syncCharms(this.pinnedCharms),
+      this.syncCharms(this.trashedCharms),
     ]);
   }
 
@@ -258,7 +258,7 @@ export class CharmManager {
 
   private async add(newCharms: Cell<Charm>[]) {
     await this.syncCharms(this.charms);
-    await idle();
+    await this.runtime.idle();
 
     newCharms.forEach((charm) => {
       if (!this.charms.get().some((otherCharm) => otherCharm.equals(charm))) {

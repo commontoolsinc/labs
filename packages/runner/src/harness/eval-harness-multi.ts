@@ -1,13 +1,11 @@
 import { Recipe } from "@commontools/builder";
 import { Console } from "./console.ts";
-import { CtRuntime, RuntimeFunction } from "./ct-runtime.ts";
+import { Harness, HarnessedFunction } from "./harness.ts";
 import {
   bundle,
   getTypeLibs,
   TsArtifact,
   TypeScriptCompiler,
-  UnsafeEvalIsolate,
-  UnsafeEvalRuntime,
 } from "@commontools/js-runtime";
 import * as commonHtml from "@commontools/html";
 import * as commonBuilder from "@commontools/builder";
@@ -32,13 +30,8 @@ declare global {
   var [MULTI_RUNTIME_CONSOLE_HOOK]: any;
 }
 
-interface Internals {
-  compiler: TypeScriptCompiler;
-  runtime: UnsafeEvalRuntime;
-  isolate: UnsafeEvalIsolate;
-}
-export class UnsafeEvalRuntimeMulti extends EventTarget implements CtRuntime {
-  private internals: Internals | undefined;
+export class UnsafeEvalRuntimeMulti extends EventTarget implements Harness {
+  private compiler: TypeScriptCompiler | undefined;
   constructor() {
     super();
     // We install our console shim globally so that it can be referenced
@@ -54,36 +47,23 @@ export class UnsafeEvalRuntimeMulti extends EventTarget implements CtRuntime {
   }
 
   async run(source: TsArtifact): Promise<Recipe> {
-    if (!this.internals) {
+    if (!this.compiler) {
       const typeLibs = await getTypeLibs();
-      const compiler = new TypeScriptCompiler(typeLibs);
-      const runtime = new UnsafeEvalRuntime();
-      const isolate = runtime.getIsolate("");
-      this.internals = { compiler, runtime, isolate };
+      this.compiler = new TypeScriptCompiler(typeLibs);
     }
-
-    const { compiler, isolate } = this.internals;
-
     const injectedScript =
-      `const console = globalThis.${RUNTIME_CONSOLE_HOOK};`;
-    const compiled = compiler.compile(source);
-    const bundled = bundle({
-      source: compiled,
-      injectedScript,
-      filename: "out.js",
-      runtimeDependencies: true,
-    });
-    const exports = isolate.execute(bundled).invoke(createLibExports()).inner();
-    if (exports && !("default" in exports)) {
+      `const console = globalThis.${MULTI_RUNTIME_CONSOLE_HOOK};`;
+    const compiled = this.compiler.compile(source);
+    const jsSrc = await bundle({ source: compiled, injectedScript });
+    const exports = eval(jsSrc.js);
+    if (!("default" in exports)) {
       throw new Error("No default export found in compiled recipe.");
     }
     return exports.default;
   }
-
-  getInvocation(source: string): RuntimeFunction {
+  getInvocation(source: string): HarnessedFunction {
     return eval(source);
   }
-
   mapStackTrace(stack: string): string {
     //return mapSourceMapsOnStacktrace(stack);
     return stack;

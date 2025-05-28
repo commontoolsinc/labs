@@ -8,7 +8,7 @@ import type { EntityId } from "./doc-map.ts";
 import type { Cancel } from "./cancel.ts";
 import type { Action, EventHandler, ReactivityLog } from "./scheduler.ts";
 import type { Harness } from "./harness/harness.ts";
-import { UnsafeEvalHarness } from "./harness/eval-harness.ts";
+import { UnsafeEvalRuntimeMulti } from "./harness/index.ts";
 import type {
   JSONSchema,
   Module,
@@ -16,9 +16,6 @@ import type {
   Recipe,
   Schema,
 } from "@commontools/builder";
-import { isBrowser, isDeno } from "@commontools/utils/env";
-
-// Interface definitions that were previously in separate files
 
 export type ErrorWithContext = Error & {
   action: Action;
@@ -27,7 +24,6 @@ export type ErrorWithContext = Error & {
   recipeId: string;
 };
 
-import type { ConsoleEvent } from "./harness/console.ts";
 import { ConsoleMethod } from "./harness/console.ts";
 export type ConsoleHandler = (
   metadata: { charmId?: string; recipeId?: string; space?: string } | undefined,
@@ -172,14 +168,22 @@ export interface IStorage {
 
 export interface IRecipeManager {
   readonly runtime: IRuntime;
-  compileRecipe(source: string, space?: string): Promise<any>;
   recipeById(id: string): any;
   generateRecipeId(recipe: any, src?: string): string;
   loadRecipe(id: string, space?: string): Promise<any>;
   getRecipeMeta(input: any): any;
   registerRecipe(
-    params: { recipeId: string; space: string; recipe: any; recipeMeta: any },
+    params: {
+      recipeId: string;
+      space: string;
+      recipe: Recipe | Module;
+      recipeMeta: any;
+    },
   ): Promise<boolean>;
+  publishToBlobby(recipeId: string): Promise<void>;
+  publishRecipe(recipeId: string): Promise<void>;
+  listRecipes(): string[];
+  removeRecipe(id: string): void;
 }
 
 export interface IModuleRegistry {
@@ -240,9 +244,7 @@ import { RecipeManager } from "./recipe-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { DocumentMap } from "./doc-map.ts";
 import { Runner } from "./runner.ts";
-import { VolatileStorageProvider } from "./storage/volatile.ts";
 import { registerBuiltins } from "./builtins/index.ts";
-// Removed setCurrentRuntime import - no longer using singleton pattern
 
 /**
  * Main Runtime class that orchestrates all services in the runner package.
@@ -275,7 +277,7 @@ export class Runtime implements IRuntime {
 
   constructor(options: RuntimeOptions) {
     // Create harness first (no dependencies on other services)
-    this.harness = new UnsafeEvalHarness(this);
+    this.harness = new UnsafeEvalRuntimeMulti();
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(

@@ -1,13 +1,7 @@
 // Load .env file
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
-import {
-  getCellFromLink,
-  getDocByEntityId,
-  getEntityId,
-  isStream,
-  Runtime,
-} from "@commontools/runner";
+import { getEntityId, isStream, Runtime } from "@commontools/runner";
 import {
   createAdminSession,
   type DID,
@@ -96,7 +90,7 @@ async function main() {
   const runtime = new Runtime({
     storageUrl: toolshedUrl,
     blobbyServerUrl: toolshedUrl,
-    signer: identity
+    signer: identity,
   });
   const charmManager = new CharmManager(session, runtime);
   const charms = charmManager.getCharms();
@@ -173,9 +167,13 @@ async function main() {
       Array.isArray(value.path)
     ) {
       const space: string = (value.space as string) ?? spaceDID!;
-      return getCellFromLink({
+      return runtime.getCellFromLink({
         space,
-        cell: getDocByEntityId(space, value.cell as { "/": string }, true)!,
+        cell: runtime.documentMap.getDocByEntityId(
+          space,
+          value.cell as { "/": string },
+          true,
+        )!,
         path: value.path,
       });
     } else if (Array.isArray(value)) {
