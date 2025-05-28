@@ -112,6 +112,7 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
       reasoning: false,
     },
   });
+
   addModel({
     provider: anthropicProvider,
     name: "anthropic:claude-3-7-sonnet-20250219",
@@ -148,6 +149,86 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
     providerOptions: {
       anthropic: {
         thinking: { type: "enabled", budgetTokens: 64000 },
+      },
+    },
+  });
+
+  addModel({
+    provider: anthropicProvider,
+    name: "anthropic:claude-sonnet-4-20250514",
+    aliases: ["anthropic:claude-4-sonnet-latest", "claude-4-sonnet"],
+    capabilities: {
+      contextWindow: 200_000,
+      maxOutputTokens: 64000,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: false,
+    },
+  });
+
+  addModel({
+    provider: anthropicProvider,
+    name: "anthropic:claude-sonnet-4-20250514-thinking",
+    aliases: [
+      "anthropic:claude-4-sonnet-thinking-latest",
+      "claude-4-sonnet-thinking",
+    ],
+    capabilities: {
+      contextWindow: 200_000,
+      maxOutputTokens: 64000,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: true,
+    },
+    providerOptions: {
+      anthropic: {
+        thinking: { type: "enabled", budgetTokens: 64000 },
+      },
+    },
+  });
+
+  addModel({
+    provider: anthropicProvider,
+    name: "anthropic:claude-opus-4-20250514",
+    aliases: ["anthropic:claude-4-opus-latest", "claude-4-opus"],
+    capabilities: {
+      contextWindow: 200_000,
+      maxOutputTokens: 32000,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: false,
+    },
+  });
+
+  addModel({
+    provider: anthropicProvider,
+    name: "anthropic:claude-opus-4-20250514-thinking",
+    aliases: [
+      "anthropic:claude-4-opus-thinking-latest",
+      "claude-4-opus-thinking",
+    ],
+    capabilities: {
+      contextWindow: 200_000,
+      maxOutputTokens: 32000,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: true,
+    },
+    providerOptions: {
+      anthropic: {
+        thinking: { type: "enabled", budgetTokens: 32000 },
       },
     },
   });
