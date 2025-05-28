@@ -68,7 +68,7 @@ export function createRef(
  * Extracts an entity ID from a cell or cell representation.
  * This is a pure function that doesn't require runtime dependencies.
  */
-export function getEntityId(value: any): EntityId | undefined {
+export function getEntityId(value: any): { "/": string } | undefined {
   if (typeof value === "string") {
     return value.startsWith("{") ? JSON.parse(value) : { "/": value };
   }
