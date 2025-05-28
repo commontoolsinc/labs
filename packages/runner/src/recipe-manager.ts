@@ -26,7 +26,7 @@ export class RecipeManager implements IRecipeManager {
 
   private async getRecipeMetaCell(
     { recipeId, space }: { recipeId: string; space: string },
-  ) {
+  ): Promise<Cell<RecipeMeta>> {
     const cell = this.runtime.getCell(
       space,
       { recipeId, type: "recipe" },
@@ -121,7 +121,7 @@ export class RecipeManager implements IRecipeManager {
     let recipeMeta = metaCell.get();
 
     // 1. Fallback to Blobby if cell missing or stale
-    if (recipeMeta.id !== recipeId) {
+    if (recipeMeta?.id !== recipeId) {
       const imported = await this.importFromBlobby({ recipeId });
       recipeMeta = imported.recipeMeta;
       metaCell.set(recipeMeta);
@@ -146,7 +146,7 @@ export class RecipeManager implements IRecipeManager {
     return recipe;
   }
 
-  async loadRecipe(id: string, space: string = "default"): Promise<Recipe> {
+  async loadRecipe(id: string, space: string): Promise<Recipe> {
     const existing = this.recipeIdMap.get(id);
     if (existing) {
       return existing;
