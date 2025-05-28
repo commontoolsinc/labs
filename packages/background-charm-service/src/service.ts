@@ -38,7 +38,11 @@ export class BackgroundCharmService {
   async initialize() {
     this.storage.setRemoteStorage(new URL(this.toolshedUrl));
     this.storage.setSigner(this.identity);
-    this.charmsCell = await getBGCharms({ bgSpace: this.bgSpace, bgCause: this.bgCause, storage: this.storage });
+    this.charmsCell = await getBGCharms({
+      bgSpace: this.bgSpace,
+      bgCause: this.bgCause,
+      storage: this.storage,
+    });
     await this.storage.syncCell(this.charmsCell, true);
     await this.storage.synced();
 
@@ -73,7 +77,10 @@ export class BackgroundCharmService {
       return;
     }
 
-    const dids = new Set(charms.map((c) => c.get().space));
+    // Charms that hit an e.g. Authorization Error are empty, and space
+    // is undefined -- filter out any of these charms before creating
+    // a worker
+    const dids = new Set(charms.map((c) => c.get().space).filter(Boolean));
     log(`monitoring ${dids.size} spaces`);
 
     const [cancel, addCancel] = useCancelGroup();
