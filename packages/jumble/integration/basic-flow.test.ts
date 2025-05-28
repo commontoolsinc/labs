@@ -260,7 +260,7 @@ Deno.test({
         },
       });
     } finally {
-      await browser!.close();
+      await browser?.close();
     }
   },
 });
