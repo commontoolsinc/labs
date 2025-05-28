@@ -8,7 +8,7 @@ describe("runRecipe", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://test",
+      storageUrl: "volatile://",
     });
   });
 

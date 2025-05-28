@@ -48,7 +48,7 @@ const session = await createSession({
   name,
 });
 const runtime = new Runtime({
-  storageUrl: `volatile://${session.space}`,
+  storageUrl: "volatile://",
   blobbyServerUrl: apiUrl,
   signer: identity
 });

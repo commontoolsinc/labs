@@ -17,7 +17,7 @@ describe("Schema-to-TS Type Conversion", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://test"
+      storageUrl: "volatile://"
     });
     frame = pushFrame();
   });

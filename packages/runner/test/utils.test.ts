@@ -23,7 +23,7 @@ describe("Utils", () => {
   
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://test"
+      storageUrl: "volatile://"
     });
   });
   

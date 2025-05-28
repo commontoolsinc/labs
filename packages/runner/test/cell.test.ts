@@ -13,7 +13,7 @@ describe("Cell", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://test"
+      storageUrl: "volatile://"
     });
   });
 
@@ -102,7 +102,7 @@ describe("Cell utility functions", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://test"
+      storageUrl: "volatile://"
     });
   });
 
@@ -140,7 +140,7 @@ describe("createProxy", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://test"
+      storageUrl: "volatile://"
     });
   });
 
@@ -459,7 +459,7 @@ describe("asCell", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://test"
+      storageUrl: "volatile://"
     });
   });
 
@@ -575,7 +575,7 @@ describe("asCell with schema", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://test"
+      storageUrl: "volatile://"
     });
   });
 
@@ -1441,7 +1441,7 @@ describe("JSON.stringify bug", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://test"
+      storageUrl: "volatile://"
     });
   });
 

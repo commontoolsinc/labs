@@ -93,7 +93,7 @@ async function initialize(
 
   // Initialize runtime and charm manager
   runtime = new Runtime({
-    storageUrl: `volatile://`,
+    storageUrl: "volatile://",
     blobbyServerUrl: toolshedUrl,
     signer: identity,
     recipeEnvironment: JSON.stringify({ apiUrl }),

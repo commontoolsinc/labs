@@ -23,7 +23,7 @@ describe("recipes with HTML", () => {
 
     // Set up runtime
     runtime = new Runtime({
-      storageUrl: "volatile://test"
+      storageUrl: "volatile://"
     });
   });
 

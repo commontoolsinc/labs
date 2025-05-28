@@ -9,7 +9,7 @@ describe("Schema Lineage", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://test",
+      storageUrl: "volatile://",
     });
   });
 
@@ -70,7 +70,7 @@ describe("Schema propagation end-to-end example", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://test",
+      storageUrl: "volatile://",
     });
   });
 

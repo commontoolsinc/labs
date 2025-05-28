@@ -15,7 +15,7 @@ describe("scheduler", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://test"
+      storageUrl: "volatile://"
     });
   });
 
@@ -328,7 +328,7 @@ describe("event handling", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://test"
+      storageUrl: "volatile://"
     });
   });
 
@@ -498,7 +498,7 @@ describe("compactifyPaths", () => {
   
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://test"
+      storageUrl: "volatile://"
     });
   });
   

@@ -20,7 +20,7 @@ describe("Recipe Runner", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://test",
+      storageUrl: "volatile://",
     });
     createCell = createCellFactory(runtime);
   });

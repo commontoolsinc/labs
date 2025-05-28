@@ -22,7 +22,7 @@ describe("Storage", () => {
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://test",
+      storageUrl: "volatile://",
       signer: signer
     });
     

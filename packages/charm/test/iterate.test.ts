@@ -9,7 +9,7 @@ describe("scrub function", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://test"
+      storageUrl: "volatile://"
     });
   });
 
