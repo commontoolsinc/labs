@@ -58,27 +58,30 @@ export type ValueEntry<T, V> = {
 export abstract class BaseObjectManager<K, S, V>
   implements ObjectStorageManager<K, S, V> {
   constructor(
-    protected readValues = new Map<K, ValueEntry<S, V>>(),
-    protected writeValues = new Map<K, ValueEntry<S, V>>(),
-    protected readDependentDocs = new Map<K, Set<S>>(),
-    protected writeDependentDocs = new Map<K, Set<S>>(),
+    protected readValues = new Map<string, ValueEntry<S, V>>(),
+    protected writeValues = new Map<string, ValueEntry<S, V>>(),
+    protected readDependentDocs = new Map<string, Set<S>>(),
+    protected writeDependentDocs = new Map<string, Set<S>>(),
   ) {}
 
   addRead(doc: K, value: V, source: S) {
-    const dependencies = this.readDependentDocs.get(doc) ?? new Set<S>();
+    const key = this.toKey(doc);
+    const dependencies = this.readDependentDocs.get(key) ?? new Set<S>();
     dependencies.add(source);
-    this.readDependentDocs.set(doc, dependencies);
-    this.readValues.set(doc, { value: value, source: source });
+    this.readDependentDocs.set(key, dependencies);
+    this.readValues.set(key, { value: value, source: source });
   }
 
   addWrite(doc: K, value: V, source: S) {
-    const dependencies = this.writeDependentDocs.get(doc) ?? new Set<S>();
+    const key = this.toKey(doc);
+    const dependencies = this.writeDependentDocs.get(key) ?? new Set<S>();
     dependencies.add(source);
-    this.writeDependentDocs.set(doc, dependencies);
-    this.writeValues.set(doc, { value: value, source: source });
+    this.writeDependentDocs.set(key, dependencies);
+    this.writeValues.set(key, { value: value, source: source });
   }
   abstract getTarget(value: CellTarget): K;
   abstract load(doc: K): ValueEntry<S, V | undefined> | null;
+  abstract toKey(doc: K): string;
 }
 
 export type OptJSONValue =

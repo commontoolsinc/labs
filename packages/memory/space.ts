@@ -800,7 +800,7 @@ export function getLabels<
 ): OfTheCause<FactSelectionValue> {
   const labels: OfTheCause<FactSelectionValue> = {};
   for (const fact of iterate(includedFacts)) {
-    const labelFact = getLabelForFact(session, fact);
+    const labelFact = getLabel(session, fact.of);
     if (labelFact !== undefined) {
       set<FactSelectionValue, OfTheCause<FactSelectionValue>>(
         labels,
@@ -817,38 +817,17 @@ export function getLabels<
   return labels;
 }
 
-// Return the most recent label that applied to the specified fact
-export function getLabelForFact<Space extends MemorySpace, T>(
-  session: Session<Space>,
-  fact: { of: Entity; the: The; cause: Cause; value: Revision<T> },
-) {
-  // We're only interested in the labels that applied to this fact during
-  // the period it was active, so get the subsequent fact to find max since.
-  const nextFactSelector = {
-    of: fact.of,
-    the: fact.the,
-    cause: SelectAllString,
-    since: fact.value.since + 1,
-  };
-  const [nextFact] = selectFacts(session, nextFactSelector);
-  const end = nextFact ? nextFact.since : undefined;
-  return getLabel(session, fact.of, end);
-}
-
 // Get the last label that applied to the entity before the specified since.
 // If end is undefined, just returns the last label.
-function getLabel<Space extends MemorySpace>(
+export function getLabel<Space extends MemorySpace>(
   session: Session<Space>,
   of: Entity,
-  end?: number,
 ) {
   const labelSelector = { of, the: LABEL_THE, cause: SelectAllString };
   const labelFacts = [...selectFacts(session, labelSelector)].reverse();
   // Apply the last label that was active for the selected fact
   for (const metadata of labelFacts) {
-    if (end === undefined || metadata.since < end) {
-      return metadata;
-    }
+    return metadata;
   }
   return undefined;
 }

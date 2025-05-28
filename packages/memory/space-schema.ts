@@ -1,5 +1,6 @@
 import type {
   Cause,
+  Entity,
   FactSelection,
   MemorySpace,
   SchemaContext,
@@ -13,10 +14,11 @@ import {
   FactSelectionValue,
   FactSelector,
   getClassifications,
-  getLabelForFact,
+  getLabel,
   getLabels,
   loadFacts,
   redactCommitData,
+  SelectedFact,
   selectFacts,
   Session,
   toSelection,
@@ -57,11 +59,19 @@ export class ServerTraverseHelper extends BaseObjectManager<
   FullFactAddress,
   JSONValue | undefined
 > {
+  // Cache our read labels, and any docs we can't read
+  private readLabels = new Map<Entity, SelectedFact | undefined>();
+  private restrictedValues = new Set<string>();
+
   constructor(
     private session: Session<MemorySpace>,
     private providedClassifications: Set<string>,
   ) {
     super();
+  }
+
+  toKey(doc: FactAddress): string {
+    return `${doc.of}/${doc.the}`;
   }
 
   // load the doc pointed to by the cell target
@@ -77,8 +87,11 @@ export class ServerTraverseHelper extends BaseObjectManager<
   load(
     doc: FactAddress,
   ): ValueEntry<FullFactAddress, JSONValue | undefined> | null {
-    if (this.readValues.has(doc)) {
-      return this.readValues.get(doc)!;
+    const key = this.toKey(doc);
+    if (this.readValues.has(key)) {
+      return this.readValues.get(key)!;
+    } else if (this.restrictedValues.has(key)) {
+      return null;
     }
     const factSelector: FactSelector = {
       of: doc.of,
@@ -96,12 +109,11 @@ export class ServerTraverseHelper extends BaseObjectManager<
         },
         value: fact.is ? (fact.is as JSONObject) : undefined,
       };
-      const labelEntry = getLabelForFact(this.session, {
-        of: fact.of,
-        the: fact.the,
-        cause: fact.cause,
-        value: { since: fact.since },
-      });
+      if (!this.readLabels.has(doc.of)) {
+        const label = getLabel(this.session, doc.of);
+        this.readLabels.set(doc.of, label);
+      }
+      const labelEntry = this.readLabels.get(doc.of);
       if (labelEntry?.is) {
         const requiredClassifications = getClassifications({
           is: labelEntry.is,
@@ -111,10 +123,11 @@ export class ServerTraverseHelper extends BaseObjectManager<
           console.log(
             `Skipping inclusion of ${fact.of}, due to classification`,
           );
+          this.restrictedValues.add(key);
           return null;
         }
       }
-      this.readValues.set(doc, valueEntry);
+      this.readValues.set(key, valueEntry);
       return valueEntry;
     }
     return null;
