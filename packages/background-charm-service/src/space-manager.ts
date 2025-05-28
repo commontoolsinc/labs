@@ -251,6 +251,13 @@ export class SpaceManager {
     this.pendingTasks = this.pendingTasks.filter((r) => r.charmId !== charmId);
   }
 
+  private disableSpace(reason: string) {
+    console.log(`${this.did} Disabling space: ${reason}`);
+    for (const [charmId, entry] of this.enabledCharms.entries()) {
+      this.disableCharm(charmId, entry, reason);
+    }
+  }
+
   // This is fired from `WorkerController` when an terminal error
   // occurs (e.g. outside of the graph), and may happen at any point
   // during execution.
@@ -268,9 +275,7 @@ export class SpaceManager {
 
     const reason =
       `TerminalError: All charms in this space have been disabled: ${event.error?.message}`;
-    for (const [charmId, entry] of this.enabledCharms.entries()) {
-      this.disableCharm(charmId, entry, reason);
-    }
+    this.disableSpace(reason);
     this.setupWorkerController();
   };
 
@@ -283,18 +288,28 @@ export class SpaceManager {
     );
     this.workerController = newWorker;
 
-    const tasks = [
-      newWorker.initialize().then(() => {
-        console.log(`${this.did} Worker controller ready for work`);
-      }),
-    ];
+    const initialize = newWorker.initialize();
 
     if (previousWorker) {
       console.log(`${this.did} Restarting Worker Controller`);
       previousWorker.removeEventListener("error", this.onTerminalError);
-      tasks.push(previousWorker.shutdown());
+      previousWorker.shutdown().catch((e) => {
+        console.warn(
+          `Could not shutdown old worker ${this.did} after restarting: ${e}`,
+        );
+      });
     }
 
-    await Promise.all(tasks);
+    try {
+      await initialize;
+      console.log(`${this.did} Worker controller ready for work`);
+    } catch (e) {
+      // Initialization error. This "should not" occur, but is seen on invalid IPC requests
+      // during initialization.
+      // Disable all charms in this space and attempt to recreate the worker.
+      console.error(`${this.did} failed to initialize: ${e}`);
+      this.disableSpace(`Failed to initialize worker.`);
+      this.setupWorkerController();
+    }
   }
 }
