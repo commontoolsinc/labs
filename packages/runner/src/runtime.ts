@@ -7,6 +7,8 @@ import { isDoc } from "./doc.ts";
 import type { EntityId } from "./doc-map.ts";
 import type { Cancel } from "./cancel.ts";
 import type { Action, EventHandler, ReactivityLog } from "./scheduler.ts";
+import type { Harness } from "./harness/harness.ts";
+import { UnsafeEvalHarness } from "./harness/eval-harness.ts";
 import type {
   JSONSchema,
   Module,
@@ -57,7 +59,7 @@ export interface IRuntime {
   readonly recipeManager: IRecipeManager;
   readonly moduleRegistry: IModuleRegistry;
   readonly documentMap: IDocumentMap;
-  readonly harness: ICodeHarness;
+  readonly harness: Harness;
   readonly runner: IRunner;
   idle(): Promise<void>;
   dispose(): Promise<void>;
@@ -194,16 +196,6 @@ export interface IDocumentMap {
   cleanup(): void;
 }
 
-export interface ICodeHarness {
-  readonly runtime: IRuntime;
-  eval(code: string, context?: any): any;
-  compile(source: string): Promise<any>;
-  getInvocation(source: string): any;
-  mapStackTrace(stack: string): string;
-  addEventListener(event: string, handler: Function): void;
-  removeEventListener(event: string, handler: Function): void;
-}
-
 export interface IRunner {
   readonly runtime: IRuntime;
 
@@ -234,7 +226,6 @@ import { Storage } from "./storage.ts";
 import { RecipeManager } from "./recipe-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { DocumentMap } from "./doc-map.ts";
-import { CodeHarness } from "./code-harness-class.ts";
 import { Runner } from "./runner.ts";
 import { VolatileStorageProvider } from "./storage/volatile.ts";
 import { registerBuiltins } from "./builtins/index.ts";
@@ -266,12 +257,12 @@ export class Runtime implements IRuntime {
   readonly recipeManager: IRecipeManager;
   readonly moduleRegistry: IModuleRegistry;
   readonly documentMap: IDocumentMap;
-  readonly harness: ICodeHarness;
+  readonly harness: Harness;
   readonly runner: IRunner;
 
   constructor(options: RuntimeOptions = {}) {
     // Create harness first (no dependencies on other services)
-    this.harness = new CodeHarness(this);
+    this.harness = new UnsafeEvalHarness(this);
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(
