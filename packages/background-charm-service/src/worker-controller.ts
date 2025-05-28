@@ -73,6 +73,7 @@ export class WorkerController extends EventTarget {
     }
     this.state = WorkerState.Initializing;
     try {
+      console.log(`WORKER INITIALIZATION MESSAGE FOR ${this.did}`);
       await this.exec(WorkerIPCMessageType.Initialize, {
         did: this.did,
         toolshedUrl: this.toolshedUrl,
