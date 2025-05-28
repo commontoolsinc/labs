@@ -147,6 +147,7 @@ export interface IScheduler {
 
 export interface IStorage {
   readonly runtime: IRuntime;
+  readonly id: string;
   syncCell<T = any>(
     cell: DocImpl<T> | Cell<any>,
     expectedInStorage?: boolean,

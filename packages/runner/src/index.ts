@@ -27,7 +27,7 @@ export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export { Storage } from "./storage.ts";
 export { getBlobbyServerUrl, setBlobbyServerUrl } from "./blobby-storage.ts";
-export { ConsoleMethod } from "./harness/console.ts";
+export { ConsoleMethod, type ConsoleEvent } from "./harness/console.ts";
 export {
   addCommonIDfromObjectID,
   followAliases,

@@ -1,6 +1,6 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { ConsoleMethod, onConsole, onError } from "@commontools/runner";
+import { ConsoleMethod, Runtime, type ConsoleEvent } from "@commontools/runner";
 import {
   BrowserRouter as Router,
   createBrowserRouter,
@@ -29,6 +29,7 @@ import SpellbookLaunchView from "@/views/spellbook/SpellbookLaunchView.tsx";
 import FullscreenInspectorView from "@/views/FullscreenInspectorView.tsx";
 import { ActionManagerProvider } from "@/contexts/ActionManagerContext.tsx";
 import { ActivityProvider } from "@/contexts/ActivityContext.tsx";
+import { RuntimeProvider } from "@/contexts/RuntimeContext.tsx";
 import { ROUTES } from "@/routes.ts";
 
 // Determine environment based on hostname
@@ -84,41 +85,36 @@ const ReplicaRedirect = () => {
   return <div>redirecting...</div>;
 };
 
-setupIframe();
-
-// Show an alert on the first error in a handler or lifted function.
+// Create runtime with error and console handlers
 let errorCount = 0;
-onError((error: Error) => {
-  !errorCount++ &&
-    globalThis.alert(
-      "Uncaught error in recipe: " + error.message + "\n" + error.stack,
-    );
-  // Also send to Sentry
-  Sentry.captureException(error);
+const runtime = new Runtime({
+  storageUrl: location.origin,
+  errorHandlers: [(error) => {
+    !errorCount++ &&
+      globalThis.alert(
+        "Uncaught error in recipe: " + error.message + "\n" + error.stack,
+      );
+    // Also send to Sentry
+    Sentry.captureException(error);
+  }],
+  consoleHandler: (event: ConsoleEvent) => {
+    // Handle console messages depending on charm context.
+    // This is essentially the same as the default handling currently,
+    // but adding this here for future use.
+    console.log(`Console [${event.method}]:`, ...event.args);
+  },
 });
 
-// Handle console messages depending on charm context.
-// This is essentially the same as the default handling currently,
-// but adding this here for future use.
-onConsole(
-  (
-    _metadata:
-      | { charmId?: string; space?: string; recipeId?: string }
-      | undefined,
-    _method: ConsoleMethod,
-    args: any[],
-  ) => {
-    return args;
-  },
-);
+setupIframe(runtime);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary fallback={<div>An error has occurred</div>}>
-      <AuthenticationProvider>
-        <CharmsProvider>
-          <ActionManagerProvider>
-            <ActivityProvider>
+      <RuntimeProvider runtime={runtime}>
+        <AuthenticationProvider>
+          <CharmsProvider>
+            <ActionManagerProvider>
+              <ActivityProvider>
               <Router>
                 <SentryRoutes>
                   {/* Redirect root to saved replica or default */}
@@ -170,10 +166,11 @@ createRoot(document.getElementById("root")!).render(
                   />
                 </SentryRoutes>
               </Router>
-            </ActivityProvider>
-          </ActionManagerProvider>
-        </CharmsProvider>
-      </AuthenticationProvider>
+              </ActivityProvider>
+            </ActionManagerProvider>
+          </CharmsProvider>
+        </AuthenticationProvider>
+      </RuntimeProvider>
     </ErrorBoundary>
   </StrictMode>,
 );

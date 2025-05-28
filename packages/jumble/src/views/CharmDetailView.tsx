@@ -130,7 +130,7 @@ function useTabNavigation() {
 }
 
 // Hook for managing suggestions
-function useSuggestions(charm: Cell<Charm> | undefined) {
+function useSuggestions(charm: Cell<Charm> | undefined, charmManager: any) {
   const [suggestions, setSuggestions] = useState<CharmSuggestion[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const suggestionsLoadedRef = useRef(false);
@@ -141,7 +141,7 @@ function useSuggestions(charm: Cell<Charm> | undefined) {
     const loadSuggestions = async () => {
       setLoadingSuggestions(true);
       try {
-        const iframeRecipe = getIframeRecipe(charm);
+        const iframeRecipe = getIframeRecipe(charm, charmManager);
         if (!iframeRecipe) {
           throw new Error("No iframe recipe found in charm");
         }
@@ -490,8 +490,9 @@ const Variants = () => {
 // Suggestions Component
 const Suggestions = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
+  const { charmManager } = useCharmManager();
   const { currentFocus: charm } = useCharm(paramCharmId);
-  const { suggestions, loadingSuggestions } = useSuggestions(charm);
+  const { suggestions, loadingSuggestions } = useSuggestions(charm, charmManager);
   const {
     setInput,
     userPreferredModel,
@@ -505,8 +506,6 @@ const Suggestions = () => {
 
   const navigate = useNavigate();
   const { replicaName } = useParams<CharmRouteParams>();
-
-  const { charmManager } = useCharmManager();
 
   // Store selected suggestion in state to use in effects
   const [selectedSuggestion, setSelectedSuggestion] = useState<

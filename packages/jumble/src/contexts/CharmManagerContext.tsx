@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useMemo } from "react";
 import { CharmManager } from "@commontools/charm";
-import { Runtime, VolatileStorageProvider } from "@commontools/runner";
 import { useParams } from "react-router-dom";
 import { type CharmRouteParams } from "@/routes.ts";
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
+import { useRuntime } from "@/contexts/RuntimeContext.tsx";
 
 export type CharmManagerContextType = {
   charmManager: CharmManager;
@@ -20,6 +20,7 @@ export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = (
 ) => {
   const { replicaName } = useParams<CharmRouteParams>();
   const { session } = useAuthentication();
+  const runtime = useRuntime();
 
   if (!replicaName) {
     throw new Error("No space name found, cannot create CharmManager");
@@ -37,11 +38,8 @@ export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = (
       localStorage.setItem("lastReplica", replicaName);
     }
 
-    const runtime = new Runtime({
-      storageProvider: new VolatileStorageProvider(session.space)
-    });
     return new CharmManager(session, runtime);
-  }, [replicaName, session]);
+  }, [replicaName, session, runtime]);
 
   return (
     <CharmManagerContext.Provider
