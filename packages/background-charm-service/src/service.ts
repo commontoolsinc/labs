@@ -83,7 +83,9 @@ export class BackgroundCharmService {
     // Charms that hit an e.g. Authorization Error are empty, and space
     // is undefined -- filter out any of these charms before creating
     // a worker
-    const dids = new Set(charms.map((c) => c.get().space).filter(Boolean));
+    const charmContents = charms.map((c) => c.get()).filter(Boolean);
+    const enabledCharms = charmContents.filter((c) => !c.disabledAt);
+    const dids = new Set(enabledCharms.map((c) => c.space));
     log(`monitoring ${dids.size} spaces`);
 
     const [cancel, addCancel] = useCancelGroup();
@@ -106,6 +108,18 @@ export class BackgroundCharmService {
       // we are only filtering charms because until the FIXME above is fixed
       const didCharms = charms.filter((c) => c.get().space === did);
       addCancel(scheduler.watch(didCharms));
+    }
+
+    const removedSpaces = new Set(this.charmSchedulers.keys()).difference(dids);
+    for (const did of removedSpaces.values()) {
+      // we are no longer monitoring this space
+      const scheduler = this.charmSchedulers.get(did);
+      this.charmSchedulers.delete(did);
+      // we can't await this in our callback, but we can at least catch and log errors
+      scheduler?.stop().catch((e) =>
+        console.error(`Error stopping scheduler: ${e}`)
+      );
+      // TODO(@ubik2) I'm not sure if we need to call the cancel function returned by scheduler.watch
     }
 
     return cancel;
