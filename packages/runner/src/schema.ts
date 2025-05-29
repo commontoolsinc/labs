@@ -100,9 +100,6 @@ function processDefaultValue(
     // document when the value is changed. A classic example is
     // `currentlySelected` with a default of `null`.
     if (!defaultValue && resolvedSchema?.default !== undefined) {
-      if (!doc.runtime) {
-        throw new Error("No runtime available in document for getDoc");
-      }
       const newDoc = doc.runtime.documentMap.getDoc(resolvedSchema.default, {
         immutable: resolvedSchema.default,
       }, doc.space);
@@ -131,9 +128,6 @@ function processDefaultValue(
     );
     // This can receive events, but at first nothing will be bound to it.
     // Normally these get created by a handler call.
-    if (!doc.runtime) {
-      throw new Error("No runtime available in document for getImmutableCell");
-    }
     return doc.runtime.getImmutableCell(doc.space, { $stream: true }, resolvedSchema, log);
   }
 

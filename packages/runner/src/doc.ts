@@ -203,7 +203,7 @@ export type DocImpl<T> = {
    * The runtime instance that owns this document.
    * Used for accessing scheduler and other runtime services.
    */
-  runtime?: IRuntime;
+  runtime: IRuntime;
 
   /**
    * Retry callbacks for the current value on cell. Will be cleared after a
@@ -246,13 +246,14 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
  * @param value - The value to wrap in a document
  * @param entityId - The entity identifier
  * @param space - The space identifier
+ * @param runtime - The runtime instance that owns this document
  * @returns A new document implementation
  */
 export function createDoc<T>(
   value: T,
   entityId: EntityId,
   space: string,
-  runtime?: IRuntime,
+  runtime: IRuntime,
 ): DocImpl<T> {
   const callbacks = new Set<
     (value: T, path: PropertyKey[], labels?: Labels) => void
@@ -368,7 +369,7 @@ export function createDoc<T>(
     set ephemeral(value: boolean) {
       ephemeral = value;
     },
-    get runtime(): IRuntime | undefined {
+    get runtime(): IRuntime {
       return runtime;
     },
     [toOpaqueRef]: () => makeOpaqueRef(self, []),
@@ -378,9 +379,7 @@ export function createDoc<T>(
     },
   };
 
-  if (runtime) {
-    runtime.documentMap.registerDoc(entityId, self, space);
-  }
+  runtime.documentMap.registerDoc(entityId, self, space);
 
   return self;
 }
