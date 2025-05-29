@@ -499,7 +499,7 @@ export class Storage implements IStorage {
         // doc, we need to persist the current value. If it does, we need to
         // update the doc value.
         const value = this._getStorageProviderForSpace(doc.space).get(
-          doc.entityId!,
+          doc.entityId,
         );
         if (value === undefined) this._batchForStorage(doc);
         else this._batchForDoc(doc, value.value, value.source, label);
