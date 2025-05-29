@@ -22,81 +22,18 @@ export type { ErrorWithContext };
 export type Action = (log: ReactivityLog) => any;
 export type EventHandler = (event: any) => any;
 
+/**
+ * Reactivity log.
+ *
+ * Used to log reads and writes to docs. Used by scheduler to keep track of
+ * dependencies and to topologically sort pending actions before executing them.
+ */
 export type ReactivityLog = {
   reads: CellLink[];
   writes: CellLink[];
 };
 
 const MAX_ITERATIONS_PER_RUN = 100;
-
-function pathAffected(
-  changedPath: PropertyKey[],
-  subscribedPath: PropertyKey[],
-): boolean {
-  // If changedPath is shorter than subscribedPath, check if changedPath is a prefix
-  if (changedPath.length <= subscribedPath.length) {
-    return changedPath.every((segment, i) => subscribedPath[i] === segment);
-  }
-  // If changedPath is longer, check if subscribedPath is a prefix of changedPath
-  return subscribedPath.every((segment, i) => changedPath[i] === segment);
-}
-
-export function compactifyPaths(links: CellLink[]): CellLink[] {
-  const compacted: CellLink[] = [];
-
-  for (const link of links) {
-    // Check if any existing compacted link covers this link
-    const isCovered = compacted.some((c) =>
-      c.cell === link.cell &&
-      link.path.length >= c.path.length &&
-      c.path.every((segment, i) => link.path[i] === segment)
-    );
-
-    if (!isCovered) {
-      // Remove any existing links that this link covers
-      for (let i = compacted.length - 1; i >= 0; i--) {
-        const existing = compacted[i];
-        if (
-          existing.cell === link.cell &&
-          existing.path.length >= link.path.length &&
-          link.path.every((segment, j) => existing.path[j] === segment)
-        ) {
-          compacted.splice(i, 1);
-        }
-      }
-
-      compacted.push(link);
-    }
-  }
-
-  return compacted;
-}
-
-function getCharmMetadataFromFrame(): {
-  recipeId?: string;
-  space?: string;
-  charmId?: string;
-} | undefined {
-  // TODO(seefeld): This is a rather hacky way to get the context, based on the
-  // unsafe_binding pattern. Once we replace that mechanism, let's add nicer
-  // abstractions for context here as well.
-  const frame = getTopFrame();
-
-  const sourceAsProxy = frame?.unsafe_binding?.materialize([]);
-
-  if (!isQueryResultForDereferencing(sourceAsProxy)) {
-    return;
-  }
-  const result: ReturnType<typeof getCharmMetadataFromFrame> = {};
-  const { cell: source } = getCellLinkOrThrow(sourceAsProxy);
-  result.recipeId = source?.get()?.[TYPE];
-  const resultDoc = source?.get()?.resultRef?.cell;
-  result.space = resultDoc?.space;
-  result.charmId = JSON.parse(
-    JSON.stringify(resultDoc?.entityId ?? {}),
-  )["/"];
-  return result;
-}
 
 export class Scheduler implements IScheduler {
   private pending = new Set<Action>();
@@ -451,5 +388,67 @@ export class Scheduler implements IScheduler {
   }
 }
 
-// Singleton wrapper functions removed to eliminate singleton pattern
-// Use runtime.scheduler methods directly instead
+// Remove longer paths already covered by shorter paths
+export function compactifyPaths(entries: CellLink[]): CellLink[] {
+  // First group by doc via a Map
+  const docToPaths = new Map<DocImpl<any>, PropertyKey[][]>();
+  for (const { cell: doc, path } of entries) {
+    const paths = docToPaths.get(doc) || [];
+    paths.push(path.map((key) => key.toString())); // Normalize to strings as keys
+    docToPaths.set(doc, paths);
+  }
+
+  // For each cell, sort the paths by length, then only return those that don't
+  // have a prefix earlier in the list
+  const result: CellLink[] = [];
+  for (const [doc, paths] of docToPaths.entries()) {
+    paths.sort((a, b) => a.length - b.length);
+    for (let i = 0; i < paths.length; i++) {
+      const earlier = paths.slice(0, i);
+      if (
+        earlier.some((path) =>
+          path.every((key, index) => key === paths[i][index])
+        )
+      ) {
+        continue;
+      }
+      result.push({ cell: doc, path: paths[i] });
+    }
+  }
+  return result;
+}
+
+function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
+  changedPath = changedPath.map((key) => key.toString()); // Normalize to strings as keys
+  return (
+    (changedPath.length <= path.length &&
+      changedPath.every((key, index) => key === path[index])) ||
+    path.every((key, index) => key === changedPath[index])
+  );
+}
+
+function getCharmMetadataFromFrame(): {
+  recipeId?: string;
+  space?: string;
+  charmId?: string;
+} | undefined {
+  // TODO(seefeld): This is a rather hacky way to get the context, based on the
+  // unsafe_binding pattern. Once we replace that mechanism, let's add nicer
+  // abstractions for context here as well.
+  const frame = getTopFrame();
+
+  const sourceAsProxy = frame?.unsafe_binding?.materialize([]);
+
+  if (!isQueryResultForDereferencing(sourceAsProxy)) {
+    return;
+  }
+  const result: ReturnType<typeof getCharmMetadataFromFrame> = {};
+  const { cell: source } = getCellLinkOrThrow(sourceAsProxy);
+  result.recipeId = source?.get()?.[TYPE];
+  const resultDoc = source?.get()?.resultRef?.cell;
+  result.space = resultDoc?.space;
+  result.charmId = JSON.parse(
+    JSON.stringify(resultDoc?.entityId ?? {}),
+  )["/"];
+  return result;
+}
