@@ -365,6 +365,7 @@ export class CharmManager {
         this.space,
       );
     } catch (e) {
+      console.warn("loadRecipe: error", e);
       console.warn("recipeId", recipeId);
       console.warn("recipe", recipe);
       console.warn("charm", charm.get());
