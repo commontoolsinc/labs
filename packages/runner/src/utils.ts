@@ -21,7 +21,6 @@ import {
 } from "./query-result-proxy.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-// Removed singleton imports - using runtime through document context
 import { ContextualFlowControl } from "./index.ts";
 
 /**
@@ -723,10 +722,11 @@ export function normalizeAndDiff(
       path = path.slice(0, -1);
     }
 
-    if (!current.cell.runtime) {
-      throw new Error("No runtime available in document for createRef/getDocByEntityId");
-    }
-    const entityId = createRef({ id: id } as Record<string, any>, { parent: current.cell.entityId, path });
+    const entityId = createRef({ id }, {
+      parent: current.cell.entityId,
+      path,
+      context,
+    });
     const doc = current.cell.runtime.documentMap.getDocByEntityId(
       current.cell.space,
       entityId,
