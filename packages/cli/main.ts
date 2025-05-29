@@ -40,8 +40,6 @@ const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
 
 const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "common user";
 
-// setBlobbyServerUrl is now handled in Runtime constructor
-
 async function main() {
   if (!spaceName && !spaceDID) {
     console.error("No space name or space DID provided");
@@ -93,6 +91,7 @@ async function main() {
     signer: identity,
   });
   const charmManager = new CharmManager(session, runtime);
+  await charmManager.ready;
   const charms = charmManager.getCharms();
   charms.sink((charms) => {
     console.log(
