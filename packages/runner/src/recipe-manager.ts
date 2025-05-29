@@ -117,6 +117,7 @@ export class RecipeManager implements IRecipeManager {
     space: string,
   ): Promise<Recipe> {
     const metaCell = await this.getRecipeMetaCell({ recipeId, space });
+    await this.runtime.storage.syncCell(metaCell);
     let recipeMeta = metaCell.get();
 
     // 1. Fallback to Blobby if cell missing or stale
@@ -160,6 +161,7 @@ export class RecipeManager implements IRecipeManager {
       .finally(() => this.inProgressCompilations.delete(id)); // tidy up
 
     this.inProgressCompilations.set(id, compilationPromise);
+
     return await compilationPromise;
   }
 
