@@ -110,6 +110,18 @@ export class BackgroundCharmService {
       addCancel(scheduler.watch(didCharms));
     }
 
+    const removedSpaces = new Set(this.charmSchedulers.keys()).difference(dids);
+    for (const did of removedSpaces.values()) {
+      // we are no longer monitoring this space
+      const scheduler = this.charmSchedulers.get(did);
+      this.charmSchedulers.delete(did);
+      // we can't await this in our callback, but we can at least catch and log errors
+      scheduler?.stop().catch((e) =>
+        console.error(`Error stopping scheduler: ${e}`)
+      );
+      // TODO(@ubik2) I'm not sure if we need to call the cancel function returned by scheduler.watch
+    }
+
     return cancel;
   }
 }
