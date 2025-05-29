@@ -1,4 +1,3 @@
-// Import types from various modules
 import type { Signer } from "@commontools/identity";
 import type { Cell, CellLink } from "./cell.ts";
 import type { DocImpl } from "./doc.ts";
@@ -33,10 +32,6 @@ export type ConsoleHandler = (
   args: any[],
 ) => any[];
 export type ErrorHandler = (error: ErrorWithContext) => void;
-
-// ConsoleEvent and ConsoleMethod are now imported from harness/console.ts
-export type { ConsoleEvent } from "./harness/console.ts";
-export { ConsoleMethod } from "./harness/console.ts";
 
 export interface CharmMetadata {
   name?: string;
@@ -249,7 +244,7 @@ import { registerBuiltins } from "./builtins/index.ts";
  * Usage:
  * ```typescript
  * const runtime = new Runtime({
- *   remoteStorageUrl: new URL('https://storage.example.com'),
+ *   remoteStorageUrl: 'https://storage.example.com',
  *   consoleHandler: customConsoleHandler,
  *   errorHandlers: [customErrorHandler]
  * });
