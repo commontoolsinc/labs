@@ -1,13 +1,10 @@
-import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { assertSpyCall, assertSpyCalls, spy } from "@std/testing/mock";
 // getDoc removed - using runtime.documentMap.getDoc instead
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { Runtime } from "../src/runtime.ts";
-import {
-  type Action,
-  type EventHandler,
-} from "../src/scheduler.ts";
+import { type Action, type EventHandler } from "../src/scheduler.ts";
 import { compactifyPaths } from "../src/scheduler.ts";
 
 describe("scheduler", () => {
@@ -15,13 +12,14 @@ describe("scheduler", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      storageUrl: "volatile://",
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
   });
+
   it("should run actions when cells change", async () => {
     let runCount = 0;
     const a = runtime.documentMap.getDoc(
@@ -49,7 +47,7 @@ describe("scheduler", () => {
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
     a.send(2); // No log, simulate external change
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(runCount).toBe(2);
     expect(c.get()).toBe(4);
   });
@@ -87,7 +85,7 @@ describe("scheduler", () => {
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
     a.send(2); // No log, simulate external change
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(4);
   });
@@ -108,13 +106,13 @@ describe("scheduler", () => {
     expect(c.get()).toBe(3);
 
     a.send(2);
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(runCount).toBe(2);
     expect(c.get()).toBe(4);
 
     runtime.scheduler.unschedule(adder);
     a.send(3);
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(runCount).toBe(2);
     expect(c.get()).toBe(4);
   });
@@ -152,12 +150,12 @@ describe("scheduler", () => {
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
     a.send(2);
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(4);
     cancel();
     a.send(3);
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(4);
   });
@@ -208,13 +206,13 @@ describe("scheduler", () => {
     expect(e.get()).toBe(4);
 
     d.send(2);
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(runs.join(",")).toBe("adder1,adder2,adder2");
     expect(c.get()).toBe(3);
     expect(e.get()).toBe(5);
 
     a.send(2);
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(runs.join(",")).toBe("adder1,adder2,adder2,adder1,adder2");
     expect(c.get()).toBe(4);
     expect(e.get()).toBe(6);
@@ -274,7 +272,7 @@ describe("scheduler", () => {
     await runtime.scheduler.run(adder2);
     await runtime.scheduler.run(adder3);
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(maxRuns).toBeGreaterThan(10);
     assertSpyCall(stopped, 0, undefined);
@@ -304,11 +302,11 @@ describe("scheduler", () => {
 
     await runtime.scheduler.run(inc);
     expect(counter.get()).toBe(1);
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(counter.get()).toBe(1);
 
     by.send(2);
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(counter.get()).toBe(3);
 
     assertSpyCalls(stopped, 0);
@@ -318,7 +316,7 @@ describe("scheduler", () => {
     let runs = 0;
     const inc: Action = () => runs++;
     runtime.scheduler.schedule(inc, { reads: [], writes: [] });
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(runs).toBe(1);
   });
 });
@@ -328,7 +326,7 @@ describe("event handling", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      storageUrl: "volatile://",
     });
   });
 
@@ -354,12 +352,15 @@ describe("event handling", () => {
       eventResultCell.send(event);
     };
 
-    runtime.scheduler.addEventHandler(eventHandler, { cell: eventCell, path: [] });
+    runtime.scheduler.addEventHandler(eventHandler, {
+      cell: eventCell,
+      path: [],
+    });
 
     runtime.scheduler.queueEvent({ cell: eventCell, path: [] }, 1);
     runtime.scheduler.queueEvent({ cell: eventCell, path: [] }, 2);
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(eventCount).toBe(2);
     expect(eventCell.get()).toBe(0); // Events are _not_ written to cell
@@ -385,7 +386,7 @@ describe("event handling", () => {
     });
 
     runtime.scheduler.queueEvent({ cell: eventCell, path: [] }, 1);
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(eventCount).toBe(1);
     expect(eventCell.get()).toBe(1);
@@ -393,7 +394,7 @@ describe("event handling", () => {
     removeHandler();
 
     runtime.scheduler.queueEvent({ cell: eventCell, path: [] }, 2);
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(eventCount).toBe(1);
     expect(eventCell.get()).toBe(1);
@@ -416,8 +417,11 @@ describe("event handling", () => {
       path: ["child", "value"],
     });
 
-    runtime.scheduler.queueEvent({ cell: parentCell, path: ["child", "value"] }, 42);
-    await runtime.scheduler.idle();
+    runtime.scheduler.queueEvent(
+      { cell: parentCell, path: ["child", "value"] },
+      42,
+    );
+    await runtime.idle();
 
     expect(eventCount).toBe(1);
   });
@@ -434,13 +438,16 @@ describe("event handling", () => {
       events.push(event);
     };
 
-    runtime.scheduler.addEventHandler(eventHandler, { cell: eventCell, path: [] });
+    runtime.scheduler.addEventHandler(eventHandler, {
+      cell: eventCell,
+      path: [],
+    });
 
     runtime.scheduler.queueEvent({ cell: eventCell, path: [] }, 1);
     runtime.scheduler.queueEvent({ cell: eventCell, path: [] }, 2);
     runtime.scheduler.queueEvent({ cell: eventCell, path: [] }, 3);
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(events).toEqual([1, 2, 3]);
   });
@@ -471,12 +478,15 @@ describe("event handling", () => {
     };
     await runtime.scheduler.run(action);
 
-    runtime.scheduler.addEventHandler(eventHandler, { cell: eventCell, path: [] });
+    runtime.scheduler.addEventHandler(eventHandler, {
+      cell: eventCell,
+      path: [],
+    });
 
     expect(actionCount).toBe(1);
 
     runtime.scheduler.queueEvent({ cell: eventCell, path: [] }, 1);
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(eventCount).toBe(1);
     expect(eventResultCell.get()).toBe(1);
@@ -484,7 +494,7 @@ describe("event handling", () => {
     expect(actionCount).toBe(2);
 
     runtime.scheduler.queueEvent({ cell: eventCell, path: [] }, 2);
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(eventCount).toBe(2);
     expect(eventResultCell.get()).toBe(2);
@@ -495,19 +505,23 @@ describe("event handling", () => {
 
 describe("compactifyPaths", () => {
   let runtime: Runtime;
-  
+
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      storageUrl: "volatile://",
     });
   });
-  
+
   afterEach(() => {
     runtime.dispose();
   });
 
   it("should compactify paths", () => {
-    const testCell = runtime.documentMap.getDoc({}, "should compactify paths 1", "test");
+    const testCell = runtime.documentMap.getDoc(
+      {},
+      "should compactify paths 1",
+      "test",
+    );
     const paths = [
       { cell: testCell, path: ["a", "b"] },
       { cell: testCell, path: ["a"] },
