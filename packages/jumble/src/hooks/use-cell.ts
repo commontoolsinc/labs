@@ -19,7 +19,7 @@ export function useNamedCell<T>(
   schema: JSONSchema,
 ) {
   const runtime = useRuntime();
-  const cell = runtime.documentMap.getDoc<T>(undefined as T, cause, space).asCell();
+  const cell = runtime.getCell<T>(space, cause, schema);
   runtime.storage.syncCell(cell, true);
 
   const [value, setValue] = useState<T>(cell.get());
