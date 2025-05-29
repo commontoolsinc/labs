@@ -491,7 +491,7 @@ const Variants = () => {
 // Suggestions Component
 const Suggestions = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
-  const { runtime } = useRuntime();
+  const runtime = useRuntime();
   const { currentFocus: charm } = useCharm(paramCharmId);
   const { suggestions, loadingSuggestions } = useSuggestions(charm, runtime);
   const {
