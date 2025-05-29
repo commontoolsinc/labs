@@ -222,18 +222,19 @@ export class Scheduler implements IScheduler {
     return reads;
   }
 
-  private handleError(error: Error, action: any): void {
+  private handleError(error: Error, action: any) {
+    // Since most errors come from `eval`ed code, let's fix the stack trace.
     if (error.stack) {
       error.stack = this.runtime.harness.mapStackTrace(error.stack);
     }
 
-    const metadata = getCharmMetadataFromFrame();
-    const errorWithContext: ErrorWithContext = Object.assign(error, {
-      action,
-      charmId: metadata?.charmId || "unknown",
-      space: metadata?.space || "unknown",
-      recipeId: metadata?.recipeId || "unknown",
-    });
+    const { charmId, recipeId, space } = getCharmMetadataFromFrame() ?? {};
+
+    const errorWithContext = error as ErrorWithContext;
+    errorWithContext.action = action;
+    if (charmId) errorWithContext.charmId = charmId;
+    if (recipeId) errorWithContext.recipeId = recipeId;
+    if (space) errorWithContext.space = space;
 
     for (const handler of this.errorHandlers) {
       try {
@@ -265,7 +266,7 @@ export class Scheduler implements IScheduler {
       }
     }
 
-    const order = this.topologicalSort(
+    const order = topologicalSort(
       this.pending,
       this.dependencies,
       this.dirty,
@@ -305,78 +306,76 @@ export class Scheduler implements IScheduler {
       queueMicrotask(() => this.execute());
     }
   }
+}
 
-  private topologicalSort(
-    actions: Set<Action>,
-    dependencies: WeakMap<Action, ReactivityLog>,
-    dirty: Set<DocImpl<any>>,
-  ): Action[] {
-    const relevantActions = new Set<Action>();
-    const graph = new Map<Action, Set<Action>>();
-    const inDegree = new Map<Action, number>();
+function topologicalSort(
+  actions: Set<Action>,
+  dependencies: WeakMap<Action, ReactivityLog>,
+  dirty: Set<DocImpl<any>>,
+): Action[] {
+  const relevantActions = new Set<Action>();
+  const graph = new Map<Action, Set<Action>>();
+  const inDegree = new Map<Action, number>();
 
-    for (const action of actions) {
-      const { reads } = dependencies.get(action)!;
-      if (reads.length === 0) {
-        // An action with no reads can be manually added to `pending`, which happens only once on `schedule`.
-        relevantActions.add(action);
-      } else if (reads.some(({ cell: doc }) => dirty.has(doc))) {
-        relevantActions.add(action);
-      }
+  for (const action of actions) {
+    const { reads } = dependencies.get(action)!;
+    if (reads.length === 0) {
+      // An action with no reads can be manually added to `pending`, which happens only once on `schedule`.
+      relevantActions.add(action);
+    } else if (reads.some(({ cell: doc }) => dirty.has(doc))) {
+      relevantActions.add(action);
     }
-
-    for (const action of relevantActions) {
-      graph.set(action, new Set());
-      inDegree.set(action, 0);
-    }
-
-    for (const actionA of relevantActions) {
-      const depsA = dependencies.get(actionA)!;
-      for (const actionB of relevantActions) {
-        if (actionA === actionB) continue;
-        const depsB = dependencies.get(actionB)!;
-
-        const hasConflict = depsA.writes.some((writeLink) =>
-          depsB.reads.some((readLink) =>
-            writeLink.cell === readLink.cell &&
-            (writeLink.path.length <= readLink.path.length
-              ? writeLink.path.every((segment, i) =>
-                readLink.path[i] === segment
-              )
-              : readLink.path.every((segment, i) =>
-                writeLink.path[i] === segment
-              ))
-          )
-        );
-
-        if (hasConflict) {
-          graph.get(actionA)!.add(actionB);
-          inDegree.set(actionB, inDegree.get(actionB)! + 1);
-        }
-      }
-    }
-
-    const queue: Action[] = [];
-    for (const [action, degree] of inDegree) {
-      if (degree === 0) queue.push(action);
-    }
-
-    const result: Action[] = [];
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      result.push(current);
-
-      for (const neighbor of graph.get(current)!) {
-        const newDegree = inDegree.get(neighbor)! - 1;
-        inDegree.set(neighbor, newDegree);
-        if (newDegree === 0) {
-          queue.push(neighbor);
-        }
-      }
-    }
-
-    return result;
   }
+
+  for (const action of relevantActions) {
+    graph.set(action, new Set());
+    inDegree.set(action, 0);
+  }
+
+  for (const actionA of relevantActions) {
+    const depsA = dependencies.get(actionA)!;
+    for (const actionB of relevantActions) {
+      if (actionA === actionB) continue;
+      const depsB = dependencies.get(actionB)!;
+
+      const hasConflict = depsA.writes.some((writeLink) =>
+        depsB.reads.some((readLink) =>
+          writeLink.cell === readLink.cell &&
+          (writeLink.path.length <= readLink.path.length
+            ? writeLink.path.every((segment, i) => readLink.path[i] === segment)
+            : readLink.path.every((segment, i) =>
+              writeLink.path[i] === segment
+            ))
+        )
+      );
+
+      if (hasConflict) {
+        graph.get(actionA)!.add(actionB);
+        inDegree.set(actionB, inDegree.get(actionB)! + 1);
+      }
+    }
+  }
+
+  const queue: Action[] = [];
+  for (const [action, degree] of inDegree) {
+    if (degree === 0) queue.push(action);
+  }
+
+  const result: Action[] = [];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    result.push(current);
+
+    for (const neighbor of graph.get(current)!) {
+      const newDegree = inDegree.get(neighbor)! - 1;
+      inDegree.set(neighbor, newDegree);
+      if (newDegree === 0) {
+        queue.push(neighbor);
+      }
+    }
+  }
+
+  return result;
 }
 
 // Remove longer paths already covered by shorter paths
