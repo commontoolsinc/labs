@@ -21,17 +21,14 @@ async function main(
     "/": "baedreiajxdvqjxmgpfzjix4h6vd4pl77unvet2k3acfvhb6ottafl7gpua",
   };
 
-  const doc = await runtime.storage.syncCellById(replica, cellId, true);
-  const authCellEntity = {
-    space: replica,
-    cell: doc,
-    path: ["argument", "auth"],
-    schema: AuthSchema,
-  } satisfies CellLink;
-
-  const authCell = runtime.getCellFromLink(authCellEntity);
-  // authCell.set({ token: "wat" });
+  const authCell = runtime.getCellFromEntityId(replica, cellId, [
+    "argument",
+    "auth",
+  ], AuthSchema);
+  await runtime.storage.syncCell(authCell);
   await runtime.storage.synced();
+
+  // authCell.set({ token: "wat" });
 
   console.log("AUTH CELL AFTER SET", authCell.get());
 

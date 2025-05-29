@@ -153,11 +153,6 @@ export interface IStorage {
     expectedInStorage?: boolean,
     schemaContext?: any,
   ): Promise<DocImpl<T>> | DocImpl<T>;
-  syncCellById<T>(
-    space: string,
-    id: EntityId | string,
-    expectedInStorage?: boolean,
-  ): Promise<DocImpl<T>> | DocImpl<T>;
   synced(): Promise<void>;
   cancelAll(): Promise<void>;
   setSigner(signer: Signer): void;
@@ -378,21 +373,21 @@ export class Runtime implements IRuntime {
 
   getCellFromEntityId<T>(
     space: string,
-    entityId: EntityId,
+    entityId: EntityId | string,
     path?: PropertyKey[],
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getCellFromEntityId<S extends JSONSchema = JSONSchema>(
     space: string,
-    entityId: EntityId,
+    entityId: EntityId | string,
     path: PropertyKey[],
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCellFromEntityId(
     space: string,
-    entityId: EntityId,
+    entityId: EntityId | string,
     path: PropertyKey[] = [],
     schema?: JSONSchema,
     log?: ReactivityLog,

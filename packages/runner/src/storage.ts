@@ -173,17 +173,6 @@ export class Storage implements IStorage {
     return this.docIsLoading.get(entityDoc) ?? entityDoc;
   }
 
-  syncCellById<T>(
-    space: string,
-    id: EntityId | string,
-    expectedInStorage: boolean = false,
-  ): Promise<DocImpl<T>> | DocImpl<T> {
-    return this.syncCell(
-      this.runtime.documentMap.getDocByEntityId<T>(space, id, true)!,
-      expectedInStorage,
-    );
-  }
-
   synced(): Promise<void> {
     return this.currentBatchPromise;
   }

@@ -1178,11 +1178,14 @@ export class CharmManager {
     path: string[] = [],
     schema?: JSONSchema,
   ): Promise<Cell<T>> {
-    return (await this.runtime.storage.syncCellById(this.space, id)).asCell(
+    const cell = this.runtime.getCellFromEntityId<T>(
+      this.space,
+      id,
       path,
-      undefined,
       schema,
     );
+    await this.runtime.storage.syncCell(cell);
+    return cell;
   }
 
   // Return Cell with argument content of already loaded recipe according
