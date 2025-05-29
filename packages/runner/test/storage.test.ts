@@ -18,16 +18,14 @@ describe("Storage", () => {
   beforeEach(() => {
     // Create shared storage provider for testing
     storage2 = new VolatileStorageProvider("test");
-    
+
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
       storageUrl: "volatile://",
-      signer: signer
+      signer: signer,
     });
-    
-    // Replace the storage's default provider with our shared storage
-    (runtime.storage as any).storageProviders.set("default", storage2);
+
     testDoc = runtime.documentMap.getDoc<string>(
       undefined as unknown as string,
       `storage test cell ${n++}`,
@@ -131,7 +129,11 @@ describe("Storage", () => {
 
   describe("ephemeral docs", () => {
     it("should not be loaded from storage", async () => {
-      const ephemeralDoc = runtime.documentMap.getDoc("transient", "ephemeral", "test");
+      const ephemeralDoc = runtime.documentMap.getDoc(
+        "transient",
+        "ephemeral",
+        "test",
+      );
       ephemeralDoc.ephemeral = true;
       await runtime.storage.syncCell(ephemeralDoc);
 

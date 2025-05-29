@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type DocImpl, isDoc } from "../src/doc.ts";
 import { isCell, isCellLink } from "../src/cell.ts";
@@ -13,13 +13,14 @@ describe("Cell", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      storageUrl: "volatile://",
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
   });
+
   it("should create a cell with initial value", () => {
     const c = runtime.documentMap.getDoc(
       10,
@@ -102,7 +103,7 @@ describe("Cell utility functions", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      storageUrl: "volatile://",
     });
   });
 
@@ -117,7 +118,11 @@ describe("Cell utility functions", () => {
   });
 
   it("should identify a cell reference", () => {
-    const c = runtime.documentMap.getDoc(10, "should identify a cell reference", "test");
+    const c = runtime.documentMap.getDoc(
+      10,
+      "should identify a cell reference",
+      "test",
+    );
     const ref = { cell: c, path: ["x"] };
     expect(isCellLink(ref)).toBe(true);
     expect(isCellLink({})).toBe(false);
@@ -140,7 +145,7 @@ describe("createProxy", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      storageUrl: "volatile://",
     });
   });
 
@@ -459,7 +464,7 @@ describe("asCell", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      storageUrl: "volatile://",
     });
   });
 
@@ -538,7 +543,7 @@ describe("asCell", () => {
     );
 
     streamCell.send("event");
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(c.get()).toStrictEqual({ stream: { $stream: true } });
     expect(eventCount).toBe(1);
@@ -557,14 +562,14 @@ describe("asCell", () => {
     });
     expect(values).toEqual([42]); // Initial call
     c.setAtPath(["d"], 50);
-    await runtime.scheduler.idle();
+    await runtime.idle();
     c.setAtPath(["a", "c"], 100);
-    await runtime.scheduler.idle();
+    await runtime.idle();
     c.setAtPath(["a", "b"], 42);
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(values).toEqual([42]); // Didn't get called again
     c.setAtPath(["a", "b"], 300);
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(c.get()).toEqual({ a: { b: 300, c: 100 }, d: 50 });
     expect(values).toEqual([42, 300]); // Got called again
   });
@@ -575,7 +580,7 @@ describe("asCell with schema", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      storageUrl: "volatile://",
     });
   });
 
@@ -1241,7 +1246,11 @@ describe("asCell with schema", () => {
   });
 
   it("should push values to array using push method", () => {
-    const c = runtime.documentMap.getDoc({ items: [1, 2, 3] }, "push-test", "test");
+    const c = runtime.documentMap.getDoc(
+      { items: [1, 2, 3] },
+      "push-test",
+      "test",
+    );
     const arrayCell = c.asCell(["items"]);
     expect(arrayCell.get()).toEqual([1, 2, 3]);
     arrayCell.push(4);
@@ -1252,7 +1261,11 @@ describe("asCell with schema", () => {
   });
 
   it("should throw when pushing values to `null`", () => {
-    const c = runtime.documentMap.getDoc({ items: null }, "push-to-null", "test");
+    const c = runtime.documentMap.getDoc(
+      { items: null },
+      "push-to-null",
+      "test",
+    );
     const arrayCell = c.asCell(["items"]);
     expect(arrayCell.get()).toBeNull();
 
@@ -1265,7 +1278,11 @@ describe("asCell with schema", () => {
       default: [10, 20],
     } as const satisfies JSONSchema;
 
-    const c = runtime.documentMap.getDoc({}, "push-to-undefined-schema", "test");
+    const c = runtime.documentMap.getDoc(
+      {},
+      "push-to-undefined-schema",
+      "test",
+    );
     const arrayCell = c.asCell(["items"], undefined, schema);
 
     arrayCell.push(30);
@@ -1282,7 +1299,11 @@ describe("asCell with schema", () => {
       default: [{ [ID]: "test", value: 10 }, { [ID]: "test2", value: 20 }],
     } as const satisfies JSONSchema;
 
-    const c = runtime.documentMap.getDoc({}, "push-to-undefined-schema-stable-id", "test");
+    const c = runtime.documentMap.getDoc(
+      {},
+      "push-to-undefined-schema-stable-id",
+      "test",
+    );
     const arrayCell = c.asCell(["items"], undefined, schema);
 
     arrayCell.push({ [ID]: "test3", "value": 30 });
@@ -1441,7 +1462,7 @@ describe("JSON.stringify bug", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      storageUrl: "volatile://",
     });
   });
 
@@ -1450,7 +1471,11 @@ describe("JSON.stringify bug", () => {
   });
 
   it("should not modify the value of the cell", () => {
-    const c = runtime.documentMap.getDoc({ result: { data: 1 } }, "json-test", "test");
+    const c = runtime.documentMap.getDoc(
+      { result: { data: 1 } },
+      "json-test",
+      "test",
+    );
     const d = runtime.documentMap.getDoc(
       { internal: { "__#2": { cell: c, path: ["result"] } } },
       "json-test2",

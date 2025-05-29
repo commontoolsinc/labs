@@ -1,23 +1,18 @@
-import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  type Cell,
-  CellLink,
-  isCell,
-  isStream,
-} from "../src/cell.ts";
+import { type Cell, CellLink, isCell, isStream } from "../src/cell.ts";
 import type { JSONSchema } from "@commontools/builder";
 import { Runtime } from "../src/runtime.ts";
 
 describe("Schema Support", () => {
   let runtime: Runtime;
-  
+
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      storageUrl: "volatile://",
     });
   });
-  
+
   afterEach(() => {
     runtime.dispose();
   });
@@ -135,7 +130,7 @@ describe("Schema Support", () => {
           currentByGetValues.push(value.label);
         });
 
-      await runtime.scheduler.idle();
+      await runtime.idle();
 
       // Find the currently selected cell and update it
       const first = c.key("current").get();
@@ -143,7 +138,7 @@ describe("Schema Support", () => {
       expect(first.get()).toEqual({ label: "first" });
       first.set({ label: "first - update" });
 
-      await runtime.scheduler.idle();
+      await runtime.idle();
 
       // Now change the currently selected cell
       const second = runtime.documentMap.getDoc(
@@ -153,15 +148,15 @@ describe("Schema Support", () => {
       ).asCell();
       c.key("current").set(second);
 
-      await runtime.scheduler.idle();
+      await runtime.idle();
 
       // Now change the first one again, should only change currentByGetValues
       first.set({ label: "first - updated again" });
-      await runtime.scheduler.idle();
+      await runtime.idle();
 
       // Now change the second one, should change all but currentByGetValues
       second.set({ label: "second - update" });
-      await runtime.scheduler.idle();
+      await runtime.idle();
 
       expect(currentByGetValues).toEqual([
         "first",
@@ -267,7 +262,7 @@ describe("Schema Support", () => {
           currentByGetValues.push(value.label);
         });
 
-      await runtime.scheduler.idle();
+      await runtime.idle();
 
       // Find the currently selected cell and read it
       const log = { reads: [], writes: [] };
@@ -297,7 +292,7 @@ describe("Schema Support", () => {
 
       // Then update it
       initial.set({ foo: { label: "first - update" } });
-      await runtime.scheduler.idle();
+      await runtime.idle();
       expect(first.get()).toEqual({ label: "first - update" });
 
       // Now change the currently selected cell behind the alias. This should
@@ -310,13 +305,13 @@ describe("Schema Support", () => {
       ).asCell();
       linkDoc.send(second.getAsCellLink());
 
-      await runtime.scheduler.idle();
+      await runtime.idle();
 
       expect(rootValues).toEqual(["root", "cancelled", "root"]);
 
       // Change unrelated value should update root, but not the other cells
       root.key("value").set("root - updated");
-      await runtime.scheduler.idle();
+      await runtime.idle();
       expect(rootValues).toEqual([
         "root",
         "cancelled",
@@ -327,11 +322,11 @@ describe("Schema Support", () => {
 
       // Now change the first one again, should only change currentByGetValues
       initial.set({ foo: { label: "first - updated again" } });
-      await runtime.scheduler.idle();
+      await runtime.idle();
 
       // Now change the second one, should change all but currentByGetValues
       second.set({ foo: { label: "second - update" } });
-      await runtime.scheduler.idle();
+      await runtime.idle();
 
       expect(rootValues).toEqual([
         "root",
@@ -353,13 +348,13 @@ describe("Schema Support", () => {
         $alias: { cell: third.getDoc(), path: [] },
       });
 
-      await runtime.scheduler.idle();
+      await runtime.idle();
 
       // Now change the first one again, should only change currentByGetValues
       initial.set({ foo: { label: "first - updated yet again" } });
       second.set({ foo: { label: "second - updated again" } });
       third.set({ label: "third - updated" });
-      await runtime.scheduler.idle();
+      await runtime.idle();
 
       expect(currentByGetValues).toEqual([
         "first",
@@ -1632,7 +1627,7 @@ describe("Schema Support", () => {
 
   describe("Running Promise", () => {
     it("should allow setting a promise when none is running", async () => {
-      await runtime.scheduler.idle();
+      await runtime.idle();
 
       const { promise, resolve } = Promise.withResolvers();
       runtime.scheduler.runningPromise = promise;
@@ -1643,7 +1638,7 @@ describe("Schema Support", () => {
     });
 
     it("should throw when trying to set a promise while one is running", async () => {
-      await runtime.scheduler.idle();
+      await runtime.idle();
 
       const { promise: promise1, resolve: resolve1 } = Promise.withResolvers();
       runtime.scheduler.runningPromise = promise1;
@@ -1660,7 +1655,7 @@ describe("Schema Support", () => {
     });
 
     it("should clear the promise after it rejects", async () => {
-      await runtime.scheduler.idle();
+      await runtime.idle();
 
       const { promise, reject } = Promise.withResolvers();
       runtime.scheduler.runningPromise = promise.catch(() => {});
@@ -1674,7 +1669,7 @@ describe("Schema Support", () => {
     });
 
     it("should allow setting undefined when no promise is running", async () => {
-      await runtime.scheduler.idle();
+      await runtime.idle();
 
       runtime.scheduler.runningPromise = undefined;
       expect(runtime.scheduler.runningPromise).toBeUndefined();

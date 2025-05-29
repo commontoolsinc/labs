@@ -15,6 +15,7 @@ describe("runRecipe", () => {
   afterEach(async () => {
     await runtime?.dispose();
   });
+
   it("should work with passthrough", async () => {
     const recipe = {
       argumentSchema: {
@@ -107,7 +108,7 @@ describe("runRecipe", () => {
       ],
     } as Recipe;
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       outerRecipe,
       { value: 5 },
       runtime.documentMap.getDoc(
@@ -116,7 +117,7 @@ describe("runRecipe", () => {
         "test",
       ),
     );
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(result.getAsQueryResult()).toEqual({ result: 5 });
   });
@@ -138,7 +139,7 @@ describe("runRecipe", () => {
       ],
     };
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       mockRecipe,
       { value: 1 },
       runtime.documentMap.getDoc(
@@ -147,7 +148,7 @@ describe("runRecipe", () => {
         "test",
       ),
     );
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(result.getAsQueryResult()).toEqual({ result: 2 });
   });
 
@@ -172,7 +173,7 @@ describe("runRecipe", () => {
       ],
     };
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       mockRecipe,
       { value: 1 },
       runtime.documentMap.getDoc(
@@ -181,7 +182,7 @@ describe("runRecipe", () => {
         "test",
       ),
     );
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(result.getAsQueryResult()).toEqual({ result: undefined });
     expect(ran).toBe(true);
   });
@@ -207,7 +208,7 @@ describe("runRecipe", () => {
       ],
     };
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       mockRecipe,
       { value: 1 },
       runtime.documentMap.getDoc(
@@ -216,7 +217,7 @@ describe("runRecipe", () => {
         "test",
       ),
     );
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(result.getAsQueryResult()).toEqual({ result: undefined });
     expect(ran).toBe(true);
   });
@@ -251,7 +252,7 @@ describe("runRecipe", () => {
       ],
     };
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       mockRecipe,
       { value: 1 },
       runtime.documentMap.getDoc(
@@ -260,7 +261,7 @@ describe("runRecipe", () => {
         "test",
       ),
     );
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(result.getAsQueryResult()).toEqual({ result: 2 });
   });
 
@@ -286,7 +287,7 @@ describe("runRecipe", () => {
       "should allow passing a cell as a binding: input cell",
       "test",
     );
-    const result = runtime.runner.run(
+    const result = runtime.run(
       recipe,
       inputCell,
       runtime.documentMap.getDoc(
@@ -296,7 +297,7 @@ describe("runRecipe", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(inputCell.get()).toMatchObject({ input: 10, output: 20 });
     expect(result.getAsQueryResult()).toEqual({ output: 20 });
@@ -305,7 +306,7 @@ describe("runRecipe", () => {
     // recipe and sending a new value to the input cell.
     runtime.runner.stop(result);
     inputCell.send({ input: 10, output: 40 });
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(result.getAsQueryResult()).toEqual({ output: 40 });
   });
 
@@ -331,7 +332,7 @@ describe("runRecipe", () => {
       "should allow stopping a recipe: input cell",
       "test",
     );
-    const result = runtime.runner.run(
+    const result = runtime.run(
       recipe,
       inputCell,
       runtime.documentMap.getDoc(
@@ -341,24 +342,24 @@ describe("runRecipe", () => {
       ),
     );
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(inputCell.get()).toMatchObject({ input: 10, output: 20 });
 
     inputCell.send({ input: 20, output: 20 });
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(inputCell.get()).toMatchObject({ input: 20, output: 40 });
 
     // Stop the recipe
     runtime.runner.stop(result);
 
     inputCell.send({ input: 40, output: 40 });
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(inputCell.get()).toMatchObject({ input: 40, output: 40 });
 
     // Restart the recipe
-    runtime.runner.run(recipe, undefined, result);
+    runtime.run(recipe, undefined, result);
 
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(inputCell.get()).toMatchObject({ input: 40, output: 80 });
   });
 
@@ -388,7 +389,7 @@ describe("runRecipe", () => {
     };
 
     // Test with partial arguments (should use default for multiplier)
-    const resultWithPartial = runtime.runner.run(
+    const resultWithPartial = runtime.run(
       recipe,
       { input: 10 },
       runtime.documentMap.getDoc(
@@ -397,11 +398,11 @@ describe("runRecipe", () => {
         "test",
       ),
     );
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(resultWithPartial.getAsQueryResult()).toEqual({ result: 20 });
 
     // Test with no arguments (should use default for input)
-    const resultWithDefaults = runtime.runner.run(
+    const resultWithDefaults = runtime.run(
       recipe,
       {},
       runtime.documentMap.getDoc(
@@ -410,7 +411,7 @@ describe("runRecipe", () => {
         "test",
       ),
     );
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(resultWithDefaults.getAsQueryResult()).toEqual({ result: 84 }); // 42 * 2
   });
 
@@ -463,21 +464,21 @@ describe("runRecipe", () => {
       ],
     };
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       recipe,
       { config: { values: [10, 20, 30, 40], operation: "avg" } },
       runtime.documentMap.getDoc(undefined, "complex schema test", "test"),
     );
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(result.getAsQueryResult()).toEqual({ result: 25 });
 
     // Test with a different operation
-    const result2 = runtime.runner.run(
+    const result2 = runtime.run(
       recipe,
       { config: { values: [10, 20, 30, 40], operation: "max" } },
       result,
     );
-    await runtime.scheduler.idle();
+    await runtime.idle();
     expect(result2.getAsQueryResult()).toEqual({ result: 40 });
   });
 
@@ -517,7 +518,7 @@ describe("runRecipe", () => {
     };
 
     // Provide partial options - should merge with defaults
-    const result = runtime.runner.run(
+    const result = runtime.run(
       recipe,
       { options: { value: 10 }, input: 5 },
       runtime.documentMap.getDoc(
@@ -526,7 +527,7 @@ describe("runRecipe", () => {
         "test",
       ),
     );
-    await runtime.scheduler.idle();
+    await runtime.idle();
 
     expect(result.getAsQueryResult().options).toEqual({
       enabled: true,
@@ -566,8 +567,8 @@ describe("runRecipe", () => {
     );
 
     // First run
-    runtime.runner.run(recipe, { value: 1 }, resultCell);
-    await runtime.scheduler.idle();
+    runtime.run(recipe, { value: 1 }, resultCell);
+    await runtime.idle();
     expect(resultCell.get()?.name).toEqual("counter");
     expect(resultCell.getAsQueryResult()?.counter).toEqual(1);
 
@@ -575,8 +576,8 @@ describe("runRecipe", () => {
     resultCell.setAtPath(["name"], "my counter");
 
     // Second run with same recipe but different argument
-    runtime.runner.run(recipe, { value: 2 }, resultCell);
-    await runtime.scheduler.idle();
+    runtime.run(recipe, { value: 2 }, resultCell);
+    await runtime.idle();
     expect(resultCell.get()?.name).toEqual("my counter");
     expect(resultCell.getAsQueryResult()?.counter).toEqual(2);
   });

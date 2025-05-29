@@ -1,9 +1,8 @@
-import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { ID } from "@commontools/builder";
 import { Identity } from "@commontools/identity";
-import { Runtime, type IStorage } from "../src/runtime.ts";
-// Remove getDoc import - use runtime.documentMap.getDoc instead
+import { type IStorage, Runtime } from "../src/runtime.ts";
 import { isCellLink } from "../src/cell.ts";
 import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 
@@ -13,7 +12,7 @@ describe("Push conflict", () => {
 
   beforeEach(async () => {
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      storageUrl: "volatile://",
     });
     storage = runtime.storage;
     storage.setSigner(await Identity.fromPassphrase("test operator"));
@@ -22,8 +21,13 @@ describe("Push conflict", () => {
   afterEach(async () => {
     await runtime?.dispose();
   });
+
   it("should resolve push conflicts", async () => {
-    const listDoc = runtime.documentMap.getDoc<any[]>([], "list", "push conflict");
+    const listDoc = runtime.documentMap.getDoc<any[]>(
+      [],
+      "list",
+      "push conflict",
+    );
     const list = listDoc.asCell();
     await storage.syncCell(list);
 
@@ -64,7 +68,11 @@ describe("Push conflict", () => {
       "name",
       "push and set",
     );
-    const listDoc = runtime.documentMap.getDoc<any[]>([], "list 2", "push and set");
+    const listDoc = runtime.documentMap.getDoc<any[]>(
+      [],
+      "list 2",
+      "push and set",
+    );
 
     const name = nameDoc.asCell();
     const list = listDoc.asCell();
@@ -116,7 +124,11 @@ describe("Push conflict", () => {
       "name 2",
       "push and set",
     );
-    const listDoc = runtime.documentMap.getDoc<any[]>([], "list 3", "push and set");
+    const listDoc = runtime.documentMap.getDoc<any[]>(
+      [],
+      "list 3",
+      "push and set",
+    );
 
     const name = nameDoc.asCell();
     const list = listDoc.asCell();

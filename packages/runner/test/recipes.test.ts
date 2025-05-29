@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   byRef,
-  createCell,
   handler,
   JSONSchema,
   lift,
   recipe,
+  TYPE,
 } from "@commontools/builder";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
@@ -28,6 +28,7 @@ describe("Recipe Runner", () => {
   afterEach(async () => {
     await runtime?.dispose();
   });
+
   it("should run a simple recipe", async () => {
     const simpleRecipe = recipe<{ value: number }>(
       "Simple Recipe",
@@ -37,7 +38,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       simpleRecipe,
       { value: 5 },
       runtime.documentMap.getDoc(
@@ -71,7 +72,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       outerRecipe,
       { value: 4 },
       runtime.documentMap.getDoc(
@@ -97,7 +98,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result1 = runtime.runner.run(
+    const result1 = runtime.run(
       recipeWithDefaults,
       {},
       runtime.documentMap.getDoc(
@@ -111,7 +112,7 @@ describe("Recipe Runner", () => {
 
     expect(result1.getAsQueryResult()).toMatchObject({ sum: 15 });
 
-    const result2 = runtime.runner.run(
+    const result2 = runtime.run(
       recipeWithDefaults,
       { a: 20 },
       runtime.documentMap.getDoc(
@@ -138,7 +139,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       multipliedArray,
       {
         values: [{ x: 1 }, { x: 2 }, { x: 3 }],
@@ -170,7 +171,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       doubleArray,
       {
         values: [1, 2, 3],
@@ -201,7 +202,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       doubleArray,
       { values: undefined },
       runtime.documentMap.getDoc(
@@ -233,7 +234,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       incRecipe,
       { counter: { value: 0 } },
       runtime.documentMap.getDoc(undefined, "should execute handlers", "test"),
@@ -269,7 +270,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       incRecipe,
       { counter: { value: 0 } },
       runtime.documentMap.getDoc(
@@ -305,7 +306,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       incRecipe,
       { counter: { value: 0 } },
       runtime.documentMap.getDoc(
@@ -364,7 +365,7 @@ describe("Recipe Runner", () => {
       return { stream };
     });
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       incRecipe,
       { counter, nested },
       runtime.documentMap.getDoc(
@@ -436,7 +437,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       multiplyRecipe,
       { x, y },
       runtime.documentMap.getDoc(
@@ -490,7 +491,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       simpleRecipe,
       { value: 5 },
       runtime.documentMap.getDoc(
@@ -538,7 +539,7 @@ describe("Recipe Runner", () => {
       "should handle schema with cell references 1",
       "test",
     );
-    const result = runtime.runner.run(
+    const result = runtime.run(
       multiplyRecipe,
       {
         settings: settingsCell,
@@ -613,7 +614,7 @@ describe("Recipe Runner", () => {
       "should handle nested cell references in schema 2",
       "test",
     );
-    const result = runtime.runner.run(
+    const result = runtime.run(
       sumRecipe,
       { data: { items: [item1, item2] } },
       runtime.documentMap.getDoc(
@@ -668,7 +669,7 @@ describe("Recipe Runner", () => {
       "should handle dynamic cell references with schema 2",
       "test",
     );
-    const result = runtime.runner.run(
+    const result = runtime.run(
       dynamicRecipe,
       {
         context: {
@@ -713,7 +714,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       incRecipe,
       { counter: 0 },
       runtime.documentMap.getDoc(
@@ -762,7 +763,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const charm = runtime.runner.run(
+    const charm = runtime.run(
       divRecipe,
       { result: 1 },
       runtime.documentMap.getDoc(
@@ -785,7 +786,9 @@ describe("Recipe Runner", () => {
     expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
 
-    // expect(lastError?.recipeId).toBe(getRecipeIdFromCharm(charm.asCell())); // TODO: Fix external dependency
+    const recipeId = charm.sourceCell?.get()?.[TYPE];
+    expect(recipeId).toBeDefined();
+    expect(lastError?.recipeId).toBe(recipeId);
     expect(lastError?.space).toBe("test");
     expect(lastError?.charmId).toBe(
       JSON.parse(JSON.stringify(charm.entityId))["/"],
@@ -832,7 +835,7 @@ describe("Recipe Runner", () => {
       "test",
     );
 
-    const charm = runtime.runner.run(
+    const charm = runtime.run(
       divRecipe,
       { divisor: 10, dividend },
       runtime.documentMap.getDoc(
@@ -852,7 +855,9 @@ describe("Recipe Runner", () => {
     expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 10 });
 
-    // expect(lastError?.recipeId).toBe(getRecipeIdFromCharm(charm.asCell())); // TODO: Fix external dependency
+    const recipeId = charm.sourceCell?.get()?.[TYPE];
+    expect(recipeId).toBeDefined();
+    expect(lastError?.recipeId).toBe(recipeId);
     expect(lastError?.space).toBe("test");
     expect(lastError?.charmId).toBe(
       JSON.parse(JSON.stringify(charm.entityId))["/"],
@@ -888,7 +893,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       slowRecipe,
       { x: 1 },
       runtime.documentMap.getDoc(
@@ -932,7 +937,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const charm = runtime.runner.run(
+    const charm = runtime.run(
       slowHandlerRecipe,
       { result: 0 },
       runtime.documentMap.getDoc(
@@ -984,7 +989,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const charm = runtime.runner.run(
+    const charm = runtime.run(
       slowHandlerRecipe,
       { result: 0 },
       runtime.documentMap.getDoc(
@@ -1030,7 +1035,7 @@ describe("Recipe Runner", () => {
     );
     input.set(5);
 
-    const result = runtime.runner.run(
+    const result = runtime.run(
       wrapperRecipe,
       { value: input },
       runtime.documentMap.getDoc(
