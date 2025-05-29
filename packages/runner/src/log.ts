@@ -1,10 +1,5 @@
+// TODO(seefeld): Move this function and this import into a shared package.
 import { debug } from "@commontools/html";
-
-// This type is used to tag a document with any important metadata.
-// Currently, the only supported type is the classification.
-export type Labels = {
-  classification?: string[];
-};
 
 export function log(fn: () => any[]) {
   debug(() => {

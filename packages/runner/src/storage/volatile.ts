@@ -1,5 +1,5 @@
 import type { EntityId } from "../doc-map.ts";
-import { log } from "./shared.ts";
+import { log } from "../log.ts";
 import {
   BaseStorageProvider,
   type Result,

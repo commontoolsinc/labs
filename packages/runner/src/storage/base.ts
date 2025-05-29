@@ -1,10 +1,16 @@
 import type { Cancel } from "../cancel.ts";
 import type { EntityId } from "../doc-map.ts";
 import type { Entity, Result, Unit } from "@commontools/memory/interface";
-import { Labels, log } from "./shared.ts";
+import { log } from "../log.ts";
 import { SchemaContext } from "@commontools/memory/interface";
 
 export type { Result, Unit };
+
+// This type is used to tag a document with any important metadata.
+// Currently, the only supported type is the classification.
+export type Labels = {
+  classification?: string[];
+};
 
 export interface StorageValue<T = any> {
   value: T;

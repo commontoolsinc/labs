@@ -1,8 +1,6 @@
 import { isStatic, markAsStatic } from "@commontools/builder";
-import { debug } from "@commontools/html"; // TODO(seefeld): Move this
 import { Signer } from "@commontools/identity";
 import { defer } from "@commontools/utils/defer";
-import { isBrowser } from "@commontools/utils/env";
 import { sleep } from "@commontools/utils/sleep";
 
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
@@ -16,45 +14,19 @@ import {
 } from "./query-result-proxy.ts";
 import {
   BaseStorageProvider,
+  type Labels,
   StorageProvider,
   StorageValue,
 } from "./storage/base.ts";
-import {
-  Provider as CachedStorageProvider,
-  RemoteStorageProviderOptions,
-} from "./storage/cache.ts";
+import { log } from "./log.ts";
+import { Provider as CachedStorageProvider } from "./storage/cache.ts";
 import { VolatileStorageProvider } from "./storage/volatile.ts";
 import { TransactionResult } from "@commontools/memory";
 import { refer } from "@commontools/memory/reference";
 import { SchemaContext, SchemaNone } from "@commontools/memory/interface";
 import type { IRuntime, IStorage } from "./runtime.ts";
 
-// This type is used to tag a document with any important metadata.
-// Currently, the only supported type is the classification.
-export type Labels = {
-  classification?: string[];
-};
-
-export function log(fn: () => any[]) {
-  debug(() => {
-    const absoluteMs = (performance.timeOrigin % 3600000) +
-      (performance.now() % 1000);
-
-    const totalSeconds = Math.floor(absoluteMs / 1000);
-    const minutes = Math.floor((totalSeconds % 3600) / 60)
-      .toString()
-      .padStart(2, "0");
-    const seconds = (totalSeconds % 60).toString().padStart(2, "0");
-    const millis = Math.floor(absoluteMs % 1000)
-      .toString()
-      .padStart(3, "0");
-    const nanos = Math.floor((absoluteMs % 1) * 1000000)
-      .toString()
-      .padStart(6, "0");
-
-    return [`${minutes}:${seconds}:${millis}:${nanos}`, ...fn()];
-  });
-}
+export type { Labels };
 
 type Job = {
   doc: DocImpl<any>;
