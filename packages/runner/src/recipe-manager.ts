@@ -58,7 +58,7 @@ export class RecipeManager implements IRecipeManager {
 
     const generatedId = src
       ? createRef({ src }, "recipe source").toString()
-      : createRef({ recipe }, "recipe").toString();
+      : createRef(recipe, "recipe").toString();
 
     console.log("generateRecipeId: generated id", generatedId);
 
