@@ -14,8 +14,10 @@ export type EntityId = {
 };
 
 /**
- * Creates an entity ID from a source object and cause.
- * This is a pure function that doesn't require runtime dependencies.
+ * Generates an entity ID.
+ *
+ * @param source - The source object.
+ * @param cause - Optional causal source. Otherwise a random n is used.
  */
 export function createRef(
   source: Record<string | number | symbol, any> = {},
@@ -66,7 +68,9 @@ export function createRef(
 
 /**
  * Extracts an entity ID from a cell or cell representation.
- * This is a pure function that doesn't require runtime dependencies.
+ *
+ * @param value - The value to extract the entity ID from.
+ * @returns The entity ID, or undefined if the value is not a cell or doc.
  */
 export function getEntityId(value: any): { "/": string } | undefined {
   if (typeof value === "string") {
@@ -165,19 +169,6 @@ export class DocumentMap implements IDocumentMap {
 
   constructor(readonly runtime: IRuntime) {}
 
-  /**
-   * Generates an entity ID.
-   *
-   * @param source - The source object.
-   * @param cause - Optional causal source. Otherwise a random n is used.
-   */
-  createRef(
-    source: Record<string | number | symbol, any> = {},
-    cause: any = crypto.randomUUID(),
-  ): EntityId {
-    return createRef(source, cause);
-  }
-
   getDocByEntityId<T = any>(
     space: string,
     entityId: EntityId | string,
@@ -196,7 +187,6 @@ export class DocumentMap implements IDocumentMap {
     }
     doc = createDoc<T>(undefined as T, entityId, space, this.runtime);
     doc.sourceCell = sourceIfCreated;
-    this.entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
     return doc;
   }
 
@@ -213,38 +203,8 @@ export class DocumentMap implements IDocumentMap {
     this.entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
   }
 
-  /**
-   * Extracts an entity ID from a cell or cell representation. Creates a stable
-   * derivative entity ID for path references.
-   *
-   * @param value - The value to extract the entity ID from.
-   * @returns The entity ID, or undefined if the value is not a cell or doc.
-   */
-  getEntityId(value: any): EntityId | undefined {
-    return getEntityId(value);
-  }
-
   registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: string): void {
     this.entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
-  }
-
-  removeDoc(space: string, entityId: EntityId): boolean {
-    const id = JSON.stringify(entityId);
-    const map = this.entityIdToDocMap["maps"]?.get(space);
-    if (map && map["map"]) {
-      return map["map"].delete(id);
-    }
-    return false;
-  }
-
-  hasDoc(space: string, entityId: EntityId): boolean {
-    return !!this.entityIdToDocMap.get(space, JSON.stringify(entityId));
-  }
-
-  listDocs(): EntityId[] {
-    // This is a simplified implementation since WeakMap doesn't support iteration
-    // In practice, this would need to be tracked differently if listing functionality is needed
-    return [];
   }
 
   cleanup(): void {
@@ -264,7 +224,7 @@ export class DocumentMap implements IDocumentMap {
   }
 
   private generateEntityId(value: any, cause?: any): EntityId {
-    return this.createRef(
+    return createRef(
       typeof value === "object" && value !== null
         ? (value as object)
         : value !== undefined
@@ -281,10 +241,6 @@ export class DocumentMap implements IDocumentMap {
   ): DocImpl<T> {
     // Use the full createDoc implementation with runtime parameter
     const doc = createDoc(value, entityId, space, this.runtime);
-    this.registerDoc(entityId, doc, space);
     return doc;
   }
 }
-
-// These functions are removed to eliminate singleton pattern
-// Use runtime.documentMap methods directly instead

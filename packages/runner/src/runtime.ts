@@ -4,6 +4,7 @@ import type { Cell, CellLink } from "./cell.ts";
 import type { DocImpl } from "./doc.ts";
 import { isDoc } from "./doc.ts";
 import type { EntityId } from "./doc-map.ts";
+import { getEntityId } from "./doc-map.ts";
 import type { Cancel } from "./cancel.ts";
 import type { Action, EventHandler, ReactivityLog } from "./scheduler.ts";
 import type { Harness } from "./harness/harness.ts";
@@ -207,11 +208,6 @@ export interface IDocumentMap {
     sourceIfCreated?: DocImpl<any>,
   ): DocImpl<T> | undefined;
   registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: string): void;
-  createRef(
-    source?: Record<string | number | symbol, any>,
-    cause?: any,
-  ): EntityId;
-  getEntityId(value: any): EntityId | undefined;
   getDoc<T>(value: T, cause: any, space: string): DocImpl<T>;
   cleanup(): void;
 }
@@ -441,7 +437,7 @@ export class Runtime implements IRuntime {
     } else if (cellLink.space) {
       doc = this.documentMap.getDocByEntityId(
         cellLink.space,
-        this.documentMap.getEntityId(cellLink.cell)!,
+        getEntityId(cellLink.cell)!,
         true,
       )!;
       if (!doc) {
