@@ -65,6 +65,7 @@ async function castRecipe() {
       signer: signer,
     });
     const charmManager = new CharmManager(session, runtime);
+    await charmManager.ready;
     const recipe = await compileRecipe(recipeSrc, "recipe", charmManager);
 
     const charm = await charmManager.runPersistent(
