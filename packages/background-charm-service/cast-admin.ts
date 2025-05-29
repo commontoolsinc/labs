@@ -1,9 +1,6 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
-import {
-  getEntityId,
-  Runtime,
-} from "@commontools/runner";
+import { getEntityId, Runtime } from "@commontools/runner";
 import { type DID } from "@commontools/identity";
 import { createAdminSession } from "@commontools/identity";
 import {
@@ -95,6 +92,7 @@ async function castRecipe() {
 
     // Create charm manager for the specified space
     const charmManager = new CharmManager(session, runtime);
+    await charmManager.ready;
     const recipe = await compileRecipe(recipeSrc, "recipe", charmManager);
     console.log("Recipe compiled successfully");
 

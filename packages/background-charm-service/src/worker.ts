@@ -96,11 +96,12 @@ async function initialize(
     storageUrl: toolshedUrl,
     blobbyServerUrl: toolshedUrl,
     signer: identity,
-    recipeEnvironment: JSON.stringify({ apiUrl }),
+    recipeEnvironment: { apiUrl },
     consoleHandler: consoleHandler,
     errorHandlers: [errorHandler],
   });
   manager = new CharmManager(currentSession, runtime);
+  await manager.ready;
 
   console.log(`Initialized`);
   initialized = true;
