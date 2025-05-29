@@ -1,10 +1,6 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
-import {
-  getEntityId,
-  isStream,
-  Runtime,
-} from "@commontools/runner";
+import { getEntityId, isStream, Runtime } from "@commontools/runner";
 import { createAdminSession, type DID, Identity } from "@commontools/identity";
 
 const { spaceId, targetCellCause, recipePath, cause, name, quit } = parseArgs(
@@ -30,8 +26,6 @@ const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
 
 const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "common user";
-
-// setBlobbyServerUrl is now handled in Runtime constructor
 
 async function castRecipe() {
   console.log(`Casting recipe from ${recipePath} in space ${spaceId}`);
@@ -68,7 +62,7 @@ async function castRecipe() {
     runtime = new Runtime({
       storageUrl: toolshedUrl,
       blobbyServerUrl: toolshedUrl,
-      signer: signer
+      signer: signer,
     });
     const charmManager = new CharmManager(session, runtime);
     const recipe = await compileRecipe(recipeSrc, "recipe", charmManager);
