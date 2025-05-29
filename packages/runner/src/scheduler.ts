@@ -161,24 +161,15 @@ export class Scheduler implements IScheduler {
     return this.runningPromise;
   }
 
-  addAction(action: Action): void {
-    this.pending.add(action);
-    this.queueExecution();
-  }
-
-  removeAction(action: Action): void {
-    this.unschedule(action);
-  }
-
   idle(): Promise<void> {
     return new Promise<void>((resolve) => {
-      // NOTE: This relies on the finally clause to set runningPromise to undefined to
-      // prevent infinite loops.
+      // NOTE: This relies on the finally clause to set runningPromise to
+      // undefined to prevent infinite loops.
       if (this.runningPromise) {
         this.runningPromise.then(() => this.idle().then(resolve));
       } // Once nothing is running, see if more work is queued up. If not, then
-      // resolve the idle promise, otherwise add it to the idle promises list that
-      // will be resolved once all the work is done.
+      // resolve the idle promise, otherwise add it to the idle promises list
+      // that will be resolved once all the work is done.
       else if (this.pending.size === 0 && this.eventQueue.length === 0) {
         resolve();
       } else {
