@@ -212,7 +212,7 @@ export class WorkerController extends EventTarget {
 
   private logTaskResults(task: Task, error?: string) {
     const errorMessage = error ? `: ${error}` : "";
-    const state = error ? "completed" : "failed";
+    const state = error ? "failed" : "completed";
     const id = `"${task.type}/${task.msgId}"`;
     const duration = (performance.now() - task.startTime).toFixed(0);
     const message =
