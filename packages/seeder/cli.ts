@@ -42,15 +42,14 @@ if (!name) {
 // Storage and blobby server URL are now configured in Runtime constructor
 setLLMUrl(apiUrl);
 
-const identity = await Identity.fromPassphrase("common user");
-const session = await createSession({
-  identity,
-  name,
-});
 const runtime = new Runtime({
-  storageUrl: "volatile://",
+  storageUrl: apiUrl,
   blobbyServerUrl: apiUrl,
-  signer: identity
+});
+
+const session = await createSession({
+  identity: await Identity.fromPassphrase("common user"),
+  name,
 });
 const charmManager = new CharmManager(session, runtime);
 
