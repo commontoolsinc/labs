@@ -56,7 +56,7 @@ export function usePublish() {
           data.title,
           data.description,
           data.tags,
-          charmManager,
+          charmManager.runtime,
         );
 
         if (success) {

@@ -1,16 +1,5 @@
 import { JSONSchema } from "@commontools/builder";
-import { Cell, getEntityId } from "@commontools/runner";
-
-// Forward declaration to avoid circular import
-interface CharmManager {
-  runtime: {
-    recipeManager: {
-      getRecipeMeta(options: { recipeId: string }): { src?: string } | undefined;
-    };
-  };
-}
-
-// Import after interface declaration
+import { Cell, getEntityId, type Runtime } from "@commontools/runner";
 import { Charm, getRecipeIdFromCharm } from "../manager.ts";
 
 export type IFrameRecipe = {
@@ -74,7 +63,7 @@ function parseIframeRecipe(source: string): IFrameRecipe {
 
 export const getIframeRecipe = (
   charm: Cell<Charm>,
-  charmManager: CharmManager
+  runtime: Runtime
 ): {
   recipeId: string;
   src?: string;
@@ -85,7 +74,7 @@ export const getIframeRecipe = (
     console.warn("No recipeId found for charm", getEntityId(charm));
     return { recipeId, src: "", iframe: undefined };
   }
-  const src = charmManager.runtime.recipeManager.getRecipeMeta({ recipeId })?.src;
+  const src = runtime.recipeManager.getRecipeMeta({ recipeId })?.src;
   if (!src) {
     console.warn("No src found for charm", getEntityId(charm));
     return { recipeId };

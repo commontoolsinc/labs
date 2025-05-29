@@ -49,7 +49,7 @@ async function castRecipe() {
     console.log("Loading recipe...");
     const recipeSrc = await Deno.readTextFile(recipePath!);
 
-    console.log("Recipe compiled successfully");
+    console.log("Recipe loaded successfully");
 
     // Create session and charm manager (matching main.ts pattern)
     const session = await createAdminSession({
@@ -66,7 +66,7 @@ async function castRecipe() {
     });
     const charmManager = new CharmManager(session, runtime);
     await charmManager.ready;
-    const recipe = await compileRecipe(recipeSrc, "recipe", charmManager);
+    const recipe = await compileRecipe(recipeSrc, "recipe", runtime, spaceId!);
 
     const charm = await charmManager.runPersistent(
       recipe,

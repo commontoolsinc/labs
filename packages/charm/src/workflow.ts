@@ -214,7 +214,7 @@ function extractContext(charm: Cell<Charm>, charmManager: CharmManager) {
   let code: string | undefined;
 
   try {
-    const iframeRecipe = getIframeRecipe(charm, charmManager);
+    const iframeRecipe = getIframeRecipe(charm, charmManager.runtime);
     if (
       iframeRecipe && iframeRecipe.iframe
     ) {

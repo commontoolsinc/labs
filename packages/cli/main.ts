@@ -190,7 +190,7 @@ async function main() {
   if (recipeFile) {
     try {
       const recipeSrc = await Deno.readTextFile(recipeFile);
-      const recipe = await compileRecipe(recipeSrc, "recipe", charmManager);
+      const recipe = await compileRecipe(recipeSrc, "recipe", runtime, space);
       const charm = await charmManager.runPersistent(recipe, inputValue, cause);
       const charmWithSchema = (await charmManager.get(charm))!;
       charmWithSchema.sink((value) => {

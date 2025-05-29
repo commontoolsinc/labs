@@ -73,7 +73,7 @@ export async function fixItCharm(
   error: Error,
   model = DEFAULT_MODEL_NAME,
 ): Promise<Cell<Charm>> {
-  const iframeRecipe = getIframeRecipe(charm, charmManager);
+  const iframeRecipe = getIframeRecipe(charm, charmManager.runtime);
   if (!iframeRecipe.iframe) {
     throw new Error("Fixit only works for iframe charms");
   }

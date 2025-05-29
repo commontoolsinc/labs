@@ -1,13 +1,5 @@
 import { UI } from "@commontools/builder";
-
-// Forward declaration to avoid circular import
-interface CharmManager {
-  runtime: {
-    recipeManager: {
-      getRecipeMeta(recipe: any): { src?: string; spec?: string; parents?: string[] } | undefined;
-    };
-  };
-}
+import type { Runtime } from "@commontools/runner";
 
 export interface Spell {
   id: string;
@@ -106,11 +98,11 @@ export async function saveSpell(
   title: string,
   description: string,
   tags: string[],
-  charmManager: CharmManager,
+  runtime: Runtime,
 ): Promise<boolean> {
   try {
     // Get all the required data from commontools first
-    const recipeMetaResult = charmManager.runtime.recipeManager.getRecipeMeta(spell);
+    const recipeMetaResult = runtime.recipeManager.getRecipeMeta(spell);
     const { src, spec, parents } = recipeMetaResult || {};
     const ui = spell.resultRef?.[UI];
 
