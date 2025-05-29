@@ -13,8 +13,10 @@ import type {
   Module,
   NodeFactory,
   Recipe,
+  RecipeEnvironment,
   Schema,
 } from "@commontools/builder";
+import { setRecipeEnvironment } from "@commontools/builder";
 
 export type ErrorWithContext = Error & {
   action: Action;
@@ -49,7 +51,7 @@ export interface RuntimeOptions {
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
   blobbyServerUrl?: string;
-  recipeEnvironment?: string;
+  recipeEnvironment?: RecipeEnvironment;
   debug?: boolean;
 }
 
@@ -321,7 +323,8 @@ export class Runtime implements IRuntime {
 
     // Handle recipe environment configuration
     if (options.recipeEnvironment) {
-      this._setRecipeEnvironment(options.recipeEnvironment);
+      // This is still a singleton. TODO(seefeld): Fix this.
+      setRecipeEnvironment(options.recipeEnvironment);
     }
 
     if (options.debug) {
@@ -365,12 +368,6 @@ export class Runtime implements IRuntime {
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern
-  }
-
-  private _setRecipeEnvironment(environment: string): void {
-    // This would need to integrate with recipe environment configuration
-    // For now, we'll store it for future use
-    (globalThis as any).__RECIPE_ENVIRONMENT = environment;
   }
 
   // Cell factory methods
