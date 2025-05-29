@@ -43,7 +43,6 @@ export interface CharmMetadata {
 export interface RuntimeOptions {
   storageUrl: string;
   signer?: Signer;
-  enableCache?: boolean;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
   blobbyServerUrl?: string;
@@ -287,7 +286,6 @@ export class Runtime implements IRuntime {
     this.storage = new Storage(this, {
       remoteStorageUrl: new URL(options.storageUrl),
       signer: options.signer,
-      enableCache: options.enableCache ?? true,
     });
 
     this.documentMap = new DocumentMap(this);

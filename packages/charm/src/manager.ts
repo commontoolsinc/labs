@@ -347,7 +347,9 @@ export class CharmManager {
     if (isCell(id)) charm = id;
     else charm = this.runtime.getCellFromEntityId(this.space, { "/": id });
 
-    await this.runtime.storage.syncCell(charm);
+    const maybePromise = this.runtime.storage.syncCell(charm);
+    console.log("maybePromise", maybePromise instanceof Promise);
+    await maybePromise;
 
     const recipeId = getRecipeIdFromCharm(charm);
     if (!recipeId) throw new Error("recipeId is required");

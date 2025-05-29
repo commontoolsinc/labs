@@ -33,7 +33,6 @@ import { Runtime } from "@commontools/runner";
 const runtime = new Runtime({
   storageUrl: "https://example.com/storage", // Required
   signer: myIdentitySigner, // Optional, for remote storage
-  enableCache: true, // Optional, default true
   consoleHandler: myConsoleHandler, // Optional
   errorHandlers: [myErrorHandler], // Optional
   blobbyServerUrl: "https://example.com/blobby", // Optional
@@ -65,7 +64,8 @@ purposes:
 - `src/index.ts`: The main entry point that exports the public API
 - `src/runtime.ts`: Central orchestrator that creates and manages all services
 - `src/cell.ts`: Defines the `Cell` abstraction and its implementation
-- `src/doc.ts`: Implements `DocImpl` which represents stored documents in storage
+- `src/doc.ts`: Implements `DocImpl` which represents stored documents in
+  storage
 - `src/runner.ts`: Provides the runtime for executing recipes
 - `src/scheduler.ts`: Manages execution order and batching of reactive updates
 - `src/storage.ts`: Manages persistence and synchronization
@@ -546,7 +546,7 @@ replaced with Runtime instance methods:
 
 ```typescript
 // OLD (deprecated):
-import { getCell, storage, idle } from "@commontools/runner";
+import { getCell, idle, storage } from "@commontools/runner";
 const cell = getCell(space, cause, schema);
 await storage.syncCell(cell);
 await idle();
@@ -575,14 +575,14 @@ The Runtime constructor accepts a configuration object:
 
 ```typescript
 interface RuntimeOptions {
-  storageUrl: string;              // Required: storage backend URL
-  signer?: Signer;                 // Optional: for remote storage auth
-  enableCache?: boolean;           // Optional: enable local caching
+  storageUrl: string; // Required: storage backend URL
+  signer?: Signer; // Optional: for remote storage auth
+  enableCache?: boolean; // Optional: enable local caching
   consoleHandler?: ConsoleHandler; // Optional: custom console handling
-  errorHandlers?: ErrorHandler[];  // Optional: error handling
-  blobbyServerUrl?: string;        // Optional: blob storage URL
+  errorHandlers?: ErrorHandler[]; // Optional: error handling
+  blobbyServerUrl?: string; // Optional: blob storage URL
   recipeEnvironment?: RecipeEnvironment; // Optional: recipe env vars
-  debug?: boolean;                 // Optional: debug logging
+  debug?: boolean; // Optional: debug logging
 }
 ```
 
@@ -618,7 +618,8 @@ business logic rather than managing data flow manually.
 The Runtime coordinates several core services:
 
 - **Scheduler**: Manages execution order and batching of reactive updates
-- **Storage**: Handles persistence and synchronization with configurable backends
+- **Storage**: Handles persistence and synchronization with configurable
+  backends
 - **DocumentMap**: Maps entity IDs to document instances and manages creation
 - **RecipeManager**: Loads, compiles, and caches recipe definitions
 - **ModuleRegistry**: Manages module registration and retrieval for recipes
