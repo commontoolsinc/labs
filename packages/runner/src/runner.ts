@@ -553,7 +553,7 @@ export class Runner implements IRunner {
                 resultFor: cause,
               }, processCell.space),
             );
-            addCancel(this.cancels.get(resultCell));
+            addCancel(() => this.stop(resultCell));
           }
 
           popFrame(frame);
@@ -616,7 +616,7 @@ export class Runner implements IRunner {
                   processCell.space,
                 ),
             );
-            addCancel(this.cancels.get(resultDoc));
+            addCancel(() => this.stop(resultDoc));
 
             if (!previousResultDoc) {
               previousResultDoc = resultDoc;
