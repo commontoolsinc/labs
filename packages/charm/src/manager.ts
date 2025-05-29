@@ -343,16 +343,11 @@ export class CharmManager {
   ): Promise<Cell<T> | undefined> {
     // Load the charm from storage.
     let charm: Cell<Charm> | undefined;
-    if (isCell(id)) {
-      charm = id;
-    } else {
-      const idAsDocId = JSON.stringify({ "/": id });
-      const doc = await this.runtime.storage.syncCellById(
-        this.space,
-        idAsDocId,
-      );
-      charm = doc.asCell();
-    }
+
+    if (isCell(id)) charm = id;
+    else charm = this.runtime.getCellFromEntityId(this.space, { "/": id });
+
+    await this.runtime.storage.syncCell(charm);
 
     const recipeId = getRecipeIdFromCharm(charm);
     if (!recipeId) throw new Error("recipeId is required");
@@ -1312,5 +1307,11 @@ export class CharmManager {
 }
 
 export const getRecipeIdFromCharm = (charm: Cell<Charm>): string => {
+  console.log(
+    "getRecipeIdFromCharm",
+    JSON.stringify(charm.entityId),
+    charm.getSourceCell(processSchema) !== undefined,
+    charm.getSourceCell(processSchema)?.get(),
+  );
   return charm.getSourceCell(processSchema)?.get()?.[TYPE];
 };

@@ -120,7 +120,6 @@ export class Storage implements IStorage {
     }
   }
 
-
   setSigner(signer: Signer): void {
     this.signer = signer;
   }
@@ -150,14 +149,14 @@ export class Storage implements IStorage {
       };
     }
 
-    const entityCell = this._ensureIsSynced(
+    const entityDoc = this._ensureIsSynced(
       cell,
       expectedInStorage,
       schemaContext,
     );
 
     // If doc is loading, return the promise. Otherwise return immediately.
-    return this.docIsLoading.get(entityCell) ?? entityCell;
+    return this.docIsLoading.get(entityDoc) ?? entityDoc;
   }
 
   syncCellById<T>(
