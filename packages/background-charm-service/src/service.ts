@@ -83,7 +83,9 @@ export class BackgroundCharmService {
     // Charms that hit an e.g. Authorization Error are empty, and space
     // is undefined -- filter out any of these charms before creating
     // a worker
-    const dids = new Set(charms.map((c) => c.get().space).filter(Boolean));
+    const charmContents = charms.map((c) => c.get()).filter(Boolean);
+    const enabledCharms = charmContents.filter((c) => !c.disabledAt);
+    const dids = new Set(enabledCharms.map((c) => c.space));
     log(`monitoring ${dids.size} spaces`);
 
     const [cancel, addCancel] = useCancelGroup();
