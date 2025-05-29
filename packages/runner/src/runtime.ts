@@ -183,11 +183,9 @@ export interface IRecipeManager {
 
 export interface IModuleRegistry {
   readonly runtime: IRuntime;
-  register(name: string, module: any): void;
-  get(name: string): any;
+  addModuleByRef(ref: string, module: Module): void;
+  getModule(ref: string): Module;
   clear(): void;
-  addModuleByRef(ref: string, module: any): void;
-  getModule(ref: string): any;
 }
 
 export interface IDocumentMap {
