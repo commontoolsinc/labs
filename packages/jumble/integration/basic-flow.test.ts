@@ -102,6 +102,10 @@ Deno.test({
             "Logged in and Common Knowledge title renders",
           );
 
+          console.log(
+            "Navigating to charm detail page",
+            `${FRONTEND_URL}${testCharm.name}/${testCharm.charmId}`,
+          );
           await page.goto(
             `${FRONTEND_URL}${testCharm.name}/${testCharm.charmId}`,
           );
@@ -282,7 +286,7 @@ async function addCharm(toolshedUrl: string, recipePath: string) {
   const name = `ci-${Date.now()}-${
     Math.random().toString(36).substring(2, 15)
   }`;
-  const { success, stderr } = await (new Deno.Command(Deno.execPath(), {
+  const { success, stdout, stderr } = await (new Deno.Command(Deno.execPath(), {
     args: [
       "task",
       "start",
@@ -306,8 +310,11 @@ async function addCharm(toolshedUrl: string, recipePath: string) {
     throw new Error(`Failed to add charm: ${decode(stderr)}`);
   }
 
+  const output = decode(stdout);
+  const charmId = output.split("created charm: ")[1].trim();
+
   return {
-    charmId: "baedreic5a2muxtlgvn6u36lmcp3tdoq5sih3nbachysw4srquvga5fjtem",
+    charmId,
     name,
   };
 }

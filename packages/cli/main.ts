@@ -204,6 +204,7 @@ async function main() {
       if (quit) {
         await runtime.idle();
         await runtime.storage.synced();
+        console.log("created charm: ", getEntityId(charm)!["/"]);
         Deno.exit(0);
       }
     } catch (error) {
