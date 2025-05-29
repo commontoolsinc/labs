@@ -1,6 +1,7 @@
 import { type DocImpl } from "../doc.ts";
 import { type Action } from "../scheduler.ts";
 import { type ReactivityLog } from "../scheduler.ts";
+import { type IRuntime } from "../runtime.ts";
 
 export function ifElse(
   inputsDoc: DocImpl<[any, any, any]>,
@@ -8,9 +9,13 @@ export function ifElse(
   _addCancel: (cancel: () => void) => void,
   cause: DocImpl<any>[],
   parentDoc: DocImpl<any>,
-  runtime?: any, // Runtime will be injected by the registration function
+  runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  const result = parentDoc.runtime!.documentMap.getDoc<any>(undefined, { ifElse: cause }, parentDoc.space);
+  const result = runtime.documentMap.getDoc<any>(
+    undefined,
+    { ifElse: cause },
+    parentDoc.space,
+  );
   sendResult(result);
 
   const inputsCell = inputsDoc.asCell();
