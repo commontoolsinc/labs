@@ -137,9 +137,6 @@ export class RecipeManager implements IRecipeManager {
     }
     const recipe = await this.runtime.harness.runSingle(recipeMeta.src);
 
-    metaCell.set(recipeMeta);
-    await this.runtime.storage.syncCell(metaCell);
-    await this.runtime.storage.synced();
     this.recipeIdMap.set(recipeId, recipe);
     this.recipeMetaMap.set(recipe, metaCell);
     return recipe;
@@ -215,14 +212,12 @@ export class RecipeManager implements IRecipeManager {
     try {
       const recipe = this.recipeIdMap.get(recipeId);
       if (!recipe) {
-        console.warn(`Recipe ${recipeId} not found for publishing`);
-        return;
+        throw new Error(`Recipe ${recipeId} not found for publishing`);
       }
 
       const meta = this.getRecipeMeta({ recipeId });
       if (!meta?.src) {
-        console.warn(`Recipe ${recipeId} has no source for publishing`);
-        return;
+        throw new Error(`Recipe ${recipeId} has no source for publishing`);
       }
 
       const data = {
@@ -256,23 +251,6 @@ export class RecipeManager implements IRecipeManager {
     } catch (error) {
       console.warn("Failed to publish recipe to blobby:", error);
       // Don't throw - this is optional functionality
-    }
-  }
-
-  publishRecipe(recipeId: string): Promise<void> {
-    return this.publishToBlobby(recipeId);
-  }
-
-  listRecipes(): string[] {
-    return Array.from(this.recipeIdMap.keys());
-  }
-
-  removeRecipe(id: string): void {
-    const recipe = this.recipeIdMap.get(id);
-    if (recipe) {
-      this.recipeIdMap.delete(id);
-      this.recipeMetaMap.delete(recipe);
-      console.log(`Recipe ${id} removed from cache`);
     }
   }
 }

@@ -185,9 +185,6 @@ export interface IRecipeManager {
     },
   ): Promise<boolean>;
   publishToBlobby(recipeId: string): Promise<void>;
-  publishRecipe(recipeId: string): Promise<void>;
-  listRecipes(): string[];
-  removeRecipe(id: string): void;
 }
 
 export interface IModuleRegistry {
