@@ -230,8 +230,6 @@ export interface IRunner {
   ): any;
   stop<T>(resultCell: DocImpl<T>): void;
   stopAll(): void;
-  isRunning<T>(doc: DocImpl<T>): boolean;
-  listRunningDocs(): DocImpl<any>[];
 }
 
 import { Scheduler } from "./scheduler.ts";

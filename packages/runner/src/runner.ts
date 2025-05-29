@@ -96,7 +96,7 @@ export class Runner implements IRunner {
     if (resultCell.sourceCell !== undefined) {
       processCell = resultCell.sourceCell;
     } else {
-      processCell = resultCell.runtime!.documentMap.getDoc(
+      processCell = this.runtime.documentMap.getDoc(
         undefined,
         { cell: resultCell, path: [] },
         resultCell.space,
@@ -323,7 +323,7 @@ export class Runner implements IRunner {
       // TODO(seefeld): This ignores schemas provided by modules, so it might
       // still fetch a lot.
       [...inputs, ...outputs].forEach((c) => {
-        const cell = this.getCellFromLink(c);
+        const cell = c.cell.asCell(c.path);
         cells.push(cell);
       });
     }
@@ -335,10 +335,6 @@ export class Runner implements IRunner {
     await Promise.all(cells.map((c) => this.runtime.storage.syncCell(c)));
 
     return true;
-  }
-
-  private getCellFromLink(link: CellLink): Cell<any> {
-    return link.cell.asCell(link.path);
   }
 
   /**
@@ -354,17 +350,6 @@ export class Runner implements IRunner {
   stop<T>(resultCell: DocImpl<T>): void {
     this.cancels.get(resultCell)?.();
     this.cancels.delete(resultCell);
-  }
-
-  isRunning<T>(doc: DocImpl<T>): boolean {
-    return this.cancels.has(doc);
-  }
-
-  listRunningDocs(): DocImpl<any>[] {
-    // Since WeakMap doesn't have iteration methods, we can't directly list all running docs
-    // This would need to be tracked differently if listing functionality is needed
-    const runningDocs: DocImpl<any>[] = [];
-    return runningDocs;
   }
 
   stopAll(): void {
@@ -692,6 +677,7 @@ export class Runner implements IRunner {
       addCancel,
       inputCells, // cause
       processCell,
+      this.runtime,
     );
 
     addCancel(
@@ -761,9 +747,9 @@ export class Runner implements IRunner {
       cell: resultCell,
       path: [],
     });
+    // TODO(seefeld): Make sure to not cancel after a recipe is elevated to a
+    // charm, e.g. via navigateTo. Nothing is cancelling right now, so leaving
+    // this as TODO.
     addCancel(this.cancels.get(resultCell.sourceCell!));
   }
 }
-
-// Singleton wrapper functions removed to eliminate singleton pattern
-// Use runtime.runner methods directly instead

@@ -59,6 +59,7 @@ export function raw<T, R>(
     addCancel: AddCancel,
     cause: any,
     parentCell: DocImpl<any>,
+    runtime: IRuntime,
   ) => Action,
 ): ModuleFactory<T, R> {
   return createNodeFactory({
