@@ -19,7 +19,7 @@ describe("Schema Support", () => {
 
   describe("Examples", () => {
     it("allows mapping of fields via interim cells", () => {
-      const c = runtime.documentMap.runtime.documentMap.getDoc(
+      const c = runtime.documentMap.getDoc(
         {
           id: 1,
           metadata: {
@@ -34,7 +34,7 @@ describe("Schema Support", () => {
 
       // This is what the system (or someone manually) would create to remap
       // data to match the desired schema
-      const mappingCell = runtime.documentMap.runtime.documentMap.getDoc(
+      const mappingCell = runtime.documentMap.getDoc(
         {
           // as-is
           id: { cell: c, path: ["id"] },
