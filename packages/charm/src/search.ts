@@ -6,7 +6,7 @@ import {
 } from "@commontools/charm";
 import { NAME, Recipe, recipe } from "@commontools/builder";
 import { LLMClient } from "@commontools/llm";
-import { Cell, recipeManager } from "@commontools/runner";
+import { Cell } from "@commontools/runner";
 
 export type CharmSearchResult = {
   charm: Cell<Charm>;

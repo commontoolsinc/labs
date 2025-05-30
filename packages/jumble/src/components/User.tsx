@@ -1,6 +1,6 @@
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
 import { FaArrowDown, FaArrowUp, FaExclamationTriangle } from "react-icons/fa";
-import { storage } from "@commontools/runner";
+import { useRuntime } from "@/contexts/RuntimeContext.tsx";
 import { useEffect, useRef, useState } from "react";
 import {
   useStatusMonitor,
@@ -135,6 +135,7 @@ const applyCircleStyle = (circle: SVGElement, style: {
 
 // Main component
 export function User() {
+  const runtime = useRuntime();
   const { session } = useAuthentication();
   const [did, setDid] = useState<string | undefined>(undefined);
   const { status, updateStatus } = useStatusMonitor();
@@ -177,7 +178,7 @@ export function User() {
   // Listen for events
   // Use storage-scope, since, if we've authenticated,
   // we're using a space-scoped inspector
-  useStorageBroadcast(storage.id, updateStatus);
+  useStorageBroadcast(runtime.id, updateStatus);
 
   // Animation logic
   useEffect(() => {

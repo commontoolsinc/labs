@@ -15,12 +15,8 @@ import {
   createQueryResultProxy,
   type QueryResult,
 } from "./query-result-proxy.ts";
-import {
-  createRef,
-  type EntityId,
-  getDocByEntityId,
-  setDocByEntityId,
-} from "./doc-map.ts";
+import { type EntityId } from "./doc-map.ts";
+import type { IRuntime } from "./runtime.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { type Cancel } from "./cancel.ts";
 import { arrayEqual } from "./utils.ts";
@@ -204,6 +200,12 @@ export type DocImpl<T> = {
   ephemeral: boolean;
 
   /**
+   * The runtime instance that owns this document.
+   * Used for accessing scheduler and other runtime services.
+   */
+  runtime: IRuntime;
+
+  /**
    * Retry callbacks for the current value on cell. Will be cleared after a
    * transaction goes through, whether it ultimately succeeds or not.
    *
@@ -240,32 +242,18 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
   : any;
 
 /**
- * Gets or creates a document for the given value, cause, and space.
- * @param value - The value to wrap in a document
- * @param cause - The cause for creating the document
- * @param space - The space identifier
- * @returns A document implementation wrapping the value
- */
-export function getDoc<T>(value: T, cause: any, space: string): DocImpl<T> {
-  // If cause is provided, generate ID and return pre-existing cell if any.
-  const entityId = generateEntityId(value, cause);
-  const existing = getDocByEntityId(space, entityId, false);
-  if (existing) return existing;
-
-  return createDoc(value, entityId, space);
-}
-
-/**
  * Creates a new document with the specified value, entity ID, and space.
  * @param value - The value to wrap in a document
  * @param entityId - The entity identifier
  * @param space - The space identifier
+ * @param runtime - The runtime instance that owns this document
  * @returns A new document implementation
  */
 export function createDoc<T>(
   value: T,
   entityId: EntityId,
   space: string,
+  runtime: IRuntime,
 ): DocImpl<T> {
   const callbacks = new Set<
     (value: T, path: PropertyKey[], labels?: Labels) => void
@@ -381,6 +369,9 @@ export function createDoc<T>(
     set ephemeral(value: boolean) {
       ephemeral = value;
     },
+    get runtime(): IRuntime {
+      return runtime;
+    },
     [toOpaqueRef]: () => makeOpaqueRef(self, []),
     [isDocMarker]: true,
     get copyTrap(): boolean {
@@ -388,20 +379,9 @@ export function createDoc<T>(
     },
   };
 
-  setDocByEntityId(space, entityId, self);
+  runtime.documentMap.registerDoc(entityId, self, space);
 
   return self;
-}
-
-function generateEntityId(value: any, cause?: any): EntityId {
-  return createRef(
-    typeof value === "object" && value !== null
-      ? (value as object)
-      : value !== undefined
-      ? { value }
-      : {},
-    cause,
-  );
 }
 
 const docLinkToOpaqueRef = new WeakMap<

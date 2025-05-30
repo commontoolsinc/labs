@@ -1,6 +1,6 @@
 import { Recipe } from "@commontools/builder";
 import { Console } from "./console.ts";
-import { CtRuntime, RuntimeFunction } from "./ct-runtime.ts";
+import { Harness, HarnessedFunction } from "./harness.ts";
 import {
   bundle,
   getTypeLibs,
@@ -37,7 +37,8 @@ interface Internals {
   runtime: UnsafeEvalRuntime;
   isolate: UnsafeEvalIsolate;
 }
-export class UnsafeEvalRuntimeMulti extends EventTarget implements CtRuntime {
+
+export class UnsafeEvalRuntimeMulti extends EventTarget implements Harness {
   private internals: Internals | undefined;
   constructor() {
     super();
@@ -80,7 +81,7 @@ export class UnsafeEvalRuntimeMulti extends EventTarget implements CtRuntime {
     return exports.default;
   }
 
-  getInvocation(source: string): RuntimeFunction {
+  getInvocation(source: string): HarnessedFunction {
     return eval(source);
   }
 

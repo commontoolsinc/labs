@@ -1,10 +1,4 @@
-import {
-  Cell,
-  isCell,
-  isStream,
-  recipeManager,
-  runtime,
-} from "@commontools/runner";
+import { Cell, isCell, isStream, type Runtime } from "@commontools/runner";
 import { isObject } from "@commontools/utils/types";
 import {
   createJsonSchema,
@@ -102,7 +96,7 @@ export async function iterate(
 ): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
   const optionsWithDefaults = applyDefaults(options);
   const { model, cache, space, generationId } = optionsWithDefaults;
-  const { iframe } = getIframeRecipe(charm);
+  const { iframe } = getIframeRecipe(charm, charmManager.runtime);
 
   const prevSpec = iframe?.spec;
   if (plan?.description === undefined) {
@@ -148,14 +142,14 @@ export const generateNewRecipeVersion = async (
   generationId?: string,
   llmRequestId?: string,
 ) => {
-  const parentInfo = getIframeRecipe(parent);
+  const parentInfo = getIframeRecipe(parent, charmManager.runtime);
   if (!parentInfo.recipeId) {
     throw new Error("No recipeId found for charm");
   }
-  const parentRecipe = await recipeManager.loadRecipe({
-    space: charmManager.getSpace(),
-    recipeId: parentInfo.recipeId,
-  });
+  const parentRecipe = await charmManager.runtime.recipeManager.loadRecipe(
+    parentInfo.recipeId,
+    charmManager.getSpace(),
+  );
 
   const name = extractTitle(newRecipe.src, "<unknown>");
   const argumentSchema =
@@ -511,20 +505,25 @@ export async function castNewRecipe(
 export async function compileRecipe(
   recipeSrc: string,
   spec: string,
-  charmManager: CharmManager,
+  runtime: Runtime,
+  space: string,
   parents?: string[],
 ) {
-  const recipe = await runtime.runSingle(recipeSrc);
+  const recipe = await runtime.harness.runSingle(recipeSrc);
   if (!recipe) {
     throw new Error("No default recipe found in the compiled exports.");
   }
   const parentsIds = parents?.map((id) => id.toString());
-  recipeManager.registerRecipe({
-    recipeId: recipeManager.generateRecipeId(recipe),
-    space: charmManager.getSpace(),
+  const recipeId = runtime.recipeManager.generateRecipeId(
+    recipe,
+    recipeSrc,
+  );
+  await runtime.recipeManager.registerRecipe({
+    recipeId,
+    space,
     recipe,
     recipeMeta: {
-      id: recipeManager.generateRecipeId(recipe),
+      id: recipeId,
       src: recipeSrc,
       spec,
       parents: parentsIds,
@@ -541,7 +540,7 @@ export async function compileAndRunRecipe(
   parents?: string[],
   llmRequestId?: string,
 ): Promise<Cell<Charm>> {
-  const recipe = await compileRecipe(recipeSrc, spec, charmManager, parents);
+  const recipe = await compileRecipe(recipeSrc, spec, charmManager.runtime, charmManager.getSpace(), parents);
   if (!recipe) {
     throw new Error("Failed to compile recipe");
   }

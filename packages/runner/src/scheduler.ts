@@ -6,36 +6,21 @@ import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { runtime } from "./runtime/index.ts";
-import { ConsoleEvent, ConsoleMethod } from "./runtime/console.ts";
+import { ConsoleEvent, ConsoleMethod } from "./harness/console.ts";
+import type {
+  CharmMetadata,
+  ConsoleHandler,
+  ErrorHandler,
+  ErrorWithContext,
+  IRuntime,
+  IScheduler,
+} from "./runtime.ts";
+
+// Re-export types that tests expect from scheduler
+export type { ErrorWithContext };
 
 export type Action = (log: ReactivityLog) => any;
 export type EventHandler = (event: any) => any;
-
-const pending = new Set<Action>();
-const eventQueue: (() => void)[] = [];
-const eventHandlers: [CellLink, EventHandler][] = [];
-const dirty = new Set<DocImpl<any>>();
-const dependencies = new WeakMap<Action, ReactivityLog>();
-const cancels = new WeakMap<Action, Cancel[]>();
-const idlePromises: (() => void)[] = [];
-let loopCounter = new WeakMap<Action, number>();
-const errorHandlers = new Set<
-  ((error: Error) => void) | ((error: ErrorWithContext) => void)
->();
-let consoleHandler = function (
-  _metadata: ReturnType<typeof getCharmMetadataFromFrame>,
-  _method: ConsoleMethod,
-  args: any[],
-): any[] {
-  // Default console handler returns arguments unaffected.
-  // Call `onConsole` to override default handler.
-  return args;
-};
-let _running: Promise<unknown> | undefined = undefined;
-let scheduled = false;
-
-const MAX_ITERATIONS_PER_RUN = 100;
 
 /**
  * Reactivity log.
@@ -48,259 +33,278 @@ export type ReactivityLog = {
   writes: CellLink[];
 };
 
-export function schedule(action: Action, log: ReactivityLog): Cancel {
-  const reads = setDependencies(action, log);
-  reads.forEach(({ cell: doc }) => dirty.add(doc));
+const MAX_ITERATIONS_PER_RUN = 100;
 
-  queueExecution();
-  pending.add(action);
+export class Scheduler implements IScheduler {
+  private pending = new Set<Action>();
+  private eventQueue: (() => void)[] = [];
+  private eventHandlers: [CellLink, EventHandler][] = [];
+  private dirty = new Set<DocImpl<any>>();
+  private dependencies = new WeakMap<Action, ReactivityLog>();
+  private cancels = new WeakMap<Action, Cancel[]>();
+  private idlePromises: (() => void)[] = [];
+  private loopCounter = new WeakMap<Action, number>();
+  private errorHandlers = new Set<ErrorHandler>();
+  private consoleHandler: ConsoleHandler;
+  private _running: Promise<unknown> | undefined = undefined;
+  private scheduled = false;
 
-  return () => unschedule(action);
-}
+  get runningPromise(): Promise<unknown> | undefined {
+    return this._running;
+  }
 
-export function unschedule(fn: Action): void {
-  cancels.get(fn)?.forEach((cancel) => cancel());
-  cancels.delete(fn);
-  dependencies.delete(fn);
-  pending.delete(fn);
-}
-
-export function subscribe(action: Action, log: ReactivityLog): Cancel {
-  const reads = setDependencies(action, log);
-
-  cancels.set(
-    action,
-    reads.map(({ cell: doc, path }) =>
-      doc.updates((_newValue, changedPath) => {
-        if (pathAffected(changedPath, path)) {
-          dirty.add(doc);
-          queueExecution();
-          pending.add(action);
-        }
-      })
-    ),
-  );
-
-  return () => unschedule(action);
-}
-
-// Like schedule, but runs the action immediately to gather dependencies
-export async function run(action: Action): Promise<any> {
-  const log: ReactivityLog = { reads: [], writes: [] };
-
-  if (running.promise) await running.promise;
-
-  let result: any;
-  running.promise = new Promise((resolve) => {
-    // This weird combination of try clauses is required to handle both sync and
-    // async implementations of the action.
-
-    const finalizeAction = (error?: unknown) => {
-      // handlerError() might throw, so let's make sure to resolve the promise.
-      try {
-        if (error) {
-          if (error instanceof Error) handleError(error, action);
-        }
-      } finally {
-        // Note: By adding the listeners after the call we avoid triggering a
-        // re-run of the action if it changed a r/w doc. Note that this also
-        // means that those actions can't loop on themselves.
-        subscribe(action, log);
-        resolve(result);
-      }
-    };
-
-    try {
-      Promise.resolve(action(log))
-        .then((actionResult) => {
-          result = actionResult;
-          finalizeAction();
-        })
-        .catch((error) => finalizeAction(error));
-    } catch (error) {
-      finalizeAction(error);
-    }
-  });
-
-  return running.promise;
-}
-
-// Enforces that `running.promise` is only set once and becomes undefined once
-// the promise is resolved.
-export const running = {
-  get promise(): Promise<unknown> | undefined {
-    return _running;
-  },
-  set promise(promise: Promise<unknown> | undefined) {
-    if (_running !== undefined) {
+  set runningPromise(promise: Promise<unknown> | undefined) {
+    if (this._running !== undefined) {
       throw new Error(
         "Cannot set running while another promise is in progress",
       );
     }
     if (promise !== undefined) {
-      _running = promise.finally(() => {
-        _running = undefined;
+      this._running = promise.finally(() => {
+        this._running = undefined;
       });
     }
-  },
-};
-
-// Returns a promise that resolves when there is no more work to do.
-export function idle() {
-  return new Promise<void>((resolve) => {
-    // NOTE: This relies on `running`'s finally clause to set it to undefined to
-    // prevent infinite loops.
-    if (running.promise) running.promise.then(() => idle().then(resolve));
-    // Once nothing is running, see if more work is queued up. If not, then
-    // resolve the idle promise, otherwise add it to the idle promises list that
-    // will be resolved once all the work is done.
-    else if (pending.size === 0 && eventQueue.length === 0) resolve();
-    else idlePromises.push(resolve);
-  });
-}
-
-// Replace the default console hook with a function that accepts context metadata,
-// console method name and the arguments.
-export function onConsole(
-  fn: (
-    metadata: ReturnType<typeof getCharmMetadataFromFrame>,
-    method: ConsoleMethod,
-    args: any[],
-  ) => any[],
-) {
-  consoleHandler = fn;
-}
-
-runtime.addEventListener("console", (e: Event) => {
-  // Called synchronously when `console` methods are
-  // called within the runtime.
-  const { method, args } = e as ConsoleEvent;
-  const metadata = getCharmMetadataFromFrame();
-  const result = consoleHandler(metadata, method, args);
-  console[method].apply(console, result);
-});
-
-export function queueEvent(eventRef: CellLink, event: any) {
-  for (const [ref, handler] of eventHandlers) {
-    if (
-      ref.cell === eventRef.cell &&
-      ref.path.length === eventRef.path.length &&
-      ref.path.every((p, i) => p === eventRef.path[i])
-    ) {
-      queueExecution();
-      eventQueue.push(() => handler(event));
-    }
   }
-}
 
-export function addEventHandler(handler: EventHandler, ref: CellLink): Cancel {
-  eventHandlers.push([ref, handler]);
-  return () => {
-    const index = eventHandlers.findIndex(([r, h]) =>
-      r === ref && h === handler
+  constructor(
+    readonly runtime: IRuntime,
+    consoleHandler?: ConsoleHandler,
+    errorHandlers?: ErrorHandler[],
+  ) {
+    this.consoleHandler = consoleHandler ||
+      function (_metadata, _method, args) {
+        // Default console handler returns arguments unaffected.
+        return args;
+      };
+
+    if (errorHandlers) {
+      errorHandlers.forEach((handler) => this.errorHandlers.add(handler));
+    }
+
+    // Set up harness event listeners
+    this.runtime.harness.addEventListener("console", (e: Event) => {
+      // Called synchronously when `console` methods are
+      // called within the runtime.
+      const { method, args } = e as ConsoleEvent;
+      const metadata = getCharmMetadataFromFrame();
+      const result = this.consoleHandler(metadata, method, args);
+      console[method].apply(console, result);
+    });
+  }
+
+  schedule(action: Action, log: ReactivityLog): Cancel {
+    const reads = this.setDependencies(action, log);
+    reads.forEach(({ cell: doc }) => this.dirty.add(doc));
+
+    this.queueExecution();
+    this.pending.add(action);
+
+    return () => this.unschedule(action);
+  }
+
+  unschedule(action: Action): void {
+    this.cancels.get(action)?.forEach((cancel) => cancel());
+    this.cancels.delete(action);
+    this.dependencies.delete(action);
+    this.pending.delete(action);
+  }
+
+  subscribe(action: Action, log: ReactivityLog): Cancel {
+    const reads = this.setDependencies(action, log);
+
+    this.cancels.set(
+      action,
+      reads.map(({ cell: doc, path }) =>
+        doc.updates((_newValue: any, changedPath: PropertyKey[]) => {
+          if (pathAffected(changedPath, path)) {
+            this.dirty.add(doc);
+            this.queueExecution();
+            this.pending.add(action);
+          }
+        })
+      ),
     );
-    if (index !== -1) eventHandlers.splice(index, 1);
-  };
-}
 
-function queueExecution() {
-  if (scheduled) return;
-  queueMicrotask(execute);
-  scheduled = true;
-}
+    return () => this.unschedule(action);
+  }
 
-function setDependencies(action: Action, log: ReactivityLog) {
-  const reads = compactifyPaths(log.reads);
-  const writes = compactifyPaths(log.writes);
-  dependencies.set(action, { reads, writes });
-  return reads;
-}
+  async run(action: Action): Promise<any> {
+    const log: ReactivityLog = { reads: [], writes: [] };
 
-export type ErrorWithContext = Error & {
-  action: Action;
-  charmId: string;
-  space: string;
-  recipeId: string;
-};
+    if (this.runningPromise) await this.runningPromise;
 
-export function isErrorWithContext(error: unknown): error is ErrorWithContext {
-  return error instanceof Error && "action" in error && "charmId" in error &&
-    "space" in error && "recipeId" in error;
-}
+    let result: any;
+    this.runningPromise = new Promise((resolve) => {
+      const finalizeAction = (error?: unknown) => {
+        try {
+          if (error) this.handleError(error as Error, action);
+        } finally {
+          // Set up reactive subscriptions after the action runs
+          // This matches the original scheduler behavior
+          this.subscribe(action, log);
+          resolve(result);
+        }
+      };
 
-export function onError(
-  fn: ((error: Error) => void) | ((error: ErrorWithContext) => void),
-) {
-  errorHandlers.add(fn);
-}
+      try {
+        Promise.resolve(action(log))
+          .then((actionResult) => {
+            result = actionResult;
+            finalizeAction();
+          })
+          .catch((error) => finalizeAction(error));
+      } catch (error) {
+        finalizeAction(error);
+      }
+    });
 
-function handleError(error: Error, action: any) {
-  // Since most errors come from `eval`ed code, let's fix the stack trace.
-  if (error.stack) error.stack = runtime.mapStackTrace(error.stack);
+    return this.runningPromise;
+  }
 
-  const { charmId, recipeId, space } = getCharmMetadataFromFrame() ?? {};
+  idle(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      // NOTE: This relies on the finally clause to set runningPromise to
+      // undefined to prevent infinite loops.
+      if (this.runningPromise) {
+        this.runningPromise.then(() => this.idle().then(resolve));
+      } // Once nothing is running, see if more work is queued up. If not, then
+      // resolve the idle promise, otherwise add it to the idle promises list
+      // that will be resolved once all the work is done.
+      else if (this.pending.size === 0 && this.eventQueue.length === 0) {
+        resolve();
+      } else {
+        this.idlePromises.push(resolve);
+      }
+    });
+  }
 
-  const errorWithContext = error as ErrorWithContext;
-  errorWithContext.action = action;
-  if (charmId) errorWithContext.charmId = charmId;
-  if (recipeId) errorWithContext.recipeId = recipeId;
-  if (space) errorWithContext.space = space;
-
-  console.error("caught error", errorWithContext);
-  for (const handler of errorHandlers) handler(errorWithContext);
-}
-
-async function execute() {
-  // In case a directly invoked `run` is still running, wait for it to finish.
-  if (running.promise) await running.promise;
-
-  // Process next event from the event queue. Will mark more docs as dirty.
-  const handler = eventQueue.shift();
-  if (handler) {
-    // This weird combination of try clauses is required to handle both sync and
-    // async implementations of the handler.
-    try {
-      running.promise = Promise.resolve(handler()).catch((error) => {
-        handleError(error as Error, handler);
-      });
-      await running.promise;
-    } catch (error) {
-      handleError(error as Error, handler);
+  queueEvent(eventRef: CellLink, event: any): void {
+    for (const [ref, handler] of this.eventHandlers) {
+      if (
+        ref.cell === eventRef.cell &&
+        ref.path.length === eventRef.path.length &&
+        ref.path.every((p, i) => p === eventRef.path[i])
+      ) {
+        this.queueExecution();
+        this.eventQueue.push(() => handler(event));
+      }
     }
   }
 
-  const order = topologicalSort(pending, dependencies, dirty);
-
-  // Clear pending and dirty sets, and cancel all listeners for docs on already
-  // scheduled actions.
-  pending.clear();
-  dirty.clear();
-  for (const fn of order) cancels.get(fn)?.forEach((cancel) => cancel());
-
-  // Now run all functions. This will create new listeners to mark docs dirty
-  // and schedule the next run.
-  for (const fn of order) {
-    loopCounter.set(fn, (loopCounter.get(fn) || 0) + 1);
-    if (loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
-      handleError(
-        new Error(
-          `Too many iterations: ${loopCounter.get(fn)} ${fn.name ?? ""}`,
-        ),
-        fn,
+  addEventHandler(handler: EventHandler, ref: CellLink): Cancel {
+    this.eventHandlers.push([ref, handler]);
+    return () => {
+      const index = this.eventHandlers.findIndex(([r, h]) =>
+        r === ref && h === handler
       );
-    } else await run(fn);
+      if (index !== -1) this.eventHandlers.splice(index, 1);
+    };
   }
 
-  if (pending.size === 0 && eventQueue.length === 0) {
-    const promises = idlePromises;
-    for (const resolve of promises) resolve();
-    idlePromises.length = 0;
+  onConsole(fn: ConsoleHandler): void {
+    this.consoleHandler = fn;
+  }
 
-    loopCounter = new WeakMap();
+  onError(fn: ErrorHandler): void {
+    this.errorHandlers.add(fn);
+  }
 
-    scheduled = false;
-  } else {
-    queueMicrotask(execute);
+  private queueExecution(): void {
+    if (this.scheduled) return;
+    queueMicrotask(() => this.execute());
+    this.scheduled = true;
+  }
+
+  private setDependencies(action: Action, log: ReactivityLog): CellLink[] {
+    const reads = compactifyPaths(log.reads);
+    const writes = compactifyPaths(log.writes);
+    this.dependencies.set(action, { reads, writes });
+    return reads;
+  }
+
+  private handleError(error: Error, action: any) {
+    // Since most errors come from `eval`ed code, let's fix the stack trace.
+    if (error.stack) {
+      error.stack = this.runtime.harness.mapStackTrace(error.stack);
+    }
+
+    const { charmId, recipeId, space } = getCharmMetadataFromFrame() ?? {};
+
+    const errorWithContext = error as ErrorWithContext;
+    errorWithContext.action = action;
+    if (charmId) errorWithContext.charmId = charmId;
+    if (recipeId) errorWithContext.recipeId = recipeId;
+    if (space) errorWithContext.space = space;
+
+    for (const handler of this.errorHandlers) {
+      try {
+        handler(errorWithContext);
+      } catch (handlerError) {
+        console.error("Error in error handler:", handlerError);
+      }
+    }
+
+    if (this.errorHandlers.size === 0) {
+      console.error("Uncaught error in action:", errorWithContext);
+    }
+  }
+
+  private async execute(): Promise<void> {
+    // In case a directly invoked `run` is still running, wait for it to finish.
+    if (this.runningPromise) await this.runningPromise;
+
+    // Process next event from the event queue. Will mark more docs as dirty.
+    const handler = this.eventQueue.shift();
+    if (handler) {
+      try {
+        this.runningPromise = Promise.resolve(handler()).catch((error) => {
+          this.handleError(error as Error, handler);
+        });
+        await this.runningPromise;
+      } catch (error) {
+        this.handleError(error as Error, handler);
+      }
+    }
+
+    const order = topologicalSort(
+      this.pending,
+      this.dependencies,
+      this.dirty,
+    );
+
+    // Clear pending and dirty sets, and cancel all listeners for docs on already
+    // scheduled actions.
+    this.pending.clear();
+    this.dirty.clear();
+    for (const fn of order) {
+      this.cancels.get(fn)?.forEach((cancel) => cancel());
+    }
+
+    // Now run all functions. This will create new listeners to mark docs dirty
+    // and schedule the next run.
+    for (const fn of order) {
+      this.loopCounter.set(fn, (this.loopCounter.get(fn) || 0) + 1);
+      if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
+        this.handleError(
+          new Error(
+            `Too many iterations: ${this.loopCounter.get(fn)} ${fn.name ?? ""}`,
+          ),
+          fn,
+        );
+      } else {
+        await this.run(fn);
+      }
+    }
+
+    if (this.pending.size === 0 && this.eventQueue.length === 0) {
+      const promises = this.idlePromises;
+      for (const resolve of promises) resolve();
+      this.idlePromises.length = 0;
+      this.loopCounter = new WeakMap();
+      this.scheduled = false;
+    } else {
+      queueMicrotask(() => this.execute());
+    }
   }
 }
 
@@ -313,101 +317,59 @@ function topologicalSort(
   const graph = new Map<Action, Set<Action>>();
   const inDegree = new Map<Action, number>();
 
-  // First pass: identify relevant actions
   for (const action of actions) {
     const { reads } = dependencies.get(action)!;
-    // TODO(seefeld): Keep track of affected paths
     if (reads.length === 0) {
-      // Actions with no dependencies are always relevant. Note that they must
-      // be manually added to `pending`, which happens only once on `schedule`.
+      // An action with no reads can be manually added to `pending`, which happens only once on `schedule`.
       relevantActions.add(action);
     } else if (reads.some(({ cell: doc }) => dirty.has(doc))) {
       relevantActions.add(action);
     }
   }
 
-  // Second pass: add downstream actions
-  let size;
-  do {
-    size = relevantActions.size;
-    for (const action of actions) {
-      if (!relevantActions.has(action)) {
-        const { writes } = dependencies.get(action)!;
-        for (const write of writes) {
-          if (
-            Array.from(relevantActions).some((relevantAction) =>
-              dependencies
-                .get(relevantAction)!
-                .reads.some(
-                  ({ cell, path }) =>
-                    cell === write.cell && pathAffected(write.path, path),
-                )
-            )
-          ) {
-            relevantActions.add(action);
-            break;
-          }
-        }
-      }
-    }
-  } while (relevantActions.size > size);
-
-  // Initialize graph and inDegree for relevant actions
   for (const action of relevantActions) {
     graph.set(action, new Set());
     inDegree.set(action, 0);
   }
 
-  // Build the graph
   for (const actionA of relevantActions) {
-    const { writes } = dependencies.get(actionA)!;
-    for (const write of writes) {
-      for (const actionB of relevantActions) {
-        if (actionA !== actionB) {
-          const { reads } = dependencies.get(actionB)!;
-          if (
-            reads.some(({ cell, path }) =>
-              cell === write.cell && pathAffected(write.path, path)
-            )
-          ) {
-            graph.get(actionA)!.add(actionB);
-            inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
-          }
-        }
+    const depsA = dependencies.get(actionA)!;
+    for (const actionB of relevantActions) {
+      if (actionA === actionB) continue;
+      const depsB = dependencies.get(actionB)!;
+
+      const hasConflict = depsA.writes.some((writeLink) =>
+        depsB.reads.some((readLink) =>
+          writeLink.cell === readLink.cell &&
+          (writeLink.path.length <= readLink.path.length
+            ? writeLink.path.every((segment, i) => readLink.path[i] === segment)
+            : readLink.path.every((segment, i) =>
+              writeLink.path[i] === segment
+            ))
+        )
+      );
+
+      if (hasConflict) {
+        graph.get(actionA)!.add(actionB);
+        inDegree.set(actionB, inDegree.get(actionB)! + 1);
       }
     }
   }
 
-  // Perform topological sort with cycle handling
   const queue: Action[] = [];
-  const result: Action[] = [];
-  const visited = new Set<Action>();
-
-  // Add all actions with no dependencies (in-degree 0) to the queue
-  for (const [action, degree] of inDegree.entries()) {
-    if (degree === 0) {
-      queue.push(action);
-    }
+  for (const [action, degree] of inDegree) {
+    if (degree === 0) queue.push(action);
   }
 
-  while (queue.length > 0 || visited.size < relevantActions.size) {
-    if (queue.length === 0) {
-      // Handle cycle: choose an unvisited node with the lowest in-degree
-      const unvisitedAction = Array.from(relevantActions)
-        .filter((action) => !visited.has(action))
-        .reduce((a, b) => (inDegree.get(a)! < inDegree.get(b)! ? a : b));
-      queue.push(unvisitedAction);
-    }
-
+  const result: Action[] = [];
+  while (queue.length > 0) {
     const current = queue.shift()!;
-    if (visited.has(current)) continue;
-
     result.push(current);
-    visited.add(current);
 
-    for (const neighbor of graph.get(current) || []) {
-      inDegree.set(neighbor, inDegree.get(neighbor)! - 1);
-      if (inDegree.get(neighbor) === 0) {
+    for (const neighbor of graph.get(current)!) {
+      const newDegree = inDegree.get(neighbor)! - 1;
+      inDegree.set(neighbor, newDegree);
+      if (newDegree === 0) {
         queue.push(neighbor);
       }
     }

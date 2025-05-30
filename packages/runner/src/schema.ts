@@ -1,9 +1,8 @@
 import { isAlias, JSONSchema } from "@commontools/builder";
-import { type DocImpl, getDoc } from "./doc.ts";
+import { type DocImpl } from "./doc.ts";
 import {
   type CellLink,
   createCell,
-  getImmutableCell,
   isCell,
   isCellLink,
 } from "./cell.ts";
@@ -101,7 +100,7 @@ function processDefaultValue(
     // document when the value is changed. A classic example is
     // `currentlySelected` with a default of `null`.
     if (!defaultValue && resolvedSchema?.default !== undefined) {
-      const newDoc = getDoc(resolvedSchema.default, {
+      const newDoc = doc.runtime.documentMap.getDoc(resolvedSchema.default, {
         immutable: resolvedSchema.default,
       }, doc.space);
       newDoc.freeze();
@@ -129,7 +128,7 @@ function processDefaultValue(
     );
     // This can receive events, but at first nothing will be bound to it.
     // Normally these get created by a handler call.
-    return getImmutableCell(doc.space, { $stream: true }, resolvedSchema, log);
+    return doc.runtime.getImmutableCell(doc.space, { $stream: true }, resolvedSchema, log);
   }
 
   // Handle object type defaults

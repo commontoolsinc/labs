@@ -1,6 +1,6 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { ConsoleMethod, onConsole, onError } from "@commontools/runner";
+import { ConsoleMethod, Runtime } from "@commontools/runner";
 import {
   BrowserRouter as Router,
   createBrowserRouter,
@@ -29,6 +29,7 @@ import SpellbookLaunchView from "@/views/spellbook/SpellbookLaunchView.tsx";
 import FullscreenInspectorView from "@/views/FullscreenInspectorView.tsx";
 import { ActionManagerProvider } from "@/contexts/ActionManagerContext.tsx";
 import { ActivityProvider } from "@/contexts/ActivityContext.tsx";
+import { RuntimeProvider } from "@/contexts/RuntimeContext.tsx";
 import { ROUTES } from "@/routes.ts";
 
 // Determine environment based on hostname
@@ -84,96 +85,95 @@ const ReplicaRedirect = () => {
   return <div>redirecting...</div>;
 };
 
-setupIframe();
-
-// Show an alert on the first error in a handler or lifted function.
+// Create runtime with error and console handlers
 let errorCount = 0;
-onError((error: Error) => {
-  !errorCount++ &&
-    globalThis.alert(
-      "Uncaught error in recipe: " + error.message + "\n" + error.stack,
-    );
-  // Also send to Sentry
-  Sentry.captureException(error);
+const runtime = new Runtime({
+  storageUrl: location.origin,
+  errorHandlers: [(error) => {
+    !errorCount++ &&
+      globalThis.alert(
+        "Uncaught error in recipe: " + error.message + "\n" + error.stack,
+      );
+    // Also send to Sentry
+    Sentry.captureException(error);
+  }],
+  consoleHandler: (metadata, method, args) => {
+    // Handle console messages depending on charm context.
+    // This is essentially the same as the default handling currently,
+    // but adding this here for future use.
+    if (metadata?.charmId) {
+      return [`Charm(${metadata.charmId}) [${method}]:`, ...args];
+    }
+    return [`Console [${method}]:`, ...args];
+  },
 });
 
-// Handle console messages depending on charm context.
-// This is essentially the same as the default handling currently,
-// but adding this here for future use.
-onConsole(
-  (
-    _metadata:
-      | { charmId?: string; space?: string; recipeId?: string }
-      | undefined,
-    _method: ConsoleMethod,
-    args: any[],
-  ) => {
-    return args;
-  },
-);
+setupIframe(runtime);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary fallback={<div>An error has occurred</div>}>
-      <AuthenticationProvider>
-        <CharmsProvider>
-          <ActionManagerProvider>
-            <ActivityProvider>
-              <Router>
-                <SentryRoutes>
-                  {/* Redirect root to saved replica or default */}
-                  <Route
-                    path={ROUTES.root}
-                    element={<ReplicaRedirect />}
-                  />
-                  <Route
-                    path={ROUTES.inspector}
-                    element={<FullscreenInspectorView />}
-                  />
-                  <Route
-                    path={ROUTES.replicaRoot}
-                    element={<Shell />}
-                  >
-                    <Route index element={<CharmList />} />
+      <RuntimeProvider runtime={runtime}>
+        <AuthenticationProvider>
+          <CharmsProvider>
+            <ActionManagerProvider>
+              <ActivityProvider>
+                <Router>
+                  <SentryRoutes>
+                    {/* Redirect root to saved replica or default */}
                     <Route
-                      path={ROUTES.charmShow}
-                      element={<CharmShowView />}
+                      path={ROUTES.root}
+                      element={<ReplicaRedirect />}
                     />
                     <Route
-                      path={ROUTES.charmDetail}
-                      element={<CharmDetailView />}
+                      path={ROUTES.inspector}
+                      element={<FullscreenInspectorView />}
                     />
                     <Route
-                      path={ROUTES.stackedCharms}
-                      element={<StackedCharmsView />}
-                    />
-                  </Route>
+                      path={ROUTES.replicaRoot}
+                      element={<Shell />}
+                    >
+                      <Route index element={<CharmList />} />
+                      <Route
+                        path={ROUTES.charmShow}
+                        element={<CharmShowView />}
+                      />
+                      <Route
+                        path={ROUTES.charmDetail}
+                        element={<CharmDetailView />}
+                      />
+                      <Route
+                        path={ROUTES.stackedCharms}
+                        element={<StackedCharmsView />}
+                      />
+                    </Route>
 
-                  {/* Spellbook routes */}
-                  <Route
-                    path={ROUTES.spellbookIndex}
-                    element={<SpellbookIndexView />}
-                  />
-                  <Route
-                    path={ROUTES.spellbookDetail}
-                    element={<SpellbookDetailView />}
-                  />
-                  <Route
-                    path={ROUTES.spellbookLaunch}
-                    element={<SpellbookLaunchView />}
-                  />
+                    {/* Spellbook routes */}
+                    <Route
+                      path={ROUTES.spellbookIndex}
+                      element={<SpellbookIndexView />}
+                    />
+                    <Route
+                      path={ROUTES.spellbookDetail}
+                      element={<SpellbookDetailView />}
+                    />
+                    <Route
+                      path={ROUTES.spellbookLaunch}
+                      element={<SpellbookLaunchView />}
+                    />
 
-                  {/* internal tools / experimental routes */}
-                  <Route
-                    path={ROUTES.utilityJsonGen}
-                    element={<GenerateJSONView />}
-                  />
-                </SentryRoutes>
-              </Router>
-            </ActivityProvider>
-          </ActionManagerProvider>
-        </CharmsProvider>
-      </AuthenticationProvider>
+                    {/* internal tools / experimental routes */}
+                    <Route
+                      path={ROUTES.utilityJsonGen}
+                      element={<GenerateJSONView />}
+                    />
+                  </SentryRoutes>
+                </Router>
+              </ActivityProvider>
+            </ActionManagerProvider>
+          </CharmsProvider>
+        </AuthenticationProvider>
+      </RuntimeProvider>
     </ErrorBoundary>
   </StrictMode>,
 );

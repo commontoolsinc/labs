@@ -13,14 +13,14 @@ import {
   unsafe_parentRecipe,
   UnsafeBinding,
 } from "@commontools/builder";
-import { type DocImpl, getDoc, isDoc } from "./doc.ts";
+import { type DocImpl, isDoc } from "./doc.ts";
+import { createRef } from "./doc-map.ts";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { createRef, getDocByEntityId } from "./doc-map.ts";
 import { ContextualFlowControl } from "./index.ts";
 
 /**
@@ -722,8 +722,12 @@ export function normalizeAndDiff(
       path = path.slice(0, -1);
     }
 
-    const entityId = createRef({ id }, { parent: current.cell, path, context });
-    const doc = getDocByEntityId(
+    const entityId = createRef({ id }, {
+      parent: current.cell.entityId,
+      path,
+      context,
+    });
+    const doc = current.cell.runtime.documentMap.getDocByEntityId(
       current.cell.space,
       entityId,
       true,

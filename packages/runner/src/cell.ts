@@ -5,7 +5,8 @@ import {
   ID_FIELD,
   type JSONSchema,
 } from "@commontools/builder";
-import { type DeepKeyLookup, type DocImpl, getDoc, isDoc } from "./doc.ts";
+import { type DeepKeyLookup, type DocImpl, isDoc } from "./doc.ts";
+import { getEntityId } from "./doc-map.ts";
 import {
   createQueryResultProxy,
   type QueryResult,
@@ -15,8 +16,8 @@ import {
   resolveLinkToAlias,
   resolveLinkToValue,
 } from "./utils.ts";
-import { queueEvent, type ReactivityLog, subscribe } from "./scheduler.ts";
-import { type EntityId, getDocByEntityId, getEntityId } from "./doc-map.ts";
+import type { ReactivityLog } from "./scheduler.ts";
+import { type EntityId } from "./doc-map.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import { validateAndTransform } from "./schema.ts";
 import { type Schema } from "@commontools/builder";
@@ -212,113 +213,6 @@ export type CellLink = {
   rootSchema?: JSONSchema;
 };
 
-/**
- * Gets a cell from the specified space with the given cause and schema.
- * @param space - The space identifier
- * @param cause - The cause for creating for the cell, used to generate an ID
- * @param schema - Optional JSON schema for the cell
- * @param log - Optional reactivity log
- * @returns A cell of type T
- */
-export function getCell<T>(
-  space: string,
-  cause: any,
-  schema?: JSONSchema,
-  log?: ReactivityLog,
-): Cell<T>;
-export function getCell<S extends JSONSchema = JSONSchema>(
-  space: string,
-  cause: any,
-  schema: S,
-  log?: ReactivityLog,
-): Cell<Schema<S>>;
-export function getCell(
-  space: string,
-  cause: any,
-  schema?: JSONSchema,
-  log?: ReactivityLog,
-): Cell<any> {
-  const doc = getDoc<any>(undefined as any, cause, space);
-  return createCell(doc, [], log, schema);
-}
-
-export function getCellFromEntityId<T>(
-  space: string,
-  entityId: EntityId,
-  path?: PropertyKey[],
-  schema?: JSONSchema,
-  log?: ReactivityLog,
-): Cell<T>;
-export function getCellFromEntityId<S extends JSONSchema = JSONSchema>(
-  space: string,
-  entityId: EntityId,
-  path: PropertyKey[],
-  schema: S,
-  log?: ReactivityLog,
-): Cell<Schema<S>>;
-export function getCellFromEntityId(
-  space: string,
-  entityId: EntityId,
-  path: PropertyKey[] = [],
-  schema?: JSONSchema,
-  log?: ReactivityLog,
-): Cell<any> {
-  const doc = getDocByEntityId(space, entityId, true)!;
-  return createCell(doc, path, log, schema);
-}
-
-export function getCellFromLink<T>(
-  cellLink: CellLink,
-  schema?: JSONSchema,
-  log?: ReactivityLog,
-): Cell<T>;
-export function getCellFromLink<S extends JSONSchema = JSONSchema>(
-  cellLink: CellLink,
-  schema: S,
-  log?: ReactivityLog,
-): Cell<Schema<S>>;
-export function getCellFromLink(
-  cellLink: CellLink,
-  schema?: JSONSchema,
-  log?: ReactivityLog,
-): Cell<any> {
-  let doc;
-
-  if (isDoc(cellLink.cell)) {
-    doc = cellLink.cell;
-  } else if (cellLink.space) {
-    doc = getDocByEntityId(cellLink.space, getEntityId(cellLink.cell)!, true)!;
-    if (!doc) throw new Error(`Can't find ${cellLink.space}/${cellLink.cell}!`);
-  } else {
-    throw new Error("Cell link has no space");
-  }
-  // If we aren't passed a schema, use the one in the cellLink
-  return createCell(doc, cellLink.path, log, schema ?? cellLink.schema);
-}
-
-export function getImmutableCell<T>(
-  space: string,
-  data: T,
-  schema?: JSONSchema,
-  log?: ReactivityLog,
-): Cell<T>;
-export function getImmutableCell<S extends JSONSchema = JSONSchema>(
-  space: string,
-  data: any,
-  schema: S,
-  log?: ReactivityLog,
-): Cell<Schema<S>>;
-export function getImmutableCell(
-  space: string,
-  data: any,
-  schema?: JSONSchema,
-  log?: ReactivityLog,
-): Cell<any> {
-  const doc = getDoc<any>(data, { immutable: data }, space);
-  doc.freeze();
-  return createCell(doc, [], log, schema);
-}
-
 export function createCell<T>(
   doc: DocImpl<any>,
   path: PropertyKey[] = [],
@@ -363,7 +257,12 @@ function createStreamCell<T>(
   const self: Stream<T> = {
     // Implementing just the subset of Cell<T> that is needed for streams.
     send: (event: T) => {
-      queueEvent({ cell: doc, path }, event);
+      // Use runtime from doc if available
+      if (doc.runtime) {
+        doc.runtime.scheduler.queueEvent({ cell: doc, path }, event);
+      } else {
+        throw new Error("No runtime available for queueEvent");
+      }
 
       cleanup?.();
       const [cancel, addCancel] = useCancelGroup();
@@ -561,7 +460,10 @@ function subscribeToReferencedDocs<T>(
   let cleanup: Cancel | undefined = callback(value);
 
   // Subscribe to the docs that are read (via logs), call callback on next change.
-  const cancel = subscribe((log) => {
+  if (!doc.runtime) {
+    throw new Error("No runtime available for subscribe");
+  }
+  const cancel = doc.runtime.scheduler.subscribe((log) => {
     const newLog = {
       reads: [],
       writes: [],

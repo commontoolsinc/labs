@@ -1,6 +1,7 @@
-import { type DocImpl, getDoc } from "../doc.ts";
+import { type DocImpl } from "../doc.ts";
 import { type ReactivityLog } from "../scheduler.ts";
-import { type Action, idle } from "../scheduler.ts";
+import { type Action } from "../scheduler.ts";
+import type { IRuntime } from "../runtime.ts";
 import { refer } from "merkle-reference";
 
 /**
@@ -24,27 +25,28 @@ export function fetchData(
   _addCancel: (cancel: () => void) => void,
   cause: DocImpl<any>[],
   parentDoc: DocImpl<any>,
+  runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  const pending = getDoc(
+  const pending = runtime.documentMap.getDoc(
     false,
     { fetchData: { pending: cause } },
     parentDoc.space,
   );
-  const result = getDoc<any | undefined>(
+  const result = runtime.documentMap.getDoc<any | undefined>(
     undefined,
     {
       fetchData: { result: cause },
     },
     parentDoc.space,
   );
-  const error = getDoc<any | undefined>(
+  const error = runtime.documentMap.getDoc<any | undefined>(
     undefined,
     {
       fetchData: { error: cause },
     },
     parentDoc.space,
   );
-  const requestHash = getDoc<string | undefined>(
+  const requestHash = runtime.documentMap.getDoc<string | undefined>(
     undefined,
     {
       fetchData: { requestHash: cause },
@@ -102,7 +104,7 @@ export function fetchData(
       .then(async (data) => {
         if (thisRun !== currentRun) return;
 
-        await idle();
+        await runtime.idle();
 
         pending.setAtPath([], false, log);
         result.setAtPath([], data, log);
@@ -111,7 +113,7 @@ export function fetchData(
       .catch(async (err) => {
         if (thisRun !== currentRun) return;
 
-        await idle();
+        await runtime.idle();
 
         pending.setAtPath([], false, log);
         error.setAtPath([], err, log);

@@ -1,10 +1,5 @@
 import { Charm } from "@commontools/charm";
-import {
-  type Cell,
-  getCell,
-  getEntityId,
-  type Storage,
-} from "@commontools/runner";
+import { type Cell, getEntityId, type Runtime } from "@commontools/runner";
 import { Identity, type IdentityCreateConfig } from "@commontools/identity";
 import { ID, type JSONSchema } from "@commontools/builder";
 import {
@@ -104,21 +99,21 @@ export async function setBGCharm({
   space,
   charmId,
   integration,
-  storage,
+  runtime,
   bgSpace,
   bgCause,
 }: {
   space: string;
   charmId: string;
   integration: string;
-  storage: Storage;
+  runtime: Runtime;
   bgSpace?: string;
   bgCause?: string;
 }): Promise<boolean> {
   const charmsCell = await getBGCharms({
     bgSpace,
     bgCause,
-    storage,
+    runtime,
   });
 
   console.log(
@@ -148,7 +143,7 @@ export async function setBGCharm({
     } as unknown as Cell<BGCharmEntry>);
 
     // Ensure changes are synced
-    await storage.synced();
+    await runtime.storage.synced();
 
     return true;
   } else {
@@ -160,17 +155,17 @@ export async function setBGCharm({
       status: "Re-initializing",
     });
 
-    await storage.synced();
+    await runtime.storage.synced();
 
     return false;
   }
 }
 
 export async function getBGCharms(
-  { bgSpace, bgCause, storage }: {
+  { bgSpace, bgCause, runtime }: {
     bgSpace?: string;
     bgCause?: string;
-    storage: Storage;
+    runtime: Runtime;
   },
 ): Promise<
   Cell<Cell<BGCharmEntry>[]>
@@ -178,13 +173,10 @@ export async function getBGCharms(
   bgSpace = bgSpace ?? BG_SYSTEM_SPACE_ID;
   bgCause = bgCause ?? BG_CELL_CAUSE;
 
-  if (!storage.hasSigner()) {
+  if (!runtime.storage.hasSigner()) {
     throw new Error("Storage has no signer");
   }
 
-  if (!storage.hasRemoteStorage()) {
-    throw new Error("Storage has no remote storage");
-  }
   const schema = {
     type: "array",
     items: {
@@ -194,7 +186,7 @@ export async function getBGCharms(
     default: [],
   } as const satisfies JSONSchema;
 
-  const charmsCell = getCell(bgSpace, bgCause, schema);
+  const charmsCell = runtime.getCell(bgSpace, bgCause, schema);
 
   // Ensure the cell is synced
   // FIXME(ja): does True do the right thing here? Does this mean: I REALLY REALLY
@@ -207,8 +199,8 @@ export async function getBGCharms(
     schema: privilegedSchema,
     rootSchema: privilegedSchema,
   };
-  await storage.syncCell(charmsCell, true, schemaContext);
-  await storage.synced();
+  await runtime.storage.syncCell(charmsCell, true, schemaContext);
+  await runtime.storage.synced();
 
   return charmsCell;
 }

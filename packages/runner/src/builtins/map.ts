@@ -1,10 +1,10 @@
 import { type Recipe } from "@commontools/builder";
-import { type DocImpl, getDoc } from "../doc.ts";
+import { type DocImpl } from "../doc.ts";
 import { getCellLinkOrThrow } from "../query-result-proxy.ts";
 import { type ReactivityLog } from "../scheduler.ts";
-import { cancels, run } from "../runner.ts";
 import { type Action } from "../scheduler.ts";
 import { type AddCancel } from "../cancel.ts";
+import type { IRuntime } from "../runtime.ts";
 
 /**
  * Implemention of built-in map module. Unlike regular modules, this will be
@@ -36,8 +36,9 @@ export function map(
   addCancel: AddCancel,
   cause: any,
   parentDoc: DocImpl<any>,
+  runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  const result = getDoc<any[]>(
+  const result = runtime.documentMap.getDoc<any[]>(
     [],
     {
       map: parentDoc.entityId,
@@ -91,12 +92,12 @@ export function map(
 
     // Add values that have been appended
     while (initializedUpTo < list.length) {
-      const resultCell = getDoc(
+      const resultCell = runtime.documentMap.getDoc(
         undefined,
         { result, index: initializedUpTo },
         parentDoc.space,
       );
-      run(
+      runtime.runner.run(
         op,
         {
           element: {
@@ -109,9 +110,8 @@ export function map(
         resultCell,
       );
       resultCell.sourceCell!.sourceCell = parentDoc;
-
-      // TODO(seefeld): Have `run` return cancel, once we make resultCell required
-      addCancel(cancels.get(resultCell));
+      // Add cancel from runtime's runner
+      addCancel(() => runtime.runner.stop(resultCell));
 
       // Send the result value to the result doc
       result.setAtPath([initializedUpTo], { cell: resultCell, path: [] }, log);

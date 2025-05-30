@@ -1,5 +1,5 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { setBlobbyServerUrl, storage } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
 import { setLLMUrl } from "@commontools/llm";
 import { createSession, Identity } from "@commontools/identity";
 import { CharmManager } from "@commontools/charm";
@@ -39,16 +39,18 @@ if (!name) {
   Deno.exit(1);
 }
 
-storage.setRemoteStorage(new URL(apiUrl));
-setBlobbyServerUrl(apiUrl);
+// Storage and blobby server URL are now configured in Runtime constructor
 setLLMUrl(apiUrl);
 
-const charmManager = new CharmManager(
-  await createSession({
-    identity: await Identity.fromPassphrase("common user"),
-    name,
-  }),
-);
+const runtime = new Runtime({
+  storageUrl: apiUrl,
+});
+
+const session = await createSession({
+  identity: await Identity.fromPassphrase("common user"),
+  name,
+});
+const charmManager = new CharmManager(session, runtime);
 
 const verifier =
   await (noVerify ? undefined : Verifier.initialize({ apiUrl, headless }));

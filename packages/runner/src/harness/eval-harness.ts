@@ -1,16 +1,17 @@
 import { Recipe } from "@commontools/builder";
-import { CtRuntime, RuntimeFunction } from "./ct-runtime.ts";
+import { Harness, HarnessedFunction } from "./harness.ts";
 import { type TsArtifact } from "@commontools/js-runtime";
 import { mapSourceMapsOnStacktrace, tsToExports } from "./local-build.ts";
 import { Console } from "./console.ts";
+import { IRuntime } from "../runtime.ts";
 
 const RUNTIME_CONSOLE_HOOK = "RUNTIME_CONSOLE_HOOK";
 declare global {
   var [RUNTIME_CONSOLE_HOOK]: any;
 }
 
-export class UnsafeEvalRuntime extends EventTarget implements CtRuntime {
-  constructor() {
+export class UnsafeEvalHarness extends EventTarget implements Harness {
+  constructor(readonly runtime: IRuntime) {
     super();
     // We install our console shim globally so that it can be referenced
     // by the eval script scope.
@@ -32,15 +33,20 @@ export class UnsafeEvalRuntime extends EventTarget implements CtRuntime {
 
     const exports = await tsToExports(file.contents, {
       injection: `const console = globalThis.${RUNTIME_CONSOLE_HOOK};`,
+      runtime: this.runtime,
     });
+
     if (!("default" in exports)) {
       throw new Error("No default export found in compiled recipe.");
     }
+
     return exports.default;
   }
-  getInvocation(source: string): RuntimeFunction {
+
+  getInvocation(source: string): HarnessedFunction {
     return eval(source);
   }
+
   mapStackTrace(stack: string): string {
     return mapSourceMapsOnStacktrace(stack);
   }

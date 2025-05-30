@@ -1,6 +1,6 @@
 import { JSONSchema } from "@commontools/builder";
+import { Cell, getEntityId, type Runtime } from "@commontools/runner";
 import { Charm, getRecipeIdFromCharm } from "../manager.ts";
-import { Cell, getEntityId, recipeManager } from "@commontools/runner";
 
 export type IFrameRecipe = {
   src: string;
@@ -61,7 +61,10 @@ function parseIframeRecipe(source: string): IFrameRecipe {
   return JSON.parse(match[1]) as IFrameRecipe;
 }
 
-export const getIframeRecipe = (charm: Cell<Charm>): {
+export const getIframeRecipe = (
+  charm: Cell<Charm>,
+  runtime: Runtime
+): {
   recipeId: string;
   src?: string;
   iframe?: IFrameRecipe;
@@ -71,7 +74,7 @@ export const getIframeRecipe = (charm: Cell<Charm>): {
     console.warn("No recipeId found for charm", getEntityId(charm));
     return { recipeId, src: "", iframe: undefined };
   }
-  const src = recipeManager.getRecipeMeta({ recipeId })?.src;
+  const src = runtime.recipeManager.getRecipeMeta({ recipeId })?.src;
   if (!src) {
     console.warn("No src found for charm", getEntityId(charm));
     return { recipeId };

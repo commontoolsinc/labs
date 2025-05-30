@@ -5,7 +5,7 @@ import { handler, lift } from "../src/module.ts";
 import { str } from "../src/built-in.ts";
 import { type Frame, type JSONSchema, type OpaqueRef } from "../src/types.ts";
 import { popFrame, pushFrame, recipe } from "../src/recipe.ts";
-import { Cell, getDoc, getImmutableCell } from "@commontools/runner";
+import { Cell, Runtime } from "@commontools/runner";
 
 // Helper function to check type compatibility at compile time
 // This doesn't run any actual tests, but ensures types are correct
@@ -13,9 +13,17 @@ function expectType<T, _U extends T>() {}
 
 describe("Schema-to-TS Type Conversion", () => {
   let frame: Frame;
+  let runtime: Runtime;
 
   beforeEach(() => {
+    runtime = new Runtime({
+      storageUrl: "volatile://"
+    });
     frame = pushFrame();
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
   });
 
   afterEach(() => {
@@ -493,7 +501,7 @@ describe("Schema-to-TS Type Conversion", () => {
     type User = Schema<typeof schema>;
 
     // Create a cell with data matching the schema
-    const settingsCell = getDoc(
+    const settingsCell = runtime.documentMap.getDoc(
       { theme: "dark", notifications: true },
       "settings-cell",
       "test",
@@ -508,7 +516,7 @@ describe("Schema-to-TS Type Conversion", () => {
       settings: settingsCell,
     };
 
-    const userCell = getImmutableCell("test", userData, schema);
+    const userCell = runtime.getImmutableCell("test", userData, schema);
     const user = userCell.get();
 
     expect(user.name).toBe("John");

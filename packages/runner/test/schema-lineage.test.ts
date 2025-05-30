@@ -1,15 +1,26 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { getDoc } from "../src/doc.ts";
 import { type Cell, isCell } from "../src/cell.ts";
-import { run } from "../src/runner.ts";
+import { Runtime } from "../src/runtime.ts";
 import { type JSONSchema, recipe, UI } from "@commontools/builder";
 
-describe.skip("Schema Lineage", () => {
+describe("Schema Lineage", () => {
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    runtime = new Runtime({
+      storageUrl: "volatile://",
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+  });
+
   describe("Schema Propagation through Aliases", () => {
     it("should propagate schema from aliases to cells", () => {
       // Create a doc with an alias that has schema information
-      const targetDoc = getDoc(
+      const targetDoc = runtime.documentMap.getDoc(
         { count: 42, label: "test" },
         "schema-lineage-target",
         "test",
@@ -25,7 +36,7 @@ describe.skip("Schema Lineage", () => {
       } as const satisfies JSONSchema;
 
       // Create a doc with an alias that includes schema information
-      const sourceDoc = getDoc(
+      const sourceDoc = runtime.documentMap.getDoc(
         {
           $alias: {
             cell: targetDoc,
@@ -54,7 +65,7 @@ describe.skip("Schema Lineage", () => {
 
     it("should respect explicitly provided schema over alias schema", () => {
       // Create a doc with an alias that has schema information
-      const targetDoc = getDoc(
+      const targetDoc = runtime.documentMap.getDoc(
         { count: 42, label: "test" },
         "schema-lineage-target-explicit",
         "test",
@@ -78,7 +89,7 @@ describe.skip("Schema Lineage", () => {
       } as const satisfies JSONSchema;
 
       // Create a doc with an alias that includes schema information
-      const sourceDoc = getDoc(
+      const sourceDoc = runtime.documentMap.getDoc(
         {
           $alias: {
             cell: targetDoc,
@@ -108,7 +119,7 @@ describe.skip("Schema Lineage", () => {
   describe("Schema Propagation from Aliases (without Recipes)", () => {
     it("should track schema through deep aliases", () => {
       // Create a series of nested aliases with schemas
-      const valueDoc = getDoc(
+      const valueDoc = runtime.documentMap.getDoc(
         { count: 5, name: "test" },
         "deep-alias-value",
         "test",
@@ -118,7 +129,7 @@ describe.skip("Schema Lineage", () => {
       const numberSchema = { type: "number" };
 
       // Create a doc with an alias specifically for the count field
-      const countDoc = getDoc(
+      const countDoc = runtime.documentMap.getDoc(
         {
           $alias: {
             cell: valueDoc,
@@ -132,7 +143,7 @@ describe.skip("Schema Lineage", () => {
       );
 
       // Create a third level of aliasing
-      const finalDoc = getDoc(
+      const finalDoc = runtime.documentMap.getDoc(
         {
           $alias: {
             cell: countDoc,
@@ -154,7 +165,7 @@ describe.skip("Schema Lineage", () => {
 
     it("should correctly handle aliases with asCell:true in schema", () => {
       // Create a document with nested objects that will be accessed with asCell
-      const nestedDoc = getDoc(
+      const nestedDoc = runtime.documentMap.getDoc(
         {
           items: [
             { id: 1, name: "Item 1" },
@@ -178,7 +189,7 @@ describe.skip("Schema Lineage", () => {
       } as const satisfies JSONSchema;
 
       // Create an alias to the items array with schema information
-      const itemsDoc = getDoc(
+      const itemsDoc = runtime.documentMap.getDoc(
         {
           $alias: {
             cell: nestedDoc,
@@ -213,6 +224,18 @@ describe.skip("Schema Lineage", () => {
 });
 
 describe("Schema propagation end-to-end example", () => {
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    runtime = new Runtime({
+      storageUrl: "volatile://",
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+  });
+
   it("should propagate schema through a recipe", () => {
     // Create a recipe with schema
     const testRecipe = recipe({
@@ -239,12 +262,16 @@ describe("Schema propagation end-to-end example", () => {
       },
     }));
 
-    const result = getDoc(
+    const result = runtime.documentMap.getDoc(
       undefined,
       "should propagate schema through a recipe",
       "test",
     );
-    run(testRecipe, { details: { name: "hello", age: 14 } }, result);
+    runtime.run(
+      testRecipe,
+      { details: { name: "hello", age: 14 } },
+      result,
+    );
 
     const c = result.asCell(
       [UI],

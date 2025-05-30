@@ -1,15 +1,7 @@
 // Load .env file
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
-import {
-  getCellFromLink,
-  getDocByEntityId,
-  getEntityId,
-  idle,
-  isStream,
-  setBlobbyServerUrl,
-  storage,
-} from "@commontools/runner";
+import { getEntityId, isStream, Runtime } from "@commontools/runner";
 import {
   createAdminSession,
   type DID,
@@ -47,9 +39,6 @@ const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
 
 const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "common user";
-
-storage.setRemoteStorage(new URL(toolshedUrl));
-setBlobbyServerUrl(toolshedUrl);
 
 async function main() {
   if (!spaceName && !spaceDID) {
@@ -96,7 +85,12 @@ async function main() {
   }) satisfies Session;
 
   // TODO(seefeld): It only wants the space, so maybe we simplify the above and just space the space did?
-  const charmManager = new CharmManager(session);
+  const runtime = new Runtime({
+    storageUrl: toolshedUrl,
+    signer: identity,
+  });
+  const charmManager = new CharmManager(session, runtime);
+  await charmManager.ready;
   const charms = charmManager.getCharms();
   charms.sink((charms) => {
     console.log(
@@ -171,9 +165,13 @@ async function main() {
       Array.isArray(value.path)
     ) {
       const space: string = (value.space as string) ?? spaceDID!;
-      return getCellFromLink({
+      return runtime.getCellFromLink({
         space,
-        cell: getDocByEntityId(space, value.cell as { "/": string }, true)!,
+        cell: runtime.documentMap.getDocByEntityId(
+          space,
+          value.cell as { "/": string },
+          true,
+        )!,
         path: value.path,
       });
     } else if (Array.isArray(value)) {
@@ -191,7 +189,7 @@ async function main() {
   if (recipeFile) {
     try {
       const recipeSrc = await Deno.readTextFile(recipeFile);
-      const recipe = await compileRecipe(recipeSrc, "recipe", charmManager);
+      const recipe = await compileRecipe(recipeSrc, "recipe", runtime, space);
       const charm = await charmManager.runPersistent(recipe, inputValue, cause);
       const charmWithSchema = (await charmManager.get(charm))!;
       charmWithSchema.sink((value) => {
@@ -203,14 +201,17 @@ async function main() {
         updater.send({ newValues: ["test"] });
       }
       if (quit) {
-        await idle();
-        await storage.synced();
+        await runtime.idle();
+        await runtime.storage.synced();
+        // This console.log is load bearing for the integration tests. This is
+        // how the integration tests get the charm ID.
+        console.log("created charm: ", getEntityId(charm)!["/"]);
         Deno.exit(0);
       }
     } catch (error) {
       console.error("Error loading and compiling recipe:", error);
       if (quit) {
-        await storage.synced();
+        await runtime.storage.synced();
         Deno.exit(1);
       }
     }

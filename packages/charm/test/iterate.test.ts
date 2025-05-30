@@ -1,10 +1,22 @@
 import { assertEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
 import { scrub } from "../src/iterate.ts";
-import { getImmutableCell } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
 import { JSONSchema } from "@commontools/builder";
 
 describe("scrub function", () => {
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    runtime = new Runtime({
+      storageUrl: "volatile://"
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+  });
+
   it("should return primitive values unchanged", () => {
     assertEquals(scrub(123), 123);
     assertEquals(scrub("test"), "test");
@@ -15,7 +27,7 @@ describe("scrub function", () => {
 
   it("should scrub arrays recursively", () => {
     const cellValue = { test: 123, $UI: "hidden" };
-    const testCell = getImmutableCell("test", cellValue);
+    const testCell = runtime.getImmutableCell("test", cellValue);
 
     const input = [1, "test", testCell, { a: 1 }];
     const result = scrub(input);
@@ -38,7 +50,7 @@ describe("scrub function", () => {
     };
 
     const cellValue = { name: "test", age: 30, $UI: {}, streamProp: {} };
-    const cellWithSchema = getImmutableCell("test", cellValue, schema);
+    const cellWithSchema = runtime.getImmutableCell("test", cellValue, schema);
 
     const result = scrub(cellWithSchema);
 
@@ -61,7 +73,7 @@ describe("scrub function", () => {
       type: "object",
     };
 
-    const cellWithEmptySchema = getImmutableCell("test", {
+    const cellWithEmptySchema = runtime.getImmutableCell("test", {
       name: "test",
       $UI: {},
     }, schema);
@@ -77,7 +89,7 @@ describe("scrub function", () => {
       type: "string",
     };
 
-    const cellWithStringSchema = getImmutableCell("test", "test value", schema);
+    const cellWithStringSchema = runtime.getImmutableCell("test", "test value", schema);
 
     const result = scrub(cellWithStringSchema);
 

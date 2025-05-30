@@ -6,7 +6,7 @@ import {
   modifyCharm,
 } from "@commontools/charm";
 import { useCharmReferences } from "@/hooks/use-charm-references.ts";
-import { isCell, isStream } from "@commontools/runner";
+import { isCell, isStream, Runtime } from "@commontools/runner";
 import { isObject } from "@commontools/utils/types";
 import {
   CheckboxToggle,
@@ -27,6 +27,7 @@ import { type CharmRouteParams } from "@/routes.ts";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { LoadingSpinner } from "@/components/Loader.tsx";
 import { useCharm } from "@/hooks/use-charm.ts";
+import { useRuntime } from "@/contexts/RuntimeContext.tsx";
 import CharmCodeEditor from "@/components/CharmCodeEditor.tsx";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
 import { DitheredCube } from "@/components/DitherCube.tsx";
@@ -130,7 +131,7 @@ function useTabNavigation() {
 }
 
 // Hook for managing suggestions
-function useSuggestions(charm: Cell<Charm> | undefined) {
+function useSuggestions(charm: Cell<Charm> | undefined, runtime: Runtime) {
   const [suggestions, setSuggestions] = useState<CharmSuggestion[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const suggestionsLoadedRef = useRef(false);
@@ -141,7 +142,7 @@ function useSuggestions(charm: Cell<Charm> | undefined) {
     const loadSuggestions = async () => {
       setLoadingSuggestions(true);
       try {
-        const iframeRecipe = getIframeRecipe(charm);
+        const iframeRecipe = getIframeRecipe(charm, runtime);
         if (!iframeRecipe) {
           throw new Error("No iframe recipe found in charm");
         }
@@ -490,8 +491,9 @@ const Variants = () => {
 // Suggestions Component
 const Suggestions = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
+  const runtime = useRuntime();
   const { currentFocus: charm } = useCharm(paramCharmId);
-  const { suggestions, loadingSuggestions } = useSuggestions(charm);
+  const { suggestions, loadingSuggestions } = useSuggestions(charm, runtime);
   const {
     setInput,
     userPreferredModel,
@@ -505,8 +507,6 @@ const Suggestions = () => {
 
   const navigate = useNavigate();
   const { replicaName } = useParams<CharmRouteParams>();
-
-  const { charmManager } = useCharmManager();
 
   // Store selected suggestion in state to use in effects
   const [selectedSuggestion, setSelectedSuggestion] = useState<

@@ -1,6 +1,5 @@
 import { createNodeFactory, lift } from "./module.ts";
-import { getTopFrame } from "./recipe.ts";
-import { type Cell, getCell, getCellLinkOrThrow } from "@commontools/runner";
+import { type Cell } from "@commontools/runner";
 import type { JSONSchema, NodeFactory, Opaque, OpaqueRef } from "./types.ts";
 import type { Schema } from "./schema-to-ts.ts";
 
@@ -106,40 +105,17 @@ export function str(
  *   by the order of invocation, which is less stable.
  * @param value - Optional, the initial value of the cell.
  */
-export function createCell<T>(
-  schema?: JSONSchema,
-  name?: string,
-  value?: T,
-): Cell<T>;
-export function createCell<S extends JSONSchema = JSONSchema>(
-  schema: S,
-  name?: string,
-  value?: Schema<S>,
-): Cell<Schema<S>>;
-export function createCell<T = any>(
-  schema?: JSONSchema,
-  name?: string,
-  value?: T,
-): Cell<T> {
-  const frame = getTopFrame();
-  // TODO(seefeld): This is a rather hacky way to get the context, based on the
-  // unsafe_binding pattern. Once we replace that mechanism, let's add nicer
-  // abstractions for context here as well.
-  const cellLink = frame?.unsafe_binding?.materialize([]);
-  if (!frame || !frame.cause || !cellLink) {
-    throw new Error(
-      "Can't invoke createCell outside of a lifted function or handler",
-    );
-  }
-  const space = getCellLinkOrThrow(cellLink).cell.space;
-
-  const cause = { parent: frame.cause } as Record<string, any>;
-  if (name) cause.name = name;
-  else cause.number = frame.generatedIdCounter++;
-
-  const cell = getCell<T>(space, cause, schema);
-
-  if (value !== undefined) cell.set(value);
-
-  return cell;
+declare global {
+  function createCell<T>(
+    schema?: JSONSchema,
+    name?: string,
+    value?: T,
+  ): Cell<T>;
+  function createCell<S extends JSONSchema = JSONSchema>(
+    schema: S,
+    name?: string,
+    value?: Schema<S>,
+  ): Cell<Schema<S>>;
 }
+
+export type { createCell };

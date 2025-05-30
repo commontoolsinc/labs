@@ -6,12 +6,10 @@ import {
 import { components } from "@commontools/ui";
 import {
   Action,
-  addAction,
   addCommonIDfromObjectID,
-  idle,
   isCell,
   ReactivityLog,
-  removeAction,
+  type Runtime,
 } from "@commontools/runner";
 import { DEFAULT_IFRAME_MODELS, LLMClient } from "@commontools/llm";
 import { isObject } from "@commontools/utils/types";
@@ -166,7 +164,7 @@ function setPreviousValue(context: any, key: string, value: any) {
   previousValues.get(context)!.set(key, value);
 }
 
-export const setupIframe = () =>
+export const setupIframe = (runtime: Runtime) =>
   setIframeContextHandler({
     read(_element: CommonIframeSandboxElement, context: any, key: string): any {
       const data = key === "*"
@@ -248,19 +246,27 @@ export const setupIframe = () =>
         if (key === "*") {
           // Wait for idle to confuse the scheduler as it updates dependencies
           // after running this function.
-          idle().then(() => removeAction(action));
+          runtime.idle().then(() => runtime.scheduler.unschedule(action));
         }
       };
 
-      addAction(action);
-      return action;
+      // Schedule the action with appropriate reactivity log
+      const reads = isCell(context) ? [context.getAsCellLink()] : [];
+      const cancel = runtime.scheduler.schedule(action, { reads, writes: [] });
+      return { action, cancel };
     },
     unsubscribe(
       _element: CommonIframeSandboxElement,
       _context: any,
       receipt: any,
     ) {
-      removeAction(receipt);
+      // Handle both old format (direct action) and new format ({ action, cancel })
+      if (receipt && typeof receipt === "object" && receipt.cancel) {
+        receipt.cancel();
+      } else {
+        // Fallback for direct action
+        runtime.scheduler.unschedule(receipt);
+      }
     },
     async onLLMRequest(
       element: CommonIframeSandboxElement,

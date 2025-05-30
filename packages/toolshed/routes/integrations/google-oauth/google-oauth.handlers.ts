@@ -25,7 +25,8 @@ import {
   tokenToAuthData,
 } from "./google-oauth.utils.ts";
 import { setBGCharm } from "@commontools/background-charm";
-import { type CellLink, storage } from "@commontools/runner";
+import { type CellLink } from "@commontools/runner";
+import { runtime } from "@/index.ts";
 import { Tokens } from "@cmd-johnson/oauth2-client";
 
 /**
@@ -198,7 +199,7 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
           space,
           charmId: integrationCharmId,
           integration: "google",
-          storage,
+          runtime,
         });
       } else {
         logger.warn(
@@ -355,7 +356,7 @@ export const backgroundIntegration: AppRouteHandler<
       space: payload.space,
       charmId: payload.charmId,
       integration: payload.integration,
-      storage,
+      runtime,
     });
 
     return createBackgroundIntegrationSuccessResponse(c, "success");

@@ -1,4 +1,4 @@
-import { describe, it } from "@std/testing/bdd";
+import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   isAlias,
@@ -13,7 +13,7 @@ import {
   hasValueAtPath,
   setValueAtPath,
 } from "../src/utils.ts";
-import { getImmutableCell } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
 
 describe("value type", () => {
   it("can destructure a value without TS errors", () => {
@@ -137,6 +137,17 @@ describe("Path operations", () => {
 });
 
 describe("createJsonSchema", () => {
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    runtime = new Runtime({
+      storageUrl: "volatile://"
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+  });
   it("should create schema for primitive types", () => {
     expect(createJsonSchema("test")).toEqual({ type: "string" });
     expect(createJsonSchema(42)).toEqual({ type: "integer" });
@@ -265,7 +276,7 @@ describe("createJsonSchema", () => {
   });
 
   it("should use cell schema when available", () => {
-    const cellWithSchema = getImmutableCell(
+    const cellWithSchema = runtime.getImmutableCell(
       "test-space",
       "cell@value.com",
       { type: "string", format: "email" },
@@ -276,7 +287,7 @@ describe("createJsonSchema", () => {
   });
 
   it("should analyze cell value when no schema is provided", () => {
-    const cellWithoutSchema = getImmutableCell(
+    const cellWithoutSchema = runtime.getImmutableCell(
       "test-space",
       {
         name: "John",
@@ -297,7 +308,7 @@ describe("createJsonSchema", () => {
   });
 
   it("should handle array cell without schema", () => {
-    const arrayCell = getImmutableCell(
+    const arrayCell = runtime.getImmutableCell(
       "test-space",
       [1, 2, 3, 4],
     );
@@ -313,7 +324,7 @@ describe("createJsonSchema", () => {
   });
 
   it("should handle nested cells with and without schema", () => {
-    const userCell = getImmutableCell(
+    const userCell = runtime.getImmutableCell(
       "test-space",
       { id: 1, name: "Alice" },
     );
@@ -326,7 +337,7 @@ describe("createJsonSchema", () => {
       },
     } as const satisfies JSONSchema;
 
-    const prefsCell = getImmutableCell(
+    const prefsCell = runtime.getImmutableCell(
       "test-space",
       { darkMode: true, fontSize: 14 },
       prefsSchema,

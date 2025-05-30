@@ -2,23 +2,31 @@ import app from "@/app.ts";
 import env from "@/env.ts";
 import * as Sentry from "@sentry/deno";
 import { identity } from "@/lib/identity.ts";
-import { storage } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
 import { memory } from "@/routes/storage/memory.ts";
 
-// Initialize storage with signer
+// Create a global runtime instance for the server
+let runtime: Runtime;
+
+// Initialize runtime with storage and signer
 // FIXME(ja): should we do this even on memory-only toolsheds?
-const initializeStorage = () => {
+const initializeRuntime = () => {
   try {
-    console.log(`Initializing storage signer to ${identity.did()}...`);
-    storage.setSigner(identity);
-    console.log("Storage signer initialized successfully");
-    storage.setRemoteStorage(new URL(env.MEMORY_URL));
+    console.log(`Initializing runtime with signer ${identity.did()}...`);
+    runtime = new Runtime({
+      storageUrl: env.MEMORY_URL,
+      signer: identity,
+    });
+    console.log("Runtime initialized successfully");
     console.log("Configured to remote storage:", env.MEMORY_URL);
   } catch (error) {
-    console.error("Failed to initialize storage signer:", error);
+    console.error("Failed to initialize runtime:", error);
     throw error;
   }
 };
+
+// Export runtime for use in other parts of the application
+export { runtime };
 
 export type AppType = typeof app;
 
@@ -72,7 +80,7 @@ const handleShutdown = async () => {
 // Start server with the abort controller
 function startServer() {
   console.log(`Server is starting on port http://${env.HOST}:${env.PORT}`);
-  initializeStorage();
+  initializeRuntime();
 
   Sentry.init({
     dsn: env.SENTRY_DSN,

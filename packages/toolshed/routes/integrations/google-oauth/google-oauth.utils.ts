@@ -1,6 +1,7 @@
 import { OAuth2Client, Tokens } from "@cmd-johnson/oauth2-client";
 import env from "@/env.ts";
-import { type CellLink, getCellFromLink, storage } from "@commontools/runner";
+import { type CellLink } from "@commontools/runner";
+import { runtime } from "@/index.ts";
 import { Context } from "@hono/hono";
 import { AuthSchema, Mutable, Schema } from "@commontools/builder";
 // Types
@@ -136,27 +137,27 @@ export async function fetchUserInfo(accessToken: string): Promise<UserInfo> {
   }
 }
 
-// Helper function to get auth cell and storage
-export async function getAuthCellAndStorage(docLink: CellLink | string) {
+// Helper function to get auth cell
+export async function getAuthCell(docLink: CellLink | string) {
   try {
     // Parse string to docLink if needed
     const parsedDocLink = typeof docLink === "string"
       ? JSON.parse(docLink)
       : docLink;
 
-    if (!storage.hasSigner() || !storage.hasRemoteStorage()) {
+    if (!runtime.storage.hasSigner()) {
       throw new Error("Unable to talk to storage: not configured.");
     }
 
     // We already should have the schema on the parsedDocLink (from our state),
     // but if it's missing, we can add it  here.
     parsedDocLink.schema = parsedDocLink.schema ?? AuthSchema;
-    const authCell = getCellFromLink(parsedDocLink);
+    const authCell = runtime.getCellFromLink(parsedDocLink);
     // make sure the cell is live!
-    await storage.syncCell(authCell, true);
-    await storage.synced();
+    await runtime.storage.syncCell(authCell, true);
+    await runtime.storage.synced();
 
-    return { authCell, storage };
+    return authCell;
   } catch (error) {
     throw new Error(`Failed to get auth cell: ${error}`);
   }
@@ -169,7 +170,7 @@ export async function persistTokens(
   authCellDocLink: string | CellLink,
 ) {
   try {
-    const { authCell, storage } = await getAuthCellAndStorage(authCellDocLink);
+    const authCell = await getAuthCell(authCellDocLink);
 
     if (!authCell) {
       throw new Error("Auth cell not found");
@@ -187,7 +188,7 @@ export async function persistTokens(
     authCell.set(tokenData);
 
     // Ensure the cell is synced
-    await storage.synced();
+    await runtime.storage.synced();
 
     return tokenData;
   } catch (error) {
@@ -200,7 +201,7 @@ export async function getTokensFromAuthCell(
   authCellDocLink: string | CellLink,
 ) {
   try {
-    const { authCell } = await getAuthCellAndStorage(authCellDocLink);
+    const authCell = await getAuthCell(authCellDocLink);
 
     if (!authCell) {
       throw new Error("Auth cell not found");
@@ -276,7 +277,7 @@ export function createRefreshErrorResponse(
 // Clears authentication data from the auth cell
 export async function clearAuthData(authCellDocLink: string | CellLink) {
   try {
-    const { authCell, storage } = await getAuthCellAndStorage(authCellDocLink);
+    const authCell = await getAuthCell(authCellDocLink);
 
     if (!authCell) {
       throw new Error("Auth cell not found");
@@ -301,7 +302,7 @@ export async function clearAuthData(authCellDocLink: string | CellLink) {
     authCell.set(emptyAuthData);
 
     // Ensure the cell is synced
-    await storage.synced();
+    await runtime.storage.synced();
 
     return emptyAuthData;
   } catch (error) {

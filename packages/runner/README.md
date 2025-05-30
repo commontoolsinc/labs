@@ -13,6 +13,45 @@ persistence.
 - **Schema Validation**: Validate and transform data against JSON Schema
   definitions
 - **Storage Integration**: Optional persistence and synchronization of data
+- **Dependency Injection**: No singleton patterns - all services are injected
+  through a central Runtime instance
+
+## Architecture
+
+The Runner has been refactored to eliminate singleton patterns in favor of
+dependency injection through a central Runtime instance. This provides better
+testability, isolation, and control over service configuration.
+
+### Runtime-Centric Design
+
+All services are now accessed through a `Runtime` instance:
+
+```typescript
+import { Runtime } from "@commontools/runner";
+
+// Create a runtime instance with configuration
+const runtime = new Runtime({
+  storageUrl: "https://example.com/storage", // Required
+  signer: myIdentitySigner, // Optional, for remote storage
+  consoleHandler: myConsoleHandler, // Optional
+  errorHandlers: [myErrorHandler], // Optional
+  blobbyServerUrl: "https://example.com/blobby", // Optional
+  recipeEnvironment: { apiUrl: "https://api.example.com" }, // Optional
+  debug: false, // Optional
+});
+
+// Access services through the runtime
+const cell = runtime.getCell("my-space", "my-cause", schema);
+const doc = runtime.documentMap.getDoc(value, cause, space);
+await runtime.storage.syncCell(cell);
+const recipe = await runtime.recipeManager.loadRecipe(recipeId);
+
+// Wait for all operations to complete
+await runtime.idle();
+
+// Clean up when done
+await runtime.dispose();
+```
 
 ## Code Organization
 
@@ -23,12 +62,16 @@ purposes:
 ### Core Files
 
 - `src/index.ts`: The main entry point that exports the public API
+- `src/runtime.ts`: Central orchestrator that creates and manages all services
 - `src/cell.ts`: Defines the `Cell` abstraction and its implementation
 - `src/doc.ts`: Implements `DocImpl` which represents stored documents in
   storage
 - `src/runner.ts`: Provides the runtime for executing recipes
-- `src/schema.ts`: Handles schema validation and transformation
+- `src/scheduler.ts`: Manages execution order and batching of reactive updates
 - `src/storage.ts`: Manages persistence and synchronization
+- `src/doc-map.ts`: Manages the mapping between entities and documents
+- `src/recipe-manager.ts`: Handles recipe loading, compilation, and caching
+- `src/module.ts`: Manages module registration and retrieval
 
 ## Core Concepts
 
@@ -114,14 +157,18 @@ Cells are reactive data containers that notify subscribers when their values
 change. They support various operations and can be linked to form complex data
 structures.
 
-User-land, cells are accessed via recipes (see below), but in the system, e.g.
-in the renderer or system UI, they are used directly:
+Cells are now created through the Runtime instance rather than global functions:
 
 ```typescript
-import { getCell, getImmutableCell } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
+
+// Create a runtime instance first
+const runtime = new Runtime({
+  storageUrl: "volatile://", // Use volatile storage for this example
+});
 
 // Create a cell with schema and default values
-const settingsCell = getCell(
+const settingsCell = runtime.getCell(
   "my-space", // The space this cell belongs to
   "settings", // Causal ID - a string identifier
   { // JSON Schema with default values
@@ -136,7 +183,7 @@ const settingsCell = getCell(
 
 // Create a related cell using an object with references as causal ID
 // This establishes a semantic relationship between cells
-const profileCell = getCell(
+const profileCell = runtime.getCell(
   "my-space", // The space this cell belongs to
   { parent: settingsCell, id: "profile" }, // Causal ID with reference to parent
   { // JSON Schema with default values
@@ -151,20 +198,6 @@ const profileCell = getCell(
 
 // Two cells with the same causal ID will be synced automatically
 // when using storage, even across different instances
-
-// Create an immutable cell (cannot be modified after creation)
-// For immutable cells, the value is provided directly and the ID is derived from it
-const configCell = getImmutableCell(
-  "my-space", // The space this cell belongs to
-  { version: "1.0", readOnly: true }, // The immutable value (ID derived from it)
-  { // Optional schema for type checking
-    type: "object",
-    properties: {
-      version: { type: "string" },
-      readOnly: { type: "boolean" },
-    },
-  },
-);
 
 // Get and set values
 const settings = settingsCell.get();
@@ -199,8 +232,11 @@ validation, and automatic transformation of data. The `Schema<>` helper from the
 Builder package provides TypeScript type inference.
 
 ```typescript
-import { getCell } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
 import type { JSONSchema } from "@commontools/builder";
+
+// Create runtime instance
+const runtime = new Runtime({ storageUrl: "volatile://" });
 
 // Define a schema with type assertions for TypeScript inference
 const userSchema = {
@@ -233,7 +269,7 @@ const userSchema = {
 } as const satisfies JSONSchema;
 
 // Create a cell with schema validation
-const userCell = getCell(
+const userCell = runtime.getCell(
   "my-space",
   "user-123", // Causal ID - identifies this particular user
   userSchema, // Schema for validation, typing, and default values
@@ -263,8 +299,11 @@ the Builder package and executed by the Runner, which manages dependencies and
 updates results automatically.
 
 ```typescript
-import { getCell, run, stop } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
 import { derive, recipe } from "@commontools/builder";
+
+// Create runtime instance
+const runtime = new Runtime({ storageUrl: "volatile://" });
 
 // Define a recipe with input and output schemas
 const doubleNumberRecipe = recipe(
@@ -291,17 +330,17 @@ const doubleNumberRecipe = recipe(
 );
 
 // Create a cell to store results
-const resultCell = getCell(
-  "my-space",
+const resultCell = runtime.documentMap.getDoc(
+  undefined,
   "calculation-result",
-  {}, // Empty schema as we'll let the recipe define the structure
+  "my-space",
 );
 
 // Run the recipe
-const result = run(doubleNumberRecipe, { value: 5 }, resultCell);
+const result = runtime.runner.run(doubleNumberRecipe, { value: 5 }, resultCell);
 
 // Await the computation graph to settle
-await idle();
+await runtime.idle();
 
 // Access results (which update automatically)
 console.log(result.get()); // { result: 10 }
@@ -309,11 +348,11 @@ console.log(result.get()); // { result: 10 }
 // Update input and watch result change automatically
 const sourceCell = result.sourceCell;
 sourceCell.key("argument").key("value").set(10);
-await idle();
+await runtime.idle();
 console.log(result.get()); // { result: 20 }
 
 // Stop recipe execution when no longer needed
-stop(result);
+runtime.runner.stop(result);
 ```
 
 ### Storage
@@ -322,22 +361,27 @@ The storage system provides persistence for cells and synchronization across
 clients.
 
 ```typescript
-import { storage } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
+import { Identity } from "@commontools/identity";
 
-// Configure storage with remote endpoint
-storage.setRemoteStorage(new URL("https://example.com/api"));
+// Create signer for authentication
+const signer = await Identity.fromPassphrase("my-passphrase");
 
-// Set identity signer for authentication
-storage.setSigner(mySigner);
+// Configure runtime with remote storage
+const runtime = new Runtime({
+  storageUrl: "https://example.com/api",
+  signer: signer,
+  enableCache: true,
+});
 
 // Sync a cell with storage
-await storage.syncCell(userCell);
+await runtime.storage.syncCell(userCell);
 
 // Sync by entity ID
-const cell = await storage.syncCellById("my-space", "entity-id");
+const cell = await runtime.storage.syncCellById("my-space", "entity-id");
 
 // Wait for all pending sync operations to complete
-await storage.synced();
+await runtime.storage.synced();
 
 // When cells with the same causal ID are synced across instances,
 // they will automatically be kept in sync with the latest value
@@ -350,11 +394,14 @@ await storage.synced();
 You can map and transform data using cells with schemas:
 
 ```typescript
-import { getCell } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
 import type { JSONSchema } from "@commontools/builder";
 
+// Create runtime instance
+const runtime = new Runtime({ storageUrl: "volatile://" });
+
 // Original data source cell
-const sourceCell = getCell(
+const sourceCell = runtime.getCell(
   "my-space",
   "source-data",
   {
@@ -385,7 +432,7 @@ const sourceCell = getCell(
 );
 
 // Create a mapping cell that reorganizes the data
-const mappingCell = getCell(
+const mappingCell = runtime.getCell(
   "my-space",
   "data-mapping",
   {
@@ -428,9 +475,12 @@ console.log(result);
 Cells can react to changes in deeply nested structures:
 
 ```typescript
-import { getCell } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
 
-const rootCell = getCell(
+// Create runtime instance
+const runtime = new Runtime({ storageUrl: "volatile://" });
+
+const rootCell = runtime.getCell(
   "my-space",
   "nested-example",
   {
@@ -489,6 +539,59 @@ rootCell.key("current").key("label").set("updated");
 // "Root changed: { value: 'root', current: { label: 'updated' } }"
 ```
 
+## Migration from Singleton Pattern
+
+Previous versions of the Runner used global singleton functions. These have been
+replaced with Runtime instance methods:
+
+```typescript
+// OLD (deprecated):
+import { getCell, idle, storage } from "@commontools/runner";
+const cell = getCell(space, cause, schema);
+await storage.syncCell(cell);
+await idle();
+
+// NEW (current):
+import { Runtime } from "@commontools/runner";
+const runtime = new Runtime({ storageUrl: "volatile://" });
+const cell = runtime.getCell(space, cause, schema);
+await runtime.storage.syncCell(cell);
+await runtime.idle();
+```
+
+### Key Changes
+
+- `getCell()` → `runtime.getCell()`
+- `getCellFromLink()` → `runtime.getCellFromLink()`
+- `getDocByEntityId()` → `runtime.documentMap.getDocByEntityId()`
+- `storage.*` → `runtime.storage.*`
+- `idle()` → `runtime.idle()`
+- `run()` → `runtime.runner.run()`
+- Storage configuration now happens in Runtime constructor
+
+### Runtime Configuration
+
+The Runtime constructor accepts a configuration object:
+
+```typescript
+interface RuntimeOptions {
+  storageUrl: string; // Required: storage backend URL
+  signer?: Signer; // Optional: for remote storage auth
+  enableCache?: boolean; // Optional: enable local caching
+  consoleHandler?: ConsoleHandler; // Optional: custom console handling
+  errorHandlers?: ErrorHandler[]; // Optional: error handling
+  blobbyServerUrl?: string; // Optional: blob storage URL
+  recipeEnvironment?: RecipeEnvironment; // Optional: recipe env vars
+  debug?: boolean; // Optional: debug logging
+}
+```
+
+### Storage URL Patterns
+
+- `"volatile://"` - In-memory storage (for testing)
+- `"https://example.com/storage"` - Remote storage with schema queries
+- Custom providers can be configured through options
+
 ## TypeScript Support
 
 All APIs are fully typed with TypeScript to provide excellent IDE support and
@@ -509,6 +612,22 @@ components interact:
 
 This flow happens automatically once set up, allowing developers to focus on
 business logic rather than managing data flow manually.
+
+## Service Architecture
+
+The Runtime coordinates several core services:
+
+- **Scheduler**: Manages execution order and batching of reactive updates
+- **Storage**: Handles persistence and synchronization with configurable
+  backends
+- **DocumentMap**: Maps entity IDs to document instances and manages creation
+- **RecipeManager**: Loads, compiles, and caches recipe definitions
+- **ModuleRegistry**: Manages module registration and retrieval for recipes
+- **Runner**: Executes recipes and manages their lifecycle
+- **Harness**: Provides the execution environment for recipe code
+
+All services receive the Runtime instance as a dependency, enabling proper
+isolation and testability without global state.
 
 ## Contributing
 

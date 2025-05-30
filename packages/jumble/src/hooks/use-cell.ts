@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { JSONSchema, Schema } from "@commontools/builder";
-import { Cell, effect, getCell, storage } from "@commontools/runner";
+import { Cell, effect } from "@commontools/runner";
+import { useRuntime } from "@/contexts/RuntimeContext.tsx";
 
 export function useNamedCell<S extends JSONSchema>(
   space: string,
@@ -17,8 +18,9 @@ export function useNamedCell<T>(
   cause: any,
   schema: JSONSchema,
 ) {
-  const cell = getCell<T>(space, cause, schema);
-  storage.syncCell(cell, true);
+  const runtime = useRuntime();
+  const cell = runtime.getCell<T>(space, cause, schema);
+  runtime.storage.syncCell(cell, true);
 
   const [value, setValue] = useState<T>(cell.get());
 

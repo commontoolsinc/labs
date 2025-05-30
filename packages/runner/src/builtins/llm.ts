@@ -1,6 +1,7 @@
-import { type DocImpl, getDoc } from "../doc.ts";
+import { type DocImpl } from "../doc.ts";
 import { DEFAULT_MODEL_NAME, LLMClient, LLMRequest } from "@commontools/llm";
-import { type Action, idle } from "../scheduler.ts";
+import { type Action } from "../scheduler.ts";
+import type { IRuntime } from "../runtime.ts";
 import { refer } from "merkle-reference";
 import { type ReactivityLog } from "../scheduler.ts";
 import { BuiltInLLMParams, BuiltInLLMState } from "@commontools/builder";
@@ -35,23 +36,24 @@ export function llm(
   _addCancel: (cancel: () => void) => void,
   cause: any,
   parentDoc: DocImpl<any>,
+  runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  const pending = getDoc(false, { llm: { pending: cause } }, parentDoc.space);
-  const result = getDoc<string | undefined>(
+  const pending = runtime.documentMap.getDoc(false, { llm: { pending: cause } }, parentDoc.space);
+  const result = runtime.documentMap.getDoc<string | undefined>(
     undefined,
     {
       llm: { result: cause },
     },
     parentDoc.space,
   );
-  const partial = getDoc<string | undefined>(
+  const partial = runtime.documentMap.getDoc<string | undefined>(
     undefined,
     {
       llm: { partial: cause },
     },
     parentDoc.space,
   );
-  const requestHash = getDoc<string | undefined>(
+  const requestHash = runtime.documentMap.getDoc<string | undefined>(
     undefined,
     {
       llm: { requestHash: cause },
@@ -118,7 +120,7 @@ export function llm(
         if (thisRun !== currentRun) return;
 
         //normalizeToCells(text, undefined, log);
-        await idle();
+        await runtime.idle();
 
         pending.setAtPath([], false, log);
         result.setAtPath([], text, log);
@@ -130,7 +132,7 @@ export function llm(
 
         console.error("Error generating data", error);
 
-        await idle();
+        await runtime.idle();
 
         pending.setAtPath([], false, log);
         result.setAtPath([], undefined, log);
