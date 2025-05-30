@@ -4,10 +4,11 @@ export class CommonFragmentElement extends HTMLElement {
     this.attachShadow({ mode: "open" })
       // Add a slot to display the children
       .appendChild(document.createElement("slot"));
-
-    // Tell engine to ignore this element for layout purposes
-    this.style.display = 'contents';
   }
+
+  connectedCallback = () => {
+    this.style.display = "contents";
+  };
 }
 
-customElements.define("common-fragment", CommonFragmentElement);
+globalThis.customElements.define("common-fragment", CommonFragmentElement);

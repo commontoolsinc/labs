@@ -36,6 +36,7 @@ export function llm(
   cause: any,
   parentDoc: DocImpl<any>,
 ): Action {
+  console.log("llm", JSON.stringify(cause))
   const pending = getDoc(false, { llm: { pending: cause } }, parentDoc.space);
   const result = getDoc<string | undefined>(
     undefined,
@@ -63,6 +64,7 @@ export function llm(
 
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
+  let previousMessages: string | undefined = undefined;
 
   return (log: ReactivityLog) => {
     const thisRun = ++currentRun;
@@ -93,8 +95,11 @@ export function llm(
     // Return if the same request is being made again, either concurrently (same
     // as previousCallHash) or when rehydrated from storage (same as the
     // contents of the requestHash doc).
+    let m = JSON.stringify(messages);
+    console.log("hash", { hash, previousCallHash, previousMessages, m})
     if (hash === previousCallHash || hash === requestHash.get()) return;
     previousCallHash = hash;
+    previousMessages = JSON.stringify(messages);
 
     result.setAtPath([], undefined, log);
     partial.setAtPath([], undefined, log);

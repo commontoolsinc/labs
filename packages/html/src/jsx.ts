@@ -1,4 +1,5 @@
 import type { Cell, Stream } from "@commontools/runner";
+
 declare global {
   namespace JSX {
     interface IntrinsicElements {

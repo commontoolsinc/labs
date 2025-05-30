@@ -1,0 +1,2185 @@
+[
+  {
+    "id": "edc8a525-829c-4b33-912b-a412814be20a",
+    "summary": "Project Planning and Strategy Session",
+    "description": "A comprehensive session to plan and strategize the upcoming project milestones, assign tasks, and discuss potential challenges and solutions. This meeting will also include a review of current progress and adjustments to the project timeline as necessary.",
+    "start": "2023-11-15T09:00:00Z",
+    "end": "2023-11-15T17:00:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "name": "John Doe",
+        "email": "john.doe@example.com"
+      },
+      {
+        "name": "Jane Smith",
+        "email": "jane.smith@example.com"
+      },
+      {
+        "name": "Alex Johnson",
+        "email": "alex.johnson@example.com"
+      },
+      {
+        "name": "Emily Davis",
+        "email": "emily.davis@example.com"
+      }
+    ]
+  },
+  {
+    "id": "0e437e2e-2fe6-4e1a-87a9-a9326d0caa97",
+    "summary": "Family Reunion and Celebration",
+    "description": "A long-awaited family reunion to catch up, share stories, and celebrate our family's milestones. The event will include activities for all ages, a potluck dinner, and a slideshow of family memories.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T20:00:00Z",
+    "location": "",
+    "eventType": "Family Gathering",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "aunt.mary@example.com"
+      },
+      {
+        "email": "uncle.john@example.com"
+      },
+      {
+        "email": "cousin.lisa@example.com"
+      },
+      {
+        "email": "grandma@example.com"
+      }
+    ]
+  },
+  {
+    "id": "e34bb5e1-48f8-48bf-b464-16db4332510b",
+    "summary": "Jane's Medium Calendar Event",
+    "description": "A scheduled event with Jane and family.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T11:00:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "jane@example.com"
+      }
+    ]
+  },
+  {
+    "id": "4a7713ae-736d-40ee-9f17-9ab73390d39d",
+    "summary": "Walmart Shopping",
+    "description": "Shopping trip to Walmart within the next 30 days.",
+    "start": "2024-05-15T10:00:00",
+    "end": "2024-05-15T11:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      }
+    ]
+  },
+  {
+    "id": "4c8ddaae-ad78-47d7-a7fe-b30ec6fd30b1",
+    "summary": "Amazon Annual Conference 2024",
+    "description": "Join us for the Amazon Annual Conference 2024, where industry leaders gather to discuss innovations, strategies, and future plans. This event includes keynote speeches, breakout sessions, networking opportunities, and product launches. Please ensure to review the agenda and prepare any questions or topics you'd like to discuss.",
+    "start": "2024-04-15T09:00:00Z",
+    "end": "2024-04-15T17:00:00Z",
+    "location": "",
+    "eventType": "Conference",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "john.doe@amazon.com"
+      },
+      {
+        "email": "jane.smith@amazon.com"
+      },
+      {
+        "email": "conference.organizer@amazon.com"
+      }
+    ]
+  },
+  {
+    "id": "a401befa-c615-45d3-8a82-2937eb121a00",
+    "summary": "Project Planning Meeting",
+    "description": "Discuss project milestones and deliverables with Jill and team.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T11:00:00",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "jill@example.com"
+      },
+      {
+        "email": "teamlead@example.com"
+      }
+    ]
+  },
+  {
+    "id": "176e3072-1881-4fa7-bb89-9fd2a92e077d",
+    "summary": "Project Kickoff Meeting with the Team",
+    "description": "This is the initial meeting to discuss the project scope, deliverables, timelines, and assign roles. We will also review the project plan and set expectations for the upcoming weeks. Please come prepared with your updates and questions.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T12:30:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "jack@company.com"
+      },
+      {
+        "email": "alice@company.com"
+      },
+      {
+        "email": "bob@company.com"
+      },
+      {
+        "email": "carol@company.com"
+      }
+    ]
+  },
+  {
+    "id": "b1fe6a9a-95ec-4151-8a5d-dbfbcc381a9f",
+    "summary": "Family Reunion and Celebration",
+    "description": "A long-awaited family reunion to catch up, share stories, and celebrate our family's milestones. The event will include activities for all ages, a potluck dinner, and a slideshow of family memories.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T18:00:00Z",
+    "location": "",
+    "eventType": "Family Gathering",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "aunt.mary@example.com"
+      },
+      {
+        "email": "uncle.john@example.com"
+      },
+      {
+        "email": "cousin.lisa@example.com"
+      },
+      {
+        "email": "grandma@example.com"
+      }
+    ]
+  },
+  {
+    "id": "6207f42e-c447-4086-b4d0-10da2e1a2d32",
+    "summary": "Visit BestBuy",
+    "description": "Shopping trip to BestBuy for new electronics.",
+    "start": "2024-05-15T14:00:00",
+    "end": "2024-05-15T15:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      }
+    ]
+  },
+  {
+    "id": "491e6770-13d0-435b-9989-e5032094fa36",
+    "summary": "Family Dinner with Jane",
+    "description": "A casual dinner with Jane and family to catch up.",
+    "start": "2024-05-15T19:00:00",
+    "end": "2024-05-15T21:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "jane@example.com"
+      }
+    ]
+  },
+  {
+    "id": "17a13283-e3b3-48cc-a63e-52a045c13b14",
+    "summary": "Amazon Product Launch Meeting",
+    "description": "Discussion on upcoming Amazon product launch strategies and marketing plans.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T12:00:00Z",
+    "location": "",
+    "eventType": "Business",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "alex.smith@amazon.com"
+      },
+      {
+        "email": "jane.doe@amazon.com"
+      }
+    ]
+  },
+  {
+    "id": "d5fd2ac6-ef06-4592-9478-e3c766c08c0d",
+    "summary": "Walmart Shopping Trip",
+    "description": "Shopping at Walmart for weekly groceries.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T11:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "friend@example.com"
+      }
+    ]
+  },
+  {
+    "id": "1c808230-b617-4db7-baec-cceb5ea0dc9e",
+    "summary": "Project Kickoff Meeting",
+    "description": "Initial meeting to discuss project scope, deliverables, and timelines with the team.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T11:30:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "teamlead@company.com"
+      },
+      {
+        "email": "developer@company.com"
+      }
+    ]
+  },
+  {
+    "id": "6b3c41e1-0e96-412c-8c1e-ec0217e06986",
+    "summary": "Amazon Product Review Meeting",
+    "description": "Discuss upcoming product launches and review strategies with the Amazon team.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T11:00:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "amazon-team@company.com"
+      }
+    ]
+  },
+  {
+    "id": "f23415e3-a55f-4b46-9c22-e180af5fbc67",
+    "summary": "Family Gathering with Jim",
+    "description": "A long-overdue family gathering with Jim to catch up and enjoy quality time together.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T18:00:00Z",
+    "location": "",
+    "eventType": "Family",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "jim@example.com"
+      },
+      {
+        "email": "mom@example.com"
+      },
+      {
+        "email": "dad@example.com"
+      }
+    ]
+  },
+  {
+    "id": "913f6826-7547-485d-b4eb-dfcaf846a0aa",
+    "summary": "Family Gathering with Jane",
+    "description": "A planned family get-together with Jane to catch up and enjoy quality time.",
+    "start": "2024-05-15T15:00:00Z",
+    "end": "2024-05-15T18:00:00Z",
+    "location": "",
+    "eventType": "Family",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "jane@example.com"
+      },
+      {
+        "email": "uncle@example.com"
+      },
+      {
+        "email": "aunt@example.com"
+      }
+    ]
+  },
+  {
+    "id": "5ce65395-0a37-4e6e-9f63-99e095eff0e0",
+    "summary": "Project Planning Meeting",
+    "description": "Discuss project milestones, deliverables, and assign tasks for the upcoming quarter.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T12:00:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "john.doe@example.com"
+      },
+      {
+        "email": "mary.smith@example.com"
+      }
+    ]
+  },
+  {
+    "id": "2ca91b83-761c-4fc6-87f7-ab4b4cab1baf",
+    "summary": "Family Reunion and Celebration",
+    "description": "A long-awaited family reunion to catch up, share stories, and celebrate our family's milestones. The event will include activities for all ages, a potluck dinner, and a slideshow of family memories.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T20:00:00Z",
+    "location": "",
+    "eventType": "Family Gathering",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "uncle.john@example.com"
+      },
+      {
+        "email": "aunt.mary@example.com"
+      },
+      {
+        "email": "cousin.lisa@example.com"
+      },
+      {
+        "email": "grandma@example.com"
+      }
+    ]
+  },
+  {
+    "id": "b218765e-10b1-4533-bf4e-e99d8c14ffc2",
+    "summary": "Family Gathering with Jill",
+    "description": "A casual family get-together with Jill to catch up and enjoy some quality time.",
+    "start": "2023-11-15T15:00:00Z",
+    "end": "2023-11-15T17:00:00Z",
+    "location": "",
+    "eventType": "Family",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "jill@example.com"
+      }
+    ]
+  },
+  {
+    "id": "99430b24-78ae-4b6b-832b-e26a2be88ae6",
+    "summary": "Quarterly Business Review and Strategic Planning Session",
+    "description": "This is a comprehensive quarterly review meeting to analyze the company's performance, discuss strategic initiatives, and plan for the upcoming quarter. The session will include presentations from various departments, breakout discussions, and action item planning. Please prepare your reports and insights beforehand.",
+    "start": "2023-11-15T09:00:00Z",
+    "end": "2023-11-15T17:00:00Z",
+    "location": "",
+    "eventType": "Business Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com",
+        "name": "Me"
+      },
+      {
+        "email": "alice@example.com",
+        "name": "Alice Johnson"
+      },
+      {
+        "email": "bob@example.com",
+        "name": "Bob Smith"
+      },
+      {
+        "email": "carol@example.com",
+        "name": "Carol Williams"
+      },
+      {
+        "email": "dave@example.com",
+        "name": "Dave Brown"
+      }
+    ]
+  },
+  {
+    "id": "b54fc127-f542-44ad-8234-5619f9977ccd",
+    "summary": "Family Shopping Trip at Walmart",
+    "description": "A planned family shopping trip to Walmart to buy groceries and household items.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T12:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "spouse@commontools.com"
+      },
+      {
+        "email": "child1@commontools.com"
+      },
+      {
+        "email": "child2@commontools.com"
+      }
+    ]
+  },
+  {
+    "id": "9f2977c4-28ae-4e3e-945f-0f3eadcfd4e8",
+    "summary": "Project Planning Meeting",
+    "description": "Discuss project milestones and deliverables with the team.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T11:00:00",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "alice@example.com"
+      },
+      {
+        "email": "bob@example.com"
+      }
+    ]
+  },
+  {
+    "id": "c2030c05-2f8c-4827-88a4-11626772db87",
+    "summary": "Amazon Shopping Spree",
+    "description": "A fun shopping event at Amazon for the family to explore new gadgets and deals.",
+    "start": "2024-05-15T10:00:00",
+    "end": "2024-05-15T12:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "sibling@example.com"
+      },
+      {
+        "email": "friend@example.com"
+      }
+    ]
+  },
+  {
+    "id": "452d1218-9611-489d-ab91-a2f391b9297a",
+    "summary": "Jim's Extended Project Planning Session",
+    "description": "A comprehensive planning session to outline the upcoming project milestones, assign tasks, and discuss resource allocation. This session will also include a review of previous project phases and setting goals for the next quarter. Attendees are encouraged to prepare their updates and questions in advance.",
+    "start": "2023-11-15T09:00:00Z",
+    "end": "2023-11-15T17:00:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "jim@company.com"
+      },
+      {
+        "email": "alice@company.com"
+      },
+      {
+        "email": "bob@company.com"
+      },
+      {
+        "email": "carol@company.com"
+      }
+    ]
+  },
+  {
+    "id": "f59c41df-4155-48d9-bac7-d6dfe9f79b2e",
+    "summary": "Amazon Annual Conference 2024",
+    "description": "Join us for the Amazon Annual Conference 2024, where industry leaders will discuss the latest innovations, strategies, and future plans. This event includes keynote speeches, breakout sessions, networking opportunities, and product launches. Please prepare your questions and participate actively to make the most of this event.",
+    "start": "2024-05-15T09:00:00Z",
+    "end": "2024-05-15T17:00:00Z",
+    "location": "",
+    "eventType": "Conference",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "john.doe@amazon.com"
+      },
+      {
+        "email": "jane.smith@amazon.com"
+      },
+      {
+        "email": "conference@amazon.com"
+      }
+    ]
+  },
+  {
+    "id": "6b8a8d72-1b32-40fe-92c0-22923e29dec7",
+    "summary": "Family Reunion and Celebration",
+    "description": "A long-overdue family reunion to catch up, share stories, and celebrate our family's milestones. The event will include activities for all ages, a potluck dinner, and a slideshow of family memories.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T18:00:00Z",
+    "location": "",
+    "eventType": "Family Gathering",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "uncle.john@example.com"
+      },
+      {
+        "email": "aunt.mary@example.com"
+      },
+      {
+        "email": "cousin.lisa@example.com"
+      },
+      {
+        "email": "grandma@example.com"
+      }
+    ]
+  },
+  {
+    "id": "0ab53ce7-8957-41c2-a306-9ae9a8b10655",
+    "summary": "Family Gathering with Jill",
+    "description": "A casual family get-together to catch up and enjoy some quality time.",
+    "start": "2023-11-15T15:00:00Z",
+    "end": "2023-11-15T17:00:00Z",
+    "location": "",
+    "eventType": "Family",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "jill@example.com"
+      }
+    ]
+  },
+  {
+    "id": "04a7dd0a-39a9-48c1-a9f6-373e3130edc9",
+    "summary": "Amazon Annual Conference 2024",
+    "description": "Join us for the Amazon Annual Conference 2024, where industry leaders gather to discuss the latest innovations, strategies, and future plans. This event includes keynote speeches, breakout sessions, networking opportunities, and product launches. Please prepare your questions and be ready for an engaging and insightful experience.",
+    "start": "2024-05-15T09:00:00Z",
+    "end": "2024-05-15T17:00:00Z",
+    "location": "",
+    "eventType": "Conference",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "john.doe@amazon.com"
+      },
+      {
+        "email": "jane.smith@amazon.com"
+      },
+      {
+        "email": "conference@amazon.com"
+      }
+    ]
+  },
+  {
+    "id": "baefd1c0-2cc4-4cce-904c-e22f64d8e0f2",
+    "summary": "Team Sync-up",
+    "description": "Weekly team sync-up to discuss project updates and next steps.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T10:30:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "alice@example.com"
+      },
+      {
+        "email": "bob@example.com"
+      }
+    ]
+  },
+  {
+    "id": "6442f0de-eb7f-4a42-b2a5-af1d9ccd2b26",
+    "summary": "Amazon Product Launch Meeting",
+    "description": "Discussion on upcoming Amazon product launch strategies and marketing plans.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T11:30:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "alex@amazon.com"
+      },
+      {
+        "email": "jane@commontools.com"
+      }
+    ]
+  },
+  {
+    "id": "c9942bfd-8826-46a3-a393-73a733b86e25",
+    "summary": "BestBuy Shopping Trip",
+    "description": "Planning a shopping trip to BestBuy to check out the latest electronics and gadgets.",
+    "start": "2024-05-15T10:00:00",
+    "end": "2024-05-15T12:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "friend1@example.com"
+      },
+      {
+        "email": "familymember@example.com"
+      }
+    ]
+  },
+  {
+    "id": "4ac28bc0-6a40-49c2-b84d-15be5918eda7",
+    "summary": "Team Sync with Jill",
+    "description": "A scheduled sync-up with Jill to discuss ongoing projects and updates.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T11:00:00",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "jill@example.com"
+      }
+    ]
+  },
+  {
+    "id": "46dd2870-ea04-4920-8d47-7240e090e372",
+    "summary": "Family Reunion and Celebration",
+    "description": "A long-overdue family reunion to catch up, share stories, and celebrate our family's milestones. The event will include activities for all ages, a potluck dinner, and a slideshow of family memories.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T18:00:00Z",
+    "location": "",
+    "eventType": "Family Gathering",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "uncle.john@example.com"
+      },
+      {
+        "email": "aunt.mary@example.com"
+      },
+      {
+        "email": "cousin.lisa@example.com"
+      },
+      {
+        "email": "grandma@example.com"
+      }
+    ]
+  },
+  {
+    "id": "fdfc7940-c675-4ebb-b777-81d6f6ac3c73",
+    "summary": "Walmart Shopping Trip",
+    "description": "Visit Walmart for weekly groceries and supplies.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T11:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "friend1@example.com"
+      }
+    ]
+  },
+  {
+    "id": "9e1070f4-08c6-4ff6-9c6d-b5ce979216cd",
+    "summary": "Project Planning Meeting",
+    "description": "Discuss project milestones, deliverables, and timelines with the team.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T11:30:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "alice@example.com"
+      },
+      {
+        "email": "bob@example.com"
+      }
+    ]
+  },
+  {
+    "id": "62daab70-e27c-47ca-a655-640fc0fcb362",
+    "summary": "Team Sync with Jack",
+    "description": "Weekly team sync to discuss project updates and next steps.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T10:30:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "jack@company.com"
+      }
+    ]
+  },
+  {
+    "id": "75c30d57-7550-45df-b927-d25a53acad0c",
+    "summary": "Visit BestBuy",
+    "description": "Shopping trip to BestBuy within the next 30 days.",
+    "start": "2024-05-15T10:00:00",
+    "end": "2024-05-15T11:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      }
+    ]
+  },
+  {
+    "id": "93a82428-8eac-4bc2-a4fc-7a328a854811",
+    "summary": "Project Planning and Strategy Meeting",
+    "description": "A comprehensive session to discuss project milestones, assign tasks, review progress, and plan upcoming activities. This meeting will also include a brainstorming segment for innovative solutions and risk management strategies.",
+    "start": "2024-05-15T10:00:00Z",
+    "end": "2024-05-15T14:00:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "john@example.com"
+      },
+      {
+        "email": "alice@company.com"
+      },
+      {
+        "email": "bob@organization.org"
+      }
+    ]
+  },
+  {
+    "id": "f1cb64fe-514d-4218-b36a-7f22d231b06e",
+    "summary": "BestBuy Family Shopping Spree",
+    "description": "A comprehensive shopping event at BestBuy for the family, including new gadgets, appliances, and entertainment systems. Planning to explore the latest tech and make informed purchases. Don't forget to bring the shopping list and any applicable coupons.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T14:00:00Z",
+    "location": "",
+    "eventType": "Shopping",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "spouse@family.com"
+      },
+      {
+        "email": "child1@family.com"
+      },
+      {
+        "email": "child2@family.com"
+      }
+    ]
+  },
+  {
+    "id": "0352b185-4abc-4f94-b74e-cb8ed5a435be",
+    "summary": "Comprehensive Project Planning Session with Jack",
+    "description": "This is a detailed planning session to outline the upcoming project milestones, assign responsibilities, and set deadlines. The meeting will also include a review of previous progress, discussion of potential challenges, and brainstorming solutions. Attendees are encouraged to prepare their reports and ideas in advance.",
+    "start": "2023-11-15T09:00:00Z",
+    "end": "2023-11-15T17:00:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "jack@domain.com"
+      },
+      {
+        "email": "projectmanager@domain.com"
+      },
+      {
+        "email": "leaddeveloper@domain.com"
+      },
+      {
+        "email": "qaengineer@domain.com"
+      }
+    ]
+  },
+  {
+    "id": "f41d89b1-0f21-44c9-a9ab-dbea863c2cb9",
+    "summary": "Walmart Meeting",
+    "description": "Discussion with Walmart team regarding upcoming collaboration.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T11:00:00",
+    "location": "",
+    "eventType": "Business",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "walmart@company.com"
+      }
+    ]
+  },
+  {
+    "id": "7f07a2f4-23ed-4795-af2b-0c82da37d73c",
+    "summary": "Amazon Annual Conference 2024",
+    "description": "Join us for the Amazon Annual Conference 2024, where industry leaders gather to discuss innovations, strategies, and future plans. This event includes keynote speeches, breakout sessions, networking opportunities, and product launches. Don't miss this opportunity to connect with professionals and learn about the latest trends in e-commerce and technology.",
+    "start": "2024-04-15T09:00:00",
+    "end": "2024-04-20T17:00:00",
+    "location": "",
+    "eventType": "Conference",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "john.doe@example.com"
+      },
+      {
+        "email": "jane.smith@example.com"
+      },
+      {
+        "email": "alex.jones@example.com"
+      }
+    ]
+  },
+  {
+    "id": "4cde7b9a-750c-4a0c-a78b-1dccc411c00a",
+    "summary": "Mom's Birthday Celebration",
+    "description": "A special birthday celebration with Mom. Don't forget to bring her favorite cake and gifts.",
+    "start": "2023-11-15T18:00:00",
+    "end": "2023-11-15T21:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "mom@example.com"
+      },
+      {
+        "email": "sibling@example.com"
+      }
+    ]
+  },
+  {
+    "id": "f5da6ce3-ec5a-476b-a2fc-55fec106fbfb",
+    "summary": "Walmart Shopping Trip",
+    "description": "Shopping trip to Walmart within the next 30 days.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T11:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      }
+    ]
+  },
+  {
+    "id": "47902582-0e84-4e1a-bc97-5d3c469004d4",
+    "summary": "Amazon Product Launch Meeting",
+    "description": "Discussion on upcoming Amazon product launch strategies and marketing plans.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T11:30:00Z",
+    "location": "",
+    "eventType": "Business Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "productmanager@amazon.com"
+      },
+      {
+        "email": "marketing@amazon.com"
+      }
+    ]
+  },
+  {
+    "id": "8753ccce-e3f8-4936-a6b8-ddb5e5540993",
+    "summary": "Quarterly Business Review and Strategic Planning Session",
+    "description": "This comprehensive session will cover the quarterly performance metrics, upcoming strategic initiatives, and team alignment activities. Attendees will also discuss market trends, customer feedback, and resource allocation to ensure alignment with company goals.",
+    "start": "2023-11-15T09:00:00Z",
+    "end": "2023-11-15T17:00:00Z",
+    "location": "",
+    "eventType": "Business Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "alice@example.com"
+      },
+      {
+        "email": "bob@example.com"
+      },
+      {
+        "email": "carol@example.com"
+      },
+      {
+        "email": "dave@example.com"
+      }
+    ]
+  },
+  {
+    "id": "8d92a437-9089-4dce-b39b-39646bee16ab",
+    "summary": "Project Planning Meeting",
+    "description": "Discuss project milestones, deliverables, and timelines with the team.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T12:00:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "alice@example.com"
+      },
+      {
+        "email": "bob@example.com"
+      }
+    ]
+  },
+  {
+    "id": "9c280847-0939-4d12-ba04-cdc9771cce6a",
+    "summary": "Mom's Birthday Celebration",
+    "description": "A special birthday celebration with Mom. Don't forget to bring her favorite cake and gifts.",
+    "start": "2023-11-15T18:00:00",
+    "end": "2023-11-15T21:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "mom@example.com"
+      },
+      {
+        "email": "sibling1@example.com"
+      },
+      {
+        "email": "sibling2@example.com"
+      }
+    ]
+  },
+  {
+    "id": "0dae6fde-86bd-4e0b-92f2-40dd5da7b81c",
+    "summary": "Extended Medical Conference at Duke Hospital",
+    "description": "A comprehensive medical conference covering the latest advancements in healthcare, research presentations, and networking opportunities at Duke Hospital. This event is scheduled to last for multiple days to facilitate in-depth discussions and workshops.",
+    "start": "2023-11-15T08:00:00Z",
+    "end": "2023-11-20T17:00:00Z",
+    "location": "Duke Hospital, Durham, NC",
+    "eventType": "Conference",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "dr.smith@duke.edu"
+      },
+      {
+        "email": "nurse.jones@duke.edu"
+      },
+      {
+        "email": "researcher.brown@duke.edu"
+      }
+    ]
+  },
+  {
+    "id": "acb59231-de95-4e71-a06b-2dc246b1eeeb",
+    "summary": "Walmart Team Meeting",
+    "description": "Monthly team sync-up to discuss ongoing projects and upcoming initiatives at Walmart.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T11:30:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "manager@walmart.com"
+      },
+      {
+        "email": "team@walmart.com"
+      }
+    ]
+  },
+  {
+    "id": "2ce4915e-8e18-49c1-9685-2b47085ceded",
+    "summary": "Family Dinner with Mom",
+    "description": "A special family dinner to catch up with Mom and spend quality time together.",
+    "start": "2023-11-15T18:00:00",
+    "end": "2023-11-15T20:00:00",
+    "location": "",
+    "eventType": "Family",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "Mom"
+      },
+      {
+        "email": "Sibling1"
+      },
+      {
+        "email": "Sibling2"
+      }
+    ]
+  },
+  {
+    "id": "6e1c78db-f4c6-4bb8-b1a9-ed7b49590359",
+    "summary": "Family Gathering with Jane",
+    "description": "A planned family get-together with Jane to catch up and enjoy quality time.",
+    "start": "2023-11-15T15:00:00Z",
+    "end": "2023-11-15T18:00:00Z",
+    "location": "",
+    "eventType": "Family",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "jane@example.com"
+      },
+      {
+        "email": "uncle@example.com"
+      },
+      {
+        "email": "aunt@example.com"
+      }
+    ]
+  },
+  {
+    "id": "5c6e7abe-ba16-428c-93d6-a91fab4c30bd",
+    "summary": "Project Planning Meeting",
+    "description": "Discuss project milestones and deliverables with the team.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T11:00:00",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "alice@example.com"
+      },
+      {
+        "email": "bob@example.com"
+      }
+    ]
+  },
+  {
+    "id": "5b9b764d-79be-4468-a072-c83ac5ee54f4",
+    "summary": "Mom's Call",
+    "description": "A short call with Mom to catch up.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T10:30:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "mom@example.com"
+      }
+    ]
+  },
+  {
+    "id": "5fb687c5-f5aa-446d-a1ee-66ec5fef3d0c",
+    "summary": "Walmart Shopping Trip",
+    "description": "A scheduled shopping trip to Walmart to purchase household essentials and groceries.",
+    "start": "2024-05-15T10:00:00",
+    "end": "2024-05-15T12:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "friend1@example.com"
+      },
+      {
+        "email": "familymember@example.com"
+      }
+    ]
+  },
+  {
+    "id": "38b62370-2463-4a42-b5b0-e315ed26f0c9",
+    "summary": "Family Shopping Trip at Walmart",
+    "description": "A planned family shopping trip to Walmart to purchase groceries, household items, and other essentials. Make sure to bring the shopping list and coupons. This event is important for family needs and budget planning.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T14:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "spouse@family.com"
+      },
+      {
+        "email": "child1@family.com"
+      },
+      {
+        "email": "child2@family.com"
+      }
+    ]
+  },
+  {
+    "id": "dc5c722c-1c77-420f-82c8-db3977009600",
+    "summary": "Follow-up Meeting with Jill",
+    "description": "Discuss project updates and next steps.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T10:30:00",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "jill@example.com"
+      }
+    ]
+  },
+  {
+    "id": "7e3b52cf-c6cc-4292-99a3-40946257fb24",
+    "summary": "Family Reunion and Celebration",
+    "description": "A long-awaited family reunion to catch up, share stories, and celebrate our family's milestones. The event will include activities for all ages, a potluck dinner, and a slideshow of family memories.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T20:00:00Z",
+    "location": "",
+    "eventType": "Family Gathering",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "aunt.mary@example.com"
+      },
+      {
+        "email": "uncle.john@example.com"
+      },
+      {
+        "email": "cousin.lisa@example.com"
+      },
+      {
+        "email": "grandma@example.com"
+      }
+    ]
+  },
+  {
+    "id": "12c2fd38-8767-4508-9dfb-82e64f142aeb",
+    "summary": "Mom's Call",
+    "description": "A short call with Mom to catch up.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T10:30:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "mom@example.com"
+      }
+    ]
+  },
+  {
+    "id": "954480bb-ca9e-4a8f-b82e-5c23d051f9b9",
+    "summary": "Project Planning Meeting",
+    "description": "Discuss project milestones and deliverables with the team.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T11:00:00",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "jack@example.com"
+      },
+      {
+        "email": "alice@example.com"
+      }
+    ]
+  },
+  {
+    "id": "ad2d7945-90e5-4290-8533-1d57a9b5ea40",
+    "summary": "BestBuy Customer Service Appointment",
+    "description": "A detailed appointment to discuss product support, warranty options, and future purchases with BestBuy customer service representatives. This session will cover various electronics and appliance needs, ensuring all questions are addressed thoroughly.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T12:00:00Z",
+    "location": "",
+    "eventType": "Customer Support",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com",
+        "name": "Awesome List User"
+      },
+      {
+        "email": "bestbuy@support.com",
+        "name": "BestBuy Support"
+      },
+      {
+        "email": "john.doe@example.com",
+        "name": "John Doe"
+      },
+      {
+        "email": "jane.smith@example.com",
+        "name": "Jane Smith"
+      }
+    ]
+  },
+  {
+    "id": "34a4c716-aa95-4a3b-baee-93fedacec889",
+    "summary": "Amazon Annual Conference 2024",
+    "description": "Join us for the Amazon Annual Conference 2024, where industry leaders will discuss the latest innovations, strategies, and future plans. This event includes keynote speeches, breakout sessions, networking opportunities, and product launches. Please prepare your questions and participate actively to maximize your experience.",
+    "start": "2024-04-15T09:00:00Z",
+    "end": "2024-04-20T17:00:00Z",
+    "location": "",
+    "eventType": "Conference",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "john.doe@amazon.com"
+      },
+      {
+        "email": "jane.smith@amazon.com"
+      },
+      {
+        "email": "conference.speaker@amazon.com"
+      },
+      {
+        "email": "it.support@commontools.com"
+      }
+    ]
+  },
+  {
+    "id": "53c6625a-c496-4a64-8260-e3a2e28841aa",
+    "summary": "Amazon Meeting",
+    "description": "Discussion about upcoming Amazon projects.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T11:00:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "amazon@company.com"
+      }
+    ]
+  },
+  {
+    "id": "4dc77f86-942f-45ff-afee-4b1d818bf2ba",
+    "summary": "Comprehensive Planning Session with Jill",
+    "description": "This is a detailed planning session to discuss upcoming projects, review progress, and strategize for the next quarter. The meeting will include multiple agenda items such as project timelines, resource allocation, and team roles. Attendees are encouraged to prepare reports and updates beforehand.",
+    "start": "2023-11-15T09:00:00Z",
+    "end": "2023-11-15T17:00:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "jill@example.com"
+      },
+      {
+        "email": "manager@example.com"
+      },
+      {
+        "email": "teamlead@example.com"
+      },
+      {
+        "email": "projectcoordinator@example.com"
+      }
+    ]
+  },
+  {
+    "id": "b586f03d-eecc-4e95-8d7a-541d74596799",
+    "summary": "Project Planning Meeting",
+    "description": "Discuss project milestones and deliverables with the team.",
+    "start": "2024-05-15T10:00:00",
+    "end": "2024-05-15T11:00:00",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "john.doe@example.com"
+      },
+      {
+        "email": "alice.smith@example.com"
+      }
+    ]
+  },
+  {
+    "id": "a2b34617-2298-49ae-bfcd-eda8ad3f37ee",
+    "summary": "Walmart Store Inventory Management Meeting",
+    "description": "A comprehensive session to review and strategize Walmart's inventory management for the upcoming quarter. Topics include supply chain optimization, stock replenishment strategies, and new technology integrations. Attendees will include store managers, supply chain analysts, and IT specialists.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T14:00:00Z",
+    "location": "",
+    "eventType": "Business Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "storemanager1@walmart.com"
+      },
+      {
+        "email": "supplychainanalyst@walmart.com"
+      },
+      {
+        "email": "itspecialist@walmart.com"
+      }
+    ]
+  },
+  {
+    "id": "268accb2-651e-41b4-a943-12cf83120586",
+    "summary": "Team Sync with Jack",
+    "description": "Weekly team sync to discuss project updates and next steps.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T10:30:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "jack@example.com"
+      }
+    ]
+  },
+  {
+    "id": "3b2d545e-13cd-4639-8f35-54f7f1a3cc19",
+    "summary": "Project Planning Meeting",
+    "description": "Discuss project milestones, deliverables, and deadlines with the team.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T12:00:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "alice@example.com"
+      },
+      {
+        "email": "bob@example.com"
+      }
+    ]
+  },
+  {
+    "id": "8e571f1e-5e80-474d-88b0-d95b3ffe1846",
+    "summary": "Team Sync with Jim",
+    "description": "Weekly team sync to discuss project updates and next steps.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T10:30:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "jim@company.com"
+      },
+      {
+        "email": "alice@company.com"
+      }
+    ]
+  },
+  {
+    "id": "82c8553d-06af-4ef7-abb9-136c0ce9800b",
+    "summary": "Amazon Annual Supply Chain Conference 2024",
+    "description": "This is a comprehensive event covering the latest innovations and strategies in Amazon's supply chain management. Attendees will participate in workshops, keynote sessions, and networking opportunities to enhance their understanding and implementation of Amazon's logistics and supply chain solutions. The event aims to foster collaboration among industry leaders, technology providers, and Amazon's internal teams to drive future growth and efficiency.",
+    "start": "2024-04-15T09:00:00Z",
+    "end": "2024-04-20T17:00:00Z",
+    "location": "",
+    "eventType": "Conference",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "john.doe@amazon.com"
+      },
+      {
+        "email": "jane.smith@amazon.com"
+      },
+      {
+        "email": "logistics@amazon.com"
+      },
+      {
+        "email": "techinnovations@amazon.com"
+      }
+    ]
+  },
+  {
+    "id": "c4afa7e9-32c2-404b-85ac-7cd2538b03d9",
+    "summary": "Duke Hospital Medical Conference",
+    "description": "A comprehensive medical conference held at Duke Hospital, covering the latest advancements in healthcare, patient care strategies, and medical research. This event includes keynote speeches, panel discussions, and networking opportunities with leading medical professionals.",
+    "start": "2023-11-15T09:00:00Z",
+    "end": "2023-11-15T17:00:00Z",
+    "location": "Duke University Hospital, Durham, NC",
+    "eventType": "Conference",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "dr.smith@duke.edu"
+      },
+      {
+        "email": "nurse.jones@duke.edu"
+      },
+      {
+        "email": "researcher.brown@duke.edu"
+      }
+    ]
+  },
+  {
+    "id": "7e3fc84a-20fd-489e-a1b8-0d763057eefb",
+    "summary": "Visit BestBuy",
+    "description": "Shopping trip to BestBuy to check out new electronics.",
+    "start": "2024-05-15T14:00:00",
+    "end": "2024-05-15T15:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      }
+    ]
+  },
+  {
+    "id": "896a6322-37ca-4ea2-912b-8ab6c8514ec7",
+    "summary": "Visit BestBuy",
+    "description": "Shopping trip to BestBuy to check out new electronics.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T11:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "friend@example.com"
+      }
+    ]
+  },
+  {
+    "id": "c7efb8c8-19a2-40bb-9d0c-8cbe154ec307",
+    "summary": "BestBuy Customer Support Training Session",
+    "description": "A comprehensive training session hosted by BestBuy to enhance customer support skills and product knowledge. This session will cover the latest updates in electronics, customer service best practices, and troubleshooting techniques. Attendees are encouraged to participate actively and ask questions.",
+    "start": "2023-11-15T09:00:00Z",
+    "end": "2023-11-15T17:00:00Z",
+    "location": "",
+    "eventType": "Training",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "support@bestbuy.com"
+      },
+      {
+        "email": "trainer@bestbuy.com"
+      },
+      {
+        "email": "manager@bestbuy.com"
+      }
+    ]
+  },
+  {
+    "id": "a82a148d-efab-497a-8267-0d3385d53a5d",
+    "summary": "Project Planning and Strategy Meeting",
+    "description": "A comprehensive session to discuss project milestones, assign tasks, review progress, and plan upcoming sprints. This meeting will also cover resource allocation, risk management, and stakeholder updates. Please prepare your reports and updates beforehand.",
+    "start": "2023-11-15T09:00:00Z",
+    "end": "2023-11-15T17:00:00Z",
+    "location": "",
+    "eventType": "Work",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "name": "Alice Johnson",
+        "email": "alice.johnson@company.com"
+      },
+      {
+        "name": "Bob Smith",
+        "email": "bob.smith@company.com"
+      },
+      {
+        "name": "Carol Williams",
+        "email": "carol.williams@company.com"
+      }
+    ]
+  },
+  {
+    "id": "549b0fc8-6e03-4e85-9aee-74c05a398ecb",
+    "summary": "Visit BestBuy",
+    "description": "Shopping trip to BestBuy to check out the latest electronics and gadgets.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T12:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "friend@example.com"
+      }
+    ]
+  },
+  {
+    "id": "24638162-03b1-4535-b71e-65208dc7734b",
+    "summary": "Walmart Meeting",
+    "description": "Discuss upcoming Walmart project and coordination.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T11:00:00",
+    "location": "",
+    "eventType": "Business",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "manager@commontools.com"
+      },
+      {
+        "email": "team@commontools.com"
+      }
+    ]
+  },
+  {
+    "id": "b4bb54de-eafe-4981-9e44-6ffc3a14f741",
+    "summary": "Project Planning Meeting",
+    "description": "Discuss project milestones, deliverables, and assign tasks for the upcoming quarter.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T12:00:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "jane.doe@example.com"
+      },
+      {
+        "email": "john.smith@example.com"
+      }
+    ]
+  },
+  {
+    "id": "313635c6-9bf6-4b2b-a55a-e4bf6b6da25a",
+    "summary": "Family Shopping at Walmart",
+    "description": "Family shopping trip to Walmart within the next 30 days.",
+    "start": "2024-05-15T10:00:00",
+    "end": "2024-05-15T12:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      }
+    ]
+  },
+  {
+    "id": "586c9112-10c5-46e4-8c75-537b93424660",
+    "summary": "Follow-up Meeting with John",
+    "description": "Discuss project updates and next steps.",
+    "start": "2024-05-15T10:00:00",
+    "end": "2024-05-15T10:30:00",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "john@example.com"
+      }
+    ]
+  },
+  {
+    "id": "e3a99e1e-b25d-4cd1-99d2-794ccd10a129",
+    "summary": "Team Sync with Jack",
+    "description": "A scheduled sync with Jack to discuss project updates and next steps.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T11:00:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "jack@example.com"
+      }
+    ]
+  },
+  {
+    "id": "53b0475f-a8d6-4fcc-afec-6fe9f75627b2",
+    "summary": "Walmart Shopping",
+    "description": "Shopping trip to Walmart within the next 30 days.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T11:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      }
+    ]
+  },
+  {
+    "id": "cb457d2c-c77b-4c08-a21a-71fd02061045",
+    "summary": "Project Planning Meeting",
+    "description": "Discuss project milestones and deliverables with the team.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T11:00:00",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "alice@example.com"
+      },
+      {
+        "email": "bob@example.com"
+      }
+    ]
+  },
+  {
+    "id": "b2c7d961-157d-4b32-b3a8-5f19534f0c17",
+    "summary": "Team Sync-up",
+    "description": "Weekly team sync-up to discuss project updates and next steps.",
+    "start": "2024-05-15T10:00:00",
+    "end": "2024-05-15T10:30:00",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "jane.doe@example.com"
+      },
+      {
+        "email": "john.smith@example.com"
+      }
+    ]
+  },
+  {
+    "id": "d7ef78a0-39c1-400b-9a76-f2ab591462b7",
+    "summary": "Visit BestBuy",
+    "description": "Shopping trip to BestBuy within the next 30 days.",
+    "start": "2024-05-15T10:00:00",
+    "end": "2024-05-15T11:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      }
+    ]
+  },
+  {
+    "id": "3a301a4e-dca1-43eb-b9ab-b1b5db443a60",
+    "summary": "Amazon Product Launch Meeting",
+    "description": "Discussion on upcoming Amazon product launch strategies and marketing plans.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T11:30:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "amazon-team@amazon.com"
+      },
+      {
+        "email": "marketing@company.com"
+      }
+    ]
+  },
+  {
+    "id": "a6246aaf-eb38-4477-8d93-6984f23ee2f6",
+    "summary": "Family Dinner with Jack",
+    "description": "A casual family dinner with Jack to catch up and enjoy some good food.",
+    "start": "2024-05-15T19:00:00",
+    "end": "2024-05-15T21:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+fam@commontools.com"
+      },
+      {
+        "email": "jack@example.com"
+      }
+    ]
+  },
+  {
+    "id": "f9cdae59-9ca4-45b2-ab0d-49c078a4772b",
+    "summary": "Quarterly Business Review and Strategic Planning Session",
+    "description": "This comprehensive session will cover the quarterly performance metrics, review strategic initiatives, and plan for the upcoming quarter. Attendees will discuss key challenges, opportunities, and set actionable goals. Please prepare your reports and insights beforehand.",
+    "start": "2023-11-15T09:00:00Z",
+    "end": "2023-11-15T17:00:00Z",
+    "location": "",
+    "eventType": "Business Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com",
+        "displayName": "Me at Work"
+      },
+      {
+        "email": "alice@example.com",
+        "displayName": "Alice Johnson"
+      },
+      {
+        "email": "bob@example.com",
+        "displayName": "Bob Smith"
+      },
+      {
+        "email": "carol@example.com",
+        "displayName": "Carol Williams"
+      },
+      {
+        "email": "dave@example.com",
+        "displayName": "Dave Brown"
+      }
+    ]
+  },
+  {
+    "id": "ba01839c-0723-4e5f-8893-6431354ceed8",
+    "summary": "Visit to Duke Hospital",
+    "description": "A scheduled visit to Duke Hospital for medical consultation and check-up.",
+    "start": "2024-05-15T10:00:00",
+    "end": "2024-05-15T11:00:00",
+    "location": "",
+    "eventType": "Medical Appointment",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "doctor@dukehospital.org"
+      },
+      {
+        "email": "nurse@dukehospital.org"
+      }
+    ]
+  },
+  {
+    "id": "b4ee729d-9d03-4f41-9cbc-2b67e412b905",
+    "summary": "Family Reunion and Long Catch-up with Mom",
+    "description": "A special extended family gathering to reconnect, share stories, and enjoy a long day together. Topics include family history, upcoming holidays, and personal updates. Please bring photos and any family memorabilia you'd like to share.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T18:00:00Z",
+    "location": "",
+    "eventType": "Family Gathering",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "mom@family.com"
+      },
+      {
+        "email": "uncle.joe@family.com"
+      },
+      {
+        "email": "aunt.susan@family.com"
+      },
+      {
+        "email": "cousin.lisa@family.com"
+      }
+    ]
+  },
+  {
+    "id": "2fcb0fef-b675-4cd2-965a-a868eae087c8",
+    "summary": "Walmart Meeting",
+    "description": "Discussion with Walmart team regarding upcoming project.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T11:00:00",
+    "location": "",
+    "eventType": "Business",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "walmart@company.com"
+      }
+    ]
+  },
+  {
+    "id": "4776eaae-8fdf-4d9f-a52d-991651ea2b71",
+    "summary": "Team Check-in with Jill",
+    "description": "Weekly team check-in to discuss project updates and upcoming deadlines.",
+    "start": "2024-05-15T10:00:00",
+    "end": "2024-05-15T10:30:00",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "jill@company.com"
+      }
+    ]
+  },
+  {
+    "id": "b3b12203-f8c5-452a-b79d-26d821bafa49",
+    "summary": "Medical Consultation at Duke Hospital",
+    "description": "A scheduled medical consultation at Duke Hospital to discuss ongoing treatment plans.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T11:30:00",
+    "location": "Duke Hospital, Durham, NC",
+    "eventType": "Medical Appointment",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me@commontools.com"
+      },
+      {
+        "email": "dr.smith@duke.edu"
+      },
+      {
+        "email": "nurse.jones@duke.edu"
+      }
+    ]
+  },
+  {
+    "id": "94454c3b-d567-46c8-b7f5-425a75b83a75",
+    "summary": "Project Kickoff Meeting",
+    "description": "Initial meeting to discuss project scope, deliverables, and timelines with the team.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T11:30:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "teamlead@company.com"
+      },
+      {
+        "email": "developer@company.com"
+      }
+    ]
+  },
+  {
+    "id": "9c4c9ea9-183a-4166-8432-77ced2bc62fd",
+    "summary": "Jim's Upcoming Meeting",
+    "description": "A short calendar event scheduled by Jim within the next 30 days.",
+    "start": "2024-05-15T10:00:00",
+    "end": "2024-05-15T11:00:00",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "john.doe@example.com"
+      },
+      {
+        "email": "jane.smith@example.com"
+      }
+    ]
+  },
+  {
+    "id": "1a255dad-e299-4514-b2c6-d8bd53f72915",
+    "summary": "Project Planning Meeting",
+    "description": "Discuss project milestones, deliverables, and assign tasks for the upcoming quarter.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T12:00:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "john.doe@example.com"
+      },
+      {
+        "email": "mary.smith@example.com"
+      }
+    ]
+  },
+  {
+    "id": "476fa12d-dfb0-42d4-a927-36159ba97912",
+    "summary": "Project Planning and Strategy Session",
+    "description": "A comprehensive session to plan and strategize the upcoming project milestones, assign tasks, and set deadlines. This meeting will also include a review of current progress and discussion of potential challenges and solutions. Attendees are encouraged to prepare updates and questions.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T16:00:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "john@example.com",
+        "displayName": "John"
+      },
+      {
+        "email": "awesomelist@commontools.com",
+        "displayName": "Awesome List Team"
+      },
+      {
+        "email": "alice@example.com",
+        "displayName": "Alice"
+      },
+      {
+        "email": "bob@example.com",
+        "displayName": "Bob"
+      },
+      {
+        "email": "carol@example.com",
+        "displayName": "Carol"
+      }
+    ]
+  },
+  {
+    "id": "a0158a4f-c39b-403f-87bf-4583e949a2fe",
+    "summary": "Jim's Comprehensive Planning Session",
+    "description": "A detailed and extensive planning session led by Jim to outline project milestones, assign tasks, and set deadlines. This session will cover all aspects of the upcoming quarter, including marketing strategies, product development, and team coordination. Attendees will include key stakeholders, department heads, and external consultants. Please prepare your reports and updates in advance.",
+    "start": "2023-11-15T09:00:00Z",
+    "end": "2023-11-15T17:00:00Z",
+    "location": "",
+    "eventType": "Meeting",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "john.doe@company.com"
+      },
+      {
+        "email": "jane.smith@company.com"
+      },
+      {
+        "email": "external.consultant@external.com"
+      }
+    ]
+  },
+  {
+    "id": "c4fdab06-ef65-464d-84b1-0a37a5812eca",
+    "summary": "Mom's Special Day",
+    "description": "A special day to spend quality time with Mom, celebrating her and making wonderful memories.",
+    "start": "2023-11-15T10:00:00",
+    "end": "2023-11-15T14:00:00",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "awesomelist@commontools.com"
+      },
+      {
+        "email": "mom@example.com"
+      },
+      {
+        "email": "familymember1@example.com"
+      }
+    ]
+  },
+  {
+    "id": "4ffd44b2-964e-4020-b15c-75c98cb5fa66",
+    "summary": "Mom's 70th Birthday Celebration",
+    "description": "A special long-duration event to celebrate Mom's 70th birthday with family and friends. The event includes a dinner, speeches, and a slideshow of memories. Please join us for this memorable occasion.",
+    "start": "2023-11-15T10:00:00Z",
+    "end": "2023-11-15T22:00:00Z",
+    "location": "",
+    "eventType": "Personal",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "me+work@commontools.com"
+      },
+      {
+        "email": "familymember1@example.com"
+      },
+      {
+        "email": "familymember2@example.com"
+      },
+      {
+        "email": "friend1@example.com"
+      }
+    ]
+  }
+]

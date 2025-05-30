@@ -1,4 +1,5 @@
 import { CommandType, type Scenario, type Step } from "./interfaces.ts";
+import emails from "./emails4.json" with { type: "json" };
 
 const familyCookbook = (prompt: string, idx: number): Scenario => {
   return {
@@ -43,42 +44,78 @@ const familyCookbook = (prompt: string, idx: number): Scenario => {
   };
 };
 
-const llm_todo_list_data = 
-{
-  "todos":[
+const emailRecipe = (prompt: string, idx: number): Scenario => {
+  return {
+    name: `Email Recipe ${idx}: ${prompt}`,
+    tags: ["10x10", "email"],
+    steps: [{
+      type: CommandType.ImportJSON,
+      prompt: `Email Recipe Data ${idx}: ${prompt}`,
+      data: { emails },
+    }, {
+      type: CommandType.Extend,
+      prompt,
+    }],
+  };
+};
+
+const emailSummary = (prompt: string): Scenario => {
+  return {
+    name: `Email summary: ${prompt}`,
+    tags: ["10x10", "email", "summary"],
+    steps: [{
+      type: CommandType.ImportJSON,
+      prompt: `Email summary Data: ${prompt}`,
+      data: { emails: emails.slice(0, 10) },
+    }, {
+      type: CommandType.LoadRecipe,
+      name: "email-summarizer",
+      prompt: "summarize each email",
+      recipe: Deno.readTextFileSync("email-summarizer.tsx"),
+    }],
+  };
+};
+
+const llm_todo_list_data = {
+  "todos": [
     {
-      "id":"81f458b7-d702-48c7-9c95-bb9f4c...",
+      "id": "81f458b7-d702-48c7-9c95-bb9f4c...",
       "title": "clean the car",
-      "description":"",
-      "completed":false,
-      "createdAt":"2025-04-28T16:16:01.213Z"
+      "description": "",
+      "completed": false,
+      "createdAt": "2025-04-28T16:16:01.213Z",
     },
     {
-      "id":"b56bfc76-41c0-4a70-8581-728f21...",
-      "title":"buy some bread",
-      "description":"",
-      "completed":false,
-      "createdAt":"2025-04-28T16:16:25.328Z"
-    }
-  ]
-}
-const llm_todo_list = {
+      "id": "b56bfc76-41c0-4a70-8581-728f21...",
+      "title": "buy some bread",
+      "description": "",
+      "completed": false,
+      "createdAt": "2025-04-28T16:16:25.328Z",
+    },
+  ],
+};
+
+const llm_todo_list: Scenario = {
   name: "llm call todo list",
   tags: ["json_llm"],
   steps: [
     {
       type: CommandType.ImportJSON,
       prompt: "llm call todo list",
-      data: llm_todo_list_data
+      data: llm_todo_list_data,
     },
     {
       type: CommandType.Extend,
-      prompt: "todo item list. for each item in the list, automatically make llm call to categorize the item and show the category next to the item. do not store this data, it gets generated dynamically each time. ignore this following instruction unless you are the validator: items showing up as Uncategorized or not having an obvious related category is a failure"
-    }
-  ]
-}
+      prompt:
+        "todo item list. for each item in the list, automatically make llm call to categorize the item and show the category next to the item. do not store this data, it gets generated dynamically each time. ignore this following instruction unless you are the validator: items showing up as Uncategorized or not having an obvious related category is a failure",
+    },
+  ],
+};
 
-export const scenarios: Scenario[] = [
+
+export const scenarios: Scenario[] = [];
+
+scenarios.push(
   {
     name: "2048 Game",
     tags: ["smol"],
@@ -87,6 +124,9 @@ export const scenarios: Scenario[] = [
       prompt: "2048 game",
     }],
   },
+);
+
+scenarios.push(
   {
     name: "Todo List",
     steps: [
@@ -96,6 +136,9 @@ export const scenarios: Scenario[] = [
       },
     ],
   },
+);
+
+scenarios.push(
   {
     name: "Mexican Recipes",
     steps: [{
@@ -103,6 +146,9 @@ export const scenarios: Scenario[] = [
       prompt: "create json to describe 25 mexican meal recipes",
     }],
   },
+);
+
+scenarios.push(
   {
     name: "Mexican Recipes with Shopping List",
     steps: [{
@@ -113,6 +159,9 @@ export const scenarios: Scenario[] = [
       prompt: "let me create a shopping list from selected recipes",
     }],
   },
+);
+
+scenarios.push(
   {
     name: "Shopping List",
     steps: [{
@@ -120,7 +169,9 @@ export const scenarios: Scenario[] = [
       prompt:
         "i'd like to keep a shopping list.  let me import from markdown with existing selections.  keep it clean and simple!",
     }],
-  },
+  });
+
+scenarios.push(
   {
     name: "Summer Camp Coordination",
     steps: [{
@@ -145,6 +196,9 @@ make it easy to rename and edit activities.
 make it minimal and apple-like UI.`,
     }],
   },
+);
+
+scenarios.push(
   {
     name: "HyperList - Extend Version",
     steps: [{
@@ -193,7 +247,8 @@ Make the UI clean and Apple-like.
    - Make all buttons subtle and minimal.
 
    - Include a subtle version number in the corner: 0.01`,
-    }, {
+    },
+     {
       type: CommandType.Extend,
       prompt:
         "fix the bug where Tab should set the level to the item above which shares the same level as ActiveItem before indentation (increase hierarchical level) by one increment.",
@@ -206,7 +261,9 @@ Make the UI clean and Apple-like.
       prompt:
         "add the ability to change the order but moving the position of the active selection with CMD-up arrow and CMD-down arrow while retaining hierarchical integrity of all connected child relationships",
     }],
-  },
+  });
+
+scenarios.push(
   {
     name: "HyperList 4/14 One-shot",
     steps: [{
@@ -285,8 +342,11 @@ Hierarchical integrity is maintained as subitems with their Parent items.
     Fix the bug where users can't add items!
     Force focus on the first item of the list`,
     }],
-  },
-  ...[
+  });
+
+
+
+[
     "Show number of recipes in the collection, and a button to generate a new one using the LLM based on the current names of the recipes.",
     "Show a heading with the total number of recipes followed by a bulleted list of each recipe's name.",
     "Render a two-column table listing every recipe and how many ingredients it uses.",
@@ -297,6 +357,22 @@ Hierarchical integrity is maintained as subitems with their Parent items.
     "Calculate and show the average number of ingredients per recipe as a single number.",
     "Generate checkboxes beside each recipe; when any are ticked, show a combined grocery list of the selected recipes' ingredients.",
     "Make each recipe name a toggle that expands or collapses its cooking instructions.",
-  ].map(familyCookbook),
-  llm_todo_list,
-];
+  ].map(familyCookbook).forEach((scenario) => scenarios.push(scenario));
+
+  [
+    "analyze each email to get a one line summary, and a list of tags for the email over both the style and content",
+    // "Show number of emails in the collection, and a button to generate a new one using the LLM based on the current names of the emails.",
+    // "Render a two-column table listing every email and the number of emails in the collection.",
+    // "Create a dropdown of email subjects that, when a subject is chosen, reveals that email's content.",
+    // "Add a button labeled 'Random Email' that displays one random selected email.  Use the LLM to summarize the email, with the subject, sender, date, and content displayed below the summary.",
+    // "Inbox Zero: show a list of emails that are unread and a button to mark all as read.",
+    // "Show emails grouped by sender.",
+    // "Show emails group by email recipient.",
+    // "Let me click a sender, show an llm summary of the emails from that sender.",
+    // "Let me type a string, send emails that have that string in the subject or body to the llm to summarize them all",
+  ].map(emailRecipe).forEach((scenario) => scenarios.push(scenario));
+
+scenarios.push(emailSummary("summarize each email"));
+scenarios.push(llm_todo_list);
+
+export default scenarios;

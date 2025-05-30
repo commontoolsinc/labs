@@ -3,8 +3,9 @@ export enum CommandType {
   Extend,
   Other,
   ImportJSON,
+  LoadRecipe,
 }
-export type Command = {
+export type Step = {
   type: CommandType.New;
   prompt: string;
 } | {
@@ -17,6 +18,12 @@ export type Command = {
   type: CommandType.ImportJSON;
   prompt: string;
   data: any;
+  dataSchema?: any;
+} | {
+  type: CommandType.LoadRecipe;
+  name: string;
+  prompt: string;
+  recipe: string;
 };
 
 export type CharmResult = {
@@ -25,13 +32,6 @@ export type CharmResult = {
   screenshotPath?: string;
   status: "PASS" | "FAIL" | "NOTVERIFIED";
   summary: string;
-};
-
-export type Step = {
-  type: CommandType;
-  prompt: string;
-  data?: any;
-  dataSchema?: any;
 };
 
 export type Scenario = {

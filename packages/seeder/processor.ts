@@ -8,7 +8,7 @@ import { Verifier } from "./verifier.ts";
 import { CharmManager } from "@commontools/charm";
 import { CommandType } from "./interfaces.ts";
 import {
-  castNewRecipe,
+  compileAndRunRecipe,
   createDataCharm,
   processWorkflow,
 } from "@commontools/charm";
@@ -193,6 +193,36 @@ export class Processor {
           });
         }
         break;
+      }
+      case CommandType.LoadRecipe: {
+        console.log(`Loading recipe: "${step.recipe}"`);
+        if (!prevCharmId) {
+          throw new Error("Previous charm ID is undefined.");
+        }
+        const charm = await this.charmManager.get(prevCharmId);
+        if (!charm) {
+          throw new Error("Charm not found.");
+        }
+
+        const newCharm = await compileAndRunRecipe(
+          this.charmManager,
+          step.recipe,
+          step.name,
+          {
+            emails: charm.getAsQueryResult().emails,
+            settings: { summaryLength: "short" },
+          },
+        );
+
+        const id = getEntityId(newCharm);
+
+        if (id) {
+          return this.verify({
+            id: id["/"],
+            prompt: step.name,
+            name: this.name,
+          });
+        }
       }
     }
 

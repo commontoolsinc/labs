@@ -1,0 +1,4897 @@
+[
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20250520T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2025-05-20T11:00:00-04:00",
+    "end": "2025-05-20T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "_68o34d9g6gp38l1h6cpj8cpo64rj2d9m6omj2dhj6orj8g3dc5r6arhecdnmq",
+    "summary": "⚡️ Maven LIVE: CTO's Playbook for Faster Agentic RAG",
+    "description": "<span>Join Nirant Kasiwal and Doug Turnbull for a high-impact lesson with live Q&amp;A.</span>\n</br>\n<span>You'll learn:</span>\n\n<span><b>Latency vs Recall Cheat-Sheet</b></span\n>\n<span><b>Hybrid-to-Agentic Upgrade Path</b></span\n>\n<span><b>Stealable RAG Audit Framework</b></span\n>\n</br>\n<span>This Lightning Lesson is free and open to all.</span>\n<p>You're welcome to invite your team or network by sending them <a href=\"https://maven.com/p/aeab18/cto-s-playbook-for-faster-agentic-rag?utm_source=maven&utm_medium=ics_ll_share_link\">this sign up page</a>.\n</p>",
+    "start": "2025-05-20T20:30:00-04:00",
+    "end": "2025-05-20T21:30:00-04:00",
+    "location": "https://maven.com/s/joinworkshop/2a07e12739",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "5347hvs3j73q006jbgvu78qc94",
+    "summary": "drop off of container",
+    "description": "",
+    "start": "2025-05-22",
+    "end": "2025-05-23",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "_68o34d9g6ko3il1i68o32c1h70p38dpo70mj2dhn6soj8g3dc5r6arhecdnmq",
+    "summary": "Guest Speaker:  Evals that work: how to look at your data and apply the scientific method to AI development process w/ Mikyo King",
+    "description": "Building great AI native products requires a rigorous evaluation process. While the idea of evaluation-driven development may seem novel to some, it really is the scientific method in disguise.  Just as scientists meticulously record experiments and take detailed notes to advance their understanding, AI systems require rigorous observation through tracing and annotations to reach their full potential. The goal of AI-native products is to build tools that empower humans, and it requires careful human judgment to align AI with human preferences and values.",
+    "start": "2025-05-27T15:00:00-04:00",
+    "end": "2025-05-27T15:45:00-04:00",
+    "location": "https://maven.com/s/joinlive/7f10144812",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20250529T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2025-05-29T15:00:00-04:00",
+    "end": "2025-05-29T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "_68o34d9g6cp3cl1h74q36c9p6ko34c9g6omj2d9m6crj0g3dc5r6arhecdnmq",
+    "summary": "⚡️ Maven LIVE: Design Vertical AI Agents That Deliver Results",
+    "description": "<span>Join Hamza Farooq for a high-impact lesson with live Q&amp;A.</span>\n</br>\n<span>You'll learn:</span>\n\n<span><b>Empowering Decision-Making with AI Agents</b></span\n>\n<span><b>Streamlining Knowledge Access with Enterprise RAG</b></span\n>\n<span><b>Explore Practical Applications of AI Agents</b></span\n>\n</br>\n<span>This Lightning Lesson is free and open to all.</span>\n<p>You're welcome to invite your team or network by sending them <a href=\"https://maven.com/p/332c7a/design-vertical-ai-agents-that-deliver-results?utm_source=maven&utm_medium=ics_ll_share_link\">this sign up page</a>.\n</p>",
+    "start": "2025-05-30T15:00:00-04:00",
+    "end": "2025-05-30T15:30:00-04:00",
+    "location": "https://maven.com/s/joinworkshop/6035a085fe",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "_68o34d9g6ko38l1h74oj8c9n74s36dpk6smj2dhl74pj2g3dc5r6arhecdnmq",
+    "summary": "Guest Speaker: Beyond MTEB: Custom Evals for Retrieval in RAG Systems w/ Kelly Hong",
+    "description": "Most RAG evaluations stop at the final output—but to truly improve your system, you need to evaluate each part in isolation. In this talk, we dive into the retrieval step of a RAG system using a real-world case study: a technical documentation support bot for Weights & Biases. We walk through how we designed and applied custom retrieval evaluations, uncovering insights that would have been missed by using only public benchmarks like MTEB. You'll learn a practical, reusable framework for diagnosing and improving retrieval performance in your own application. Whether you're launching your first RAG application or debugging a live system, this talk will help you build evaluations that reflect your users and your data.\n\n\n",
+    "start": "2025-05-30T19:30:00-04:00",
+    "end": "2025-05-30T20:00:00-04:00",
+    "location": "https://maven.com/s/joinlive/6ef29bd07e",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7d6f0rvf2cchn4la2l9nndl29a",
+    "summary": "must have answer for 8' go/no-go",
+    "description": "",
+    "start": "2025-06-02",
+    "end": "2025-06-03",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20250603T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2025-06-03T11:00:00-04:00",
+    "end": "2025-06-03T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "_68o34d9g6gp3cl1i60pj0c1l6sp3ae1p68mj2dhk64r30g3dc5r6arhecdnmq",
+    "summary": "⚡️ Maven LIVE: Latency First: How to Actually Make RAG & Agents Fast",
+    "description": "<span>Join Jason Liu and Aarush Sah for a high-impact lesson with live Q&amp;A.</span>\n</br>\n<span>You'll learn:</span>\n\n<span><b>Measure RAG & Agent Performance Effectively</b></span\n>\n<span><b>Identify Latency Bottlenecks in AI Pipelines</b></span\n>\n<span><b>Apply Practical Optimization Techniques</b></span\n>\n</br>\n<span>This Lightning Lesson is free and open to all.</span>\n<p>You're welcome to invite your team or network by sending them <a href=\"https://maven.com/p/57c23c/latency-first-how-to-actually-make-rag-agents-fast?utm_source=maven&utm_medium=ics_ll_share_link\">this sign up page</a>.\n</p>",
+    "start": "2025-06-04T13:00:00-04:00",
+    "end": "2025-06-04T14:00:00-04:00",
+    "location": "https://maven.com/s/joinworkshop/cf2a1879a7",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20250604T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2025-06-04T17:00:00-04:00",
+    "end": "2025-06-04T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "_68o34d9g6kojal1h6ko3ad1k6srj8d9g6smj2dhp64q32g3dc5r6arhecdnmq",
+    "summary": "Guest Speaker: Inspect AI: A Framework for LLM Evaluations w/ JJ Allaire",
+    "description": "As large language models grow in complexity and capability, evaluating them rigorously across tasks and providers remains an open challenge. Inspect, developed by the UK AI Security Institute, is an open-source Python framework that brings the principles of software testing, modular composition, and reproducible research to the domain of LLM evaluation. Designed to support flexible pipelines—including prompt engineering, tool usage, multi-turn dialog, and model-graded scoring—Inspect enables researchers and developers to define and run evaluations using declarative, composable components. This talk will walk through Inspect’s architecture, including its integration with the VS Code extension for interactive development, support for dozens of major model APIs, and a rich logging system for experiment tracking and visualization. We’ll explore how Inspect’s structured approach draws from practices in literate programming, functional pipelines, and schema-driven modeling—offering a perspective highly aligned with the values of the data science and open-source tooling communities.",
+    "start": "2025-06-05T14:30:00-04:00",
+    "end": "2025-06-05T15:00:00-04:00",
+    "location": "https://maven.com/s/joinlive/5431475eda",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "_68o34d9g6kojal1i68qjecpl6goj2chg70mj2dhp6cq38g3dc5r6arhecdnmq",
+    "summary": "Guest Speaker:  Continuous Evaluation at Groq: Reliability & CI w/ Aarush Sah",
+    "description": "Reliable LLM products need evaluation suites that run automatically in CI, surface regressions before deployment, and give engineers actionable feedback. I’ll outline Groq’s approach to embedding continuous evals across multiple services, share the key reliability pitfalls we uncovered, and walk through a concrete example from our Compound AI system. Attendees leave with a ready-to-use checklist for piloting CI-based evals.",
+    "start": "2025-06-06T19:00:00-04:00",
+    "end": "2025-06-06T19:30:00-04:00",
+    "location": "https://maven.com/s/joinlive/f807756a5b",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "_68o34d9g6ko36l1h6cqj4c1k60rjie1l6gmj2dhl6oq36g3dc5r6arhecdnmq",
+    "summary": "Guest Speaker: Failure funnels - an analytical framework for simplifying Agent evaluations. w/Bryan Bischof",
+    "description": "Bryan Bischof will discuss an analytical he technique he has used at several companies to tame agent evals. \nBryan is currently Head of AI at Theory Ventures. He formerly led AI Engineering at Hex, where he spearheaded the development of Magic—the data science and analytics copilot. Bryan has worked all over the data stack leading teams in analytics, machine learning engineering, data platform engineering, and AI engineering. He started the data team at Blue Bottle Coffee, led several projects at Stitch Fix, and built the data teams at Weights and Biases. Bryan previously co-authored the book Building Production Recommendation Systems with O’Reilly, and teaches Data Science and Analytics in the graduate school at Rutgers. His Ph.D. is in pure mathematics.",
+    "start": "2025-06-06T20:00:00-04:00",
+    "end": "2025-06-06T20:30:00-04:00",
+    "location": "https://maven.com/s/joinlive/1d3d7a3719",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "1vap48utgbbh9mrrocamc63139",
+    "summary": "swap containers",
+    "description": "",
+    "start": "2025-06-09",
+    "end": "2025-06-10",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "_68o34d9g6ko3el1h6cpj0chl6gp3ccpk64mj2dhm70q32g3dc5r6arhecdnmq",
+    "summary": "Guest Speaker: Why Engineers and PMs need to collaborate on Evals w/ Aman Khan",
+    "description": "Every business is trying to implement AI - but how many are actually doing this successfully? You may have heard evals are the secret sauce to successful AI products (heck, you're already a step ahead of the curve by taking this course). The thing is - if what you're evaluating doesn't matter to the business, your AI product might be \"really good\", but it's optimizing for the wrong thing. In this session, I'll be sharing what the companies that actually have AI in production and successfully implemented evals have in common - they are representative of business metrics. We'll talk about adopting evals beyond a test harness (using proxy business metrics), communicating AI value with non-technical stakeholders, and how to build a business case for evals at your company.",
+    "start": "2025-06-10T16:30:00-04:00",
+    "end": "2025-06-10T17:00:00-04:00",
+    "location": "https://maven.com/s/joinlive/437b656209",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "_68o34d9g6gojcl1h6cpj4d9o6coj4c9o6smj2dhh6osjgg3dc5r6arhecdnmq",
+    "summary": "⚡️ Maven LIVE: RAG Anti-patterns in the Wild, and How to Fix Them",
+    "description": "<span>Join Jason Liu and Skylar Payne for a high-impact lesson with live Q&amp;A.</span>\n</br>\n<span>You'll learn:</span>\n\n<span><b>Diagnose Silent RAG Failures</b></span\n>\n<span><b>Implement Robust Monitoring Strategies</b></span\n>\n<span><b>Apply Architectural Solutions</b></span\n>\n</br>\n<span>This Lightning Lesson is free and open to all.</span>\n<p>You're welcome to invite your team or network by sending them <a href=\"https://maven.com/p/35585d/rag-anti-patterns-in-the-wild-and-how-to-fix-them?utm_source=maven&utm_medium=ics_ll_share_link\">this sign up page</a>.\n</p>",
+    "start": "2025-06-11T13:00:00-04:00",
+    "end": "2025-06-11T14:00:00-04:00",
+    "location": "https://maven.com/s/joinworkshop/3533fc6280",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "_68o34d9g6ko3al1h70q3gd9j6sr30d9p74mj2dhm6coj0g3dc5r6arhecdnmq",
+    "summary": "Guest Speaker: Running evals at scale with Modal w/ Charles Frye",
+    "description": "Language model evals are very different from chatbot inference: they require throughput, not latency, and they are often experimental, with rapidly changing codebases. That makes them a great workload for Modal, the serverless platform that refuses to compromise on performance or DevX. In this webinar, Modal Developer Advocate Charles Frye will make this case in more detail and demonstrate a large-scale evaluation run on Modal.\n",
+    "start": "2025-06-11T14:00:00-04:00",
+    "end": "2025-06-11T14:30:00-04:00",
+    "location": "https://maven.com/s/joinlive/5c768ccff3",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "_68o34d9g6ko3al1i60p3achj6cp3gd1l6gmj2dhm6cpjgg3dc5r6arhecdnmq",
+    "summary": "Guest Speaker  An LLM-As-Judge Won't Save the Product—Fixing Your Process Will w/ Eugene Yan",
+    "description": "Product evals are misunderstood. Some folks think that adding another tool, metric, or LLM-as-judge will solve the problems and save the product. But this sidesteps the core problem and avoids the real work. Evals aren’t static artifacts or quick fixes; they’re practices that apply the scientific method, eval-driven development, and AI output monitoring—we'll discuss these in this session.",
+    "start": "2025-06-11T22:30:00-04:00",
+    "end": "2025-06-11T23:00:00-04:00",
+    "location": "https://maven.com/s/joinlive/0b05697137",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20250612T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2025-06-12T15:00:00-04:00",
+    "end": "2025-06-12T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4rkfadh8e0dc2erlji6t8s607g",
+    "summary": "pick up second container",
+    "description": "",
+    "start": "2025-06-13",
+    "end": "2025-06-14",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "_68o34d9g6ko3cl1i6cqjid9k6oqjachl6smj2dhm6ks34g3dc5r6arhecdnmq",
+    "summary": "Guest Speaker: Lessons from production: Conversational Jobs & Hotels search with metadata-aware embeddings w/Daniel Svonava",
+    "description": "Learn how to drive 50%+ CTR lift on natural language search results from two production case studies - a jobs marketplace and a hotel search aggregator. In both cases, the data being searched contains many unstructured properties (text and in the hotel case also images) and even more structured properties like numbers, locations, lists of categorical data and more - which often cause difficulties in traditional vector search systems. Additionally, to disambiguate broad queries and to handle situations where no query is available but we still want to show the user relevant results (home page, email marketing etc), we make heavy use of behavioral data to improve our understanding of both the searched content and the users interacting with the system.",
+    "start": "2025-06-13T13:15:00-04:00",
+    "end": "2025-06-13T13:45:00-04:00",
+    "location": "https://maven.com/s/joinlive/049b63720e",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20250617T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2025-06-17T11:00:00-04:00",
+    "end": "2025-06-17T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7pp2ic3svgesojv2ijvvm2rojn",
+    "summary": "drop off container in CA",
+    "description": "",
+    "start": "2025-06-23",
+    "end": "2025-06-24",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20250626T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2025-06-26T15:00:00-04:00",
+    "end": "2025-06-26T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20250701T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2025-07-01T11:00:00-04:00",
+    "end": "2025-07-01T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20250702T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2025-07-02T17:00:00-04:00",
+    "end": "2025-07-02T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20250710T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2025-07-10T15:00:00-04:00",
+    "end": "2025-07-10T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20250715T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2025-07-15T11:00:00-04:00",
+    "end": "2025-07-15T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20250724T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2025-07-24T15:00:00-04:00",
+    "end": "2025-07-24T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20250729T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2025-07-29T11:00:00-04:00",
+    "end": "2025-07-29T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20250806T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2025-08-06T17:00:00-04:00",
+    "end": "2025-08-06T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20250807T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2025-08-07T15:00:00-04:00",
+    "end": "2025-08-07T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20250812T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2025-08-12T11:00:00-04:00",
+    "end": "2025-08-12T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20250821T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2025-08-21T15:00:00-04:00",
+    "end": "2025-08-21T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20250826T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2025-08-26T11:00:00-04:00",
+    "end": "2025-08-26T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "s0l4v4gh0l85e6n6a455d45ed0_20250828",
+    "summary": "Happy birthday!",
+    "description": "",
+    "start": "2025-08-28",
+    "end": "2025-08-29",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "h2381l9mqe3955vchq4pr6rbp8_20250830",
+    "summary": "anniversary",
+    "description": "",
+    "start": "2025-08-30",
+    "end": "2025-08-31",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20250903T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2025-09-03T17:00:00-04:00",
+    "end": "2025-09-03T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20250904T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2025-09-04T15:00:00-04:00",
+    "end": "2025-09-04T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20250909T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2025-09-09T11:00:00-04:00",
+    "end": "2025-09-09T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20250918T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2025-09-18T15:00:00-04:00",
+    "end": "2025-09-18T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20250923T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2025-09-23T11:00:00-04:00",
+    "end": "2025-09-23T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "10hcv0itqc7g4so57qgii5sdqc_20250929",
+    "summary": "Emily Janovyak Andrews's birthday",
+    "description": "",
+    "start": "2025-09-29",
+    "end": "2025-09-30",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20251001T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2025-10-01T17:00:00-04:00",
+    "end": "2025-10-01T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20251002T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2025-10-02T15:00:00-04:00",
+    "end": "2025-10-02T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20251007T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2025-10-07T11:00:00-04:00",
+    "end": "2025-10-07T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20251016T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2025-10-16T15:00:00-04:00",
+    "end": "2025-10-16T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20251021T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2025-10-21T11:00:00-04:00",
+    "end": "2025-10-21T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20251030T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2025-10-30T15:00:00-04:00",
+    "end": "2025-10-30T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "mlhp822ihd3uhur588gmmb2r88_20251102",
+    "summary": "david andrews's birthday",
+    "description": "",
+    "start": "2025-11-02",
+    "end": "2025-11-03",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20251104T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2025-11-04T11:00:00-05:00",
+    "end": "2025-11-04T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20251105T220000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2025-11-05T17:00:00-05:00",
+    "end": "2025-11-05T18:00:00-05:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20251113T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2025-11-13T15:00:00-05:00",
+    "end": "2025-11-13T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20251118T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2025-11-18T11:00:00-05:00",
+    "end": "2025-11-18T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20251127T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2025-11-27T15:00:00-05:00",
+    "end": "2025-11-27T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20251202T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2025-12-02T11:00:00-05:00",
+    "end": "2025-12-02T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20251203T220000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2025-12-03T17:00:00-05:00",
+    "end": "2025-12-03T18:00:00-05:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20251211T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2025-12-11T15:00:00-05:00",
+    "end": "2025-12-11T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20251216T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2025-12-16T11:00:00-05:00",
+    "end": "2025-12-16T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20251225T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2025-12-25T15:00:00-05:00",
+    "end": "2025-12-25T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20251230T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2025-12-30T11:00:00-05:00",
+    "end": "2025-12-30T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "8ppdrpiuk4i0q71urhmis9lfpc_20260105",
+    "summary": "Mary Andrews's birthday",
+    "description": "",
+    "start": "2026-01-05",
+    "end": "2026-01-06",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20260107T220000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2026-01-07T17:00:00-05:00",
+    "end": "2026-01-07T18:00:00-05:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260108T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-01-08T15:00:00-05:00",
+    "end": "2026-01-08T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260113T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-01-13T11:00:00-05:00",
+    "end": "2026-01-13T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260122T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-01-22T15:00:00-05:00",
+    "end": "2026-01-22T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260127T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-01-27T11:00:00-05:00",
+    "end": "2026-01-27T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20260204T220000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2026-02-04T17:00:00-05:00",
+    "end": "2026-02-04T18:00:00-05:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260205T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-02-05T15:00:00-05:00",
+    "end": "2026-02-05T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260210T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-02-10T11:00:00-05:00",
+    "end": "2026-02-10T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260219T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-02-19T15:00:00-05:00",
+    "end": "2026-02-19T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260224T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-02-24T11:00:00-05:00",
+    "end": "2026-02-24T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20260304T220000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2026-03-04T17:00:00-05:00",
+    "end": "2026-03-04T18:00:00-05:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260305T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-03-05T15:00:00-05:00",
+    "end": "2026-03-05T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260310T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-03-10T11:00:00-04:00",
+    "end": "2026-03-10T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "jsoe45qnivc8hjcigrr5vk0g4s_20260312",
+    "summary": "Sarah  Edwards's birthday",
+    "description": "",
+    "start": "2026-03-12",
+    "end": "2026-03-13",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "b3jai23vasrhvv80qp43fabcns_20260319",
+    "summary": "Freddy Mangum's birthday",
+    "description": "",
+    "start": "2026-03-19",
+    "end": "2026-03-20",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260319T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-03-19T15:00:00-04:00",
+    "end": "2026-03-19T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260324T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-03-24T11:00:00-04:00",
+    "end": "2026-03-24T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20260401T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2026-04-01T17:00:00-04:00",
+    "end": "2026-04-01T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260402T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-04-02T15:00:00-04:00",
+    "end": "2026-04-02T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260407T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-04-07T11:00:00-04:00",
+    "end": "2026-04-07T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260416T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-04-16T15:00:00-04:00",
+    "end": "2026-04-16T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "bvei8q4uuso4p5il0sdmtflrnk_20260418",
+    "summary": "Ben Andrews's birthday",
+    "description": "",
+    "start": "2026-04-18",
+    "end": "2026-04-19",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260421T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-04-21T11:00:00-04:00",
+    "end": "2026-04-21T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260430T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-04-30T15:00:00-04:00",
+    "end": "2026-04-30T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260505T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-05-05T11:00:00-04:00",
+    "end": "2026-05-05T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20260506T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2026-05-06T17:00:00-04:00",
+    "end": "2026-05-06T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260514T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-05-14T15:00:00-04:00",
+    "end": "2026-05-14T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260519T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-05-19T11:00:00-04:00",
+    "end": "2026-05-19T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260528T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-05-28T15:00:00-04:00",
+    "end": "2026-05-28T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260602T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-06-02T11:00:00-04:00",
+    "end": "2026-06-02T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20260603T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2026-06-03T17:00:00-04:00",
+    "end": "2026-06-03T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260611T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-06-11T15:00:00-04:00",
+    "end": "2026-06-11T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260616T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-06-16T11:00:00-04:00",
+    "end": "2026-06-16T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260625T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-06-25T15:00:00-04:00",
+    "end": "2026-06-25T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260630T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-06-30T11:00:00-04:00",
+    "end": "2026-06-30T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20260701T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2026-07-01T17:00:00-04:00",
+    "end": "2026-07-01T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260709T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-07-09T15:00:00-04:00",
+    "end": "2026-07-09T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260714T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-07-14T11:00:00-04:00",
+    "end": "2026-07-14T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260723T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-07-23T15:00:00-04:00",
+    "end": "2026-07-23T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260728T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-07-28T11:00:00-04:00",
+    "end": "2026-07-28T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20260805T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2026-08-05T17:00:00-04:00",
+    "end": "2026-08-05T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260806T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-08-06T15:00:00-04:00",
+    "end": "2026-08-06T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260811T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-08-11T11:00:00-04:00",
+    "end": "2026-08-11T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260820T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-08-20T15:00:00-04:00",
+    "end": "2026-08-20T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260825T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-08-25T11:00:00-04:00",
+    "end": "2026-08-25T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "s0l4v4gh0l85e6n6a455d45ed0_20260828",
+    "summary": "Happy birthday!",
+    "description": "",
+    "start": "2026-08-28",
+    "end": "2026-08-29",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "h2381l9mqe3955vchq4pr6rbp8_20260830",
+    "summary": "anniversary",
+    "description": "",
+    "start": "2026-08-30",
+    "end": "2026-08-31",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20260902T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2026-09-02T17:00:00-04:00",
+    "end": "2026-09-02T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260903T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-09-03T15:00:00-04:00",
+    "end": "2026-09-03T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260908T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-09-08T11:00:00-04:00",
+    "end": "2026-09-08T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20260917T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-09-17T15:00:00-04:00",
+    "end": "2026-09-17T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20260922T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-09-22T11:00:00-04:00",
+    "end": "2026-09-22T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "10hcv0itqc7g4so57qgii5sdqc_20260929",
+    "summary": "Emily Janovyak Andrews's birthday",
+    "description": "",
+    "start": "2026-09-29",
+    "end": "2026-09-30",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20261001T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-10-01T15:00:00-04:00",
+    "end": "2026-10-01T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20261006T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-10-06T11:00:00-04:00",
+    "end": "2026-10-06T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20261007T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2026-10-07T17:00:00-04:00",
+    "end": "2026-10-07T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20261015T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-10-15T15:00:00-04:00",
+    "end": "2026-10-15T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20261020T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-10-20T11:00:00-04:00",
+    "end": "2026-10-20T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20261029T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-10-29T15:00:00-04:00",
+    "end": "2026-10-29T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "mlhp822ihd3uhur588gmmb2r88_20261102",
+    "summary": "david andrews's birthday",
+    "description": "",
+    "start": "2026-11-02",
+    "end": "2026-11-03",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20261103T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-11-03T11:00:00-05:00",
+    "end": "2026-11-03T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20261104T220000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2026-11-04T17:00:00-05:00",
+    "end": "2026-11-04T18:00:00-05:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20261112T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-11-12T15:00:00-05:00",
+    "end": "2026-11-12T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20261117T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-11-17T11:00:00-05:00",
+    "end": "2026-11-17T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20261126T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-11-26T15:00:00-05:00",
+    "end": "2026-11-26T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20261201T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-12-01T11:00:00-05:00",
+    "end": "2026-12-01T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20261202T220000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2026-12-02T17:00:00-05:00",
+    "end": "2026-12-02T18:00:00-05:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20261210T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-12-10T15:00:00-05:00",
+    "end": "2026-12-10T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20261215T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-12-15T11:00:00-05:00",
+    "end": "2026-12-15T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20261224T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2026-12-24T15:00:00-05:00",
+    "end": "2026-12-24T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20261229T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2026-12-29T11:00:00-05:00",
+    "end": "2026-12-29T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "8ppdrpiuk4i0q71urhmis9lfpc_20270105",
+    "summary": "Mary Andrews's birthday",
+    "description": "",
+    "start": "2027-01-05",
+    "end": "2027-01-06",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20270106T220000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2027-01-06T17:00:00-05:00",
+    "end": "2027-01-06T18:00:00-05:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270107T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-01-07T15:00:00-05:00",
+    "end": "2027-01-07T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270112T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-01-12T11:00:00-05:00",
+    "end": "2027-01-12T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270121T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-01-21T15:00:00-05:00",
+    "end": "2027-01-21T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270126T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-01-26T11:00:00-05:00",
+    "end": "2027-01-26T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20270203T220000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2027-02-03T17:00:00-05:00",
+    "end": "2027-02-03T18:00:00-05:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270204T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-02-04T15:00:00-05:00",
+    "end": "2027-02-04T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270209T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-02-09T11:00:00-05:00",
+    "end": "2027-02-09T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270218T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-02-18T15:00:00-05:00",
+    "end": "2027-02-18T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270223T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-02-23T11:00:00-05:00",
+    "end": "2027-02-23T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20270303T220000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2027-03-03T17:00:00-05:00",
+    "end": "2027-03-03T18:00:00-05:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270304T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-03-04T15:00:00-05:00",
+    "end": "2027-03-04T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270309T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-03-09T11:00:00-05:00",
+    "end": "2027-03-09T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "jsoe45qnivc8hjcigrr5vk0g4s_20270312",
+    "summary": "Sarah  Edwards's birthday",
+    "description": "",
+    "start": "2027-03-12",
+    "end": "2027-03-13",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270318T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-03-18T15:00:00-04:00",
+    "end": "2027-03-18T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "b3jai23vasrhvv80qp43fabcns_20270319",
+    "summary": "Freddy Mangum's birthday",
+    "description": "",
+    "start": "2027-03-19",
+    "end": "2027-03-20",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270323T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-03-23T11:00:00-04:00",
+    "end": "2027-03-23T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270401T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-04-01T15:00:00-04:00",
+    "end": "2027-04-01T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270406T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-04-06T11:00:00-04:00",
+    "end": "2027-04-06T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20270407T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2027-04-07T17:00:00-04:00",
+    "end": "2027-04-07T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270415T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-04-15T15:00:00-04:00",
+    "end": "2027-04-15T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "bvei8q4uuso4p5il0sdmtflrnk_20270418",
+    "summary": "Ben Andrews's birthday",
+    "description": "",
+    "start": "2027-04-18",
+    "end": "2027-04-19",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270420T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-04-20T11:00:00-04:00",
+    "end": "2027-04-20T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270429T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-04-29T15:00:00-04:00",
+    "end": "2027-04-29T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270504T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-05-04T11:00:00-04:00",
+    "end": "2027-05-04T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20270505T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2027-05-05T17:00:00-04:00",
+    "end": "2027-05-05T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270513T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-05-13T15:00:00-04:00",
+    "end": "2027-05-13T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270518T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-05-18T11:00:00-04:00",
+    "end": "2027-05-18T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270527T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-05-27T15:00:00-04:00",
+    "end": "2027-05-27T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270601T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-06-01T11:00:00-04:00",
+    "end": "2027-06-01T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20270602T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2027-06-02T17:00:00-04:00",
+    "end": "2027-06-02T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270610T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-06-10T15:00:00-04:00",
+    "end": "2027-06-10T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270615T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-06-15T11:00:00-04:00",
+    "end": "2027-06-15T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270624T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-06-24T15:00:00-04:00",
+    "end": "2027-06-24T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270629T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-06-29T11:00:00-04:00",
+    "end": "2027-06-29T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20270707T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2027-07-07T17:00:00-04:00",
+    "end": "2027-07-07T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270708T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-07-08T15:00:00-04:00",
+    "end": "2027-07-08T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270713T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-07-13T11:00:00-04:00",
+    "end": "2027-07-13T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270722T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-07-22T15:00:00-04:00",
+    "end": "2027-07-22T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270727T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-07-27T11:00:00-04:00",
+    "end": "2027-07-27T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20270804T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2027-08-04T17:00:00-04:00",
+    "end": "2027-08-04T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270805T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-08-05T15:00:00-04:00",
+    "end": "2027-08-05T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270810T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-08-10T11:00:00-04:00",
+    "end": "2027-08-10T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270819T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-08-19T15:00:00-04:00",
+    "end": "2027-08-19T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270824T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-08-24T11:00:00-04:00",
+    "end": "2027-08-24T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "s0l4v4gh0l85e6n6a455d45ed0_20270828",
+    "summary": "Happy birthday!",
+    "description": "",
+    "start": "2027-08-28",
+    "end": "2027-08-29",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "h2381l9mqe3955vchq4pr6rbp8_20270830",
+    "summary": "anniversary",
+    "description": "",
+    "start": "2027-08-30",
+    "end": "2027-08-31",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20270901T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2027-09-01T17:00:00-04:00",
+    "end": "2027-09-01T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270902T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-09-02T15:00:00-04:00",
+    "end": "2027-09-02T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270907T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-09-07T11:00:00-04:00",
+    "end": "2027-09-07T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270916T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-09-16T15:00:00-04:00",
+    "end": "2027-09-16T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20270921T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-09-21T11:00:00-04:00",
+    "end": "2027-09-21T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "10hcv0itqc7g4so57qgii5sdqc_20270929",
+    "summary": "Emily Janovyak Andrews's birthday",
+    "description": "",
+    "start": "2027-09-29",
+    "end": "2027-09-30",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20270930T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-09-30T15:00:00-04:00",
+    "end": "2027-09-30T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20271005T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-10-05T11:00:00-04:00",
+    "end": "2027-10-05T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20271006T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2027-10-06T17:00:00-04:00",
+    "end": "2027-10-06T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20271014T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-10-14T15:00:00-04:00",
+    "end": "2027-10-14T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20271019T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-10-19T11:00:00-04:00",
+    "end": "2027-10-19T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20271028T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-10-28T15:00:00-04:00",
+    "end": "2027-10-28T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "mlhp822ihd3uhur588gmmb2r88_20271102",
+    "summary": "david andrews's birthday",
+    "description": "",
+    "start": "2027-11-02",
+    "end": "2027-11-03",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20271102T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-11-02T11:00:00-04:00",
+    "end": "2027-11-02T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20271103T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2027-11-03T17:00:00-04:00",
+    "end": "2027-11-03T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20271111T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-11-11T15:00:00-05:00",
+    "end": "2027-11-11T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20271116T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-11-16T11:00:00-05:00",
+    "end": "2027-11-16T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20271125T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-11-25T15:00:00-05:00",
+    "end": "2027-11-25T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20271130T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-11-30T11:00:00-05:00",
+    "end": "2027-11-30T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20271201T220000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2027-12-01T17:00:00-05:00",
+    "end": "2027-12-01T18:00:00-05:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20271209T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-12-09T15:00:00-05:00",
+    "end": "2027-12-09T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20271214T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-12-14T11:00:00-05:00",
+    "end": "2027-12-14T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20271223T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2027-12-23T15:00:00-05:00",
+    "end": "2027-12-23T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20271228T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2027-12-28T11:00:00-05:00",
+    "end": "2027-12-28T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "8ppdrpiuk4i0q71urhmis9lfpc_20280105",
+    "summary": "Mary Andrews's birthday",
+    "description": "",
+    "start": "2028-01-05",
+    "end": "2028-01-06",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20280105T220000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2028-01-05T17:00:00-05:00",
+    "end": "2028-01-05T18:00:00-05:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20280106T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2028-01-06T15:00:00-05:00",
+    "end": "2028-01-06T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20280111T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2028-01-11T11:00:00-05:00",
+    "end": "2028-01-11T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20280120T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2028-01-20T15:00:00-05:00",
+    "end": "2028-01-20T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20280125T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2028-01-25T11:00:00-05:00",
+    "end": "2028-01-25T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20280202T220000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2028-02-02T17:00:00-05:00",
+    "end": "2028-02-02T18:00:00-05:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20280203T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2028-02-03T15:00:00-05:00",
+    "end": "2028-02-03T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20280208T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2028-02-08T11:00:00-05:00",
+    "end": "2028-02-08T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20280217T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2028-02-17T15:00:00-05:00",
+    "end": "2028-02-17T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20280222T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2028-02-22T11:00:00-05:00",
+    "end": "2028-02-22T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20280301T220000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2028-03-01T17:00:00-05:00",
+    "end": "2028-03-01T18:00:00-05:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20280302T200000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2028-03-02T15:00:00-05:00",
+    "end": "2028-03-02T16:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20280307T160000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2028-03-07T11:00:00-05:00",
+    "end": "2028-03-07T12:00:00-05:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "jsoe45qnivc8hjcigrr5vk0g4s_20280312",
+    "summary": "Sarah  Edwards's birthday",
+    "description": "",
+    "start": "2028-03-12",
+    "end": "2028-03-13",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20280316T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2028-03-16T15:00:00-04:00",
+    "end": "2028-03-16T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "b3jai23vasrhvv80qp43fabcns_20280319",
+    "summary": "Freddy Mangum's birthday",
+    "description": "",
+    "start": "2028-03-19",
+    "end": "2028-03-20",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20280321T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2028-03-21T11:00:00-04:00",
+    "end": "2028-03-21T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20280330T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2028-03-30T15:00:00-04:00",
+    "end": "2028-03-30T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20280404T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2028-04-04T11:00:00-04:00",
+    "end": "2028-04-04T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20280405T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2028-04-05T17:00:00-04:00",
+    "end": "2028-04-05T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20280413T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2028-04-13T15:00:00-04:00",
+    "end": "2028-04-13T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "bvei8q4uuso4p5il0sdmtflrnk_20280418",
+    "summary": "Ben Andrews's birthday",
+    "description": "",
+    "start": "2028-04-18",
+    "end": "2028-04-19",
+    "location": "",
+    "eventType": "birthday",
+    "hangoutLink": "",
+    "attendees": []
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20280418T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2028-04-18T11:00:00-04:00",
+    "end": "2028-04-18T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20280427T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2028-04-27T15:00:00-04:00",
+    "end": "2028-04-27T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20280502T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2028-05-02T11:00:00-04:00",
+    "end": "2028-05-02T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20280503T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2028-05-03T17:00:00-04:00",
+    "end": "2028-05-03T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20280511T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2028-05-11T15:00:00-04:00",
+    "end": "2028-05-11T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20280516T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2028-05-16T11:00:00-04:00",
+    "end": "2028-05-16T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20280525T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2028-05-25T15:00:00-04:00",
+    "end": "2028-05-25T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20280530T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2028-05-30T11:00:00-04:00",
+    "end": "2028-05-30T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20280607T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2028-06-07T17:00:00-04:00",
+    "end": "2028-06-07T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20280608T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2028-06-08T15:00:00-04:00",
+    "end": "2028-06-08T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20280613T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2028-06-13T11:00:00-04:00",
+    "end": "2028-06-13T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20280622T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2028-06-22T15:00:00-04:00",
+    "end": "2028-06-22T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20280627T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2028-06-27T11:00:00-04:00",
+    "end": "2028-06-27T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20280705T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2028-07-05T17:00:00-04:00",
+    "end": "2028-07-05T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20280706T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2028-07-06T15:00:00-04:00",
+    "end": "2028-07-06T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20280711T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2028-07-11T11:00:00-04:00",
+    "end": "2028-07-11T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20280720T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2028-07-20T15:00:00-04:00",
+    "end": "2028-07-20T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20280725T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2028-07-25T11:00:00-04:00",
+    "end": "2028-07-25T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "7s223hnqicjc0rklqcr1bgmavi_20280802T210000Z",
+    "summary": "[Showcase] Show and Tell",
+    "description": "We have two types of Show and Tells:<br><ol><li><b>Showcase </b>[Monthly] - These are designed for anyone in the friends group to attend. They have larger demos summarizing progress in the last month, and will have more exposition and description of what they are and how they fit in. If you can only come sometimes, prioritize these! These show and tells are recorded.</li><li><b>Inside Baseball</b> [Weekly] - These are designed for people who are following along closely. The demos will be of smaller things with much less exposition about why they exist and how they fit into the bigger picture. There will be much for discussion after each demo. Friends are welcome to attend, but if you can only attend some show and tells, you should prioritize the showcases. These show and tells are <i>not </i>recorded.</li></ol>",
+    "start": "2028-08-02T17:00:00-04:00",
+    "end": "2028-08-02T18:00:00-04:00",
+    "location": "1600-Shattuck-2-Common Space (10)",
+    "eventType": "default",
+    "hangoutLink": "https://meet.google.com/btn-rxcz-pxd",
+    "attendees": [
+      {
+        "email": "alex@common.tools",
+        "organizer": true,
+        "responseStatus": "accepted"
+      },
+      {
+        "email": "friends@common.tools",
+        "displayName": "friends",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "everyone@common.tools",
+        "displayName": "everyone",
+        "responseStatus": "needsAction"
+      },
+      {
+        "email": "c_1882a3m0p9loqietkskqukcn46oom@resource.calendar.google.com",
+        "displayName": "1600-Shattuck-2-Common Space (10)",
+        "resource": true,
+        "responseStatus": "accepted"
+      }
+    ]
+  },
+  {
+    "id": "4fe142fkpc1t7d2ntcca2snbg4_20280803T190000Z",
+    "summary": "In The Woods Biweekly Live conversation",
+    "description": "We'll meet in the Discord video channel within the In The Woods server.\n\nThis is one of the unrecorded discussions.",
+    "start": "2028-08-03T15:00:00-04:00",
+    "end": "2028-08-03T16:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  },
+  {
+    "id": "3jcudodf8m1qsnsjlo16u7he72_20280808T150000Z",
+    "summary": "In the Woods Live discussion",
+    "description": "\nThe actual discussion will be in the Discord at this time in the Voice Chat channel; this is a placeholder to remind folks about the timing.",
+    "start": "2028-08-08T11:00:00-04:00",
+    "end": "2028-08-08T12:00:00-04:00",
+    "location": "",
+    "eventType": "default",
+    "hangoutLink": "",
+    "attendees": [
+      {
+        "email": "anotherjesse@gmail.com",
+        "self": true,
+        "responseStatus": "needsAction"
+      }
+    ]
+  }
+]

@@ -37,12 +37,20 @@ export const createDataCharm = (
   schema?: JSONSchema,
   name?: string,
 ) => {
-  const argumentSchema = schema ?? createJsonSchema(data);
-
+  let argumentSchema: JSONSchema = schema ?? createJsonSchema(data);
+  if (argumentSchema.type !== "object") {
+    data = { data };
+    argumentSchema = {
+      type: "object",
+      properties: { data: argumentSchema },
+    };
+  }
   const schemaString = JSON.stringify(argumentSchema, null, 2);
-  const result = Object.keys(argumentSchema.properties ?? {}).map((key) =>
-    `    ${key}: data.${key},\n`
-  ).join("\n");
+
+  const properties = Object.keys(argumentSchema.properties ?? {});
+  const result = properties.map((key) => `    ${key}: data.${key},\n`).join(
+    "\n",
+  );
 
   const dataRecipeSrc = `import { h } from "@commontools/html";
   import { recipe, UI, NAME, derive, type JSONSchema } from "@commontools/builder";
