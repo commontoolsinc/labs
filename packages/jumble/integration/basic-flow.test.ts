@@ -102,10 +102,6 @@ Deno.test({
             "Logged in and Common Knowledge title renders",
           );
 
-          console.log(
-            "Navigating to charm detail page",
-            `${FRONTEND_URL}${testCharm.name}/${testCharm.charmId}`,
-          );
           await page.goto(
             `${FRONTEND_URL}${testCharm.name}/${testCharm.charmId}`,
           );

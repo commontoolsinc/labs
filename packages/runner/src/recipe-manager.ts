@@ -60,8 +60,6 @@ export class RecipeManager implements IRecipeManager {
       ? createRef({ src }, "recipe source").toString()
       : createRef(recipe, "recipe").toString();
 
-    console.log("generateRecipeId: generated id", generatedId);
-
     return generatedId;
   }
 
@@ -228,7 +226,6 @@ export class RecipeManager implements IRecipeManager {
         recipeName: meta.recipeName,
       };
 
-      console.log(`Saving spell-${recipeId}`);
       const response = await fetch(
         `${this.runtime.blobbyServerUrl}/spell-${recipeId}`,
         {
@@ -247,7 +244,6 @@ export class RecipeManager implements IRecipeManager {
         return;
       }
 
-      console.log(`Recipe ${recipeId} published to blobby successfully`);
     } catch (error) {
       console.warn("Failed to publish recipe to blobby:", error);
       // Don't throw - this is optional functionality

@@ -348,7 +348,6 @@ export class CharmManager {
     else charm = this.runtime.getCellFromEntityId(this.space, { "/": id });
 
     const maybePromise = this.runtime.storage.syncCell(charm);
-    console.log("maybePromise", maybePromise instanceof Promise);
     await maybePromise;
 
     const recipeId = getRecipeIdFromCharm(charm);
@@ -1312,11 +1311,5 @@ export class CharmManager {
 }
 
 export const getRecipeIdFromCharm = (charm: Cell<Charm>): string => {
-  console.log(
-    "getRecipeIdFromCharm",
-    JSON.stringify(charm.entityId),
-    charm.getSourceCell(processSchema) !== undefined,
-    charm.getSourceCell(processSchema)?.get(),
-  );
   return charm.getSourceCell(processSchema)?.get()?.[TYPE];
 };

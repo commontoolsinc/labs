@@ -49,7 +49,6 @@ async function castRecipe() {
     console.log("Loading recipe...");
     const recipeSrc = await Deno.readTextFile(recipePath!);
 
-    console.log("Recipe loaded successfully");
 
     // Create session and charm manager (matching main.ts pattern)
     const session = await createAdminSession({
