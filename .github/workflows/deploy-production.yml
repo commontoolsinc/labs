@@ -18,7 +18,7 @@ jobs:
       - name: 📥 Checkout specific commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.commit_sha }}
+          ref: estuary-hack
 
       - name: 🔍 Validate commit SHA
         run: |
