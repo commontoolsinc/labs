@@ -59,7 +59,7 @@ export interface IRuntime {
   readonly documentMap: IDocumentMap;
   readonly harness: Harness;
   readonly runner: IRunner;
-  readonly blobbyServerUrl: string | undefined;
+  readonly blobbyServerUrl: string;
 
   idle(): Promise<void>;
   dispose(): Promise<void>;
