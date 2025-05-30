@@ -87,7 +87,6 @@ async function main() {
   // TODO(seefeld): It only wants the space, so maybe we simplify the above and just space the space did?
   const runtime = new Runtime({
     storageUrl: toolshedUrl,
-    blobbyServerUrl: toolshedUrl,
     signer: identity,
   });
   const charmManager = new CharmManager(session, runtime);

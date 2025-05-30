@@ -26,7 +26,6 @@ const workerTimeoutMs = (() => {
 const identity = await getIdentity(env.IDENTITY, env.OPERATOR_PASS);
 const runtime = new Runtime({
   storageUrl: env.TOOLSHED_API_URL,
-  blobbyServerUrl: env.TOOLSHED_API_URL,
   signer: identity,
 });
 const service = new BackgroundCharmService({
