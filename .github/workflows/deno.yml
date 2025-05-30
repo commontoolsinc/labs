@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: estuary-hack
 
       - name: 🦕 Setup Deno 2.2.2
         uses: denoland/setup-deno@v2
