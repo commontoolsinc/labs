@@ -118,57 +118,57 @@ createRoot(document.getElementById("root")!).render(
           <CharmsProvider>
             <ActionManagerProvider>
               <ActivityProvider>
-              <Router>
-                <SentryRoutes>
-                  {/* Redirect root to saved replica or default */}
-                  <Route
-                    path={ROUTES.root}
-                    element={<ReplicaRedirect />}
-                  />
-                  <Route
-                    path={ROUTES.inspector}
-                    element={<FullscreenInspectorView />}
-                  />
-                  <Route
-                    path={ROUTES.replicaRoot}
-                    element={<Shell />}
-                  >
-                    <Route index element={<CharmList />} />
+                <Router>
+                  <SentryRoutes>
+                    {/* Redirect root to saved replica or default */}
                     <Route
-                      path={ROUTES.charmShow}
-                      element={<CharmShowView />}
+                      path={ROUTES.root}
+                      element={<ReplicaRedirect />}
                     />
                     <Route
-                      path={ROUTES.charmDetail}
-                      element={<CharmDetailView />}
+                      path={ROUTES.inspector}
+                      element={<FullscreenInspectorView />}
                     />
                     <Route
-                      path={ROUTES.stackedCharms}
-                      element={<StackedCharmsView />}
-                    />
-                  </Route>
+                      path={ROUTES.replicaRoot}
+                      element={<Shell />}
+                    >
+                      <Route index element={<CharmList />} />
+                      <Route
+                        path={ROUTES.charmShow}
+                        element={<CharmShowView />}
+                      />
+                      <Route
+                        path={ROUTES.charmDetail}
+                        element={<CharmDetailView />}
+                      />
+                      <Route
+                        path={ROUTES.stackedCharms}
+                        element={<StackedCharmsView />}
+                      />
+                    </Route>
 
-                  {/* Spellbook routes */}
-                  <Route
-                    path={ROUTES.spellbookIndex}
-                    element={<SpellbookIndexView />}
-                  />
-                  <Route
-                    path={ROUTES.spellbookDetail}
-                    element={<SpellbookDetailView />}
-                  />
-                  <Route
-                    path={ROUTES.spellbookLaunch}
-                    element={<SpellbookLaunchView />}
-                  />
+                    {/* Spellbook routes */}
+                    <Route
+                      path={ROUTES.spellbookIndex}
+                      element={<SpellbookIndexView />}
+                    />
+                    <Route
+                      path={ROUTES.spellbookDetail}
+                      element={<SpellbookDetailView />}
+                    />
+                    <Route
+                      path={ROUTES.spellbookLaunch}
+                      element={<SpellbookLaunchView />}
+                    />
 
-                  {/* internal tools / experimental routes */}
-                  <Route
-                    path={ROUTES.utilityJsonGen}
-                    element={<GenerateJSONView />}
-                  />
-                </SentryRoutes>
-              </Router>
+                    {/* internal tools / experimental routes */}
+                    <Route
+                      path={ROUTES.utilityJsonGen}
+                      element={<GenerateJSONView />}
+                    />
+                  </SentryRoutes>
+                </Router>
               </ActivityProvider>
             </ActionManagerProvider>
           </CharmsProvider>
