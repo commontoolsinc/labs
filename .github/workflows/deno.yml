@@ -163,7 +163,6 @@ jobs:
           destination-dir: jumble/${{ github.sha }}
 
       - name: 🔐 Process & sign binaries
-        if: github.ref == 'refs/heads/main'
         run: |
           mkdir -p release
           mkdir -p signed
@@ -207,7 +206,6 @@ jobs:
         id: binary_processing
 
       - name: 📝 Generate attestation for toolshed binary
-        if: github.ref == 'refs/heads/main'
         id: attest_toolshed
         uses: actions/attest-build-provenance@v1
         with:
@@ -215,7 +213,6 @@ jobs:
           subject-digest: sha256:${{ steps.binary_processing.outputs.toolshed_hash }}
 
       - name: 📝 Generate attestation for bg-charm-service binary
-        if: github.ref == 'refs/heads/main'
         id: attest_bg_charm_service
         uses: actions/attest-build-provenance@v1
         with:
@@ -223,7 +220,6 @@ jobs:
           subject-digest: sha256:${{ steps.binary_processing.outputs.bg_charm_service_hash }}
 
       - name: 📝 Generate attestation for tarball
-        if: github.ref == 'refs/heads/main'
         id: attest_tarball
         uses: actions/attest-build-provenance@v1
         with:
@@ -231,7 +227,6 @@ jobs:
           subject-digest: sha256:${{ steps.binary_processing.outputs.tarball_hash }}
 
       - name: 📤 Upload attestations as artifacts
-        if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: binary_attestations
@@ -242,7 +237,6 @@ jobs:
             ${{ steps.attest_tarball.outputs.bundle-path }}
 
       - name: 🔍 Verify binary attestations
-        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -280,17 +274,14 @@ jobs:
           fi
 
       - name: 🔑 Authenticate to Google Cloud
-        if: github.ref == 'refs/heads/main'
         uses: google-github-actions/auth@v1
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: ⚙️ Setup Google Cloud SDK
-        if: github.ref == 'refs/heads/main'
         uses: google-github-actions/setup-gcloud@v1
 
       - name: 🚀 Upload artifacts to Google Cloud Storage
-        if: github.ref == 'refs/heads/main'
         run: |
           gsutil cp release/labs-${{ github.sha }}.tar.gz gs://commontools-build-artifacts/workspace-artifacts/
           gsutil cp release/labs-${{ github.sha }}.hash.txt gs://commontools-build-artifacts/workspace-artifacts/
