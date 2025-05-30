@@ -5,6 +5,15 @@ export enum CommandType {
   Help = "help",
 }
 
+export interface Args {
+  files: string[];
+  help?: boolean;
+  verbose?: boolean;
+  noRun?: boolean;
+  noCheck?: boolean;
+  out?: string;
+}
+
 export interface Command {
   type: CommandType;
   verbose?: boolean;
@@ -13,5 +22,8 @@ export interface Command {
 export interface RunCommand extends Command {
   type: CommandType.Run;
   source: TsArtifact;
-  bundle?: boolean;
+  verbose?: boolean;
+  noRun?: boolean;
+  noCheck?: boolean;
+  out?: string;
 }

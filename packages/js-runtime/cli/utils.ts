@@ -1,10 +1,9 @@
-import { join, dirname } from "@std/path";
+import { dirname, join } from "@std/path";
 import { type TsArtifact } from "../interface.ts";
 
-// Takes a list of filepaths and reads the files from disk,
+// Takes a list of absolute filepaths and reads the files from disk,
 // populating a `TsArtifact`.
 export async function populateArtifact(
-  rootDir: string,
   files: string[],
 ): Promise<TsArtifact> {
   const artifact: Partial<TsArtifact> = {
@@ -12,15 +11,14 @@ export async function populateArtifact(
   };
   let fsRoot;
   for (const filepath of files) {
-    const absPath = join(rootDir, filepath);
-    const contents = await Deno.readTextFile(absPath);
+    const contents = await Deno.readTextFile(filepath);
 
     // The first file is the entry point.
     if (!fsRoot) {
-      fsRoot = dirname(absPath);
+      fsRoot = dirname(filepath);
     }
 
-    const name = absPath.substring(fsRoot.length);
+    const name = filepath.substring(fsRoot.length);
     if (!artifact.entry) {
       artifact.entry = name;
     }
@@ -28,12 +26,16 @@ export async function populateArtifact(
     // Module path is relative to the entry point.
     // e.g. `ct run ../project/recipe.ts ../project/dir/utils.ts`
     // Will set module paths as `/recipe.ts` and `/dir/utils.ts`
-    if (!absPath.startsWith(fsRoot)) {
+    if (!filepath.startsWith(fsRoot)) {
       throw new Error(
-        `File does not live within entry file project: ${absPath}`,
+        `File does not live within entry file project: ${filepath}`,
       );
     }
     artifact.files!.push({ name, contents });
   }
   return artifact as TsArtifact;
+}
+
+export function relativeToAbsolute(rootDir: string, filepath: string): string {
+  return join(rootDir, filepath);
 }
