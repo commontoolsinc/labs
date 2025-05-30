@@ -142,10 +142,11 @@ window.generateText = function ({ system, messages }) {
   })
 }
 
-window.generateObject = function ({ system, messages }) {
+window.generateObject = function ({ system, messages, model }) {
   return window.llm({
     system,
     messages,
+    model: model ?? "google:gemini-2.5-pro",
     mode: 'json'
   })
     .then(result => {

@@ -473,7 +473,7 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
 
   addModel({
     provider: vertexProvider,
-    name: "google:gemini-2.5-pro-exp-03-25",
+    name: "google:gemini-2.5-pro-preview-05-06",
     aliases: ["google:gemini-2.5-pro", "gemini-2.5-pro"],
     capabilities: {
       contextWindow: 1_048_576,
@@ -489,7 +489,7 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
 
   addModel({
     provider: vertexProvider,
-    name: "google:gemini-2.5-flash-preview-04-17",
+    name: "google:gemini-2.5-flash-preview-05-20",
     aliases: [
       "google:gemini-2.5-flash-preview",
       "gemini-2.5-flash",
