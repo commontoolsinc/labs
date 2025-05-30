@@ -184,8 +184,8 @@ export class Runner implements IRunner {
     const defaults = extractDefaultValues(recipe.argumentSchema);
 
     const internal = {
-      ...(deepCopy(defaults) as { internal: any })?.internal,
-      ...(recipe.initial as { internal: any } | void)?.internal,
+      ...deepCopy((defaults as { internal: any })?.internal),
+      ...deepCopy((recipe.initial as { internal: any })?.internal),
       ...processCell.get()?.internal,
     };
 
