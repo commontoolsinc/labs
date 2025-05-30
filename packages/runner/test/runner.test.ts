@@ -581,4 +581,79 @@ describe("runRecipe", () => {
     expect(resultCell.get()?.name).toEqual("my counter");
     expect(resultCell.getAsQueryResult()?.counter).toEqual(2);
   });
+
+  it("should create separate copies of initial values for each recipe instance", async () => {
+    const recipe: Recipe = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          input: { type: "number" },
+        },
+      },
+      initial: {
+        internal: {
+          counter: 10,
+          nested: { value: "initial" },
+        },
+      },
+      resultSchema: {},
+      result: {
+        counter: { $alias: { path: ["internal", "counter"] } },
+        nested: { $alias: { path: ["internal", "nested"] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (args: { input: number }) => {
+              return {
+                counter: args.input,
+              };
+            },
+          },
+          inputs: { $alias: { path: ["argument", "input"] } },
+          outputs: { $alias: { path: ["internal", "counter"] } },
+        },
+      ],
+    };
+
+    // Create first instance
+    const result1 = runtime.run(
+      recipe,
+      { input: 5 },
+      runtime.documentMap.getDoc(
+        undefined,
+        "should create separate copies of initial values 1",
+        "test",
+      ),
+    );
+    await runtime.idle();
+
+    // Create second instance
+    const result2 = runtime.run(
+      recipe,
+      { input: 10 },
+      runtime.documentMap.getDoc(
+        undefined,
+        "should create separate copies of initial values 2",
+        "test",
+      ),
+    );
+    await runtime.idle();
+
+    // Get the internal state objects
+    const internal1 = result1.sourceCell?.get().internal;
+    const internal2 = result2.sourceCell?.get().internal;
+
+    // Verify they are different objects
+    expect(internal1).not.toBe(internal2);
+    expect(internal1.nested).not.toBe(internal2.nested);
+
+    // Modify nested object in first instance
+    internal1.nested.value = "modified";
+
+    // Verify second instance is unaffected
+    expect(internal2.nested.value).toBe("initial");
+    expect(result2.getAsQueryResult().nested.value).toBe("initial");
+  });
 });
