@@ -74,6 +74,8 @@ jobs:
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: estuary-hack
 
       - name: 🦕 Setup Deno 2.2.2
         uses: denoland/setup-deno@v2
@@ -114,6 +116,8 @@ jobs:
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: estuary-hack
 
       - name: 🦕 Setup Deno 2.2.2
         uses: denoland/setup-deno@v2
@@ -321,6 +325,8 @@ jobs:
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: estuary-hack
 
       - name: 🦕 Setup Deno 2.2.2
         uses: denoland/setup-deno@v2
@@ -375,6 +381,8 @@ jobs:
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: estuary-hack
 
       - name: 🦕 Setup Deno 2.2.2
         uses: denoland/setup-deno@v2
@@ -412,9 +420,10 @@ jobs:
     needs: ["integration-test"]
     runs-on: ubuntu-latest
     environment: toolshed
-    steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: estuary-hack
 
       - name: 📥 Download frontend artifacts
         uses: actions/download-artifact@v4
