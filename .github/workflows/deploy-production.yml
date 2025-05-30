@@ -15,15 +15,15 @@ jobs:
     environment: estuary # Protection rules configured in GitHub repo settings
 
     steps:
-      - name: 📥 Checkout specific commit
-        uses: actions/checkout@v4
-        with:
-          ref: estuary-hack
+      # - name: 📥 Checkout specific commit
+      #   uses: actions/checkout@v4
+      #   with:
+      #     ref: estuary-hack
 
-      - name: 🔍 Validate commit SHA
-        run: |
-          echo "Deploying commit: ${{ github.event.inputs.commit_sha }}"
-          git rev-parse --verify ${{ github.event.inputs.commit_sha }}
+      # - name: 🔍 Validate commit SHA
+      #   run: |
+      #     echo "Deploying commit: ${{ github.event.inputs.commit_sha }}"
+      #     git rev-parse --verify ${{ github.event.inputs.commit_sha }}
 
       # Download the artifacts for this specific SHA from the artifact storage
       - name: 🔑 Authenticate to Google Cloud
