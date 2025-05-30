@@ -256,7 +256,7 @@ export class Runtime implements IRuntime {
   readonly documentMap: IDocumentMap;
   readonly harness: Harness;
   readonly runner: IRunner;
-  readonly blobbyServerUrl: string | undefined;
+  readonly blobbyServerUrl: string;
 
   constructor(options: RuntimeOptions) {
     // Generate unique ID for this runtime instance
