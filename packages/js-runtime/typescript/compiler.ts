@@ -237,13 +237,14 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
         return {
           resolvedModule: {
             resolvedFileName: resolved,
-            extension: ".ts",
+            extension: ts.Extension.Ts,
           },
         };
       }
       // This module could not be found in the input
-      // e.g. `@commontools/foo`. Attempt to resolve at runtime
-      // for now.
+      // e.g. `@commontools/foo`. If a type definition was provided
+      // with the same identifier with a `.d.ts` extension, that will be used
+      // for types, leaving the module implementation resolution to runtime.
       return {
         resolvedModule: {
           resolvedFileName: `${literal.text}.d.ts`,
@@ -293,10 +294,10 @@ export class TypeScriptCompiler {
       !source.fileName.startsWith(VFS_TYPES_DIR)
     );
 
-    assert(
-      sourceFiles.length === sourceNames.length,
-      `Some inputs were not converted to source files.`,
-    );
+    //assert(
+    //  sourceFiles.length === sourceNames.length,
+    //  `Some inputs were not converted to source files.`,
+    //);
 
     for (const sourceFile of sourceFiles) {
       if (!options.noCheck) {

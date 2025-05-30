@@ -6,6 +6,8 @@ import {
   getTypeLibs,
   TsArtifact,
   TypeScriptCompiler,
+  UnsafeEvalIsolate,
+  UnsafeEvalRuntime,
 } from "@commontools/js-runtime";
 import * as commonHtml from "@commontools/html";
 import * as commonBuilder from "@commontools/builder";
@@ -30,8 +32,13 @@ declare global {
   var [MULTI_RUNTIME_CONSOLE_HOOK]: any;
 }
 
+interface Internals {
+  compiler: TypeScriptCompiler;
+  runtime: UnsafeEvalRuntime;
+  isolate: UnsafeEvalIsolate;
+}
 export class UnsafeEvalRuntimeMulti extends EventTarget implements CtRuntime {
-  private compiler: TypeScriptCompiler | undefined;
+  private internals: Internals | undefined;
   constructor() {
     super();
     // We install our console shim globally so that it can be referenced
@@ -47,23 +54,36 @@ export class UnsafeEvalRuntimeMulti extends EventTarget implements CtRuntime {
   }
 
   async run(source: TsArtifact): Promise<Recipe> {
-    if (!this.compiler) {
+    if (!this.internals) {
       const typeLibs = await getTypeLibs();
-      this.compiler = new TypeScriptCompiler(typeLibs);
+      const compiler = new TypeScriptCompiler(typeLibs);
+      const runtime = new UnsafeEvalRuntime();
+      const isolate = runtime.getIsolate("");
+      this.internals = { compiler, runtime, isolate };
     }
+
+    const { compiler, isolate } = this.internals;
+
     const injectedScript =
       `const console = globalThis.${RUNTIME_CONSOLE_HOOK};`;
-    const compiled = this.compiler.compile(source);
-    const jsSrc = await bundle({ source: compiled, injectedScript });
-    const exports = eval(jsSrc.js);
-    if (!("default" in exports)) {
+    const compiled = compiler.compile(source);
+    const bundled = bundle({
+      source: compiled,
+      injectedScript,
+      filename: "out.js",
+      runtimeDependencies: true,
+    });
+    const exports = isolate.execute(bundled).invoke(createLibExports()).inner();
+    if (exports && !("default" in exports)) {
       throw new Error("No default export found in compiled recipe.");
     }
     return exports.default;
   }
+
   getInvocation(source: string): RuntimeFunction {
     return eval(source);
   }
+
   mapStackTrace(stack: string): string {
     //return mapSourceMapsOnStacktrace(stack);
     return stack;
