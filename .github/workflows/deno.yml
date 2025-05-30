@@ -145,7 +145,6 @@ jobs:
       # localhost:8000 toolshed proxying of jumble.
       - name: 📤 Upload frontend artifacts to R2 /jumble/latest
         uses: ryand56/r2-upload-action@v1.4
-        if: github.ref == 'refs/heads/main'
         with:
           r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
           r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -156,7 +155,6 @@ jobs:
 
       - name: 📤 Upload backend artifacts to R2 /jumble/${{ github.sha }}
         uses: ryand56/r2-upload-action@v1.4
-        if: github.ref == 'refs/heads/main'
         with:
           r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
           r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
