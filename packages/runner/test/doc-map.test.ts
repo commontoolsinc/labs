@@ -22,7 +22,7 @@ describe("cell-map", () => {
   });
 
   afterEach(() => {
-    runtime.dispose();
+    return runtime.dispose();
   });
 
   describe("createRef", () => {

@@ -14,7 +14,7 @@ describe("Schema Support", () => {
   });
 
   afterEach(() => {
-    runtime.dispose();
+    return runtime.dispose();
   });
 
   describe("Examples", () => {

@@ -513,7 +513,7 @@ describe("compactifyPaths", () => {
   });
 
   afterEach(() => {
-    runtime.dispose();
+    return runtime.dispose();
   });
 
   it("should compactify paths", () => {
