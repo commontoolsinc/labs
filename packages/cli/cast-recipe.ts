@@ -49,7 +49,6 @@ async function castRecipe() {
     console.log("Loading recipe...");
     const recipeSrc = await Deno.readTextFile(recipePath!);
 
-
     // Create session and charm manager (matching main.ts pattern)
     const session = await createAdminSession({
       identity: signer,
@@ -60,7 +59,6 @@ async function castRecipe() {
     // Create charm manager for the specified space
     runtime = new Runtime({
       storageUrl: toolshedUrl,
-      blobbyServerUrl: toolshedUrl,
       signer: signer,
     });
     const charmManager = new CharmManager(session, runtime);

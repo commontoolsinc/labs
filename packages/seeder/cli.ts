@@ -44,7 +44,6 @@ setLLMUrl(apiUrl);
 
 const runtime = new Runtime({
   storageUrl: apiUrl,
-  blobbyServerUrl: apiUrl,
 });
 
 const session = await createSession({

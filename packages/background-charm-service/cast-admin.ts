@@ -55,7 +55,6 @@ async function castRecipe() {
   // Create runtime with proper configuration
   const runtime = new Runtime({
     storageUrl: toolshedUrl,
-    blobbyServerUrl: toolshedUrl,
     signer: identity,
   });
 
