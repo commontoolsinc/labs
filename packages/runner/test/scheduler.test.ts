@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { assertSpyCall, assertSpyCalls, spy } from "@std/testing/mock";
-// getDoc removed - using runtime.documentMap.getDoc instead
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type Action, type EventHandler } from "../src/scheduler.ts";
