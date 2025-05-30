@@ -78,6 +78,12 @@ export default defineConfig({
         changeOrigin: true,
         rewriteWsOrigin: true,
       },
+      "/static": {
+        target: Deno.env.get("STATIC_URL") ??
+          Deno.env.get("TOOLSHED_API_URL") ??
+          "http://localhost:8000",
+        changeOrigin: true,
+      },
     },
     headers: {
       "Service-Worker-Allowed": "/data/",
