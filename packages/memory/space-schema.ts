@@ -23,15 +23,8 @@ import {
   toSelection,
 } from "./space.ts";
 import { FactAddress } from "../runner/src/storage/cache.ts";
-import {
-  BaseObjectManager,
-  CellTarget,
-  CycleTracker,
-  getAtPath,
-  SchemaObjectTraverser,
-  ValueEntry,
-} from "./traverse.ts";
-import { JSONObject, JSONSchema, JSONValue } from "@commontools/builder";
+
+import { JSONObject, JSONValue } from "@commontools/builder";
 import { TheAuthorizationError } from "./error.ts";
 import {
   getChange,
@@ -44,6 +37,14 @@ import {
 } from "./selection.ts";
 import { the as COMMIT_THE } from "./commit.ts";
 import { CommitData } from "./consumer.ts";
+import {
+  BaseObjectManager,
+  CellTarget,
+  CycleTracker,
+  getAtPath,
+  SchemaObjectTraverser,
+  ValueEntry,
+} from "../builder/src/traverse.ts";
 export type * from "./interface.ts";
 export * from "./interface.ts";
 

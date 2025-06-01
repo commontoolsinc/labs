@@ -1,5 +1,5 @@
 import {
-  deepEqual,
+  ContextualFlowControl,
   ID,
   ID_FIELD,
   isAlias,
@@ -21,7 +21,6 @@ import {
 } from "./query-result-proxy.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { ContextualFlowControl } from "./index.ts";
 
 /**
  * Extracts default values from a JSON schema object.

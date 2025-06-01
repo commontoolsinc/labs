@@ -1,14 +1,12 @@
-import { isAlias, JSONSchema } from "@commontools/builder";
-import { type DocImpl } from "./doc.ts";
 import {
-  type CellLink,
-  createCell,
-  isCell,
-  isCellLink,
-} from "./cell.ts";
+  ContextualFlowControl,
+  isAlias,
+  JSONSchema,
+} from "@commontools/builder";
+import { type DocImpl } from "./doc.ts";
+import { type CellLink, createCell, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { resolveLinks, resolveLinkToAlias } from "./utils.ts";
-import { ContextualFlowControl } from "./index.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -128,7 +126,12 @@ function processDefaultValue(
     );
     // This can receive events, but at first nothing will be bound to it.
     // Normally these get created by a handler call.
-    return doc.runtime.getImmutableCell(doc.space, { $stream: true }, resolvedSchema, log);
+    return doc.runtime.getImmutableCell(
+      doc.space,
+      { $stream: true },
+      resolvedSchema,
+      log,
+    );
   }
 
   // Handle object type defaults
@@ -314,7 +317,7 @@ export function validateAndTransform(
         log?.reads.push({ cell: doc, path: path.slice(0, i + 1) });
         const extraPath = [...path.slice(i + 1)];
         const newPath = [...value.path, ...extraPath];
-        const cfc = new ContextualFlowControl();
+        const cfc = doc.runtime.cfc;
         let newSchema;
         if (value.schema !== undefined) {
           newSchema = cfc.getSchemaAtPath(

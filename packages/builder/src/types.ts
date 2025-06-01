@@ -156,6 +156,13 @@ export type JSONSchema = {
 export { type Mutable };
 export type JSONSchemaMutable = Mutable<JSONSchema>;
 
+// This is a schema, together with its rootSchema for resolving $ref entries
+// In the future, we should include the boolean option in the JSONSchema type itself
+export type SchemaContext = {
+  schema: JSONSchema | boolean;
+  rootSchema: JSONSchema | boolean;
+};
+
 export type Alias = {
   $alias: {
     cell?: any;

@@ -5,22 +5,18 @@ import type {
   ConnectionError,
   Entity,
   Fact,
+  FactAddress,
   MemorySpace,
   QueryError,
   Result,
   Revision,
-  SchemaContext,
   State,
   The,
   TransactionError,
   UCAN,
   Unit,
 } from "@commontools/memory/interface";
-import {
-  type Cancel,
-  ContextualFlowControl,
-  type EntityId,
-} from "@commontools/runner";
+import { type Cancel, type EntityId } from "@commontools/runner";
 import {
   BaseStorageProvider,
   type StorageProvider,
@@ -36,7 +32,13 @@ export * from "@commontools/memory/interface";
 import * as Codec from "@commontools/memory/codec";
 import { Channel, RawCommand } from "./inspector.ts";
 import { isBrowser } from "@commontools/utils/env";
-import { deepEqual, JSONSchema, JSONValue } from "@commontools/builder";
+import {
+  ContextualFlowControl,
+  deepEqual,
+  JSONSchema,
+  JSONValue,
+  SchemaContext,
+} from "@commontools/builder";
 import { set, setSelector } from "@commontools/memory/selection";
 import { isObject } from "@commontools/utils/types";
 import { querySchemaHeap } from "./query.ts";
@@ -117,11 +119,6 @@ export interface Retract {
   the: The;
   of: Entity;
   is?: void;
-}
-
-export interface FactAddress {
-  the: The;
-  of: Entity;
 }
 
 const toKey = ({ the, of }: FactAddress) => `${of}/${the}`;
@@ -361,6 +358,7 @@ export class Replica {
     public pullRetryLimit: number = 100,
     public schemaTracker = new Map<string, Set<string>>(),
     public useSchemaQueries: boolean = false,
+    private cfc: ContextualFlowControl = new ContextualFlowControl(),
   ) {
     this.pull = this.pull.bind(this);
   }
@@ -423,7 +421,6 @@ export class Replica {
     const querySelector = {};
     // We'll assert that we need all the classifications we expect to need.
     // If we don't actually have those, the server will reject our request.
-    const cfc = new ContextualFlowControl();
     const classifications = new Set<string>();
     for (const [{ the, of }, context] of entries) {
       if (this.useSchemaQueries) {
@@ -434,7 +431,7 @@ export class Replica {
           schemaContext: schemaContext,
         });
         // Since we're accessing the entire document, we should base our classification on the rootSchema
-        cfc.joinSchema(classifications, schemaContext.rootSchema);
+        this.cfc.joinSchema(classifications, schemaContext.rootSchema);
       } else {
         // We're using the "cached" mode, and we don't use schema queries
         setSelector(querySelector, of, the, "_", {});

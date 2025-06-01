@@ -60,6 +60,7 @@ export interface IRuntime {
   readonly harness: Harness;
   readonly runner: IRunner;
   readonly blobbyServerUrl: string;
+  readonly cfc: ContextualFlowControl;
 
   idle(): Promise<void>;
   dispose(): Promise<void>;
@@ -226,6 +227,7 @@ import { ModuleRegistry } from "./module.ts";
 import { DocumentMap } from "./doc-map.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
+import { ContextualFlowControl } from "@commontools/builder";
 
 /**
  * Main Runtime class that orchestrates all services in the runner package.
@@ -257,6 +259,7 @@ export class Runtime implements IRuntime {
   readonly harness: Harness;
   readonly runner: IRunner;
   readonly blobbyServerUrl: string;
+  readonly cfc: ContextualFlowControl;
 
   constructor(options: RuntimeOptions) {
     // Generate unique ID for this runtime instance
@@ -285,6 +288,7 @@ export class Runtime implements IRuntime {
     this.moduleRegistry = new ModuleRegistry(this);
     this.recipeManager = new RecipeManager(this);
     this.runner = new Runner(this);
+    this.cfc = new ContextualFlowControl();
 
     // Register built-in modules with runtime injection
     registerBuiltins(this);

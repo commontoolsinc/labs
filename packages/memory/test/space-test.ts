@@ -10,7 +10,8 @@ import { refer } from "merkle-reference";
 
 import { alice, space } from "./principal.ts";
 import { SchemaSelector } from "../space.ts";
-import { AssertFact, SchemaContext } from "../interface.ts";
+import { AssertFact } from "../interface.ts";
+import { SchemaContext } from "@commontools/builder";
 const the = "application/json";
 const doc = `of:${refer({ hello: "world" })}` as const;
 const doc1 = doc; // convenient name

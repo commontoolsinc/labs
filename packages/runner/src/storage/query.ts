@@ -1,4 +1,4 @@
-import { JSONObject, JSONValue } from "@commontools/builder";
+import { JSONObject, JSONValue, SchemaContext } from "@commontools/builder";
 import {
   BaseObjectManager,
   CellTarget,
@@ -6,13 +6,12 @@ import {
   getAtPath,
   SchemaObjectTraverser,
   ValueEntry,
-} from "../../../memory/traverse.ts";
+} from "../../../builder/src/traverse.ts";
 import type {
+  FactAddress,
   Revision,
-  SchemaContext,
   State,
 } from "@commontools/memory/interface";
-import { FactAddress } from "./cache.ts";
 
 export class ClientObjectManager extends BaseObjectManager<
   FactAddress,

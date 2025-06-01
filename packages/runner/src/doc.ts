@@ -20,7 +20,6 @@ import type { IRuntime } from "./runtime.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { type Cancel } from "./cancel.ts";
 import { arrayEqual } from "./utils.ts";
-import { ContextualFlowControl } from "./index.ts";
 import { Labels } from "./storage.ts";
 
 /**
@@ -258,7 +257,6 @@ export function createDoc<T>(
   const callbacks = new Set<
     (value: T, path: PropertyKey[], labels?: Labels) => void
   >();
-  const cfc = new ContextualFlowControl();
   let readOnly = false;
   let sourceCell: DocImpl<any> | undefined;
   let ephemeral = false;
@@ -305,7 +303,7 @@ export function createDoc<T>(
       if (changed) {
         log?.writes.push({ cell: self, path, schema: schema });
         const lubSchema = (schema !== undefined)
-          ? cfc.lubSchema(schema)
+          ? runtime.cfc.lubSchema(schema)
           : undefined;
         const labels = (lubSchema !== undefined)
           ? { classification: [lubSchema] }

@@ -3,10 +3,10 @@ import {
   JSONObject,
   JSONSchema,
   JSONValue,
+  SchemaContext,
 } from "@commontools/builder";
 import { isNumber, isObject, isString } from "@commontools/utils/types";
-import { ContextualFlowControl } from "@commontools/runner";
-import { SchemaContext } from "@commontools/memory";
+import { ContextualFlowControl } from "@commontools/builder";
 
 export class CycleTracker<K> {
   private partial: Set<K>;

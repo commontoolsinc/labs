@@ -1,5 +1,5 @@
 import type { Reference } from "merkle-reference";
-import { JSONSchema, JSONValue } from "@commontools/builder";
+import { JSONValue, SchemaContext } from "@commontools/builder";
 
 export type { Reference };
 
@@ -519,6 +519,11 @@ export type InvocationURL<T> = `job:${string}` & {
   toString(): InvocationURL<T>;
 };
 
+export interface FactAddress {
+  the: The;
+  of: Entity;
+}
+
 /**
  * Describes not yet claimed memory. It describes a lack of fact about memory.
  */
@@ -788,13 +793,6 @@ export type SchemaPathSelector = {
   path: string[];
   schemaContext?: SchemaContext;
   is?: Unit;
-};
-
-// This is a schema, together with its rootSchema for resolving $ref entries
-// In the future, we should include the boolean option in the JSONSchema type itself
-export type SchemaContext = {
-  schema: JSONSchema | boolean;
-  rootSchema: JSONSchema | boolean;
 };
 
 export type Operation =

@@ -1,11 +1,10 @@
-import { isStatic, markAsStatic } from "@commontools/builder";
+import { isStatic, markAsStatic, SchemaContext } from "@commontools/builder";
 import { Signer } from "@commontools/identity";
 import { defer } from "@commontools/utils/defer";
 import { sleep } from "@commontools/utils/sleep";
 
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { Cell, type CellLink, isCell, isCellLink, isStream } from "./cell.ts";
-import { ContextualFlowControl } from "./cfc.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type EntityId } from "./doc-map.ts";
 import {
@@ -23,7 +22,7 @@ import { Provider as CachedStorageProvider } from "./storage/cache.ts";
 import { VolatileStorageProvider } from "./storage/volatile.ts";
 import { TransactionResult } from "@commontools/memory";
 import { refer } from "@commontools/memory/reference";
-import { SchemaContext, SchemaNone } from "@commontools/memory/interface";
+import { SchemaNone } from "@commontools/memory/interface";
 import type { IRuntime, IStorage } from "./runtime.ts";
 
 export type { Labels };
@@ -112,8 +111,6 @@ export class Storage implements IStorage {
 
   private cancel: Cancel;
   private addCancel: AddCancel;
-
-  private cfc: ContextualFlowControl = new ContextualFlowControl();
 
   constructor(
     readonly runtime: IRuntime,
@@ -289,7 +286,7 @@ export class Storage implements IStorage {
     // If we needed privilege to get this doc, we likely need it for included docs
     const lubLabel = schemaContext === undefined
       ? undefined
-      : this.cfc.lubSchema(schemaContext.schema);
+      : this.runtime.cfc.lubSchema(schemaContext.schema);
     this._addToBatch([{ doc: doc, type: "sync", label: lubLabel }]);
 
     // Return the doc, to make calls chainable.
@@ -402,7 +399,10 @@ export class Storage implements IStorage {
         ) {
           // If we had a classification earlier, carry it to the dependent object
           if (label !== undefined) {
-            value.schema = this.cfc.schemaWithLub(value.schema ?? {}, label);
+            value.schema = this.runtime.cfc.schemaWithLub(
+              value.schema ?? {},
+              label,
+            );
           }
           // If the doc is not yet loaded, load it. As it's referenced in
           // something that came from storage, the id is known in storage and so
