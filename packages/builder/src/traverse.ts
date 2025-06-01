@@ -6,7 +6,7 @@ import type {
   SchemaContext,
 } from "./types.ts";
 import { isAlias } from "./types.ts";
-import { isNumber, isObject, isString } from "@commontools/utils/types";
+import { isNumber, isObject, isString } from "../../utils/src/types.ts";
 
 export class CycleTracker<K> {
   private partial: Set<K>;

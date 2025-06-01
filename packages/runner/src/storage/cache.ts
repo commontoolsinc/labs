@@ -494,7 +494,7 @@ export class Replica {
       const factAddress = { the: revision.the, of: revision.of };
       revisions.set(factAddress, revision);
       if (schema !== undefined) {
-        const schemaRef = refer(schema).toString();
+        const schemaRef = refer(JSON.stringify(schema)).toString();
         const factKey = toKey(factAddress);
         if (!this.schemaTracker.has(factKey)) {
           this.schemaTracker.set(factKey, new Set<string>());
@@ -536,27 +536,28 @@ export class Replica {
         // Even though we have our root doc in local store, we may need
         // to re-issue our query, since our cached copy may have been run with a
         // different schema, and thus have different linked documents.
-        const schemaRef = refer(schema).toString();
-        const key = toKey(address);
-        // FIXME(@ubik2): instead of just using the schema tracker here, if we have the
-        // doc in our heap, we have a subscription with a schema in our heap. See if our
-        // new schema pattern will walk outside our current set of docs in the heap. If
-        // not, we can return the heap copy. If they do, we need to issue a schema query
-        // to the server (which will get the linked docs that we don't already have).
-        // I'd like to also get an if-modified-since map, so I can include the entities
-        // and since fields I already have.
-        if (!this.schemaTracker.get(key)?.has(schemaRef)) {
+        const schemaRef = refer(JSON.stringify(schema)).toString();
+        const factKey = toKey(address);
+        // if we have the doc in our heap, we have a subscription with a
+        // schema in our heap. See if our new schema pattern will walk outside
+        // our current set of docs in the heap. If not, we can return the heap
+        // copy. If they do, we need to issue a schema query to the server
+        // (which will get the linked docs that we don't already have).
+        // I'd like to also get an if-modified-since map, in the future, so I
+        // can include the entities and since fields I already have.
+        if (!this.schemaTracker.get(factKey)?.has(schemaRef)) {
           // See if we have everything we need locally (in our heap)
-          const localQueryResult = querySchemaHeap(
+          const localResult = querySchemaHeap(
             schema,
             [],
             address,
             this.heap.store,
           );
-          if (localQueryResult.missing.length === 0) {
-            const schemaQueries = this.schemaTracker.get(key) ?? new Set();
-            schemaQueries.add(schemaRef);
-            this.schemaTracker.set(key, schemaQueries);
+          if (localResult.missing.length === 0) {
+            if (!this.schemaTracker.has(factKey)) {
+              this.schemaTracker.set(factKey, new Set<string>());
+            }
+            this.schemaTracker.get(factKey)?.add(schemaRef);
           } else {
             need.push([address, schema]);
           }
