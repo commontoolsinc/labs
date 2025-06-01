@@ -3,7 +3,6 @@ import type {
   JSONValue,
   SchemaContext,
 } from "@commontools/builder";
-
 import {
   BaseObjectManager,
   type CellTarget,

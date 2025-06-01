@@ -1,11 +1,11 @@
-import {
-  ContextualFlowControl,
-  isAlias,
-  type JSONObject,
-  type JSONSchema,
-  type JSONValue,
-  type SchemaContext,
-} from "@commontools/builder";
+import { ContextualFlowControl } from "./cfc.ts";
+import type {
+  JSONObject,
+  JSONSchema,
+  JSONValue,
+  SchemaContext,
+} from "./types.ts";
+import { isAlias } from "./types.ts";
 import { isNumber, isObject, isString } from "@commontools/utils/types";
 
 export class CycleTracker<K> {
