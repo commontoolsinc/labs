@@ -39,6 +39,7 @@ import { isBrowser } from "@commontools/utils/env";
 import { deepEqual, JSONSchema, JSONValue } from "@commontools/builder";
 import { set, setSelector } from "@commontools/memory/selection";
 import { isObject } from "@commontools/utils/types";
+import { querySchemaHeap } from "./query.ts";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -540,8 +541,28 @@ export class Replica {
         // different schema, and thus have different linked documents.
         const schemaRef = refer(schema).toString();
         const key = toKey(address);
+        // FIXME(@ubik2): instead of just using the schema tracker here, if we have the
+        // doc in our heap, we have a subscription with a schema in our heap. See if our
+        // new schema pattern will walk outside our current set of docs in the heap. If
+        // not, we can return the heap copy. If they do, we need to issue a schema query
+        // to the server (which will get the linked docs that we don't already have).
+        // I'd like to also get an if-modified-since map, so I can include the entities
+        // and since fields I already have.
         if (!this.schemaTracker.get(key)?.has(schemaRef)) {
-          need.push([address, schema]);
+          // See if we have everything we need locally (in our heap)
+          const localQueryResult = querySchemaHeap(
+            schema,
+            [],
+            address,
+            this.heap.store,
+          );
+          if (localQueryResult.missing.length === 0) {
+            const schemaQueries = this.schemaTracker.get(key) ?? new Set();
+            schemaQueries.add(schemaRef);
+            this.schemaTracker.set(key, schemaQueries);
+          } else {
+            need.push([address, schema]);
+          }
         }
       }
     }
@@ -591,7 +612,7 @@ export class Replica {
   }
 
   syncTimer: number = -1;
-  syncTimeout = 1000;
+  syncTimeout = 60 * 1000;
 
   sync() {
     clearTimeout(this.syncTimer);

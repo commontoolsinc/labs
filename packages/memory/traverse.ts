@@ -1,8 +1,12 @@
-// This is the same structure as in space.ts, but there's also a different
-// Session interface in memory/interface, so the space version isn't exported.
-
-import { isAlias, JSONObject, JSONValue } from "@commontools/builder";
-import { isObject } from "@commontools/utils/types";
+import {
+  isAlias,
+  JSONObject,
+  JSONSchema,
+  JSONValue,
+} from "@commontools/builder";
+import { isNumber, isObject, isString } from "@commontools/utils/types";
+import { ContextualFlowControl } from "@commontools/runner";
+import { SchemaContext } from "@commontools/memory";
 
 export class CycleTracker<K> {
   private partial: Set<K>;
@@ -385,4 +389,203 @@ type Primitive = string | number | boolean | null | undefined | symbol | bigint;
 export function isPrimitive(val: unknown): val is Primitive {
   const type = typeof val;
   return val === null || (type !== "object" && type !== "function");
+}
+
+export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
+  constructor(
+    helper: ObjectStorageManager<K, S, JSONValue>,
+    private schemaContext: SchemaContext,
+    private rootSchema: JSONSchema | boolean | undefined = undefined,
+    private tracker: CycleTracker<JSONValue> = new CycleTracker<JSONValue>(),
+  ) {
+    super(helper);
+    this.rootSchema = schemaContext.rootSchema;
+  }
+
+  traverse(
+    doc: K,
+    docRoot: JSONValue,
+    value: JSONValue,
+  ): OptJSONValue {
+    return this.traverseWithSchema(
+      doc,
+      docRoot,
+      value,
+      this.schemaContext.schema,
+    );
+  }
+
+  traverseWithSchema(
+    doc: K,
+    docRoot: JSONValue,
+    value: JSONValue,
+    schema: JSONSchema | boolean,
+  ): OptJSONValue {
+    if (ContextualFlowControl.isTrueSchema(schema)) {
+      // A value of true or {} means we match anything
+      // Resolve the rest of the doc, and return
+      return this.traverseDAG(doc, docRoot, value, this.tracker);
+    } else if (schema === false) {
+      // This value rejects all objects - just return
+      return undefined;
+    } else if (typeof schema !== "object") {
+      console.warn("Invalid schema is not an object", schema);
+      return undefined;
+    }
+    if ("$ref" in schema) {
+      // At some point, this should be extended to support more than just '#'
+      if (schema["$ref"] != "#") {
+        console.warn("Unsupported $ref in schema: ", schema["$ref"]);
+      }
+      if (this.rootSchema === undefined) {
+        console.warn("Unsupported $ref without root schema: ", schema["$ref"]);
+        return undefined;
+      }
+      schema = this.rootSchema;
+    }
+    const schemaObj = schema as JSONObject;
+    if (value === null) {
+      return ("type" in schemaObj && schemaObj["type"] == "null")
+        ? value
+        : undefined;
+    } else if (isString(value)) {
+      return ("type" in schemaObj && schemaObj["type"] == "string")
+        ? value
+        : undefined;
+    } else if (isNumber(value)) {
+      return ("type" in schemaObj && schemaObj["type"] == "number")
+        ? value
+        : undefined;
+    } else if (Array.isArray(value)) {
+      if ("type" in schemaObj && schemaObj["type"] == "array") {
+        if (this.tracker.enter(value)) {
+          try {
+            this.traverseArrayWithSchema(doc, docRoot, value, schemaObj);
+          } finally {
+            this.tracker.exit(value);
+          }
+        } else {
+          return null;
+        }
+      }
+      return undefined;
+    } else if (isObject(value)) {
+      if (isPointer(value)) {
+        return this.traversePointerWithSchema(
+          doc,
+          docRoot,
+          value as JSONObject,
+          schemaObj,
+        );
+        // TODO(@ubik2): it might be technically ok to follow the same pointer more than once, since we might have
+        // a different schema the second time, which could prevent an infinite cycle, but for now, just reject these.
+      } else if ("type" in schemaObj && schemaObj["type"] == "object") {
+        if (this.tracker.enter(value)) {
+          try {
+            this.traverseObjectWithSchema(
+              doc,
+              docRoot,
+              value as JSONObject,
+              schemaObj,
+            );
+          } finally {
+            this.tracker.exit(value);
+          }
+        } else {
+          return null;
+        }
+      }
+    }
+  }
+
+  private traverseArrayWithSchema(
+    doc: K,
+    docRoot: JSONValue,
+    value: JSONValue[],
+    schema: JSONSchema,
+  ): OptJSONValue {
+    const arrayObj = [];
+    for (const item of value) {
+      const itemSchema = isObject(schema["items"])
+        ? schema["items"] as JSONSchema
+        : typeof (schema["items"]) === "boolean"
+        ? schema["items"]
+        : true;
+      const val = this.traverseWithSchema(doc, docRoot, item, itemSchema);
+      if (val === undefined) {
+        // this array is invalid, since one or more items do not match the schema
+        return undefined;
+      }
+      arrayObj.push(val);
+    }
+    return arrayObj;
+  }
+
+  private traverseObjectWithSchema(
+    doc: K,
+    docRoot: JSONValue,
+    value: JSONObject,
+    schema: JSONSchema,
+  ): OptJSONValue {
+    const filteredObj: Record<string, OptJSONValue> = {};
+    for (const [propKey, propValue] of Object.entries(value)) {
+      const schemaProperties = schema["properties"] as
+        | Record<string, JSONSchema | boolean>
+        | undefined;
+      const propSchema = (
+          isObject(schemaProperties) &&
+          schemaProperties !== undefined &&
+          propKey in schemaProperties
+        )
+        ? schemaProperties[propKey]
+        : (isObject(schema["additionalProperties"]) ||
+            schema["additionalProperties"] === false)
+        ? schema["additionalProperties"] as JSONSchema | boolean
+        : true;
+      const val = this.traverseWithSchema(doc, docRoot, propValue, propSchema);
+      if (val !== undefined) {
+        filteredObj[propKey] = val;
+      }
+    }
+    // Check that all required fields are present
+    if ("required" in schema) {
+      const required = schema["required"] as string[];
+      if (Array.isArray(required)) {
+        for (const requiredProperty of required) {
+          if (!(requiredProperty in filteredObj)) {
+            return undefined;
+          }
+        }
+      }
+    }
+    return filteredObj;
+  }
+
+  private traversePointerWithSchema(
+    doc: K,
+    docRoot: JSONValue,
+    value: JSONObject,
+    schema: JSONSchema,
+  ): OptJSONValue {
+    const [newDoc, newDocRoot, newObj] = getAtPath(
+      this.helper,
+      doc,
+      docRoot,
+      value,
+      [],
+      this.tracker,
+    );
+    if (newObj === undefined) {
+      return null;
+    }
+    if (this.tracker.enter(value)) {
+      try {
+        return this.traverseWithSchema(newDoc, newDocRoot, newObj, schema);
+      } finally {
+        this.tracker.exit(value);
+      }
+    } else {
+      return null;
+    }
+  }
 }
