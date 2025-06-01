@@ -1,4 +1,4 @@
-import {
+import type {
   Cause,
   Changes,
   Entity,
@@ -7,10 +7,10 @@ import {
   OfTheCause,
   Select,
   SelectAll,
-  SelectAllString,
   The,
 } from "./interface.ts";
-import { JSONValue } from "../builder/src/index.ts";
+import { SelectAllString } from "./interface.ts";
+import type { JSONValue } from "@commontools/builder";
 
 export const from = (
   source: Iterable<[fact: Fact, since: number]>,

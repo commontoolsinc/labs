@@ -1,6 +1,7 @@
 import type {
   Cause,
   Entity,
+  FactAddress,
   FactSelection,
   MemorySpace,
   SchemaQuery,
@@ -10,21 +11,20 @@ import { SelectAllString } from "./interface.ts";
 import { isObject } from "@commontools/utils/types";
 import {
   collectClassifications,
-  FactSelectionValue,
-  FactSelector,
+  type FactSelectionValue,
+  type FactSelector,
   getClassifications,
   getLabel,
   getLabels,
   loadFacts,
   redactCommitData,
-  SelectedFact,
+  type SelectedFact,
   selectFacts,
-  Session,
+  type Session,
   toSelection,
 } from "./space.ts";
-import { FactAddress } from "../runner/src/storage/cache.ts";
 
-import { JSONObject, JSONValue } from "@commontools/builder";
+import type { JSONObject, JSONValue } from "@commontools/builder";
 import { TheAuthorizationError } from "./error.ts";
 import {
   getChange,
@@ -36,15 +36,15 @@ import {
   setRevision,
 } from "./selection.ts";
 import { the as COMMIT_THE } from "./commit.ts";
-import { CommitData } from "./consumer.ts";
+import type { CommitData } from "./consumer.ts";
 import {
   BaseObjectManager,
-  CellTarget,
+  type CellTarget,
   CycleTracker,
   getAtPath,
   SchemaObjectTraverser,
-  ValueEntry,
-} from "../builder/src/traverse.ts";
+  type ValueEntry,
+} from "@commontools/builder/traverse";
 export type * from "./interface.ts";
 export * from "./interface.ts";
 

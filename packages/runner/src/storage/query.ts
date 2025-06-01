@@ -1,12 +1,17 @@
-import { JSONObject, JSONValue, SchemaContext } from "@commontools/builder";
+import type {
+  JSONObject,
+  JSONValue,
+  SchemaContext,
+} from "@commontools/builder";
+
 import {
   BaseObjectManager,
-  CellTarget,
+  type CellTarget,
   CycleTracker,
   getAtPath,
   SchemaObjectTraverser,
-  ValueEntry,
-} from "../../../builder/src/traverse.ts";
+  type ValueEntry,
+} from "@commontools/builder/traverse";
 import type {
   FactAddress,
   Revision,

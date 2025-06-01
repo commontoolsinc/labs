@@ -8,8 +8,8 @@ import * as Consumer from "../consumer.ts";
 import * as Selection from "../selection.ts";
 import { refer } from "merkle-reference";
 import { alice, bob, space as subject } from "./principal.ts";
-import { UTCUnixTimestampInSeconds } from "../interface.ts";
-import { JSONSchema } from "@commontools/builder";
+import type { UTCUnixTimestampInSeconds } from "../interface.ts";
+import type { JSONSchema } from "@commontools/builder";
 import { LABEL_THE } from "../space.ts";
 
 // Some generated service key.
