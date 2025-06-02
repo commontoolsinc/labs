@@ -76,7 +76,6 @@ export class ClientObjectManager extends BaseObjectManager<
   }
 }
 
-// TODO: Add since fields to the return
 export function querySchemaHeap(
   schemaContext: SchemaContext,
   path: string[],
