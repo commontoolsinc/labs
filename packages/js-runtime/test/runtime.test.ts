@@ -1,40 +1,29 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  bundle,
-  getTypeLibs,
-  TypeScriptCompiler,
-  UnsafeEvalRuntime,
-} from "../mod.ts";
+import { getTypeLibs, TypeScriptCompiler } from "../mod.ts";
 import { execute, unrollFiles } from "./utils.ts";
 
 describe("Runtime", () => {
   it("Compiles and executes a set of typescript files", async () => {
-    const files = {
+    const artifact = unrollFiles({
       "/main.tsx": "import { add } from './utils.ts';export default add(10,2)",
       "/utils.ts": "export const add=(x:number,y:number):number =>x+y;",
-    };
+    });
     const compiler = new TypeScriptCompiler(await getTypeLibs());
-    const compiled = compiler.compile(unrollFiles(files));
-    const bundled = bundle({ source: compiled, filename: "out.js" });
-    const exports = execute(bundled);
+    const compiled = compiler.compile(artifact);
+    const exports = execute(compiled).invoke();
     expect(exports.inner().default).toBe(12);
   });
 
   it("Executes with runtime dependencies", async () => {
-    const files = {
+    const artifact = unrollFiles({
       "/main.tsx": "import { add } from '@std/math';export default add(10,2)",
       "@std/math.d.ts":
         "export declare function add(x: number, y: number): number;",
-    };
-    const compiler = new TypeScriptCompiler(await getTypeLibs());
-    const compiled = compiler.compile(unrollFiles(files));
-    const bundled = bundle({
-      source: compiled,
-      filename: "out.js",
-      runtimeDependencies: true,
     });
-    const exports = execute(bundled).invoke({
+    const compiler = new TypeScriptCompiler(await getTypeLibs());
+    const compiled = compiler.compile(artifact);
+    const exports = execute(compiled).invoke({
       "@std/math": {
         add(x: number, y: number): number {
           return x + y;
@@ -43,31 +32,45 @@ describe("Runtime", () => {
     });
     expect(exports.inner().default).toBe(12);
   });
-});
 
-describe("Runtime TODO", () => {
-  it.skip("Source maps errors on invoke", async () => {
-    const files = {
-      "/main.tsx":
-        "import { throwIfNot1 } from './utils.ts';export default throwIfNot1(0);",
-      "/utils.ts":
-        "export const throwIfNot1 =(x:number)=>{if(x!==1)throw new Error('not 1')};",
-    };
+  it("Source maps errors on invoke", async () => {
+    const artifact = unrollFiles({
+      "/main.tsx": `// main.tsx
+      import { doubleOrThrow } from "./utils.ts";
+
+      export default doubleOrThrow(undefined);
+      `,
+      "/utils.ts": `// utils.ts
+      export function doubleOrThrow(input: number | undefined): number {
+        if (typeof input === "number") {
+          return input * 2;
+        }
+        throw new Error("throwing!");
+      }
+      `,
+    });
     const compiler = new TypeScriptCompiler(await getTypeLibs());
-    const compiled = compiler.compile(unrollFiles(files));
-    const bundled = bundle({ filename: "abcdef.tsx", source: compiled });
-    const runtime = new UnsafeEvalRuntime();
-    const isolate = runtime.getIsolate("");
+    const compiled = compiler.compile(artifact, { filename: "recipe-abc.js" });
+    let thrown: Error | undefined;
     try {
-      const result = isolate.execute(bundled);
-      expect(result.inner().default).toBe(12);
+      const exports = execute(compiled).invoke();
+      expect(exports.inner().default).toBe(12);
     } catch (e: any) {
-      console.log(
-        "INVOKE ERROR",
-        e,
-        "message" in e && e.message,
-        "stack" in e && e.stack,
-      );
+      thrown = e as Error;
+    } finally {
+      expect(thrown).toBeDefined();
+      const stack = thrown!.stack!.split("\n");
+      stack.length = 6;
+      const expected = [
+        "Error: throwing!",
+        "    at doubleOrThrow (utils.ts:6:14)",
+        "    at Object.eval (main.tsx:4:35)",
+        "    at <CT_INTERNAL>",
+        "    at <CT_INTERNAL>",
+        "    at <CT_INTERNAL>",
+      ];
+
+      expect(stack.join("\n")).toBe(expected.join("\n"));
     }
   });
 });

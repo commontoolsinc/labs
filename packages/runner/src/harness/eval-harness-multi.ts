@@ -2,7 +2,6 @@ import { Recipe } from "@commontools/builder";
 import { Console } from "./console.ts";
 import { Harness, HarnessedFunction } from "./harness.ts";
 import {
-  bundle,
   getTypeLibs,
   TsArtifact,
   TypeScriptCompiler,
@@ -67,14 +66,12 @@ export class UnsafeEvalRuntimeMulti extends EventTarget implements Harness {
 
     const injectedScript =
       `const console = globalThis.${RUNTIME_CONSOLE_HOOK};`;
-    const compiled = compiler.compile(source);
-    const bundled = bundle({
-      source: compiled,
-      injectedScript,
+    const compiled = compiler.compile(source, {
       filename: "out.js",
-      runtimeDependencies: true,
+      injectedScript,
     });
-    const exports = isolate.execute(bundled).invoke(createLibExports()).inner();
+    const exports = isolate.execute(compiled).invoke(createLibExports())
+      .inner();
     if (exports && !("default" in exports)) {
       throw new Error("No default export found in compiled recipe.");
     }

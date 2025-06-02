@@ -1,14 +1,8 @@
-import { type Command, type RunCommand, CommandType } from "./interface.ts";
-import { RuntimeCLI }from "./cli.ts";
+import { type Command, CommandType, type RunCommand } from "./interface.ts";
+import { RuntimeCLI } from "./cli.ts";
 import { Processor } from "./processor.ts";
 
-export {
-  type Command,
-  type RunCommand,
-  CommandType,
-  RuntimeCLI,
-  Processor,
-}
+export { type Command, CommandType, Processor, type RunCommand, RuntimeCLI };
 
 async function main(args: string[]) {
   const cli = new RuntimeCLI();
