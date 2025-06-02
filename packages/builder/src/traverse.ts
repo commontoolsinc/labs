@@ -6,6 +6,8 @@ import type {
   SchemaContext,
 } from "./types.ts";
 import { isAlias } from "./types.ts";
+// TODO(@ubik2): Ideally this would use the following, but rollup has issues
+//import { isNumber, isObject, isString } from "@commontools/utils/types";
 import { isNumber, isObject, isString } from "../../utils/src/types.ts";
 
 export class CycleTracker<K> {
