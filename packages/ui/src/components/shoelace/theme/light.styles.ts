@@ -316,8 +316,10 @@ export default css`
     --sl-transition-fast: 150ms;
     --sl-transition-x-fast: 50ms;
 
-    --sl-font-mono: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
-    --sl-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    --sl-font-mono:
+      SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    --sl-font-sans:
+      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
       sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
     --sl-font-serif: Georgia, "Times New Roman", serif;
 
@@ -351,8 +353,9 @@ export default css`
     --sl-focus-ring-color: var(--sl-color-primary-600);
     --sl-focus-ring-style: solid;
     --sl-focus-ring-width: 3px;
-    --sl-focus-ring: var(--sl-focus-ring-style) var(--sl-focus-ring-width)
-      var(--sl-focus-ring-color);
+    --sl-focus-ring: var(--sl-focus-ring-style) var(--sl-focus-ring-width) var(
+      --sl-focus-ring-color
+    );
     --sl-focus-ring-offset: 1px;
 
     --sl-button-font-size-small: var(--sl-font-size-x-small);

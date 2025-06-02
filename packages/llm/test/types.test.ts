@@ -43,7 +43,14 @@ describe("types", () => {
     });
     it("fail cases", () => {
       const failRequest = (input: object) =>
-        assert(!isLLMRequest({ cache: true, model: DEFAULT_MODEL_NAME, messages: [], ...input }));
+        assert(
+          !isLLMRequest({
+            cache: true,
+            model: DEFAULT_MODEL_NAME,
+            messages: [],
+            ...input,
+          }),
+        );
       assert(
         !isLLMRequest({
           model: DEFAULT_MODEL_NAME,

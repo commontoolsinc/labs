@@ -2,29 +2,23 @@
 
 ## Overview
 
-The Recipe Framework appears to be a declarative, reactive system for building
-integrations and data transformations. It uses a component-based architecture
-where recipes are autonomous modules that can import, process, and export data.
+The Recipe Framework appears to be a declarative, reactive system for building integrations and data transformations. It uses a component-based architecture where recipes are autonomous modules that can import, process, and export data.
 
 ## Core Concepts
 
 ### Recipe
 
-A recipe is the fundamental building block, defined using the `recipe()`
-function. It takes three parameters:
+A recipe is the fundamental building block, defined using the `recipe()` function. It takes three parameters:
 
 - Input Schema: Defines the input parameters and their types using JSON Schema
 - Output Schema: Defines the output structure
-- Implementation Function: A function that receives the inputs and returns
-  outputs
+- Implementation Function: A function that receives the inputs and returns outputs
 
 ### Schemas and Type Safety
 
-The framework provides two ways to define schemas for recipes, handlers, and
-lifted functions:
+The framework provides two ways to define schemas for recipes, handlers, and lifted functions:
 
-1. **TypeScript Generics**: Directly pass TypeScript interfaces as type
-   parameters
+1. **TypeScript Generics**: Directly pass TypeScript interfaces as type parameters
 
    ```typescript
    const myHandler = handler<InputType, StateType>(
@@ -49,9 +43,7 @@ The JSON Schema approach provides several benefits:
 - Better serialization support
 - Integration with framework tooling
 
-Importantly, the framework automatically derives TypeScript types from JSON
-Schemas, giving you full type inference and type checking in your handler and
-lift functions.
+Importantly, the framework automatically derives TypeScript types from JSON Schemas, giving you full type inference and type checking in your handler and lift functions.
 
 ### Data Flow
 
@@ -59,8 +51,7 @@ The framework uses a reactive programming model:
 
 - `cell`: Represents a reactive state container that can be updated and observed
 - `derive`: Creates a derived value that updates when its dependencies change
-- `lift`: Similar to derive, but lifts a regular function into the reactive
-  graph
+- `lift`: Similar to derive, but lifts a regular function into the reactive graph
   - `derive(param, function)` is an alias to `lift(function)(param)`
 
 ### Handlers vs Reactive Functions
@@ -69,8 +60,7 @@ There are important differences between the types of functions in the framework:
 
 #### Handlers
 
-Handlers are functions that declare node types in the reactive graph that
-respond to events:
+Handlers are functions that declare node types in the reactive graph that respond to events:
 
 - Created with `handler()` function
 - Can be defined with JSON Schema or TypeScript generics (see Schemas section)
@@ -105,8 +95,7 @@ respond to events:
 - Return a stream that can be:
   - Passed to JSX components as event handlers (e.g., `onClick={stream}`)
   - Returned by a recipe for external consumption
-  - Passed to another handler which can call `.send(...)` on it to generate
-    events
+  - Passed to another handler which can call `.send(...)` on it to generate events
 - Can update cells and trigger side effects
 - Support async operations for data processing
 - React to outside events (user interactions, API responses)
@@ -114,8 +103,7 @@ respond to events:
 
 #### Reactive Functions (lift/derive)
 
-- `lift`: Declares a reactive node type that transforms data in the reactive
-  graph
+- `lift`: Declares a reactive node type that transforms data in the reactive graph
   - Can also use JSON Schema for type safety with input and output schemas:
 
     ```typescript
@@ -163,13 +151,9 @@ respond to events:
 
 ### Data as Futures
 
-Within recipes, functions cannot directly read values - they can only pass
-references to other nodes. Think of the data passed to a recipe as "futures" -
-promises of values that will be available when the program runs.
+Within recipes, functions cannot directly read values - they can only pass references to other nodes. Think of the data passed to a recipe as "futures" - promises of values that will be available when the program runs.
 
-The system allows accessing fields using the dot notation (e.g., `cell.field`),
-but this doesn't actually read values - it's creating new references to future
-data.
+The system allows accessing fields using the dot notation (e.g., `cell.field`), but this doesn't actually read values - it's creating new references to future data.
 
 ```tsx
 // This doesn't read values, it creates references:
@@ -189,23 +173,19 @@ Recipes can include UI components using JSX syntax:
 
 #### JSX and TypeScript
 
-The Recipe Framework uses custom JSX elements that may generate TypeScript
-linter errors in the IDE. Common errors include:
+The Recipe Framework uses custom JSX elements that may generate TypeScript linter errors in the IDE. Common errors include:
 
 - `Property 'common-*' does not exist on type 'JSX.IntrinsicElements'`
 - Style-related type errors when using string styles
 - Event handler type mismatches
 
-These are expected in the development environment and don't affect runtime
-functionality. The framework's processor handles these custom elements correctly
-even though TypeScript doesn't recognize them.
+These are expected in the development environment and don't affect runtime functionality. The framework's processor handles these custom elements correctly even though TypeScript doesn't recognize them.
 
 ### Built-in Functions
 
 Several utility functions are available:
 
-- `llm`: Makes calls to language models with parameters for system prompt, user
-  prompt, etc.
+- `llm`: Makes calls to language models with parameters for system prompt, user prompt, etc.
 - `fetchData`: Fetches data from URLs
 - `streamData`: Streams data from URLs
 - `ifElse`: Conditional logic for reactive flows
@@ -219,8 +199,7 @@ Several utility functions are available:
   );
   ```
 
-- `str`: Template literal for string interpolation with reactive values,
-  creating reactive strings
+- `str`: Template literal for string interpolation with reactive values, creating reactive strings
 
   ```typescript
   // Creates a reactive string that updates when cells change
@@ -228,9 +207,7 @@ Several utility functions are available:
     str`Hello, ${user.name}! You have ${notifications.count} new messages.`;
   ```
 
-**Important**: These built-in functions can only be called from within a recipe
-function, not from handlers, lift, or derive functions. They create nodes in the
-reactive graph and cannot be awaited directly.
+**Important**: These built-in functions can only be called from within a recipe function, not from handlers, lift, or derive functions. They create nodes in the reactive graph and cannot be awaited directly.
 
 ## JSX and Reactive Arrays
 
@@ -242,13 +219,9 @@ The Recipe Framework has an interesting approach to handling arrays with JSX:
 }
 ```
 
-While this looks like regular JSX mapping, in the Recipe framework, this
-actually creates mini-recipes for each item in the array, constructing a
-reactive graph. Each mapped item becomes a reactive node that updates when the
-source data changes.
+While this looks like regular JSX mapping, in the Recipe framework, this actually creates mini-recipes for each item in the array, constructing a reactive graph. Each mapped item becomes a reactive node that updates when the source data changes.
 
-In the todo-list example, this pattern is used to create draggable todo items,
-where each item has its own encapsulated recipe:
+In the todo-list example, this pattern is used to create draggable todo items, where each item has its own encapsulated recipe:
 
 ```typescript
 {items.map((item: TodoItem) => (
@@ -272,24 +245,15 @@ where each item has its own encapsulated recipe:
 ))}
 ```
 
-This approach allows for efficient updates and encapsulation of item-specific
-logic.
+This approach allows for efficient updates and encapsulation of item-specific logic.
 
 ## Best Practices
 
-1. **Use JSON Schema Over TypeScript Generics**: Prefer using JSON Schema for
-   type definitions rather than TypeScript generics. This provides better
-   runtime validation, self-documentation, and compatibility with framework
-   tooling.
+1. **Use JSON Schema Over TypeScript Generics**: Prefer using JSON Schema for type definitions rather than TypeScript generics. This provides better runtime validation, self-documentation, and compatibility with framework tooling.
 
-2. **Use `asCell: true` for Handler State**: When defining handler state schema,
-   use `asCell: true` for properties that need to be updated. This gives you
-   direct access to the Cell methods like `.set()` and `.get()`.
+2. **Use `asCell: true` for Handler State**: When defining handler state schema, use `asCell: true` for properties that need to be updated. This gives you direct access to the Cell methods like `.set()` and `.get()`.
 
-3. **Avoid All Direct Conditionals in Recipes**: Never use direct if statements,
-   ternary operators, or any other conditionals inside a recipe function - they
-   won't work properly because they immediately evaluate data instead of
-   creating reactive nodes:
+3. **Avoid All Direct Conditionals in Recipes**: Never use direct if statements, ternary operators, or any other conditionals inside a recipe function - they won't work properly because they immediately evaluate data instead of creating reactive nodes:
 
    ```typescript
    // DON'T DO THIS - if statements don't work in recipes
@@ -353,9 +317,7 @@ logic.
    });
    ```
 
-4. **Reference Data Instead of Copying**: When transforming data, reference the
-   original objects rather than copying all their properties. This maintains
-   reactivity and creates cleaner code:
+4. **Reference Data Instead of Copying**: When transforming data, reference the original objects rather than copying all their properties. This maintains reactivity and creates cleaner code:
 
    ```typescript
    // DO THIS: Reference the original data
@@ -374,41 +336,30 @@ logic.
    }));
    ```
 
-5. **Use Reactive String Templates**: Use the `str` template literal to create
-   reactive strings that update when their inputs change:
+5. **Use Reactive String Templates**: Use the `str` template literal to create reactive strings that update when their inputs change:
 
    ```typescript
    const message =
      str`Hello ${user.name}, you have ${notifications.count} notifications`;
    ```
 
-6. **Keep Logic Inside Recipes**: Place as much logic as possible inside recipe
-   functions or the `map` function. This creates a cleaner reactive system where
-   data flow is transparent.
+6. **Keep Logic Inside Recipes**: Place as much logic as possible inside recipe functions or the `map` function. This creates a cleaner reactive system where data flow is transparent.
 
-7. **Leverage Framework Reactivity**: Let the framework track changes and
-   updates. Avoid manually tracking which items have been processed or creating
-   complex state management patterns.
+7. **Leverage Framework Reactivity**: Let the framework track changes and updates. Avoid manually tracking which items have been processed or creating complex state management patterns.
 
 8. **Composition**: Build complex flows by composing smaller recipes.
 
-9. **Minimize Side Effects**: Side effects should be managed through handlers
-   rather than directly in recipes.
+9. **Minimize Side Effects**: Side effects should be managed through handlers rather than directly in recipes.
 
-10. **Schema Reuse**: Define schemas once and reuse them across recipes,
-    handlers, and lifted functions to maintain consistency.
+10. **Schema Reuse**: Define schemas once and reuse them across recipes, handlers, and lifted functions to maintain consistency.
 
-11. **Follow Type Through Schema**: Leverage the framework's automatic type
-    inference from JSON Schema rather than duplicating type definitions with
-    TypeScript interfaces.
+11. **Follow Type Through Schema**: Leverage the framework's automatic type inference from JSON Schema rather than duplicating type definitions with TypeScript interfaces.
 
 ## Schema Best Practices
 
-When defining schemas in the Recipe Framework, follow these guidelines for best
-results:
+When defining schemas in the Recipe Framework, follow these guidelines for best results:
 
-1. **Define Schemas as Constants**: Declare schemas as constants for reuse and
-   reference:
+1. **Define Schemas as Constants**: Declare schemas as constants for reuse and reference:
 
    ```typescript
    const UserSchema = {
@@ -422,8 +373,7 @@ results:
    } as const satisfies JSONSchema;
    ```
 
-2. **Use `as const satisfies JSONSchema`**: Always use this pattern to ensure
-   proper type inference and compile-time validation:
+2. **Use `as const satisfies JSONSchema`**: Always use this pattern to ensure proper type inference and compile-time validation:
 
    ```typescript
    // DO THIS
@@ -433,8 +383,7 @@ results:
    const schema = {/*...*/} as JSONSchema; // Doesn't provide proper type checking
    ```
 
-3. **Always Include Reasonable Defaults**: Where possible, provide sensible
-   default values to improve usability and reduce errors:
+3. **Always Include Reasonable Defaults**: Where possible, provide sensible default values to improve usability and reduce errors:
 
    ```typescript
    const SettingsSchema = {
@@ -459,8 +408,7 @@ results:
    } as const satisfies JSONSchema;
    ```
 
-4. **Extract Types from Schemas**: Use the `Schema` utility to derive TypeScript
-   types from JSON Schemas:
+4. **Extract Types from Schemas**: Use the `Schema` utility to derive TypeScript types from JSON Schemas:
 
    ```typescript
    const UserSchema = {/*...*/} as const satisfies JSONSchema;
@@ -469,8 +417,7 @@ results:
    // Now User is a TypeScript type matching the schema
    ```
 
-5. **Reference Schemas Instead of Duplicating**: For nested objects, reference
-   existing schemas:
+5. **Reference Schemas Instead of Duplicating**: For nested objects, reference existing schemas:
 
    ```typescript
    // Instead of duplicating user properties
@@ -485,8 +432,7 @@ results:
    } as const satisfies JSONSchema;
    ```
 
-6. **Document Schemas with Descriptions**: Add descriptions to schemas and
-   properties for better self-documentation:
+6. **Document Schemas with Descriptions**: Add descriptions to schemas and properties for better self-documentation:
 
    ```typescript
    {
@@ -497,8 +443,7 @@ results:
    }
    ```
 
-7. **Use `asCell: true` for Reactive State**: In handler state schemas, use
-   `asCell: true` for properties that need direct access to Cell methods:
+7. **Use `asCell: true` for Reactive State**: In handler state schemas, use `asCell: true` for properties that need direct access to Cell methods:
 
    ```typescript
    const stateSchema = {
@@ -514,8 +459,7 @@ results:
    };
    ```
 
-8. **Define Required Properties Explicitly**: Always specify which properties
-   are required:
+8. **Define Required Properties Explicitly**: Always specify which properties are required:
 
    ```typescript
    {
@@ -524,8 +468,7 @@ results:
    }
    ```
 
-9. **Use Schema Composition**: Break down complex schemas into smaller, reusable
-   parts:
+9. **Use Schema Composition**: Break down complex schemas into smaller, reusable parts:
 
    ```typescript
    const AddressSchema = {/*...*/} as const satisfies JSONSchema;
@@ -567,8 +510,7 @@ results:
 
 ### Schema to TypeScript Inference
 
-The framework provides automatic type inference from JSON Schema to TypeScript
-types:
+The framework provides automatic type inference from JSON Schema to TypeScript types:
 
 ```typescript
 // Define a schema
@@ -588,8 +530,7 @@ type Person = Schema<typeof PersonSchema>;
 
 ### Cell Type vs Value Type
 
-When working with handlers that use `asCell: true`, it's important to understand
-the distinction:
+When working with handlers that use `asCell: true`, it's important to understand the distinction:
 
 ```typescript
 // Regular state property (value type)
@@ -599,8 +540,7 @@ the distinction:
 { count: { type: "number", asCell: true } } // Handler receives Cell<number>
 ```
 
-With Cell-typed properties, the handler function receives actual Cell instances
-with methods:
+With Cell-typed properties, the handler function receives actual Cell instances with methods:
 
 - `cell.get()`: Get the current value
 - `cell.set(newValue)`: Set a new value
@@ -614,18 +554,14 @@ This allows for more control over state updates, including:
 
 ## Framework Goals
 
-The primary goal of this framework is to generate "low taint code" that enables
-effective data flow analysis. In this system:
+The primary goal of this framework is to generate "low taint code" that enables effective data flow analysis. In this system:
 
 - Recipes are transparent to data flow analysis
 - Functions passed to `handler` or `lift` aren't transparent (they're "tainted")
 - JSON Schema provides a clean abstraction for data validation and type safety
-- The `asCell: true` pattern maintains reactivity while allowing direct
-  manipulation
+- The `asCell: true` pattern maintains reactivity while allowing direct manipulation
 
-By following these principles, applications built with this framework can
-achieve predictable data flow, easier testing, and better security through data
-flow isolation.
+By following these principles, applications built with this framework can achieve predictable data flow, easier testing, and better security through data flow isolation.
 
 ## Integration Process
 
@@ -659,23 +595,20 @@ export default recipe(
 
 ## Integration Between Recipes
 
-Recipes can be composed together, where the output of one recipe serves as the
-input to another. This is done by:
+Recipes can be composed together, where the output of one recipe serves as the input to another. This is done by:
 
 1. Defining a common data schema between recipes
 2. Exporting data from the source recipe
 3. Importing that data as input in the consuming recipe
 
-For example, our Email Summarizer recipe takes emails from the Gmail recipe as
-input:
+For example, our Email Summarizer recipe takes emails from the Gmail recipe as input:
 
 - Gmail recipe exports an array of emails
 - Email Summarizer recipe consumes these emails and processes them with LLM
 
 ## LLM Integration
 
-The framework provides integration with language models through the `llm`
-function:
+The framework provides integration with language models through the `llm` function:
 
 ```typescript
 const result = llm({
@@ -689,11 +622,9 @@ const result = llm({
 
 **Important restrictions**:
 
-1. The `llm` function can only be called directly within a recipe function, not
-   in handlers, lift, or derive functions
+1. The `llm` function can only be called directly within a recipe function, not in handlers, lift, or derive functions
 2. You cannot `await` the result directly, as it's a node in the reactive graph
-3. To use LLM results, you need to access them through the reactive graph (e.g.,
-   via derive)
+3. To use LLM results, you need to access them through the reactive graph (e.g., via derive)
 
 The result object includes:
 

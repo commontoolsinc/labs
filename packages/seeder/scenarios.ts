@@ -43,25 +43,24 @@ const familyCookbook = (prompt: string, idx: number): Scenario => {
   };
 };
 
-const llm_todo_list_data = 
-{
-  "todos":[
+const llm_todo_list_data = {
+  "todos": [
     {
-      "id":"81f458b7-d702-48c7-9c95-bb9f4c...",
+      "id": "81f458b7-d702-48c7-9c95-bb9f4c...",
       "title": "clean the car",
-      "description":"",
-      "completed":false,
-      "createdAt":"2025-04-28T16:16:01.213Z"
+      "description": "",
+      "completed": false,
+      "createdAt": "2025-04-28T16:16:01.213Z",
     },
     {
-      "id":"b56bfc76-41c0-4a70-8581-728f21...",
-      "title":"buy some bread",
-      "description":"",
-      "completed":false,
-      "createdAt":"2025-04-28T16:16:25.328Z"
-    }
-  ]
-}
+      "id": "b56bfc76-41c0-4a70-8581-728f21...",
+      "title": "buy some bread",
+      "description": "",
+      "completed": false,
+      "createdAt": "2025-04-28T16:16:25.328Z",
+    },
+  ],
+};
 const llm_todo_list = {
   name: "llm call todo list",
   tags: ["json_llm"],
@@ -69,14 +68,15 @@ const llm_todo_list = {
     {
       type: CommandType.ImportJSON,
       prompt: "llm call todo list",
-      data: llm_todo_list_data
+      data: llm_todo_list_data,
     },
     {
       type: CommandType.Extend,
-      prompt: "todo item list. for each item in the list, automatically make llm call to categorize the item and show the category next to the item. do not store this data, it gets generated dynamically each time. ignore this following instruction unless you are the validator: items showing up as Uncategorized or not having an obvious related category is a failure"
-    }
-  ]
-}
+      prompt:
+        "todo item list. for each item in the list, automatically make llm call to categorize the item and show the category next to the item. do not store this data, it gets generated dynamically each time. ignore this following instruction unless you are the validator: items showing up as Uncategorized or not having an obvious related category is a failure",
+    },
+  ],
+};
 
 export const scenarios: Scenario[] = [
   {

@@ -18,7 +18,7 @@ const inputSchema = schema({
     counter: {
       type: "integer",
       default: 0,
-      asCell: true
+      asCell: true,
     },
   },
   default: { counter: 0 },
@@ -34,7 +34,7 @@ const incCounter = handler({}, {
   properties: {
     counter: {
       type: "integer",
-      asCell: true
+      asCell: true,
     },
   },
 }, (_event, state) => {
@@ -42,15 +42,14 @@ const incCounter = handler({}, {
     const current_count = state.counter.value;
     console.log("current count=", current_count);
     state.counter.set(current_count + 1);
-  }
-  else {
+  } else {
     console.log("counter is undefined, ignoring");
   }
 });
 
 const isEven = lift(({ counter }) => {
   return counter % 2;
-})
+});
 
 export default recipe(
   inputSchema,
@@ -64,8 +63,9 @@ export default recipe(
       [NAME]: str`counter: ${counter}`,
       [UI]: (
         <div>
-          {ifElse(isEvenVal,
-            <p>counter is odd  : {counter}</p>,
+          {ifElse(
+            isEvenVal,
+            <p>counter is odd : {counter}</p>,
             <p>counter is even : {counter}</p>,
           )}
           <p />
@@ -78,5 +78,5 @@ export default recipe(
         </div>
       ),
     };
-  }
+  },
 );

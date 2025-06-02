@@ -243,7 +243,6 @@ export class RecipeManager implements IRecipeManager {
         );
         return;
       }
-
     } catch (error) {
       console.warn("Failed to publish recipe to blobby:", error);
       // Don't throw - this is optional functionality

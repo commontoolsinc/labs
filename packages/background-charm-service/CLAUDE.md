@@ -6,8 +6,7 @@
 - Run with Gmail integration: `deno task gmail:kv`
 - Run with Gmail integration (legacy): `deno task gmail`
 - Initialize integration cells: `deno task initialize`
-- Initialize specific integration: `deno task initialize:gmail` or
-  `deno task initialize:gcal`
+- Initialize specific integration: `deno task initialize:gmail` or `deno task initialize:gcal`
 - Run tests: `deno task test`
 - Run specific test: `deno test src/path/to/test.ts`
 - Check typings: `deno task check`
@@ -18,8 +17,7 @@
 
 ### Adding a New Integration
 
-1. Create a new file in `src/integrations/` named after your integration (e.g.,
-   `myservice.ts`)
+1. Create a new file in `src/integrations/` named after your integration (e.g., `myservice.ts`)
 2. Implement the `Integration` interface:
 
 ```typescript
@@ -67,8 +65,7 @@ export default new MyServiceIntegration();
 ```
 
 3. The integration will be automatically discovered and registered
-4. Update deno.json to add shortcut task:
-   `"myservice": "deno run -A src/cli.ts --integration=myservice"`
+4. Update deno.json to add shortcut task: `"myservice": "deno run -A src/cli.ts --integration=myservice"`
 
 ## Code Style Guidelines
 

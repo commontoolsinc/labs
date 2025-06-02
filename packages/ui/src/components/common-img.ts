@@ -45,9 +45,9 @@ export class CommonImgElement extends LitElement {
     const onload = () => (this._isLoaded = true);
 
     return html`
-      <img @load=${onload} class="${
-      this._isLoaded ? "img loaded" : "img"
-    }" src="${this.src}" />
+      <img @load="${onload}" class="${this._isLoaded
+        ? "img loaded"
+        : "img"}" src="${this.src}" />
     `;
   }
 }

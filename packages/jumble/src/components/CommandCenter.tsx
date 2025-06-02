@@ -414,15 +414,14 @@ export function CommandCenter() {
         setMode({
           type: "input",
           command: newCharmCommand,
-          placeholder: (newCharmCommand as InputCommandItem).placeholder || "What would you like to create?",
+          placeholder: (newCharmCommand as InputCommandItem).placeholder ||
+            "What would you like to create?",
         });
       }
     };
 
     const handleNewCharmEvent = () => {
-      const newCharmCommand = allCommands.find((cmd) =>
-        cmd.id === "new-charm"
-      );
+      const newCharmCommand = allCommands.find((cmd) => cmd.id === "new-charm");
       if (!newCharmCommand) {
         console.warn("New charm command not found");
         return;
@@ -431,7 +430,8 @@ export function CommandCenter() {
       setMode({
         type: "input",
         command: newCharmCommand,
-        placeholder: (newCharmCommand as InputCommandItem).placeholder || "What would you like to create?",
+        placeholder: (newCharmCommand as InputCommandItem).placeholder ||
+          "What would you like to create?",
       });
     };
 

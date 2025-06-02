@@ -1,7 +1,6 @@
 # Charm Seeder
 
-"42 charms" project runs a collection of workflows/prompts to create and verify
-charms.
+"42 charms" project runs a collection of workflows/prompts to create and verify charms.
 
 ## Setup requirements:
 
@@ -16,9 +15,7 @@ You can run the seeder on your local branch
 
 local:
 
-You will need to run the toolshed and jumble in other tabs, you will want to
-have an `.env` file for toolshed with keys for LLMs and API/project setup for
-phoenix.
+You will need to run the toolshed and jumble in other tabs, you will want to have an `.env` file for toolshed with keys for LLMs and API/project setup for phoenix.
 
     cd toolshed; deno task dev
     cd jumble; deno task dev-local
@@ -47,5 +44,4 @@ You can add new flows to `scenarios.ts`.
 
 ## Reading the report
 
-A report will be generated in the `results` directory named `results/blue42.html`.
-You can open this in your browser to see the results.
+A report will be generated in the `results` directory named `results/blue42.html`. You can open this in your browser to see the results.

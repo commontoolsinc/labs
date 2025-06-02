@@ -168,10 +168,10 @@ export function updateJob(
 }
 
 export function completeJob({ id, status, result, llmRequestId }: {
-  id: string,
-  status: string,
-  result?: Cell<Charm>,
-  llmRequestId?: string,
+  id: string;
+  status: string;
+  result?: Cell<Charm>;
+  llmRequestId?: string;
 }) {
   const jobEvent: JobCompleteEvent = {
     id,

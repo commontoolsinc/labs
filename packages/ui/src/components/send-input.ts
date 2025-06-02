@@ -61,11 +61,12 @@ export class SendMessageElement extends LitElement {
           appearance="rounded"
           class="unibox-input"
           id="input"
-          .placeholder=${this.placeholder}
-          @keydown=${this.keyDown}
+          .placeholder="${this.placeholder}"
+          @keydown="${this.keyDown}"
         >
         </common-input>
-        <common-button class="unibox-button" @click=${this.send}>${this.name}</common-button>
+        <common-button class="unibox-button" @click="${this.send}"
+        >${this.name}</common-button>
       </div>
     `;
   }

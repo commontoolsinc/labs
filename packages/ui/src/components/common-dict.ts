@@ -36,7 +36,9 @@ export class CommonDictElement extends LitElement {
       `;
     });
 
-    return html`<div class="dict">${records}</div>`;
+    return html`
+      <div class="dict">${records}</div>
+    `;
   }
 }
 globalThis.customElements.define("common-dict", CommonDictElement);

@@ -45,11 +45,15 @@ export class CommonDatatableElement extends LitElement {
   override render() {
     const rows = repeat(this.rows, (row) => {
       const cells = repeat(this.cols, (col) => {
-        return html`<td class="cell">${row[col]}</td>`;
+        return html`
+          <td class="cell">${row[col]}</td>
+        `;
       });
-      return html`<tr class="row">
-        ${cells}
-      </tr>`;
+      return html`
+        <tr class="row">
+          ${cells}
+        </tr>
+      `;
     });
 
     return html`

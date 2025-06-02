@@ -1,8 +1,6 @@
 # Claude CLI Commands for GitHub Workflows
 
-This directory contains documentation for using Claude to help with GitHub issue
-and PR workflows. Instead of using shell scripts to control Claude, Claude can
-now compose these commands directly.
+This directory contains documentation for using Claude to help with GitHub issue and PR workflows. Instead of using shell scripts to control Claude, Claude can now compose these commands directly.
 
 ## Available Commands
 
@@ -38,17 +36,13 @@ See [diagnose.md](./diagnose.md) for detailed process documentation.
 
 ## Benefits of This Approach
 
-1. **More Natural Interaction**: Instead of having shell scripts control Claude,
-   Claude can now directly perform these workflows in conversation.
+1. **More Natural Interaction**: Instead of having shell scripts control Claude, Claude can now directly perform these workflows in conversation.
 
-2. **Improved Customization**: Easier to tailor the process to specific
-   scenarios during the conversation.
+2. **Improved Customization**: Easier to tailor the process to specific scenarios during the conversation.
 
-3. **Better Context Handling**: Claude maintains conversation context instead of
-   relying on temporary files.
+3. **Better Context Handling**: Claude maintains conversation context instead of relying on temporary files.
 
-4. **Simplified Command Structure**: No need to manage temporary files or
-   complex shell script logic.
+4. **Simplified Command Structure**: No need to manage temporary files or complex shell script logic.
 
 ## Requirements
 
@@ -58,7 +52,6 @@ See [diagnose.md](./diagnose.md) for detailed process documentation.
 
 ## Usage Tips
 
-- When working with issues or PRs, always provide the issue/PR number as an
-  argument
+- When working with issues or PRs, always provide the issue/PR number as an argument
 - Follow Claude's prompts to work through the process step by step
 - You can interrupt or modify the workflow at any point during the conversation
