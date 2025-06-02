@@ -365,16 +365,17 @@ function topologicalSort(
   // Build the graph
   for (const actionA of relevantActions) {
     const { writes } = dependencies.get(actionA)!;
+    const graphA = graph.get(actionA)!;
     for (const write of writes) {
       for (const actionB of relevantActions) {
-        if (actionA !== actionB) {
+        if (actionA !== actionB && !graphA.has(actionB)) {
           const { reads } = dependencies.get(actionB)!;
           if (
             reads.some(({ cell, path }) =>
               cell === write.cell && pathAffected(write.path, path)
             )
           ) {
-            graph.get(actionA)!.add(actionB);
+            graphA.add(actionB);
             inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
           }
         }
