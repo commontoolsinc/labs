@@ -401,8 +401,10 @@ export class Storage implements IStorage {
           Array.isArray(value.path)
         ) {
           // If we had a classification earlier, carry it to the dependent object
+          // We can't modify value.schema directly (that needs to go through changes)
+          let valueSchema = value.schema;
           if (label !== undefined) {
-            value.schema = this.cfc.schemaWithLub(value.schema ?? {}, label);
+            valueSchema = this.cfc.schemaWithLub(value.schema ?? {}, label);
           }
           // If the doc is not yet loaded, load it. As it's referenced in
           // something that came from storage, the id is known in storage and so
@@ -411,8 +413,8 @@ export class Storage implements IStorage {
             doc.space,
             value.cell,
             true,
-            value.schema
-              ? { schema: value.schema, rootSchema: value.schema }
+            valueSchema
+              ? { schema: valueSchema, rootSchema: valueSchema }
               : undefined,
           );
           dependencies.add(dependency);
