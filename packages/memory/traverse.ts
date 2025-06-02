@@ -143,6 +143,7 @@ export abstract class BaseObjectTraverser<K, S>
           tracker.exit(value);
         }
       } else {
+        console.log("Cycle detected", JSON.stringify(doc));
         return null;
       }
     } else if (isObject(value)) {
@@ -172,6 +173,7 @@ export abstract class BaseObjectTraverser<K, S>
             tracker.exit(value);
           }
         } else {
+          console.log("Cycle detected", JSON.stringify(doc));
           return null;
         }
       }
@@ -275,7 +277,7 @@ function followPointer<K, S>(
   tracker: PointerCycleTracker,
 ): [K, JSONValue, JSONValue | undefined] {
   if (!tracker.enter(fact)) {
-    console.error("Cycle Detected!");
+    console.log("Cycle detected", JSON.stringify(doc));
     return [doc, docRoot, undefined];
   }
   try {

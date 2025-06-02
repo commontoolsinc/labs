@@ -216,6 +216,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
             this.tracker.exit(value);
           }
         } else {
+          console.log("Cycle detected", JSON.stringify(doc));
           return null;
         }
       }
@@ -243,6 +244,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
             this.tracker.exit(value);
           }
         } else {
+          console.log("Cycle detected", JSON.stringify(doc));
           return null;
         }
       }
@@ -336,6 +338,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
         this.tracker.exit(value);
       }
     } else {
+      console.log("Cycle detected", JSON.stringify(doc));
       return null;
     }
   }
