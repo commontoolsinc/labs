@@ -138,8 +138,8 @@ export function toJSONWithAliases(
 ): JSONValue | undefined {
   if (isStatic(value) && !processStatic) {
     return markAsStatic(
-      toJSONWithAliases(value, paths, ignoreSelfAliases, path, true),
-    );
+      toJSONWithAliases(value, paths, ignoreSelfAliases, path, true) as any,
+    ) as JSONValue;
   } // Convert regular cells to opaque refs
   else if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
   // Convert parent opaque refs to shadow refs
@@ -196,7 +196,7 @@ export function toJSONWithAliases(
     } else if (!("cell" in alias) || typeof alias.cell === "number") {
       return {
         $alias: {
-          cell: (alias.cell ?? 0) + 1,
+          cell: ((alias.cell as number) ?? 0) + 1,
           path: alias.path as (string | number)[],
         },
       } satisfies Alias;

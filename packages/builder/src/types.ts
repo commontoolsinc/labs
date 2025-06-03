@@ -32,7 +32,7 @@ export type OpaqueRefMethods<T> = {
   set(value: Opaque<T> | T): void;
   key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
   setDefault(value: Opaque<T> | T): void;
-  setPreExisting(ref: any): void;
+  setPreExisting(ref: unknown): void;
   setName(name: string): void;
   setSchema(schema: JSONSchema): void;
   connect(node: NodeRef): void;
@@ -42,7 +42,7 @@ export type OpaqueRefMethods<T> = {
     value?: Opaque<T>;
     defaultValue?: Opaque<T>;
     nodes: Set<NodeRef>;
-    external?: any;
+    external?: unknown;
     name?: string;
     schema?: JSONSchema;
     rootSchema?: JSONSchema;
@@ -60,7 +60,7 @@ export type OpaqueRefMethods<T> = {
       array: T,
     ) => Opaque<S>,
   ): Opaque<S[]>;
-  toJSON(): any;
+  toJSON(): unknown;
   [Symbol.iterator](): Iterator<T>;
   [Symbol.toPrimitive](hint: string): T;
   [isOpaqueRefMarker]: true;
@@ -68,8 +68,8 @@ export type OpaqueRefMethods<T> = {
 
 export const isOpaqueRefMarker = Symbol("isOpaqueRef");
 
-export function isOpaqueRef(value: any): value is OpaqueRef<any> {
-  return value && typeof value[isOpaqueRefMarker] === "boolean";
+export function isOpaqueRef(value: unknown): value is OpaqueRef<any> {
+  return !!value && typeof (value as any)[isOpaqueRefMarker] === "boolean";
 }
 
 export type NodeRef = {
@@ -80,7 +80,7 @@ export type NodeRef = {
 };
 
 export type toJSON = {
-  toJSON(): any;
+  toJSON(): unknown;
 };
 
 export type NodeFactory<T, R> =
@@ -118,16 +118,16 @@ export interface JSONObject extends Record<string, JSONValue> {}
 // Annotations when writing data that help determine the entity id. They are
 // removed before sending to storage.
 export interface IDFields {
-  [ID]?: any;
-  [ID_FIELD]?: any;
+  [ID]?: unknown;
+  [ID_FIELD]?: unknown;
 }
 
 // TODO(@ubik2) When specifying a JSONSchema, you can often use a boolean
 // This is particularly useful for specifying the schema of a property.
 // That will require reworking some things, so for now, I'm not doing it
 export type JSONSchema = {
-  readonly [ID]?: any;
-  readonly [ID_FIELD]?: any;
+  readonly [ID]?: unknown;
+  readonly [ID_FIELD]?: unknown;
   readonly type?:
     | "object"
     | "array"
@@ -158,14 +158,14 @@ export type JSONSchemaMutable = Mutable<JSONSchema>;
 
 export type Alias = {
   $alias: {
-    cell?: any;
+    cell?: unknown;
     path: PropertyKey[];
     schema?: JSONSchema;
     rootSchema?: JSONSchema;
   };
 };
 
-export function isAlias(value: any): value is Alias {
+export function isAlias(value: unknown): value is Alias {
   return isObject(value) && "$alias" in value && isObject(value.$alias) &&
     "path" in value.$alias &&
     Array.isArray(value.$alias.path);
@@ -175,8 +175,8 @@ export type StreamAlias = {
   $stream: true;
 };
 
-export function isStreamAlias(value: any): value is StreamAlias {
-  return !!value && typeof value.$stream === "boolean" && value.$stream;
+export function isStreamAlias(value: unknown): value is StreamAlias {
+  return !!value && typeof (value as any).$stream === "boolean" && (value as any).$stream;
 }
 
 export type Module = {
@@ -191,10 +191,10 @@ export type Handler<T = any, R = any> = Module & {
   with: (inputs: Opaque<T>) => OpaqueRef<R>;
 };
 
-export function isModule(value: any): value is Module {
+export function isModule(value: unknown): value is Module {
   return (
     (typeof value === "function" || typeof value === "object") &&
-    typeof value.type === "string"
+    typeof (value as any).type === "string"
   );
 }
 
@@ -221,24 +221,24 @@ export type Recipe = {
   [unsafe_materializeFactory]?: (log: any) => (path: PropertyKey[]) => any;
 };
 
-export function isRecipe(value: any): value is Recipe {
+export function isRecipe(value: unknown): value is Recipe {
   return (
     (typeof value === "function" || typeof value === "object") &&
     value !== null &&
-    !!value.argumentSchema &&
-    !!value.resultSchema &&
-    !!value.nodes &&
-    Array.isArray(value.nodes)
+    !!(value as any).argumentSchema &&
+    !!(value as any).resultSchema &&
+    !!(value as any).nodes &&
+    Array.isArray((value as any).nodes)
   );
 }
 
 type CanBeOpaqueRef = { [toOpaqueRef]: () => OpaqueRef<any> };
 
-export function canBeOpaqueRef(value: any): value is CanBeOpaqueRef {
+export function canBeOpaqueRef(value: unknown): value is CanBeOpaqueRef {
   return (
     (typeof value === "object" || typeof value === "function") &&
     value !== null &&
-    typeof value[toOpaqueRef] === "function"
+    typeof (value as any)[toOpaqueRef] === "function"
   );
 }
 
@@ -252,12 +252,12 @@ export type ShadowRef = {
   shadowOf: OpaqueRef<any> | ShadowRef;
 };
 
-export function isShadowRef(value: any): value is ShadowRef {
+export function isShadowRef(value: unknown): value is ShadowRef {
   return (
     !!value &&
     typeof value === "object" &&
     "shadowOf" in value &&
-    (isOpaqueRef(value.shadowOf) || isShadowRef(value.shadowOf))
+    (isOpaqueRef((value as any).shadowOf) || isShadowRef((value as any).shadowOf))
   );
 }
 
@@ -269,7 +269,7 @@ export type UnsafeBinding = {
 
 export type Frame = {
   parent?: Frame;
-  cause?: any;
+  cause?: unknown;
   generatedIdCounter: number;
   opaqueRefs: Set<OpaqueRef<any>>;
   unsafe_binding?: UnsafeBinding;
@@ -281,12 +281,12 @@ export type Static = {
   [isStaticMarker]: true;
 };
 
-export function isStatic(value: any): value is Static {
+export function isStatic(value: unknown): value is Static {
   return typeof value === "object" && value !== null &&
-    value[isStaticMarker] === true;
+    (value as any)[isStaticMarker] === true;
 }
 
-export function markAsStatic(value: any): any {
-  value[isStaticMarker] = true;
+export function markAsStatic(value: unknown): unknown {
+  (value as any)[isStaticMarker] = true;
   return value;
 }

@@ -184,15 +184,15 @@ export class Runner implements IRunner {
     const defaults = extractDefaultValues(recipe.argumentSchema);
 
     const internal = {
-      ...deepCopy((defaults as { internal: any })?.internal),
-      ...deepCopy((recipe.initial as { internal: any })?.internal),
+      ...(deepCopy((defaults as { internal: any })?.internal) as any),
+      ...(deepCopy((recipe.initial as { internal: any })?.internal) as any),
       ...processCell.get()?.internal,
     };
 
     // Still necessary until we consistently use schema for defaults.
     // Only do it on first load.
     if (!processCell.get()?.argument) {
-      argument = mergeObjects(argument, defaults);
+      argument = mergeObjects(argument as any, defaults) as T;
     }
 
     const recipeChanged = recipeId !== processCell.get()?.[TYPE];
@@ -218,7 +218,7 @@ export class Runner implements IRunner {
       // TODO(seefeld): Be smarter about merging in case result changed. But since
       // we don't yet update recipes, this isn't urgent yet.
       resultCell.send(
-        unwrapOneLevelAndBindtoDoc<R>(recipe.result as R, processCell),
+        unwrapOneLevelAndBindtoDoc<R, any>(recipe.result as R, processCell),
       );
     }
 

@@ -166,8 +166,8 @@ export abstract class BaseObjectTraverser<K, S>
             return Object.fromEntries(
               Object.entries(value).map((
                 [k, v],
-              ): any => [k, this.traverseDAG(doc, docRoot, v, tracker)]),
-            );
+              ) => [k, this.traverseDAG(doc, docRoot, v, tracker)]),
+            ) as JSONValue;
           } finally {
             tracker.exit(value);
           }
@@ -247,7 +247,7 @@ export function getAtPath<K, S>(
       const cursorObj = cursor as JSONObject;
       cursor = cursorObj[part] as JSONValue;
     } else if (Array.isArray(cursor)) {
-      cursor = elementAt(cursor, part);
+      cursor = elementAt(cursor, part) as JSONValue;
     } else {
       // we can only descend into pointers, objects, and arrays
       return [doc, docRoot, undefined];
@@ -352,7 +352,7 @@ export function getPointerInfo(value: JSONObject): CellTarget {
   return { path: [], cellTarget: undefined };
 }
 
-export function isPointer(value: any): boolean {
+export function isPointer(value: unknown): boolean {
   return (isAlias(value) || isJSONCellLink(value));
 }
 
@@ -362,20 +362,20 @@ export function isPointer(value: any): boolean {
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-function isJSONCellLink(value: any): value is JSONCellLink {
+function isJSONCellLink(value: unknown): value is JSONCellLink {
   return (isObject(value) && "cell" in value && isObject(value.cell) &&
     "/" in value.cell && "path" in value &&
     Array.isArray(value.path));
 }
 
-export function indexFromPath(array: unknown[], path: string): any {
+export function indexFromPath(array: unknown[], path: string): number | undefined {
   const number = new Number(path).valueOf();
   return (Number.isInteger(number) && number >= 0 && number < array.length)
     ? number
     : undefined;
 }
 
-export function elementAt(array: unknown[], path: string): any {
+export function elementAt(array: unknown[], path: string): unknown {
   const index = indexFromPath(array, path);
   return (index === undefined) ? undefined : array[index];
 }
