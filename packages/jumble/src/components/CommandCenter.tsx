@@ -1,6 +1,5 @@
 import { Command } from "cmdk";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import "./commands.css";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { useMatch, useNavigate } from "react-router-dom";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";

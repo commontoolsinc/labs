@@ -294,7 +294,7 @@ export default recipe(
       // Call LLM to generate summary
       const summaryResult = llm({
         system: systemPrompt,
-        prompt: userPrompt,
+        messages: [userPrompt],
       });
 
       // Return a simple object that references the original email
