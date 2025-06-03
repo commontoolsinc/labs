@@ -107,7 +107,7 @@
     "esbuild": "npm:esbuild",
     "jsdom": "npm:jsdom",
     "lit": "npm:lit@^3.2.1",
-    "merkle-reference": "npm:merkle-reference@^2.0.1",
+    "merkle-reference": "npm:merkle-reference@^2.2.0",
     "multiformats": "npm:multiformats@^13.3.2",
     "react": "npm:react@^18.3.1",
     "react-dom": "npm:react-dom@^18.3.1",
