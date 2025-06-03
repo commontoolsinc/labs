@@ -1,5 +1,5 @@
 {
-  "version": "5",
+  "version": "4",
   "specifiers": {
     "jsr:@astral/astral@*": "0.5.2",
     "jsr:@cmd-johnson/oauth2-client@2": "2.0.0",
