@@ -527,6 +527,44 @@ async function handleUseSpellOnOtherData(ctx: CommandContext) {
   }
 }
 
+async function handleAddRemoteEmailRecipe(
+  ctx: CommandContext,
+  filename: string,
+  name: string,
+) {
+  if (!ctx.focusedCharmId) {
+    ctx.setOpen(false);
+    return;
+  }
+
+  const emailCharm = await ctx.charmManager.get(ctx.focusedCharmId);
+  if (!emailCharm) {
+    console.error("Failed to load charm", ctx.focusedCharmId);
+    return;
+  }
+
+  const emails = emailCharm.getAsQueryResult().emails;
+
+  ctx.setLoading(true);
+  try {
+    const newCharm = await addGithubRecipe(
+      ctx.charmManager,
+      filename,
+      name,
+      {
+        emails,
+      },
+    );
+
+    navigateToCharm(ctx, newCharm);
+  } catch (error) {
+    console.error(`Error loading ${filename}:`, error);
+  } finally {
+    ctx.setLoading(false);
+    ctx.setOpen(false);
+  }
+}
+
 async function handleAddRemoteRecipe(
   ctx: CommandContext,
   filename: string,
@@ -865,6 +903,30 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
           title: "Add Gmail Importer",
           handler: () =>
             handleAddRemoteRecipe(ctx, "gmail.tsx", "GMail Importer"),
+        },
+        {
+          id: "add-email-summarizer",
+          type: "action",
+          title: "Add Email Summarizer",
+          predicate: !!ctx.focusedCharmId,
+          handler: () =>
+            handleAddRemoteEmailRecipe(
+              ctx,
+              "email-summarizer.tsx",
+              "Email Summarizer",
+            ),
+        },
+        {
+          id: "add-email-date-extractor",
+          type: "action",
+          title: "Add Email Date Extractor",
+          predicate: !!ctx.focusedCharmId,
+          handler: () =>
+            handleAddRemoteEmailRecipe(
+              ctx,
+              "email-date-extractor.tsx",
+              "Email Date Extractor",
+            ),
         },
         {
           id: "add-gcal-importer",
