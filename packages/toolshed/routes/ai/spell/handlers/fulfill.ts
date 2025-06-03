@@ -20,6 +20,7 @@ import {
   SchemaFragment,
 } from "@/routes/ai/spell/schema.ts";
 import { extractJSON } from "@/routes/ai/spell/json.ts";
+import { isRecord } from "@commontools/utils/types";
 
 export const FulfillSchemaRequestSchema = z.object({
   schema: z.record(
@@ -305,11 +306,11 @@ function constructSchemaPrompt(
       } else if (Array.isArray(value)) {
         // Recursively sanitize array elements
         sanitized[key] = value.map((item) =>
-          typeof item === "object" && item !== null
+          isRecord(item)
             ? sanitizeObject(item as Record<string, unknown>)
             : item
         );
-      } else if (typeof value === "object" && value !== null) {
+      } else if (isRecord(value)) {
         // Recursively sanitize nested objects
         sanitized[key] = sanitizeObject(value as Record<string, unknown>);
       } else {

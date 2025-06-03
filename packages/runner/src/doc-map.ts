@@ -7,6 +7,7 @@ import {
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { refer } from "merkle-reference";
 import type { IDocumentMap, IRuntime } from "./runtime.ts";
+import { isRecord } from "@commontools/utils/types";
 
 export type EntityId = {
   "/": string | Uint8Array;
@@ -34,11 +35,11 @@ export function createRef(
     seen.add(obj);
 
     // Don't traverse into ids.
-    if (typeof obj === "object" && obj !== null && "/" in obj) return obj;
+    if (isRecord(obj) && "/" in obj) return obj;
 
     // If there is a .toJSON method, replace obj with it, then descend.
     if (
-      (typeof obj === "object" || typeof obj === "function") && obj !== null &&
+      isRecord(obj) &&
       typeof obj.toJSON === "function"
     ) {
       obj = obj.toJSON() ?? obj;
@@ -54,7 +55,7 @@ export function createRef(
     // If referencing other docs, return their ids (or random as fallback).
     if (isDoc(obj) || isCell(obj)) return obj.entityId ?? crypto.randomUUID();
     else if (Array.isArray(obj)) return obj.map(traverse);
-    else if (typeof obj === "object" && obj !== null) {
+    else if (isRecord(obj)) {
       return Object.fromEntries(
         Object.entries(obj).map(([key, value]) => [key, traverse(value)]),
       );
@@ -76,7 +77,7 @@ export function getEntityId(value: any): { "/": string } | undefined {
   if (typeof value === "string") {
     return value.startsWith("{") ? JSON.parse(value) : { "/": value };
   }
-  if (typeof value === "object" && value !== null && "/" in value) {
+  if (isRecord(value) && "/" in value) {
     return JSON.parse(JSON.stringify(value));
   }
 
@@ -225,7 +226,7 @@ export class DocumentMap implements IDocumentMap {
 
   private generateEntityId(value: any, cause?: any): EntityId {
     return createRef(
-      typeof value === "object" && value !== null
+      isRecord(value)
         ? (value as object)
         : value !== undefined
         ? { value }

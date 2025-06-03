@@ -68,8 +68,9 @@ export type OpaqueRefMethods<T> = {
 
 export const isOpaqueRefMarker = Symbol("isOpaqueRef");
 
-export function isOpaqueRef(value: unknown): value is OpaqueRef<any> {
-  return !!value && typeof (value as any)[isOpaqueRefMarker] === "boolean";
+export function isOpaqueRef<T = any>(value: unknown): value is OpaqueRef<T> {
+  return !!value &&
+    typeof (value as OpaqueRef<T>)[isOpaqueRefMarker] === "boolean";
 }
 
 export type NodeRef = {
@@ -176,7 +177,8 @@ export type StreamAlias = {
 };
 
 export function isStreamAlias(value: unknown): value is StreamAlias {
-  return !!value && typeof (value as any).$stream === "boolean" && (value as any).$stream;
+  return !!value && typeof (value as StreamAlias).$stream === "boolean" &&
+    (value as StreamAlias).$stream;
 }
 
 export type Module = {
@@ -257,7 +259,8 @@ export function isShadowRef(value: unknown): value is ShadowRef {
     !!value &&
     typeof value === "object" &&
     "shadowOf" in value &&
-    (isOpaqueRef((value as any).shadowOf) || isShadowRef((value as any).shadowOf))
+    (isOpaqueRef((value as ShadowRef).shadowOf) ||
+      isShadowRef((value as ShadowRef).shadowOf))
   );
 }
 

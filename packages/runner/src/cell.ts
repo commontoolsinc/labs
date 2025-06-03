@@ -18,6 +18,7 @@ import {
 } from "./utils.ts";
 import type { ReactivityLog } from "./scheduler.ts";
 import { type EntityId } from "./doc-map.ts";
+import { isObject, isRecord } from "@commontools/utils/types";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import { validateAndTransform } from "./schema.ts";
 import { type Schema } from "@commontools/builder";
@@ -303,7 +304,7 @@ function createRegularCell<T>(
       ),
     send: (newValue: Cellify<T>) => self.set(newValue),
     update: (values: Cellify<Partial<T>>) => {
-      if (typeof values !== "object" || values === null) {
+      if (!isRecord(values)) {
         throw new Error("Can't update with non-object value");
       }
       for (const [key, value] of Object.entries(values)) {
@@ -331,9 +332,8 @@ function createRegularCell<T>(
       const valuesToWrite = values.map((value: any) => {
         if (
           !isCell(value) && !isCellLink(value) && !isDoc(value) &&
-          !Array.isArray(value) && typeof value === "object" &&
-          value !== null &&
-          value[ID] === undefined && getTopFrame()
+          isObject(value) &&
+          (value as { [ID]?: unknown })[ID] === undefined && getTopFrame()
         ) {
           return {
             [ID]: getTopFrame()!.generatedIdCounter++,
@@ -498,8 +498,7 @@ function subscribeToReferencedDocs<T>(
  * @returns {boolean}
  */
 export function isCell(value: any): value is Cell<any> {
-  return typeof value === "object" && value !== null &&
-    value[isCellMarker] === true;
+  return isRecord(value) && value[isCellMarker] === true;
 }
 
 const isCellMarker = Symbol("isCell");
@@ -510,8 +509,7 @@ const isCellMarker = Symbol("isCell");
  * @returns True if the value is a Stream
  */
 export function isStream(value: any): value is Stream<any> {
-  return typeof value === "object" && value !== null &&
-    value[isStreamMarker] === true;
+  return isRecord(value) && value[isStreamMarker] === true;
 }
 
 const isStreamMarker = Symbol("isStream");
@@ -524,7 +522,6 @@ const isStreamMarker = Symbol("isStream");
  */
 export function isCellLink(value: any): value is CellLink {
   return (
-    typeof value === "object" && value !== null && isDoc(value.cell) &&
-    Array.isArray(value.path)
+    isRecord(value) && isDoc(value.cell) && Array.isArray(value.path)
   );
 }

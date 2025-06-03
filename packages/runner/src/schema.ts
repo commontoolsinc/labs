@@ -1,14 +1,10 @@
-import { isAlias, JSONSchema } from "@commontools/builder";
+import { isAlias, type JSONSchema, type JSONValue } from "@commontools/builder";
 import { type DocImpl } from "./doc.ts";
-import {
-  type CellLink,
-  createCell,
-  isCell,
-  isCellLink,
-} from "./cell.ts";
+import { type CellLink, createCell, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { resolveLinks, resolveLinkToAlias } from "./utils.ts";
 import { ContextualFlowControl } from "./index.ts";
+import { isRecord, type Mutable } from "@commontools/utils/types";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -128,13 +124,17 @@ function processDefaultValue(
     );
     // This can receive events, but at first nothing will be bound to it.
     // Normally these get created by a handler call.
-    return doc.runtime.getImmutableCell(doc.space, { $stream: true }, resolvedSchema, log);
+    return doc.runtime.getImmutableCell(
+      doc.space,
+      { $stream: true },
+      resolvedSchema,
+      log,
+    );
   }
 
   // Handle object type defaults
   if (
-    resolvedSchema?.type === "object" && typeof defaultValue === "object" &&
-    defaultValue !== null
+    resolvedSchema?.type === "object" && isRecord(defaultValue)
   ) {
     const result: Record<string, any> = {};
     const processedKeys = new Set<string>();
@@ -237,17 +237,21 @@ function processDefaultValue(
 
 function mergeDefaults(
   schema: JSONSchema | undefined,
-  defaultValue: any,
-): any {
-  const result = { ...schema };
+  defaultValue: Readonly<JSONValue>,
+): JSONSchema {
+  const result: Mutable<JSONSchema> = { ...(schema as Mutable<JSONSchema>) };
 
   // TODO(seefeld): What's the right thing to do for arrays?
   if (
     result.type === "object" &&
-    typeof result.default === "object" &&
-    typeof defaultValue === "object"
-  ) result.default = { ...result.default, ...defaultValue };
-  else result.default = defaultValue;
+    isRecord(result.default) &&
+    isRecord(defaultValue)
+  ) {
+    result.default = {
+      ...result.default,
+      ...defaultValue,
+    } as Readonly<JSONValue>;
+  } else result.default = defaultValue;
 
   return result;
 }
@@ -287,8 +291,7 @@ export function validateAndTransform(
   // anyOf gets handled here if all options are cells, so we don't read the
   // data. Below we handle the case where some options are meant to be cells.
   if (
-    typeof schema === "object" &&
-    schema !== null &&
+    isRecord(schema) &&
     ((schema!.asCell || schema!.asStream) ||
       (Array.isArray(resolvedSchema?.anyOf) &&
         resolvedSchema.anyOf.every((
@@ -413,7 +416,7 @@ export function validateAndTransform(
         rootSchema,
         seen,
       );
-    } else if (typeof value === "object" && value !== null) {
+    } else if (isRecord(value)) {
       let objectCandidates = options.filter((option) =>
         option.type === "object"
       );
@@ -468,7 +471,7 @@ export function validateAndTransform(
         if (isCell(result)) {
           log?.reads.push(...extraLog.reads);
           return result; // TODO(seefeld): Complain if it's a mix of cells and non-cells?
-        } else if (typeof result === "object" && result !== null) {
+        } else if (isRecord(result)) {
           merged = { ...merged, ...result };
           extraReads.push(...extraLog.reads);
         } else {
@@ -516,7 +519,7 @@ export function validateAndTransform(
   }
 
   if (resolvedSchema.type === "object") {
-    if (typeof value !== "object" || value === null) value = {};
+    if (!isRecord(value)) value = {};
 
     const result: Record<string, any> = {};
 

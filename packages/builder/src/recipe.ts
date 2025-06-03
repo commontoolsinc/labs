@@ -31,6 +31,7 @@ import {
   traverseValue,
 } from "./utils.ts";
 import { SchemaWithoutCell } from "./schema-to-ts.ts";
+import { isRecord } from "@commontools/utils/types";
 
 /** Declare a recipe
  *
@@ -187,13 +188,11 @@ function factoryFromRecipe<T, R>(
   // Fill in reasonable names for all cells, where possible:
 
   // First from results
-  if (typeof outputs === "object" && outputs !== null) {
-    Object.entries(outputs).forEach(([key, value]) => {
-      if (
-        isOpaqueRef(value) && !value.export().path.length &&
-        !value.export().name
-      ) {
-        value.setName(key);
+  if (isRecord(outputs)) {
+    Object.entries(outputs).forEach(([key, value]: [string, unknown]) => {
+      if (isOpaqueRef(value)) {
+        const ref = value; // Typescript needs this to avoid type errors
+        if (!ref.export().path.length && !ref.export().name) ref.setName(key);
       }
     });
   }
@@ -202,7 +201,7 @@ function factoryFromRecipe<T, R>(
   cells.forEach((cell) => {
     if (cell.export().path.length) return;
     cell.export().nodes.forEach((node: NodeRef) => {
-      if (typeof node.inputs === "object" && node.inputs !== null) {
+      if (isRecord(node.inputs)) {
         Object.entries(node.inputs).forEach(([key, input]) => {
           if (
             isOpaqueRef(input) && input.cell === cell && !cell.export().name

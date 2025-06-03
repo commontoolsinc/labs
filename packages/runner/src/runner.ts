@@ -38,6 +38,7 @@ import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import { getCellLinkOrThrow } from "./query-result-proxy.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
+import { isRecord } from "@commontools/utils/types";
 
 const moduleWrappers = {
   handler: (fn: (event: any, ...props: any[]) => any) => (props: any) =>
@@ -289,7 +290,7 @@ export class Runner implements IRunner {
       if (link && link.cell) {
         const maybePromise = this.runtime.storage.syncCell(link.cell);
         if (maybePromise instanceof Promise) promises.add(maybePromise);
-      } else if (typeof value === "object" && value !== null) {
+      } else if (isRecord(value)) {
         for (const key in value) syncAllMentionedCells(value[key]);
       }
     };

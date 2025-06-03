@@ -949,7 +949,7 @@ export function isEqualCellLink(a: CellLink, b: CellLink): boolean {
 export function containsOpaqueRef(value: unknown): boolean {
   if (isOpaqueRef(value)) return true;
   if (isCell(value) || isCellLink(value) || isDoc(value)) return false;
-  if (typeof value === "object" && value !== null) {
+  if (isRecord(value)) {
     return Object.values(value).some(containsOpaqueRef);
   }
   return false;
@@ -960,7 +960,7 @@ export function deepCopy(value: unknown): unknown {
     return deepCopy(getCellLinkOrThrow(value));
   }
   if (isDoc(value) || isCell(value)) return value;
-  if (typeof value === "object" && value !== null) {
+  if (isRecord(value)) {
     return Array.isArray(value) ? value.map(deepCopy) : Object.fromEntries(
       Object.entries(value).map(([key, value]) => [key, deepCopy(value)]),
     );
