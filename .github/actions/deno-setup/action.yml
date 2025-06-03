@@ -1,0 +1,23 @@
+name: "Deno Setup"
+description: "Setup deno"
+inputs:
+  cache:
+    description: 'Load deno dependencies from github cache'
+    default: true
+runs:
+  using: "composite"
+  steps:
+    # Keep in sync with `./tasks/check.sh` version
+    - name: 🦕 Setup Deno 2.3.5
+      uses: denoland/setup-deno@v2
+      with:
+        deno-version: "2.3.5"
+
+    - name: 📦 Cache Deno dependencies
+      if: inputs.cache 
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.deno
+          ~/.cache/deno
+        key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
