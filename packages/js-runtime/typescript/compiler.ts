@@ -1,5 +1,6 @@
 import {
   CompilerError,
+  ExecutableJs,
   isJsModule,
   isSourceMap,
   JsArtifact,
@@ -21,6 +22,8 @@ import type {
 } from "typescript";
 import * as ts from "typescript";
 import * as path from "@std/path";
+import { bundleAMDOutput } from "./bundle.ts";
+import { parseSourceMap } from "../utils.ts";
 
 const TARGET_TYPE_LIB = "es2023";
 const IS_MAP = /\.js\.map$/;
@@ -87,6 +90,14 @@ class VirtualFs implements ModuleResolutionHost {
     return true;
   }
 
+  getWrites(): Record<string, string> {
+    return this.fsWrite;
+  }
+
+  // This method was used to collect all written files
+  // and map each transpiled JS/source map with its original
+  // source. As we bundle everything up now, this is not currently needed,
+  // but keeping this here as reference until things settle here a bit.
   getCompiledModules(): Record<string, JsModule> {
     const modules = Object.create(null) as Record<
       string,
@@ -97,21 +108,7 @@ class VirtualFs implements ModuleResolutionHost {
         const root = key.slice(0, -4);
         modules[root] = modules[root] ?? {};
         try {
-          const sourceMap = JSON.parse(this.fsWrite[key]);
-          if (sourceMap && "version" in sourceMap) {
-            // TypeScript correctly generates `version` as an integer,
-            // but the `source-map-js` library's `RawSourceMap` we use
-            // elsewhere expects `version` to be a string.
-            sourceMap.version = `${sourceMap.version}`;
-          }
-          if (isSourceMap(sourceMap)) {
-            modules[root].sourceMap = sourceMap;
-          } else {
-            throw new Error(
-              "DEV: Source map type check failure: " +
-                JSON.stringify(sourceMap, null, 2),
-            );
-          }
+          modules[root].sourceMap = parseSourceMap(this.fsWrite[key]);
         } catch (e) {
           console.warn(`There was an error parsing "${key}" source map: ${e}`);
         }
@@ -196,6 +193,10 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
     return VFS_TYPES_DIR;
   }
 
+  getEnvironmentVariable(name: string): string | undefined {
+    return undefined;
+  }
+
   resolveTypeReferenceDirectiveReferences?<T extends FileReference | string>(
     typeDirectiveReferences: readonly T[],
     containingFile: string,
@@ -258,7 +259,13 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
 }
 
 export interface TypeScriptCompilerOptions {
+  // Filename for the output JS, used internally
+  // with source maps.
+  filename?: string;
+  // Skip type checking.
   noCheck?: boolean;
+  // Extra scripts to inject into the output bundle.
+  injectedScript?: string;
 }
 
 export class TypeScriptCompiler {
@@ -274,11 +281,15 @@ export class TypeScriptCompiler {
   // Artifact files must be TypeScriptModuleSource
   compile(
     input: TsArtifact,
-    options: TypeScriptCompilerOptions = {},
-  ): JsArtifact {
+    inputOptions: TypeScriptCompilerOptions = {},
+  ): ExecutableJs {
+    const filename = inputOptions.filename ?? "out.js";
+    const noCheck = inputOptions.noCheck ?? false;
+    const injectedScript = inputOptions.injectedScript;
+
     validateSource(input);
     const sourceNames = input.files.map(({ name }) => name);
-    const tsOptions = this.getCompilerOptions();
+    const tsOptions = this.getCompilerOptions({ filename });
     const host = new TypeScriptHost(
       input,
       this.typeLibs,
@@ -299,8 +310,14 @@ export class TypeScriptCompiler {
     //  `Some inputs were not converted to source files.`,
     //);
 
+    let sourceEntry;
     for (const sourceFile of sourceFiles) {
-      if (!options.noCheck) {
+      if (sourceFile.fileName === input.entry) {
+        assert(!sourceEntry, "Source entry not yet set.");
+        sourceEntry = sourceFile;
+      }
+
+      if (!noCheck) {
         // check types
         const diagnostics = program.getSemanticDiagnostics(sourceFile);
         checkDiagnostics(diagnostics);
@@ -310,33 +327,71 @@ export class TypeScriptCompiler {
       checkDiagnostics(diagnostics);
     }
 
-    const { diagnostics } = program.emit();
+    if (!sourceEntry) {
+      throw new Error("Missing source entry.");
+    }
+
+    const { diagnostics, emittedFiles, emitSkipped } = program.emit(
+      sourceEntry,
+    );
     checkDiagnostics(diagnostics);
 
+    if (emitSkipped) {
+      throw new Error("Emit skipped. Check diagnostics.");
+    }
+
+    // Get written files, should be a JS and source map.
+    const writes = host.getWrites();
+
+    // TypeScript compiles AMD modules from "/main.ts" to "main".
+    // Derive the entry module name here.
+    const match = input.entry.match(/\/([^\.]*)/);
+    if (!match) {
+      throw new Error("Could not derive entry module name");
+    }
+    const entryModule = match[1];
+    const source = writes[filename];
+    const sourceMap = parseSourceMap(writes[`${filename}.map`]);
+    const bundled = bundleAMDOutput({
+      entryModule,
+      source,
+      sourceMap,
+      filename,
+      injectedScript,
+    });
     return {
-      entry: input.entry,
-      modules: host.getCompiledModules(),
+      js: bundled,
+      filename,
+      sourceMap,
     };
   }
 
-  private getCompilerOptions(): CompilerOptions {
+  private getCompilerOptions(
+    options: TypeScriptCompilerOptions,
+  ): CompilerOptions {
     return {
       declarations: true,
-      module: ts.ModuleKind.CommonJS,
+      module: ts.ModuleKind.AMD,
       target: ts.ScriptTarget.ES2023,
       // `lib` should autoapply, but we need to manage default libraries since
       // we are running outside of node. Ensure this lib matches `target`.
       lib: [TARGET_TYPE_LIB],
       strict: true,
-      isolatedModules: true,
+      isolatedModules: false,
       jsx: ts.JsxEmit.React,
       jsxFactory: "h",
       jsxFragmentFactory: "h.fragment",
       esModuleInterop: true,
-      sourceMap: true, // Enable source map generation
-      inlineSources: true, // We want the source map to include the original TypeScript files
-      inlineSourceMap: false, // Generate separate source map instead of inline
-      allowImportingTsExtensions: true,
+      outFile: options.filename,
+      noEmitOnError: true,
+      // Dynamic import/requires should not be added.
+      noResolve: true,
+      // Enable source map generation.
+      sourceMap: true,
+      // We want the source map to include the original TypeScript files
+      inlineSources: true,
+      // Generate separate source map instead of inline
+      inlineSourceMap: false,
     };
   }
 }

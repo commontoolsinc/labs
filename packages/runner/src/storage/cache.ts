@@ -652,7 +652,7 @@ export class Replica {
       // transaction
       const facts: Fact[] = [];
       for (const { the, of, is } of changes) {
-        const fact = limitFactState(this.get({ the, of }));
+        const fact = this.get({ the, of });
         // If `is` is `undefined` we want to retract the fact.
         if (is === undefined) {
           // If local `is` in the local state is also `undefined` desired state
@@ -1202,17 +1202,4 @@ const getSchema = (change: Assert | Retract): SchemaContext | undefined => {
     return { schema: schema, rootSchema: schema };
   }
   return undefined;
-};
-
-// Remove any non-state fields from fact
-const limitFactState = (fact: State | undefined): State | undefined => {
-  if (fact === undefined) {
-    return undefined;
-  } else if (fact?.is !== undefined && fact?.cause !== undefined) {
-    return { of: fact.of, the: fact.the, is: fact.is, cause: fact.cause };
-  } else if (fact?.cause !== undefined) {
-    return { of: fact.of, the: fact.the, cause: fact.cause };
-  } else {
-    return { of: fact.of, the: fact.the };
-  }
 };

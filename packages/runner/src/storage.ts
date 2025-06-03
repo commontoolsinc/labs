@@ -411,8 +411,8 @@ export class Storage implements IStorage {
             doc.space,
             value.cell,
             true,
-            value.schema
-              ? { schema: value.schema, rootSchema: value.schema }
+            valueSchema
+              ? { schema: valueSchema, rootSchema: valueSchema }
               : undefined,
           );
           dependencies.add(dependency);

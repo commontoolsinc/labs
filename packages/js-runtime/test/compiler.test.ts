@@ -42,32 +42,27 @@ const TESTS: TestDef[] = [
 
 describe("TypeScriptCompiler", () => {
   it("compiles a filesystem graph", async () => {
-    const files = {
+    const artifact = unrollFiles({
       "/main.tsx":
         "import { sub } from './math/subtract.ts';export default sub(10,2)",
       "/utils.ts": "export const add=(x:number,y:number):number =>x+y;",
       "/math/subtract.ts":
         "import { add } from '../utils.ts';export const sub = (x:number,y:number)=>add(x,y*-1)",
-    };
+    });
     const compiler = new TypeScriptCompiler(await getTypeLibs());
-    const compiled = compiler.compile(unrollFiles(files));
-    expect(compiled.modules["/main.js"].originalFilename).toBe("/main.tsx");
-    expect(compiled.modules["/utils.js"].originalFilename).toBe("/utils.ts");
-    expect(compiled.modules["/math/subtract.js"].originalFilename).toBe(
-      "/math/subtract.ts",
-    );
+    const compiled = compiler.compile(artifact, { filename: "test.js" });
+    expect(compiled.filename).toBe("test.js");
+    expect(compiled.sourceMap).toBeDefined();
   });
 
   it("Typechecks a runtime dependency, providing typedefs", async () => {
-    const files = {
+    const artifact = unrollFiles({
       "/main.tsx": "import { add } from '@std/math';export default add(10,2)",
       "@std/math.d.ts":
         "export declare function add(x: number, y: number): number;",
-    };
+    });
     const compiler = new TypeScriptCompiler(await getTypeLibs());
-    const compiled = compiler.compile(unrollFiles(files));
-    expect(compiled.modules["/main.js"].originalFilename).toBe("/main.tsx");
-    expect(Object.keys(compiled.modules).length).toBe(1);
+    compiler.compile(artifact);
   });
 
   for (const { name, source, expectedError, ...options } of TESTS) {

@@ -1,20 +1,12 @@
-import * as path from "@std/path";
-import { populateArtifact } from "./utils.ts";
-import { type Command, CommandType, type RunCommand } from "./interface.ts";
+import { populateArtifact, relativeToAbsolute } from "./utils.ts";
+import {
+  Args,
+  type Command,
+  CommandType,
+  type RunCommand,
+} from "./interface.ts";
 import { Processor } from "./processor.ts";
-
-type CLIArg = "verbose" | "help" | "no-run" | "bundle";
-type CLIArgs = Record<CLIArg, boolean>;
-
-const CLIFlags: Map<string, CLIArg> = new Map([
-  ["-v", "verbose"],
-  ["--verbose", "verbose"],
-  ["-h", "help"],
-  ["--h", "help"],
-  ["--help", "help"],
-  ["--bundle", "bundle"],
-  ["--no-run", "no-run"],
-]);
+import { parseArgs } from "@std/cli/parse-args";
 
 export class RuntimeCLI {
   private cwd: string;
@@ -25,32 +17,19 @@ export class RuntimeCLI {
   }
 
   async parse(input: string[]): Promise<Command> {
-    type CLIArgsExtra = CLIArgs & {
-      others?: string[];
-    };
-    const args = input.reduce((args, arg) => {
-      const match = CLIFlags.get(arg);
-      if (match) {
-        args[match] = true;
-      } else {
-        if (!args.others) {
-          args.others = [];
-        }
-        args.others.push(arg);
-      }
-      return args;
-    }, {} as CLIArgsExtra);
-
+    const args = parseCLIArgs(this.cwd, input);
     if (args.help) {
       return { type: CommandType.Help };
     }
 
     const runCommand: RunCommand = {
       type: CommandType.Run,
-      source: await populateArtifact(this.cwd, args.others ?? []),
+      source: await populateArtifact(args.files),
     };
-    if (args.bundle) runCommand.bundle = true;
-    if (args.verbose) runCommand.verbose = true;
+    if (args.noCheck) runCommand.noCheck = args.noCheck;
+    if (args.noRun) runCommand.noRun = args.noRun;
+    if (args.verbose) runCommand.verbose = args.verbose;
+    if (args.out) runCommand.out = args.out;
     return runCommand;
   }
 
@@ -68,4 +47,29 @@ export class RuntimeCLI {
       }
     }
   }
+}
+
+export function parseCLIArgs(cwd: string, input: string[]): Args {
+  const parsed = parseArgs(input, {
+    boolean: [
+      "help",
+      "verbose",
+      "no-run",
+      "no-check",
+    ],
+    string: [
+      "out",
+    ],
+  });
+
+  return {
+    files: (parsed["_"] ?? []).map((filepath) =>
+      relativeToAbsolute(cwd, String(filepath))
+    ),
+    help: !!parsed.help,
+    verbose: !!parsed.verbose,
+    noCheck: !!parsed["no-check"],
+    noRun: !!parsed["no-run"],
+    out: parsed.out ? relativeToAbsolute(cwd, parsed.out) : undefined,
+  };
 }

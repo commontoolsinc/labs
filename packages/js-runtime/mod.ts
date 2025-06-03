@@ -9,7 +9,6 @@ export {
   TypeScriptCompiler,
   type TypeScriptCompilerOptions,
 } from "./typescript/mod.ts";
-export { bundle } from "./bundler/bundler.ts";
 export {
   UnsafeEvalIsolate,
   UnsafeEvalJsValue,

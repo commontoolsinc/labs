@@ -1,16 +1,19 @@
-import { ExecutableJs, JsIsolate, JsRuntime } from "./interface.ts";
+import { ExecutableJs, JsIsolate, JsRuntime, SourceMap } from "./interface.ts";
 import { SourceMapParser } from "./source-map.ts";
 
 export class UnsafeEvalJsValue {
+  private internals: IsolateInternals;
   private value: any;
-  constructor(value: any) {
+  constructor(internals: IsolateInternals, value: any) {
+    this.internals = internals;
     this.value = value;
   }
   invoke(...args: any[]): UnsafeEvalJsValue {
     if (typeof this.value !== "function") {
       throw new Error("Cannot invoke non function");
     }
-    return new UnsafeEvalJsValue(this.value.apply(null, args));
+    const result = this.internals.exec(() => this.value.apply(null, args));
+    return new UnsafeEvalJsValue(this.internals, result);
   }
   inner(): any {
     return this.value;
@@ -26,28 +29,42 @@ export class UnsafeEvalJsValue {
   }
 }
 
-export class UnsafeEvalIsolate implements JsIsolate {
+class IsolateInternals {
   private sourceMaps = new SourceMapParser();
+
+  exec<T>(callback: () => T) {
+    try {
+      return callback();
+    } catch (e: any) {
+      const error = e as Error;
+      if (error.stack) {
+        error.stack = this.sourceMaps.parse(error.stack);
+        throw error;
+      }
+      throw error;
+    }
+  }
+
+  loadSourceMap(filename: string, sourceMap: SourceMap) {
+    this.sourceMaps.load(filename, sourceMap);
+  }
+}
+
+export class UnsafeEvalIsolate implements JsIsolate {
+  private internals = new IsolateInternals();
   execute(
     input: string | ExecutableJs,
   ): UnsafeEvalJsValue {
     const { js, filename, sourceMap } = typeof input === "string"
-      ? { js: input, filename: "NO-NAME.tsx" }
+      ? { js: input, filename: "NO-NAME.js" }
       : input;
 
     if (filename && sourceMap) {
-      this.sourceMaps.load(filename, sourceMap);
+      this.internals.loadSourceMap(filename, sourceMap);
     }
-    try {
-      return new UnsafeEvalJsValue(eval(js));
-    } catch (e: any) {
-      const error = e as Error;
-      if (error.stack) {
-        const result = this.sourceMaps.parse(error.stack);
-        throw new Error(result);
-      }
-      throw error;
-    }
+
+    const result = this.internals.exec(() => eval(js));
+    return new UnsafeEvalJsValue(this.internals, result);
   }
 }
 

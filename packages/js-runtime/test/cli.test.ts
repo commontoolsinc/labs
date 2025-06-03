@@ -1,7 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { bundle, getTypeLibs, TypeScriptCompiler } from "../mod.ts";
-import { unrollFiles } from "./utils.ts";
 import { decode } from "@commontools/utils/encoding";
 import { join } from "@std/path";
 
@@ -11,9 +9,14 @@ function processStream(stream: Uint8Array): string[] {
 
 describe("CLI", () => {
   it("Executes a package", async () => {
-    const { code, stdout, stderr }= await new Deno.Command(Deno.execPath(), {
+    const { code, stdout, stderr } = await new Deno.Command(Deno.execPath(), {
       cwd: join(import.meta.dirname!, ".."),
-      args: ["task", "run", "test/cli-fixtures/index.tsx", "test/cli-fixtures/pow.ts"]
+      args: [
+        "task",
+        "run",
+        "test/cli-fixtures/index.tsx",
+        "test/cli-fixtures/pow.ts",
+      ],
     }).output();
 
     const out = processStream(stdout);

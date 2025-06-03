@@ -317,59 +317,102 @@ function topologicalSort(
   const graph = new Map<Action, Set<Action>>();
   const inDegree = new Map<Action, number>();
 
+  // First pass: identify relevant actions
   for (const action of actions) {
     const { reads } = dependencies.get(action)!;
+    // TODO(seefeld): Keep track of affected paths
     if (reads.length === 0) {
-      // An action with no reads can be manually added to `pending`, which happens only once on `schedule`.
+      // Actions with no dependencies are always relevant. Note that they must
+      // be manually added to `pending`, which happens only once on `schedule`.
       relevantActions.add(action);
     } else if (reads.some(({ cell: doc }) => dirty.has(doc))) {
       relevantActions.add(action);
     }
   }
 
+  // Second pass: add downstream actions
+  let size;
+  do {
+    size = relevantActions.size;
+    for (const action of actions) {
+      if (!relevantActions.has(action)) {
+        const { writes } = dependencies.get(action)!;
+        for (const write of writes) {
+          if (
+            Array.from(relevantActions).some((relevantAction) =>
+              dependencies
+                .get(relevantAction)!
+                .reads.some(
+                  ({ cell, path }) =>
+                    cell === write.cell && pathAffected(write.path, path),
+                )
+            )
+          ) {
+            relevantActions.add(action);
+            break;
+          }
+        }
+      }
+    }
+  } while (relevantActions.size > size);
+
+  // Initialize graph and inDegree for relevant actions
   for (const action of relevantActions) {
     graph.set(action, new Set());
     inDegree.set(action, 0);
   }
 
+  // Build the graph
   for (const actionA of relevantActions) {
-    const depsA = dependencies.get(actionA)!;
-    for (const actionB of relevantActions) {
-      if (actionA === actionB) continue;
-      const depsB = dependencies.get(actionB)!;
-
-      const hasConflict = depsA.writes.some((writeLink) =>
-        depsB.reads.some((readLink) =>
-          writeLink.cell === readLink.cell &&
-          (writeLink.path.length <= readLink.path.length
-            ? writeLink.path.every((segment, i) => readLink.path[i] === segment)
-            : readLink.path.every((segment, i) =>
-              writeLink.path[i] === segment
-            ))
-        )
-      );
-
-      if (hasConflict) {
-        graph.get(actionA)!.add(actionB);
-        inDegree.set(actionB, inDegree.get(actionB)! + 1);
+    const { writes } = dependencies.get(actionA)!;
+    const graphA = graph.get(actionA)!;
+    for (const write of writes) {
+      for (const actionB of relevantActions) {
+        if (actionA !== actionB && !graphA.has(actionB)) {
+          const { reads } = dependencies.get(actionB)!;
+          if (
+            reads.some(({ cell, path }) =>
+              cell === write.cell && pathAffected(write.path, path)
+            )
+          ) {
+            graphA.add(actionB);
+            inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
+          }
+        }
       }
     }
   }
 
+  // Perform topological sort with cycle handling
   const queue: Action[] = [];
-  for (const [action, degree] of inDegree) {
-    if (degree === 0) queue.push(action);
+  const result: Action[] = [];
+  const visited = new Set<Action>();
+
+  // Add all actions with no dependencies (in-degree 0) to the queue
+  for (const [action, degree] of inDegree.entries()) {
+    if (degree === 0) {
+      queue.push(action);
+    }
   }
 
-  const result: Action[] = [];
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    result.push(current);
+  while (queue.length > 0 || visited.size < relevantActions.size) {
+    if (queue.length === 0) {
+      // Handle cycle: choose an unvisited node with the lowest in-degree
+      const unvisitedAction = Array.from(relevantActions)
+        .filter((action) => !visited.has(action))
+        .reduce((a, b) => (inDegree.get(a)! < inDegree.get(b)! ? a : b));
+      queue.push(unvisitedAction);
+    }
 
-    for (const neighbor of graph.get(current)!) {
-      const newDegree = inDegree.get(neighbor)! - 1;
-      inDegree.set(neighbor, newDegree);
-      if (newDegree === 0) {
+    const current = queue.shift()!;
+    if (visited.has(current)) continue;
+
+    result.push(current);
+    visited.add(current);
+
+    for (const neighbor of graph.get(current) || []) {
+      inDegree.set(neighbor, inDegree.get(neighbor)! - 1);
+      if (inDegree.get(neighbor) === 0) {
         queue.push(neighbor);
       }
     }
