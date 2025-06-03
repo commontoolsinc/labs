@@ -310,7 +310,7 @@ export class Storage implements IStorage {
     // Traverse the value and for each doc reference, make sure it's persisted.
     // This is done recursively.
     const traverse = (
-      value: any,
+      value: Readonly<any>,
       path: PropertyKey[],
       processStatic: boolean = false,
     ): any => {
@@ -398,12 +398,9 @@ export class Storage implements IStorage {
           Array.isArray(value.path)
         ) {
           // If we had a classification earlier, carry it to the dependent object
-          if (label !== undefined) {
-            value.schema = this.runtime.cfc.schemaWithLub(
-              value.schema ?? {},
-              label,
-            );
-          }
+          const valueSchema = (label !== undefined)
+            ? this.runtime.cfc.schemaWithLub(value.schema ?? {}, label)
+            : value.schema;
           // If the doc is not yet loaded, load it. As it's referenced in
           // something that came from storage, the id is known in storage and so
           // we have to wait for it to load. Hence true as second parameter.

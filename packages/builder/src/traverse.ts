@@ -29,7 +29,7 @@ export class CycleTracker<K> {
 }
 // TODO(@ubik2): I could restore tracking the completed objects here
 export type PointerCycleTracker = CycleTracker<
-  JSONValue
+  Readonly<JSONValue>
 >;
 
 type JSONCellLink = { cell: { "/": string }; path: string[] };
@@ -110,14 +110,14 @@ export interface ObjectTraverser<K, V> {
 }
 
 export abstract class BaseObjectTraverser<K, S>
-  implements ObjectTraverser<K, OptJSONValue> {
+  implements ObjectTraverser<K, Readonly<OptJSONValue>> {
   constructor(
-    protected helper: ObjectStorageManager<K, S, JSONValue>,
+    protected helper: ObjectStorageManager<K, S, Readonly<JSONValue>>,
   ) {}
   abstract traverse(
     doc: K,
-    docRoot: JSONValue,
-    value: JSONValue,
+    docRoot: Readonly<JSONValue>,
+    value: Readonly<JSONValue>,
   ): OptJSONValue;
 
   /**
@@ -133,8 +133,8 @@ export abstract class BaseObjectTraverser<K, S>
    */
   protected traverseDAG(
     doc: K,
-    docRoot: JSONValue,
-    value: JSONValue,
+    docRoot: Readonly<JSONValue>,
+    value: Readonly<JSONValue>,
     tracker: PointerCycleTracker,
   ): JSONValue | undefined {
     if (isPrimitive(value)) {
@@ -195,8 +195,8 @@ export class BasicObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
 
   traverse(
     doc: K,
-    docRoot: JSONValue,
-    value: JSONValue,
+    docRoot: Readonly<JSONValue>,
+    value: Readonly<JSONValue>,
   ): JSONValue | undefined {
     const tracker = new CycleTracker<JSONValue>();
     return this.traverseDAG(
@@ -222,11 +222,11 @@ export class BasicObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
  * @returns [finalDoc, finalDocRoot, valueAtPath] - Final document, its root, and the value at path (or undefined)
  */
 export function getAtPath<K, S>(
-  traverser: ObjectStorageManager<K, S, JSONValue>,
+  traverser: ObjectStorageManager<K, S, Readonly<JSONValue>>,
   doc: K,
-  docRoot: JSONValue,
-  fact: JSONValue | undefined,
-  path: string[],
+  docRoot: Readonly<JSONValue>,
+  fact: Readonly<JSONValue> | undefined,
+  path: readonly string[],
   tracker: PointerCycleTracker,
 ): [K, JSONValue, JSONValue | undefined] {
   if (isPointer(fact)) {
@@ -234,7 +234,7 @@ export function getAtPath<K, S>(
       traverser,
       doc,
       docRoot,
-      fact as JSONObject,
+      fact as Readonly<JSONObject>,
       tracker,
     );
   }
@@ -246,12 +246,12 @@ export function getAtPath<K, S>(
         traverser,
         doc,
         docRoot,
-        cursor as JSONObject,
+        cursor as Readonly<JSONObject>,
         tracker,
       );
-    } else if (isObject(cursor) && part in (cursor as JSONObject)) {
-      const cursorObj = cursor as JSONObject;
-      cursor = cursorObj[part] as JSONValue;
+    } else if (isObject(cursor) && part in (cursor as Readonly<JSONObject>)) {
+      const cursorObj = cursor as Readonly<JSONObject>;
+      cursor = cursorObj[part] as Readonly<JSONValue>;
     } else if (Array.isArray(cursor)) {
       cursor = elementAt(cursor, part);
     } else {
@@ -274,18 +274,18 @@ export function getAtPath<K, S>(
  * @returns [targetDoc, targetDocRoot, resolvedValue] - Target document, its root, and the resolved value (or undefined)
  */
 function followPointer<K, S>(
-  traverser: ObjectStorageManager<K, S, JSONValue>,
+  traverser: ObjectStorageManager<K, S, Readonly<JSONValue>>,
   doc: K,
-  docRoot: JSONValue,
-  fact: JSONObject,
+  docRoot: Readonly<JSONValue>,
+  fact: Readonly<JSONObject>,
   tracker: PointerCycleTracker,
-): [K, JSONValue, JSONValue | undefined] {
+): [K, Readonly<JSONValue>, Readonly<JSONValue> | undefined] {
   if (!tracker.enter(fact)) {
     console.error("Cycle Detected!");
     return [doc, docRoot, undefined];
   }
   try {
-    const cellTarget = getPointerInfo(fact as JSONObject);
+    const cellTarget = getPointerInfo(fact as Readonly<JSONObject>);
     const target = (cellTarget.cellTarget !== undefined)
       ? traverser.getTarget(cellTarget)
       : doc;
@@ -313,7 +313,7 @@ function followPointer<K, S>(
       // that's what our schema is relative to.
       [targetDoc, targetDocRoot] = [
         target,
-        (valueEntry.value as JSONObject)["value"],
+        (valueEntry.value as Readonly<JSONObject>)["value"],
       ];
     }
     // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
@@ -339,7 +339,7 @@ function followPointer<K, S>(
  *   - path: An array of string segments representing the path to the target
  *   - cellTarget: The target cell identifier as a string, or undefined if it refers to the current document
  */
-export function getPointerInfo(value: JSONObject): CellTarget {
+export function getPointerInfo(value: Readonly<JSONObject>): CellTarget {
   if (isAlias(value)) {
     if (isObject(value.$alias.cell) && "/" in value.$alias.cell) {
       return {
@@ -358,7 +358,7 @@ export function getPointerInfo(value: JSONObject): CellTarget {
   return { path: [], cellTarget: undefined };
 }
 
-export function isPointer(value: any): boolean {
+export function isPointer(value: unknown): boolean {
   return (isAlias(value) || isJSONCellLink(value));
 }
 
@@ -368,20 +368,23 @@ export function isPointer(value: any): boolean {
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-function isJSONCellLink(value: any): value is JSONCellLink {
+function isJSONCellLink(value: unknown): value is JSONCellLink {
   return (isObject(value) && "cell" in value && isObject(value.cell) &&
     "/" in value.cell && "path" in value &&
     Array.isArray(value.path));
 }
 
-export function indexFromPath(array: unknown[], path: string): any {
+export function indexFromPath(
+  array: unknown[],
+  path: string,
+): number | undefined {
   const number = new Number(path).valueOf();
   return (Number.isInteger(number) && number >= 0 && number < array.length)
     ? number
     : undefined;
 }
 
-export function elementAt(array: unknown[], path: string): any {
+export function elementAt<T>(array: T[], path: string): T | undefined {
   const index = indexFromPath(array, path);
   return (index === undefined) ? undefined : array[index];
 }
@@ -406,8 +409,8 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
 
   traverse(
     doc: K,
-    docRoot: JSONValue,
-    value: JSONValue,
+    docRoot: Readonly<JSONValue>,
+    value: Readonly<JSONValue>,
   ): OptJSONValue {
     return this.traverseWithSchema(
       doc,
@@ -419,8 +422,8 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
 
   traverseWithSchema(
     doc: K,
-    docRoot: JSONValue,
-    value: JSONValue,
+    docRoot: Readonly<JSONValue>,
+    value: Readonly<JSONValue>,
     schema: JSONSchema | boolean,
   ): OptJSONValue {
     if (ContextualFlowControl.isTrueSchema(schema)) {
@@ -445,7 +448,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       }
       schema = this.rootSchema;
     }
-    const schemaObj = schema as JSONObject;
+    const schemaObj = schema as Readonly<JSONObject>;
     if (value === null) {
       return ("type" in schemaObj && schemaObj["type"] == "null")
         ? value
@@ -487,7 +490,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
             this.traverseObjectWithSchema(
               doc,
               docRoot,
-              value as JSONObject,
+              value as Readonly<JSONObject>,
               schemaObj,
             );
           } finally {
@@ -502,8 +505,8 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
 
   private traverseArrayWithSchema(
     doc: K,
-    docRoot: JSONValue,
-    value: JSONValue[],
+    docRoot: Readonly<JSONValue>,
+    value: readonly Readonly<JSONValue>[],
     schema: JSONSchema,
   ): OptJSONValue {
     const arrayObj = [];
@@ -525,8 +528,8 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
 
   private traverseObjectWithSchema(
     doc: K,
-    docRoot: JSONValue,
-    value: JSONObject,
+    docRoot: Readonly<JSONValue>,
+    value: Readonly<JSONObject>,
     schema: JSONSchema,
   ): OptJSONValue {
     const filteredObj: Record<string, OptJSONValue> = {};
@@ -565,8 +568,8 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
 
   private traversePointerWithSchema(
     doc: K,
-    docRoot: JSONValue,
-    value: JSONObject,
+    docRoot: Readonly<JSONValue>,
+    value: Readonly<JSONObject>,
     schema: JSONSchema,
   ): OptJSONValue {
     const [newDoc, newDocRoot, newObj] = getAtPath(
