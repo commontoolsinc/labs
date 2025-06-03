@@ -1,4 +1,3 @@
-import "./commands.css";
 import {
   addGithubRecipe,
   castSpellAsCharm,
