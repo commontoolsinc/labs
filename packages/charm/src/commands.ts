@@ -1,4 +1,4 @@
-import { createJsonSchema, NAME, type JSONSchema } from "@commontools/builder";
+import { createJsonSchema, type JSONSchema, NAME } from "@commontools/builder";
 import { DEFAULT_MODEL_NAME, fixRecipePrompt } from "@commontools/llm";
 import { Cell } from "@commontools/runner";
 

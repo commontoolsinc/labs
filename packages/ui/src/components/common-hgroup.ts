@@ -34,7 +34,9 @@ export class CommonHgroupElement extends LitElement {
     return html`
       <hgroup class="hgroup">
         <div class="hgroup-heading" part="heading"><slot></slot></div>
-        <div class="hgroup-subheading" part="subheading"><slot name="subheading"></slot></div>
+        <div class="hgroup-subheading" part="subheading">
+          <slot name="subheading"></slot>
+        </div>
       </hgroup>
     `;
   }

@@ -63,13 +63,12 @@ export class CommonUniboxElement extends LitElement {
           class="unibox-input"
           .placeholder="${this.placeholder}"
           .value="${this.value}"
-          @input=${this.handleChange}
-          @keydown=${this.handleEnter}
+          @input="${this.handleChange}"
+          @keydown="${this.handleEnter}"
         >
         </common-input>
-        <common-button class="unibox-button" @click=${this.handleClick}
-          >${this.label}</common-button
-        >
+        <common-button class="unibox-button" @click="${this.handleClick}"
+        >${this.label}</common-button>
       </div>
     `;
   }

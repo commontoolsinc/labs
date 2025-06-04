@@ -1,4 +1,4 @@
-import { beforeEach, describe, it, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { h, render, VNode } from "../src/index.ts";
 import { lift, recipe, str, UI } from "@commontools/builder";
 import { Runtime } from "@commontools/runner";
@@ -23,7 +23,7 @@ describe("recipes with HTML", () => {
 
     // Set up runtime
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      storageUrl: "volatile://",
     });
   });
 
@@ -40,7 +40,11 @@ describe("recipes with HTML", () => {
     );
 
     const space = "test";
-    const resultCell = runtime.documentMap.getDoc(undefined, "simple-ui-result", space);
+    const resultCell = runtime.documentMap.getDoc(
+      undefined,
+      "simple-ui-result",
+      space,
+    );
     const result = runtime.runner.run(simpleRecipe, { value: 5 }, resultCell);
 
     await runtime.idle();
@@ -82,7 +86,11 @@ describe("recipes with HTML", () => {
     });
 
     const space = "test";
-    const resultCell = runtime.documentMap.getDoc(undefined, "todo-list-result", space);
+    const resultCell = runtime.documentMap.getDoc(
+      undefined,
+      "todo-list-result",
+      space,
+    );
     const result = runtime.runner.run(todoList, {
       title: "test",
       items: [
@@ -122,7 +130,11 @@ describe("recipes with HTML", () => {
     });
 
     const space = "test";
-    const resultCell = runtime.documentMap.getDoc(undefined, "nested-todo-result", space);
+    const resultCell = runtime.documentMap.getDoc(
+      undefined,
+      "nested-todo-result",
+      space,
+    );
     const result = runtime.runner.run(todoList, {
       title: { name: "test" },
       items: [
@@ -147,7 +159,11 @@ describe("recipes with HTML", () => {
     });
 
     const space = "test";
-    const resultCell = runtime.documentMap.getDoc(undefined, "str-recipe-result", space);
+    const resultCell = runtime.documentMap.getDoc(
+      undefined,
+      "str-recipe-result",
+      space,
+    );
     const result = runtime.runner.run(strRecipe, { name: "world" }, resultCell);
 
     await runtime.idle();
@@ -186,7 +202,11 @@ describe("recipes with HTML", () => {
     }));
 
     const space = "test";
-    const resultCell = runtime.documentMap.getDoc(undefined, "nested-map-result", space);
+    const resultCell = runtime.documentMap.getDoc(
+      undefined,
+      "nested-map-result",
+      space,
+    );
     const result = runtime.runner.run(nestedMapRecipe, data, resultCell);
 
     await runtime.idle();

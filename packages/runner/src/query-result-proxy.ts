@@ -199,7 +199,10 @@ export function createQueryResultProxy<T>(
           ) {
             log?.writes.push({ cell: valueCell, path: [...valuePath, i] });
             if (valueCell.runtime) {
-              valueCell.runtime.scheduler.queueEvent({ cell: valueCell, path: [...valuePath, i] }, undefined);
+              valueCell.runtime.scheduler.queueEvent({
+                cell: valueCell,
+                path: [...valuePath, i],
+              }, undefined);
             }
           }
         }

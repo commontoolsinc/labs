@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { scrub } from "../src/iterate.ts";
 import { Runtime } from "@commontools/runner";
 import { JSONSchema } from "@commontools/builder";
@@ -9,7 +9,7 @@ describe("scrub function", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      storageUrl: "volatile://",
     });
   });
 
@@ -89,7 +89,11 @@ describe("scrub function", () => {
       type: "string",
     };
 
-    const cellWithStringSchema = runtime.getImmutableCell("test", "test value", schema);
+    const cellWithStringSchema = runtime.getImmutableCell(
+      "test",
+      "test value",
+      schema,
+    );
 
     const result = scrub(cellWithStringSchema);
 

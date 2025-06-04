@@ -68,9 +68,11 @@ export class CommonVstackElement extends LitElement {
   ];
 
   override render() {
-    return html` <div class="stack">
-      <slot></slot>
-    </div>`;
+    return html`
+      <div class="stack">
+        <slot></slot>
+      </div>
+    `;
   }
 }
 globalThis.customElements.define("common-vstack", CommonVstackElement);

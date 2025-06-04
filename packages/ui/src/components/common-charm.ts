@@ -42,7 +42,9 @@ export class CommonCharmElement extends LitElement {
   }
 
   override render() {
-    return html`<slot></slot>`;
+    return html`
+      <slot></slot>
+    `;
   }
 }
 

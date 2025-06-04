@@ -21,7 +21,7 @@ import { useEffect, useState } from "react";
 export default function Shell() {
   const { charmId } = useParams<CharmRouteParams>();
   const { session } = useAuthentication();
-  
+
   if (!session) {
     return <AuthenticationView />;
   }
@@ -38,7 +38,7 @@ function ShellContent({ charmId }: { charmId?: string }) {
   const { charmManager } = useCharmManager();
   const { session } = useAuthentication();
   // We don't need a custom toggle handler - PrimaryFeedbackActions handles its own state
-  
+
   useGlobalActions();
 
   return (
@@ -56,8 +56,10 @@ function ShellContent({ charmId }: { charmId?: string }) {
           <CommandCenter />
           {charm && charmManager && (() => {
             const traceId = charmManager.getLLMTrace(charm);
-            return traceId && typeof traceId === 'string' && traceId.trim() !== '' ? 
-              <PrimaryFeedbackActions llmRequestId={traceId} /> : null;
+            return traceId && typeof traceId === "string" &&
+                traceId.trim() !== ""
+              ? <PrimaryFeedbackActions llmRequestId={traceId} />
+              : null;
           })()}
           <ToggleableNetworkInspector
             visible={localStorage.getItem("networkInspectorVisible") ===

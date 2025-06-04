@@ -12,7 +12,9 @@ export class CommonScreenElement extends LitElement {
   `;
 
   override render() {
-    return html`<slot></slot>`;
+    return html`
+      <slot></slot>
+    `;
   }
 }
 globalThis.customElements.define("common-screen", CommonScreenElement);

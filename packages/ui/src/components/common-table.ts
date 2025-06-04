@@ -61,7 +61,9 @@ export class CommonCardElement extends LitElement {
 
   override render() {
     if (!this.item) {
-      return html`<div>Missing data</div>`;
+      return html`
+        <div>Missing data</div>
+      `;
     }
 
     if (this.schema) {
@@ -70,39 +72,34 @@ export class CommonCardElement extends LitElement {
       const selfEntry = entries.find(([key]) => key === "self");
 
       return html`
-        ${
-        nonSelfEntries.map(
+        ${nonSelfEntries.map(
           ([key, schema]) =>
             html`
-            <div class="field">
-              <div class="label">${key.replace(/([A-Z])/g, " $1").trim()}</div>
-              <div class="value">${
-              this.formatValue(this.item[key], schema, key)
-            }</div>
-            </div>
-          `,
-        )
-      }
-        ${
-        selfEntry
-          ? html`
               <div class="field">
-                <div class="label">${
-            selfEntry[0].replace(/([A-Z])/g, " $1").trim()
-          }</div>
-                <div class="value">
-                  ${
-            this.formatValue(
+                <div class="label">${key.replace(/([A-Z])/g, " $1")
+                .trim()}</div>
+                <div class="value">${this.formatValue(
+                this.item[key],
+                schema,
+                key,
+              )}</div>
+              </div>
+            `,
+        )} ${selfEntry
+          ? html`
+            <div class="field">
+              <div class="label">${selfEntry[0].replace(/([A-Z])/g, " $1")
+              .trim()}</div>
+              <div class="value">
+                ${this.formatValue(
               this.item[selfEntry[0]],
               selfEntry[1],
               selfEntry[0],
-            )
-          }
-                </div>
+            )}
               </div>
-            `
-          : ""
-      }
+            </div>
+          `
+          : ""}
       `;
     }
 
@@ -111,31 +108,31 @@ export class CommonCardElement extends LitElement {
     const selfEntry = entries.find(([key]) => key === "self");
 
     return html`
-      ${
-      nonSelfEntries.map(
+      ${nonSelfEntries.map(
         ([key, value]) =>
           html`
-          <div class="field">
-            <div class="label">${key.replace(/([A-Z])/g, " $1").trim()}</div>
-            <div class="value">${this.formatValue(value, undefined, key)}</div>
-          </div>
-        `,
-      )
-    }
-      ${
-      selfEntry
-        ? html`
             <div class="field">
-              <div class="label">${
-          selfEntry[0].replace(/([A-Z])/g, " $1").trim()
-        }</div>
-              <div class="value">${
-          this.formatValue(selfEntry[1], undefined, selfEntry[0])
-        }</div>
+              <div class="label">${key.replace(/([A-Z])/g, " $1").trim()}</div>
+              <div class="value">${this.formatValue(
+              value,
+              undefined,
+              key,
+            )}</div>
             </div>
-          `
-        : ""
-    }
+          `,
+      )} ${selfEntry
+        ? html`
+          <div class="field">
+            <div class="label">${selfEntry[0].replace(/([A-Z])/g, " $1")
+            .trim()}</div>
+            <div class="value">${this.formatValue(
+            selfEntry[1],
+            undefined,
+            selfEntry[0],
+          )}</div>
+          </div>
+        `
+        : ""}
     `;
   }
 
@@ -145,33 +142,43 @@ export class CommonCardElement extends LitElement {
     }
 
     if (key === "self") {
-      return html`<span class="self-pill">${value.toString()}</span>`;
+      return html`
+        <span class="self-pill">${value.toString()}</span>
+      `;
     }
 
     if (schema) {
       switch (schema._def.typeName) {
         case "ZodArray":
         case "ZodObject":
-          return html`<pre>${JSON.stringify(value, null, 2)}</pre>`;
+          return html`
+            <pre>${JSON.stringify(value, null, 2)}</pre>
+          `;
         case "ZodBoolean":
           return value ? "✓" : "✗";
         case "ZodDate":
           return new Date(value).toLocaleString();
         case "ZodString":
-          return html`<div class="string-value">${value}</div>`;
+          return html`
+            <div class="string-value">${value}</div>
+          `;
         default:
           return String(value);
       }
     }
 
     if (typeof value === "object") {
-      return html`<pre>${JSON.stringify(value, null, 2)}</pre>`;
+      return html`
+        <pre>${JSON.stringify(value, null, 2)}</pre>
+      `;
     } else if (typeof value === "boolean") {
       return value ? "✓" : "✗";
     } else if (value instanceof Date) {
       return value.toLocaleString();
     }
-    return html`<div class="string-value">${value}</div>`;
+    return html`
+      <div class="string-value">${value}</div>
+    `;
   }
 }
 globalThis.customElements.define("common-card", CommonCardElement);
@@ -329,10 +336,11 @@ export class CommonTableElement extends LitElement {
       case "ZodArray":
       case "ZodObject":
         return html`
-          <span class="complex-value" title=${JSON.stringify(value)}>
-            ${JSON.stringify(value).slice(0, 50)}${
-          JSON.stringify(value).length > 50 ? "..." : ""
-        }
+          <span class="complex-value" title="${JSON.stringify(value)}">
+            ${JSON.stringify(value).slice(
+            0,
+            50,
+          )}${JSON.stringify(value).length > 50 ? "..." : ""}
           </span>
         `;
       case "ZodBoolean":
@@ -453,121 +461,110 @@ export class CommonTableElement extends LitElement {
 
   override render() {
     if (!this.schema) {
-      return html`<div>No schema provided</div>`;
+      return html`
+        <div>No schema provided</div>
+      `;
     }
 
     if (!this.data || !this.data.length) {
-      return html`<div>No data available</div>`;
+      return html`
+        <div>No data available</div>
+      `;
     }
 
     const shape = this.schema ? this.schema.shape : {};
 
     return html`
-      <button class="download-all-button" @click=${this.handleDownloadAll}>
+      <button class="download-all-button" @click="${this.handleDownloadAll}">
         Download All Records
       </button>
-      <button class="import-button" @click=${this.handleImport}>Import JSON</button>
+      <button class="import-button" @click="${this
+        .handleImport}">Import JSON</button>
       <div class="table-container">
         <table>
           <thead>
             <tr>
-              ${
-      Object.entries(this.schema.shape).map(
-        ([key]) => html` <th>${key.replace(/([A-Z])/g, " $1").trim()}</th> `,
-      )
-    }
+              ${Object.entries(this.schema.shape).map(
+        ([key]) =>
+          html`
+            <th>${key.replace(/([A-Z])/g, " $1").trim()}</th>
+          `,
+      )}
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            ${
-      this.data.map(
+            ${this.data.map(
         (row) =>
           html`
-                <tr>
-                  ${
-            Object.entries(shape).map(
+            <tr>
+              ${Object.entries(shape).map(
               ([key, schema]) =>
                 html`
-                      <td title=${String(row[key])}>${
-                  this.formatValue(row[key], schema)
-                }</td>
-                    `,
-            )
-          }
-                  <td>
-                    ${
-            this.preview
+                  <td title="${String(row[key])}">${this.formatValue(
+                    row[key],
+                    schema,
+                  )}</td>
+                `,
+            )}
+              <td>
+                ${this.preview
               ? html`
-                          <button class="preview-button" @click=${() =>
-                this.showPreview(row)}>
-                            Preview
-                          </button>
-                        `
-              : ""
-          }
-                    ${
-            this.edit
+                <button class="preview-button" @click="${() =>
+                  this.showPreview(row)}">
+                  Preview
+                </button>
+              `
+              : ""} ${this.edit
               ? html`
-                          <button class="edit-button" @click=${() =>
-                this.handleEdit(row)}>
-                            Edit
-                          </button>
-                        `
-              : ""
-          }
-                    ${
-            this.delete
+                <button class="edit-button" @click="${() =>
+                  this.handleEdit(row)}">
+                  Edit
+                </button>
+              `
+              : ""} ${this.delete
               ? html`
-                          <button class="delete-button" @click=${() =>
-                this.handleDelete(row)}>
-                            Delete
-                          </button>
-                        `
-              : ""
-          }
-                    ${
-            this.download
+                <button class="delete-button" @click="${() =>
+                  this.handleDelete(row)}">
+                  Delete
+                </button>
+              `
+              : ""} ${this.download
               ? html`
-                          <button class="download-button" @click=${() =>
-                this.handleDownload(row)}>
-                            Download
-                          </button>
-                        `
-              : ""
-          }
-                    ${
-            this.copy
+                <button class="download-button" @click="${() =>
+                  this.handleDownload(row)}">
+                  Download
+                </button>
+              `
+              : ""} ${this.copy
               ? html`
-                          <button class="copy-button" @click=${() =>
-                this.handleCopySelf(row)}>
-                            Copy Ref
-                          </button>
-                        `
-              : ""
-          }
-                  </td>
-                </tr>
-              `,
-      )
-    }
+                <button class="copy-button" @click="${() =>
+                  this.handleCopySelf(row)}">
+                  Copy Ref
+                </button>
+              `
+              : ""}
+              </td>
+            </tr>
+          `,
+      )}
           </tbody>
         </table>
       </div>
 
-      ${
-      this.selectedItem
+      ${this.selectedItem
         ? html`
-            <div class="modal-overlay" @click=${this.closePreview}>
-              <div class="modal-content" @click=${(e: Event) =>
-          e.stopPropagation()}>
-                <button class="close-button" @click=${this.closePreview}>×</button>
-                <common-card .schema=${this.schema} .item=${this.selectedItem}></common-card>
-              </div>
+          <div class="modal-overlay" @click="${this.closePreview}">
+            <div class="modal-content" @click="${(e: Event) =>
+            e.stopPropagation()}">
+              <button class="close-button" @click="${this
+            .closePreview}">×</button>
+              <common-card .schema="${this.schema}" .item="${this
+            .selectedItem}"></common-card>
             </div>
-          `
-        : ""
-    }
+          </div>
+        `
+        : ""}
     `;
   }
 }

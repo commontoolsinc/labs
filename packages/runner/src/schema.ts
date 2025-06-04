@@ -1,11 +1,6 @@
 import { isAlias, JSONSchema } from "@commontools/builder";
 import { type DocImpl } from "./doc.ts";
-import {
-  type CellLink,
-  createCell,
-  isCell,
-  isCellLink,
-} from "./cell.ts";
+import { type CellLink, createCell, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { resolveLinks, resolveLinkToAlias } from "./utils.ts";
 import { ContextualFlowControl } from "./index.ts";
@@ -128,7 +123,12 @@ function processDefaultValue(
     );
     // This can receive events, but at first nothing will be bound to it.
     // Normally these get created by a handler call.
-    return doc.runtime.getImmutableCell(doc.space, { $stream: true }, resolvedSchema, log);
+    return doc.runtime.getImmutableCell(
+      doc.space,
+      { $stream: true },
+      resolvedSchema,
+      log,
+    );
   }
 
   // Handle object type defaults

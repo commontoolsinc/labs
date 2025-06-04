@@ -38,7 +38,11 @@ export function llm(
   parentDoc: DocImpl<any>,
   runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  const pending = runtime.documentMap.getDoc(false, { llm: { pending: cause } }, parentDoc.space);
+  const pending = runtime.documentMap.getDoc(
+    false,
+    { llm: { pending: cause } },
+    parentDoc.space,
+  );
   const result = runtime.documentMap.getDoc<string | undefined>(
     undefined,
     {

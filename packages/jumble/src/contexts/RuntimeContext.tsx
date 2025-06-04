@@ -1,4 +1,4 @@
-import { createContext, useContext, ReactNode } from "react";
+import { createContext, ReactNode, useContext } from "react";
 import { Runtime } from "@commontools/runner";
 
 interface RuntimeContextType {
@@ -7,11 +7,11 @@ interface RuntimeContextType {
 
 const RuntimeContext = createContext<RuntimeContextType | undefined>(undefined);
 
-export function RuntimeProvider({ 
-  children, 
-  runtime 
-}: { 
-  children: ReactNode; 
+export function RuntimeProvider({
+  children,
+  runtime,
+}: {
+  children: ReactNode;
   runtime: Runtime;
 }) {
   return (

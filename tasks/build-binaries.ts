@@ -66,7 +66,12 @@ class BuildConfig {
   }
 
   bgCharmServiceWorkerPath() {
-    return this.path("packages", "background-charm-service", "src", "worker.ts");
+    return this.path(
+      "packages",
+      "background-charm-service",
+      "src",
+      "worker.ts",
+    );
   }
 
   staticBundleFilePath(filename: string): string[] {

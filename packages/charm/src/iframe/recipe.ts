@@ -63,7 +63,7 @@ function parseIframeRecipe(source: string): IFrameRecipe {
 
 export const getIframeRecipe = (
   charm: Cell<Charm>,
-  runtime: Runtime
+  runtime: Runtime,
 ): {
   recipeId: string;
   src?: string;

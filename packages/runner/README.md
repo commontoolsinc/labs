@@ -1,26 +1,19 @@
 # Runner
 
-The Runner package provides a reactive runtime for executing recipes
-(computational graphs) with automatic dependency tracking, state management, and
-persistence.
+The Runner package provides a reactive runtime for executing recipes (computational graphs) with automatic dependency tracking, state management, and persistence.
 
 ## Key Features
 
 - **Cell-based Reactivity**: Create, manage, and observe reactive data cells
 - **Recipe Execution**: Run computational graphs defined as recipes
-- **Automatic Dependency Tracking**: Changes propagate through your application
-  automatically
-- **Schema Validation**: Validate and transform data against JSON Schema
-  definitions
+- **Automatic Dependency Tracking**: Changes propagate through your application automatically
+- **Schema Validation**: Validate and transform data against JSON Schema definitions
 - **Storage Integration**: Optional persistence and synchronization of data
-- **Dependency Injection**: No singleton patterns - all services are injected
-  through a central Runtime instance
+- **Dependency Injection**: No singleton patterns - all services are injected through a central Runtime instance
 
 ## Architecture
 
-The Runner has been refactored to eliminate singleton patterns in favor of
-dependency injection through a central Runtime instance. This provides better
-testability, isolation, and control over service configuration.
+The Runner has been refactored to eliminate singleton patterns in favor of dependency injection through a central Runtime instance. This provides better testability, isolation, and control over service configuration.
 
 ### Runtime-Centric Design
 
@@ -55,17 +48,14 @@ await runtime.dispose();
 
 ## Code Organization
 
-The Runner codebase is organized around several core concepts that work together
-to provide a reactive runtime system. Here's a map of the key files and their
-purposes:
+The Runner codebase is organized around several core concepts that work together to provide a reactive runtime system. Here's a map of the key files and their purposes:
 
 ### Core Files
 
 - `src/index.ts`: The main entry point that exports the public API
 - `src/runtime.ts`: Central orchestrator that creates and manages all services
 - `src/cell.ts`: Defines the `Cell` abstraction and its implementation
-- `src/doc.ts`: Implements `DocImpl` which represents stored documents in
-  storage
+- `src/doc.ts`: Implements `DocImpl` which represents stored documents in storage
 - `src/runner.ts`: Provides the runtime for executing recipes
 - `src/scheduler.ts`: Manages execution order and batching of reactive updates
 - `src/storage.ts`: Manages persistence and synchronization
@@ -77,25 +67,17 @@ purposes:
 
 ### Document vs Cell Abstractions
 
-One of the most important concepts to understand in the Runner is the
-relationship between documents and cells:
+One of the most important concepts to understand in the Runner is the relationship between documents and cells:
 
-- **DocImpl**: Represents raw documents stored in storage. These are the actual
-  persistence units that get saved and synchronized.
+- **DocImpl**: Represents raw documents stored in storage. These are the actual persistence units that get saved and synchronized.
 
-- **Cell**: The user-facing abstraction that provides a reactive view over one
-  or more documents. Cells are defined by schemas and can traverse document
-  relationships through cell links and aliases.
+- **Cell**: The user-facing abstraction that provides a reactive view over one or more documents. Cells are defined by schemas and can traverse document relationships through cell links and aliases.
 
-While DocImpl handles the low-level storage concerns, Cells provide the
-higher-level programming model with schema validation, reactivity, and
-relationship traversal. When you're working with data in the Runner, you'll
-almost always interact with Cells rather than directly with DocImpl instances.
+While DocImpl handles the low-level storage concerns, Cells provide the higher-level programming model with schema validation, reactivity, and relationship traversal. When you're working with data in the Runner, you'll almost always interact with Cells rather than directly with DocImpl instances.
 
 ### Schema and Validation
 
-The schema system defines both the structure of data and how it's represented in
-storage:
+The schema system defines both the structure of data and how it's represented in storage:
 
 - Schemas are based on JSON Schema with extensions for reactivity and references
 - Each Cell has an associated schema that validates its data
@@ -106,8 +88,7 @@ storage:
 
 Cells can reference other cells through links and aliases:
 
-- **CellLink**: A reference to another cell, containing a space ID and document
-  ID
+- **CellLink**: A reference to another cell, containing a space ID and document ID
 - **Aliases**: Named references within documents that point to other documents
 - These mechanisms allow building complex, interconnected data structures
 - The system automatically traverses links when needed
@@ -129,8 +110,7 @@ The storage system handles persistence and synchronization:
 - Document-based persistence model
 - Identity-based access control
 - Synchronization through a publish/subscribe mechanism
-- Primitives for conflict resolution strategies, although right now only
-  compare-and-swap is implemented and failed transactions just reset the data
+- Primitives for conflict resolution strategies, although right now only compare-and-swap is implemented and failed transactions just reset the data
 
 ### Reactivity System
 
@@ -153,9 +133,7 @@ The scheduler manages the execution order of reactive updates:
 
 ### Cells
 
-Cells are reactive data containers that notify subscribers when their values
-change. They support various operations and can be linked to form complex data
-structures.
+Cells are reactive data containers that notify subscribers when their values change. They support various operations and can be linked to form complex data structures.
 
 Cells are now created through the Runtime instance rather than global functions:
 
@@ -227,9 +205,7 @@ cleanup();
 
 ### Cells with Type-Safe Schemas
 
-Using cells with schemas is highly recommended as it provides type checking,
-validation, and automatic transformation of data. The `Schema<>` helper from the
-Builder package provides TypeScript type inference.
+Using cells with schemas is highly recommended as it provides type checking, validation, and automatic transformation of data. The `Schema<>` helper from the Builder package provides TypeScript type inference.
 
 ```typescript
 import { Runtime } from "@commontools/runner";
@@ -294,9 +270,7 @@ console.log(nameCell.get()); // "Alice"
 
 ### Running Recipes
 
-Recipes define computational graphs that process data. Recipes are created using
-the Builder package and executed by the Runner, which manages dependencies and
-updates results automatically.
+Recipes define computational graphs that process data. Recipes are created using the Builder package and executed by the Runner, which manages dependencies and updates results automatically.
 
 ```typescript
 import { Runtime } from "@commontools/runner";
@@ -357,8 +331,7 @@ runtime.runner.stop(result);
 
 ### Storage
 
-The storage system provides persistence for cells and synchronization across
-clients.
+The storage system provides persistence for cells and synchronization across clients.
 
 ```typescript
 import { Runtime } from "@commontools/runner";
@@ -541,8 +514,7 @@ rootCell.key("current").key("label").set("updated");
 
 ## Migration from Singleton Pattern
 
-Previous versions of the Runner used global singleton functions. These have been
-replaced with Runtime instance methods:
+Previous versions of the Runner used global singleton functions. These have been replaced with Runtime instance methods:
 
 ```typescript
 // OLD (deprecated):
@@ -594,42 +566,35 @@ interface RuntimeOptions {
 
 ## TypeScript Support
 
-All APIs are fully typed with TypeScript to provide excellent IDE support and
-catch errors at compile time.
+All APIs are fully typed with TypeScript to provide excellent IDE support and catch errors at compile time.
 
 ## Data Flow in the Runner
 
-Understanding the data flow in the Runner helps visualize how different
-components interact:
+Understanding the data flow in the Runner helps visualize how different components interact:
 
 1. **Input** → Data enters the system through Cell updates or recipe executions
-2. **Validation** → Schema validation ensures data conforms to expected
-   structure (so far only on get, not yet on write)
+2. **Validation** → Schema validation ensures data conforms to expected structure (so far only on get, not yet on write)
 3. **Processing** → Recipes transform data according to their logic
 4. **Reactivity** → Changes propagate to dependent cells and recipes
 5. **Storage** → Updated data is persisted to storage if configured
 6. **Synchronization** → Changes are synchronized across clients if enabled
 
-This flow happens automatically once set up, allowing developers to focus on
-business logic rather than managing data flow manually.
+This flow happens automatically once set up, allowing developers to focus on business logic rather than managing data flow manually.
 
 ## Service Architecture
 
 The Runtime coordinates several core services:
 
 - **Scheduler**: Manages execution order and batching of reactive updates
-- **Storage**: Handles persistence and synchronization with configurable
-  backends
+- **Storage**: Handles persistence and synchronization with configurable backends
 - **DocumentMap**: Maps entity IDs to document instances and manages creation
 - **RecipeManager**: Loads, compiles, and caches recipe definitions
 - **ModuleRegistry**: Manages module registration and retrieval for recipes
 - **Runner**: Executes recipes and manages their lifecycle
 - **Harness**: Provides the execution environment for recipe code
 
-All services receive the Runtime instance as a dependency, enabling proper
-isolation and testability without global state.
+All services receive the Runtime instance as a dependency, enabling proper isolation and testability without global state.
 
 ## Contributing
 
-See the project's main contribution guide for details on development workflow,
-testing, and submitting changes.
+See the project's main contribution guide for details on development workflow, testing, and submitting changes.

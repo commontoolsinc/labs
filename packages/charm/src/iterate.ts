@@ -540,7 +540,13 @@ export async function compileAndRunRecipe(
   parents?: string[],
   llmRequestId?: string,
 ): Promise<Cell<Charm>> {
-  const recipe = await compileRecipe(recipeSrc, spec, charmManager.runtime, charmManager.getSpace(), parents);
+  const recipe = await compileRecipe(
+    recipeSrc,
+    spec,
+    charmManager.runtime,
+    charmManager.getSpace(),
+    parents,
+  );
   if (!recipe) {
     throw new Error("Failed to compile recipe");
   }

@@ -1,8 +1,6 @@
 # deno-web-test
 
-`deno-web-test` is a test runner for running Deno tests in a browser. This is
-used in code compatible with both Deno and browsers in order to test browser
-functionality.
+`deno-web-test` is a test runner for running Deno tests in a browser. This is used in code compatible with both Deno and browsers in order to test browser functionality.
 
 ## Usage
 
@@ -17,8 +15,7 @@ Deno.test("add", function () {
 });
 ```
 
-Optionally add a `deno-web-test.config.ts` to the project root to configure the
-runner. See [config.ts](/deno-web-test/config.ts) for all options.
+Optionally add a `deno-web-test.config.ts` to the project root to configure the runner. See [config.ts](/deno-web-test/config.ts) for all options.
 
 ```ts
 export default {
@@ -29,7 +26,7 @@ export default {
   pipeConsole: true,
   include: {
     "path/static-asset.json": "static/asset.json",
-  }
+  },
 };
 ```
 
@@ -45,14 +42,8 @@ Finally, run `deno-web-test/cli.ts`, which takes a glob of files to test.
 
 ## Support
 
-Currently only the `Deno.test(string, fn)` signature works. Using other
-signatures, or the BDD framework in `@std/testing/bdd` is not yet supported.
+Currently only the `Deno.test(string, fn)` signature works. Using other signatures, or the BDD framework in `@std/testing/bdd` is not yet supported.
 
 ## Testing
 
-For testing `deno-web-test` itself, the test suites (running in Deno itself) run
-`deno-web-test` for subprojects to test features. Due to being in a workspace,
-and not wanting to clutter the workspace with these test directories, and Deno
-attempting to enforce this, the test packages are moved to a temporary directory
-and the test task rewritten to target the local `cli.ts` export. This could be
-relaxed if moved outside of the workspace.
+For testing `deno-web-test` itself, the test suites (running in Deno itself) run `deno-web-test` for subprojects to test features. Due to being in a workspace, and not wanting to clutter the workspace with these test directories, and Deno attempting to enforce this, the test packages are moved to a temporary directory and the test task rewritten to target the local `cli.ts` export. This could be relaxed if moved outside of the workspace.

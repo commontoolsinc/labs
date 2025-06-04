@@ -117,14 +117,15 @@ export class CommonMediaElement extends LitElement {
 
   override render() {
     return html`
-    <article class="media">
-      <div class="media-media">
-        <common-img class="media-img" src="${this.src}" /></common-img>
-      </div>
-      <div class="media-content" part="content">
-        <slot></slot>
-      </div>
-    </article>`;
+      <article class="media">
+        <div class="media-media">
+          <common-img class="media-img" src="${this.src}"></common-img>
+        </div>
+        <div class="media-content" part="content">
+          <slot></slot>
+        </div>
+      </article>
+    `;
   }
 }
 globalThis.customElements.define("common-media", CommonMediaElement);

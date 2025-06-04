@@ -74,10 +74,11 @@
     "lineWidth": 80,
     "semiColons": true,
     "singleQuote": false,
-    "proseWrap": "always",
+    "proseWrap": "never",
     "exclude": [
       "packages/jumble/integration/cache/llm-api-cache/",
-      "packages/seeder/templates/"
+      "packages/seeder/templates/",
+      "packages/static/assets/"
     ]
   },
   "imports": {

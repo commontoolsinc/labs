@@ -72,9 +72,11 @@ export class CommonHstackElement extends LitElement {
   ];
 
   override render() {
-    return html` <div class="hstack">
-      <slot></slot>
-    </div>`;
+    return html`
+      <div class="hstack">
+        <slot></slot>
+      </div>
+    `;
   }
 }
 globalThis.customElements.define("common-hstack", CommonHstackElement);

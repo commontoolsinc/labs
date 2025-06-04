@@ -109,10 +109,10 @@ export class CommonUpdaterElement extends LitElement {
     }[this.updateState];
 
     return html`
-      <button 
-        class="button" 
-        @click=${this.handleClick}
-        data-state=${this.updateState}
+      <button
+        class="button"
+        @click="${this.handleClick}"
+        data-state="${this.updateState}"
       >
         ${buttonText}
       </button>

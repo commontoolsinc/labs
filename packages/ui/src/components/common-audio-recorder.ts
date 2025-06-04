@@ -127,16 +127,16 @@ export class CommonAudioRecorderElement extends LitElement {
 
   override render() {
     return html`
-      <div @click=${this.startRecording} class=${
-      this.isRecording ? "hidden" : ""
-    }>
+      <div @click="${this.startRecording}" class="${this.isRecording
+        ? "hidden"
+        : ""}">
         <slot name="start">
           <button>Start Recording</button>
         </slot>
       </div>
-      <div @click=${this.stopRecording} class=${
-      !this.isRecording ? "hidden" : ""
-    }>
+      <div @click="${this.stopRecording}" class="${!this.isRecording
+        ? "hidden"
+        : ""}">
         <slot name="stop">
           <button>Finish Recording</button>
         </slot>

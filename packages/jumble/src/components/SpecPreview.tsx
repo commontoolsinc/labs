@@ -170,9 +170,7 @@ export function SpecPreview({
 
   // Calculate different heights for different states (more compact)
   const loaderHeight = 60; // Height for just the loader (smaller cube + padding)
-  const maxContentHeight = form.plan?.charms
-    ? 240
-    : 192;
+  const maxContentHeight = form.plan?.charms ? 240 : 192;
 
   // Directly set the height style without animation
   const containerHeight = React.useMemo(() => {

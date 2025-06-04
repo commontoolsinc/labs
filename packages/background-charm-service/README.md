@@ -1,12 +1,8 @@
 # Background Charm Service
 
-A service for running background charms with isolation and monitoring
-capabilities.
+A service for running background charms with isolation and monitoring capabilities.
 
-**FIXME(ja): all of this is built on a lie: If update method is async (uses
-fetch - like gmail) the handler will "finish" while work is still happening!
-Because many updaters are async we don't receive exceptions (mark them as
-failing) or know when to properly reschedule them.**
+**FIXME(ja): all of this is built on a lie: If update method is async (uses fetch - like gmail) the handler will "finish" while work is still happening! Because many updaters are async we don't receive exceptions (mark them as failing) or know when to properly reschedule them.**
 
 ## Overview
 
@@ -46,8 +42,7 @@ The Background Charm Service runs charms in the background with:
 
 ### Execution Flow
 
-1. The service discovers background charms from the central toolshed-system list
-   of charms
+1. The service discovers background charms from the central toolshed-system list of charms
 2. For each unique space, a SpaceManager is created
 3. Each SpaceManager creates its own WorkerController with an isolated worker
 4. The SpaceManager schedules and executes charms through its WorkerController
@@ -59,8 +54,7 @@ The Background Charm Service runs charms in the background with:
 The service provides isolation at multiple levels:
 
 - **Space Isolation**: Each space gets its own SpaceManager and Worker
-- **Worker Isolation**: Each WorkerController uses a Web Worker for thread-level
-  isolation
+- **Worker Isolation**: Each WorkerController uses a Web Worker for thread-level isolation
 - **Session Isolation**: Each worker has its own session with proper permissions
 - **Error Isolation**: Errors in one charm do not affect other charms or spaces
 
