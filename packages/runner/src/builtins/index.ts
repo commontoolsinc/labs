@@ -5,6 +5,7 @@ import { streamData } from "./stream-data.ts";
 import { llm } from "./llm.ts";
 import { ifElse } from "./if-else.ts";
 import type { IRuntime } from "../runtime.ts";
+import { compileAndRun } from "./compile-and-run.ts";
 
 /**
  * Register all built-in modules with a runtime's module registry
@@ -17,4 +18,5 @@ export function registerBuiltins(runtime: IRuntime) {
   moduleRegistry.addModuleByRef("streamData", raw(streamData));
   moduleRegistry.addModuleByRef("llm", raw(llm));
   moduleRegistry.addModuleByRef("ifElse", raw(ifElse));
+  moduleRegistry.addModuleByRef("compileAndRun", raw(compileAndRun));
 }
