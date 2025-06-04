@@ -1,13 +1,50 @@
-import * as path from "@std/path";
-import { Command, CommandType, RunCommand } from "./interface.ts";
-import { getTypeLibs, TypeScriptCompiler, UnsafeEvalRuntime } from "../mod.ts";
+import { RunCommand } from "./interface.ts";
+import {
+  getTypeLibs,
+  ProgramGraph,
+  Source,
+  TypeScriptCompiler,
+  UnsafeEvalRuntime,
+} from "../mod.ts";
+import { basename, dirname, join } from "@std/path";
+
+class CliProgram implements ProgramGraph {
+  private fsRoot: string;
+  private _entry: Source;
+  constructor(entryPath: string) {
+    this.fsRoot = dirname(entryPath);
+    this._entry = {
+      name: entryPath.substring(this.fsRoot.length),
+      contents: Deno.readTextFileSync(entryPath),
+    };
+  }
+
+  entry(): Source {
+    return this._entry;
+  }
+
+  resolveSource(specifier: string): Source | undefined {
+    if (specifier && specifier[0] === "/") {
+      const absPath = join(
+        this.fsRoot,
+        specifier.substring(1, specifier.length),
+      );
+      return {
+        name: specifier,
+        contents: Deno.readTextFileSync(absPath),
+      };
+    }
+    return undefined;
+  }
+}
 
 export class Processor {
   async run(command: RunCommand): Promise<any> {
+    const program = new CliProgram(command.entry);
     const compiler = new TypeScriptCompiler(await getTypeLibs());
-    const compiled = compiler.compile(command.source, {
+    const compiled = compiler.compile(program, {
       noCheck: !!command.noCheck,
-      filename: command.out ? path.basename(command.out) : undefined,
+      filename: command.out ? basename(command.out) : undefined,
     });
 
     if (command.noRun) {

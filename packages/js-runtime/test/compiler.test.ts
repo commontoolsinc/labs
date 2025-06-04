@@ -5,7 +5,7 @@ import {
   TypeScriptCompiler,
   TypeScriptCompilerOptions,
 } from "../mod.ts";
-import { unrollFiles } from "./utils.ts";
+import { TestProgram } from "./utils.ts";
 
 type TestDef =
   & { name: string; source: string; expectedError?: string }
@@ -42,7 +42,7 @@ const TESTS: TestDef[] = [
 
 describe("TypeScriptCompiler", () => {
   it("compiles a filesystem graph", async () => {
-    const artifact = unrollFiles({
+    const program = new TestProgram("/main.tsx", {
       "/main.tsx":
         "import { sub } from './math/subtract.ts';export default sub(10,2)",
       "/utils.ts": "export const add=(x:number,y:number):number =>x+y;",
@@ -50,19 +50,19 @@ describe("TypeScriptCompiler", () => {
         "import { add } from '../utils.ts';export const sub = (x:number,y:number)=>add(x,y*-1)",
     });
     const compiler = new TypeScriptCompiler(await getTypeLibs());
-    const compiled = compiler.compile(artifact, { filename: "test.js" });
+    const compiled = compiler.compile(program, { filename: "test.js" });
     expect(compiled.filename).toBe("test.js");
     expect(compiled.sourceMap).toBeDefined();
   });
 
   it("Typechecks a runtime dependency, providing typedefs", async () => {
-    const artifact = unrollFiles({
+    const program = new TestProgram("/main.tsx", {
       "/main.tsx": "import { add } from '@std/math';export default add(10,2)",
       "@std/math.d.ts":
         "export declare function add(x: number, y: number): number;",
     });
     const compiler = new TypeScriptCompiler(await getTypeLibs());
-    compiler.compile(artifact);
+    compiler.compile(program);
   });
 
   for (const { name, source, expectedError, ...options } of TESTS) {

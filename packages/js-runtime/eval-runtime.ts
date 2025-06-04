@@ -1,4 +1,4 @@
-import { ExecutableJs, JsIsolate, JsRuntime, SourceMap } from "./interface.ts";
+import { JsIsolate, JsRuntime, JsScript, SourceMap } from "./interface.ts";
 import { SourceMapParser } from "./source-map.ts";
 
 export class UnsafeEvalJsValue {
@@ -53,7 +53,7 @@ class IsolateInternals {
 export class UnsafeEvalIsolate implements JsIsolate {
   private internals = new IsolateInternals();
   execute(
-    input: string | ExecutableJs,
+    input: string | JsScript,
   ): UnsafeEvalJsValue {
     const { js, filename, sourceMap } = typeof input === "string"
       ? { js: input, filename: "NO-NAME.js" }

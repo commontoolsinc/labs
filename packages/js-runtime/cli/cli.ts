@@ -1,4 +1,3 @@
-import { populateArtifact, relativeToAbsolute } from "./utils.ts";
 import {
   Args,
   type Command,
@@ -7,6 +6,7 @@ import {
 } from "./interface.ts";
 import { Processor } from "./processor.ts";
 import { parseArgs } from "@std/cli/parse-args";
+import { join } from "@std/path";
 
 export class RuntimeCLI {
   private cwd: string;
@@ -16,7 +16,7 @@ export class RuntimeCLI {
     this.processor = new Processor();
   }
 
-  async parse(input: string[]): Promise<Command> {
+  parse(input: string[]): Command {
     const args = parseCLIArgs(this.cwd, input);
     if (args.help) {
       return { type: CommandType.Help };
@@ -24,7 +24,7 @@ export class RuntimeCLI {
 
     const runCommand: RunCommand = {
       type: CommandType.Run,
-      source: await populateArtifact(args.files),
+      entry: args.entry,
     };
     if (args.noCheck) runCommand.noCheck = args.noCheck;
     if (args.noRun) runCommand.noRun = args.noRun;
@@ -62,14 +62,20 @@ export function parseCLIArgs(cwd: string, input: string[]): Args {
     ],
   });
 
+  const entry = (parsed["_"] ?? []).shift();
+  if (!entry) {
+    throw new Error("Missing entry.");
+  }
   return {
-    files: (parsed["_"] ?? []).map((filepath) =>
-      relativeToAbsolute(cwd, String(filepath))
-    ),
+    entry: relativeToAbsolute(cwd, String(entry)),
     help: !!parsed.help,
     verbose: !!parsed.verbose,
     noCheck: !!parsed["no-check"],
     noRun: !!parsed["no-run"],
     out: parsed.out ? relativeToAbsolute(cwd, parsed.out) : undefined,
   };
+}
+
+function relativeToAbsolute(rootDir: string, filepath: string): string {
+  return join(rootDir, filepath);
 }

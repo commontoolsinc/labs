@@ -2,7 +2,7 @@
   "name": "@commontools/js-runtime",
   "tasks": {
     "run": "deno run --allow-read --allow-env=\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV ./cli/mod.ts",
-    "test": "deno test --allow-read --allow-run --allow-env=\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV"
+    "test": "deno test --allow-read --allow-run --allow-env=\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV test/*.test.ts"
   },
   "imports": {
     "source-map-js": "npm:source-map-js"
