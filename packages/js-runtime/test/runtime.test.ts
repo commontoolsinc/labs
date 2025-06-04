@@ -1,28 +1,28 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { getTypeLibs, TypeScriptCompiler } from "../mod.ts";
-import { execute, unrollFiles } from "./utils.ts";
+import { execute, TestProgram } from "./utils.ts";
 
 describe("Runtime", () => {
   it("Compiles and executes a set of typescript files", async () => {
-    const artifact = unrollFiles({
+    const program = new TestProgram("/main.tsx", {
       "/main.tsx": "import { add } from './utils.ts';export default add(10,2)",
       "/utils.ts": "export const add=(x:number,y:number):number =>x+y;",
     });
     const compiler = new TypeScriptCompiler(await getTypeLibs());
-    const compiled = compiler.compile(artifact);
+    const compiled = compiler.compile(program);
     const exports = execute(compiled).invoke();
     expect(exports.inner().default).toBe(12);
   });
 
   it("Executes with runtime dependencies", async () => {
-    const artifact = unrollFiles({
+    const program = new TestProgram("/main.tsx", {
       "/main.tsx": "import { add } from '@std/math';export default add(10,2)",
       "@std/math.d.ts":
         "export declare function add(x: number, y: number): number;",
     });
     const compiler = new TypeScriptCompiler(await getTypeLibs());
-    const compiled = compiler.compile(artifact);
+    const compiled = compiler.compile(program);
     const exports = execute(compiled).invoke({
       "@std/math": {
         add(x: number, y: number): number {
@@ -34,7 +34,7 @@ describe("Runtime", () => {
   });
 
   it("Source maps errors on invoke", async () => {
-    const artifact = unrollFiles({
+    const program = new TestProgram("/main.tsx", {
       "/main.tsx": `// main.tsx
       import { doubleOrThrow } from "./utils.ts";
 
@@ -50,7 +50,7 @@ describe("Runtime", () => {
       `,
     });
     const compiler = new TypeScriptCompiler(await getTypeLibs());
-    const compiled = compiler.compile(artifact, { filename: "recipe-abc.js" });
+    const compiled = compiler.compile(program, { filename: "recipe-abc.js" });
     let thrown: Error | undefined;
     try {
       const exports = execute(compiled).invoke();

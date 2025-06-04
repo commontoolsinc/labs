@@ -1,9 +1,12 @@
 export type {
+  Compiler,
   CompilerError,
-  ExecutableJs,
   JsIsolate,
   JsRuntime,
-  TsArtifact,
+  JsScript,
+  Program,
+  ProgramResolver as ProgramGraph,
+  Source,
 } from "./interface.ts";
 export {
   TypeScriptCompiler,
@@ -14,4 +17,4 @@ export {
   UnsafeEvalJsValue,
   UnsafeEvalRuntime,
 } from "./eval-runtime.ts";
-export { getTypeLibs } from "./utils.ts";
+export { getTypeLibs } from "./typescript/utils.ts";

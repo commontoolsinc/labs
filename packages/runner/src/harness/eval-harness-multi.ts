@@ -3,7 +3,7 @@ import { Console } from "./console.ts";
 import { Harness, HarnessedFunction } from "./harness.ts";
 import {
   getTypeLibs,
-  TsArtifact,
+  Program,
   TypeScriptCompiler,
   UnsafeEvalIsolate,
   UnsafeEvalRuntime,
@@ -53,7 +53,7 @@ export class UnsafeEvalRuntimeMulti extends EventTarget implements Harness {
     });
   }
 
-  async run(source: TsArtifact): Promise<Recipe> {
+  async run(source: Program): Promise<Recipe> {
     if (!this.internals) {
       const typeLibs = await getTypeLibs();
       const compiler = new TypeScriptCompiler(typeLibs);

@@ -1,4 +1,4 @@
-import { type TsArtifact } from "../interface.ts";
+import { type Program } from "../interface.ts";
 
 export enum CommandType {
   Run = "run",
@@ -6,7 +6,7 @@ export enum CommandType {
 }
 
 export interface Args {
-  files: string[];
+  entry: string;
   help?: boolean;
   verbose?: boolean;
   noRun?: boolean;
@@ -21,7 +21,7 @@ export interface Command {
 
 export interface RunCommand extends Command {
   type: CommandType.Run;
-  source: TsArtifact;
+  entry: string;
   verbose?: boolean;
   noRun?: boolean;
   noCheck?: boolean;

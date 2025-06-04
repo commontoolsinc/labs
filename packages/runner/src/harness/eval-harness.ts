@@ -1,6 +1,6 @@
 import { Recipe } from "@commontools/builder";
 import { Harness, HarnessedFunction } from "./harness.ts";
-import { type TsArtifact } from "@commontools/js-runtime";
+import { type Program } from "@commontools/js-runtime";
 import { mapSourceMapsOnStacktrace, tsToExports } from "./local-build.ts";
 import { Console } from "./console.ts";
 import { IRuntime } from "../runtime.ts";
@@ -25,8 +25,10 @@ export class UnsafeEvalHarness extends EventTarget implements Harness {
     });
   }
 
-  async run(source: TsArtifact): Promise<Recipe> {
-    const file = source.files.find(({ name }) => name === source.entry);
+  async run(source: Program): Promise<Recipe> {
+    const file = source.files.find(({ name }: { name: string }) =>
+      name === source.entry
+    );
     if (!file) {
       throw new Error("Needs an entry source.");
     }
