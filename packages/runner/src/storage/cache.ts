@@ -1,3 +1,13 @@
+import { fromString, refer } from "merkle-reference";
+import { isBrowser } from "@commontools/utils/env";
+import { isObject } from "@commontools/utils/types";
+import {
+  ContextualFlowControl,
+  deepEqual,
+  JSONSchema,
+  JSONValue,
+  SchemaContext,
+} from "@commontools/builder";
 import type {
   AuthorizationError,
   Commit,
@@ -16,31 +26,20 @@ import type {
   UCAN,
   Unit,
 } from "@commontools/memory/interface";
-import { type Cancel, type EntityId } from "@commontools/runner";
+import { set, setSelector } from "@commontools/memory/selection";
+import type { MemorySpaceSession } from "@commontools/memory/consumer";
+import { assert, retract, unclaimed } from "@commontools/memory/fact";
+import { the, toChanges, toRevision } from "@commontools/memory/commit";
+import * as Memory from "@commontools/memory/consumer";
+import * as Codec from "@commontools/memory/codec";
+import type { Cancel, EntityId } from "@commontools/runner";
 import {
   BaseStorageProvider,
   type StorageProvider,
   type StorageValue,
 } from "./base.ts";
-import type { MemorySpaceSession } from "@commontools/memory/consumer";
-import { assert, retract, unclaimed } from "@commontools/memory/fact";
-import { fromString, refer } from "merkle-reference";
-import { the, toChanges, toRevision } from "@commontools/memory/commit";
 import * as IDB from "./idb.ts";
-import * as Memory from "@commontools/memory/consumer";
-export * from "@commontools/memory/interface";
-import * as Codec from "@commontools/memory/codec";
 import { Channel, RawCommand } from "./inspector.ts";
-import { isBrowser } from "@commontools/utils/env";
-import {
-  ContextualFlowControl,
-  deepEqual,
-  JSONSchema,
-  JSONValue,
-  SchemaContext,
-} from "@commontools/builder";
-import { set, setSelector } from "@commontools/memory/selection";
-import { isObject } from "@commontools/utils/types";
 import { querySchemaHeap } from "./query.ts";
 
 export type { Result, Unit };
@@ -547,12 +546,14 @@ export class Replica {
         // can include the entities and since fields I already have.
         if (!this.schemaTracker.get(factKey)?.has(schemaRef)) {
           // See if we have everything we need locally (in our heap)
-          const localResult = querySchemaHeap(
-            schema,
-            [],
-            address,
-            this.heap.store,
-          );
+          // FIXME
+          // const localResult = querySchemaHeap(
+          //   schema,
+          //   [],
+          //   address,
+          //   this.heap.store,
+          // );
+          const localResult = { missing: [1] };
           if (localResult.missing.length === 0) {
             if (!this.schemaTracker.has(factKey)) {
               this.schemaTracker.set(factKey, new Set<string>());

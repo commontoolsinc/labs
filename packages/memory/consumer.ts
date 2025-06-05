@@ -1,3 +1,4 @@
+import type { JSONValue, SchemaContext } from "@commontools/builder";
 import {
   Abilities,
   AuthorizationError,
@@ -47,7 +48,6 @@ import {
   UCAN,
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
-import type { JSONValue, SchemaContext } from "@commontools/builder";
 import { refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
 import {

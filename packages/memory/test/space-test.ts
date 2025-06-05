@@ -1,17 +1,17 @@
 import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
-import * as Space from "../space.ts";
-import * as Changes from "../changes.ts";
-import * as Selection from "../selection.ts";
-import * as Commit from "../commit.ts";
-import * as Transaction from "../transaction.ts";
-import * as Fact from "../fact.ts";
-import { createTemporaryDirectory } from "../util.ts";
 import { refer } from "merkle-reference";
-
-import { alice, space } from "./principal.ts";
-import { SchemaSelector } from "../space.ts";
-import { AssertFact } from "../interface.ts";
 import { SchemaContext } from "@commontools/builder";
+import * as Changes from "../changes.ts";
+import * as Commit from "../commit.ts";
+import * as Fact from "../fact.ts";
+import * as Selection from "../selection.ts";
+import * as Space from "../space.ts";
+import * as Transaction from "../transaction.ts";
+import { createTemporaryDirectory } from "../util.ts";
+import { AssertFact } from "../interface.ts";
+import { SchemaSelector } from "../space.ts";
+import { alice, space } from "./principal.ts";
+
 const the = "application/json";
 const doc = `of:${refer({ hello: "world" })}` as const;
 const doc1 = doc; // convenient name

@@ -1,4 +1,4 @@
-import * as Memory from "./memory.ts";
+import * as Access from "./access.ts";
 import type {
   AsyncResult,
   Await,
@@ -9,12 +9,13 @@ import type {
   ConsumerInvocationFor,
   ConsumerResultFor,
   Fact,
+  FactAddress,
   Invocation,
   InvocationURL,
   MemorySession,
   MemorySpace,
   Proto,
-  Protocol as Protocol,
+  Protocol,
   ProviderCommand,
   ProviderCommandFor,
   ProviderSession,
@@ -23,6 +24,7 @@ import type {
   Reference,
   Result,
   Revision,
+  SchemaPathSelector,
   SchemaQuery,
   Selection,
   Subscribe,
@@ -30,18 +32,18 @@ import type {
   Transaction,
   UCAN,
 } from "./interface.ts";
-import * as Subscription from "./subscription.ts";
-export * from "./interface.ts";
-export * from "./util.ts";
-export * as Error from "./error.ts";
-export * as Space from "./space.ts";
-export * as Memory from "./memory.ts";
-export * as Subscription from "./subscription.ts";
-import { refer } from "./reference.ts";
-import * as Access from "./access.ts";
 import { Fact as FactModule, SelectionBuilder } from "./lib.ts";
-import { FactAddress } from "../runner/src/storage/cache.ts";
+import * as Memory from "./memory.ts";
+import { refer } from "./reference.ts";
 import { redactCommit } from "./space.ts";
+import * as Subscription from "./subscription.ts";
+
+export * as Error from "./error.ts";
+export * from "./interface.ts";
+export * as Memory from "./memory.ts";
+export * as Space from "./space.ts";
+export * as Subscription from "./subscription.ts";
+export * from "./util.ts";
 
 // Convenient shorthand so I don't need this long type for this string
 type JobId = InvocationURL<Reference<ConsumerCommandInvocation<Protocol>>>;
@@ -126,6 +128,36 @@ export class SchemaSubscription {
   ) {}
 }
 
+// FIXME: decide where this lives instead of duplicating
+// double defining for now, while i debug import issues.
+/**
+ * A data structure that maps keys to sets of values, allowing multiple values
+ * to be associated with a single key without duplication.
+ *
+ * @template K The type of keys in the map
+ * @template V The type of values stored in the sets
+ */
+class MapSet<K, V> {
+  private map = new Map<K, Set<V>>();
+
+  public get(key: K): Set<V> | undefined {
+    return this.map.get(key);
+  }
+
+  public add(key: K, value: V) {
+    if (!this.map.has(key)) {
+      const values = new Set<V>([value]);
+      this.map.set(key, values);
+    } else {
+      this.map.get(key)!.add(value);
+    }
+  }
+
+  public has(key: K): boolean {
+    return this.map.has(key);
+  }
+}
+
 class MemoryProviderSession<
   Space extends MemorySpace,
   MemoryProtocol extends Protocol<Space>,
@@ -138,6 +170,7 @@ class MemoryProviderSession<
 
   channels: Map<InvocationURL<Reference<Subscribe>>, Set<string>> = new Map();
   schemaChannels: Map<JobId, SchemaSubscription> = new Map();
+  watchedObjects: MapSet<string, SchemaPathSelector> = new MapSet();
 
   constructor(
     public memory: MemorySession,
@@ -226,6 +259,7 @@ class MemoryProviderSession<
       }
       case "/memory/graph/query": {
         const result = await this.memory.querySchema(invocation);
+        // We maintain subscriptions at this level, but really need more data from the query response
         if (invocation.args.subscribe && result.ok !== undefined) {
           this.addSchemaSubscription(of, invocation, result.ok);
           this.memory.subscribe(this);
@@ -325,9 +359,13 @@ class MemoryProviderSession<
 
   private formatAddress<Space extends MemorySpace>(
     space: Space,
-    fv: FactAddress,
+    fv: Readonly<FactAddress>,
   ) {
     return Subscription.formatAddress({ at: space, the: fv.the, of: fv.of });
+  }
+
+  private toKey(fv: Readonly<FactAddress>) {
+    return `${fv.of}/${fv.the}`;
   }
 
   private addSchemaSubscription<Space extends MemorySpace>(
@@ -351,6 +389,13 @@ class MemoryProviderSession<
       since,
     );
     this.schemaChannels.set(of, subscription);
+
+    // We don't know which schema path selector caused this fact to be included (it may have been included by multiple)
+    for (const fact of factVersions) {
+      const factKey = this.toKey(fact);
+      // FIXME
+      this.watchedObjects.add(factKey, { path: [] });
+    }
   }
 
   private async getSchemaSubscriptionMatches<Space extends MemorySpace>(

@@ -31,12 +31,12 @@ export class ClientObjectManager extends BaseObjectManager<
     super();
   }
 
-  toKey(doc: FactAddress): string {
+  override toKey(doc: FactAddress): string {
     return `${doc.of}/${doc.the}`;
   }
 
-  // load the doc pointed to by the cell target
-  getTarget(target: CellTarget): FactAddress {
+  // get the fact address for the doc pointed to by the cell target
+  override getTarget(target: CellTarget): FactAddress {
     return {
       the: "application/json",
       of: `of:${target.cellTarget}`,
@@ -44,7 +44,7 @@ export class ClientObjectManager extends BaseObjectManager<
   }
 
   // Returns null if there is no matching fact
-  load(
+  override load(
     doc: FactAddress,
   ): ValueEntry<FactAddress, JSONValue | undefined> | null {
     const key = this.toKey(doc);
@@ -85,20 +85,19 @@ export function querySchemaHeap(
   missing: FactAddress[];
   loaded: Set<ValueEntry<FactAddress, JSONValue | undefined>>;
 } {
-  const helper = new ClientObjectManager(store);
+  const manager = new ClientObjectManager(store);
   // Then filter the facts by the associated schemas, which will dereference
   // pointers as we walk through the structure.
 
   const tracker = new CycleTracker<JSONValue>();
   // We've provided a schema context for this, so traverse it
   const traverser = new SchemaObjectTraverser(
-    helper,
+    manager,
     schemaContext,
-    schemaContext.rootSchema,
     tracker,
   );
   const rv = new Set<ValueEntry<FactAddress, JSONValue | undefined>>();
-  const valueEntry = helper.load(factAddress);
+  const valueEntry = manager.load(factAddress);
   if (valueEntry === null) {
     // If we don't have the top document, we don't have all the documents
     return { missing: [factAddress], loaded: rv };
@@ -110,7 +109,7 @@ export function querySchemaHeap(
   // We store the actual doc in the value field of the object
   const factValue = (valueEntry.value as JSONObject).value;
   const [newDoc, newDocRoot, newValue] = getAtPath<FactAddress, FactAddress>(
-    helper,
+    manager,
     factAddress,
     factValue,
     factValue,
@@ -118,13 +117,13 @@ export function querySchemaHeap(
     tracker,
   );
   if (newValue === undefined) {
-    return { missing: [...helper.getMissingDocs()], loaded: rv };
+    return { missing: [...manager.getMissingDocs()], loaded: rv };
   }
   // We don't actually use the return value here, but we've built up
   // a list of all the documents we read.
   traverser.traverse(newDoc, newDocRoot, newValue);
-  for (const item of helper.getReadDocs()) {
+  for (const item of manager.getReadDocs()) {
     rv.add(item);
   }
-  return { missing: [...helper.getMissingDocs()], loaded: rv };
+  return { missing: [...manager.getMissingDocs()], loaded: rv };
 }

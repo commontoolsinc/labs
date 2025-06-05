@@ -1,3 +1,11 @@
+// TODO(@ubik2): Ideally this would use the following, but rollup has issues
+//import { isNumber, isObject, isString } from "@commontools/utils/types";
+import {
+  type Immutable,
+  isNumber,
+  isObject,
+  isString,
+} from "../../utils/src/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type {
   JSONObject,
@@ -6,9 +14,45 @@ import type {
   SchemaContext,
 } from "./types.ts";
 import { isAlias } from "./types.ts";
-// TODO(@ubik2): Ideally this would use the following, but rollup has issues
-//import { isNumber, isObject, isString } from "@commontools/utils/types";
-import { isNumber, isObject, isString } from "../../utils/src/types.ts";
+import { deepEqual } from "./utils.ts";
+
+// TODO: Fix redundant type definition, but we can't import memory here
+export type SchemaPathSelector = {
+  path: readonly string[];
+  schemaContext?: Readonly<SchemaContext>;
+};
+/**
+ * A data structure that maps keys to sets of values, allowing multiple values
+ * to be associated with a single key without duplication.
+ *
+ * @template K The type of keys in the map
+ * @template V The type of values stored in the sets
+ */
+export class MapSet<K, V> {
+  private map = new Map<K, Set<V>>();
+
+  public get(key: K): Set<V> | undefined {
+    return this.map.get(key);
+  }
+
+  public add(key: K, value: V) {
+    if (!this.map.has(key)) {
+      const values = new Set<V>([value]);
+      this.map.set(key, values);
+    } else {
+      this.map.get(key)!.add(value);
+    }
+  }
+
+  public has(key: K): boolean {
+    return this.map.has(key);
+  }
+}
+
+export const DefaultSchemaSelector = {
+  path: [],
+  schemaContext: { schema: true, rootSchema: true },
+} as const;
 
 export class CycleTracker<K> {
   private partial: Set<K>;
@@ -27,9 +71,9 @@ export class CycleTracker<K> {
     this.partial.delete(k);
   }
 }
-// TODO(@ubik2): I could restore tracking the completed objects here
+
 export type PointerCycleTracker = CycleTracker<
-  Readonly<JSONValue>
+  Immutable<JSONValue>
 >;
 
 type JSONCellLink = { cell: { "/": string }; path: string[] };
@@ -38,13 +82,15 @@ export type CellTarget = { path: string[]; cellTarget: string | undefined };
 export interface ObjectStorageManager<K, S, V> {
   addRead(doc: K, value: V, source: S): void;
   addWrite(doc: K, value: V, source: S): void;
+  // get the key for the doc pointed to by the cell target
   getTarget(value: CellTarget): K;
+  // load the object for the specified key
   load(doc: K): ValueEntry<S, V | undefined> | null;
 }
 
 export type ValueEntry<T, V> = {
   value: V;
-  source?: T;
+  source: T;
 };
 
 // export type LooseJSONValue =
@@ -87,6 +133,7 @@ export abstract class BaseObjectManager<K, S, V>
   }
   abstract getTarget(value: CellTarget): K;
   abstract load(doc: K): ValueEntry<S, V | undefined> | null;
+  // get a string version of a key
   abstract toKey(doc: K): string;
 }
 
@@ -106,19 +153,23 @@ export interface ObjectTraverser<K, V> {
     doc: K,
     docRoot: V,
     value: V,
-  ): V | undefined;
+  ): V;
 }
 
 export abstract class BaseObjectTraverser<K, S>
-  implements ObjectTraverser<K, Readonly<OptJSONValue>> {
+  implements ObjectTraverser<K, Immutable<OptJSONValue>> {
   constructor(
-    protected helper: ObjectStorageManager<K, S, Readonly<JSONValue>>,
+    protected manager: BaseObjectManager<
+      K,
+      S,
+      Immutable<JSONValue> | undefined
+    >,
   ) {}
   abstract traverse(
     doc: K,
-    docRoot: Readonly<JSONValue>,
-    value: Readonly<JSONValue>,
-  ): OptJSONValue;
+    docRoot: Immutable<JSONValue>,
+    value: Immutable<JSONValue>,
+  ): Immutable<OptJSONValue>;
 
   /**
    * Attempt to traverse the document as a directed acyclic graph.
@@ -133,10 +184,14 @@ export abstract class BaseObjectTraverser<K, S>
    */
   protected traverseDAG(
     doc: K,
-    docRoot: Readonly<JSONValue>,
-    value: Readonly<JSONValue>,
+    docRoot: Immutable<JSONValue>,
+    value: Immutable<JSONValue>,
     tracker: PointerCycleTracker,
-  ): JSONValue | undefined {
+    schemaTracker?: MapSet<string, SchemaPathSelector>,
+  ): Immutable<JSONValue> {
+    // FIXME: remove this
+    console.log("doc root === value ? ", docRoot === value);
+
     if (isPrimitive(value)) {
       return value;
     } else if (Array.isArray(value)) {
@@ -155,24 +210,35 @@ export abstract class BaseObjectTraverser<K, S>
       // First, see if we need special handling
       if (isPointer(value)) {
         const [newDoc, newDocRoot, newObj] = getAtPath(
-          this.helper,
+          this.manager,
           doc,
           docRoot,
           value,
           [],
           tracker,
+          schemaTracker,
+          DefaultSchemaSelector,
         );
         if (newObj === undefined) {
           return null;
         }
-        return this.traverseDAG(newDoc, newDocRoot, newObj, tracker);
+        return this.traverseDAG(
+          newDoc,
+          newDocRoot,
+          newObj,
+          tracker,
+          schemaTracker,
+        );
       } else {
         if (tracker.enter(value)) {
           try {
             return Object.fromEntries(
               Object.entries(value).map((
                 [k, v],
-              ): any => [k, this.traverseDAG(doc, docRoot, v, tracker)]),
+              ): any => [
+                k,
+                this.traverseDAG(doc, docRoot, v, tracker),
+              ]),
             );
           } finally {
             tracker.exit(value);
@@ -188,70 +254,77 @@ export abstract class BaseObjectTraverser<K, S>
   }
 }
 
-export class BasicObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
-  //   constructor(helper: ObjectStorageManager<T, JSONValue>) {
-  //     super(helper);
-  //   }
+// export class BasicObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
+//   //   constructor(helper: ObjectStorageManager<T, JSONValue>) {
+//   //     super(helper);
+//   //   }
 
-  traverse(
-    doc: K,
-    docRoot: Readonly<JSONValue>,
-    value: Readonly<JSONValue>,
-  ): JSONValue | undefined {
-    const tracker = new CycleTracker<JSONValue>();
-    return this.traverseDAG(
-      doc,
-      docRoot,
-      value,
-      tracker,
-    );
-  }
-}
+//   override traverse(
+//     doc: K,
+//     docRoot: Immutable<JSONValue>,
+//     value: Immutable<JSONValue>,
+//   ): Immutable<JSONValue> | undefined {
+//     const tracker = new CycleTracker<Immutable<JSONValue>>();
+//     return this.traverseDAG(
+//       doc,
+//       docRoot,
+//       value,
+//       tracker,
+//     );
+//   }
+// }
 
 /**
  * Traverses a data structure following a path and resolves any pointers.
- * If we load any additional documents, we will also let the traverser know.
+ * If we load any additional documents, we will also let the helper know.
  *
- * @param traverser - Storage manager for document access.
+ * @param manager - Storage manager for document access.
  * @param doc - Current document address
  * @param docRoot - Current document's root as JSON
  * @param fact - Starting value for traversal
  * @param path - Property/index path to follow
  * @param tracker - Prevents pointer cycles
+ * @param schemaTracker: Tracks schema used for loaded docs
  *
  * @returns [finalDoc, finalDocRoot, valueAtPath] - Final document, its root, and the value at path (or undefined)
  */
 export function getAtPath<K, S>(
-  traverser: ObjectStorageManager<K, S, Readonly<JSONValue>>,
+  manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
   doc: K,
-  docRoot: Readonly<JSONValue>,
-  fact: Readonly<JSONValue> | undefined,
+  docRoot: Immutable<JSONValue>,
+  fact: Immutable<JSONValue> | undefined,
   path: readonly string[],
   tracker: PointerCycleTracker,
-): [K, JSONValue, JSONValue | undefined] {
+  schemaTracker?: MapSet<string, SchemaPathSelector>,
+  selector?: SchemaPathSelector,
+): [K, Immutable<JSONValue>, Immutable<JSONValue> | undefined] {
   if (isPointer(fact)) {
     [doc, docRoot, fact] = followPointer(
-      traverser,
+      manager,
       doc,
       docRoot,
-      fact as Readonly<JSONObject>,
+      fact as Immutable<JSONObject>,
       tracker,
+      schemaTracker,
+      selector,
     );
   }
   let cursor = fact;
-  for (const [index, part] of path.entries()) {
+  for (const [_index, part] of path.entries()) {
     // TODO(@ubik2) Call toJSON on object if it's a function?
     if (isPointer(cursor)) {
       [doc, docRoot, cursor] = followPointer(
-        traverser,
+        manager,
         doc,
         docRoot,
-        cursor as Readonly<JSONObject>,
+        cursor as Immutable<JSONObject>,
         tracker,
+        schemaTracker,
+        selector,
       );
-    } else if (isObject(cursor) && part in (cursor as Readonly<JSONObject>)) {
-      const cursorObj = cursor as Readonly<JSONObject>;
-      cursor = cursorObj[part] as Readonly<JSONValue>;
+    } else if (isObject(cursor) && part in (cursor as Immutable<JSONObject>)) {
+      const cursorObj = cursor as Immutable<JSONObject>;
+      cursor = cursorObj[part] as Immutable<JSONValue>;
     } else if (Array.isArray(cursor)) {
       cursor = elementAt(cursor, part);
     } else {
@@ -265,35 +338,38 @@ export function getAtPath<K, S>(
 /**
  * Resolves a pointer reference to its target value.
  *
- * @param traverser - Object storage manager for document access
+ * @param manager - Object storage manager for document access
  * @param doc - Current document
  * @param docRoot - Current document's root as JSON
  * @param fact - Pointer object to resolve
  * @param tracker - Prevents infinite pointer cycles
+ * @param schemaTracker: Tracks schema to use for loaded docs
  *
  * @returns [targetDoc, targetDocRoot, resolvedValue] - Target document, its root, and the resolved value (or undefined)
  */
 function followPointer<K, S>(
-  traverser: ObjectStorageManager<K, S, Readonly<JSONValue>>,
+  manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
   doc: K,
-  docRoot: Readonly<JSONValue>,
-  fact: Readonly<JSONObject>,
+  docRoot: Immutable<JSONValue>,
+  fact: Immutable<JSONObject>,
   tracker: PointerCycleTracker,
-): [K, Readonly<JSONValue>, Readonly<JSONValue> | undefined] {
+  schemaTracker?: MapSet<string, SchemaPathSelector>,
+  selector?: SchemaPathSelector,
+): [K, Immutable<JSONValue>, Immutable<JSONValue> | undefined] {
   if (!tracker.enter(fact)) {
     console.error("Cycle Detected!");
     return [doc, docRoot, undefined];
   }
   try {
-    const cellTarget = getPointerInfo(fact as Readonly<JSONObject>);
+    const cellTarget = getPointerInfo(fact as Immutable<JSONObject>);
     const target = (cellTarget.cellTarget !== undefined)
-      ? traverser.getTarget(cellTarget)
+      ? manager.getTarget(cellTarget)
       : doc;
     let [targetDoc, targetDocRoot] = [doc, docRoot];
     if (cellTarget.cellTarget !== undefined) {
       // We have a reference to a different cell, so track the dependency
       // and update our targetDoc and targetDocRoot
-      const valueEntry = traverser.load(target);
+      const valueEntry = manager.load(target);
       if (valueEntry === null) {
         return [doc, docRoot, undefined];
       }
@@ -301,7 +377,8 @@ function followPointer<K, S>(
         valueEntry !== null && valueEntry.value !== undefined &&
         valueEntry.source && valueEntry.value !== docRoot
       ) {
-        traverser.addRead(doc, valueEntry.value, valueEntry.source);
+        schemaTracker?.add(manager.toKey(doc), selector!);
+        manager.addRead(doc, valueEntry.value, valueEntry.source);
       }
       // If the object we're pointing to is a retracted fact, just return undefined.
       // We can't do a better match, but we do want to include the result so we watch this doc
@@ -313,17 +390,18 @@ function followPointer<K, S>(
       // that's what our schema is relative to.
       [targetDoc, targetDocRoot] = [
         target,
-        (valueEntry.value as Readonly<JSONObject>)["value"],
+        (valueEntry.value as Immutable<JSONObject>)["value"],
       ];
     }
     // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
     const [nextDoc, nextDocRoot, nextObj] = getAtPath(
-      traverser,
+      manager,
       targetDoc,
       targetDocRoot,
       targetDocRoot,
       cellTarget.path,
       tracker,
+      schemaTracker,
     );
     return [nextDoc, nextDocRoot, nextObj];
   } finally {
@@ -339,7 +417,7 @@ function followPointer<K, S>(
  *   - path: An array of string segments representing the path to the target
  *   - cellTarget: The target cell identifier as a string, or undefined if it refers to the current document
  */
-export function getPointerInfo(value: Readonly<JSONObject>): CellTarget {
+export function getPointerInfo(value: Immutable<JSONObject>): CellTarget {
   if (isAlias(value)) {
     if (isObject(value.$alias.cell) && "/" in value.$alias.cell) {
       return {
@@ -374,7 +452,7 @@ function isJSONCellLink(value: unknown): value is JSONCellLink {
     Array.isArray(value.path));
 }
 
-export function indexFromPath(
+function indexFromPath(
   array: unknown[],
   path: string,
 ): number | undefined {
@@ -384,7 +462,7 @@ export function indexFromPath(
     : undefined;
 }
 
-export function elementAt<T>(array: T[], path: string): T | undefined {
+function elementAt<T>(array: T[], path: string): T | undefined {
   const index = indexFromPath(array, path);
   return (index === undefined) ? undefined : array[index];
 }
@@ -398,74 +476,94 @@ export function isPrimitive(val: unknown): val is Primitive {
 
 export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
   constructor(
-    helper: ObjectStorageManager<K, S, JSONValue>,
+    manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
     private schemaContext: SchemaContext,
-    private rootSchema: JSONSchema | boolean | undefined = undefined,
-    private tracker: CycleTracker<JSONValue> = new CycleTracker<JSONValue>(),
+    private tracker: PointerCycleTracker = new CycleTracker<
+      Immutable<JSONValue>
+    >(),
+    private schemaTracker: MapSet<string, SchemaPathSelector> = new MapSet<
+      string,
+      SchemaPathSelector
+    >(),
   ) {
-    super(helper);
-    this.rootSchema = schemaContext.rootSchema;
+    super(manager);
   }
 
-  traverse(
+  override traverse(
     doc: K,
-    docRoot: Readonly<JSONValue>,
-    value: Readonly<JSONValue>,
-  ): OptJSONValue {
+    docRoot: Immutable<JSONValue>,
+    value: Immutable<JSONValue>,
+  ): Immutable<OptJSONValue> {
+    this.schemaTracker.add(this.manager.toKey(doc), {
+      path: [],
+      schemaContext: this.schemaContext,
+    });
     return this.traverseWithSchema(
       doc,
       docRoot,
       value,
-      this.schemaContext.schema,
+      this.schemaContext,
     );
   }
 
   traverseWithSchema(
     doc: K,
-    docRoot: Readonly<JSONValue>,
-    value: Readonly<JSONValue>,
-    schema: JSONSchema | boolean,
-  ): OptJSONValue {
-    if (ContextualFlowControl.isTrueSchema(schema)) {
+    docRoot: Immutable<JSONValue>,
+    value: Immutable<JSONValue>,
+    schemaContext: SchemaContext,
+  ): Immutable<OptJSONValue> {
+    if (ContextualFlowControl.isTrueSchema(schemaContext.schema)) {
       // A value of true or {} means we match anything
       // Resolve the rest of the doc, and return
       return this.traverseDAG(doc, docRoot, value, this.tracker);
-    } else if (schema === false) {
+    } else if (schemaContext.schema === false) {
       // This value rejects all objects - just return
       return undefined;
-    } else if (typeof schema !== "object") {
-      console.warn("Invalid schema is not an object", schema);
+    } else if (typeof schemaContext.schema !== "object") {
+      console.warn("Invalid schema is not an object", schemaContext.schema);
       return undefined;
     }
-    if ("$ref" in schema) {
+    if ("$ref" in schemaContext.schema) {
       // At some point, this should be extended to support more than just '#'
-      if (schema["$ref"] != "#") {
-        console.warn("Unsupported $ref in schema: ", schema["$ref"]);
+      if (schemaContext.schema["$ref"] != "#") {
+        console.warn(
+          "Unsupported $ref in schema: ",
+          schemaContext.schema["$ref"],
+        );
       }
-      if (this.rootSchema === undefined) {
-        console.warn("Unsupported $ref without root schema: ", schema["$ref"]);
+      if (schemaContext.rootSchema === undefined) {
+        console.warn(
+          "Unsupported $ref without root schema: ",
+          schemaContext.schema["$ref"],
+        );
         return undefined;
       }
-      schema = this.rootSchema;
+      schemaContext = {
+        schema: schemaContext.rootSchema,
+        rootSchema: schemaContext.rootSchema,
+      };
     }
-    const schemaObj = schema as Readonly<JSONObject>;
+    const schemaObj = schemaContext.schema as Immutable<JSONObject>;
     if (value === null) {
-      return ("type" in schemaObj && schemaObj["type"] == "null")
+      return ("type" in schemaObj && schemaObj["type"] === "null")
         ? value
         : undefined;
     } else if (isString(value)) {
-      return ("type" in schemaObj && schemaObj["type"] == "string")
+      return ("type" in schemaObj && schemaObj["type"] === "string")
         ? value
         : undefined;
     } else if (isNumber(value)) {
-      return ("type" in schemaObj && schemaObj["type"] == "number")
+      return ("type" in schemaObj && schemaObj["type"] === "number")
         ? value
         : undefined;
     } else if (Array.isArray(value)) {
-      if ("type" in schemaObj && schemaObj["type"] == "array") {
+      if ("type" in schemaObj && schemaObj["type"] === "array") {
         if (this.tracker.enter(value)) {
           try {
-            this.traverseArrayWithSchema(doc, docRoot, value, schemaObj);
+            this.traverseArrayWithSchema(doc, docRoot, value, {
+              schema: schemaObj,
+              rootSchema: schemaContext.rootSchema,
+            });
           } finally {
             this.tracker.exit(value);
           }
@@ -480,18 +578,18 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
           doc,
           docRoot,
           value as JSONObject,
-          schemaObj,
+          { schema: schemaObj, rootSchema: schemaContext.rootSchema },
         );
         // TODO(@ubik2): it might be technically ok to follow the same pointer more than once, since we might have
         // a different schema the second time, which could prevent an infinite cycle, but for now, just reject these.
-      } else if ("type" in schemaObj && schemaObj["type"] == "object") {
+      } else if ("type" in schemaObj && schemaObj["type"] === "object") {
         if (this.tracker.enter(value)) {
           try {
             this.traverseObjectWithSchema(
               doc,
               docRoot,
-              value as Readonly<JSONObject>,
-              schemaObj,
+              value as Immutable<JSONObject>,
+              { schema: schemaObj, rootSchema: schemaContext.rootSchema },
             );
           } finally {
             this.tracker.exit(value);
@@ -505,18 +603,22 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
 
   private traverseArrayWithSchema(
     doc: K,
-    docRoot: Readonly<JSONValue>,
-    value: readonly Readonly<JSONValue>[],
-    schema: JSONSchema,
-  ): OptJSONValue {
+    docRoot: Immutable<JSONValue>,
+    value: readonly Immutable<JSONValue>[],
+    schemaContext: SchemaContext,
+  ): Immutable<OptJSONValue> {
     const arrayObj = [];
+    const schema = schemaContext.schema as Immutable<JSONObject>;
     for (const item of value) {
       const itemSchema = isObject(schema["items"])
         ? schema["items"] as JSONSchema
         : typeof (schema["items"]) === "boolean"
         ? schema["items"]
         : true;
-      const val = this.traverseWithSchema(doc, docRoot, item, itemSchema);
+      const val = this.traverseWithSchema(doc, docRoot, item, {
+        schema: itemSchema,
+        rootSchema: schemaContext.rootSchema,
+      });
       if (val === undefined) {
         // this array is invalid, since one or more items do not match the schema
         return undefined;
@@ -528,11 +630,12 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
 
   private traverseObjectWithSchema(
     doc: K,
-    docRoot: Readonly<JSONValue>,
-    value: Readonly<JSONObject>,
-    schema: JSONSchema,
-  ): OptJSONValue {
-    const filteredObj: Record<string, OptJSONValue> = {};
+    docRoot: Immutable<JSONValue>,
+    value: Immutable<JSONObject>,
+    schemaContext: SchemaContext,
+  ): Immutable<OptJSONValue> {
+    const filteredObj: Record<string, Immutable<OptJSONValue>> = {};
+    const schema = schemaContext.schema as Immutable<JSONObject>;
     for (const [propKey, propValue] of Object.entries(value)) {
       const schemaProperties = schema["properties"] as
         | Record<string, JSONSchema | boolean>
@@ -547,7 +650,10 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
             schema["additionalProperties"] === false)
         ? schema["additionalProperties"] as JSONSchema | boolean
         : true;
-      const val = this.traverseWithSchema(doc, docRoot, propValue, propSchema);
+      const val = this.traverseWithSchema(doc, docRoot, propValue, {
+        schema: propSchema,
+        rootSchema: schemaContext.rootSchema,
+      });
       if (val !== undefined) {
         filteredObj[propKey] = val;
       }
@@ -568,24 +674,34 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
 
   private traversePointerWithSchema(
     doc: K,
-    docRoot: Readonly<JSONValue>,
-    value: Readonly<JSONObject>,
-    schema: JSONSchema,
-  ): OptJSONValue {
+    docRoot: Immutable<JSONValue>,
+    value: Immutable<JSONObject>,
+    schemaContext: SchemaContext,
+  ): Immutable<OptJSONValue> {
     const [newDoc, newDocRoot, newObj] = getAtPath(
-      this.helper,
+      this.manager,
       doc,
       docRoot,
       value,
       [],
       this.tracker,
+      this.schemaTracker,
     );
     if (newObj === undefined) {
       return null;
     }
     if (this.tracker.enter(value)) {
       try {
-        return this.traverseWithSchema(newDoc, newDocRoot, newObj, schema);
+        this.schemaTracker.add(this.manager.toKey(newDoc), {
+          path: [],
+          schemaContext: schemaContext,
+        });
+        return this.traverseWithSchema(
+          newDoc,
+          newDocRoot,
+          newObj,
+          schemaContext,
+        );
       } finally {
         this.tracker.exit(value);
       }
@@ -593,4 +709,20 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       return null;
     }
   }
+}
+
+/**
+ * Is schemaA a superset of schemaB.
+ * That is, will every object matched by schema B also be matched by schemaA.
+ *
+ * @param schemaA
+ * @param schemaB
+ * @returns true if schemaA is a superset, or false if it cannot be determined.
+ */
+export function isSchemaSuperset(
+  schemaA: JSONSchema | boolean,
+  schemaB: JSONSchema | boolean,
+) {
+  return (ContextualFlowControl.isTrueSchema(schemaA)) ||
+    deepEqual(schemaA, schemaB) || (schemaB === false);
 }
