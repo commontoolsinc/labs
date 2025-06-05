@@ -305,5 +305,11 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
     : any
   : any;
 
+// Minimal version of Cell used in utils and built=in
+export interface ICell<T> {
+  get(): T;
+  schema?: JSONSchema;
+}
+
 export const isCellMarker = Symbol("isCell");
 export const isDocMarker = Symbol("isDoc");

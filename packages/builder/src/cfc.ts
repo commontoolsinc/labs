@@ -1,7 +1,5 @@
-// This is a simple form of the policy, where you express the basics of the partial ordering.
-
-import type { JSONSchema } from "@commontools/builder";
 import { isObject } from "@commontools/utils/types";
+import type { JSONSchema } from "./types.ts";
 
 // I use these strings in other code, so make them available as
 // constants. These are just strings, and real meaning would be

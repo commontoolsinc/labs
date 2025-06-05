@@ -4,6 +4,7 @@ import {
   type Alias,
   canBeOpaqueRef,
   type DeepKeyLookup,
+  ICell,
   isAlias,
   isCellMarker,
   isDocMarker,
@@ -243,11 +244,6 @@ type ICellLink = {
   schema?: JSONSchema;
   rootSchema?: JSONSchema;
 };
-// Minimal version of Cell used in utils
-interface ICell<T> {
-  get(): T;
-  schema?: JSONSchema;
-}
 
 type IDocImpl<T> = {
   get(): T;
