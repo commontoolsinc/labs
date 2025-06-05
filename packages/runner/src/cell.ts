@@ -1,13 +1,16 @@
-import { isCellMarker, isStreamAlias, TYPE } from "@commontools/builder";
 import {
+  type DeepKeyLookup,
   getTopFrame,
   ID,
   ID_FIELD,
+  isCellMarker,
+  isStreamAlias,
   type JSONSchema,
   type Schema,
+  TYPE,
 } from "@commontools/builder";
-import { type DeepKeyLookup, type DocImpl, isDoc } from "./doc.ts";
-import { getEntityId } from "./doc-map.ts";
+import { type DocImpl, isDoc } from "./doc.ts";
+import { type EntityId, getEntityId } from "./doc-map.ts";
 import {
   createQueryResultProxy,
   type QueryResult,
@@ -18,7 +21,6 @@ import {
   resolveLinkToValue,
 } from "./utils.ts";
 import type { ReactivityLog } from "./scheduler.ts";
-import { type EntityId } from "./doc-map.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import { validateAndTransform } from "./schema.ts";
 

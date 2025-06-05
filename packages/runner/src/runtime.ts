@@ -1,13 +1,4 @@
 import type { Signer } from "@commontools/identity";
-import type { Cell, CellLink } from "./cell.ts";
-import type { DocImpl } from "./doc.ts";
-import { isDoc } from "./doc.ts";
-import type { EntityId } from "./doc-map.ts";
-import { getEntityId } from "./doc-map.ts";
-import type { Cancel } from "./cancel.ts";
-import type { Action, EventHandler, ReactivityLog } from "./scheduler.ts";
-import type { Harness } from "./harness/harness.ts";
-import { UnsafeEvalHarness } from "./harness/index.ts";
 import type {
   JSONSchema,
   Module,
@@ -16,7 +7,18 @@ import type {
   RecipeEnvironment,
   Schema,
 } from "@commontools/builder";
-import { setRecipeEnvironment } from "@commontools/builder";
+import {
+  ContextualFlowControl,
+  setRecipeEnvironment,
+} from "@commontools/builder";
+import type { Cell, CellLink } from "./cell.ts";
+import type { DocImpl } from "./doc.ts";
+import { isDoc } from "./doc.ts";
+import { type EntityId, getEntityId } from "./doc-map.ts";
+import type { Cancel } from "./cancel.ts";
+import type { Action, EventHandler, ReactivityLog } from "./scheduler.ts";
+import type { Harness } from "./harness/harness.ts";
+import { UnsafeEvalHarness } from "./harness/index.ts";
 
 export type ErrorWithContext = Error & {
   action: Action;
@@ -227,7 +229,6 @@ import { ModuleRegistry } from "./module.ts";
 import { DocumentMap } from "./doc-map.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
-import { ContextualFlowControl } from "@commontools/builder";
 
 /**
  * Main Runtime class that orchestrates all services in the runner package.

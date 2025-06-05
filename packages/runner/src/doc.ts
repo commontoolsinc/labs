@@ -1,6 +1,7 @@
 import {
   cell as opaqueRef,
   deepEqual,
+  type DeepKeyLookup,
   type Frame,
   getTopFrame,
   getValueAtPath,
@@ -232,14 +233,6 @@ export type DocImpl<T> = {
    */
   copyTrap: boolean;
 };
-
-export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
-  : Path extends [infer First, ...infer Rest]
-    ? First extends keyof T
-      ? Rest extends PropertyKey[] ? DeepKeyLookup<T[First], Rest>
-      : any
-    : any
-  : any;
 
 /**
  * Creates a new document with the specified value, entity ID, and space.

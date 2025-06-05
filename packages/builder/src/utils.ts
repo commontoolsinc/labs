@@ -3,7 +3,7 @@ import { createShadowRef } from "./opaque-ref.ts";
 import {
   type Alias,
   canBeOpaqueRef,
-  DeepKeyLookup,
+  type DeepKeyLookup,
   isAlias,
   isCellMarker,
   isDocMarker,

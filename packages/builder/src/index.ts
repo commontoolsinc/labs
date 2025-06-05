@@ -38,6 +38,7 @@ export {
 } from "./built-in.ts";
 export {
   type Alias,
+  type DeepKeyLookup,
   type Frame,
   ID,
   ID_FIELD,

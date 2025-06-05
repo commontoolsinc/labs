@@ -297,11 +297,6 @@ export function markAsStatic(value: any): any {
   return value;
 }
 
-export type EntityId = {
-  "/": string | Uint8Array;
-  toJSON?: () => { "/": string };
-};
-
 export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
   : Path extends [infer First, ...infer Rest]
     ? First extends keyof T

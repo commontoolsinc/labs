@@ -1,8 +1,11 @@
-import { isStatic, markAsStatic, SchemaContext } from "@commontools/builder";
 import { Signer } from "@commontools/identity";
 import { defer } from "@commontools/utils/defer";
 import { sleep } from "@commontools/utils/sleep";
-
+import {
+  isStatic,
+  markAsStatic,
+  type SchemaContext,
+} from "@commontools/builder";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { Cell, type CellLink, isCell, isCellLink, isStream } from "./cell.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
