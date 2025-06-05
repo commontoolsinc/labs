@@ -306,6 +306,7 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
   : any;
 
 // Minimal version of Cell used in utils and built=in
+// The real Cell object doesn't inherit from this, but could.
 export interface ICell<T> {
   get(): T;
   schema?: JSONSchema;
