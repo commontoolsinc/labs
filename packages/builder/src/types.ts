@@ -296,3 +296,19 @@ export function markAsStatic(value: any): any {
   value[isStaticMarker] = true;
   return value;
 }
+
+export type EntityId = {
+  "/": string | Uint8Array;
+  toJSON?: () => { "/": string };
+};
+
+export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
+  : Path extends [infer First, ...infer Rest]
+    ? First extends keyof T
+      ? Rest extends PropertyKey[] ? DeepKeyLookup<T[First], Rest>
+      : any
+    : any
+  : any;
+
+export const isCellMarker = Symbol("isCell");
+export const isDocMarker = Symbol("isDoc");

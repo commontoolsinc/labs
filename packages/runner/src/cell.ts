@@ -1,4 +1,4 @@
-import { isStreamAlias, TYPE } from "@commontools/builder";
+import { isCellMarker, isStreamAlias, TYPE } from "@commontools/builder";
 import {
   getTopFrame,
   ID,
@@ -499,8 +499,6 @@ export function isCell(value: any): value is Cell<any> {
   return typeof value === "object" && value !== null &&
     value[isCellMarker] === true;
 }
-
-const isCellMarker = Symbol("isCell");
 
 /**
  * Type guard to check if a value is a Stream.

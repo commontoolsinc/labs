@@ -42,6 +42,8 @@ export {
   ID,
   ID_FIELD,
   isAlias,
+  isCellMarker,
+  isDocMarker,
   isModule,
   isOpaqueRef,
   isRecipe,

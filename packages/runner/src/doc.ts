@@ -4,6 +4,7 @@ import {
   type Frame,
   getTopFrame,
   getValueAtPath,
+  isDocMarker,
   type JSONSchema,
   type OpaqueRef,
   type Schema,
@@ -423,5 +424,3 @@ export function isDoc(value: any): value is DocImpl<any> {
   return typeof value === "object" && value !== null &&
     value[isDocMarker] === true;
 }
-
-const isDocMarker = Symbol("isDoc");
