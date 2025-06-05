@@ -213,7 +213,7 @@ export class Storage implements IStorage {
           connectionTimeout: 30_000,
           useSchemaQueries: type === "schema",
         };
-        provider = new CachedStorageProvider({
+        provider = CachedStorageProvider.connect({
           id: this.runtime.id,
           address: new URL("/api/storage/memory", this.remoteStorageUrl!),
           space: space as `did:${string}:${string}`,

@@ -6,6 +6,8 @@ import type {
   Entity,
   Fact,
   MemorySpace,
+  Protocol,
+  ProviderSession,
   QueryError,
   Result,
   Revision,
@@ -737,19 +739,10 @@ export interface RemoteStorageProviderSettings {
 }
 
 export interface RemoteStorageProviderOptions {
-  /**
-   * Unique identifier of the storage. Used as name of the `BroadcastChannel`
-   * in order to allow inspection of the storage.
-   */
-  id: string;
-
-  address: URL;
   as: Memory.Signer;
   space: MemorySpace;
   the?: string;
   settings?: RemoteStorageProviderSettings;
-
-  inspector?: Channel;
 }
 
 const defaultSettings: RemoteStorageProviderSettings = {
@@ -758,19 +751,31 @@ const defaultSettings: RemoteStorageProviderSettings = {
   useSchemaQueries: false,
 };
 
-export class Provider implements StorageProvider {
-  connection: WebSocket | null = null;
+export interface ConnectionOptions {
+  /**
+   * Unique identifier of the storage. Used as name of the `BroadcastChannel`
+   * in order to allow inspection of the storage.
+   */
+  id: string;
   address: URL;
-  workspace: Replica;
-  the: string;
-  session: Memory.MemorySession<MemorySpace>;
-  spaces: Map<string, Replica>;
-  settings: RemoteStorageProviderSettings;
-
-  subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
-    new Map();
-
   inspector?: Channel;
+}
+
+export interface ProviderConnectionOptions extends ConnectionOptions {
+  provider: Provider;
+}
+
+class ProviderConnection implements StorageProvider {
+  address: URL;
+  connection: WebSocket | null = null;
+  connectionCount = 0;
+  timeoutID = 0;
+  inspector?: Channel;
+  provider: Provider;
+  reader: ReadableStreamDefaultReader<
+    UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>
+  >;
+  writer: WritableStreamDefaultWriter<Memory.ProviderCommand<Memory.Protocol>>;
 
   /**
    * queue that holds commands that we read from the session, but could not
@@ -778,41 +783,316 @@ export class Provider implements StorageProvider {
    */
   queue: Set<UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>> =
     new Set();
-  writer: WritableStreamDefaultWriter<Memory.ProviderCommand<Memory.Protocol>>;
-  reader: ReadableStreamDefaultReader<
-    UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>
-  >;
 
-  connectionCount = 0;
-  timeoutID = 0;
-
-  constructor({
-    id,
-    address,
-    as,
-    space,
-    the = "application/json",
-    settings = defaultSettings,
-    inspector,
-  }: RemoteStorageProviderOptions) {
+  constructor(
+    { id, address, provider, inspector }: ProviderConnectionOptions,
+  ) {
     this.address = address;
-    this.the = the;
-    this.settings = settings;
+    this.provider = provider;
+    this.handleEvent = this.handleEvent.bind(this);
+    this.provider = provider;
     // Do not use a default inspector when in Deno:
     // Requires `--unstable-broadcast-channel` flags and it is not used
     // in that environment.
     this.inspector = isBrowser() ? (inspector ?? new Channel(id)) : undefined;
-    this.handleEvent = this.handleEvent.bind(this);
+
+    const session = provider.session;
+    this.reader = session.readable.getReader();
+    this.writer = session.writable.getWriter();
+
+    this.connect();
+  }
+  get settings() {
+    return this.provider.settings;
+  }
+  connect() {
+    const { connection } = this;
+    // If we already have a connection we remove all the listeners from it.
+    if (connection) {
+      clearTimeout(this.timeoutID);
+      connection.removeEventListener("message", this);
+      connection.removeEventListener("open", this);
+      connection.removeEventListener("close", this);
+      connection.removeEventListener("error", this);
+    }
+
+    const webSocketUrl = new URL(this.address.href);
+    webSocketUrl.searchParams.set("space", this.provider.workspace.space);
+    const socket = new WebSocket(webSocketUrl.href);
+    this.connection = socket;
+    // Start a timer so if connection is pending longer then `connectionTimeout`
+    // we should abort and retry.
+    this.setTimeout();
+    socket.addEventListener("message", this);
+    socket.addEventListener("open", this);
+    socket.addEventListener("close", this);
+    socket.addEventListener("error", this);
+
+    this.connectionCount += 1;
+  }
+  post(
+    invocation: Memory.UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>,
+  ) {
+    this.inspect({
+      send: invocation,
+    });
+    this.connection!.send(Codec.UCAN.toString(invocation));
+  }
+  setTimeout() {
+    this.timeoutID = setTimeout(
+      this.handleEvent,
+      this.settings.connectionTimeout,
+      { type: "timeout", target: this.connection },
+    );
+  }
+  onTimeout(socket: WebSocket) {
+    this.inspect({
+      disconnect: {
+        reason: "timeout",
+        message:
+          `Aborting connection after failure to connect in ${this.settings.connectionTimeout}ms`,
+      },
+    });
+
+    if (this.connection === socket) {
+      socket.close();
+    }
+  }
+  handleEvent(event: MessageEvent) {
+    // clear if we had timeout pending
+    clearTimeout(this.timeoutID);
+
+    switch (event.type) {
+      case "message":
+        return this.onReceive(event.data);
+      case "open":
+        return this.onOpen(event.target as WebSocket);
+      case "close":
+        return this.onDisconnect(event);
+      case "error":
+        return this.onDisconnect(event);
+      case "timeout":
+        return this.onTimeout(event.target as WebSocket);
+    }
+  }
+
+  parse(source: string): Memory.ProviderCommand<Memory.Protocol> {
+    return Codec.Receipt.fromString(source);
+  }
+  onReceive(data: string) {
+    return this.writer.write(
+      this.inspect({ receive: this.parse(data) }).receive,
+    );
+  }
+
+  async onOpen(socket: WebSocket) {
+    const { reader, queue } = this;
+
+    // Report connection to inspector
+    this.inspect({
+      connect: { attempt: this.connectionCount },
+    });
+
+    // If we did have connection
+    if (this.connectionCount > 1) {
+      this.provider.poll();
+    }
+
+    while (this.connection === socket) {
+      // First drain the queued commands if we have them.
+      for (const command of queue) {
+        this.post(command);
+        queue.delete(command);
+      }
+
+      // Next read next command from the session.
+      const next = await reader.read();
+      // If session is closed we're done.
+      if (next.done) {
+        this.close();
+      }
+
+      const command = next.value!;
+
+      // Now we make sure that our socket is still a current connection as we
+      // may have lost connection while waiting to read a command.
+      if (this.connection === socket) {
+        this.post(command);
+      } // If it is no longer our connection we simply add the command into a
+      // queue so it will be send once connection is reopen.
+      else {
+        this.queue.add(command);
+        break;
+      }
+    }
+  }
+
+  onDisconnect(event: Event) {
+    const socket = event.target as WebSocket;
+    // If connection is `null` provider was closed and we do nothing on
+    // disconnect.
+    if (this.connection === socket) {
+      // Report disconnection to inspector
+      switch (event.type) {
+        case "error":
+        case "timeout":
+        case "close": {
+          this.inspect({
+            disconnect: {
+              reason: event.type,
+              message: `Disconnected because of the ${event.type}`,
+            },
+          });
+          break;
+        }
+        default:
+          throw new Error(`Unknown event type: ${event.type}`);
+      }
+
+      this.connect();
+    }
+  }
+
+  async close() {
+    const { connection } = this;
+    this.connection = null;
+    if (connection && connection.readyState !== WebSocket.CLOSED) {
+      connection.close();
+      return await ProviderConnection.closed(connection);
+    } else {
+      return {};
+    }
+  }
+
+  async destroy(): Promise<void> {
+    await this.close();
+  }
+
+  inspect(
+    message: RawCommand,
+  ): RawCommand {
+    this.inspector?.postMessage({
+      ...message,
+      time: Date.now(),
+    });
+    return message;
+  }
+
+  /**
+   * Creates a promise that succeeds when the socket is closed or fails with
+   * the error event if the socket errors.
+   */
+  static async closed(socket: WebSocket): Promise<Unit> {
+    if (socket.readyState === WebSocket.CLOSED) {
+      return {};
+    } else {
+      return await new Promise((succeed, fail) => {
+        socket.addEventListener(
+          "close",
+          () => {
+            succeed({});
+          },
+          { once: true },
+        );
+        socket.addEventListener(
+          "error",
+          (event) => {
+            fail(event);
+          },
+          { once: true },
+        );
+      });
+    }
+  }
+  static async opened(socket: WebSocket) {
+    if (socket.readyState === WebSocket.CONNECTING) {
+      await new Promise((resolve) => {
+        socket.addEventListener("open", resolve, { once: true });
+        socket.addEventListener("error", resolve, { once: true });
+      });
+    }
+
+    switch (socket.readyState) {
+      case WebSocket.OPEN:
+        return socket;
+      case WebSocket.CLOSING:
+        throw new Error(`Socket is closing`);
+      case WebSocket.CLOSED:
+        throw new Error(`Socket is closed`);
+      default:
+        throw new Error(`Socket is in unknown state`);
+    }
+  }
+
+  sink<T = any>(
+    entityId: EntityId,
+    callback: (value: StorageValue<T>) => void,
+  ) {
+    return this.provider.sink(entityId, callback);
+  }
+
+  sync(
+    entityId: EntityId,
+    expectedInStorage?: boolean,
+    schemaContext?: SchemaContext,
+  ) {
+    return this.provider.sync(entityId, expectedInStorage, schemaContext);
+  }
+
+  get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
+    return this.provider.get(entityId);
+  }
+  send<T = any>(
+    batch: { entityId: EntityId; value: StorageValue<T> }[],
+  ) {
+    return this.provider.send(batch);
+  }
+
+  getReplica() {
+    return this.provider.getReplica();
+  }
+}
+
+export class Provider implements StorageProvider {
+  workspace: Replica;
+  the: string;
+  session: Memory.MemoryConsumer<MemorySpace>;
+  spaces: Map<string, Replica>;
+  settings: RemoteStorageProviderSettings;
+
+  subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
+    new Map();
+
+  static open(options: RemoteStorageProviderOptions) {
+    return new this(options);
+  }
+
+  static connect(options: ConnectionOptions & RemoteStorageProviderOptions) {
+    return this.open(options).connect(options);
+  }
+
+  constructor({
+    as,
+    space,
+    the = "application/json",
+    settings = defaultSettings,
+  }: RemoteStorageProviderOptions) {
+    this.the = the;
+    this.settings = settings;
 
     const session = Memory.create({ as });
 
-    this.reader = session.readable.getReader();
-    this.writer = session.writable.getWriter();
     this.session = session;
     this.spaces = new Map();
     this.workspace = this.mount(space);
+  }
 
-    this.connect();
+  connect(options: ConnectionOptions) {
+    return new ProviderConnection({
+      id: options.id,
+      provider: this,
+      address: options.address,
+    });
   }
 
   mount(space: MemorySpace): Replica {
@@ -925,233 +1205,20 @@ export class Provider implements StorageProvider {
     }
   }
 
-  parse(source: string): Memory.ProviderCommand<Memory.Protocol> {
-    return Codec.Receipt.fromString(source);
-  }
-
-  onReceive(data: string) {
-    return this.writer.write(
-      this.inspect({ receive: this.parse(data) }).receive,
-    );
-  }
-
-  inspect(
-    message: RawCommand,
-  ): RawCommand {
-    this.inspector?.postMessage({
-      ...message,
-      time: Date.now(),
-    });
-    return message;
-  }
-
-  handleEvent(event: MessageEvent) {
-    // clear if we had timeout pending
-    clearTimeout(this.timeoutID);
-
-    switch (event.type) {
-      case "message":
-        return this.onReceive(event.data);
-      case "open":
-        return this.onOpen(event.target as WebSocket);
-      case "close":
-        return this.onDisconnect(event);
-      case "error":
-        return this.onDisconnect(event);
-      case "timeout":
-        return this.onTimeout(event.target as WebSocket);
-    }
-  }
-  connect() {
-    const { connection } = this;
-    // If we already have a connection we remove all the listeners from it.
-    if (connection) {
-      clearTimeout(this.timeoutID);
-      connection.removeEventListener("message", this);
-      connection.removeEventListener("open", this);
-      connection.removeEventListener("close", this);
-      connection.removeEventListener("error", this);
-    }
-
-    const webSocketUrl = new URL(this.address.href);
-    webSocketUrl.searchParams.set("space", this.workspace.space);
-    const socket = new WebSocket(webSocketUrl.href);
-    this.connection = socket;
-    // Start a timer so if connection is pending longer then `connectionTimeout`
-    // we should abort and retry.
-    this.setTimeout();
-    socket.addEventListener("message", this);
-    socket.addEventListener("open", this);
-    socket.addEventListener("close", this);
-    socket.addEventListener("error", this);
-
-    this.connectionCount += 1;
-  }
-
-  setTimeout() {
-    this.timeoutID = setTimeout(
-      this.handleEvent,
-      this.settings.connectionTimeout,
-      { type: "timeout", target: this.connection },
-    );
-  }
-
-  onTimeout(socket: WebSocket) {
-    this.inspect({
-      disconnect: {
-        reason: "timeout",
-        message:
-          `Aborting connection after failure to connect in ${this.settings.connectionTimeout}ms`,
-      },
-    });
-
-    if (this.connection === socket) {
-      socket.close();
-    }
-  }
-
-  async onOpen(socket: WebSocket) {
-    const { reader, queue } = this;
-
-    // Report connection to inspector
-    this.inspect({
-      connect: { attempt: this.connectionCount },
-    });
-
-    // If we did have connection
-    if (this.connectionCount > 1) {
-      for (const space of this.spaces.values()) {
-        space.poll();
-      }
-    }
-
-    while (this.connection === socket) {
-      // First drain the queued commands if we have them.
-      for (const command of queue) {
-        this.post(command);
-        queue.delete(command);
-      }
-
-      // Next read next command from the session.
-      const next = await reader.read();
-      // If session is closed we're done.
-      if (next.done) {
-        this.close();
-      }
-
-      const command = next.value!;
-
-      // Now we make sure that our socket is still a current connection as we
-      // may have lost connection while waiting to read a command.
-      if (this.connection === socket) {
-        this.post(command);
-      } // If it is no longer our connection we simply add the command into a
-      // queue so it will be send once connection is reopen.
-      else {
-        this.queue.add(command);
-        break;
-      }
-    }
-  }
-
-  post(
-    invocation: Memory.UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>,
-  ) {
-    this.inspect({
-      send: invocation,
-    });
-    this.connection!.send(Codec.UCAN.toString(invocation));
-  }
-
-  onDisconnect(event: Event) {
-    const socket = event.target as WebSocket;
-    // If connection is `null` provider was closed and we do nothing on
-    // disconnect.
-    if (this.connection === socket) {
-      // Report disconnection to inspector
-      switch (event.type) {
-        case "error":
-        case "timeout":
-        case "close": {
-          this.inspect({
-            disconnect: {
-              reason: event.type,
-              message: `Disconnected because of the ${event.type}`,
-            },
-          });
-          break;
-        }
-        default:
-          throw new Error(`Unknown event type: ${event.type}`);
-      }
-
-      this.connect();
-    }
-  }
-
-  async close() {
-    const { connection } = this;
-    this.connection = null;
-    if (connection && connection.readyState !== WebSocket.CLOSED) {
-      connection.close();
-      return await Provider.closed(connection);
-    } else {
-      return {};
-    }
-  }
-
-  async destroy(): Promise<void> {
-    await this.close();
-  }
-
   /**
-   * Creates a promise that succeeds when the socket is closed or fails with
-   * the error event if the socket errors.
+   * Polls all spaces for changes.
    */
-  static async closed(socket: WebSocket): Promise<Unit> {
-    if (socket.readyState === WebSocket.CLOSED) {
-      return {};
-    } else {
-      return await new Promise((succeed, fail) => {
-        socket.addEventListener(
-          "close",
-          () => {
-            succeed({});
-          },
-          { once: true },
-        );
-        socket.addEventListener(
-          "error",
-          (event) => {
-            fail(event);
-          },
-          { once: true },
-        );
-      });
-    }
-  }
-  static async opened(socket: WebSocket) {
-    if (socket.readyState === WebSocket.CONNECTING) {
-      await new Promise((resolve) => {
-        socket.addEventListener("open", resolve, { once: true });
-        socket.addEventListener("error", resolve, { once: true });
-      });
-    }
-
-    switch (socket.readyState) {
-      case WebSocket.OPEN:
-        return socket;
-      case WebSocket.CLOSING:
-        throw new Error(`Socket is closing`);
-      case WebSocket.CLOSED:
-        throw new Error(`Socket is closed`);
-      default:
-        throw new Error(`Socket is in unknown state`);
+  poll() {
+    for (const space of this.spaces.values()) {
+      space.poll();
     }
   }
 
   getReplica(): string {
     return this.workspace.space;
+  }
+
+  async destroy(): Promise<void> {
   }
 }
 
