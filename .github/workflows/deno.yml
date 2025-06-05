@@ -21,18 +21,8 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🦕 Setup Deno 2.2.2
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: "2.2.2"
-
-      - name: 📦 Cache Deno dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.deno
-            ~/.cache/deno
-          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
 
       # Errors if `deno.lock` file was not committed with the current change
       - name: 🔍 Verify lock file & install dependencies
@@ -73,18 +63,8 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🦕 Setup Deno 2.2.2
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: "2.2.2"
-
-      - name: 📦 Cache Deno dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.deno
-            ~/.cache/deno
-          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
 
       - name: 📝 Verify code formatting
         working-directory: packages/toolshed
@@ -113,18 +93,8 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🦕 Setup Deno 2.2.2
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: "2.2.2"
-
-      - name: 📦 Cache Deno dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.deno
-            ~/.cache/deno
-          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
 
       - name: 🏗️ Build application binaries
         run: deno task build-binaries
@@ -332,18 +302,8 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🦕 Setup Deno 2.2.2
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: "2.2.2"
-
-      - name: 📦 Cache Deno dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.deno
-            ~/.cache/deno
-          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v4
@@ -386,18 +346,8 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🦕 Setup Deno 2.2.2
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: "2.2.2"
-
-      - name: 📦 Cache Deno dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.deno
-            ~/.cache/deno
-          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v4
@@ -431,11 +381,10 @@ jobs:
         with:
           name: jumble-artifacts
           path: ./jumble-artifacts
-
-      - name: 🦕 Setup Deno 2.2.2
-        uses: denoland/setup-deno@v2
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
         with:
-          deno-version: "2.2.2"
+          cache: false
 
       - name: 🔽 Pre-download Sentry CLI
         run: |
