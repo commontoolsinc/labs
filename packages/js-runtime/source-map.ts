@@ -77,3 +77,29 @@ function mapIsEmpty(position: MappedPosition): boolean {
   return position.source === null && position.name === null &&
     position.line === null && position.column === null;
 }
+
+export const isSourceMap = (value: unknown): value is SourceMap =>
+  !!(value && typeof value === "object" &&
+    "version" in value && value.version === "3" &&
+    "file" in value && typeof value.file === "string" &&
+    "sourceRoot" in value && typeof value.sourceRoot === "string" &&
+    "sources" in value && Array.isArray(value.sources) &&
+    "names" in value && Array.isArray(value.names) &&
+    "mappings" in value && typeof value.mappings === "string");
+
+// Parses string as a `SourceMap`, or throws if unable.
+export function parseSourceMap(stringMap: string): SourceMap {
+  const sourceMap = JSON.parse(stringMap);
+  if (sourceMap && "version" in sourceMap) {
+    // TypeScript correctly generates `version` as an integer,
+    // but the `source-map-js` library's `RawSourceMap` we use
+    // elsewhere expects `version` to be a string.
+    sourceMap.version = `${sourceMap.version}`;
+  }
+  if (!isSourceMap(sourceMap)) {
+    throw new Error(
+      `Could not parse source map: ${JSON.stringify(sourceMap, null, 2)}`,
+    );
+  }
+  return sourceMap;
+}

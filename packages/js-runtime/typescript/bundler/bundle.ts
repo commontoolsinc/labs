@@ -1,5 +1,5 @@
-import { SourceMap } from "../interface.ts";
-import { getAMDLoader } from "./loader.ts";
+import { SourceMap } from "../../interface.ts";
+import { getAMDLoader } from "./amd-loader.ts";
 
 const ENTRY = "$ENTRY";
 const BUNDLE_PRE = stripNewLines(`

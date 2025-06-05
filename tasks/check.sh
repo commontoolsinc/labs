@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+set -e
+
+DENO_VERSION_REQUIRED="2.3.5"
+# This is more portable than parsing `deno --version`
+DENO_VERSION=$(echo "console.log(Deno.version.deno)" | deno run -)
+if [ "$DENO_VERSION" != "$DENO_VERSION_REQUIRED" ]; then
+  echo "ERROR: Deno version is $DENO_VERSION, expected $DENO_VERSION_REQUIRED."
+  exit 1
+fi
 
 deno check \
   packages/background-charm-service \

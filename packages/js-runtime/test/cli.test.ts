@@ -14,8 +14,7 @@ describe("CLI", () => {
       args: [
         "task",
         "run",
-        "test/cli-fixtures/index.tsx",
-        "test/cli-fixtures/pow.ts",
+        "test/cli-fixtures/pow-5.tsx",
       ],
     }).output();
 
