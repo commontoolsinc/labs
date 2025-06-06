@@ -1,3 +1,4 @@
+import { MapSet } from "@commontools/builder/traverse";
 import * as Access from "./access.ts";
 import type {
   AsyncResult,
@@ -126,36 +127,6 @@ export class SchemaSubscription {
     public watchedObjects: Set<string>,
     public since: number = -1,
   ) {}
-}
-
-// FIXME: decide where this lives instead of duplicating
-// double defining for now, while i debug import issues.
-/**
- * A data structure that maps keys to sets of values, allowing multiple values
- * to be associated with a single key without duplication.
- *
- * @template K The type of keys in the map
- * @template V The type of values stored in the sets
- */
-class MapSet<K, V> {
-  private map = new Map<K, Set<V>>();
-
-  public get(key: K): Set<V> | undefined {
-    return this.map.get(key);
-  }
-
-  public add(key: K, value: V) {
-    if (!this.map.has(key)) {
-      const values = new Set<V>([value]);
-      this.map.set(key, values);
-    } else {
-      this.map.get(key)!.add(value);
-    }
-  }
-
-  public has(key: K): boolean {
-    return this.map.has(key);
-  }
 }
 
 class MemoryProviderSession<

@@ -16,7 +16,6 @@ import type {
 import { isAlias } from "./types.ts";
 import { deepEqual } from "./utils.ts";
 
-// TODO: Fix redundant type definition, but we can't import memory here
 export type SchemaPathSelector = {
   path: readonly string[];
   schemaContext?: Readonly<SchemaContext>;
