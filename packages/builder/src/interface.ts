@@ -339,7 +339,7 @@ export type CreateCellFunction = {
 };
 
 // Re-export opaque ref creators
-export type CellFunction = <T>(value: T) => OpaqueRef<T>;
+export type CellFunction = <T>(value?: T) => OpaqueRef<T>;
 export type StreamFunction = <T>(initial?: T) => OpaqueRef<T>;
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;
 

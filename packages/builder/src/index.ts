@@ -1,19 +1,6 @@
-// Re-export all public API from interface for backward compatibility
-export * from "./interface.ts";
-
-export {
-  type BuiltInCompileAndRunParams,
-  type BuiltInCompileAndRunState,
-  type BuiltInLLMParams,
-  type BuiltInLLMState,
-  compileAndRun,
-  fetchData,
-  ifElse,
-  llm,
-  navigateTo,
-  str,
-  streamData,
-} from "./built-in.ts";
+// Export the factory function
+export { createBuilder } from "./factory.ts";
+export type { BuilderFunctions, BuilderRuntime } from "./interface.ts";
 
 // Internal functions and exports needed by other packages
 export {
@@ -30,6 +17,10 @@ export {
 } from "./recipe.ts";
 export {
   type Alias,
+  AuthSchema,
+  type Frame,
+  type HandlerFactory,
+  ID,
   ID_FIELD,
   isAlias,
   isModule,
@@ -37,17 +28,31 @@ export {
   isRecipe,
   isStatic,
   isStreamAlias,
+  type JSONObject,
+  type JSONSchema,
   type JSONSchemaMutable,
+  type JSONValue,
   markAsStatic,
+  type Module,
+  type ModuleFactory,
+  NAME,
+  type NodeFactory,
   type OpaqueRefMethods,
+  type Recipe,
+  type RecipeFactory,
   type StreamAlias,
   type toJSON,
   toOpaqueRef,
+  TYPE,
+  UI,
   unsafe_materializeFactory,
   unsafe_originalRecipe,
   unsafe_parentRecipe,
   type UnsafeBinding,
 } from "./types.ts";
+export { createNodeFactory } from "./module.ts";
+export { type Schema, schema } from "./schema-to-ts.ts";
+export type { Mutable } from "@commontools/utils/types";
 
 // This should be a separate package, but for now it's easier to keep it here.
 export {
@@ -56,7 +61,3 @@ export {
   getValueAtPath,
   setValueAtPath,
 } from "./utils.ts";
-
-// Export the factory function
-export { createBuilder } from "./factory.ts";
-export type { BuilderFunctions, BuilderRuntime } from "./interface.ts";
