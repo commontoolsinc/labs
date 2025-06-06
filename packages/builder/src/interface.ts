@@ -3,43 +3,20 @@
  * This module exports only the types and functions that are part of the public API.
  */
 
-// Import types for use in this file
-import type {
-  JSONSchema,
-  Module,
-  ModuleFactory,
-  Opaque,
-  OpaqueRef,
-  RecipeFactory,
-} from "./types.ts";
+import type { Mutable } from "@commontools/utils/types";
 
 import type { Schema } from "./schema-to-ts.ts";
 
-// Re-export core types needed by recipes
-export type {
-  Frame,
-  JSONObject,
-  JSONSchema,
-  // JSON types
-  JSONValue,
-  // Module and Recipe types
-  Module,
-  // Factory types
-  ModuleFactory,
-  Mutable,
-  Node,
-  NodeFactory,
-  // Core data types
-  Opaque,
-  OpaqueRef,
-  Recipe,
-  RecipeFactory,
-  Static,
-} from "./types.ts";
+export const ID: unique symbol = Symbol("ID, unique to the context");
+export const ID_FIELD: unique symbol = Symbol(
+  "ID_FIELD, name of sibling that contains id",
+);
 
-// Export symbols as both type and value
-export { ID, NAME, TYPE, UI } from "./types.ts";
-
+// Should be Symbol("UI") or so, but this makes repeat() use these when
+// iterating over recipes.
+export const TYPE = "$TYPE";
+export const NAME = "$NAME";
+export const UI = "$UI";
 
 // Re-export Schema type
 export type { Schema } from "./schema-to-ts.ts";
@@ -47,9 +24,6 @@ export type { Schema } from "./schema-to-ts.ts";
 // Re-export schema utilities
 export { schema } from "./schema-to-ts.ts";
 export { AuthSchema } from "./schema-lib.ts";
-
-// Re-export spell utilities
-export { $, event, select, Spell } from "./spell.ts";
 
 // Cell type with only public methods
 export interface Cell<T = any> {
@@ -67,6 +41,135 @@ export interface Cell<T = any> {
 export interface Stream<T> {
   send(event: T): void;
 }
+
+export type OpaqueRef<T> =
+  & OpaqueRefMethods<T>
+  & (T extends Array<infer U> ? Array<OpaqueRef<U>>
+    : T extends object ? { [K in keyof T]: OpaqueRef<T[K]> }
+    : T);
+
+// Any OpaqueRef is also an Opaque, but can also have static values.
+// Use Opaque<T> in APIs that get inputs from the developer and use OpaqueRef
+// when data gets passed into what developers see (either recipe inputs or
+// module outputs).
+export type Opaque<T> =
+  | OpaqueRef<T>
+  | (T extends Array<infer U> ? Array<Opaque<U>>
+    : T extends object ? { [K in keyof T]: Opaque<T[K]> }
+    : T);
+
+// OpaqueRefMethods type with only public methods
+export interface OpaqueRefMethods<T> {
+  get(): OpaqueRef<T>;
+  set(value: Opaque<T> | T): void;
+  key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
+  setDefault(value: Opaque<T> | T): void;
+  setName(name: string): void;
+  setSchema(schema: JSONSchema): void;
+  map<S>(
+    fn: (
+      element: T extends Array<infer U> ? Opaque<U> : Opaque<T>,
+      index: Opaque<number>,
+      array: T,
+    ) => Opaque<S>,
+  ): Opaque<S[]>;
+}
+
+// Factory types
+
+// TODO(seefeld): Subset of internal type, just enough to make it
+// differentiated. But this isn't part of the public API, so we need to find a
+// different way to handle this.
+export interface Recipe {
+  argumentSchema: JSONSchema;
+  resultSchema: JSONSchema;
+}
+export interface Module {
+  type: "ref" | "javascript" | "recipe" | "raw" | "isolated" | "passthrough";
+}
+
+export type toJSON = {
+  toJSON(): unknown;
+};
+
+export type Handler<T = any, R = any> = Module & {
+  with: (inputs: Opaque<T>) => OpaqueRef<R>;
+};
+
+export type NodeFactory<T, R> =
+  & ((inputs: Opaque<T>) => OpaqueRef<R>)
+  & (Module | Handler | Recipe)
+  & toJSON;
+
+export type RecipeFactory<T, R> =
+  & ((inputs: Opaque<T>) => OpaqueRef<R>)
+  & Recipe
+  & toJSON;
+
+export type ModuleFactory<T, R> =
+  & ((inputs: Opaque<T>) => OpaqueRef<R>)
+  & Module
+  & toJSON;
+
+export type HandlerFactory<T, R> =
+  & ((inputs: Opaque<T>) => OpaqueRef<R>)
+  & Handler<T, R>
+  & toJSON;
+
+// JSON types
+
+export type JSONValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JSONArray
+  | JSONObject & IDFields;
+
+export interface JSONArray extends ArrayLike<JSONValue> {}
+
+export interface JSONObject extends Record<string, JSONValue> {}
+
+// Annotations when writing data that help determine the entity id. They are
+// removed before sending to storage.
+export interface IDFields {
+  [ID]?: unknown;
+  [ID_FIELD]?: unknown;
+}
+
+// TODO(@ubik2) When specifying a JSONSchema, you can often use a boolean
+// This is particularly useful for specifying the schema of a property.
+// That will require reworking some things, so for now, I'm not doing it
+export type JSONSchema = {
+  readonly [ID]?: unknown;
+  readonly [ID_FIELD]?: unknown;
+  readonly type?:
+    | "object"
+    | "array"
+    | "string"
+    | "integer"
+    | "number"
+    | "boolean"
+    | "null";
+  readonly properties?: Readonly<Record<string, JSONSchema>>;
+  readonly description?: string;
+  readonly default?: Readonly<JSONValue>;
+  readonly title?: string;
+  readonly example?: Readonly<JSONValue>;
+  readonly required?: readonly string[];
+  readonly enum?: readonly string[];
+  readonly items?: Readonly<JSONSchema>;
+  readonly $ref?: string;
+  readonly $defs?: Readonly<Record<string, JSONSchema>>;
+  readonly asCell?: boolean;
+  readonly asStream?: boolean;
+  readonly anyOf?: readonly JSONSchema[];
+  readonly additionalProperties?: Readonly<JSONSchema> | boolean;
+  readonly ifc?: { classification?: string[]; integrity?: string[] }; // temporarily used to assign labels like "confidential"
+};
+
+export { type Mutable };
+export type JSONSchemaMutable = Mutable<JSONSchema>;
 
 // Built-in types
 export interface BuiltInLLMParams {
