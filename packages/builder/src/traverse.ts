@@ -194,7 +194,7 @@ export abstract class BaseObjectTraverser<K, S>
               tracker,
               schemaTracker,
             )
-          ) as JSONValue[];
+          ) as Immutable<JSONValue>[];
         } finally {
           tracker.exit(doc.value);
         }
@@ -222,7 +222,7 @@ export abstract class BaseObjectTraverser<K, S>
             return Object.fromEntries(
               Object.entries(doc.value).map((
                 [k, value],
-              ): any => [
+              ) => [
                 k,
                 this.traverseDAG(
                   {
@@ -234,7 +234,7 @@ export abstract class BaseObjectTraverser<K, S>
                   schemaTracker,
                 ),
               ]),
-            );
+            ) as Immutable<JSONValue>;
           } finally {
             tracker.exit(doc.value);
           }
@@ -421,7 +421,7 @@ export function isPointer(value: unknown): boolean {
 /**
  * Check if value is a cell link. Unlike the isCellLink version, this does not check for a marker symbol, since that won't exist in the JSON object.
  *
- * @param {any} value - The value to check.
+ * @param {unknown} value - The value to check.
  * @returns {boolean}
  */
 function isJSONCellLink(value: unknown): value is JSONCellLink {

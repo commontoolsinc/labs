@@ -1,3 +1,4 @@
+import { isObject, isRecord } from "@commontools/utils/types";
 import {
   type DeepKeyLookup,
   getTopFrame,
@@ -303,7 +304,7 @@ function createRegularCell<T>(
       ),
     send: (newValue: Cellify<T>) => self.set(newValue),
     update: (values: Cellify<Partial<T>>) => {
-      if (typeof values !== "object" || values === null) {
+      if (!isRecord(values)) {
         throw new Error("Can't update with non-object value");
       }
       for (const [key, value] of Object.entries(values)) {
@@ -331,9 +332,8 @@ function createRegularCell<T>(
       const valuesToWrite = values.map((value: any) => {
         if (
           !isCell(value) && !isCellLink(value) && !isDoc(value) &&
-          !Array.isArray(value) && typeof value === "object" &&
-          value !== null &&
-          value[ID] === undefined && getTopFrame()
+          isObject(value) &&
+          (value as { [ID]?: unknown })[ID] === undefined && getTopFrame()
         ) {
           return {
             [ID]: getTopFrame()!.generatedIdCounter++,
@@ -362,9 +362,9 @@ function createRegularCell<T>(
       // Hacky retry logic for push only. See storage.ts for details on this
       // retry approach and what we should really be doing instead.
       if (!ref.cell.retry) ref.cell.retry = [];
-      ref.cell.retry.push((newBaseValue: any[]) => {
+      ref.cell.retry.push((newBaseValue) => {
         // Unlikely, but maybe the conflict reset to undefined?
-        if (newBaseValue === undefined) {
+        if (!Array.isArray(newBaseValue)) {
           newBaseValue = Array.isArray(schema?.default) ? schema.default : [];
         }
 
@@ -373,7 +373,7 @@ function createRegularCell<T>(
         const newValues = JSON.parse(JSON.stringify(appended));
 
         // Reappend the new values.
-        return [...newBaseValue, ...newValues];
+        return [...(newBaseValue as unknown[]), ...newValues];
       });
     },
     equals: (other: Cell<any>) =>
@@ -498,8 +498,7 @@ function subscribeToReferencedDocs<T>(
  * @returns {boolean}
  */
 export function isCell(value: any): value is Cell<any> {
-  return typeof value === "object" && value !== null &&
-    value[isCellMarker] === true;
+  return isRecord(value) && value[isCellMarker] === true;
 }
 
 /**
@@ -508,8 +507,7 @@ export function isCell(value: any): value is Cell<any> {
  * @returns True if the value is a Stream
  */
 export function isStream(value: any): value is Stream<any> {
-  return typeof value === "object" && value !== null &&
-    value[isStreamMarker] === true;
+  return isRecord(value) && value[isStreamMarker] === true;
 }
 
 const isStreamMarker = Symbol("isStream");
@@ -522,7 +520,6 @@ const isStreamMarker = Symbol("isStream");
  */
 export function isCellLink(value: any): value is CellLink {
   return (
-    typeof value === "object" && value !== null && isDoc(value.cell) &&
-    Array.isArray(value.path)
+    isRecord(value) && isDoc(value.cell) && Array.isArray(value.path)
   );
 }

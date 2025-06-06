@@ -1,4 +1,4 @@
-import { isRecord } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 import { createShadowRef } from "./opaque-ref.ts";
 import {
   type Alias,
@@ -51,8 +51,7 @@ export function traverseValue(
     (!isOpaqueRef(value) &&
       !canBeOpaqueRef(value) &&
       !isShadowRef(value) &&
-      typeof value === "object" &&
-      value !== null) ||
+      isRecord(value)) ||
     isRecipe(value)
   ) {
     return staticWrap(
@@ -104,7 +103,7 @@ export function getValueAtPath(obj: any, path: PropertyKey[]): any {
 export function hasValueAtPath(obj: any, path: PropertyKey[]): boolean {
   let current = obj;
   for (const key of path) {
-    if (!current || typeof current !== "object" || !(key in current)) {
+    if (!isRecord(current) || !(key in current)) {
       return false;
     }
     current = current[key];
@@ -114,7 +113,7 @@ export function hasValueAtPath(obj: any, path: PropertyKey[]): boolean {
 
 export const deepEqual = (a: any, b: any): boolean => {
   if (a === b) return true;
-  if (a && b && typeof a === "object" && typeof b === "object") {
+  if (isRecord(a) && isRecord(b)) {
     if (a.constructor !== b.constructor) return false;
     const keysA = Object.keys(a);
     const keysB = Object.keys(b);
@@ -137,8 +136,8 @@ export function toJSONWithAliases(
 ): JSONValue | undefined {
   if (isStatic(value) && !processStatic) {
     return markAsStatic(
-      toJSONWithAliases(value, paths, ignoreSelfAliases, path, true),
-    );
+      toJSONWithAliases(value, paths, ignoreSelfAliases, path, true) as any,
+    ) as JSONValue;
   } // Convert regular cells to opaque refs
   else if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
   // Convert parent opaque refs to shadow refs
@@ -195,7 +194,7 @@ export function toJSONWithAliases(
     } else if (!("cell" in alias) || typeof alias.cell === "number") {
       return {
         $alias: {
-          cell: (alias.cell ?? 0) + 1,
+          cell: ((alias.cell as number) ?? 0) + 1,
           path: alias.path as (string | number)[],
         },
       } satisfies Alias;
@@ -210,7 +209,7 @@ export function toJSONWithAliases(
     );
   }
 
-  if (typeof value === "object" || isRecipe(value)) {
+  if (isRecord(value) || isRecipe(value)) {
     const result: any = {};
     let hasValue = false;
     for (const key in value as any) {
@@ -328,11 +327,11 @@ export function createJsonSchema(
             schema.items = {};
           } else {
             const first = value[0];
-            if (first && typeof first === "object" && !Array.isArray(first)) {
+            if (isObject(first)) {
               const properties: { [key: string]: any } = {};
               for (let i = 0; i < value.length; i++) {
                 const item = value?.[i];
-                if (typeof item === "object" && item !== null) {
+                if (isRecord(item)) {
                   Object.keys(item).forEach((key) => {
                     if (!(key in properties)) {
                       properties[key] = analyzeType(
@@ -474,7 +473,7 @@ function attachCfcToOutputs<T, R>(
     const cfcSchema: JSONSchema = { ...outputSchema, ifc };
     (outputs as OpaqueRef<T>).setSchema(cfcSchema);
     return;
-  } else if (typeof outputs === "object" && outputs !== null) {
+  } else if (isRecord(outputs)) {
     // Descend into objects and arrays
     for (const [key, value] of Object.entries(outputs)) {
       attachCfcToOutputs(value, cfc, lubClassification);

@@ -27,6 +27,7 @@ import { TransactionResult } from "@commontools/memory";
 import { refer } from "@commontools/memory/reference";
 import { SchemaNone } from "@commontools/memory/interface";
 import type { IRuntime, IStorage } from "./runtime.ts";
+import { isRecord } from "@commontools/utils/types";
 
 export type { Labels };
 
@@ -331,7 +332,7 @@ export class Storage implements IStorage {
         return { ...value, cell: value.cell.toJSON() /* = the id */ };
       } else if (isStatic(value) && !processStatic) {
         return { $static: traverse(value, path, true) };
-      } else if (typeof value === "object" && value !== null) {
+      } else if (isRecord(value)) {
         if (Array.isArray(value)) {
           return value.map((value, index) => traverse(value, [...path, index]));
         } else {
@@ -395,8 +396,7 @@ export class Storage implements IStorage {
         // If we see a doc link with just an id, then we replace it with
         // the actual doc:
         if (
-          typeof value.cell === "object" &&
-          value.cell !== null &&
+          isRecord(value.cell) &&
           "/" in value.cell &&
           Array.isArray(value.path)
         ) {

@@ -20,6 +20,7 @@ import {
 import { type EntityId } from "./doc-map.ts";
 import type { IRuntime } from "./runtime.ts";
 import { type ReactivityLog } from "./scheduler.ts";
+import { isRecord } from "@commontools/utils/types";
 import { type Cancel } from "./cancel.ts";
 import { arrayEqual } from "./utils.ts";
 import { Labels } from "./storage.ts";
@@ -414,6 +415,5 @@ export function makeOpaqueRef(
  * @returns {boolean}
  */
 export function isDoc(value: any): value is DocImpl<any> {
-  return typeof value === "object" && value !== null &&
-    value[isDocMarker] === true;
+  return isRecord(value) && value[isDocMarker] === true;
 }
