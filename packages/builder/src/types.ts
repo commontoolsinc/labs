@@ -1,6 +1,5 @@
 import { isObject } from "@commontools/utils/types";
 
-import { ID, ID_FIELD, NAME, TYPE, UI } from "./interface.ts";
 import type {
   JSONSchema,
   JSONValue,
@@ -10,16 +9,21 @@ import type {
   Recipe,
 } from "./interface.ts";
 
-export { ID, ID_FIELD, NAME, TYPE, UI };
+export { AuthSchema, ID, ID_FIELD, NAME, TYPE, UI } from "./interface.ts";
 export type {
   Handler,
+  HandlerFactory,
+  JSONObject,
   JSONSchema,
   JSONSchemaMutable,
   JSONValue,
   Module,
+  ModuleFactory,
+  NodeFactory,
   Opaque,
   OpaqueRef,
   Recipe,
+  RecipeFactory,
   toJSON,
 } from "./interface.ts";
 

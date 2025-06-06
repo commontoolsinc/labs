@@ -4,7 +4,10 @@ import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import { refer } from "merkle-reference";
 import { type ReactivityLog } from "../scheduler.ts";
-import { BuiltInLLMParams, BuiltInLLMState } from "@commontools/builder";
+import {
+  BuiltInLLMParams,
+  BuiltInLLMState,
+} from "@commontools/builder/interface";
 
 const client = new LLMClient();
 
@@ -38,7 +41,11 @@ export function llm(
   parentDoc: DocImpl<any>,
   runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  const pending = runtime.documentMap.getDoc(false, { llm: { pending: cause } }, parentDoc.space);
+  const pending = runtime.documentMap.getDoc(
+    false,
+    { llm: { pending: cause } },
+    parentDoc.space,
+  );
   const result = runtime.documentMap.getDoc<string | undefined>(
     undefined,
     {
