@@ -31,6 +31,15 @@ import { ActivityProvider } from "@/contexts/ActivityContext.tsx";
 import { RuntimeProvider } from "@/contexts/RuntimeContext.tsx";
 import { ROUTES } from "@/routes.ts";
 
+declare global {
+  interface ImportMeta {
+    readonly env: {
+      readonly VITE_COMMIT_SHA?: string;
+      [key: string]: string | undefined;
+    };
+  }
+}
+
 // Determine environment based on hostname
 const determineEnvironment = () => {
   const hostname = globalThis.location.hostname;

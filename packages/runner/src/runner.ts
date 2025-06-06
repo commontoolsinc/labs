@@ -90,7 +90,7 @@ export class Runner implements IRunner {
     let processCell: DocImpl<{
       [TYPE]: string;
       argument?: T;
-      internal?: { [key: string]: any };
+      internal?: JSONValue;
       resultRef: { cell: DocImpl<R>; path: PropertyKey[] };
     }>;
 
@@ -182,18 +182,25 @@ export class Runner implements IRunner {
     }
 
     // Walk the recipe's schema and extract all default values
-    const defaults = extractDefaultValues(recipe.argumentSchema);
+    const defaults = extractDefaultValues(recipe.argumentSchema) as Partial<T>;
 
-    const internal = {
-      ...(deepCopy((defaults as { internal: any })?.internal) as any),
-      ...(deepCopy((recipe.initial as { internal: any })?.internal) as any),
-      ...processCell.get()?.internal,
-    };
+    // Important to use DeepCopy here, as the resulting object will be modified!
+    const previousInternal = processCell.get()?.internal;
+    const internal: JSONValue = Object.assign(
+      {},
+      deepCopy((defaults as unknown as { internal: JSONValue })?.internal),
+      deepCopy(
+        isRecord(recipe.initial) && isRecord(recipe.initial.internal)
+          ? recipe.initial.internal
+          : {},
+      ),
+      isRecord(previousInternal) ? previousInternal : {},
+    );
 
     // Still necessary until we consistently use schema for defaults.
     // Only do it on first load.
     if (!processCell.get()?.argument) {
-      argument = mergeObjects(argument as any, defaults) as T;
+      argument = mergeObjects<T>(argument as any, defaults);
     }
 
     const recipeChanged = recipeId !== processCell.get()?.[TYPE];

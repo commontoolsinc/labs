@@ -1,4 +1,5 @@
 import {
+  type Alias,
   ID,
   ID_FIELD,
   isAlias,
@@ -22,7 +23,7 @@ import {
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { ContextualFlowControl } from "./index.ts";
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 
 /**
  * Extracts default values from a JSON schema object.
@@ -37,10 +38,14 @@ export function extractDefaultValues(
   if (
     schema.type === "object" && schema.properties && isObject(schema.properties)
   ) {
-    const obj = deepCopy(schema.default ?? {}) as Record<string, JSONValue>;
+    // Ignore the schema.default if it's not an object, since it's not a valid
+    // default value for an object.
+    const obj = deepCopy(isRecord(schema.default) ? schema.default : {});
     for (const [propKey, propSchema] of Object.entries(schema.properties)) {
       const value = extractDefaultValues(propSchema);
-      if (value !== undefined) obj[propKey] = value;
+      if (value !== undefined) {
+        (obj as Record<string, unknown>)[propKey] = value;
+      }
     }
 
     return Object.entries(obj).length > 0 ? obj : undefined;
@@ -56,12 +61,12 @@ export function extractDefaultValues(
  * @param objects - Objects to merge
  * @returns A merged object, or undefined if no objects provided
  */
-export function mergeObjects<T extends Record<string, unknown>>(
-  ...objects: (T | undefined)[]
-): T | undefined {
+export function mergeObjects<T>(
+  ...objects: (Partial<T> | undefined)[]
+): T {
   objects = objects.filter((obj) => obj !== undefined);
-  if (objects.length === 0) return undefined;
-  if (objects.length === 1) return objects[0];
+  if (objects.length === 0) return {} as T;
+  if (objects.length === 1) return objects[0] as T;
 
   const seen = new Set<PropertyKey>();
   const result: Record<string, unknown> = {};
@@ -80,14 +85,18 @@ export function mergeObjects<T extends Record<string, unknown>>(
       isCell(obj) ||
       isStatic(obj)
     ) {
-      return obj;
+      return obj as T;
     }
 
     // Then merge objects, only passing those on that have any values.
     for (const key of Object.keys(obj)) {
       if (seen.has(key)) continue;
       seen.add(key);
-      const merged = mergeObjects(...objects.map((obj) => obj?.[key] as T));
+      const merged = mergeObjects<T[keyof T]>(
+        ...objects.map((obj) =>
+          (obj as Record<string, unknown>)?.[key] as T[keyof T]
+        ),
+      );
       if (merged !== undefined) result[key] = merged;
     }
   }
@@ -302,7 +311,7 @@ export function findAllAliasedCells<T>(
       const doc = (binding.$alias.cell ?? origDoc) as DocImpl<T>;
       const path = binding.$alias.path;
       if (docs.find((c) => c.cell === doc && c.path === path)) return;
-      docs.push({ cell: doc, path });
+      docs.push({ cell: doc as DocImpl<unknown>, path });
       find(doc.getAtPath(path), doc);
     } else if (Array.isArray(binding)) {
       for (const value of binding) find(value, origDoc);
@@ -562,21 +571,21 @@ export function maybeGetCellLink<T>(
 
 // Follows aliases and returns cell reference describing the last alias.
 // Only logs interim aliases, not the first one, and not the non-alias value.
-export function followAliases<T>(
-  alias: unknown,
+export function followAliases<T = any>(
+  alias: Alias,
   doc: DocImpl<T>,
   log?: ReactivityLog,
 ): CellLink {
-  if (!isAlias(alias)) {
+  if (isAlias(alias)) {
+    return followLinks(
+      { cell: doc, ...alias.$alias } as CellLink,
+      log,
+      createVisits(),
+      true,
+    );
+  } else {
     throw new Error(`Alias expected: ${JSON.stringify(alias)}`);
   }
-
-  return followLinks(
-    { cell: doc, ...(alias as any).$alias },
-    log,
-    createVisits(),
-    true,
-  );
 }
 
 /**
@@ -955,14 +964,17 @@ export function containsOpaqueRef(value: unknown): boolean {
   return false;
 }
 
-export function deepCopy(value: unknown): unknown {
+export function deepCopy<T = unknown>(value: T): Mutable<T> {
   if (isQueryResultForDereferencing(value)) {
-    return deepCopy(getCellLinkOrThrow(value));
+    return deepCopy(getCellLinkOrThrow(value)) as unknown as Mutable<T>;
   }
-  if (isDoc(value) || isCell(value)) return value;
+  if (isDoc(value) || isCell(value)) return value as Mutable<T>;
   if (isRecord(value)) {
-    return Array.isArray(value) ? value.map(deepCopy) : Object.fromEntries(
-      Object.entries(value).map(([key, value]) => [key, deepCopy(value)]),
-    );
-  } else return value;
+    return Array.isArray(value)
+      ? value.map(deepCopy) as unknown as Mutable<T>
+      : Object.fromEntries(
+        Object.entries(value).map(([key, value]) => [key, deepCopy(value)]),
+      ) as unknown as Mutable<T>;
+    // Literal value:
+  } else return value as Mutable<T>;
 }

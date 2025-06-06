@@ -362,9 +362,9 @@ function createRegularCell<T>(
       // Hacky retry logic for push only. See storage.ts for details on this
       // retry approach and what we should really be doing instead.
       if (!ref.cell.retry) ref.cell.retry = [];
-      ref.cell.retry.push((newBaseValue: any[]) => {
+      ref.cell.retry.push((newBaseValue) => {
         // Unlikely, but maybe the conflict reset to undefined?
-        if (newBaseValue === undefined) {
+        if (!Array.isArray(newBaseValue)) {
           newBaseValue = Array.isArray(schema?.default) ? schema.default : [];
         }
 
@@ -373,7 +373,7 @@ function createRegularCell<T>(
         const newValues = JSON.parse(JSON.stringify(appended));
 
         // Reappend the new values.
-        return [...newBaseValue, ...newValues];
+        return [...(newBaseValue as unknown[]), ...newValues];
       });
     },
     equals: (other: Cell<any>) =>

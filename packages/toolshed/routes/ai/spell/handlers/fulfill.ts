@@ -4,12 +4,8 @@ import { getAllBlobs } from "@/routes/ai/spell/behavior/effects.ts";
 
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type { FulfillSchemaRoute } from "@/routes/ai/spell/spell.routes.ts";
-import { Spell } from "@/routes/ai/spell/spell.ts";
-import { performSearch } from "../behavior/search.ts";
 import { Logger } from "@/lib/prefixed-logger.ts";
-import { processSpellSearch } from "@/routes/ai/spell/behavior/spell-search.ts";
 import { captureException } from "@sentry/deno";
-import { areSchemaCompatible } from "@/routes/ai/spell/schema-compatibility.ts";
 
 import { generateText } from "@/lib/llm.ts";
 import {
@@ -21,6 +17,7 @@ import {
 } from "@/routes/ai/spell/schema.ts";
 import { extractJSON } from "@/routes/ai/spell/json.ts";
 import { isRecord } from "@commontools/utils/types";
+import { isTemplateLiteral } from "typescript";
 
 export const FulfillSchemaRequestSchema = z.object({
   schema: z.record(
@@ -306,13 +303,11 @@ function constructSchemaPrompt(
       } else if (Array.isArray(value)) {
         // Recursively sanitize array elements
         sanitized[key] = value.map((item) =>
-          isRecord(item)
-            ? sanitizeObject(item as Record<string, unknown>)
-            : item
+          isRecord(item) ? sanitizeObject(item) : item
         );
       } else if (isRecord(value)) {
         // Recursively sanitize nested objects
-        sanitized[key] = sanitizeObject(value as Record<string, unknown>);
+        sanitized[key] = sanitizeObject(value);
       } else {
         // Keep primitives as-is
         sanitized[key] = value;

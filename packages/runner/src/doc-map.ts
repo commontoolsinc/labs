@@ -38,8 +38,11 @@ export function createRef(
     if (isRecord(obj) && "/" in obj) return obj;
 
     // If there is a .toJSON method, replace obj with it, then descend.
+    // TODO(seefeld): We have to accept functions for now as the recipe factory
+    // is a function and has a .toJSON method. But we plan to move away from
+    // that kind of serialization anyway, so once we did, remove this.
     if (
-      isRecord(obj) &&
+      (isRecord(obj) || typeof obj === "function") &&
       typeof obj.toJSON === "function"
     ) {
       obj = obj.toJSON() ?? obj;

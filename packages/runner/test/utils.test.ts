@@ -66,7 +66,7 @@ describe("Utils", () => {
       const obj2 = { b: { y: 20 }, c: 3 };
       const obj3 = { a: 4, d: 5 };
 
-      const result = mergeObjects<any>(obj1, obj2, obj3);
+      const result = mergeObjects<unknown>(obj1, obj2, obj3);
       expect(result).toEqual({
         a: 1,
         b: { x: 10, y: 20 },
@@ -80,7 +80,7 @@ describe("Utils", () => {
       const obj2 = undefined;
       const obj3 = { b: 2 };
 
-      const result = mergeObjects<any>(obj1, obj2, obj3);
+      const result = mergeObjects<unknown>(obj1, obj2, obj3);
       expect(result).toEqual({ a: 1, b: 2 });
     });
 
@@ -106,7 +106,7 @@ describe("Utils", () => {
         b: { c: 4 },
       };
 
-      const result = mergeObjects<any>(obj1, obj2, obj3);
+      const result = mergeObjects<unknown>(obj1, obj2, obj3);
       expect(result).toEqual({
         a: { $alias: { path: [] } },
         b: { c: { cell: testCell, path: [] } },

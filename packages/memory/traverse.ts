@@ -233,7 +233,7 @@ export function getAtPath<K, S>(
     );
   }
   let cursor = fact;
-  for (const [index, part] of path.entries()) {
+  for (const [_index, part] of path.entries()) {
     // TODO(@ubik2) Call toJSON on object if it's a function?
     if (isPointer(cursor)) {
       [doc, docRoot, cursor] = followPointer(
@@ -247,7 +247,7 @@ export function getAtPath<K, S>(
       const cursorObj = cursor as JSONObject;
       cursor = cursorObj[part] as JSONValue;
     } else if (Array.isArray(cursor)) {
-      cursor = elementAt(cursor, part) as JSONValue;
+      cursor = elementAt(cursor, part) as JSONValue | undefined;
     } else {
       // we can only descend into pointers, objects, and arrays
       return [doc, docRoot, undefined];
@@ -368,7 +368,10 @@ function isJSONCellLink(value: unknown): value is JSONCellLink {
     Array.isArray(value.path));
 }
 
-export function indexFromPath(array: unknown[], path: string): number | undefined {
+export function indexFromPath(
+  array: unknown[],
+  path: string,
+): number | undefined {
   const number = new Number(path).valueOf();
   return (Number.isInteger(number) && number >= 0 && number < array.length)
     ? number

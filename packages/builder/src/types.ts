@@ -177,8 +177,7 @@ export type StreamAlias = {
 };
 
 export function isStreamAlias(value: unknown): value is StreamAlias {
-  return !!value && typeof (value as StreamAlias).$stream === "boolean" &&
-    (value as StreamAlias).$stream;
+  return isObject(value) && "$stream" in value && value.$stream === true;
 }
 
 export type Module = {
@@ -196,7 +195,7 @@ export type Handler<T = any, R = any> = Module & {
 export function isModule(value: unknown): value is Module {
   return (
     (typeof value === "function" || typeof value === "object") &&
-    typeof (value as any).type === "string"
+    value !== null && typeof (value as unknown as Module).type === "string"
   );
 }
 

@@ -4,7 +4,7 @@ import { type CellLink, createCell, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { resolveLinks, resolveLinkToAlias } from "./utils.ts";
 import { ContextualFlowControl } from "./index.ts";
-import { isRecord, type Mutable } from "@commontools/utils/types";
+import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -134,7 +134,7 @@ function processDefaultValue(
 
   // Handle object type defaults
   if (
-    resolvedSchema?.type === "object" && isRecord(defaultValue)
+    resolvedSchema?.type === "object" && isObject(defaultValue)
   ) {
     const result: Record<string, any> = {};
     const processedKeys = new Set<string>();
@@ -148,7 +148,7 @@ function processDefaultValue(
           result[key] = processDefaultValue(
             doc,
             [...path, key],
-            defaultValue[key],
+            defaultValue[key as keyof typeof defaultValue],
             propSchema,
             log,
             rootSchema,
@@ -202,7 +202,7 @@ function processDefaultValue(
           result[key] = processDefaultValue(
             doc,
             [...path, key],
-            defaultValue[key],
+            defaultValue[key as keyof typeof defaultValue],
             additionalPropertiesSchema,
             log,
             rootSchema,
