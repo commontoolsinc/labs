@@ -20,7 +20,7 @@ import {
   str,
   streamData,
 } from "./built-in.ts";
-import { type Runtime } from "@commontools/runner";
+import { getCellLinkOrThrow, type Runtime } from "@commontools/runner";
 
 /**
  * Creates a set of builder functions with the given runtime
@@ -29,7 +29,6 @@ import { type Runtime } from "@commontools/runner";
  */
 export const createBuilder = (
   runtime: Runtime,
-  getCellLinkOrThrow?: (value: any) => any,
 ): BuilderFunctions => {
   // Implementation of createCell moved from runner/harness
   const createCell: CreateCellFunction = function createCell<T = any>(

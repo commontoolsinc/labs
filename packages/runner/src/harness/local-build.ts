@@ -210,7 +210,7 @@ export const tsToExports = async (
       case "@commontools/html":
         return commonHtml;
       case "@commontools/builder":
-        return createBuilder(config.runtime, getCellLinkOrThrow);
+        return createBuilder(config.runtime);
       case "zod":
         return zod;
       case "merkle-reference":

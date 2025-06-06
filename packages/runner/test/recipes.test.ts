@@ -25,7 +25,7 @@ describe("Recipe Runner", () => {
     runtime = new Runtime({
       storageUrl: "volatile://",
     });
-    const builder = createBuilder(runtime, getCellLinkOrThrow);
+    const builder = createBuilder(runtime);
     ({
       lift,
       recipe,
