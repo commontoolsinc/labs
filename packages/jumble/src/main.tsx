@@ -32,11 +32,8 @@ import { RuntimeProvider } from "@/contexts/RuntimeContext.tsx";
 import { ROUTES } from "@/routes.ts";
 
 declare global {
-  interface ImportMeta {
-    readonly env: {
-      readonly VITE_COMMIT_SHA?: string;
-      [key: string]: string | undefined;
-    };
+  interface ImportMetaEnv {
+    readonly VITE_COMMIT_SHA?: string;
   }
 }
 
