@@ -1,7 +1,17 @@
 import { createNodeFactory, lift } from "./module.ts";
-import { type Cell } from "@commontools/runner";
 import type { JSONSchema, NodeFactory, Opaque, OpaqueRef } from "./types.ts";
 import type { Schema } from "./schema-to-ts.ts";
+
+// Cell interface for global declaration (avoiding circular dependency)
+interface Cell<T = any> {
+  get(): T;
+  set(value: T): void;
+  send(value: T): void;
+  update(values: Partial<T>): void;
+  push(...value: T extends (infer U)[] ? U[] : never): void;
+  equals(other: Cell<any>): boolean;
+  key<K extends keyof T>(valueKey: K): Cell<T[K]>;
+}
 
 export interface BuiltInLLMParams {
   messages?: string[];

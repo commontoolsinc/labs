@@ -1,28 +1,43 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  byRef,
-  handler,
-  JSONSchema,
-  lift,
-  recipe,
-  TYPE,
-} from "@commontools/builder";
+import { createBuilder } from "@commontools/builder";
+import { JSONSchema, TYPE } from "@commontools/builder/interface";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { type Cell, isCell } from "../src/cell.ts";
 import { resolveLinks } from "../src/utils.ts";
-import { createCellFactory } from "../src/harness/create-cell.ts";
+import { getCellLinkOrThrow } from "../src/query-result-proxy.ts";
 
 describe("Recipe Runner", () => {
   let runtime: Runtime;
-  let createCell: ReturnType<typeof createCellFactory>;
+  let lift: ReturnType<typeof createBuilder>["lift"];
+  let recipe: ReturnType<typeof createBuilder>["recipe"];
+  let createCell: ReturnType<typeof createBuilder>["createCell"];
+  let handler: ReturnType<typeof createBuilder>["handler"];
+  let derive: ReturnType<typeof createBuilder>["derive"];
+  let compute: ReturnType<typeof createBuilder>["compute"];
+  let render: ReturnType<typeof createBuilder>["render"];
+  let str: ReturnType<typeof createBuilder>["str"];
+  let ifElse: ReturnType<typeof createBuilder>["ifElse"];
+  let byRef: ReturnType<typeof createBuilder>["byRef"];
 
   beforeEach(() => {
     runtime = new Runtime({
       storageUrl: "volatile://",
     });
-    createCell = createCellFactory(runtime);
+    const builder = createBuilder(runtime, getCellLinkOrThrow);
+    ({
+      lift,
+      recipe,
+      createCell,
+      handler,
+      derive,
+      compute,
+      render,
+      str,
+      ifElse,
+      byRef,
+    } = builder);
   });
 
   afterEach(async () => {
