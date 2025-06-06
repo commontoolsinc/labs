@@ -1,16 +1,20 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { createBuilder } from "@commontools/builder";
+import { JSONSchema, UI } from "@commontools/builder/interface";
 import { type Cell, isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
-import { type JSONSchema, recipe, UI } from "@commontools/builder";
 
 describe("Schema Lineage", () => {
   let runtime: Runtime;
+  let recipe: ReturnType<typeof createBuilder>["recipe"];
 
   beforeEach(() => {
     runtime = new Runtime({
       storageUrl: "volatile://",
     });
+    const builder = createBuilder(runtime);
+    ({ recipe } = builder);
   });
 
   afterEach(async () => {
@@ -225,11 +229,14 @@ describe("Schema Lineage", () => {
 
 describe("Schema propagation end-to-end example", () => {
   let runtime: Runtime;
+  let recipe: ReturnType<typeof createBuilder>["recipe"];
 
   beforeEach(() => {
     runtime = new Runtime({
       storageUrl: "volatile://",
     });
+    const builder = createBuilder(runtime);
+    ({ recipe } = builder);
   });
 
   afterEach(async () => {
