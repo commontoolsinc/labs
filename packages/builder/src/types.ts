@@ -157,6 +157,12 @@ export type JSONSchema = {
 export { type Mutable };
 export type JSONSchemaMutable = Mutable<JSONSchema>;
 
+// This is a schema, together with its rootSchema for resolving $ref entries
+export type SchemaContext = {
+  schema: JSONSchema | boolean;
+  rootSchema: JSONSchema | boolean;
+};
+
 export type Alias = {
   $alias: {
     cell?: unknown;
@@ -288,7 +294,25 @@ export function isStatic(value: unknown): value is Static {
     (value as any)[isStaticMarker] === true;
 }
 
-export function markAsStatic(value: unknown): unknown {
+export function markAsStatic<T>(value: T): T {
   (value as any)[isStaticMarker] = true;
   return value;
 }
+
+export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
+  : Path extends [infer First, ...infer Rest]
+    ? First extends keyof T
+      ? Rest extends PropertyKey[] ? DeepKeyLookup<T[First], Rest>
+      : any
+    : any
+  : any;
+
+// Minimal version of Cell used in utils and built=in
+// The real Cell object doesn't inherit from this, but could.
+export interface ICell<T> {
+  get(): T;
+  schema?: JSONSchema;
+}
+
+export const isCellMarker = Symbol("isCell");
+export const isDocMarker = Symbol("isDoc");

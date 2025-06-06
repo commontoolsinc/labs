@@ -1,4 +1,5 @@
 import {
+  Classification,
   isAlias,
   JSONSchema,
   Module,
@@ -10,7 +11,6 @@ import {
 } from "@commontools/builder";
 import {
   type Cell,
-  Classification,
   createRef,
   DocImpl,
   EntityId,

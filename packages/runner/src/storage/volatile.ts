@@ -1,3 +1,4 @@
+import { SchemaContext } from "@commontools/builder";
 import type { EntityId } from "../doc-map.ts";
 import { log } from "../log.ts";
 import {
@@ -6,7 +7,6 @@ import {
   type StorageValue,
   type Unit,
 } from "./base.ts";
-import { SchemaContext } from "@commontools/memory/interface";
 
 /**
  * Volatile (in-memory) storage provider. Just for testing.

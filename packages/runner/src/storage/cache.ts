@@ -1,3 +1,13 @@
+import { fromString, refer } from "merkle-reference";
+import { isBrowser } from "@commontools/utils/env";
+import { isObject } from "@commontools/utils/types";
+import {
+  ContextualFlowControl,
+  deepEqual,
+  JSONSchema,
+  JSONValue,
+  SchemaContext,
+} from "@commontools/builder";
 import type {
   AuthorizationError,
   Commit,
@@ -5,40 +15,32 @@ import type {
   ConnectionError,
   Entity,
   Fact,
+  FactAddress,
   MemorySpace,
   QueryError,
   Result,
   Revision,
-  SchemaContext,
   State,
   The,
   TransactionError,
   UCAN,
   Unit,
 } from "@commontools/memory/interface";
-import {
-  type Cancel,
-  ContextualFlowControl,
-  type EntityId,
-} from "@commontools/runner";
+import { set, setSelector } from "@commontools/memory/selection";
+import type { MemorySpaceSession } from "@commontools/memory/consumer";
+import { assert, retract, unclaimed } from "@commontools/memory/fact";
+import { the, toChanges, toRevision } from "@commontools/memory/commit";
+import * as Memory from "@commontools/memory/consumer";
+import * as Codec from "@commontools/memory/codec";
+import type { Cancel, EntityId } from "@commontools/runner";
 import {
   BaseStorageProvider,
   type StorageProvider,
   type StorageValue,
 } from "./base.ts";
-import type { MemorySpaceSession } from "@commontools/memory/consumer";
-import { assert, retract, unclaimed } from "@commontools/memory/fact";
-import { fromString, refer } from "merkle-reference";
-import { the, toChanges, toRevision } from "@commontools/memory/commit";
 import * as IDB from "./idb.ts";
-import * as Memory from "@commontools/memory/consumer";
-export * from "@commontools/memory/interface";
-import * as Codec from "@commontools/memory/codec";
 import { Channel, RawCommand } from "./inspector.ts";
-import { isBrowser } from "@commontools/utils/env";
-import { deepEqual, JSONSchema, JSONValue } from "@commontools/builder";
-import { set, setSelector } from "@commontools/memory/selection";
-import { isObject } from "@commontools/utils/types";
+import { querySchemaHeap } from "./query.ts";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -116,11 +118,6 @@ export interface Retract {
   the: The;
   of: Entity;
   is?: void;
-}
-
-export interface FactAddress {
-  the: The;
-  of: Entity;
 }
 
 const toKey = ({ the, of }: FactAddress) => `${of}/${the}`;
@@ -360,6 +357,7 @@ export class Replica {
     public pullRetryLimit: number = 100,
     public schemaTracker = new Map<string, Set<string>>(),
     public useSchemaQueries: boolean = false,
+    private cfc: ContextualFlowControl = new ContextualFlowControl(),
   ) {
     this.pull = this.pull.bind(this);
   }
@@ -422,7 +420,6 @@ export class Replica {
     const querySelector = {};
     // We'll assert that we need all the classifications we expect to need.
     // If we don't actually have those, the server will reject our request.
-    const cfc = new ContextualFlowControl();
     const classifications = new Set<string>();
     for (const [{ the, of }, context] of entries) {
       if (this.useSchemaQueries) {
@@ -433,7 +430,7 @@ export class Replica {
           schemaContext: schemaContext,
         });
         // Since we're accessing the entire document, we should base our classification on the rootSchema
-        cfc.joinSchema(classifications, schemaContext.rootSchema);
+        this.cfc.joinSchema(classifications, schemaContext.rootSchema);
       } else {
         // We're using the "cached" mode, and we don't use schema queries
         setSelector(querySelector, of, the, "_", {});
@@ -496,7 +493,7 @@ export class Replica {
       const factAddress = { the: revision.the, of: revision.of };
       revisions.set(factAddress, revision);
       if (schema !== undefined) {
-        const schemaRef = refer(schema).toString();
+        const schemaRef = refer(JSON.stringify(schema)).toString();
         const factKey = toKey(factAddress);
         if (!this.schemaTracker.has(factKey)) {
           this.schemaTracker.set(factKey, new Set<string>());
@@ -538,10 +535,31 @@ export class Replica {
         // Even though we have our root doc in local store, we may need
         // to re-issue our query, since our cached copy may have been run with a
         // different schema, and thus have different linked documents.
-        const schemaRef = refer(schema).toString();
-        const key = toKey(address);
-        if (!this.schemaTracker.get(key)?.has(schemaRef)) {
-          need.push([address, schema]);
+        const schemaRef = refer(JSON.stringify(schema)).toString();
+        const factKey = toKey(address);
+        // if we have the doc in our heap, we have a subscription with a
+        // schema in our heap. See if our new schema pattern will walk outside
+        // our current set of docs in the heap. If not, we can return the heap
+        // copy. If they do, we need to issue a schema query to the server
+        // (which will get the linked docs that we don't already have).
+        // I'd like to also get an if-modified-since map, in the future, so I
+        // can include the entities and since fields I already have.
+        if (!this.schemaTracker.get(factKey)?.has(schemaRef)) {
+          // See if we have everything we need locally (in our heap)
+          const localResult = querySchemaHeap(
+            schema,
+            [],
+            address,
+            this.heap.store,
+          );
+          if (localResult.missing.length === 0) {
+            if (!this.schemaTracker.has(factKey)) {
+              this.schemaTracker.set(factKey, new Set<string>());
+            }
+            this.schemaTracker.get(factKey)?.add(schemaRef);
+          } else {
+            need.push([address, schema]);
+          }
         }
       }
     }
@@ -591,7 +609,7 @@ export class Replica {
   }
 
   syncTimer: number = -1;
-  syncTimeout = 1000;
+  syncTimeout = 60 * 1000;
 
   sync() {
     clearTimeout(this.syncTimer);

@@ -1,16 +1,16 @@
 import { assert, assertEquals, assertMatch } from "@std/assert";
-import * as Fact from "../fact.ts";
-import * as Transaction from "../transaction.ts";
+import { refer } from "merkle-reference";
+import type { JSONSchema } from "@commontools/builder";
 import * as Changes from "../changes.ts";
 import * as Commit from "../commit.ts";
-import * as Provider from "../provider.ts";
 import * as Consumer from "../consumer.ts";
+import * as Fact from "../fact.ts";
+import type { UTCUnixTimestampInSeconds } from "../interface.ts";
+import * as Provider from "../provider.ts";
 import * as Selection from "../selection.ts";
-import { refer } from "merkle-reference";
-import { alice, bob, space as subject } from "./principal.ts";
-import { UTCUnixTimestampInSeconds } from "../interface.ts";
-import { JSONSchema } from "@commontools/builder";
 import { LABEL_THE } from "../space.ts";
+import * as Transaction from "../transaction.ts";
+import { alice, bob, space as subject } from "./principal.ts";
 
 // Some generated service key.
 const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";

@@ -1,10 +1,14 @@
-import { isAlias, type JSONSchema, type JSONValue } from "@commontools/builder";
+import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
+import {
+  ContextualFlowControl,
+  isAlias,
+  type JSONSchema,
+  type JSONValue,
+} from "@commontools/builder";
 import { type DocImpl } from "./doc.ts";
 import { type CellLink, createCell, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { resolveLinks, resolveLinkToAlias } from "./utils.ts";
-import { ContextualFlowControl } from "./index.ts";
-import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -317,7 +321,7 @@ export function validateAndTransform(
         log?.reads.push({ cell: doc, path: path.slice(0, i + 1) });
         const extraPath = [...path.slice(i + 1)];
         const newPath = [...value.path, ...extraPath];
-        const cfc = new ContextualFlowControl();
+        const cfc = doc.runtime.cfc;
         let newSchema;
         if (value.schema !== undefined) {
           newSchema = cfc.getSchemaAtPath(

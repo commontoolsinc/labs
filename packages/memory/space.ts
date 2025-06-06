@@ -413,7 +413,7 @@ const select = <Space extends MemorySpace>(
 ): Selection<Space>[Space] => {
   const factSelection: FactSelection = {}; // we'll store our facts here
   // First, collect all the potentially relevant facts (without dereferencing pointers)
-  for (const entry of iterateSelector(select)) {
+  for (const entry of iterateSelector(select, {})) {
     const factSelector = {
       of: entry.of,
       the: entry.the,
@@ -475,6 +475,30 @@ export const selectFacts = function* <Space extends MemorySpace>(
       since: row.since,
     };
   }
+};
+
+export const selectFact = function <Space extends MemorySpace>(
+  { store }: Session<Space>,
+  { the, of, since }: { the: The; of: Entity; since?: number },
+): SelectedFact | undefined {
+  const rows = store.prepare(EXPORT).all({
+    the: the,
+    of: of,
+    cause: null,
+    is: null,
+    since: since ?? null,
+  }) as StateRow[];
+  if (rows.length > 0) {
+    const row = rows[0];
+    return {
+      the: row.the,
+      of: row.of,
+      cause: row.cause ?? refer(unclaimed(row)).toString() as Cause,
+      is: row.is ? JSON.parse(row.is) as JSONValue : undefined,
+      since: row.since,
+    };
+  }
+  return undefined;
 };
 
 /**
@@ -822,12 +846,7 @@ export function getLabel<Space extends MemorySpace>(
   session: Session<Space>,
   of: Entity,
 ) {
-  const labelSelector = { of, the: LABEL_THE, cause: SelectAllString };
-  // Apply the last label that was active for the selected fact
-  for (const metadata of selectFacts(session, labelSelector)) {
-    return metadata;
-  }
-  return undefined;
+  return selectFact(session, { of, the: LABEL_THE });
 }
 
 // Get the various classification tags required based on the collection of labels.
@@ -898,7 +917,7 @@ export function redactCommitData(
   return newCommitData;
 }
 
-export function loadFacts<Space extends MemorySpace>(
+function loadFacts<Space extends MemorySpace>(
   selection: FactSelection,
   session: Session<Space>,
   factSelector: FactSelector,

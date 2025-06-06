@@ -9,7 +9,7 @@ import type {
   OpaqueRef,
   toJSON,
 } from "./types.ts";
-import { isModule, isOpaqueRef } from "./types.ts";
+import { isModule } from "./types.ts";
 import { opaqueRef } from "./opaque-ref.ts";
 import {
   applyArgumentIfcToResult,

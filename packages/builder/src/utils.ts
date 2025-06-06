@@ -1,8 +1,13 @@
+import { isObject, isRecord } from "@commontools/utils/types";
 import { createShadowRef } from "./opaque-ref.ts";
 import {
   type Alias,
   canBeOpaqueRef,
+  type DeepKeyLookup,
+  ICell,
   isAlias,
+  isCellMarker,
+  isDocMarker,
   isOpaqueRef,
   isRecipe,
   isShadowRef,
@@ -20,14 +25,7 @@ import {
   unsafe_originalRecipe,
 } from "./types.ts";
 import { getTopFrame } from "./recipe.ts";
-import {
-  type CellLink,
-  ContextualFlowControl,
-  isCell,
-  isCellLink,
-  isDoc,
-} from "@commontools/runner";
-import { isObject, isRecord } from "@commontools/utils/types";
+import { ContextualFlowControl } from "./cfc.ts";
 
 /**
  * Traverse a value, _not_ entering cells
@@ -235,12 +233,63 @@ export function toJSONWithAliases(
   return value;
 }
 
+//
+// Some minimal type definitions for createJsonSchema to avoid using the ones in runner
+//
+type ICellLink = {
+  space?: string;
+  cell: IDocImpl<any>;
+  path: PropertyKey[];
+  schema?: JSONSchema;
+  rootSchema?: JSONSchema;
+};
+
+type IDocImpl<T> = {
+  get(): T;
+  getAtPath<Path extends PropertyKey[]>(path: Path): DeepKeyLookup<T, Path>;
+};
+
+//
+// Some helper functions for createJsonSchema, to avoid using the ones in runner.
+//
+/**
+ * Check if value is a simple cell.
+ *
+ * @param {any} value - The value to check.
+ * @returns {boolean}
+ */
+function isICell(value: any): value is ICell<any> {
+  return isRecord(value) && value[isCellMarker] === true;
+}
+
+/**
+ * Check if value is a cell link.
+ *
+ * @param {any} value - The value to check.
+ * @returns {boolean}
+ */
+function isICellLink(value: any): value is ICellLink {
+  return (
+    isRecord(value) && isIDoc(value.cell) && Array.isArray(value.path)
+  );
+}
+
+/**
+ * Check if value is a cell.
+ *
+ * @param {any} value - The value to check.
+ * @returns {boolean}
+ */
+function isIDoc(value: any): value is IDocImpl<any> {
+  return isRecord(value) && value[isDocMarker] === true;
+}
+
 export function createJsonSchema(
   example: any,
   addDefaults = false,
 ): JSONSchemaMutable {
   function analyzeType(value: any): JSONSchema {
-    if (isCell(value)) {
+    if (isICell(value)) {
       if (value.schema) {
         return value.schema;
       } else {
@@ -248,15 +297,15 @@ export function createJsonSchema(
       }
     }
 
-    if (isDoc(value)) value = { cell: value, path: [] } satisfies CellLink;
+    if (isIDoc(value)) value = { cell: value, path: [] } satisfies ICellLink;
 
-    if (isCellLink(value)) {
+    if (isICellLink(value)) {
       value = value.cell.getAtPath(value.path);
       return analyzeType(value);
     }
 
     if (isAlias(value)) {
-      if (isDoc(value.$alias.cell)) {
+      if (isIDoc(value.$alias.cell)) {
         value = value.$alias.cell.getAtPath(value.$alias.path);
       } else {
         value = getValueAtPath(example, value.$alias.path);
@@ -353,8 +402,6 @@ export function recipeToJSON(recipe: Recipe) {
 }
 
 export function connectInputAndOutputs(node: NodeRef) {
-  const cfc = new ContextualFlowControl();
-
   function connect(value: any): any {
     if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
     if (isOpaqueRef(value)) {
