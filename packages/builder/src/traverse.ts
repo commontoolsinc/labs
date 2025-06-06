@@ -189,16 +189,13 @@ export abstract class BaseObjectTraverser<K, S>
     tracker: PointerCycleTracker,
     schemaTracker?: MapSet<string, SchemaPathSelector>,
   ): Immutable<JSONValue> {
-    // FIXME: remove this
-    console.log("doc root === value ? ", docRoot === value);
-
     if (isPrimitive(value)) {
       return value;
     } else if (Array.isArray(value)) {
       if (tracker.enter(value)) {
         try {
           return value.map((item) =>
-            this.traverseDAG(doc, docRoot, item, tracker)
+            this.traverseDAG(doc, docRoot, item, tracker, schemaTracker)
           ) as JSONValue[];
         } finally {
           tracker.exit(value);
@@ -209,7 +206,7 @@ export abstract class BaseObjectTraverser<K, S>
     } else if (isObject(value)) {
       // First, see if we need special handling
       if (isPointer(value)) {
-        const [newDoc, newDocRoot, newObj] = getAtPath(
+        const [newDoc, newDocRoot, newObj, newDocPath] = getAtPath(
           this.manager,
           doc,
           docRoot,
@@ -237,7 +234,7 @@ export abstract class BaseObjectTraverser<K, S>
                 [k, v],
               ): any => [
                 k,
-                this.traverseDAG(doc, docRoot, v, tracker),
+                this.traverseDAG(doc, docRoot, v, tracker, schemaTracker),
               ]),
             );
           } finally {
@@ -286,7 +283,9 @@ export abstract class BaseObjectTraverser<K, S>
  * @param tracker - Prevents pointer cycles
  * @param schemaTracker: Tracks schema used for loaded docs
  *
- * @returns [finalDoc, finalDocRoot, valueAtPath] - Final document, its root, and the value at path (or undefined)
+ * @returns [finalDoc, finalDocRoot, valueAtPath, path] -
+ *  Final document, its root, and the value at path (or undefined),
+ *  and the path in that final doc
  */
 export function getAtPath<K, S>(
   manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
@@ -297,9 +296,10 @@ export function getAtPath<K, S>(
   tracker: PointerCycleTracker,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
-): [K, Immutable<JSONValue>, Immutable<JSONValue> | undefined] {
+): [K, Immutable<JSONValue>, Immutable<JSONValue> | undefined, string[]] {
+  let docPath: string[] = [];
   if (isPointer(fact)) {
-    [doc, docRoot, fact] = followPointer(
+    [doc, docRoot, fact, docPath] = followPointer(
       manager,
       doc,
       docRoot,
@@ -313,26 +313,28 @@ export function getAtPath<K, S>(
   for (const [_index, part] of path.entries()) {
     // TODO(@ubik2) Call toJSON on object if it's a function?
     if (isPointer(cursor)) {
-      [doc, docRoot, cursor] = followPointer(
+      [doc, docRoot, cursor, docPath] = followPointer(
         manager,
         doc,
         docRoot,
         cursor as Immutable<JSONObject>,
         tracker,
         schemaTracker,
-        selector,
+        selector, // FIXME: narrow selector as you follow path
       );
+    } else if (Array.isArray(cursor)) {
+      cursor = elementAt(cursor, part);
+      docPath.push(part);
     } else if (isObject(cursor) && part in (cursor as Immutable<JSONObject>)) {
       const cursorObj = cursor as Immutable<JSONObject>;
       cursor = cursorObj[part] as Immutable<JSONValue>;
-    } else if (Array.isArray(cursor)) {
-      cursor = elementAt(cursor, part);
+      docPath.push(part);
     } else {
       // we can only descend into pointers, objects, and arrays
-      return [doc, docRoot, undefined];
+      return [doc, docRoot, undefined, []];
     }
   }
-  return [doc, docRoot, cursor];
+  return [doc, docRoot, cursor, docPath];
 }
 
 /**
@@ -345,7 +347,7 @@ export function getAtPath<K, S>(
  * @param tracker - Prevents infinite pointer cycles
  * @param schemaTracker: Tracks schema to use for loaded docs
  *
- * @returns [targetDoc, targetDocRoot, resolvedValue] - Target document, its root, and the resolved value (or undefined)
+ * @returns [targetDoc, targetDocRoot, resolvedValue, targetDocPath] - Target document, its root, and the resolved value (or undefined)
  */
 function followPointer<K, S>(
   manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
@@ -355,10 +357,10 @@ function followPointer<K, S>(
   tracker: PointerCycleTracker,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
-): [K, Immutable<JSONValue>, Immutable<JSONValue> | undefined] {
+): [K, Immutable<JSONValue>, Immutable<JSONValue> | undefined, string[]] {
   if (!tracker.enter(fact)) {
     console.error("Cycle Detected!");
-    return [doc, docRoot, undefined];
+    return [doc, docRoot, undefined, []];
   }
   try {
     const cellTarget = getPointerInfo(fact as Immutable<JSONObject>);
@@ -371,19 +373,18 @@ function followPointer<K, S>(
       // and update our targetDoc and targetDocRoot
       const valueEntry = manager.load(target);
       if (valueEntry === null) {
-        return [doc, docRoot, undefined];
+        return [doc, docRoot, undefined, []];
       }
       if (
         valueEntry !== null && valueEntry.value !== undefined &&
         valueEntry.source && valueEntry.value !== docRoot
       ) {
-        schemaTracker?.add(manager.toKey(doc), selector!);
         manager.addRead(doc, valueEntry.value, valueEntry.source);
       }
       // If the object we're pointing to is a retracted fact, just return undefined.
       // We can't do a better match, but we do want to include the result so we watch this doc
       if (valueEntry.value === undefined) {
-        return [target, {}, undefined];
+        return [target, {}, undefined, []];
       }
       // Otherwise, we can continue with the target.
       // an assertion fact.is will be an object with a value property, and
@@ -394,7 +395,7 @@ function followPointer<K, S>(
       ];
     }
     // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
-    const [nextDoc, nextDocRoot, nextObj] = getAtPath(
+    const [nextDoc, nextDocRoot, nextObj, nextDocPath] = getAtPath(
       manager,
       targetDoc,
       targetDocRoot,
@@ -402,8 +403,13 @@ function followPointer<K, S>(
       cellTarget.path,
       tracker,
       schemaTracker,
+      selector,
     );
-    return [nextDoc, nextDocRoot, nextObj];
+    schemaTracker?.add(manager.toKey(nextDoc), {
+      path: nextDocPath,
+      schemaContext: selector?.schemaContext,
+    });
+    return [nextDoc, nextDocRoot, nextObj, nextDocPath];
   } finally {
     tracker.exit(fact);
   }
@@ -515,7 +521,13 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
     if (ContextualFlowControl.isTrueSchema(schemaContext.schema)) {
       // A value of true or {} means we match anything
       // Resolve the rest of the doc, and return
-      return this.traverseDAG(doc, docRoot, value, this.tracker);
+      return this.traverseDAG(
+        doc,
+        docRoot,
+        value,
+        this.tracker,
+        this.schemaTracker,
+      );
     } else if (schemaContext.schema === false) {
       // This value rejects all objects - just return
       return undefined;
@@ -545,19 +557,13 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
     }
     const schemaObj = schemaContext.schema as Immutable<JSONObject>;
     if (value === null) {
-      return ("type" in schemaObj && schemaObj["type"] === "null")
-        ? value
-        : undefined;
+      return this.isValidType(schemaObj, "null") ? value : undefined;
     } else if (isString(value)) {
-      return ("type" in schemaObj && schemaObj["type"] === "string")
-        ? value
-        : undefined;
+      return this.isValidType(schemaObj, "string") ? value : undefined;
     } else if (isNumber(value)) {
-      return ("type" in schemaObj && schemaObj["type"] === "number")
-        ? value
-        : undefined;
+      return this.isValidType(schemaObj, "number") ? value : undefined;
     } else if (Array.isArray(value)) {
-      if ("type" in schemaObj && schemaObj["type"] === "array") {
+      if (this.isValidType(schemaObj, "array")) {
         if (this.tracker.enter(value)) {
           try {
             this.traverseArrayWithSchema(doc, docRoot, value, {
@@ -582,7 +588,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
         );
         // TODO(@ubik2): it might be technically ok to follow the same pointer more than once, since we might have
         // a different schema the second time, which could prevent an infinite cycle, but for now, just reject these.
-      } else if ("type" in schemaObj && schemaObj["type"] === "object") {
+      } else if (this.isValidType(schemaObj, "object")) {
         if (this.tracker.enter(value)) {
           try {
             this.traverseObjectWithSchema(
@@ -599,6 +605,23 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
         }
       }
     }
+  }
+
+  private isValidType(
+    schemaObj: Immutable<JSONObject>,
+    valueType: string,
+  ): boolean {
+    if ("type" in schemaObj) {
+      if (Array.isArray(schemaObj["type"])) {
+        return schemaObj["type"].includes(valueType);
+      } else if (isString(schemaObj["type"])) {
+        return schemaObj["type"] === valueType;
+      } else {
+        // invalid schema type
+        return false;
+      }
+    }
+    return true;
   }
 
   private traverseArrayWithSchema(
@@ -678,7 +701,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
     value: Immutable<JSONObject>,
     schemaContext: SchemaContext,
   ): Immutable<OptJSONValue> {
-    const [newDoc, newDocRoot, newObj] = getAtPath(
+    const [newDoc, newDocRoot, newObj, newDocPath] = getAtPath(
       this.manager,
       doc,
       docRoot,
@@ -686,16 +709,13 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       [],
       this.tracker,
       this.schemaTracker,
+      { path: [], schemaContext: schemaContext },
     );
     if (newObj === undefined) {
       return null;
     }
     if (this.tracker.enter(value)) {
       try {
-        this.schemaTracker.add(this.manager.toKey(newDoc), {
-          path: [],
-          schemaContext: schemaContext,
-        });
         return this.traverseWithSchema(
           newDoc,
           newDocRoot,

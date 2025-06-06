@@ -8,12 +8,14 @@ import {
   type CellTarget,
   CycleTracker,
   getAtPath,
+  MapSet,
   SchemaObjectTraverser,
   type ValueEntry,
 } from "@commontools/builder/traverse";
 import type {
   FactAddress,
   Revision,
+  SchemaPathSelector,
   State,
 } from "@commontools/memory/interface";
 
@@ -90,11 +92,14 @@ export function querySchemaHeap(
   // pointers as we walk through the structure.
 
   const tracker = new CycleTracker<JSONValue>();
+  const schemaTracker = new MapSet<string, SchemaPathSelector>();
+
   // We've provided a schema context for this, so traverse it
   const traverser = new SchemaObjectTraverser(
     manager,
     schemaContext,
     tracker,
+    schemaTracker,
   );
   const rv = new Set<ValueEntry<FactAddress, JSONValue | undefined>>();
   const valueEntry = manager.load(factAddress);
@@ -108,13 +113,18 @@ export function querySchemaHeap(
   }
   // We store the actual doc in the value field of the object
   const factValue = (valueEntry.value as JSONObject).value;
-  const [newDoc, newDocRoot, newValue] = getAtPath<FactAddress, FactAddress>(
+  const [newDoc, newDocRoot, newValue, _newDocPath] = getAtPath<
+    FactAddress,
+    FactAddress
+  >(
     manager,
     factAddress,
     factValue,
     factValue,
     path,
     tracker,
+    schemaTracker,
+    { path: [], schemaContext: schemaContext },
   );
   if (newValue === undefined) {
     return { missing: [...manager.getMissingDocs()], loaded: rv };

@@ -170,6 +170,7 @@ export const selectSchema = <Space extends MemorySpace>(
         of: entry.source.of,
         the: entry.source.the,
       });
+      // FIXME: need to remove this or schemaTracker
       selectionTracker?.add(factKey, selectorEntry.value);
       // The top level facts we accessed should be included
       addToSelection(includedFacts, entry);
@@ -244,7 +245,7 @@ function loadFactsForDoc(
     const factAddress = { of: fact.source.of, the: fact.source.the };
     if (selector.schemaContext !== undefined) {
       const factValue = (fact.value as Immutable<JSONObject>).value;
-      const [newDoc, newDocRoot, newValue] = getAtPath<
+      const [newDoc, newDocRoot, newValue, newDocPath] = getAtPath<
         FactAddress,
         FullFactAddress
       >(
@@ -255,6 +256,7 @@ function loadFactsForDoc(
         selector.path,
         tracker,
         schemaTracker,
+        selector,
       );
       if (newValue === undefined) {
         return;
@@ -264,6 +266,7 @@ function loadFactsForDoc(
         manager,
         selector.schemaContext,
         tracker,
+        schemaTracker,
       );
       // We don't actually use the return value here, but we've built up
       // a list of all the documents we need to watch.

@@ -1,7 +1,8 @@
 import type { Reference } from "merkle-reference";
 import { JSONValue, SchemaContext } from "@commontools/builder";
+import { SchemaPathSelector } from "@commontools/builder/traverse";
 
-export type { Reference };
+export type { Reference, SchemaPathSelector };
 
 export interface Clock {
   now(): UTCUnixTimestampInSeconds;
@@ -786,14 +787,6 @@ export type SchemaSelector = Select<
   Entity,
   Select<The, Select<Cause, SchemaPathSelector>>
 >;
-
-// Note: This could be altered to only pass the rootSchema (as schema), and rely on path
-// to narrow the schema to the appropriate section.
-// TODO: Fix redundant type definition, but we can't import memory here
-export type SchemaPathSelector = {
-  path: readonly string[];
-  schemaContext?: Readonly<SchemaContext>;
-};
 
 export type Operation =
   | Transaction
