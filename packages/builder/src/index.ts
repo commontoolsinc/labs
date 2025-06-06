@@ -37,6 +37,8 @@ export {
   type ModuleFactory,
   NAME,
   type NodeFactory,
+  type Opaque,
+  type OpaqueRef,
   type OpaqueRefMethods,
   type Recipe,
   type RecipeFactory,
