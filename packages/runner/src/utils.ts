@@ -1,11 +1,12 @@
 import {
-  deepEqual,
+  type Alias,
   ID,
   ID_FIELD,
   isAlias,
   isOpaqueRef,
   isStatic,
   type JSONSchema,
+  type JSONValue,
   markAsStatic,
   type Recipe,
   unsafe_materializeFactory,
@@ -22,23 +23,28 @@ import {
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { ContextualFlowControl } from "./index.ts";
+import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 
 /**
  * Extracts default values from a JSON schema object.
  * @param schema - The JSON schema to extract defaults from
  * @returns An object containing the default values, or undefined if none found
  */
-export function extractDefaultValues(schema: any): any {
+export function extractDefaultValues(
+  schema: JSONSchema,
+): JSONValue | undefined {
   if (typeof schema !== "object" || schema === null) return undefined;
 
-  if (schema.type === "object") {
-    const obj: any = {};
-    for (const [key, value] of Object.entries(schema)) {
-      if (key === "properties" && typeof value === "object" && value !== null) {
-        for (const [propKey, propValue] of Object.entries(value)) {
-          const value = extractDefaultValues(propValue);
-          if (value !== undefined) obj[propKey] = value;
-        }
+  if (
+    schema.type === "object" && schema.properties && isObject(schema.properties)
+  ) {
+    // Ignore the schema.default if it's not an object, since it's not a valid
+    // default value for an object.
+    const obj = deepCopy(isRecord(schema.default) ? schema.default : {});
+    for (const [propKey, propSchema] of Object.entries(schema.properties)) {
+      const value = extractDefaultValues(propSchema);
+      if (value !== undefined) {
+        (obj as Record<string, unknown>)[propKey] = value;
       }
     }
 
@@ -55,13 +61,15 @@ export function extractDefaultValues(schema: any): any {
  * @param objects - Objects to merge
  * @returns A merged object, or undefined if no objects provided
  */
-export function mergeObjects(...objects: any[]): any {
+export function mergeObjects<T>(
+  ...objects: (Partial<T> | undefined)[]
+): T {
   objects = objects.filter((obj) => obj !== undefined);
-  if (objects.length === 0) return undefined;
-  if (objects.length === 1) return objects[0];
+  if (objects.length === 0) return {} as T;
+  if (objects.length === 1) return objects[0] as T;
 
   const seen = new Set<PropertyKey>();
-  const result: any = {};
+  const result: Record<string, unknown> = {};
 
   for (const obj of objects) {
     // If we have a literal value, return it. Same for arrays, since we wouldn't
@@ -77,19 +85,23 @@ export function mergeObjects(...objects: any[]): any {
       isCell(obj) ||
       isStatic(obj)
     ) {
-      return obj;
+      return obj as T;
     }
 
     // Then merge objects, only passing those on that have any values.
     for (const key of Object.keys(obj)) {
       if (seen.has(key)) continue;
       seen.add(key);
-      const merged = mergeObjects(...objects.map((obj) => obj[key]));
+      const merged = mergeObjects<T[keyof T]>(
+        ...objects.map((obj) =>
+          (obj as Record<string, unknown>)?.[key] as T[keyof T]
+        ),
+      );
       if (merged !== undefined) result[key] = merged;
     }
   }
 
-  return result;
+  return result as T;
 }
 
 /**
@@ -103,12 +115,12 @@ export function mergeObjects(...objects: any[]): any {
  * @param value - The value to send
  * @param log - Optional reactivity log
  */
-export function sendValueToBinding(
-  doc: DocImpl<any>,
-  binding: any,
-  value: any,
+export function sendValueToBinding<T>(
+  doc: DocImpl<T>,
+  binding: unknown,
+  value: unknown,
   log?: ReactivityLog,
-) {
+): void {
   if (isAlias(binding)) {
     const ref = followAliases(binding, doc, log);
     diffAndUpdate(ref, value, log, { doc, binding });
@@ -118,9 +130,16 @@ export function sendValueToBinding(
         sendValueToBinding(doc, binding[i], value[i], log);
       }
     }
-  } else if (typeof binding === "object" && binding !== null) {
+  } else if (isRecord(binding) && isRecord(value)) {
     for (const key of Object.keys(binding)) {
-      if (key in value) sendValueToBinding(doc, binding[key], value[key], log);
+      if (key in value) {
+        sendValueToBinding(
+          doc,
+          binding[key],
+          value[key],
+          log,
+        );
+      }
     }
   } else {
     if (binding !== value) {
@@ -132,10 +151,10 @@ export function sendValueToBinding(
 // Sets a value at a path, following aliases and recursing into objects. Returns
 // success, meaning no frozen docs were in the way. That is, also returns true
 // if there was no change.
-export function setNestedValue(
-  doc: DocImpl<any>,
+export function setNestedValue<T>(
+  doc: DocImpl<T>,
   path: PropertyKey[],
-  value: any,
+  value: unknown,
   log?: ReactivityLog,
 ): boolean {
   const destValue = doc.getAtPath(path);
@@ -147,10 +166,8 @@ export function setNestedValue(
   // Compare destValue and value, if they are the same, recurse, otherwise write
   // value with setAtPath
   if (
-    typeof destValue === "object" &&
-    destValue !== null &&
-    typeof value === "object" &&
-    value !== null &&
+    isRecord(destValue) &&
+    isRecord(value) &&
     Array.isArray(value) === Array.isArray(destValue) &&
     !isDoc(value) &&
     !isCellLink(value) &&
@@ -215,11 +232,11 @@ export function setNestedValue(
  * @param doc - The doc to bind to.
  * @returns The unwrapped binding.
  */
-export function unwrapOneLevelAndBindtoDoc<T>(
+export function unwrapOneLevelAndBindtoDoc<T, U>(
   binding: T,
-  doc: DocImpl<any>,
+  doc: DocImpl<U>,
 ): T {
-  function convert(binding: any, processStatic = false): any {
+  function convert(binding: unknown, processStatic = false): unknown {
     if (isStatic(binding) && !processStatic) {
       return markAsStatic(convert(binding, true));
     } else if (isAlias(binding)) {
@@ -240,8 +257,8 @@ export function unwrapOneLevelAndBindtoDoc<T>(
       return binding; // Don't enter docs
     } else if (Array.isArray(binding)) {
       return binding.map((value) => convert(value));
-    } else if (typeof binding === "object" && binding !== null) {
-      const result: any = Object.fromEntries(
+    } else if (isRecord(binding)) {
+      const result: Record<string | symbol, unknown> = Object.fromEntries(
         Object.entries(binding).map(([key, value]) => [key, convert(value)]),
       );
       if (binding[unsafe_originalRecipe]) {
@@ -253,13 +270,16 @@ export function unwrapOneLevelAndBindtoDoc<T>(
   return convert(binding) as T;
 }
 
-export function unsafe_noteParentOnRecipes(recipe: Recipe, binding: any) {
-  if (typeof binding !== "object" || binding === null) return;
-
+export function unsafe_noteParentOnRecipes(
+  recipe: Recipe,
+  binding: unknown,
+): void {
   // For now we just do top-level bindings
-  for (const key in binding) {
-    if (binding[key][unsafe_originalRecipe]) {
-      binding[key][unsafe_parentRecipe] = recipe;
+  if (isRecord(binding)) {
+    for (const key in binding) {
+      if (isRecord(binding[key]) && binding[key][unsafe_originalRecipe]) {
+        binding[key][unsafe_parentRecipe] = recipe;
+      }
     }
   }
 }
@@ -279,19 +299,19 @@ export function unsafe_createParentBindings(
 }
 
 // Traverses binding and returns all docs reacheable through aliases.
-export function findAllAliasedCells(
-  binding: any,
-  doc: DocImpl<any>,
+export function findAllAliasedCells<T>(
+  binding: unknown,
+  doc: DocImpl<T>,
 ): CellLink[] {
   const docs: CellLink[] = [];
-  function find(binding: any, origDoc: DocImpl<any>) {
+  function find(binding: unknown, origDoc: DocImpl<T>): void {
     if (isAlias(binding)) {
       // Numbered docs are yet to be unwrapped nested recipes. Ignore them.
       if (typeof binding.$alias.cell === "number") return;
-      const doc = binding.$alias.cell ?? origDoc;
+      const doc = (binding.$alias.cell ?? origDoc) as DocImpl<T>;
       const path = binding.$alias.path;
       if (docs.find((c) => c.cell === doc && c.path === path)) return;
-      docs.push({ cell: doc, path });
+      docs.push({ cell: doc as DocImpl<unknown>, path });
       find(doc.getAtPath(path), doc);
     } else if (Array.isArray(binding)) {
       for (const value of binding) find(value, origDoc);
@@ -336,16 +356,16 @@ function createVisits(): Visits {
 /**
  * Creates a cache key for a doc and path combination.
  */
-function createPathCacheKey(
-  doc: DocImpl<any>,
+function createPathCacheKey<T>(
+  doc: DocImpl<T>,
   path: PropertyKey[],
   aliases: boolean = false,
 ): string {
   return JSON.stringify([doc.space, doc.toJSON(), path, aliases]);
 }
 
-export function resolveLinkToValue(
-  doc: DocImpl<any>,
+export function resolveLinkToValue<T>(
+  doc: DocImpl<T>,
   path: PropertyKey[],
   log?: ReactivityLog,
   schema?: JSONSchema,
@@ -356,8 +376,8 @@ export function resolveLinkToValue(
   return followLinks(ref, log, visits);
 }
 
-export function resolveLinkToAlias(
-  doc: DocImpl<any>,
+export function resolveLinkToAlias<T>(
+  doc: DocImpl<T>,
   path: PropertyKey[],
   log?: ReactivityLog,
   schema?: JSONSchema,
@@ -373,8 +393,8 @@ export function resolveLinks(ref: CellLink, log?: ReactivityLog): CellLink {
   return followLinks(ref, log, visits);
 }
 
-function resolvePath(
-  doc: DocImpl<any>,
+function resolvePath<T>(
+  doc: DocImpl<T>,
   path: PropertyKey[],
   log?: ReactivityLog,
   schema?: JSONSchema,
@@ -537,9 +557,9 @@ function followLinks(
   return result;
 }
 
-export function maybeGetCellLink(
-  value: any,
-  parent?: DocImpl<any>,
+export function maybeGetCellLink<T>(
+  value: unknown,
+  parent?: DocImpl<T>,
 ): CellLink | undefined {
   if (isQueryResultForDereferencing(value)) return getCellLinkOrThrow(value);
   else if (isCellLink(value)) return value;
@@ -551,16 +571,21 @@ export function maybeGetCellLink(
 
 // Follows aliases and returns cell reference describing the last alias.
 // Only logs interim aliases, not the first one, and not the non-alias value.
-export function followAliases(
-  alias: any,
-  doc: DocImpl<any>,
+export function followAliases<T = any>(
+  alias: Alias,
+  doc: DocImpl<T>,
   log?: ReactivityLog,
 ): CellLink {
-  if (!isAlias(alias)) {
+  if (isAlias(alias)) {
+    return followLinks(
+      { cell: doc, ...alias.$alias } as CellLink,
+      log,
+      createVisits(),
+      true,
+    );
+  } else {
     throw new Error(`Alias expected: ${JSON.stringify(alias)}`);
   }
-
-  return followLinks({ cell: doc, ...alias.$alias }, log, createVisits(), true);
 }
 
 /**
@@ -580,16 +605,16 @@ export function followAliases(
  */
 export function diffAndUpdate(
   current: CellLink,
-  newValue: any,
+  newValue: unknown,
   log?: ReactivityLog,
-  context?: any,
+  context?: unknown,
 ): boolean {
   const changes = normalizeAndDiff(current, newValue, log, context);
   applyChangeSet(changes, log);
   return changes.length > 0;
 }
 
-type ChangeSet = { location: CellLink; value: any }[];
+type ChangeSet = { location: CellLink; value: unknown }[];
 
 /**
  * Traverses objects and returns an array of changes that should be written. An
@@ -614,9 +639,9 @@ type ChangeSet = { location: CellLink; value: any }[];
  */
 export function normalizeAndDiff(
   current: CellLink,
-  newValue: any,
+  newValue: unknown,
   log?: ReactivityLog,
-  context?: any,
+  context?: unknown,
 ): ChangeSet {
   const changes: ChangeSet = [];
 
@@ -629,11 +654,11 @@ export function normalizeAndDiff(
   // semantically a new item (in fact we otherwise run into compare-and-swap
   // transaction errors).
   if (
-    typeof newValue === "object" && newValue !== null &&
+    isRecord(newValue) &&
     newValue[ID_FIELD] !== undefined
   ) {
     const { [ID_FIELD]: fieldName, ...rest } = newValue;
-    const id = newValue[fieldName];
+    const id = newValue[fieldName as PropertyKey];
     if (current.path.length > 1) {
       const parent = current.cell.getAtPath(current.path.slice(0, -1));
       if (Array.isArray(parent)) {
@@ -641,8 +666,8 @@ export function normalizeAndDiff(
           if (isCellLink(v)) {
             const sibling = v.cell.getAtPath(v.path);
             if (
-              typeof sibling === "object" && sibling !== null &&
-              sibling[fieldName] === id
+              isRecord(sibling) &&
+              sibling[fieldName as PropertyKey] === id
             ) {
               // We found a sibling with the same id, so ...
               return [
@@ -706,7 +731,7 @@ export function normalizeAndDiff(
 
   // Handle ID-based object (convert to entity)
   if (
-    typeof newValue === "object" && newValue !== null &&
+    isRecord(newValue) &&
     newValue[ID] !== undefined
   ) {
     const { [ID]: id, ...rest } = newValue;
@@ -800,7 +825,7 @@ export function normalizeAndDiff(
   }
 
   // Handle objects
-  if (typeof newValue === "object" && newValue !== null) {
+  if (isRecord(newValue)) {
     // If the current value is not a (regular) object, set it to an empty object
     // Note that the alias case is handled above
     if (
@@ -893,26 +918,27 @@ export function applyChangeSet(
  * We'll want to revisit once iframes become more sophisticated in what they can
  * express, e.g. we could have the inner shim do some of this work instead.
  */
-export function addCommonIDfromObjectID(obj: any, fieldName: string = "id") {
-  function traverse(obj: any) {
-    if (typeof obj === "object" && obj !== null && fieldName in obj) {
+export function addCommonIDfromObjectID(
+  obj: unknown,
+  fieldName: string = "id",
+): void {
+  function traverse(obj: unknown): void {
+    if (isRecord(obj) && fieldName in obj) {
       obj[ID_FIELD] = fieldName;
     }
 
     if (
-      typeof obj === "object" && obj !== null && !isCell(obj) &&
+      isRecord(obj) && !isCell(obj) &&
       !isCellLink(obj) && !isDoc(obj)
     ) {
-      Object.values(obj).forEach((v: any) => {
-        traverse(v);
-      });
+      Object.values(obj).forEach((v) => traverse(v));
     }
   }
 
   traverse(obj);
 }
 
-export function maybeUnwrapProxy(value: any): any {
+export function maybeUnwrapProxy(value: unknown): unknown {
   return isQueryResultForDereferencing(value)
     ? getCellLinkOrThrow(value)
     : value;
@@ -929,23 +955,26 @@ export function isEqualCellLink(a: CellLink, b: CellLink): boolean {
     arrayEqual(a.path, b.path);
 }
 
-export function containsOpaqueRef(value: any): boolean {
+export function containsOpaqueRef(value: unknown): boolean {
   if (isOpaqueRef(value)) return true;
   if (isCell(value) || isCellLink(value) || isDoc(value)) return false;
-  if (typeof value === "object" && value !== null) {
+  if (isRecord(value)) {
     return Object.values(value).some(containsOpaqueRef);
   }
   return false;
 }
 
-export function deepCopy(value: any): any {
+export function deepCopy<T = unknown>(value: T): Mutable<T> {
   if (isQueryResultForDereferencing(value)) {
-    return deepCopy(getCellLinkOrThrow(value));
+    return deepCopy(getCellLinkOrThrow(value)) as unknown as Mutable<T>;
   }
-  if (isDoc(value) || isCell(value)) return value;
-  if (typeof value === "object" && value !== null) {
-    return Array.isArray(value) ? value.map(deepCopy) : Object.fromEntries(
-      Object.entries(value).map(([key, value]) => [key, deepCopy(value)]),
-    );
-  } else return value;
+  if (isDoc(value) || isCell(value)) return value as Mutable<T>;
+  if (isRecord(value)) {
+    return Array.isArray(value)
+      ? value.map(deepCopy) as unknown as Mutable<T>
+      : Object.fromEntries(
+        Object.entries(value).map(([key, value]) => [key, deepCopy(value)]),
+      ) as unknown as Mutable<T>;
+    // Literal value:
+  } else return value as Mutable<T>;
 }

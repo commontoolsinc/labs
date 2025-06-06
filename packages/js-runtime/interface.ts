@@ -9,8 +9,8 @@ export class CompilerError extends Error {
 
 // A reference to a runtime value from a `JsIsolate`.
 export interface JsValue {
-  invoke(...args: any[]): JsValue;
-  inner(): any;
+  invoke(...args: unknown[]): JsValue;
+  inner(): unknown;
   asObject(): object;
   isObject(): boolean;
 }

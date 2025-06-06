@@ -16,6 +16,7 @@ import { getTopFrame, recipe } from "./recipe.ts";
 import { createNodeFactory } from "./module.ts";
 import { SchemaWithoutCell } from "./schema-to-ts.ts";
 import { ContextualFlowControl } from "../../runner/src/index.ts";
+import { isRecord } from "@commontools/utils/types";
 
 let mapFactory: NodeFactory<any, any>;
 
@@ -110,8 +111,11 @@ export function opaqueRef<T>(
       unsafe_getExternal: () => {
         if (!unsafe_binding) return proxy;
         const value = unsafe_materialize(unsafe_binding, path);
-        if (typeof value === "object" && value !== null && value[toOpaqueRef]) {
-          return value[toOpaqueRef]();
+        if (
+          isRecord(value) && value[toOpaqueRef] &&
+          typeof value[toOpaqueRef] === "function"
+        ) {
+          return (value[toOpaqueRef] as () => OpaqueRef<any>)();
         } else return proxy;
       },
       map: <S>(

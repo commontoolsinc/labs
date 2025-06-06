@@ -1,4 +1,4 @@
-import { Plugin } from "vite";
+import { type Plugin, type ResolvedConfig } from "vite";
 import {
   type DenoMediaType,
   type DenoResolveResult,
@@ -17,16 +17,16 @@ export default function denoPlugin(
 
   return {
     name: "deno",
-    configResolved(config) {
+    configResolved(config: ResolvedConfig) {
       root = config.root;
     },
-    async resolveId(id, importer) {
+    async resolveId(id: string, importer: string | undefined) {
       // The "pre"-resolve plugin already resolved it
       if (isDenoSpecifier(id)) return;
 
       return await resolveViteSpecifier(id, cache, root, importer);
     },
-    async load(id) {
+    async load(id: string) {
       if (!isDenoSpecifier(id)) return;
 
       const { loader, resolved } = parseDenoSpecifier(id);
