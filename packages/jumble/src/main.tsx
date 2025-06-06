@@ -1,9 +1,8 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { ConsoleMethod, Runtime } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
 import {
   BrowserRouter as Router,
-  createBrowserRouter,
   createRoutesFromChildren,
   matchRoutes,
   Route,
@@ -30,12 +29,6 @@ import { ActionManagerProvider } from "@/contexts/ActionManagerContext.tsx";
 import { ActivityProvider } from "@/contexts/ActivityContext.tsx";
 import { RuntimeProvider } from "@/contexts/RuntimeContext.tsx";
 import { ROUTES } from "@/routes.ts";
-
-declare global {
-  interface ImportMetaEnv {
-    readonly VITE_COMMIT_SHA?: string;
-  }
-}
 
 // Determine environment based on hostname
 const determineEnvironment = () => {
@@ -66,7 +59,7 @@ if (envConfig) {
   Sentry.init({
     dsn: envConfig.dsn,
     environment: envConfig.environment,
-    release: import.meta.env.VITE_COMMIT_SHA || "development",
+    release: (import.meta as any).env.VITE_COMMIT_SHA || "development",
     tracesSampleRate: 1.0,
     integrations: [
       Sentry.reactRouterV7BrowserTracingIntegration({

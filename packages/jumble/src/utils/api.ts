@@ -1,6 +1,6 @@
 import React from "react";
 
-const TOOLSHED_API_URL = import.meta.env.VITE_TOOLSHED_API_URL ||
+const TOOLSHED_API_URL = (import.meta as any).env.VITE_TOOLSHED_API_URL ||
   "http://localhost:8000";
 
 export async function getAllBlobs(): Promise<any[]> {
