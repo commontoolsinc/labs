@@ -13,10 +13,8 @@ import {
 import { Runtime } from "../src/runtime.ts";
 import { ClientObjectManager } from "../src/storage/query.ts";
 import { expect } from "@std/expect";
-import { CellLink } from "../src/cell.ts";
 import { refer } from "merkle-reference/json";
 import { Entity } from "@commontools/memory";
-import { string } from "zod";
 
 describe("Query", () => {
   let runtime: Runtime;
@@ -76,14 +74,9 @@ describe("Query", () => {
       cause: refer({ the: "application/json", of: `of:${entityId2["/"]}` }),
       since: 2,
     };
-    const testMap = new Map<string, string>();
 
     store.set(`${assert1.of}/${assert1.the}`, assert1);
     store.set(`${assert2.of}/${assert2.the}`, assert2);
-    console.log(
-      "store contents:",
-      JSON.stringify([...store.entries()], undefined, 2),
-    );
     const schemaContext = {
       schema: {
         "type": "object",
@@ -105,13 +98,13 @@ describe("Query", () => {
       tracker,
       schemaTracker,
     );
-    const obj = manager.load({ the: assert2.the, of: assert2.of });
-    //   // We've provided a schema context for this, so traverse it
-    traverser.traverse(
-      { the: assert2.the, of: assert2.of },
-      assert2.is.value,
-      assert2.is.value,
-    );
+    // We've provided a schema context for this, so traverse it
+    traverser.traverse({
+      doc: { the: assert2.the, of: assert2.of },
+      docRoot: assert2.is.value,
+      path: [],
+      value: assert2.is.value,
+    });
     const selectorSet1 = schemaTracker.get(
       `of:${entityId1["/"]}/application/json`,
     );
@@ -122,9 +115,6 @@ describe("Query", () => {
     expect(selectorSet2?.size).toBe(1);
     const [selector1] = selectorSet1!.values();
     const [selector2] = selectorSet2!.values();
-    console.log(
-      JSON.stringify([selector1, selector2], undefined, 2),
-    );
     expect(selector2).toEqual({
       path: [],
       schemaContext: schemaContext,
@@ -174,14 +164,9 @@ describe("Query", () => {
       cause: refer({ the: "application/json", of: `of:${entityId2["/"]}` }),
       since: 2,
     };
-    const testMap = new Map<string, string>();
 
     store.set(`${assert1.of}/${assert1.the}`, assert1);
     store.set(`${assert2.of}/${assert2.the}`, assert2);
-    console.log(
-      "store contents:",
-      JSON.stringify([...store.entries()], undefined, 2),
-    );
     const schemaContext = {
       schema: {
         "type": "object",
@@ -195,12 +180,14 @@ describe("Query", () => {
       tracker,
       schemaTracker,
     );
-    const obj = manager.load({ the: assert2.the, of: assert2.of });
-    //   // We've provided a schema context for this, so traverse it
+    // We've provided a schema context for this, so traverse it
     traverser.traverse(
-      { the: assert2.the, of: assert2.of },
-      assert2.is.value,
-      assert2.is.value,
+      {
+        doc: { the: assert2.the, of: assert2.of },
+        docRoot: assert2.is.value,
+        path: [],
+        value: assert2.is.value,
+      },
     );
     const selectorSet1 = schemaTracker.get(
       `of:${entityId1["/"]}/application/json`,
@@ -212,9 +199,6 @@ describe("Query", () => {
     expect(selectorSet2?.size).toBe(1);
     const [selector1] = selectorSet1!.values();
     const [selector2] = selectorSet2!.values();
-    console.log(
-      JSON.stringify([selector1, selector2], undefined, 2),
-    );
     expect(selector2).toEqual({
       path: [],
       schemaContext: schemaContext,
@@ -225,6 +209,78 @@ describe("Query", () => {
         schema: true,
         rootSchema: true,
       },
+    });
+  });
+
+  it("should handle pointer loops", () => {
+    // schema that enables loops
+    const schema = {
+      "type": "object",
+      "properties": {
+        "name": { "$ref": "#" },
+        "firstName": { "type": "string" },
+      },
+    } as const satisfies JSONSchema;
+    // Now we make the doc with the cycle
+    const testDoc1 = runtime.documentMap.getDoc<
+      { name: { cell: { ["/"]: string }; path: string[] } }
+    >(
+      {
+        name: {
+          cell: { "/": "<placeholder>" },
+          path: ["name"],
+        },
+      },
+      `query test cell 1`,
+      "test",
+    );
+    const entityId1 = testDoc1.entityId.toJSON!();
+    const assert1 = {
+      the: "application/json",
+      of: `of:${entityId1["/"]}` as Entity,
+      is: {
+        value: {
+          name: {
+            cell: entityId1,
+            path: ["name"],
+          },
+        },
+      },
+      cause: refer({ the: "application/json", of: `of:${entityId1["/"]}` }),
+      since: 1,
+    };
+    store.set(`${assert1.of}/${assert1.the}`, assert1);
+    const schemaContext = {
+      schema: schema,
+      rootSchema: schema,
+    };
+    const schemaTracker = new MapSet<string, SchemaPathSelector>();
+    const traverser = new SchemaObjectTraverser(
+      manager,
+      schemaContext,
+      tracker,
+      schemaTracker,
+    );
+    // We've provided a schema context for this, so traverse it
+    traverser.traverse(
+      {
+        doc: { the: assert1.the, of: assert1.of },
+        docRoot: assert1.is.value,
+        path: [],
+        value: assert1.is.value,
+      },
+    );
+    const selectorSet1 = schemaTracker.get(
+      `of:${entityId1["/"]}/application/json`,
+    );
+    expect(selectorSet1?.size).toBe(2);
+    expect(selectorSet1).toContainEqual({
+      path: [],
+      schemaContext: schemaContext,
+    });
+    expect(selectorSet1).toContainEqual({
+      path: ["name"],
+      schemaContext: schemaContext,
     });
   });
 });

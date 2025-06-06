@@ -8,6 +8,7 @@ import {
   MapSet,
   type PointerCycleTracker,
   SchemaObjectTraverser,
+  type ValueAtPath,
   type ValueEntry,
 } from "@commontools/builder/traverse";
 import { type Immutable, isObject } from "@commontools/utils/types";
@@ -245,20 +246,18 @@ function loadFactsForDoc(
     const factAddress = { of: fact.source.of, the: fact.source.the };
     if (selector.schemaContext !== undefined) {
       const factValue = (fact.value as Immutable<JSONObject>).value;
-      const [newDoc, newDocRoot, newValue, newDocPath] = getAtPath<
+      const newDoc = getAtPath<
         FactAddress,
         FullFactAddress
       >(
         manager,
-        factAddress,
-        factValue,
-        factValue,
+        { doc: factAddress, docRoot: factValue, path: [], value: factValue },
         selector.path,
         tracker,
         schemaTracker,
         selector,
       );
-      if (newValue === undefined) {
+      if (newDoc.value === undefined) {
         return;
       }
       // We've provided a schema context for this, so traverse it
@@ -270,7 +269,7 @@ function loadFactsForDoc(
       );
       // We don't actually use the return value here, but we've built up
       // a list of all the documents we need to watch.
-      traverser.traverse(newDoc, newDocRoot, newValue);
+      traverser.traverse(newDoc);
     } else {
       // If we didn't provide a schema context, we still want the selected
       // object in our manager, so load it directly.

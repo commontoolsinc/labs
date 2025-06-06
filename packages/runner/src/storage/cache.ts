@@ -546,14 +546,12 @@ export class Replica {
         // can include the entities and since fields I already have.
         if (!this.schemaTracker.get(factKey)?.has(schemaRef)) {
           // See if we have everything we need locally (in our heap)
-          // FIXME
-          // const localResult = querySchemaHeap(
-          //   schema,
-          //   [],
-          //   address,
-          //   this.heap.store,
-          // );
-          const localResult = { missing: [1] };
+          const localResult = querySchemaHeap(
+            schema,
+            [],
+            address,
+            this.heap.store,
+          );
           if (localResult.missing.length === 0) {
             if (!this.schemaTracker.has(factKey)) {
               this.schemaTracker.set(factKey, new Set<string>());

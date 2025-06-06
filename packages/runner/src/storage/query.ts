@@ -10,6 +10,7 @@ import {
   getAtPath,
   MapSet,
   SchemaObjectTraverser,
+  type ValueAtPath,
   type ValueEntry,
 } from "@commontools/builder/traverse";
 import type {
@@ -86,6 +87,7 @@ export function querySchemaHeap(
 ): {
   missing: FactAddress[];
   loaded: Set<ValueEntry<FactAddress, JSONValue | undefined>>;
+  selected: MapSet<string, SchemaPathSelector>;
 } {
   const manager = new ClientObjectManager(store);
   // Then filter the facts by the associated schemas, which will dereference
@@ -105,35 +107,41 @@ export function querySchemaHeap(
   const valueEntry = manager.load(factAddress);
   if (valueEntry === null) {
     // If we don't have the top document, we don't have all the documents
-    return { missing: [factAddress], loaded: rv };
+    return { missing: [factAddress], loaded: rv, selected: schemaTracker };
   } else if (valueEntry.value === undefined) {
     // we have a retracted fact
     rv.add(valueEntry);
-    return { missing: [], loaded: rv };
+    return { missing: [], loaded: rv, selected: schemaTracker };
   }
   // We store the actual doc in the value field of the object
   const factValue = (valueEntry.value as JSONObject).value;
-  const [newDoc, newDocRoot, newValue, _newDocPath] = getAtPath<
+  const newDoc = getAtPath<
     FactAddress,
     FactAddress
   >(
     manager,
-    factAddress,
-    factValue,
-    factValue,
+    { doc: factAddress, docRoot: factValue, path: [], value: factValue },
     path,
     tracker,
     schemaTracker,
     { path: [], schemaContext: schemaContext },
   );
-  if (newValue === undefined) {
-    return { missing: [...manager.getMissingDocs()], loaded: rv };
+  if (newDoc.value === undefined) {
+    return {
+      missing: [...manager.getMissingDocs()],
+      loaded: rv,
+      selected: schemaTracker,
+    };
   }
   // We don't actually use the return value here, but we've built up
   // a list of all the documents we read.
-  traverser.traverse(newDoc, newDocRoot, newValue);
+  traverser.traverse(newDoc);
   for (const item of manager.getReadDocs()) {
     rv.add(item);
   }
-  return { missing: [...manager.getMissingDocs()], loaded: rv };
+  return {
+    missing: [...manager.getMissingDocs()],
+    loaded: rv,
+    selected: schemaTracker,
+  };
 }
