@@ -53,6 +53,7 @@ export {
   type UnsafeBinding,
 } from "./types.ts";
 export { createNodeFactory } from "./module.ts";
+export { opaqueRef as cell } from "./opaque-ref.ts";
 export { type Schema, schema } from "./schema-to-ts.ts";
 export type { Mutable } from "@commontools/utils/types";
 
