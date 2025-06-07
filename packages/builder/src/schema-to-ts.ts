@@ -1,5 +1,4 @@
-import type { IDFields, JSONSchema } from "./types.ts";
-import type { Cell, Stream } from "@commontools/runner";
+import type { Cell, IDFields, JSONSchema, Stream } from "./interface.ts";
 
 export const schema = <T extends JSONSchema>(schema: T) => schema;
 
