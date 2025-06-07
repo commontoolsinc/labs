@@ -1,20 +1,31 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { recipe } from "../src/index.ts";
+import { createBuilder } from "../src/index.ts";
 import { popFrame, pushFrame } from "../src/recipe.ts";
-import { opaqueRef } from "../src/opaque-ref.ts";
 import type { Frame, JSONSchema } from "../src/types.ts";
+import { Runtime } from "@commontools/runner";
 
 describe("OpaqueRef Schema Support", () => {
   let frame: Frame;
+  let runtime: Runtime;
+  let recipe: ReturnType<typeof createBuilder>["recipe"];
+  let cell: ReturnType<typeof createBuilder>["cell"];
 
   beforeEach(() => {
     // Setup frame for the test
     frame = pushFrame();
+    
+    // Set up runtime and builder
+    runtime = new Runtime({
+      storageUrl: "volatile://",
+    });
+    const builder = createBuilder(runtime);
+    ({ recipe, cell } = builder);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     popFrame(frame);
+    await runtime?.dispose();
   });
 
   describe("Schema Setting and Retrieval", () => {
@@ -29,7 +40,7 @@ describe("OpaqueRef Schema Support", () => {
       } as const satisfies JSONSchema;
 
       // Create an opaque ref
-      const ref = opaqueRef<{ name: string; age: number }>(undefined, schema);
+      const ref = cell<{ name: string; age: number }>(undefined, schema);
 
       // Export the ref and check the schema is included
       const exported = ref.export();
@@ -54,7 +65,7 @@ describe("OpaqueRef Schema Support", () => {
       } as const satisfies JSONSchema;
 
       // Create an opaque ref
-      const ref = opaqueRef<{ name: string; details: { age: number } }>(
+      const ref = cell<{ name: string; details: { age: number } }>(
         undefined,
         rootSchema,
       ).key("details");
@@ -80,7 +91,7 @@ describe("OpaqueRef Schema Support", () => {
       } as const satisfies JSONSchema;
 
       // Create an opaque ref
-      const ref = opaqueRef<{ name: string; age: number }>(undefined, schema);
+      const ref = cell<{ name: string; age: number }>(undefined, schema);
 
       // Get a child property
       const nameRef = ref.key("name");
@@ -111,7 +122,7 @@ describe("OpaqueRef Schema Support", () => {
       } as const satisfies JSONSchema;
 
       // Create an opaque ref with an array
-      const ref = opaqueRef<{ items: Array<{ id: number; text: string }> }>(
+      const ref = cell<{ items: Array<{ id: number; text: string }> }>(
         undefined,
         schema,
       );
@@ -153,7 +164,7 @@ describe("OpaqueRef Schema Support", () => {
       } as const satisfies JSONSchema;
 
       // Create an opaque ref with nested objects
-      const ref = opaqueRef<{
+      const ref = cell<{
         user: {
           profile: {
             name: string;
@@ -192,7 +203,7 @@ describe("OpaqueRef Schema Support", () => {
       } as const satisfies JSONSchema;
 
       // Create an opaque ref with nested objects
-      const ref = opaqueRef<{
+      const ref = cell<{
         details: {
           name: string;
           age: number;
@@ -232,7 +243,7 @@ describe("OpaqueRef Schema Support", () => {
       } as const satisfies JSONSchema;
 
       // Create an opaque ref with nested objects, and a property that isn't in the schema
-      const ref = opaqueRef<{
+      const ref = cell<{
         details: {
           name: string;
           age: number;
