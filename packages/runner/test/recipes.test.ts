@@ -1,12 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createBuilder } from "@commontools/builder";
-import { JSONSchema, TYPE } from "@commontools/builder/interface";
+import { type Cell, JSONSchema, TYPE } from "@commontools/builder/interface";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
-import { type Cell, isCell } from "../src/cell.ts";
+import { isCell } from "../src/cell.ts";
 import { resolveLinks } from "../src/utils.ts";
-import { getCellLinkOrThrow } from "../src/query-result-proxy.ts";
 
 describe("Recipe Runner", () => {
   let runtime: Runtime;
@@ -14,11 +13,6 @@ describe("Recipe Runner", () => {
   let recipe: ReturnType<typeof createBuilder>["recipe"];
   let createCell: ReturnType<typeof createBuilder>["createCell"];
   let handler: ReturnType<typeof createBuilder>["handler"];
-  let derive: ReturnType<typeof createBuilder>["derive"];
-  let compute: ReturnType<typeof createBuilder>["compute"];
-  let render: ReturnType<typeof createBuilder>["render"];
-  let str: ReturnType<typeof createBuilder>["str"];
-  let ifElse: ReturnType<typeof createBuilder>["ifElse"];
   let byRef: ReturnType<typeof createBuilder>["byRef"];
 
   beforeEach(() => {
@@ -31,11 +25,6 @@ describe("Recipe Runner", () => {
       recipe,
       createCell,
       handler,
-      derive,
-      compute,
-      render,
-      str,
-      ifElse,
       byRef,
     } = builder);
   });
@@ -658,7 +647,9 @@ describe("Recipe Runner", () => {
       },
     } as const satisfies JSONSchema;
 
-    const dynamicRecipe = recipe<{ context: Record<PropertyKey, number> }>(
+    const dynamicRecipe = recipe<
+      { context: Record<PropertyKey, Cell<number>> }
+    >(
       "Dynamic Context",
       ({ context }) => {
         const result = lift(
@@ -666,7 +657,7 @@ describe("Recipe Runner", () => {
           { type: "number" },
           ({ context }) =>
             Object.values(context ?? {}).reduce(
-              (sum: number, val) => sum + (val as Cell<number>).get(),
+              (sum: number, val) => sum + val.get(),
               0,
             ),
         )({ context });
@@ -678,12 +669,12 @@ describe("Recipe Runner", () => {
       5,
       "should handle dynamic cell references with schema 1",
       "test",
-    );
+    ).asCell([], undefined, { type: "number" });
     const value2 = runtime.documentMap.getDoc(
       7,
       "should handle dynamic cell references with schema 2",
       "test",
-    );
+    ).asCell([], undefined, { type: "number" });
     const result = runtime.run(
       dynamicRecipe,
       {
