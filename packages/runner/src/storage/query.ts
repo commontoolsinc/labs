@@ -1,16 +1,12 @@
-import type {
-  JSONObject,
-  JSONValue,
-  SchemaContext,
-} from "@commontools/builder";
+import type { JSONObject, JSONValue } from "@commontools/builder";
 import {
   BaseObjectManager,
   type CellTarget,
   CycleTracker,
   getAtPath,
   MapSet,
+  MinimalSchemaSelector,
   SchemaObjectTraverser,
-  type ValueAtPath,
   type ValueEntry,
 } from "@commontools/builder/traverse";
 import type {
@@ -80,7 +76,7 @@ export class ClientObjectManager extends BaseObjectManager<
 }
 
 export function querySchemaHeap(
-  schemaContext: SchemaContext,
+  selector: SchemaPathSelector,
   path: string[],
   factAddress: FactAddress,
   store: Map<string, Revision<State>>,
@@ -96,13 +92,6 @@ export function querySchemaHeap(
   const tracker = new CycleTracker<JSONValue>();
   const schemaTracker = new MapSet<string, SchemaPathSelector>();
 
-  // We've provided a schema context for this, so traverse it
-  const traverser = new SchemaObjectTraverser(
-    manager,
-    schemaContext,
-    tracker,
-    schemaTracker,
-  );
   const rv = new Set<ValueEntry<FactAddress, JSONValue | undefined>>();
   const valueEntry = manager.load(factAddress);
   if (valueEntry === null) {
@@ -113,9 +102,10 @@ export function querySchemaHeap(
     rv.add(valueEntry);
     return { missing: [], loaded: rv, selected: schemaTracker };
   }
+  schemaTracker.add(manager.toKey(factAddress), selector);
   // We store the actual doc in the value field of the object
   const factValue = (valueEntry.value as JSONObject).value;
-  const newDoc = getAtPath<
+  const [newDoc, _] = getAtPath<
     FactAddress,
     FactAddress
   >(
@@ -124,7 +114,7 @@ export function querySchemaHeap(
     path,
     tracker,
     schemaTracker,
-    { path: [], schemaContext: schemaContext },
+    MinimalSchemaSelector,
   );
   if (newDoc.value === undefined) {
     return {
@@ -133,6 +123,15 @@ export function querySchemaHeap(
       selected: schemaTracker,
     };
   }
+  selector = { ...selector, path: newDoc.path };
+  // We've provided a schema context for this, so traverse it
+  const traverser = new SchemaObjectTraverser(
+    manager,
+    selector,
+    tracker,
+    schemaTracker,
+  );
+
   // We don't actually use the return value here, but we've built up
   // a list of all the documents we read.
   traverser.traverse(newDoc);

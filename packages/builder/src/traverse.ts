@@ -53,6 +53,11 @@ export const DefaultSchemaSelector = {
   schemaContext: { schema: true, rootSchema: true },
 } as const;
 
+export const MinimalSchemaSelector = {
+  path: [],
+  schemaContext: { schema: false, rootSchema: false },
+} as const;
+
 export class CycleTracker<K> {
   private partial: Set<K>;
   constructor() {
@@ -204,7 +209,7 @@ export abstract class BaseObjectTraverser<K, S>
     } else if (isObject(doc.value)) {
       // First, see if we need special handling
       if (isPointer(doc.value)) {
-        const newDoc = getAtPath(
+        const [newDoc, _] = getAtPath(
           this.manager,
           doc,
           [],
@@ -258,8 +263,11 @@ export abstract class BaseObjectTraverser<K, S>
  * @param path - Property/index path to follow
  * @param tracker - Prevents pointer cycles
  * @param schemaTracker: Tracks schema used for loaded docs
+ * @param selector: The selector being used (its path is relative to doc's root)
  *
- * @returns a ValueAtPath object with the target doc, docRoot, path, and value.
+ * @returns a tuple containing a ValueAtPath object with the target doc,
+ * docRoot, path, and value and also containing the updated selector that
+ * applies to that target doc.
  */
 export function getAtPath<K, S>(
   manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
@@ -268,31 +276,27 @@ export function getAtPath<K, S>(
   tracker: PointerCycleTracker,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
-): ValueAtPath<K> {
-  // we'll mutate curDoc's value and path, so copy the object and the path
+): [ValueAtPath<K>, SchemaPathSelector | undefined] {
+  // we may mutate curDoc's value and path, so copy the object and the path
   let curDoc = { ...doc, path: [...doc.path] };
-  if (isPointer(doc.value)) {
-    curDoc = followPointer(
+  let remaining = [...path];
+  while (isPointer(curDoc.value)) {
+    [curDoc, selector] = followPointer(
       manager,
-      doc,
-      path,
+      curDoc,
+      remaining,
       tracker,
       schemaTracker,
       selector,
     );
+    remaining = [];
   }
-  for (const [index, part] of path.entries()) {
-    // TODO(@ubik2) Call toJSON on object if it's a function?
-    if (isPointer(curDoc.value)) {
-      curDoc = followPointer(
-        manager,
-        curDoc,
-        path.slice(index + 1),
-        tracker,
-        schemaTracker,
-        selector, // FIXME: narrow selector as you follow path
-      );
-    } else if (Array.isArray(curDoc.value)) {
+  for (
+    let part = remaining.shift();
+    part !== undefined;
+    part = remaining.shift()
+  ) {
+    if (Array.isArray(curDoc.value)) {
       curDoc.value = elementAt(curDoc.value, part);
       curDoc.path.push(part);
     } else if (
@@ -303,10 +307,22 @@ export function getAtPath<K, S>(
       curDoc.path.push(part);
     } else {
       // we can only descend into pointers, objects, and arrays
-      return { ...curDoc, path: [], value: undefined };
+      return [{ ...curDoc, path: [], value: undefined }, selector];
+    }
+    // If this next value is a pointer, use the pointer resolution code
+    while (isPointer(curDoc.value)) {
+      [curDoc, selector] = followPointer(
+        manager,
+        curDoc,
+        remaining,
+        tracker,
+        schemaTracker,
+        selector,
+      );
+      remaining = [];
     }
   }
-  return curDoc;
+  return [curDoc, selector];
 }
 
 /**
@@ -328,9 +344,9 @@ function followPointer<K, S>(
   tracker: PointerCycleTracker,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
-): ValueAtPath<K> {
+): [ValueAtPath<K>, SchemaPathSelector | undefined] {
   if (!tracker.enter(doc.value!)) {
-    return { ...doc, path: [], value: undefined };
+    return [{ ...doc, path: [], value: undefined }, selector];
   }
   try {
     const cellTarget = getPointerInfo(doc.value as Immutable<JSONObject>);
@@ -343,7 +359,7 @@ function followPointer<K, S>(
       // and update our targetDoc and targetDocRoot
       const valueEntry = manager.load(target);
       if (valueEntry === null) {
-        return { ...doc, path: [], value: undefined };
+        return [{ ...doc, path: [], value: undefined }, selector];
       }
       if (
         valueEntry !== null && valueEntry.value !== undefined &&
@@ -351,10 +367,22 @@ function followPointer<K, S>(
       ) {
         manager.addRead(doc.doc, valueEntry.value, valueEntry.source);
       }
+      if (selector !== undefined) {
+        // We'll need to re-root the selector for the target doc
+        // Remove the portions of doc.path from selector.path, limiting schema if needed
+        // Also insert the portions of cellTarget.path, so selector is relative to new target doc
+        selector = narrowSchema(doc.path, selector, cellTarget.path);
+        if (schemaTracker !== undefined) {
+          schemaTracker.add(manager.toKey(target), selector);
+        }
+      }
       // If the object we're pointing to is a retracted fact, just return undefined.
       // We can't do a better match, but we do want to include the result so we watch this doc
       if (valueEntry.value === undefined) {
-        return { doc: target, docRoot: undefined, path: [], value: undefined };
+        return [
+          { doc: target, docRoot: undefined, path: [], value: undefined },
+          selector,
+        ];
       }
       // Otherwise, we can continue with the target.
       // an assertion fact.is will be an object with a value property, and
@@ -362,9 +390,13 @@ function followPointer<K, S>(
       targetDoc = target;
       targetDocRoot = (valueEntry.value as Immutable<JSONObject>)["value"];
     }
+    // TODO(@ubik2) - consider better what to do with selectors when we have local pointers.
+    // As written, the selector will have a valid path from the root of the doc, but there is
+    // more than one valid path, and we want to match the one the alias directed us to.
+
     // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
     // then the provided path from the arguments.
-    const nextDoc = getAtPath(
+    return getAtPath(
       manager,
       {
         doc: targetDoc,
@@ -377,13 +409,51 @@ function followPointer<K, S>(
       schemaTracker,
       selector,
     );
-    schemaTracker?.add(manager.toKey(nextDoc.doc), {
-      path: nextDoc.path,
-      schemaContext: selector?.schemaContext,
-    });
-    return nextDoc;
   } finally {
     tracker.exit(doc.value!);
+  }
+}
+
+// docPath is where we found the pointer and are doing this work
+// Selector path and schema used to be relative to the top of the doc, but
+// we want them relative to the new doc.
+// targetPath is the path in the target doc that the pointer points to
+function narrowSchema(
+  docPath: string[],
+  selector: SchemaPathSelector,
+  targetPath: string[],
+): SchemaPathSelector {
+  let docPathIndex = 0;
+  while (docPathIndex < docPath.length && docPathIndex < selector.path.length) {
+    if (docPath[docPathIndex] !== selector.path[docPathIndex]) {
+      console.warn("Mismatched paths", docPath, selector.path);
+      return MinimalSchemaSelector;
+    }
+    docPathIndex++;
+  }
+  if (docPathIndex < docPath.length) {
+    // we've reached the end of our selector path, but still have parts in our doc path, so narrow the schema
+    // Some of the schema may have been applicable to other parts of the doc, but we only want to use the
+    // portion that will apply to the next doc.
+    const cfc = new ContextualFlowControl();
+    const schema = cfc.schemaAtPath(
+      selector.schemaContext!.schema,
+      docPath.slice(docPathIndex),
+    );
+    return {
+      path: [...targetPath],
+      schemaContext: {
+        schema: schema,
+        rootSchema: selector.schemaContext!.rootSchema,
+      },
+    };
+  } else {
+    // We've reached the end of the doc path, but still have stuff in our selector path, so remove
+    // the path parts we've already walked from the selector.
+    return {
+      path: [...targetPath, ...selector.path.slice(docPath.length)],
+      schemaContext: selector.schemaContext,
+    };
   }
 }
 
@@ -455,7 +525,7 @@ export function isPrimitive(val: unknown): val is Primitive {
 export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
   constructor(
     manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
-    private schemaContext: SchemaContext,
+    private selector: SchemaPathSelector,
     private tracker: PointerCycleTracker = new CycleTracker<
       Immutable<JSONValue>
     >(),
@@ -470,16 +540,46 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
   override traverse(
     doc: ValueAtPath<K>,
   ): Immutable<OptJSONValue> {
-    this.schemaTracker.add(this.manager.toKey(doc.doc), {
-      path: [],
-      schemaContext: this.schemaContext,
-    });
-    return this.traverseWithSchema(doc, this.schemaContext);
+    this.schemaTracker.add(this.manager.toKey(doc.doc), this.selector);
+    return this.traverseWithSelector(doc, this.selector);
   }
 
-  traverseWithSchema(
+  // Traverse the specified doc with the selector.
+  // The selector should have been re-rooted if needed to be relative to the specified doc
+  // The selector must have a valid (defined) schemaContext
+  traverseWithSelector(
     doc: ValueAtPath<K>,
-    schemaContext: SchemaContext,
+    selector: SchemaPathSelector,
+  ): Immutable<OptJSONValue> {
+    if (deepEqual(doc.path, selector.path)) {
+      return this.traverseWithSchemaContext(doc, selector.schemaContext!);
+    } else if (doc.path.length > selector.path.length) {
+      throw new Error("Doc path should never exceed selector path");
+    } else if (!deepEqual(doc.path, selector.path.slice(0, doc.path.length))) {
+      // There's a mismatch in the initial part, so this will not match
+      return undefined;
+    } else { // doc path length < selector.path.length
+      const [nextDoc, nextSelector] = getAtPath(
+        this.manager,
+        doc,
+        selector.path.slice(doc.path.length),
+        this.tracker,
+        this.schemaTracker,
+        selector,
+      );
+      if (nextDoc.value === undefined) {
+        return undefined;
+      }
+      if (!deepEqual(nextDoc.path, nextSelector!.path)) {
+        throw new Error("New doc path doesn't match selector path");
+      }
+      this.traverseWithSchemaContext(nextDoc, nextSelector!.schemaContext!);
+    }
+  }
+
+  traverseWithSchemaContext(
+    doc: ValueAtPath<K>,
+    schemaContext: Readonly<SchemaContext>,
   ): Immutable<OptJSONValue> {
     if (ContextualFlowControl.isTrueSchema(schemaContext.schema)) {
       // A value of true or {} means we match anything
@@ -591,14 +691,19 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
         : typeof (schema["items"]) === "boolean"
         ? schema["items"]
         : true;
-      const val = this.traverseWithSchema({
+      const curDoc = {
         ...doc,
         path: [...doc.path, index.toString()],
         value: item,
-      }, {
-        schema: itemSchema,
-        rootSchema: schemaContext.rootSchema,
-      });
+      };
+      const selector = {
+        path: curDoc.path,
+        schemaContext: {
+          schema: itemSchema,
+          rootSchema: schemaContext.rootSchema,
+        },
+      };
+      const val = this.traverseWithSelector(curDoc, selector);
       if (val === undefined) {
         // this array is invalid, since one or more items do not match the schema
         return undefined;
@@ -628,7 +733,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
             schema["additionalProperties"] === false)
         ? schema["additionalProperties"] as JSONSchema | boolean
         : true;
-      const val = this.traverseWithSchema({
+      const val = this.traverseWithSchemaContext({
         ...doc,
         path: [...doc.path, propKey],
         value: propValue,
@@ -654,17 +759,18 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
     return filteredObj;
   }
 
+  // This just has a schemaContext, since the doc.path would match the selector.path
   private traversePointerWithSchema(
     doc: ValueAtPath<K>,
     schemaContext: SchemaContext,
   ): Immutable<OptJSONValue> {
-    const newDoc = getAtPath(
+    const [newDoc, newSelector] = getAtPath(
       this.manager,
       doc,
       [],
       this.tracker,
       this.schemaTracker,
-      { path: [], schemaContext: schemaContext },
+      { path: [...doc.path], schemaContext: schemaContext },
     );
     if (newDoc.value === undefined) {
       return null;
@@ -675,7 +781,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
     // doc we were called with (not the one we resolved, which may be a pointer).
     if (this.tracker.enter(doc.value!)) {
       try {
-        return this.traverseWithSchema(newDoc, schemaContext);
+        return this.traverseWithSelector(newDoc, newSelector!);
       } finally {
         this.tracker.exit(doc.value!);
       }

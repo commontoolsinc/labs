@@ -547,7 +547,7 @@ export class Replica {
         if (!this.schemaTracker.get(factKey)?.has(schemaRef)) {
           // See if we have everything we need locally (in our heap)
           const localResult = querySchemaHeap(
-            schema,
+            { path: [], schemaContext: schema },
             [],
             address,
             this.heap.store,

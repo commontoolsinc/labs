@@ -6,9 +6,9 @@ import {
   DefaultSchemaSelector,
   getAtPath,
   MapSet,
+  MinimalSchemaSelector,
   type PointerCycleTracker,
   SchemaObjectTraverser,
-  type ValueAtPath,
   type ValueEntry,
 } from "@commontools/builder/traverse";
 import { type Immutable, isObject } from "@commontools/utils/types";
@@ -246,7 +246,7 @@ function loadFactsForDoc(
     const factAddress = { of: fact.source.of, the: fact.source.the };
     if (selector.schemaContext !== undefined) {
       const factValue = (fact.value as Immutable<JSONObject>).value;
-      const newDoc = getAtPath<
+      const [newDoc, _newSelector] = getAtPath<
         FactAddress,
         FullFactAddress
       >(
@@ -260,10 +260,14 @@ function loadFactsForDoc(
       if (newDoc.value === undefined) {
         return;
       }
+      // TODO(@ubik2): I should be able to use newSelector here, but I haven't
+      // tweaked the path on the selector for local aliases, so just use the
+      // newDoc.path for now
+      selector = { ...selector, path: newDoc.path };
       // We've provided a schema context for this, so traverse it
       const traverser = new SchemaObjectTraverser(
         manager,
-        selector.schemaContext,
+        selector,
         tracker,
         schemaTracker,
       );
