@@ -171,7 +171,7 @@ export const selectSchema = <Space extends MemorySpace>(
         of: entry.source.of,
         the: entry.source.the,
       });
-      // FIXME: need to remove this or schemaTracker
+      // TODO(@ubik2): need to remove this or schemaTracker
       selectionTracker?.add(factKey, selectorEntry.value);
       // The top level facts we accessed should be included
       addToSelection(includedFacts, entry);
@@ -246,7 +246,7 @@ function loadFactsForDoc(
     const factAddress = { of: fact.source.of, the: fact.source.the };
     if (selector.schemaContext !== undefined) {
       const factValue = (fact.value as Immutable<JSONObject>).value;
-      const [newDoc, _newSelector] = getAtPath<
+      const [newDoc, newSelector] = getAtPath<
         FactAddress,
         FullFactAddress
       >(
@@ -260,14 +260,10 @@ function loadFactsForDoc(
       if (newDoc.value === undefined) {
         return;
       }
-      // TODO(@ubik2): I should be able to use newSelector here, but I haven't
-      // tweaked the path on the selector for local aliases, so just use the
-      // newDoc.path for now
-      selector = { ...selector, path: newDoc.path };
       // We've provided a schema context for this, so traverse it
       const traverser = new SchemaObjectTraverser(
         manager,
-        selector,
+        newSelector!,
         tracker,
         schemaTracker,
       );

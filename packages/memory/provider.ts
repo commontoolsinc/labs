@@ -364,7 +364,7 @@ class MemoryProviderSession<
     // We don't know which schema path selector caused this fact to be included (it may have been included by multiple)
     for (const fact of factVersions) {
       const factKey = this.toKey(fact);
-      // FIXME
+      // FIXME(@ubik2)
       this.watchedObjects.add(factKey, { path: [] });
     }
   }

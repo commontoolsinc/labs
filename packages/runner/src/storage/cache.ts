@@ -455,7 +455,7 @@ export class Replica {
         return { error };
       }
       fetchedEntries = query.schemaFacts;
-      // FIXME(@ubik2) verify that we're dealing with this subscription
+      // TODO(@ubik2) verify that we're dealing with this subscription
       // I know we're sending updates over from the provider, but make sure
       // we're incorporating those in the cache.
     }

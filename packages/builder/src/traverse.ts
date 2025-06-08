@@ -354,6 +354,14 @@ function followPointer<K, S>(
       ? manager.getTarget(cellTarget)
       : doc.doc;
     let [targetDoc, targetDocRoot] = [doc.doc, doc.docRoot];
+    if (selector !== undefined) {
+      // We'll need to re-root the selector for the target doc
+      // Remove the portions of doc.path from selector.path, limiting schema if needed
+      // Also insert the portions of cellTarget.path, so selector is relative to new target doc
+      // We do this even if the target doc is the same doc, since we want the
+      // selector path to match.
+      selector = narrowSchema(doc.path, selector, cellTarget.path);
+    }
     if (cellTarget.cellTarget !== undefined) {
       // We have a reference to a different cell, so track the dependency
       // and update our targetDoc and targetDocRoot
@@ -367,14 +375,8 @@ function followPointer<K, S>(
       ) {
         manager.addRead(doc.doc, valueEntry.value, valueEntry.source);
       }
-      if (selector !== undefined) {
-        // We'll need to re-root the selector for the target doc
-        // Remove the portions of doc.path from selector.path, limiting schema if needed
-        // Also insert the portions of cellTarget.path, so selector is relative to new target doc
-        selector = narrowSchema(doc.path, selector, cellTarget.path);
-        if (schemaTracker !== undefined) {
-          schemaTracker.add(manager.toKey(target), selector);
-        }
+      if (schemaTracker !== undefined && selector !== undefined) {
+        schemaTracker.add(manager.toKey(target), selector);
       }
       // If the object we're pointing to is a retracted fact, just return undefined.
       // We can't do a better match, but we do want to include the result so we watch this doc
@@ -390,10 +392,6 @@ function followPointer<K, S>(
       targetDoc = target;
       targetDocRoot = (valueEntry.value as Immutable<JSONObject>)["value"];
     }
-    // TODO(@ubik2) - consider better what to do with selectors when we have local pointers.
-    // As written, the selector will have a valid path from the root of the doc, but there is
-    // more than one valid path, and we want to match the one the alias directed us to.
-
     // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
     // then the provided path from the arguments.
     return getAtPath(
