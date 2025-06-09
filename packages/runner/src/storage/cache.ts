@@ -42,7 +42,6 @@ import {
 } from "./base.ts";
 import * as IDB from "./idb.ts";
 import { Channel, RawCommand } from "./inspector.ts";
-import { querySchemaHeap } from "./query.ts";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {

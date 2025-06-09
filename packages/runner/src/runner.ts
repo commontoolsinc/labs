@@ -1,3 +1,4 @@
+import { isRecord } from "@commontools/utils/types";
 import {
   type Alias,
   isAlias,
@@ -38,7 +39,6 @@ import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import { getCellLinkOrThrow } from "./query-result-proxy.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
-import { isRecord } from "@commontools/utils/types";
 
 const moduleWrappers = {
   handler: (fn: (event: any, ...props: any[]) => any) => (props: any) =>

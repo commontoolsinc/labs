@@ -1,4 +1,5 @@
 import { isObject, isRecord } from "@commontools/utils/types";
+import { type CellLink, isCell, isCellLink, isDoc } from "@commontools/runner";
 import { createShadowRef } from "./opaque-ref.ts";
 import {
   type Alias,
@@ -22,7 +23,6 @@ import {
 } from "./types.ts";
 import { getTopFrame } from "./recipe.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { type CellLink, isCell, isCellLink, isDoc } from "@commontools/runner";
 
 /**
  * Traverse a value, _not_ entering cells

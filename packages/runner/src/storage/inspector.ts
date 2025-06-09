@@ -1,3 +1,4 @@
+import type { JSONValue } from "@commontools/builder";
 import type {
   AuthorizationError,
   ConflictError,
@@ -14,7 +15,6 @@ import type {
   UCAN,
   Variant,
 } from "@commontools/memory/interface";
-import type { JSONValue } from "@commontools/builder";
 
 export type Status<Pending extends object, Ready = Pending> =
   | { pending: Pending; ready?: void; time: Time }

@@ -2,6 +2,7 @@
  * Factory function to create builder functions with runtime dependency injection
  */
 
+import { getCellLinkOrThrow, type Runtime } from "@commontools/runner";
 import type {
   BuilderFunctionsAndConstants,
   Cell,
@@ -21,7 +22,6 @@ import {
   str,
   streamData,
 } from "./built-in.ts";
-import { getCellLinkOrThrow, type Runtime } from "@commontools/runner";
 import { getRecipeEnvironment } from "./env.ts";
 
 /**

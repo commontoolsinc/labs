@@ -19,6 +19,7 @@ import type { Cancel } from "./cancel.ts";
 import type { Action, EventHandler, ReactivityLog } from "./scheduler.ts";
 import type { Harness } from "./harness/harness.ts";
 import { UnsafeEvalHarness } from "./harness/index.ts";
+import { ConsoleMethod } from "./harness/console.ts";
 
 export type ErrorWithContext = Error & {
   action: Action;
@@ -27,7 +28,6 @@ export type ErrorWithContext = Error & {
   recipeId: string;
 };
 
-import { ConsoleMethod } from "./harness/console.ts";
 export type ConsoleHandler = (
   metadata: { charmId?: string; recipeId?: string; space?: string } | undefined,
   method: ConsoleMethod,

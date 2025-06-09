@@ -1,11 +1,15 @@
-import { Signer } from "@commontools/identity";
+import { isRecord } from "@commontools/utils/types";
 import { defer } from "@commontools/utils/defer";
 import { sleep } from "@commontools/utils/sleep";
+import { Signer } from "@commontools/identity";
 import {
   isStatic,
   markAsStatic,
   type SchemaContext,
 } from "@commontools/builder";
+import { TransactionResult } from "@commontools/memory";
+import { refer } from "@commontools/memory/reference";
+import { SchemaNone } from "@commontools/memory/interface";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { Cell, type CellLink, isCell, isCellLink, isStream } from "./cell.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
@@ -23,11 +27,7 @@ import {
 import { log } from "./log.ts";
 import { Provider as CachedStorageProvider } from "./storage/cache.ts";
 import { VolatileStorageProvider } from "./storage/volatile.ts";
-import { TransactionResult } from "@commontools/memory";
-import { refer } from "@commontools/memory/reference";
-import { SchemaNone } from "@commontools/memory/interface";
 import type { IRuntime, IStorage } from "./runtime.ts";
-import { isRecord } from "@commontools/utils/types";
 
 export type { Labels };
 

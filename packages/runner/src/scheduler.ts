@@ -1,14 +1,13 @@
+import { getTopFrame, TYPE } from "@commontools/builder";
 import type { DocImpl } from "./doc.ts";
 import type { Cancel } from "./cancel.ts";
 import { type CellLink } from "./cell.ts";
-import { getTopFrame, TYPE } from "@commontools/builder";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { ConsoleEvent, ConsoleMethod } from "./harness/console.ts";
+import { ConsoleEvent } from "./harness/console.ts";
 import type {
-  CharmMetadata,
   ConsoleHandler,
   ErrorHandler,
   ErrorWithContext,
