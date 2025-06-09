@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createBuilder } from "@commontools/builder";
-import { type JSONSchema, UI } from "@commontools/builder/interface";
-import { type Cell, isCell } from "../src/cell.ts";
+import {
+  type Cell,
+  createBuilder,
+  type JSONSchema,
+  UI,
+} from "@commontools/builder";
+import { isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 
 describe("Schema Lineage", () => {

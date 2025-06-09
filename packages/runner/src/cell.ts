@@ -1,5 +1,4 @@
-import { isStreamAlias, TYPE } from "@commontools/builder";
-import type { Cell } from "@commontools/builder/interface";
+import { type Cell, isStreamAlias } from "@commontools/builder";
 import {
   getTopFrame,
   ID,

@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createBuilder } from "@commontools/builder";
-import { type Cell, JSONSchema, TYPE } from "@commontools/builder/interface";
+import {
+  type Cell,
+  createBuilder,
+  type JSONSchema,
+  TYPE,
+} from "@commontools/builder";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { isCell } from "../src/cell.ts";
