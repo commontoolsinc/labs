@@ -77,7 +77,7 @@ export class ClientObjectManager extends BaseObjectManager<
 
 export function querySchemaHeap(
   selector: SchemaPathSelector,
-  path: string[],
+  path: readonly string[],
   factAddress: FactAddress,
   store: Map<string, Revision<State>>,
 ): {

@@ -8,6 +8,7 @@ import {
   JSONValue,
   SchemaContext,
 } from "@commontools/builder";
+import { MapSet } from "@commontools/builder/traverse";
 import type {
   AuthorizationError,
   Commit,
@@ -20,6 +21,7 @@ import type {
   QueryError,
   Result,
   Revision,
+  SchemaPathSelector,
   State,
   The,
   TransactionError,
@@ -288,6 +290,46 @@ class PullQueue {
   }
 }
 
+// This class helps us maintain a client model of our server side subscriptions
+// FIXME: there are some corner cases here
+// imagine we subscribe to doc1 which causes a subscription to doc2
+// then we want to subscribe to doc2, but already have the subscription (via doc1)
+// then doc1 is altered so that it points to doc3. Now we're no longer
+// subscribed to doc2 as we should be.
+class SelectorTracker {
+  private refTracker = new MapSet<string, string>();
+  private selectors = new Map<string, SchemaPathSelector>();
+
+  add(doc: FactAddress, selector: SchemaPathSelector | undefined) {
+    if (selector === undefined) {
+      return;
+    }
+    const selectorRef = refer(JSON.stringify(selector)).toString();
+    this.refTracker.add(toKey(doc), selectorRef);
+    this.selectors.set(selectorRef, selector);
+  }
+
+  has(doc: FactAddress): boolean {
+    return this.refTracker.has(toKey(doc));
+  }
+
+  hasSelector(doc: FactAddress, selector: SchemaPathSelector): boolean {
+    const selectorRefs = this.refTracker.get(toKey(doc));
+    if (selectorRefs !== undefined) {
+      const selectorRef = refer(JSON.stringify(selector)).toString();
+      return selectorRefs.has(selectorRef);
+    }
+    return false;
+  }
+
+  get(doc: FactAddress): IteratorObject<SchemaPathSelector> {
+    const selectorRefs = this.refTracker.get(toKey(doc)) ?? [];
+    return selectorRefs.values().map((selectorRef) =>
+      this.selectors.get(selectorRef)!
+    );
+  }
+}
+
 export class Replica {
   static put(
     local: Revision<State> | undefined,
@@ -355,8 +397,9 @@ export class Replica {
     public nursery: Nursery = new Nursery(),
     public queue: PullQueue = new PullQueue(),
     public pullRetryLimit: number = 100,
-    public schemaTracker = new Map<string, Set<string>>(),
     public useSchemaQueries: boolean = false,
+    // Track the selectors used for top level docs
+    private selectorTracker: SelectorTracker = new SelectorTracker(),
     private cfc: ContextualFlowControl = new ContextualFlowControl(),
   ) {
     this.pull = this.pull.bind(this);
@@ -454,6 +497,8 @@ export class Replica {
         console.error("query failure", error);
         return { error };
       }
+      // We provided schema for the top level fact that we selected, but we
+      // will have undefined schema for the entries included as links.
       fetchedEntries = query.schemaFacts;
       // TODO(@ubik2) verify that we're dealing with this subscription
       // I know we're sending updates over from the provider, but make sure
@@ -492,14 +537,10 @@ export class Replica {
     for (const [revision, schema] of fetchedEntries) {
       const factAddress = { the: revision.the, of: revision.of };
       revisions.set(factAddress, revision);
-      if (schema !== undefined) {
-        const schemaRef = refer(JSON.stringify(schema)).toString();
-        const factKey = toKey(factAddress);
-        if (!this.schemaTracker.has(factKey)) {
-          this.schemaTracker.set(factKey, new Set<string>());
-        }
-        this.schemaTracker.get(factKey)?.add(schemaRef);
-      }
+      this.selectorTracker.add(factAddress, {
+        path: [],
+        schemaContext: schema,
+      });
     }
 
     // Add notFound entries to the heap and also persist them in the cache.
@@ -532,34 +573,16 @@ export class Replica {
       if (!this.get(address)) {
         need.push([address, schema]);
       } else if (schema !== undefined) {
+        const selector = { path: [], schemaContext: schema };
         // Even though we have our root doc in local store, we may need
         // to re-issue our query, since our cached copy may have been run with a
         // different schema, and thus have different linked documents.
-        const schemaRef = refer(JSON.stringify(schema)).toString();
-        const factKey = toKey(address);
-        // if we have the doc in our heap, we have a subscription with a
-        // schema in our heap. See if our new schema pattern will walk outside
-        // our current set of docs in the heap. If not, we can return the heap
-        // copy. If they do, we need to issue a schema query to the server
-        // (which will get the linked docs that we don't already have).
-        // I'd like to also get an if-modified-since map, in the future, so I
-        // can include the entities and since fields I already have.
-        if (!this.schemaTracker.get(factKey)?.has(schemaRef)) {
-          // See if we have everything we need locally (in our heap)
-          const localResult = querySchemaHeap(
-            { path: [], schemaContext: schema },
-            [],
-            address,
-            this.heap.store,
-          );
-          if (localResult.missing.length === 0) {
-            if (!this.schemaTracker.has(factKey)) {
-              this.schemaTracker.set(factKey, new Set<string>());
-            }
-            this.schemaTracker.get(factKey)?.add(schemaRef);
-          } else {
-            need.push([address, schema]);
-          }
+        if (!this.selectorTracker.hasSelector(address, selector)) {
+          // If we already have a subscription for the query running on the
+          // server for this selector, we don't need to send a new one
+          // (revisit this when we allow unsubscribe)
+          // Otherwise, add it to the set of things we need
+          need.push([address, schema]);
         }
       }
     }
