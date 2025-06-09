@@ -1,13 +1,11 @@
 import ts from "typescript";
 import { RawSourceMap, SourceMapConsumer } from "source-map-js";
 import * as commonHtml from "@commontools/html";
-import * as commonBuilder from "@commontools/builder";
-import { createBuilder } from "@commontools/builder";
-import { getCellLinkOrThrow } from "../query-result-proxy.ts";
 import * as zod from "zod";
 import * as zodToJsonSchema from "zod-to-json-schema";
 import * as merkleReference from "merkle-reference";
 import turndown from "turndown";
+import { createBuilder } from "@commontools/builder";
 import { type IRuntime } from "../runtime.ts";
 
 let DOMParser: any;
@@ -210,6 +208,7 @@ export const tsToExports = async (
       case "@commontools/html":
         return commonHtml;
       case "@commontools/builder":
+      case "@commontools/builder/interface":
         return createBuilder(config.runtime);
       case "zod":
         return zod;

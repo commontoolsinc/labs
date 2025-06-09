@@ -4,7 +4,6 @@ import {
   type Cell,
   createBuilder,
   type JSONSchema,
-  TYPE,
 } from "@commontools/builder";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
@@ -18,6 +17,7 @@ describe("Recipe Runner", () => {
   let createCell: ReturnType<typeof createBuilder>["createCell"];
   let handler: ReturnType<typeof createBuilder>["handler"];
   let byRef: ReturnType<typeof createBuilder>["byRef"];
+  let TYPE: ReturnType<typeof createBuilder>["TYPE"];
 
   beforeEach(() => {
     runtime = new Runtime({
@@ -30,6 +30,7 @@ describe("Recipe Runner", () => {
       createCell,
       handler,
       byRef,
+      TYPE,
     } = builder);
   });
 

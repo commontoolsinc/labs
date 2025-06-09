@@ -28,6 +28,15 @@ import type {
   StreamFunction,
   StrFunction,
 } from "./interface.ts";
+import {
+  AuthSchema,
+  ID,
+  ID_FIELD,
+  NAME,
+  schema,
+  TYPE,
+  UI,
+} from "./interface.ts";
 
 export { AuthSchema, ID, ID_FIELD, NAME, TYPE, UI } from "./interface.ts";
 export type {
@@ -250,7 +259,7 @@ export function markAsStatic(value: unknown): unknown {
 }
 
 // Builder functions interface
-export interface BuilderFunctions {
+export interface BuilderFunctionsAndConstants {
   // Recipe creation
   recipe: RecipeFunction;
 
@@ -280,6 +289,17 @@ export interface BuilderFunctions {
 
   // Environment
   getRecipeEnvironment: GetRecipeEnvironmentFunction;
+
+  // Constants
+  ID: typeof ID;
+  ID_FIELD: typeof ID_FIELD;
+  TYPE: typeof TYPE;
+  NAME: typeof NAME;
+  UI: typeof UI;
+
+  // Schema utilities
+  schema: typeof schema;
+  AuthSchema: typeof AuthSchema;
 }
 
 // Runtime interface needed by createCell
@@ -302,4 +322,4 @@ export interface BuilderRuntime {
 export type CreateBuilder = (
   runtime: BuilderRuntime,
   getCellLinkOrThrow?: (value: any) => any,
-) => BuilderFunctions;
+) => BuilderFunctionsAndConstants;

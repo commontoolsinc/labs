@@ -3,11 +3,12 @@
  */
 
 import type {
-  BuilderFunctions,
+  BuilderFunctionsAndConstants,
   Cell,
   CreateCellFunction,
   JSONSchema,
 } from "./types.ts";
+import { AuthSchema, ID, ID_FIELD, NAME, schema, TYPE, UI } from "./types.ts";
 import { opaqueRef, stream } from "./opaque-ref.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { byRef, compute, derive, handler, lift, render } from "./module.ts";
@@ -30,7 +31,7 @@ import { getRecipeEnvironment } from "./env.ts";
  */
 export const createBuilder = (
   runtime: Runtime,
-): BuilderFunctions => {
+): BuilderFunctionsAndConstants => {
   // Implementation of createCell moved from runner/harness
   const createCell: CreateCellFunction = function createCell<T = any>(
     schema?: JSONSchema,
@@ -96,5 +97,16 @@ export const createBuilder = (
 
     // Environment
     getRecipeEnvironment,
+
+    // Constants
+    ID,
+    ID_FIELD,
+    TYPE,
+    NAME,
+    UI,
+
+    // Schema utilities
+    schema,
+    AuthSchema,
   };
 };

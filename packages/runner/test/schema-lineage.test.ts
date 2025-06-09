@@ -4,7 +4,6 @@ import {
   type Cell,
   createBuilder,
   type JSONSchema,
-  UI,
 } from "@commontools/builder";
 import { isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -12,13 +11,14 @@ import { Runtime } from "../src/runtime.ts";
 describe("Schema Lineage", () => {
   let runtime: Runtime;
   let recipe: ReturnType<typeof createBuilder>["recipe"];
+  let UI: ReturnType<typeof createBuilder>["UI"];
 
   beforeEach(() => {
     runtime = new Runtime({
       storageUrl: "volatile://",
     });
     const builder = createBuilder(runtime);
-    ({ recipe } = builder);
+    ({ recipe, UI } = builder);
   });
 
   afterEach(async () => {
@@ -234,13 +234,14 @@ describe("Schema Lineage", () => {
 describe("Schema propagation end-to-end example", () => {
   let runtime: Runtime;
   let recipe: ReturnType<typeof createBuilder>["recipe"];
+  let UI: ReturnType<typeof createBuilder>["UI"];
 
   beforeEach(() => {
     runtime = new Runtime({
       storageUrl: "volatile://",
     });
     const builder = createBuilder(runtime);
-    ({ recipe } = builder);
+    ({ recipe, UI } = builder);
   });
 
   afterEach(async () => {

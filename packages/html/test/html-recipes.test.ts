@@ -1,6 +1,6 @@
-import { beforeEach, describe, it, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { h, render, VNode } from "../src/index.ts";
-import { createBuilder, UI } from "@commontools/builder";
+import { createBuilder } from "@commontools/builder";
 import { Runtime } from "@commontools/runner";
 import * as assert from "./assert.ts";
 import { JSDOM } from "jsdom";
@@ -12,6 +12,7 @@ describe("recipes with HTML", () => {
   let lift: ReturnType<typeof createBuilder>["lift"];
   let recipe: ReturnType<typeof createBuilder>["recipe"];
   let str: ReturnType<typeof createBuilder>["str"];
+  let UI: ReturnType<typeof createBuilder>["UI"];
 
   beforeEach(() => {
     // Set up a fresh JSDOM instance for each test
@@ -26,11 +27,11 @@ describe("recipes with HTML", () => {
 
     // Set up runtime
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      storageUrl: "volatile://",
     });
-    
+
     const builder = createBuilder(runtime);
-    ({ lift, recipe, str } = builder);
+    ({ lift, recipe, str, UI } = builder);
   });
 
   afterEach(async () => {
@@ -48,7 +49,7 @@ describe("recipes with HTML", () => {
     const result = runtime.run(
       simpleRecipe,
       { value: 5 },
-      runtime.documentMap.getDoc(undefined, "simple-ui-result", "test")
+      runtime.documentMap.getDoc(undefined, "simple-ui-result", "test"),
     );
 
     await runtime.idle();
@@ -98,7 +99,7 @@ describe("recipes with HTML", () => {
           { title: "item 2", done: true },
         ],
       },
-      runtime.documentMap.getDoc(undefined, "todo-list-result", "test")
+      runtime.documentMap.getDoc(undefined, "todo-list-result", "test"),
     );
 
     await runtime.idle();
@@ -140,7 +141,7 @@ describe("recipes with HTML", () => {
           { title: "item 2", done: true },
         ],
       },
-      runtime.documentMap.getDoc(undefined, "nested-todo-result", "test")
+      runtime.documentMap.getDoc(undefined, "nested-todo-result", "test"),
     );
 
     await runtime.idle();
@@ -161,7 +162,7 @@ describe("recipes with HTML", () => {
     const result = runtime.run(
       strRecipe,
       { name: "world" },
-      runtime.documentMap.getDoc(undefined, "str-recipe-result", "test")
+      runtime.documentMap.getDoc(undefined, "str-recipe-result", "test"),
     );
 
     await runtime.idle();
@@ -202,7 +203,7 @@ describe("recipes with HTML", () => {
     const result = runtime.run(
       nestedMapRecipe,
       data,
-      runtime.documentMap.getDoc(undefined, "nested-map-result", "test")
+      runtime.documentMap.getDoc(undefined, "nested-map-result", "test"),
     );
 
     await runtime.idle();
