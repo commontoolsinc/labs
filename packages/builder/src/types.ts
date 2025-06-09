@@ -45,6 +45,7 @@ export type {
   OpaqueRef,
   Recipe,
   RecipeFactory,
+  Stream,
   toJSON,
 } from "./interface.ts";
 
