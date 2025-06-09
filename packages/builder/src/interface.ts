@@ -204,18 +204,20 @@ export interface BuiltInCompileAndRunState<T> {
 export type RecipeFunction = {
   <S extends JSONSchema>(
     argumentSchema: S,
-    fn: (input: OpaqueRef<Required<Schema<S>>>) => any,
+    fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => any,
   ): RecipeFactory<SchemaWithoutCell<S>, ReturnType<typeof fn>>;
 
   <S extends JSONSchema, R>(
     argumentSchema: S,
-    fn: (input: OpaqueRef<Required<Schema<S>>>) => Opaque<R>,
+    fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => Opaque<R>,
   ): RecipeFactory<SchemaWithoutCell<S>, R>;
 
   <S extends JSONSchema, RS extends JSONSchema>(
     argumentSchema: S,
     resultSchema: RS,
-    fn: (input: OpaqueRef<Required<Schema<S>>>) => Opaque<Schema<RS>>,
+    fn: (
+      input: OpaqueRef<Required<SchemaWithoutCell<S>>>,
+    ) => Opaque<SchemaWithoutCell<RS>>,
   ): RecipeFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
 
   <T>(
