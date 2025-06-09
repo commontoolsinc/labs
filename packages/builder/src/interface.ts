@@ -205,18 +205,18 @@ export type RecipeFunction = {
   <S extends JSONSchema>(
     argumentSchema: S,
     fn: (input: OpaqueRef<Required<Schema<S>>>) => any,
-  ): RecipeFactory<Schema<S>, ReturnType<typeof fn>>;
+  ): RecipeFactory<SchemaWithoutCell<S>, ReturnType<typeof fn>>;
 
   <S extends JSONSchema, R>(
     argumentSchema: S,
     fn: (input: OpaqueRef<Required<Schema<S>>>) => Opaque<R>,
-  ): RecipeFactory<Schema<S>, R>;
+  ): RecipeFactory<SchemaWithoutCell<S>, R>;
 
   <S extends JSONSchema, RS extends JSONSchema>(
     argumentSchema: S,
     resultSchema: RS,
     fn: (input: OpaqueRef<Required<Schema<S>>>) => Opaque<Schema<RS>>,
-  ): RecipeFactory<Schema<S>, Schema<RS>>;
+  ): RecipeFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
 
   <T>(
     argumentSchema: string | JSONSchema,
