@@ -1,7 +1,12 @@
 import { createNodeFactory, lift } from "./module.ts";
-import { type Cell } from "@commontools/runner";
-import type { JSONSchema, NodeFactory, Opaque, OpaqueRef } from "./types.ts";
-import type { Schema } from "./schema-to-ts.ts";
+import type {
+  Cell,
+  JSONSchema,
+  NodeFactory,
+  Opaque,
+  OpaqueRef,
+  Schema,
+} from "./types.ts";
 
 export interface BuiltInLLMParams {
   messages?: string[];

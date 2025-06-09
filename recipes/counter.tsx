@@ -8,7 +8,7 @@ import {
   schema,
   str,
   UI,
-} from "@commontools/builder";
+} from "@commontools/builder/interface";
 
 // Different way to define the same schema, using 'schema' helper function,
 // let's as leave off `as const satisfies JSONSchema`.

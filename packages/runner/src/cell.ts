@@ -1,4 +1,4 @@
-import { isStreamAlias, TYPE } from "@commontools/builder";
+import { type Cell, isStreamAlias } from "@commontools/builder";
 import {
   getTopFrame,
   ID,
@@ -109,68 +109,72 @@ import { ContextualFlowControl } from "./index.ts";
  * @property cellLink The cell link representing this cell.
  * @returns {CellLink}
  */
-export interface Cell<T> {
-  get(): T;
-  set(value: Cellify<T> | T): void;
-  send(value: Cellify<T> | T): void;
-  update<V extends Cellify<Partial<T> | Partial<T>>>(
-    values: V extends object ? V : never,
-  ): void;
-  push(
-    ...value: Array<
-      | (T extends Array<infer U> ? (Cellify<U> | U | DocImpl<U>) : any)
-      | CellLink
-    >
-  ): void;
-  equals(other: Cell<any>): boolean;
-  key<K extends T extends Cell<infer S> ? keyof S : keyof T>(
-    valueKey: K,
-  ): Cell<
-    T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
-  >;
+declare module "@commontools/builder/interface" {
+  interface Cell<T> {
+    get(): T;
+    set(value: Cellify<T> | T): void;
+    send(value: Cellify<T> | T): void;
+    update<V extends Cellify<Partial<T> | Partial<T>>>(
+      values: V extends object ? V : never,
+    ): void;
+    push(
+      ...value: Array<
+        | (T extends Array<infer U> ? (Cellify<U> | U | DocImpl<U>) : any)
+        | CellLink
+      >
+    ): void;
+    equals(other: Cell<any>): boolean;
+    key<K extends T extends Cell<infer S> ? keyof S : keyof T>(
+      valueKey: K,
+    ): Cell<
+      T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
+    >;
 
-  asSchema<T>(
-    schema?: JSONSchema,
-  ): Cell<T>;
-  asSchema<S extends JSONSchema = JSONSchema>(
-    schema: S,
-  ): Cell<Schema<S>>;
-  withLog(log: ReactivityLog): Cell<T>;
-  sink(callback: (value: T) => Cancel | undefined | void): Cancel;
-  getAsQueryResult<Path extends PropertyKey[]>(
-    path?: Path,
-    log?: ReactivityLog,
-  ): QueryResult<DeepKeyLookup<T, Path>>;
-  getAsCellLink(): CellLink;
-  getDoc(): DocImpl<any>;
-  getSourceCell<T>(
-    schema?: JSONSchema,
-  ): Cell<
-    & T
-    // Add default types for TYPE and `argument`. A more specific type in T will
-    // take precedence.
-    & { [TYPE]: string | undefined }
-    & ("argument" extends keyof T ? unknown : { argument: any })
-  >;
-  getSourceCell<S extends JSONSchema = JSONSchema>(
-    schema: S,
-  ): Cell<
-    & Schema<S>
-    // Add default types for TYPE and `argument`. A more specific type in
-    // `schema` will take precedence.
-    & { [TYPE]: string | undefined }
-    & ("argument" extends keyof Schema<S> ? unknown
-      : { argument: any })
-  >;
-  toJSON(): { cell: { "/": string } | undefined; path: PropertyKey[] };
-  schema?: JSONSchema;
-  rootSchema?: JSONSchema;
-  value: T;
-  cellLink: CellLink;
-  entityId: EntityId | undefined;
-  [isCellMarker]: true;
-  copyTrap: boolean;
+    asSchema<T>(
+      schema?: JSONSchema,
+    ): Cell<T>;
+    asSchema<S extends JSONSchema = JSONSchema>(
+      schema: S,
+    ): Cell<Schema<S>>;
+    withLog(log: ReactivityLog): Cell<T>;
+    sink(callback: (value: T) => Cancel | undefined | void): Cancel;
+    getAsQueryResult<Path extends PropertyKey[]>(
+      path?: Path,
+      log?: ReactivityLog,
+    ): QueryResult<DeepKeyLookup<T, Path>>;
+    getAsCellLink(): CellLink;
+    getDoc(): DocImpl<any>;
+    getSourceCell<T>(
+      schema?: JSONSchema,
+    ): Cell<
+      & T
+      // Add default types for TYPE and `argument`. A more specific type in T will
+      // take precedence.
+      & { [TYPE]: string | undefined }
+      & ("argument" extends keyof T ? unknown : { argument: any })
+    >;
+    getSourceCell<S extends JSONSchema = JSONSchema>(
+      schema: S,
+    ): Cell<
+      & Schema<S>
+      // Add default types for TYPE and `argument`. A more specific type in
+      // `schema` will take precedence.
+      & { [TYPE]: string | undefined }
+      & ("argument" extends keyof Schema<S> ? unknown
+        : { argument: any })
+    >;
+    toJSON(): { cell: { "/": string } | undefined; path: PropertyKey[] };
+    schema?: JSONSchema;
+    rootSchema?: JSONSchema;
+    value: T;
+    cellLink: CellLink;
+    entityId: EntityId | undefined;
+    [isCellMarker]: true;
+    copyTrap: boolean;
+  }
 }
+
+export type { Cell } from "@commontools/builder/interface";
 
 /**
  * Cellify is a type utility that allows any part of type T to be wrapped in

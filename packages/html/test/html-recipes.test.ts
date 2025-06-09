@@ -1,6 +1,6 @@
-import { beforeEach, describe, it, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { h, render, VNode } from "../src/index.ts";
-import { lift, recipe, str, UI } from "@commontools/builder";
+import { createBuilder } from "@commontools/builder";
 import { Runtime } from "@commontools/runner";
 import * as assert from "./assert.ts";
 import { JSDOM } from "jsdom";
@@ -9,6 +9,10 @@ describe("recipes with HTML", () => {
   let dom: JSDOM;
   let document: Document;
   let runtime: Runtime;
+  let lift: ReturnType<typeof createBuilder>["lift"];
+  let recipe: ReturnType<typeof createBuilder>["recipe"];
+  let str: ReturnType<typeof createBuilder>["str"];
+  let UI: ReturnType<typeof createBuilder>["UI"];
 
   beforeEach(() => {
     // Set up a fresh JSDOM instance for each test
@@ -23,8 +27,11 @@ describe("recipes with HTML", () => {
 
     // Set up runtime
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      storageUrl: "volatile://",
     });
+
+    const builder = createBuilder(runtime);
+    ({ lift, recipe, str, UI } = builder);
   });
 
   afterEach(async () => {
@@ -39,9 +46,11 @@ describe("recipes with HTML", () => {
       },
     );
 
-    const space = "test";
-    const resultCell = runtime.documentMap.getDoc(undefined, "simple-ui-result", space);
-    const result = runtime.runner.run(simpleRecipe, { value: 5 }, resultCell);
+    const result = runtime.run(
+      simpleRecipe,
+      { value: 5 },
+      runtime.documentMap.getDoc(undefined, "simple-ui-result", "test"),
+    );
 
     await runtime.idle();
     const resultValue = result.get();
@@ -81,15 +90,17 @@ describe("recipes with HTML", () => {
       };
     });
 
-    const space = "test";
-    const resultCell = runtime.documentMap.getDoc(undefined, "todo-list-result", space);
-    const result = runtime.runner.run(todoList, {
-      title: "test",
-      items: [
-        { title: "item 1", done: false },
-        { title: "item 2", done: true },
-      ],
-    }, resultCell);
+    const result = runtime.run(
+      todoList,
+      {
+        title: "test",
+        items: [
+          { title: "item 1", done: false },
+          { title: "item 2", done: true },
+        ],
+      },
+      runtime.documentMap.getDoc(undefined, "todo-list-result", "test"),
+    );
 
     await runtime.idle();
 
@@ -121,15 +132,17 @@ describe("recipes with HTML", () => {
       return { [UI]: h("div", null, summaryUI as any) };
     });
 
-    const space = "test";
-    const resultCell = runtime.documentMap.getDoc(undefined, "nested-todo-result", space);
-    const result = runtime.runner.run(todoList, {
-      title: { name: "test" },
-      items: [
-        { title: "item 1", done: false },
-        { title: "item 2", done: true },
-      ],
-    }, resultCell);
+    const result = runtime.run(
+      todoList,
+      {
+        title: { name: "test" },
+        items: [
+          { title: "item 1", done: false },
+          { title: "item 2", done: true },
+        ],
+      },
+      runtime.documentMap.getDoc(undefined, "nested-todo-result", "test"),
+    );
 
     await runtime.idle();
 
@@ -146,9 +159,11 @@ describe("recipes with HTML", () => {
       return { [UI]: h("div", null, str`Hello, ${name}!`) };
     });
 
-    const space = "test";
-    const resultCell = runtime.documentMap.getDoc(undefined, "str-recipe-result", space);
-    const result = runtime.runner.run(strRecipe, { name: "world" }, resultCell);
+    const result = runtime.run(
+      strRecipe,
+      { name: "world" },
+      runtime.documentMap.getDoc(undefined, "str-recipe-result", "test"),
+    );
 
     await runtime.idle();
 
@@ -185,9 +200,11 @@ describe("recipes with HTML", () => {
       ),
     }));
 
-    const space = "test";
-    const resultCell = runtime.documentMap.getDoc(undefined, "nested-map-result", space);
-    const result = runtime.runner.run(nestedMapRecipe, data, resultCell);
+    const result = runtime.run(
+      nestedMapRecipe,
+      data,
+      runtime.documentMap.getDoc(undefined, "nested-map-result", "test"),
+    );
 
     await runtime.idle();
 

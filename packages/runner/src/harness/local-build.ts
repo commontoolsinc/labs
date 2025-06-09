@@ -1,12 +1,11 @@
 import ts from "typescript";
 import { RawSourceMap, SourceMapConsumer } from "source-map-js";
 import * as commonHtml from "@commontools/html";
-import * as commonBuilder from "@commontools/builder";
 import * as zod from "zod";
 import * as zodToJsonSchema from "zod-to-json-schema";
 import * as merkleReference from "merkle-reference";
 import turndown from "turndown";
-import { createCellFactory } from "./create-cell.ts";
+import { createBuilder } from "@commontools/builder";
 import { type IRuntime } from "../runtime.ts";
 
 let DOMParser: any;
@@ -209,7 +208,8 @@ export const tsToExports = async (
       case "@commontools/html":
         return commonHtml;
       case "@commontools/builder":
-        return commonBuilder;
+      case "@commontools/builder/interface":
+        return createBuilder(config.runtime);
       case "zod":
         return zod;
       case "merkle-reference":
@@ -247,10 +247,6 @@ return exports;
 //# ${"sourceURL"}=${fileName}
 `;
   }
-
-  // TODO(seefeld): This should eventually be how we create the entire builder
-  // interface - as context for the eval.
-  const createCell = createCellFactory(config.runtime);
 
   try {
     return await eval(wrappedCode)(customRequire);
