@@ -6,7 +6,7 @@ import {
   recipe,
   Schema,
   UI,
-} from "@commontools/builder";
+} from "@commontools/builder/interface";
 
 const IntegrationSpaceCharmSchema = {
   type: "object",

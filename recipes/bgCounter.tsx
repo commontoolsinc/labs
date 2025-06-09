@@ -9,7 +9,7 @@ import {
   schema,
   str,
   UI,
-} from "@commontools/builder";
+} from "@commontools/builder/interface";
 
 const updaterSchema = {
   type: "object",

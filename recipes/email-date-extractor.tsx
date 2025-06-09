@@ -10,7 +10,7 @@ import {
   recipe,
   str,
   UI,
-} from "@commontools/builder";
+} from "@commontools/builder/interface";
 
 // Reuse email schema from email-summarizer.tsx
 const EmailProperties = {

@@ -8,7 +8,7 @@ import {
   recipe,
   str,
   UI,
-} from "@commontools/builder";
+} from "@commontools/builder/interface";
 import { sleep } from "@commontools/utils/sleep";
 
 interface GitHubCommit {

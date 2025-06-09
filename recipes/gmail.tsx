@@ -13,7 +13,7 @@ import {
   Schema,
   str,
   UI,
-} from "@commontools/builder";
+} from "@commontools/builder/interface";
 import TurndownService from "turndown";
 import { Cell } from "@commontools/runner";
 

@@ -9,7 +9,7 @@ import {
   recipe,
   Schema,
   UI,
-} from "@commontools/builder";
+} from "@commontools/builder/interface";
 
 const DISABLED_VIA_UI = "Disabled via UI";
 

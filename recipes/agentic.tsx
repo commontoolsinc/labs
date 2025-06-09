@@ -10,7 +10,7 @@ import {
   recipe,
   str,
   UI,
-} from "@commontools/builder";
+} from "@commontools/builder/interface";
 
 // Define input schema
 const InputSchema = {

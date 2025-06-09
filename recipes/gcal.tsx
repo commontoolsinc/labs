@@ -13,7 +13,7 @@ import {
   Schema,
   str,
   UI,
-} from "@commontools/builder";
+} from "@commontools/builder/interface";
 import { Cell } from "@commontools/runner";
 
 const Classification = {
@@ -286,7 +286,8 @@ export async function fetchCalendar(
       )
     }/events?maxResults=${maxResults}&timeMin=${
       encodeURIComponent(now)
-    }&singleEvents=true&orderBy=startTime`);
+    }&singleEvents=true&orderBy=startTime`,
+  );
   const listResponse = await googleRequest(
     auth,
     google_cal_url,
