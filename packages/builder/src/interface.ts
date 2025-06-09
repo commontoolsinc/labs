@@ -8,8 +8,6 @@
  * `@commontools/builder/interface`, but not both.
  */
 
-import type { Mutable } from "@commontools/utils/types";
-
 import type { Schema } from "./schema-to-ts.ts";
 
 export const ID: unique symbol = Symbol("ID, unique to the context");
@@ -172,9 +170,6 @@ export type JSONSchema = {
   readonly additionalProperties?: Readonly<JSONSchema> | boolean;
   readonly ifc?: { classification?: string[]; integrity?: string[] }; // temporarily used to assign labels like "confidential"
 };
-
-export { type Mutable };
-export type JSONSchemaMutable = Mutable<JSONSchema>;
 
 // Built-in types
 export interface BuiltInLLMParams {

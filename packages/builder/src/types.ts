@@ -1,4 +1,4 @@
-import { isObject } from "@commontools/utils/types";
+import { isObject, type Mutable } from "@commontools/utils/types";
 
 import type {
   ByRefFunction,
@@ -36,7 +36,6 @@ export type {
   HandlerFactory,
   JSONObject,
   JSONSchema,
-  JSONSchemaMutable,
   JSONValue,
   Module,
   ModuleFactory,
@@ -48,6 +47,8 @@ export type {
   Stream,
   toJSON,
 } from "./interface.ts";
+
+export type JSONSchemaMutable = Mutable<JSONSchema>;
 
 // Augment the public interface with the internal OpaqueRefMethods interface.
 // Deliberately repeating the original interface to catch any inconsistencies:
