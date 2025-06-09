@@ -1,12 +1,11 @@
 import { h } from "@commontools/html";
 import {
-  derive,
   handler,
   JSONSchema,
   NAME,
   recipe,
   UI,
-} from "@commontools/builder";
+} from "@commontools/builder/interface";
 
 const InputSchema = {
   type: "object",

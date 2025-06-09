@@ -1,14 +1,11 @@
-export { opaqueRef as cell, stream } from "./opaque-ref.ts";
-export { $, event, select, Spell } from "./spell.ts";
-export {
-  byRef,
-  compute,
-  createNodeFactory,
-  derive,
-  handler,
-  lift,
-  render,
-} from "./module.ts";
+// Export the factory function
+export { createBuilder } from "./factory.ts";
+export type {
+  BuilderFunctionsAndConstants as BuilderFunctions,
+  BuilderRuntime,
+} from "./types.ts";
+
+// Internal functions and exports needed by other packages
 export {
   getRecipeEnvironment,
   type RecipeEnvironment,
@@ -19,32 +16,17 @@ export {
   popFrame,
   pushFrame,
   pushFrameFromCause,
-  recipe,
   recipeFromFrame,
 } from "./recipe.ts";
 export {
-  type BuiltInCompileAndRunParams,
-  type BuiltInCompileAndRunState,
-  type BuiltInLLMParams,
-  type BuiltInLLMState,
-  compileAndRun,
-  type createCell,
-  fetchData,
-  ifElse,
-  llm,
-  navigateTo,
-  str,
-  streamData,
-} from "./built-in.ts";
-export {
   type Alias,
-  type DeepKeyLookup,
+  AuthSchema,
+  type Cell,
   type Frame,
+  type HandlerFactory,
   ID,
   ID_FIELD,
   isAlias,
-  isCellMarker,
-  isDocMarker,
   isModule,
   isOpaqueRef,
   isRecipe,
@@ -57,17 +39,18 @@ export {
   markAsStatic,
   type Module,
   type ModuleFactory,
-  type Mutable,
   NAME,
-  type Node,
   type NodeFactory,
   type Opaque,
   type OpaqueRef,
   type OpaqueRefMethods,
   type Recipe,
   type RecipeFactory,
+  type Schema,
+  schema,
   type SchemaContext,
-  type Static,
+  type SchemaWithoutCell,
+  type Stream,
   type StreamAlias,
   type toJSON,
   toOpaqueRef,
@@ -78,9 +61,11 @@ export {
   unsafe_parentRecipe,
   type UnsafeBinding,
 } from "./types.ts";
-export { type Schema, schema } from "./schema-to-ts.ts";
-export { AuthSchema } from "./schema-lib.ts";
+export { createNodeFactory } from "./module.ts";
+export { opaqueRef as cell } from "./opaque-ref.ts";
 export { Classification, ContextualFlowControl } from "./cfc.ts";
+export type { Mutable } from "@commontools/utils/types";
+
 // This should be a separate package, but for now it's easier to keep it here.
 export {
   createJsonSchema,

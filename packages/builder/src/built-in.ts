@@ -1,12 +1,12 @@
 import { createNodeFactory, lift } from "./module.ts";
 import type {
-  ICell,
+  Cell,
   JSONSchema,
   NodeFactory,
   Opaque,
   OpaqueRef,
+  Schema,
 } from "./types.ts";
-import type { Schema } from "./schema-to-ts.ts";
 
 export interface BuiltInLLMParams {
   messages?: string[];
@@ -134,12 +134,12 @@ declare global {
     schema?: JSONSchema,
     name?: string,
     value?: T,
-  ): ICell<T>;
+  ): Cell<T>;
   function createCell<S extends JSONSchema = JSONSchema>(
     schema: S,
     name?: string,
     value?: Schema<S>,
-  ): ICell<Schema<S>>;
+  ): Cell<Schema<S>>;
 }
 
 export type { createCell };

@@ -1,28 +1,37 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  byRef,
-  handler,
-  JSONSchema,
-  lift,
-  recipe,
-  TYPE,
+  type Cell,
+  createBuilder,
+  type JSONSchema,
 } from "@commontools/builder";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
-import { type Cell, isCell } from "../src/cell.ts";
+import { isCell } from "../src/cell.ts";
 import { resolveLinks } from "../src/utils.ts";
-import { createCellFactory } from "../src/harness/create-cell.ts";
 
 describe("Recipe Runner", () => {
   let runtime: Runtime;
-  let createCell: ReturnType<typeof createCellFactory>;
+  let lift: ReturnType<typeof createBuilder>["lift"];
+  let recipe: ReturnType<typeof createBuilder>["recipe"];
+  let createCell: ReturnType<typeof createBuilder>["createCell"];
+  let handler: ReturnType<typeof createBuilder>["handler"];
+  let byRef: ReturnType<typeof createBuilder>["byRef"];
+  let TYPE: ReturnType<typeof createBuilder>["TYPE"];
 
   beforeEach(() => {
     runtime = new Runtime({
       storageUrl: "volatile://",
     });
-    createCell = createCellFactory(runtime);
+    const builder = createBuilder(runtime);
+    ({
+      lift,
+      recipe,
+      createCell,
+      handler,
+      byRef,
+      TYPE,
+    } = builder);
   });
 
   afterEach(async () => {
@@ -643,7 +652,9 @@ describe("Recipe Runner", () => {
       },
     } as const satisfies JSONSchema;
 
-    const dynamicRecipe = recipe<{ context: Record<PropertyKey, number> }>(
+    const dynamicRecipe = recipe<
+      { context: Record<PropertyKey, number> }
+    >(
       "Dynamic Context",
       ({ context }) => {
         const result = lift(
@@ -651,7 +662,7 @@ describe("Recipe Runner", () => {
           { type: "number" },
           ({ context }) =>
             Object.values(context ?? {}).reduce(
-              (sum: number, val) => sum + (val as Cell<number>).get(),
+              (sum: number, val) => sum + val.get(),
               0,
             ),
         )({ context });

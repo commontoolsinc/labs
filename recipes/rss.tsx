@@ -1,17 +1,17 @@
 import { h } from "@commontools/html";
 import {
+  type Cell,
   cell,
   derive,
   handler,
   ID,
-  JSONSchema,
+  type JSONSchema,
   NAME,
   recipe,
-  Schema,
+  type Schema,
   str,
   UI,
-} from "@commontools/builder";
-import { Cell } from "@commontools/runner";
+} from "@commontools/builder/interface";
 
 const FeedItemProperties = {
   id: { type: "string" },

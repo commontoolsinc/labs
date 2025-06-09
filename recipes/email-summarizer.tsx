@@ -10,7 +10,7 @@ import {
   Schema,
   str,
   UI,
-} from "@commontools/builder";
+} from "@commontools/builder/interface";
 
 // Email schema based on Gmail recipe
 const EmailProperties = {

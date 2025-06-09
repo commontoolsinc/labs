@@ -1,11 +1,9 @@
 import {
   cell as opaqueRef,
   deepEqual,
-  type DeepKeyLookup,
   type Frame,
   getTopFrame,
   getValueAtPath,
-  isDocMarker,
   type JSONSchema,
   type OpaqueRef,
   type Schema,
@@ -235,6 +233,14 @@ export type DocImpl<T> = {
   copyTrap: boolean;
 };
 
+export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
+  : Path extends [infer First, ...infer Rest]
+    ? First extends keyof T
+      ? Rest extends PropertyKey[] ? DeepKeyLookup<T[First], Rest>
+      : any
+    : any
+  : any;
+
 /**
  * Creates a new document with the specified value, entity ID, and space.
  * @param value - The value to wrap in a document
@@ -417,3 +423,5 @@ export function makeOpaqueRef(
 export function isDoc(value: any): value is DocImpl<any> {
   return isRecord(value) && value[isDocMarker] === true;
 }
+
+const isDocMarker = Symbol("isDoc");

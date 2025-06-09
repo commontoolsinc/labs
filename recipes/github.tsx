@@ -8,7 +8,7 @@ import {
   recipe,
   str,
   UI,
-} from "@commontools/builder";
+} from "@commontools/builder/interface";
 import { sleep } from "@commontools/utils/sleep";
 
 interface GitHubCommit {
@@ -148,6 +148,7 @@ const refreshCommits = handler({}, {
     repo: { type: "string" },
     owner: { type: "string" },
   },
+  required: ["commits", "repo", "owner"],
 }, async (_, state) => {
   console.log("refreshing commits", JSON.stringify(state, null, 2));
   const commits = await getRecentCommits(state.owner, state.repo);
