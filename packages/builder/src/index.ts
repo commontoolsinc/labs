@@ -1,6 +1,6 @@
 // Export the factory function
 export { createBuilder } from "./factory.ts";
-export type { BuilderFunctions, BuilderRuntime } from "./interface.ts";
+export type { BuilderFunctions, BuilderRuntime } from "./types.ts";
 
 // Internal functions and exports needed by other packages
 export {

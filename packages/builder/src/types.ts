@@ -1,16 +1,37 @@
 import { isObject } from "@commontools/utils/types";
 
 import type {
+  ByRefFunction,
+  Cell,
+  CellFunction,
+  CompileAndRunFunction,
+  ComputeFunction,
+  CreateCellFunction,
+  DeriveFunction,
+  FetchDataFunction,
+  HandlerFunction,
+  IfElseFunction,
   JSONSchema,
   JSONValue,
+  LiftFunction,
+  LLMFunction,
   Module,
+  NavigateToFunction,
   Opaque,
   OpaqueRef,
   Recipe,
+  RecipeFunction,
+  RenderFunction,
+  Schema,
+  StreamDataFunction,
+  StreamFunction,
+  StrFunction,
 } from "./interface.ts";
 
 export { AuthSchema, ID, ID_FIELD, NAME, TYPE, UI } from "./interface.ts";
 export type {
+  Cell,
+  CreateCellFunction,
   Handler,
   HandlerFactory,
   JSONObject,
@@ -27,6 +48,10 @@ export type {
   toJSON,
 } from "./interface.ts";
 
+// Augment the public interface with the internal OpaqueRefMethods interface.
+// Deliberately repeating the original interface to catch any inconsistencies:
+// This here then reflects the entire interface the internal implementation
+// implements.
 declare module "./interface.ts" {
   interface OpaqueRefMethods<T> {
     get(): OpaqueRef<T>;
@@ -219,3 +244,55 @@ export function markAsStatic(value: unknown): unknown {
   (value as any)[isStaticMarker] = true;
   return value;
 }
+
+// Builder functions interface
+export interface BuilderFunctions {
+  // Recipe creation
+  recipe: RecipeFunction;
+
+  // Module creation
+  lift: LiftFunction;
+  handler: HandlerFunction;
+  derive: DeriveFunction;
+  compute: ComputeFunction;
+  render: RenderFunction;
+
+  // Built-in modules
+  str: StrFunction;
+  ifElse: IfElseFunction;
+  llm: LLMFunction;
+  fetchData: FetchDataFunction;
+  streamData: StreamDataFunction;
+  compileAndRun: CompileAndRunFunction;
+  navigateTo: NavigateToFunction;
+
+  // Cell creation
+  createCell: CreateCellFunction;
+  cell: CellFunction;
+  stream: StreamFunction;
+
+  // Utility
+  byRef: ByRefFunction;
+}
+
+// Runtime interface needed by createCell
+export interface BuilderRuntime {
+  getCell<T>(
+    space: string,
+    cause: any,
+    schema?: JSONSchema,
+    log?: any,
+  ): Cell<T>;
+  getCell<S extends JSONSchema = JSONSchema>(
+    space: string,
+    cause: any,
+    schema: S,
+    log?: any,
+  ): Cell<Schema<S>>;
+}
+
+// Factory function to create builder with runtime
+export type CreateBuilder = (
+  runtime: BuilderRuntime,
+  getCellLinkOrThrow?: (value: any) => any,
+) => BuilderFunctions;

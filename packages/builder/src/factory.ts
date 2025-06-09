@@ -7,7 +7,7 @@ import type {
   Cell,
   CreateCellFunction,
   JSONSchema,
-} from "./interface.ts";
+} from "./types.ts";
 import { opaqueRef, stream } from "./opaque-ref.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { byRef, compute, derive, handler, lift, render } from "./module.ts";

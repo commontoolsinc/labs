@@ -1,6 +1,11 @@
 /**
- * Public interface for the builder package.
- * This module exports only the types and functions that are part of the public API.
+ * Public interface for the builder package. This module exports only the types
+ * and functions that are part of the public API.
+ *
+ * Import these types via `types.ts` for internal code.
+ *
+ * Other packages should either import from `@commontools/builder` or
+ * `@commontools/builder/interface`, but not both.
  */
 
 import type { Mutable } from "@commontools/utils/types";
@@ -343,36 +348,6 @@ export type CellFunction = <T>(value?: T, schema?: JSONSchema) => OpaqueRef<T>;
 export type StreamFunction = <T>(initial?: T) => OpaqueRef<T>;
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;
 
-// Builder functions interface
-export interface BuilderFunctions {
-  // Recipe creation
-  recipe: RecipeFunction;
-
-  // Module creation
-  lift: LiftFunction;
-  handler: HandlerFunction;
-  derive: DeriveFunction;
-  compute: ComputeFunction;
-  render: RenderFunction;
-
-  // Built-in modules
-  str: StrFunction;
-  ifElse: IfElseFunction;
-  llm: LLMFunction;
-  fetchData: FetchDataFunction;
-  streamData: StreamDataFunction;
-  compileAndRun: CompileAndRunFunction;
-  navigateTo: NavigateToFunction;
-
-  // Cell creation
-  createCell: CreateCellFunction;
-  cell: CellFunction;
-  stream: StreamFunction;
-
-  // Utility
-  byRef: ByRefFunction;
-}
-
 // Re-export all function types as values for destructuring imports
 // These will be implemented by the factory
 export declare const recipe: RecipeFunction;
@@ -393,25 +368,3 @@ export declare const createCell: CreateCellFunction;
 export declare const cell: CellFunction;
 export declare const stream: StreamFunction;
 export declare const byRef: ByRefFunction;
-
-// Runtime interface needed by createCell
-export interface BuilderRuntime {
-  getCell<T>(
-    space: string,
-    cause: any,
-    schema?: JSONSchema,
-    log?: any,
-  ): Cell<T>;
-  getCell<S extends JSONSchema = JSONSchema>(
-    space: string,
-    cause: any,
-    schema: S,
-    log?: any,
-  ): Cell<Schema<S>>;
-}
-
-// Factory function to create builder with runtime
-export type CreateBuilder = (
-  runtime: BuilderRuntime,
-  getCellLinkOrThrow?: (value: any) => any,
-) => BuilderFunctions;
