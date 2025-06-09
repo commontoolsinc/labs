@@ -363,3 +363,13 @@ export declare const createCell: CreateCellFunction;
 export declare const cell: CellFunction;
 export declare const stream: StreamFunction;
 export declare const byRef: ByRefFunction;
+
+/**
+ * Helper type to recursively remove `readonly` properties from type `T`.
+ *
+ * (Duplicated from @commontools/utils/types.ts, but we want to keep this
+ * independent for now)
+ */
+export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
+  : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
+  : T;
