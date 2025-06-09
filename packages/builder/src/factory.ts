@@ -21,6 +21,7 @@ import {
   streamData,
 } from "./built-in.ts";
 import { getCellLinkOrThrow, type Runtime } from "@commontools/runner";
+import { getRecipeEnvironment } from "./env.ts";
 
 /**
  * Creates a set of builder functions with the given runtime
@@ -92,5 +93,8 @@ export const createBuilder = (
 
     // Utility
     byRef,
+
+    // Environment
+    getRecipeEnvironment,
   };
 };

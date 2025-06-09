@@ -9,6 +9,7 @@ import type {
   CreateCellFunction,
   DeriveFunction,
   FetchDataFunction,
+  GetRecipeEnvironmentFunction,
   HandlerFunction,
   IfElseFunction,
   JSONSchema,
@@ -276,6 +277,9 @@ export interface BuilderFunctions {
 
   // Utility
   byRef: ByRefFunction;
+
+  // Environment
+  getRecipeEnvironment: GetRecipeEnvironmentFunction;
 }
 
 // Runtime interface needed by createCell

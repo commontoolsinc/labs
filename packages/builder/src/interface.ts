@@ -345,6 +345,13 @@ export type CellFunction = <T>(value?: T, schema?: JSONSchema) => OpaqueRef<T>;
 export type StreamFunction = <T>(initial?: T) => OpaqueRef<T>;
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;
 
+// Recipe environment types
+export interface RecipeEnvironment {
+  readonly apiUrl: URL;
+}
+
+export type GetRecipeEnvironmentFunction = () => RecipeEnvironment;
+
 // Re-export all function types as values for destructuring imports
 // These will be implemented by the factory
 export declare const recipe: RecipeFunction;
@@ -365,6 +372,7 @@ export declare const createCell: CreateCellFunction;
 export declare const cell: CellFunction;
 export declare const stream: StreamFunction;
 export declare const byRef: ByRefFunction;
+export declare const getRecipeEnvironment: GetRecipeEnvironmentFunction;
 
 /**
  * Helper type to recursively remove `readonly` properties from type `T`.
