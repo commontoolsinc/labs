@@ -43,6 +43,9 @@ export {
   type OpaqueRefMethods,
   type Recipe,
   type RecipeFactory,
+  type Schema,
+  schema,
+  type SchemaWithoutCell,
   type Stream,
   type StreamAlias,
   type toJSON,
@@ -56,7 +59,6 @@ export {
 } from "./types.ts";
 export { createNodeFactory } from "./module.ts";
 export { opaqueRef as cell } from "./opaque-ref.ts";
-export { type Schema, schema } from "./schema-to-ts.ts";
 export type { Mutable } from "@commontools/utils/types";
 
 // This should be a separate package, but for now it's easier to keep it here.

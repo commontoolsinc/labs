@@ -13,6 +13,7 @@ import {
   type OpaqueRef,
   type Recipe,
   type RecipeFactory,
+  type SchemaWithoutCell,
   type ShadowRef,
   type toJSON,
   UI,
@@ -30,7 +31,6 @@ import {
   toJSONWithAliases,
   traverseValue,
 } from "./utils.ts";
-import { SchemaWithoutCell } from "./schema-to-ts.ts";
 import { isRecord } from "@commontools/utils/types";
 
 /** Declare a recipe

@@ -47,6 +47,7 @@ export type {
   Stream,
   toJSON,
 } from "./interface.ts";
+export { type Schema, schema, type SchemaWithoutCell } from "./schema-to-ts.ts";
 
 export type JSONSchemaMutable = Mutable<JSONSchema>;
 

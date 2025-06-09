@@ -652,7 +652,7 @@ describe("Recipe Runner", () => {
     } as const satisfies JSONSchema;
 
     const dynamicRecipe = recipe<
-      { context: Record<PropertyKey, Cell<number>> }
+      { context: Record<PropertyKey, number> }
     >(
       "Dynamic Context",
       ({ context }) => {
@@ -673,12 +673,12 @@ describe("Recipe Runner", () => {
       5,
       "should handle dynamic cell references with schema 1",
       "test",
-    ).asCell([], undefined, { type: "number" });
+    );
     const value2 = runtime.documentMap.getDoc(
       7,
       "should handle dynamic cell references with schema 2",
       "test",
-    ).asCell([], undefined, { type: "number" });
+    );
     const result = runtime.run(
       dynamicRecipe,
       {

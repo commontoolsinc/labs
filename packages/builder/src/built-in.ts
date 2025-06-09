@@ -5,8 +5,8 @@ import type {
   NodeFactory,
   Opaque,
   OpaqueRef,
+  Schema,
 } from "./types.ts";
-import type { Schema } from "./schema-to-ts.ts";
 
 export interface BuiltInLLMParams {
   messages?: string[];

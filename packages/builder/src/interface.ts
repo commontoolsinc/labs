@@ -8,7 +8,7 @@
  * `@commontools/builder/interface`, but not both.
  */
 
-import type { Schema } from "./schema-to-ts.ts";
+import type { Schema, SchemaWithoutCell } from "./schema-to-ts.ts";
 
 export const ID: unique symbol = Symbol("ID, unique to the context");
 export const ID_FIELD: unique symbol = Symbol(
@@ -22,7 +22,7 @@ export const NAME = "$NAME";
 export const UI = "$UI";
 
 // Re-export Schema type
-export type { Schema } from "./schema-to-ts.ts";
+export type { Schema, SchemaWithoutCell } from "./schema-to-ts.ts";
 
 // Re-export schema utilities
 export { schema } from "./schema-to-ts.ts";
@@ -240,7 +240,7 @@ export type LiftFunction = {
     argumentSchema: T,
     resultSchema: R,
     implementation: (input: Schema<T>) => Schema<R>,
-  ): ModuleFactory<Schema<T>, Schema<R>>;
+  ): ModuleFactory<SchemaWithoutCell<T>, SchemaWithoutCell<R>>;
 
   <T, R>(
     implementation: (input: T) => R,
@@ -260,7 +260,7 @@ export type HandlerFunction = {
     eventSchema: E,
     stateSchema: T,
     handler: (event: Schema<E>, props: Schema<T>) => any,
-  ): ModuleFactory<Schema<T>, Schema<E>>;
+  ): ModuleFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
 
   <E, T>(
     eventSchema: JSONSchema,
