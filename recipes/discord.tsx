@@ -1,5 +1,5 @@
-import { h } from "@commontools/html";
 import {
+  h,
   cell,
   derive,
   handler,
@@ -8,7 +8,7 @@ import {
   recipe,
   type Schema,
   UI,
-} from "@commontools/builder/interface";
+} from "commontools";
 
 // README:
 // sudo tailscale serve --https=443 localhost:8080

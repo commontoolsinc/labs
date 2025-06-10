@@ -7,7 +7,7 @@ import { type ReactivityLog } from "../scheduler.ts";
 import {
   BuiltInLLMParams,
   BuiltInLLMState,
-} from "@commontools/builder/interface";
+} from "@commontools/api";
 
 const client = new LLMClient();
 

@@ -1,5 +1,5 @@
-import { h } from "@commontools/html";
 import {
+  h,
   cell,
   derive,
   handler,
@@ -8,8 +8,10 @@ import {
   recipe,
   str,
   UI,
-} from "@commontools/builder/interface";
-import { sleep } from "@commontools/utils/sleep";
+} from "commontools";
+
+const sleep = (timeout: number) =>
+  new Promise((resolve) => setTimeout(resolve, timeout));
 
 interface GitHubCommit {
   sha: string;

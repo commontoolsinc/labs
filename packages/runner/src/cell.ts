@@ -109,7 +109,7 @@ import { validateAndTransform } from "./schema.ts";
  * @property cellLink The cell link representing this cell.
  * @returns {CellLink}
  */
-declare module "@commontools/builder/interface" {
+declare module "@commontools/api" {
   interface Cell<T> {
     get(): T;
     set(value: Cellify<T> | T): void;
@@ -174,7 +174,7 @@ declare module "@commontools/builder/interface" {
   }
 }
 
-export type { Cell } from "@commontools/builder/interface";
+export type { Cell } from "@commontools/api";
 
 /**
  * Cellify is a type utility that allows any part of type T to be wrapped in

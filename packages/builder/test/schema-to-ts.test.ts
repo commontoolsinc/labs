@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Schema } from "../src/schema-to-ts.ts";
 import { handler, lift } from "../src/module.ts";
 import { str } from "../src/built-in.ts";
-import { type Frame, type JSONSchema, type OpaqueRef } from "../src/types.ts";
+import {
+  type Frame,
+  type JSONSchema,
+  type OpaqueRef,
+  Schema,
+} from "../src/types.ts";
 import { popFrame, pushFrame, recipe } from "../src/recipe.ts";
 import { Cell, Runtime } from "@commontools/runner";
 
@@ -17,7 +21,7 @@ describe("Schema-to-TS Type Conversion", () => {
 
   beforeEach(() => {
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      storageUrl: "volatile://",
     });
     frame = pushFrame();
   });

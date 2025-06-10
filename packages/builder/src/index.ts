@@ -22,7 +22,9 @@ export {
   type Alias,
   AuthSchema,
   type Cell,
+  type Child,
   type Frame,
+  h,
   type HandlerFactory,
   ID,
   ID_FIELD,
@@ -44,6 +46,7 @@ export {
   type Opaque,
   type OpaqueRef,
   type OpaqueRefMethods,
+  type Props,
   type Recipe,
   type RecipeFactory,
   type Schema,
@@ -60,6 +63,7 @@ export {
   unsafe_originalRecipe,
   unsafe_parentRecipe,
   type UnsafeBinding,
+  type VNode,
 } from "./types.ts";
 export { createNodeFactory } from "./module.ts";
 export { opaqueRef as cell } from "./opaque-ref.ts";

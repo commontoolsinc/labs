@@ -22,7 +22,9 @@ describe("Runtime", () => {
         "export declare function add(x: number, y: number): number;",
     });
     const compiler = new TypeScriptCompiler(await getTypeLibs());
-    const compiled = compiler.compile(program);
+    const compiled = compiler.compile(program, {
+      runtimeModules: ["@std/math"],
+    });
     const exports = execute(compiled).invoke({
       "@std/math": {
         add(x: number, y: number): number {

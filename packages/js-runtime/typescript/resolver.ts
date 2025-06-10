@@ -3,7 +3,7 @@ import { Program, ProgramResolver, Source } from "../interface.ts";
 import { dirname, join } from "@std/path";
 
 export type UnresolvedModuleHandling =
-  | { type: "allow"; specifiers: string[] }
+  | { type: "allow"; identifiers: string[] }
   | { type: "allow-all" }
   | { type: "deny" };
 
@@ -37,24 +37,15 @@ export function resolveProgram(
       }
       const newSource = graph.resolveSource(identifier);
       if (!newSource) {
-        const { type } = unresolvedModules;
-        if (
-          type === "allow-all" ||
-          (type === "allow" && unresolvedModules.specifiers.includes(specifier))
-        ) {
-          if (resolveUnresolvedModuleTypes) {
-            const typeDefIdentifier = `${identifier}.d.ts`;
-            if (!sources.has(typeDefIdentifier)) {
-              const typeDef = graph.resolveSource(typeDefIdentifier);
-              if (typeDef) sources.set(typeDefIdentifier, typeDef);
-            }
+        isUnresolvedModuleOk(identifier, unresolvedModules);
+        if (resolveUnresolvedModuleTypes) {
+          const typeDefIdentifier = `${identifier}.d.ts`;
+          if (!sources.has(typeDefIdentifier)) {
+            const typeDef = graph.resolveSource(typeDefIdentifier);
+            if (typeDef) sources.set(typeDefIdentifier, typeDef);
           }
-          continue;
-        } else {
-          throw new Error(
-            `Could not resolve "${specifier}" from "${current.name}".`,
-          );
         }
+        continue;
       }
       sources.set(identifier, newSource as Source);
       toProcess.push(identifier);
@@ -65,6 +56,27 @@ export function resolveProgram(
     entry: entry.name,
     files: [...sources.values()],
   };
+}
+
+function isUnresolvedModuleOk(
+  identifier: string,
+  config: UnresolvedModuleHandling,
+) {
+  switch (config.type) {
+    case "allow-all":
+      return;
+    case "allow": {
+      if (config.identifiers.includes(identifier)) {
+        return;
+      }
+    }
+    /* falls through */
+    case "deny":
+    default:
+      throw new Error(
+        `Could not resolve "${identifier}".`,
+      );
+  }
 }
 
 function resolveSpecifier(specifier: string, from: Source): string {

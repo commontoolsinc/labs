@@ -6,12 +6,13 @@ export enum CommandType {
 }
 
 export interface Args {
-  entry: string;
+  entry?: string;
   help?: boolean;
   verbose?: boolean;
   noRun?: boolean;
   noCheck?: boolean;
-  out?: string;
+  filename?: string;
+  output?: string;
 }
 
 export interface Command {
@@ -25,5 +26,6 @@ export interface RunCommand extends Command {
   verbose?: boolean;
   noRun?: boolean;
   noCheck?: boolean;
-  out?: string;
+  filename?: string;
+  output?: string;
 }

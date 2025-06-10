@@ -1,5 +1,5 @@
-import { h } from "@commontools/html";
 import {
+  h,
   derive,
   handler,
   ifElse,
@@ -10,7 +10,7 @@ import {
   schema,
   str,
   UI,
-} from "@commontools/builder/interface";
+} from "commontools";
 
 const inputSchema = schema({
   type: "object",

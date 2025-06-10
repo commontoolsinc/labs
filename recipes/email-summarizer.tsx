@@ -1,5 +1,5 @@
-import { h } from "@commontools/html";
 import {
+  h,
   derive,
   handler,
   JSONSchema,
@@ -10,7 +10,7 @@ import {
   Schema,
   str,
   UI,
-} from "@commontools/builder/interface";
+} from "commontools";
 
 // Email schema based on Gmail recipe
 const EmailProperties = {

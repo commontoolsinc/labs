@@ -1,5 +1,5 @@
-import { h } from "@commontools/html";
 import {
+  h,
   type Cell,
   cell,
   derive,
@@ -11,7 +11,7 @@ import {
   type Schema,
   str,
   UI,
-} from "@commontools/builder/interface";
+} from "commontools";
 
 const FeedItemProperties = {
   id: { type: "string" },

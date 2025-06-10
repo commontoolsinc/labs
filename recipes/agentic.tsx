@@ -1,5 +1,5 @@
-import { h } from "@commontools/html";
 import {
+  h,
   compileAndRun,
   derive,
   ifElse,
@@ -10,7 +10,7 @@ import {
   recipe,
   str,
   UI,
-} from "@commontools/builder/interface";
+} from "commontools";
 
 // Define input schema
 const InputSchema = {

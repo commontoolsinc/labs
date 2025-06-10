@@ -114,11 +114,14 @@ class VirtualFs implements ModuleResolutionHost {
 }
 
 class TypeScriptHost extends VirtualFs implements CompilerHost {
+  private allowedRuntimeModules: string[];
   constructor(
     source: Program,
     typeLibs: TypeLibs,
+    allowedRuntimeModules: string[],
   ) {
     super(source, typeLibs, DEBUG_VIRTUAL_FS);
+    this.allowedRuntimeModules = allowedRuntimeModules;
   }
 
   getDefaultLibFileName(_options: CompilerOptions): string {
@@ -182,14 +185,17 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
       // e.g. `@commontools/foo`. If a type definition was provided
       // with the same identifier with a `.d.ts` extension, that will be used
       // for types, leaving the module implementation resolution to runtime.
-      return {
-        resolvedModule: {
-          resolvedFileName: `${literal.text}.d.ts`,
-          extension: ts.Extension.Dts,
-          isExternalLibraryImport: true,
-          packageId: undefined,
-        },
-      };
+      if (this.allowedRuntimeModules.includes(name)) {
+        return {
+          resolvedModule: {
+            resolvedFileName: `${name}.d.ts`,
+            extension: ts.Extension.Dts,
+            isExternalLibraryImport: true,
+            packageId: undefined,
+          },
+        };
+      }
+      return { resolvedModule: undefined };
     });
   }
 }
@@ -202,6 +208,9 @@ export interface TypeScriptCompilerOptions {
   noCheck?: boolean;
   // Extra scripts to inject into the output bundle.
   injectedScript?: string;
+  // Optional mapping of runtime module name e.g. `"@commontools/framework"`,
+  // and its corresponding type definitions.
+  runtimeModules?: string[];
 }
 
 export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
@@ -213,32 +222,26 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     }, {} as TypeLibs);
   }
 
-  resolveProgram(
-    resolver: ProgramResolver,
-  ): Program {
-    return resolveProgram(resolver, {
-      unresolvedModules: { type: "allow-all" },
-      resolveUnresolvedModuleTypes: true,
-      target: TARGET,
-    });
-  }
-
   // Compiles `source` into `JsArtifact`.
   // Artifact files must be TypeScriptModuleSource
   compile(
     input: Program | ProgramResolver,
     inputOptions: TypeScriptCompilerOptions = {},
   ): JsScript {
-    const program = isProgram(input)
-      ? input
-      : resolveProgram(input as ProgramResolver, {
-        unresolvedModules: { type: "allow-all" },
-        resolveUnresolvedModuleTypes: true,
-        target: TARGET,
-      });
     const filename = inputOptions.filename ?? "out.js";
     const noCheck = inputOptions.noCheck ?? false;
     const injectedScript = inputOptions.injectedScript;
+    const runtimeModules = inputOptions.runtimeModules ?? [];
+    const program = isProgram(input)
+      ? input
+      : resolveProgram(input as ProgramResolver, {
+        unresolvedModules: {
+          type: "allow",
+          identifiers: runtimeModules,
+        },
+        resolveUnresolvedModuleTypes: true,
+        target: TARGET,
+      });
 
     validateSource(program);
     const sourceNames = program.files.map(({ name }) => name);
@@ -248,6 +251,7 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     const host = new TypeScriptHost(
       program,
       this.typeLibs,
+      runtimeModules,
     );
     const tsProgram = ts.createProgram(
       sourceNames,

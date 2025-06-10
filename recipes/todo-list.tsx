@@ -1,5 +1,5 @@
-import { h } from "@commontools/html";
 import {
+  h,
   derive,
   handler,
   JSONSchema,
@@ -7,7 +7,7 @@ import {
   recipe,
   Schema,
   UI,
-} from "@commontools/builder/interface";
+} from "commontools";
 
 const TodoItemSchema = {
   type: "object",
