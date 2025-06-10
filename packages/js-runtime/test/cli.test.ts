@@ -99,7 +99,7 @@ describe("CLI", () => {
       expect(await exists(join(types, "commontools", "index.d.ts"))).toEqual(
         true,
       );
-      expect(await exists(join(types, "commontoolsenv", "index.d.ts"))).toEqual(
+      expect(await exists(join(types, "ct-env", "index.d.ts"))).toEqual(
         true,
       );
       expect(await exists(join(types, "react", "jsx-runtime", "index.d.ts")))

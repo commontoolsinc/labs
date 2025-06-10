@@ -4,7 +4,10 @@ import { join } from "@std/path/join";
 
 const tsConfig = {
   "compilerOptions": {
-    "types": ["commontoolsenv"],
+    // Disable all libraries. Strictly only use
+    // types provided by the runtime.
+    "noLib": true,
+    "types": ["ct-env"],
     "target": "ES2023",
     "jsx": "react-jsx",
     "strictNullChecks": true,
@@ -38,13 +41,19 @@ const jsxRuntime = `declare module "react/jsx-runtime" {
 // environment types (`commontoolsenv`) loaded by the `tsconfig.json`.
 export async function initWorkspace(command: Command) {
   const { cwd } = command;
+  const apiTypes = await cache.getText(
+    "types/commontools.d.ts",
+  );
+  const webTypes = await cache.getText(
+    "types/dom.d.ts",
+  );
+  const esTypes = await cache.getText(
+    "types/es2023.d.ts",
+  );
+
   const types = {
-    "commontools": await cache.getText(
-      "types/commontools.d.ts",
-    ),
-    "commontoolsenv": await cache.getText(
-      "types/dom.d.ts",
-    ),
+    "commontools": apiTypes,
+    "ct-env": `${esTypes}\n${webTypes}`,
     "react/jsx-runtime": jsxRuntime,
   };
 
