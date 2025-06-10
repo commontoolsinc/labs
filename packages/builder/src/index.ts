@@ -48,6 +48,7 @@ export {
   type RecipeFactory,
   type Schema,
   schema,
+  type SchemaContext,
   type SchemaWithoutCell,
   type Stream,
   type StreamAlias,
@@ -62,6 +63,7 @@ export {
 } from "./types.ts";
 export { createNodeFactory } from "./module.ts";
 export { opaqueRef as cell } from "./opaque-ref.ts";
+export { Classification, ContextualFlowControl } from "./cfc.ts";
 export type { Mutable } from "@commontools/utils/types";
 
 // This should be a separate package, but for now it's easier to keep it here.

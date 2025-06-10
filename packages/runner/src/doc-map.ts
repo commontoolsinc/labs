@@ -1,3 +1,5 @@
+import { refer } from "merkle-reference";
+import { isRecord } from "@commontools/utils/types";
 import { isOpaqueRef } from "@commontools/builder";
 import { createDoc, type DocImpl, isDoc } from "./doc.ts";
 import {
@@ -5,9 +7,7 @@ import {
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
-import { refer } from "merkle-reference";
 import type { IDocumentMap, IRuntime } from "./runtime.ts";
-import { isRecord } from "@commontools/utils/types";
 
 export type EntityId = {
   "/": string | Uint8Array;

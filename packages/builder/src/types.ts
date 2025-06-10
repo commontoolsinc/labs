@@ -122,6 +122,12 @@ export type NodeRef = {
   frame: Frame | undefined;
 };
 
+// This is a schema, together with its rootSchema for resolving $ref entries
+export type SchemaContext = {
+  schema: JSONSchema | boolean;
+  rootSchema: JSONSchema | boolean;
+};
+
 export type Alias = {
   $alias: {
     cell?: unknown;
@@ -253,7 +259,7 @@ export function isStatic(value: unknown): value is Static {
     (value as any)[isStaticMarker] === true;
 }
 
-export function markAsStatic(value: unknown): unknown {
+export function markAsStatic<T>(value: T): T {
   (value as any)[isStaticMarker] = true;
   return value;
 }

@@ -1,8 +1,9 @@
 {
   "name": "@commontools/builder",
-  "exports": { 
-    ".": "./src/index.ts", 
-    "./interface": "./src/interface.ts" 
+  "exports": {
+    ".": "./src/index.ts",
+    "./traverse": "./src/traverse.ts",
+    "./interface": "./src/interface.ts"
   },
   "tasks": {
     "test": "deno test --allow-env"

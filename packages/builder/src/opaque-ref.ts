@@ -1,3 +1,4 @@
+import { isRecord } from "@commontools/utils/types";
 import {
   isOpaqueRefMarker,
   type JSONSchema,
@@ -12,11 +13,10 @@ import {
   toOpaqueRef,
   type UnsafeBinding,
 } from "./types.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import { hasValueAtPath, setValueAtPath } from "./utils.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { createNodeFactory } from "./module.ts";
-import { ContextualFlowControl } from "../../runner/src/index.ts";
-import { isRecord } from "@commontools/utils/types";
 
 let mapFactory: NodeFactory<any, any>;
 

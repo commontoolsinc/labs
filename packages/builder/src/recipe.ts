@@ -1,3 +1,4 @@
+import { isRecord } from "@commontools/utils/types";
 import {
   canBeOpaqueRef,
   type Frame,
@@ -31,7 +32,6 @@ import {
   toJSONWithAliases,
   traverseValue,
 } from "./utils.ts";
-import { isRecord } from "@commontools/utils/types";
 
 /** Declare a recipe
  *

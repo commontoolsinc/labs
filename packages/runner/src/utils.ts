@@ -1,5 +1,7 @@
+import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import {
   type Alias,
+  ContextualFlowControl,
   ID,
   ID_FIELD,
   isAlias,
@@ -22,8 +24,6 @@ import {
 } from "./query-result-proxy.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { ContextualFlowControl } from "./index.ts";
-import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 
 /**
  * Extracts default values from a JSON schema object.

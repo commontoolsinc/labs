@@ -1,13 +1,4 @@
 import type { Signer } from "@commontools/identity";
-import type { Cell, CellLink } from "./cell.ts";
-import type { DocImpl } from "./doc.ts";
-import { isDoc } from "./doc.ts";
-import type { EntityId } from "./doc-map.ts";
-import { getEntityId } from "./doc-map.ts";
-import type { Cancel } from "./cancel.ts";
-import type { Action, EventHandler, ReactivityLog } from "./scheduler.ts";
-import type { Harness } from "./harness/harness.ts";
-import { UnsafeEvalHarness } from "./harness/index.ts";
 import type {
   JSONSchema,
   Module,
@@ -16,7 +7,19 @@ import type {
   RecipeEnvironment,
   Schema,
 } from "@commontools/builder";
-import { setRecipeEnvironment } from "@commontools/builder";
+import {
+  ContextualFlowControl,
+  setRecipeEnvironment,
+} from "@commontools/builder";
+import type { Cell, CellLink } from "./cell.ts";
+import type { DocImpl } from "./doc.ts";
+import { isDoc } from "./doc.ts";
+import { type EntityId, getEntityId } from "./doc-map.ts";
+import type { Cancel } from "./cancel.ts";
+import type { Action, EventHandler, ReactivityLog } from "./scheduler.ts";
+import type { Harness } from "./harness/harness.ts";
+import { UnsafeEvalHarness } from "./harness/index.ts";
+import { ConsoleMethod } from "./harness/console.ts";
 
 export type ErrorWithContext = Error & {
   action: Action;
@@ -25,7 +28,6 @@ export type ErrorWithContext = Error & {
   recipeId: string;
 };
 
-import { ConsoleMethod } from "./harness/console.ts";
 export type ConsoleHandler = (
   metadata: { charmId?: string; recipeId?: string; space?: string } | undefined,
   method: ConsoleMethod,
@@ -60,6 +62,7 @@ export interface IRuntime {
   readonly harness: Harness;
   readonly runner: IRunner;
   readonly blobbyServerUrl: string;
+  readonly cfc: ContextualFlowControl;
 
   idle(): Promise<void>;
   dispose(): Promise<void>;
@@ -257,6 +260,7 @@ export class Runtime implements IRuntime {
   readonly harness: Harness;
   readonly runner: IRunner;
   readonly blobbyServerUrl: string;
+  readonly cfc: ContextualFlowControl;
 
   constructor(options: RuntimeOptions) {
     // Generate unique ID for this runtime instance
@@ -285,6 +289,7 @@ export class Runtime implements IRuntime {
     this.moduleRegistry = new ModuleRegistry(this);
     this.recipeManager = new RecipeManager(this);
     this.runner = new Runner(this);
+    this.cfc = new ContextualFlowControl();
 
     // Register built-in modules with runtime injection
     registerBuiltins(this);

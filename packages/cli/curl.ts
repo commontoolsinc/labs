@@ -46,7 +46,7 @@ async function main() {
   // Parse the url like ct://spaceDID/entityID/attribute
   // We don't allow fetching the application/commit+json of the space, since
   // the space is not an entity (not available with the 'of:` prefix).
-  // did key is base58btc; entity id is base32; attribute is mime type-ish
+  // did key is base58btc; entity id is multibase-base32; attribute is mime-ish
   const urlRegex: RegExp =
     /^(ct:\/\/)?((?<spaceDID>(did:key:[1-9A-HJ-NP-Za-km-z]+))|(?<spaceName>[^/:]+))\/(?<of>[a-z2-7]+)(\/(?<the>\w+\/[-+.\w]+))?$/;
   const match = url.match(urlRegex);

@@ -27,6 +27,7 @@ export type { Schema, SchemaWithoutCell } from "./schema-to-ts.ts";
 // Re-export schema utilities
 export { schema } from "./schema-to-ts.ts";
 export { AuthSchema } from "./schema-lib.ts";
+export type { SchemaContext } from "./types.ts";
 
 // Cell type with only public methods
 export interface Cell<T = any> {

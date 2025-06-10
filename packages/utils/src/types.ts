@@ -42,3 +42,11 @@ export function isString(value: unknown): value is string {
 export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
   : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
   : T;
+
+/**
+ * Helper type to recursively add `readonly` properties to type `T`.
+ */
+export type Immutable<T> = T extends ReadonlyArray<infer U>
+  ? ReadonlyArray<Immutable<U>>
+  : T extends object ? ({ readonly [P in keyof T]: Immutable<T[P]> })
+  : T;
