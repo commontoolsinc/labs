@@ -1,25 +1,31 @@
-import { RunCommand } from "./interface.ts";
+import { RunCommand } from "../interface.ts";
 import {
   getTypeLibs,
   ProgramGraph,
   Source,
   TypeScriptCompiler,
   UnsafeEvalRuntime,
-} from "../mod.ts";
+} from "../../mod.ts";
 import { basename, dirname, join } from "@std/path";
 import { cache } from "@commontools/static";
-import { Runtime } from "@commontools/runner";
-import { createBuilder } from "@commontools/builder";
 
 type RUNTIME_IDENTIFIER = "commontools";
-const RUNTIME_DEPENDENCIES: Record<RUNTIME_IDENTIFIER, any> = {
-  "commontools": createBuilder(new Runtime({ storageUrl: "volatile://" })),
-};
 const RUNTIME_TYPES: Record<RUNTIME_IDENTIFIER, string> = {
   "commontools": await cache.getText(
     "types/commontools.d.ts",
   ),
 };
+
+async function createRuntimeDependencies(): Promise<
+  Record<RUNTIME_IDENTIFIER, any>
+> {
+  const { Runtime } = await import("@commontools/runner");
+  const { createBuilder } = await import("@commontools/builder");
+  const builder = createBuilder(new Runtime({ storageUrl: "volatile://" }));
+  return {
+    "commontools": builder,
+  };
+}
 
 class CliProgram implements ProgramGraph {
   private fsRoot: string;
@@ -72,7 +78,7 @@ export class Processor {
     const compiled = compiler.compile(program, {
       noCheck: command.noCheck,
       filename,
-      runtimeModules: Object.keys(RUNTIME_DEPENDENCIES),
+      runtimeModules: Object.keys(RUNTIME_TYPES),
     });
 
     if (command.output) {
@@ -85,7 +91,9 @@ export class Processor {
 
     const runtime = new UnsafeEvalRuntime();
     const isolate = runtime.getIsolate("");
-    const exports = isolate.execute(compiled).invoke(RUNTIME_DEPENDENCIES);
+    const exports = isolate.execute(compiled).invoke(
+      await createRuntimeDependencies(),
+    );
     return exports.inner();
   }
 }

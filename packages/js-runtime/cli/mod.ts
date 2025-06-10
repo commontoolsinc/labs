@@ -1,6 +1,6 @@
 import { type Command, CommandType, type RunCommand } from "./interface.ts";
 import { RuntimeCLI } from "./cli.ts";
-import { Processor } from "./processor.ts";
+import { Processor } from "./commands/processor.ts";
 
 export { type Command, CommandType, Processor, type RunCommand, RuntimeCLI };
 
