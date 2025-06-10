@@ -21,7 +21,6 @@ import type {
 import { BaseStorageProvider } from "./storage/base.ts";
 import { log } from "./log.ts";
 import { Provider as CachedStorageProvider } from "./storage/cache.ts";
-import { VolatileStorageProvider } from "./storage/volatile.ts";
 import { TransactionResult } from "@commontools/memory";
 import { refer } from "@commontools/memory/reference";
 import { SchemaContext, SchemaNone } from "@commontools/memory/interface";
