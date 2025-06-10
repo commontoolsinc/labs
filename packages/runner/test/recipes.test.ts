@@ -13,20 +13,53 @@ import { type ErrorWithContext } from "../src/scheduler.ts";
 import { type Cell, isCell } from "../src/cell.ts";
 import { resolveLinks } from "../src/utils.ts";
 import { createCellFactory } from "../src/harness/create-cell.ts";
+import { Identity } from "@commontools/identity";
+import * as Memory from "@commontools/memory";
+import * as Consumer from "@commontools/memory/consumer";
+import { Provider } from "../src/storage/cache.ts";
+
+const signer = await Identity.fromPassphrase("test operator");
 
 describe("Recipe Runner", () => {
   let runtime: Runtime;
   let createCell: ReturnType<typeof createCellFactory>;
+  let provider: Memory.Provider.Provider<Memory.Protocol>;
+  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Create memory service for testing
+    const open = await Memory.Provider.open({
+      store: new URL("memory://db/"),
+      serviceDid: signer.did(),
+    });
+
+    if (open.error) {
+      throw open.error;
+    }
+
+    provider = open.ok;
+
+    consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
+
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager: {
+        open: (space: Consumer.MemorySpace) =>
+          Provider.open({
+            space,
+            session: consumer,
+          }),
+      },
     });
     createCell = createCellFactory(runtime);
   });
 
   afterEach(async () => {
     await runtime?.dispose();
+    await provider?.close();
   });
 
   it("should run a simple recipe", async () => {
