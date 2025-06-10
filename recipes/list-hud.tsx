@@ -9,7 +9,6 @@ import {
   UI,
 } from "@commontools/builder/interface";
 
-// Todo item schema matching the list.tsx output
 const TodoItemSchema = {
   type: "object",
   properties: {
@@ -58,7 +57,8 @@ export default recipe(
   ListHudOutputSchema,
   ({ title, items }) => {
     // System prompt for task analysis
-    const systemPrompt = str`You are a helpful assistant that summarizes todo lists. Provide a 2-3 sentence summary that is encouraging and highlights progress. Mention how many items are completed vs pending.`;
+    const systemPrompt =
+      str`You are a helpful assistant that summarizes todo lists. Provide a 2-3 sentence summary that is encouraging and highlights progress. Mention how many items are completed vs pending.`;
 
     // Build data from items
     const todoData = derive(
@@ -69,12 +69,12 @@ export default recipe(
         }
 
         const itemsList = todoItems
-          .map(item => `- [${item.done ? 'x' : ' '}] ${item.title}`)
-          .join('\n');
+          .map((item) => `- [${item.done ? "x" : " "}] ${item.title}`)
+          .join("\n");
 
         return str`Todo list: "${listTitle}"
 ${itemsList}`;
-      }
+      },
     );
 
     // Generate summary
@@ -92,7 +92,7 @@ ${itemsList}`;
           return "No items yet. Add some tasks to get started!";
         }
         return result || "Generating summary...";
-      }
+      },
     );
 
     // Simple UI
