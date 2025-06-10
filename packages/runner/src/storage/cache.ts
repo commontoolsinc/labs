@@ -290,11 +290,6 @@ class PullQueue {
 }
 
 // This class helps us maintain a client model of our server side subscriptions
-// FIXME: there are some corner cases here
-// imagine we subscribe to doc1 which causes a subscription to doc2
-// then we want to subscribe to doc2, but already have the subscription (via doc1)
-// then doc1 is altered so that it points to doc3. Now we're no longer
-// subscribed to doc2 as we should be.
 class SelectorTracker {
   private refTracker = new MapSet<string, string>();
   private selectors = new Map<string, SchemaPathSelector>();
@@ -898,7 +893,12 @@ export class Provider implements StorageProvider {
     entityId: EntityId,
     expectedInStorage?: boolean,
     schemaContext?: SchemaContext,
-  ) {
+  ): Promise<
+    Result<
+      Selection<FactAddress, Revision<State>>,
+      StoreError | QueryError | AuthorizationError | ConnectionError
+    >
+  > {
     const { the } = this;
     const of = BaseStorageProvider.toEntity(entityId);
     return this.workspace.load([[{ the, of }, schemaContext]]);

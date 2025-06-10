@@ -20,6 +20,7 @@ export type SchemaPathSelector = {
   path: readonly string[];
   schemaContext?: Readonly<SchemaContext>;
 };
+
 /**
  * A data structure that maps keys to sets of values, allowing multiple values
  * to be associated with a single key without duplication.
@@ -104,12 +105,6 @@ export type ValueAtPath<K> = {
   value: Immutable<JSONValue> | undefined;
 };
 
-// export type LooseJSONValue =
-//   | JSONValue
-//   | undefined
-//   | ArrayLike<JSONValue | undefined>
-//   | Record<string, JSONValue | undefined>;
-
 // I've really got two different concepts here.
 // A. How we traverse the object
 //  1. For a schema query, we traverse the object, but avoid visiting branches that don't match our schema
@@ -158,13 +153,9 @@ interface OptJSONObject {
   [key: string]: OptJSONValue;
 }
 
-// V must be a DAG, though it may have aliases or cell links that make it seem like it has cycles
-export interface ObjectTraverser<K, V> {
-  traverse(doc: ValueAtPath<K>): V;
-}
-
-export abstract class BaseObjectTraverser<K, S>
-  implements ObjectTraverser<K, Immutable<OptJSONValue>> {
+// Value traversed must be a DAG, though it may have aliases or cell links
+// that make it seem like it has cycles
+export abstract class BaseObjectTraverser<K, S> {
   constructor(
     protected manager: BaseObjectManager<
       K,

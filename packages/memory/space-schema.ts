@@ -6,7 +6,6 @@ import {
   DefaultSchemaSelector,
   getAtPath,
   MapSet,
-  MinimalSchemaSelector,
   type PointerCycleTracker,
   SchemaObjectTraverser,
   type ValueEntry,
