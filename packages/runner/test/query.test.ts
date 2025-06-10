@@ -1,20 +1,20 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { JSONSchema, JSONValue } from "@commontools/builder";
+import { expect } from "@std/expect";
+import { refer } from "merkle-reference/json";
+import type { JSONSchema, JSONValue } from "@commontools/builder";
 import {
   CycleTracker,
   MapSet,
   SchemaObjectTraverser,
 } from "@commontools/builder/traverse";
-import {
+import type {
   Revision,
   SchemaPathSelector,
   State,
 } from "@commontools/memory/interface";
+import { type Entity } from "@commontools/memory";
 import { Runtime } from "../src/runtime.ts";
 import { ClientObjectManager } from "../src/storage/query.ts";
-import { expect } from "@std/expect";
-import { refer } from "merkle-reference/json";
-import { Entity } from "@commontools/memory";
 
 describe("Query", () => {
   let runtime: Runtime;
