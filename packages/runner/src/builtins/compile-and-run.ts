@@ -2,7 +2,7 @@ import { type DocImpl } from "../doc.ts";
 import { type Action } from "../scheduler.ts";
 import { refer } from "merkle-reference";
 import { type ReactivityLog } from "../scheduler.ts";
-import { BuiltInCompileAndRunParams } from "@commontools/builder/interface";
+import { BuiltInCompileAndRunParams } from "@commontools/api";
 import type { IRuntime } from "../runtime.ts";
 
 /**

@@ -9,7 +9,14 @@ async function main(args: string[]) {
   const command = await cli.parse(args);
   try {
     const result = await cli.process(command);
-    console.log("default" in result ? result.default : result);
+    const mainExport = result && "default" in result ? result.default : result;
+    if (mainExport !== undefined) {
+      try {
+        console.log(JSON.stringify(mainExport, null, 2));
+      } catch (_e) {
+        console.log(mainExport);
+      }
+    }
     Deno.exit(0);
   } catch (e) {
     console.error(e && typeof e.toString === "function" ? e.toString() : e);

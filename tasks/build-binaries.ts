@@ -118,7 +118,7 @@ async function build(config: BuildConfig): Promise<void> {
     await prepareWorkspace(config);
     if (!config.cliOnly) await buildToolshed(config);
     if (!config.cliOnly) await buildBgCharmService(config);
-    if (config.cliOnly) await buildCli(config);
+    await buildCli(config);
   } catch (e: unknown) {
     buildError = e as Error;
   }
@@ -258,6 +258,7 @@ async function buildCli(config: BuildConfig): Promise<void> {
       // as a non-static asset. Checking should be done
       // prior to building.
       "--no-check",
+      "--allow-write",
       "--allow-read",
       // Globs don't work for compile(?)
       `--allow-env=${envs.join(",")}`,

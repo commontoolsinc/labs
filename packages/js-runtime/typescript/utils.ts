@@ -7,7 +7,8 @@ export const getTypeLibs = (() => {
       return cached;
     }
     const es2023 = await cache.getText("types/es2023.d.ts");
-    cached = { es2023 };
+    const dom = await cache.getText("types/dom.d.ts");
+    cached = { es2023, dom };
     return cached;
   };
 })();

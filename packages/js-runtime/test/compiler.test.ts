@@ -6,6 +6,8 @@ import {
   TypeScriptCompilerOptions,
 } from "../mod.ts";
 import { TestProgram } from "./utils.ts";
+import { resolveProgram } from "../typescript/resolver.ts";
+import { TARGET } from "../typescript/options.ts";
 
 type TestDef =
   & { name: string; source: string; expectedError?: string }
@@ -62,7 +64,17 @@ describe("TypeScriptCompiler", () => {
         "export declare function add(x: number, y: number): number;",
     });
     const compiler = new TypeScriptCompiler(await getTypeLibs());
-    compiler.compile(program);
+    compiler.compile(program, { runtimeModules: ["@std/math"] });
+  });
+
+  it("Throws if runtime module not defined", async () => {
+    const program = new TestProgram("/main.tsx", {
+      "/main.tsx": "import { add } from '@std/math';export default add(10,2)",
+      "@std/math.d.ts":
+        "export declare function add(x: number, y: number): number;",
+    });
+    const compiler = new TypeScriptCompiler(await getTypeLibs());
+    expect(() => compiler.compile(program)).toThrow();
   });
 
   for (const { name, source, expectedError, ...options } of TESTS) {
@@ -79,4 +91,62 @@ describe("TypeScriptCompiler", () => {
       } else compiler.compile(artifact, options);
     });
   }
+});
+
+describe("resolver", () => {
+  describe("resolveProgram", () => {
+    const graph = new TestProgram("/main.tsx", {
+      "/main.tsx": "import { add } from '@std/math';export default add(10,2)",
+      "@std/math.d.ts":
+        "export declare function add(x: number, y: number): number;",
+    });
+    it("unresolvedModules.type allow-all", () => {
+      const program = resolveProgram(
+        graph,
+        {
+          unresolvedModules: { type: "allow-all" },
+          resolveUnresolvedModuleTypes: true,
+          target: TARGET,
+        },
+      );
+      expect(program.files.length).toBe(2);
+    });
+    it("unresolvedModules.type allow", () => {
+      const program = resolveProgram(
+        graph,
+        {
+          unresolvedModules: { type: "allow", identifiers: ["@std/math"] },
+          resolveUnresolvedModuleTypes: true,
+          target: TARGET,
+        },
+      );
+      expect(program.files.length).toBe(2);
+      expect(() =>
+        resolveProgram(
+          graph,
+          {
+            unresolvedModules: { type: "allow", identifiers: [] },
+            resolveUnresolvedModuleTypes: true,
+            target: TARGET,
+          },
+        )
+      ).toThrow(
+        /Could not resolve/,
+      );
+    });
+    it("unresolvedModules.type deny", () => {
+      expect(() =>
+        resolveProgram(
+          graph,
+          {
+            unresolvedModules: { type: "allow", identifiers: [] },
+            resolveUnresolvedModuleTypes: true,
+            target: TARGET,
+          },
+        )
+      ).toThrow(
+        /Could not resolve/,
+      );
+    });
+  });
 });

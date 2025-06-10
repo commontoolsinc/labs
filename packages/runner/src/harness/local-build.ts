@@ -209,6 +209,7 @@ export const tsToExports = async (
         return commonHtml;
       case "@commontools/builder":
       case "@commontools/builder/interface":
+      case "commontools":
         return createBuilder(config.runtime);
       case "zod":
         return zod;

@@ -1,6 +1,6 @@
-import { h } from "@commontools/html";
 import {
-  AuthSchema,
+  h,
+  Cell,
   cell,
   derive,
   getRecipeEnvironment,
@@ -13,8 +13,7 @@ import {
   Schema,
   str,
   UI,
-} from "@commontools/builder/interface";
-import { Cell } from "@commontools/runner";
+} from "commontools";
 
 const Classification = {
   Unclassified: "unclassified",
@@ -22,6 +21,37 @@ const Classification = {
   Secret: "secret",
   TopSecret: "topsecret",
 } as const;
+
+const ClassificationSecret = "secret";
+
+// This is used by the various Google tokens created with tokenToAuthData
+export const AuthSchema = {
+  type: "object",
+  properties: {
+    token: {
+      type: "string",
+      default: "",
+      ifc: { classification: [ClassificationSecret] },
+    },
+    tokenType: { type: "string", default: "" },
+    scope: { type: "array", items: { type: "string" }, default: [] },
+    expiresIn: { type: "number", default: 0 },
+    expiresAt: { type: "number", default: 0 },
+    refreshToken: {
+      type: "string",
+      default: "",
+      ifc: { classification: [ClassificationSecret] },
+    },
+    user: {
+      type: "object",
+      properties: {
+        email: { type: "string", default: "" },
+        name: { type: "string", default: "" },
+        picture: { type: "string", default: "" },
+      },
+    },
+  },
+} as const satisfies JSONSchema;
 
 const env = getRecipeEnvironment();
 

@@ -9,7 +9,16 @@ import type {
   CreateCellFunction,
   JSONSchema,
 } from "./types.ts";
-import { AuthSchema, ID, ID_FIELD, NAME, schema, TYPE, UI } from "./types.ts";
+import {
+  AuthSchema,
+  h,
+  ID,
+  ID_FIELD,
+  NAME,
+  schema,
+  TYPE,
+  UI,
+} from "./types.ts";
 import { opaqueRef, stream } from "./opaque-ref.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { byRef, compute, derive, handler, lift, render } from "./module.ts";
@@ -108,5 +117,8 @@ export const createBuilder = (
     // Schema utilities
     schema,
     AuthSchema,
+
+    // Render utils
+    h,
   };
 };

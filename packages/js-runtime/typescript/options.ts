@@ -12,7 +12,7 @@ export const getCompilerOptions = (): CompilerOptions => {
     target: TARGET,
     // `lib` should autoapply, but we need to manage default libraries since
     // we are running outside of node. Ensure this lib matches `target`.
-    lib: [TARGET_TYPE_LIB],
+    lib: [TARGET_TYPE_LIB, "dom"],
     strict: true,
     isolatedModules: false,
     jsx: JsxEmit.React,

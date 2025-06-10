@@ -1,14 +1,5 @@
 // deno-lint-ignore-file jsx-no-useless-fragment
-import {
-  h,
-  derive,
-  handler,
-  NAME,
-  recipe,
-  schema,
-  str,
-  UI,
-} from "commontools";
+import { derive, h, handler, NAME, recipe, schema, str, UI } from "commontools";
 
 // Different way to define the same schema, using 'schema' helper function,
 // let's as leave off `as const satisfies JSONSchema`.

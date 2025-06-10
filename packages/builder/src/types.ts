@@ -27,20 +27,24 @@ import type {
   StreamDataFunction,
   StreamFunction,
   StrFunction,
-} from "./interface.ts";
-import {
-  AuthSchema,
+} from "@commontools/api";
+import { h, ID, ID_FIELD, NAME, schema, TYPE, UI } from "@commontools/api";
+import { AuthSchema } from "./schema-lib.ts";
+export { AuthSchema } from "./schema-lib.ts";
+export {
   ID,
   ID_FIELD,
   NAME,
+  type Schema,
   schema,
+  type SchemaWithoutCell,
   TYPE,
   UI,
-} from "./interface.ts";
-
-export { AuthSchema, ID, ID_FIELD, NAME, TYPE, UI } from "./interface.ts";
+} from "@commontools/api";
+export { h } from "@commontools/api";
 export type {
   Cell,
+  Child,
   CreateCellFunction,
   Handler,
   HandlerFactory,
@@ -52,12 +56,13 @@ export type {
   NodeFactory,
   Opaque,
   OpaqueRef,
+  Props,
   Recipe,
   RecipeFactory,
   Stream,
   toJSON,
-} from "./interface.ts";
-export { type Schema, schema, type SchemaWithoutCell } from "./schema-to-ts.ts";
+  VNode,
+} from "@commontools/api";
 
 export type JSONSchemaMutable = Mutable<JSONSchema>;
 
@@ -65,7 +70,7 @@ export type JSONSchemaMutable = Mutable<JSONSchema>;
 // Deliberately repeating the original interface to catch any inconsistencies:
 // This here then reflects the entire interface the internal implementation
 // implements.
-declare module "./interface.ts" {
+declare module "@commontools/api" {
   interface OpaqueRefMethods<T> {
     get(): OpaqueRef<T>;
     set(value: Opaque<T> | T): void;
@@ -106,7 +111,7 @@ declare module "./interface.ts" {
   }
 }
 
-export type { OpaqueRefMethods } from "./interface.ts";
+export type { OpaqueRefMethods } from "@commontools/api";
 
 export const isOpaqueRefMarker = Symbol("isOpaqueRef");
 
@@ -151,7 +156,7 @@ export function isStreamAlias(value: unknown): value is StreamAlias {
   return isObject(value) && "$stream" in value && value.$stream === true;
 }
 
-declare module "./interface.ts" {
+declare module "@commontools/api" {
   export interface Module {
     type: "ref" | "javascript" | "recipe" | "raw" | "isolated" | "passthrough";
     implementation?: ((...args: any[]) => any) | Recipe | string;
@@ -180,7 +185,7 @@ export const unsafe_originalRecipe = Symbol("unsafe_originalRecipe");
 export const unsafe_parentRecipe = Symbol("unsafe_parentRecipe");
 export const unsafe_materializeFactory = Symbol("unsafe_materializeFactory");
 
-declare module "./interface.ts" {
+declare module "@commontools/api" {
   interface Recipe {
     argumentSchema: JSONSchema;
     resultSchema: JSONSchema;
@@ -306,6 +311,9 @@ export interface BuilderFunctionsAndConstants {
   // Schema utilities
   schema: typeof schema;
   AuthSchema: typeof AuthSchema;
+
+  // Render utils
+  h: typeof h;
 }
 
 // Runtime interface needed by createCell

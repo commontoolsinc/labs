@@ -7,6 +7,19 @@ import {
   UnsafeEvalRuntime,
 } from "../mod.ts";
 import { basename, dirname, join } from "@std/path";
+import { cache } from "@commontools/static";
+import { Runtime } from "@commontools/runner";
+import { createBuilder } from "@commontools/builder";
+
+type RUNTIME_IDENTIFIER = "commontools";
+const RUNTIME_DEPENDENCIES: Record<RUNTIME_IDENTIFIER, any> = {
+  "commontools": createBuilder(new Runtime({ storageUrl: "volatile://" })),
+};
+const RUNTIME_TYPES: Record<RUNTIME_IDENTIFIER, string> = {
+  "commontools": await cache.getText(
+    "types/commontools.d.ts",
+  ),
+};
 
 class CliProgram implements ProgramGraph {
   private fsRoot: string;
@@ -24,6 +37,15 @@ class CliProgram implements ProgramGraph {
   }
 
   resolveSource(specifier: string): Source | undefined {
+    if (specifier.endsWith(".d.ts")) {
+      const bare = specifier.substring(0, specifier.length - 5);
+      if (bare in RUNTIME_TYPES) {
+        return {
+          name: specifier,
+          contents: RUNTIME_TYPES[bare as RUNTIME_IDENTIFIER],
+        };
+      }
+    }
     if (specifier && specifier[0] === "/") {
       const absPath = join(
         this.fsRoot,
@@ -40,24 +62,30 @@ class CliProgram implements ProgramGraph {
 
 export class Processor {
   async run(command: RunCommand): Promise<any> {
+    const filename = command.filename
+      ? basename(command.filename)
+      : command.output
+      ? basename(command.output)
+      : undefined;
     const program = new CliProgram(command.entry);
     const compiler = new TypeScriptCompiler(await getTypeLibs());
     const compiled = compiler.compile(program, {
-      noCheck: !!command.noCheck,
-      filename: command.out ? basename(command.out) : undefined,
+      noCheck: command.noCheck,
+      filename,
+      runtimeModules: Object.keys(RUNTIME_DEPENDENCIES),
     });
+
+    if (command.output) {
+      await Deno.writeTextFile(command.output, compiled.js);
+    }
 
     if (command.noRun) {
       return;
     }
 
-    if (command.out) {
-      await Deno.writeTextFile(command.out, compiled.js);
-    }
-
     const runtime = new UnsafeEvalRuntime();
     const isolate = runtime.getIsolate("");
-    const exports = isolate.execute(compiled).invoke();
+    const exports = isolate.execute(compiled).invoke(RUNTIME_DEPENDENCIES);
     return exports.inner();
   }
 }

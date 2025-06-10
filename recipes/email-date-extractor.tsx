@@ -1,5 +1,5 @@
-import { h } from "@commontools/html";
 import {
+  h,
   derive,
   handler,
   ifElse,
@@ -10,7 +10,7 @@ import {
   recipe,
   str,
   UI,
-} from "@commontools/builder/interface";
+} from "commontools";
 
 // Reuse email schema from email-summarizer.tsx
 const EmailProperties = {
