@@ -26,63 +26,16 @@ export interface LLMRequest {
 throughout the codebase defaults it to `true` if undefined, but this implicit
 behavior isn't clear from the interface.
 
-**Recommendation**: Make `cache` required with explicit default:
+**Recommendation**: Rename `cache` to `noCache` with `false` as default:
 
 ```typescript
 export interface LLMRequest {
-  cache: boolean; // Always explicit, no ambiguity
+  noCache?: boolean;
   // ... other properties
 }
 ```
 
-## 2. WorkflowForm Interface
-
-**File**: `packages/charm/src/workflow.ts` **Lines**: 299-348
-
-```typescript
-export interface WorkflowForm {
-  classification: {
-    workflowType: WorkflowType;
-    confidence: number;
-    reasoning: string;
-  } | null;
-  
-  plan: {
-    features?: string[];
-    description?: string;
-    charms?: CharmSearchResult[];
-  } | null;
-  
-  generation: {
-    charm: Cell<Charm>;
-  } | null;
-  
-  searchResults: {
-    castable: Record<...>
-  } | null;
-  
-  spellToCast: {
-    charmId: string;
-    spellId: string;
-  } | null;
-}
-```
-
-**Issue**: Using `null` to represent "not yet processed" states requires
-constant null checking. This doesn't make invalid states unrepresentable.
-
-**Recommendation**: Use discriminated unions:
-
-```typescript
-type WorkflowForm = 
-  | { state: 'unclassified' }
-  | { state: 'classified'; classification: {...}; plan: null }
-  | { state: 'planned'; classification: {...}; plan: {...}; generation: null }
-  | { state: 'generated'; classification: {...}; plan: {...}; generation: {...} }
-  // etc.
-```
-
-## 3. OAuth2Tokens Interface
+## 2. OAuth2Tokens Interface
 
 **File**:
 `packages/toolshed/routes/integrations/google-oauth/google-oauth.utils.ts`
@@ -119,7 +72,7 @@ export interface RenewableOAuth2Tokens extends InitialOAuth2Tokens {
 }
 ```
 
-## 4. UserInfo Interface
+## 3. UserInfo Interface
 
 **File**:
 `packages/toolshed/routes/integrations/google-oauth/google-oauth.utils.ts`
@@ -159,7 +112,7 @@ type UserInfoResult =
   | { success: false; error: string };
 ```
 
-## 5. CallbackResult Interface
+## 4. CallbackResult Interface
 
 **File**:
 `packages/toolshed/routes/integrations/google-oauth/google-oauth.utils.ts`
@@ -185,55 +138,7 @@ type CallbackResult =
   | { success: false; error: string; details?: Record<string, unknown> };
 ```
 
-## 6. RuntimeOptions Interface
-
-**File**: `packages/runner/src/runtime.ts` **Lines**: 43-51
-
-```typescript
-export interface RuntimeOptions {
-  storageUrl: string;
-  signer?: Signer;
-  consoleHandler?: ConsoleHandler;
-  errorHandlers?: ErrorHandler[];
-  blobbyServerUrl?: string;
-  recipeEnvironment?: RecipeEnvironment;
-  debug?: boolean;
-}
-```
-
-**Issue**: Optional properties have implicit defaults that aren't clear from the
-interface. Code later throws if `storageUrl` doesn't exist (line 275).
-
-**Recommendation**: Make defaults explicit:
-
-```typescript
-export interface RuntimeOptions {
-  storageUrl: string;
-  signer: Signer | null;
-  consoleHandler: ConsoleHandler | null;
-  errorHandlers: ErrorHandler[];
-  blobbyServerUrl: string | null;
-  recipeEnvironment: RecipeEnvironment | null;
-  debug: boolean;
-}
-
-// With a factory function for defaults:
-export function createRuntimeOptions(
-  partial: PartialRuntimeOptions,
-): RuntimeOptions {
-  return {
-    storageUrl: partial.storageUrl, // required
-    signer: partial.signer ?? null,
-    consoleHandler: partial.consoleHandler ?? defaultConsoleHandler,
-    errorHandlers: partial.errorHandlers ?? [],
-    blobbyServerUrl: partial.blobbyServerUrl ?? null,
-    recipeEnvironment: partial.recipeEnvironment ?? null,
-    debug: partial.debug ?? false,
-  };
-}
-```
-
-## 7. BackgroundCharmServiceOptions Interface
+## 5. BackgroundCharmServiceOptions Interface
 
 **File**: `packages/background-charm-service/src/service.ts` **Lines**: 12-19
 
@@ -271,7 +176,7 @@ export const DEFAULT_BG_OPTIONS = {
 } as const;
 ```
 
-## 8. Module Interface
+## 6. Module Interface
 
 **File**: `packages/builder/src/types.ts` **Lines**: 182-188
 
