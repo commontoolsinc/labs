@@ -232,6 +232,7 @@ async function buildBgCharmService(config: BuildConfig): Promise<void> {
 async function buildCli(config: BuildConfig): Promise<void> {
   console.log("Building CLI binary...");
   const envs = [
+    "TOOLSHED_API_URL",
     "TSC_WATCHFILE",
     "TSC_NONPOLLING_WATCHER",
     "TSC_WATCHDIRECTORY",
