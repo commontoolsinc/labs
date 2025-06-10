@@ -7,18 +7,51 @@ import { type ReactivityLog } from "../src/scheduler.ts";
 import { ID, JSONSchema, popFrame, pushFrame } from "@commontools/builder";
 import { Runtime } from "../src/runtime.ts";
 import { addCommonIDfromObjectID } from "../src/utils.ts";
+import { Identity } from "@commontools/identity";
+import * as Memory from "@commontools/memory";
+import * as Consumer from "@commontools/memory/consumer";
+import { Provider } from "../src/storage/cache.ts";
+
+const signer = await Identity.fromPassphrase("test operator");
 
 describe("Cell", () => {
   let runtime: Runtime;
+  let provider: Memory.Provider.Provider<Memory.Protocol>;
+  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Create memory service for testing
+    const open = await Memory.Provider.open({
+      store: new URL("memory://db/"),
+      serviceDid: signer.did(),
+    });
+
+    if (open.error) {
+      throw open.error;
+    }
+
+    provider = open.ok;
+
+    consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
+
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager: {
+        open: (space: Consumer.MemorySpace) =>
+          Provider.open({
+            space,
+            session: consumer,
+          }),
+      },
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
+    await provider?.close();
   });
 
   it("should create a cell with initial value", () => {
@@ -100,15 +133,42 @@ describe("Cell", () => {
 
 describe("Cell utility functions", () => {
   let runtime: Runtime;
+  let provider: Memory.Provider.Provider<Memory.Protocol>;
+  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Create memory service for testing
+    const open = await Memory.Provider.open({
+      store: new URL("memory://db/"),
+      serviceDid: signer.did(),
+    });
+
+    if (open.error) {
+      throw open.error;
+    }
+
+    provider = open.ok;
+
+    consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
+
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager: {
+        open: (space: Consumer.MemorySpace) =>
+          Provider.open({
+            space,
+            session: consumer,
+          }),
+      },
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
+    await provider?.close();
   });
 
   it("should identify a cell", () => {
@@ -142,15 +202,42 @@ describe("Cell utility functions", () => {
 
 describe("createProxy", () => {
   let runtime: Runtime;
+  let provider: Memory.Provider.Provider<Memory.Protocol>;
+  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Create memory service for testing
+    const open = await Memory.Provider.open({
+      store: new URL("memory://db/"),
+      serviceDid: signer.did(),
+    });
+
+    if (open.error) {
+      throw open.error;
+    }
+
+    provider = open.ok;
+
+    consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
+
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager: {
+        open: (space: Consumer.MemorySpace) =>
+          Provider.open({
+            space,
+            session: consumer,
+          }),
+      },
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
+    await provider?.close();
   });
 
   it("should create a proxy for nested objects", () => {
@@ -461,15 +548,42 @@ describe("createProxy", () => {
 
 describe("asCell", () => {
   let runtime: Runtime;
+  let provider: Memory.Provider.Provider<Memory.Protocol>;
+  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Create memory service for testing
+    const open = await Memory.Provider.open({
+      store: new URL("memory://db/"),
+      serviceDid: signer.did(),
+    });
+
+    if (open.error) {
+      throw open.error;
+    }
+
+    provider = open.ok;
+
+    consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
+
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager: {
+        open: (space: Consumer.MemorySpace) =>
+          Provider.open({
+            space,
+            session: consumer,
+          }),
+      },
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
+    await provider?.close();
   });
 
   it("should create a simple cell interface", () => {
@@ -577,15 +691,42 @@ describe("asCell", () => {
 
 describe("asCell with schema", () => {
   let runtime: Runtime;
+  let provider: Memory.Provider.Provider<Memory.Protocol>;
+  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Create memory service for testing
+    const open = await Memory.Provider.open({
+      store: new URL("memory://db/"),
+      serviceDid: signer.did(),
+    });
+
+    if (open.error) {
+      throw open.error;
+    }
+
+    provider = open.ok;
+
+    consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
+
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager: {
+        open: (space: Consumer.MemorySpace) =>
+          Provider.open({
+            space,
+            session: consumer,
+          }),
+      },
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
+    await provider?.close();
   });
 
   it("should validate and transform according to schema", () => {
@@ -1459,15 +1600,42 @@ describe("asCell with schema", () => {
 
 describe("JSON.stringify bug", () => {
   let runtime: Runtime;
+  let provider: Memory.Provider.Provider<Memory.Protocol>;
+  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Create memory service for testing
+    const open = await Memory.Provider.open({
+      store: new URL("memory://db/"),
+      serviceDid: signer.did(),
+    });
+
+    if (open.error) {
+      throw open.error;
+    }
+
+    provider = open.ok;
+
+    consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
+
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager: {
+        open: (space: Consumer.MemorySpace) =>
+          Provider.open({
+            space,
+            session: consumer,
+          }),
+      },
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
+    await provider?.close();
   });
 
   it("should not modify the value of the cell", () => {
