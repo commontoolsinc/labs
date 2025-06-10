@@ -18,7 +18,13 @@ describe("Storage", () => {
   let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
   let testDoc: DocImpl<any>;
   let n = 0;
-  let storage2: any;
+  const storageManager = {
+    open: (space: Consumer.MemorySpace) =>
+      Provider.open({
+        space,
+        session: consumer,
+      }),
+  };
 
   beforeEach(async () => {
     // Create memory service for testing
@@ -42,13 +48,7 @@ describe("Storage", () => {
     // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
-      storageManager: {
-        open: (space: Consumer.MemorySpace) =>
-          Provider.open({
-            space,
-            session: consumer,
-          }),
-      },
+      storageManager,
     });
 
     testDoc = runtime.documentMap.getDoc<string>(
@@ -61,6 +61,8 @@ describe("Storage", () => {
   afterEach(async () => {
     await runtime?.storage.cancelAll();
     await provider?.close();
+    // _processCurrentBatch leaves sleep behind that makes deno error
+    await new Promise((wake) => setTimeout(wake, 1));
   });
 
   describe("persistDoc", () => {
@@ -80,8 +82,6 @@ describe("Storage", () => {
 
       const [fact] = query.facts;
 
-      console.log(fact);
-
       expect(fact.is).toEqual({ value: testValue });
     });
 
@@ -100,9 +100,8 @@ describe("Storage", () => {
 
       await runtime.storage.syncCell(testDoc);
 
-      await storage2.sync(refDoc.entityId!);
-      const value = storage2.get(refDoc.entityId!);
-      expect(value?.value).toEqual("hello");
+      const entry = storageManager.open(signer.did()).get(refDoc.entityId);
+      expect(entry?.value).toEqual("hello");
     });
 
     it("should persist a cells and referenced cells within it", async () => {
@@ -120,9 +119,17 @@ describe("Storage", () => {
 
       await runtime.storage.syncCell(testDoc);
 
-      await storage2.sync(refDoc.entityId!);
-      const value = storage2.get(refDoc.entityId!);
-      expect(value?.value).toEqual("hello");
+      const query = consumer
+        .mount(signer.did())
+        .query({
+          select: { _: { "application/json": {} } },
+        });
+
+      await query;
+
+      const [fact] = query.facts;
+
+      expect(fact?.is).toEqual({ value: "hello" });
     });
   });
 
@@ -135,16 +142,27 @@ describe("Storage", () => {
 
       await runtime.storage.synced();
 
-      await storage2.sync(testDoc.entityId!);
-      const value = storage2.get(testDoc.entityId!);
-      expect(value?.value).toBe("value 2");
+      const query = consumer
+        .mount(signer.did())
+        .query({
+          select: { _: { "application/json": {} } },
+        });
+
+      await query;
+
+      const [fact] = query.facts;
+
+      expect(fact?.is).toEqual({ value: "value 2" });
     });
   });
 
   describe("syncDoc", () => {
     it("should wait for a doc to appear", async () => {
       let synced = false;
-      storage2.sync(testDoc.entityId!, true).then(() => (synced = true));
+
+      storageManager.open(signer.did()).sync(testDoc.entityId!, true).then(
+        () => (synced = true),
+      );
       expect(synced).toBe(false);
 
       testDoc.send("test");
@@ -154,7 +172,9 @@ describe("Storage", () => {
 
     it("should wait for a undefined doc to appear", async () => {
       let synced = false;
-      storage2.sync(testDoc.entityId!, true).then(() => (synced = true));
+      storageManager.open(signer.did()).sync(testDoc.entityId!, true).then(
+        () => (synced = true),
+      );
       expect(synced).toBe(false);
 
       await runtime.storage.syncCell(testDoc);
@@ -171,10 +191,11 @@ describe("Storage", () => {
       );
       ephemeralDoc.ephemeral = true;
       await runtime.storage.syncCell(ephemeralDoc);
+      const provider = storageManager.open(signer.did());
 
-      await storage2.sync(ephemeralDoc.entityId!);
-      const value = storage2.get(ephemeralDoc.entityId!);
-      expect(value).toBeUndefined();
+      await provider.sync(ephemeralDoc.entityId!);
+      const record = provider.get(ephemeralDoc.entityId!);
+      expect(record).toBeUndefined();
     });
   });
 
@@ -190,9 +211,17 @@ describe("Storage", () => {
 
       await runtime.storage.synced();
 
-      await storage2.sync(testDoc.entityId!);
-      const value = storage2.get(testDoc.entityId!);
-      expect(value?.value).toBe("value 2");
+      const query = consumer
+        .mount(signer.did())
+        .query({
+          select: { _: { "application/json": {} } },
+        });
+
+      await query;
+
+      const [fact] = query.facts;
+
+      expect(fact?.is).toEqual({ value: "value 2" });
     });
   });
 });
