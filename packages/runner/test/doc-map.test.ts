@@ -3,6 +3,12 @@ import { expect } from "@std/expect";
 import { createRef, type EntityId, getEntityId } from "../src/doc-map.ts";
 import { refer } from "merkle-reference";
 import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commontools/identity";
+import * as Memory from "@commontools/memory";
+import * as Consumer from "@commontools/memory/consumer";
+import { Provider } from "../src/storage/cache.ts";
+
+const signer = await Identity.fromPassphrase("test operator");
 
 describe("refer", () => {
   it("should create a reference that is equal to another reference with the same source", () => {
@@ -14,15 +20,42 @@ describe("refer", () => {
 
 describe("cell-map", () => {
   let runtime: Runtime;
+  let provider: Memory.Provider.Provider<Memory.Protocol>;
+  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Create memory service for testing
+    const open = await Memory.Provider.open({
+      store: new URL("memory://db/"),
+      serviceDid: signer.did(),
+    });
+
+    if (open.error) {
+      throw open.error;
+    }
+
+    provider = open.ok;
+
+    consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
+
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager: {
+        open: (space: Consumer.MemorySpace) =>
+          Provider.open({
+            space,
+            session: consumer,
+          }),
+      },
     });
   });
 
-  afterEach(() => {
-    return runtime.dispose();
+  afterEach(async () => {
+    await runtime?.dispose();
+    await provider?.close();
   });
 
   describe("createRef", () => {
