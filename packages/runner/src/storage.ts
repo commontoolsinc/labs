@@ -20,13 +20,16 @@ import type {
 } from "./storage/interface.ts";
 import { BaseStorageProvider } from "./storage/base.ts";
 import { log } from "./log.ts";
-import { Provider as CachedStorageProvider } from "./storage/cache.ts";
 import { TransactionResult } from "@commontools/memory";
 import { refer } from "@commontools/memory/reference";
-import { SchemaContext, SchemaNone } from "@commontools/memory/interface";
+import {
+  MemorySpace,
+  SchemaContext,
+  SchemaNone,
+} from "@commontools/memory/interface";
 import type { IRuntime, IStorage } from "./runtime.ts";
 
-export type { Labels };
+export type { Labels, MemorySpace };
 
 type Job = {
   doc: DocImpl<any>;
@@ -179,45 +182,13 @@ export class Storage implements IStorage {
     this.cancel();
   }
 
-  private _getStorageProviderForSpace(space: string): IStorageProvider {
+  private _getStorageProviderForSpace(space: MemorySpace): IStorageProvider {
     if (!space) throw new Error("No space set");
 
     let provider = this.storageProviders.get(space);
 
     if (!provider) {
-      provider = this.storageManager.open(
-        space as `did:${string}:${string}`,
-      );
-      // // Default to "schema", but let either custom URL (used in tests) or
-      // // environment variable override this.
-      // const type = this.remoteStorageUrl?.protocol === "volatile:"
-      //   ? "volatile"
-      //   : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "schema");
-
-      // if (type === "volatile") {
-      //   provider = new VolatileStorageProvider(space);
-      // } else if (type === "schema" || type === "cached") {
-      //   if (!this.remoteStorageUrl) {
-      //     throw new Error("No remote storage URL set");
-      //   }
-      //   if (!this.signer) {
-      //     throw new Error("No signer set for schema storage");
-      //   }
-      //   const settings = {
-      //     maxSubscriptionsPerSpace: 50_000,
-      //     connectionTimeout: 30_000,
-      //     useSchemaQueries: type === "schema",
-      //   };
-      //   provider = CachedStorageProvider.connect({
-      //     id: this.runtime.id,
-      //     address: new URL("/api/storage/memory", this.remoteStorageUrl!),
-      //     space: space as `did:${string}:${string}`,
-      //     as: this.signer,
-      //     settings: settings,
-      //   });
-      // } else {
-      //   throw new Error(`Unknown storage type: ${type}`);
-      // }
+      provider = this.storageManager.open(space);
       this.storageProviders.set(space, provider);
     }
     return provider;
@@ -599,7 +570,7 @@ export class Storage implements IStorage {
 
     // Sort storage jobs by space
     const storageJobsBySpace = new Map<
-      string,
+      MemorySpace,
       { entityId: EntityId; value: StorageValue }[]
     >();
     storageJobs.forEach((value, doc) => {
@@ -611,7 +582,7 @@ export class Storage implements IStorage {
     log(() => ["storage jobs start"]);
 
     const process = (
-      space: string,
+      space: MemorySpace,
       jobs: { entityId: EntityId; value: StorageValue }[],
     ): Promise<
       { ok: object; err?: undefined } | { ok?: undefined; err?: Error }

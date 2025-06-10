@@ -6,7 +6,7 @@ import {
 } from "./query-result-proxy.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { refer } from "merkle-reference";
-import type { IDocumentMap, IRuntime } from "./runtime.ts";
+import type { IDocumentMap, IRuntime, MemorySpace } from "./runtime.ts";
 
 export type EntityId = {
   "/": string | Uint8Array;
@@ -170,7 +170,7 @@ export class DocumentMap implements IDocumentMap {
   constructor(readonly runtime: IRuntime) {}
 
   getDocByEntityId<T = any>(
-    space: string,
+    space: MemorySpace,
     entityId: EntityId | string,
     createIfNotFound = true,
     sourceIfCreated?: DocImpl<any>,
@@ -214,7 +214,7 @@ export class DocumentMap implements IDocumentMap {
   /**
    * Get or create a document with the specified value, cause, and space
    */
-  getDoc<T>(value: T, cause: any, space: string): DocImpl<T> {
+  getDoc<T>(value: T, cause: any, space: MemorySpace): DocImpl<T> {
     // Generate entity ID from value and cause
     const entityId = this.generateEntityId(value, cause);
     const existing = this.getDocByEntityId<T>(space, entityId, false);
@@ -237,7 +237,7 @@ export class DocumentMap implements IDocumentMap {
   private createDoc<T>(
     value: T,
     entityId: EntityId,
-    space: string,
+    space: MemorySpace,
   ): DocImpl<T> {
     // Use the full createDoc implementation with runtime parameter
     const doc = createDoc(value, entityId, space, this.runtime);

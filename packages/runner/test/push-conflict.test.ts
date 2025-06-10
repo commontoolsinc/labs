@@ -171,7 +171,6 @@ describe.skip("Push conflict", () => {
     await storage.syncCell(name);
     await storage.syncCell(list);
 
-    // const memory = new VolatileStorageProvider("push and set");
     const memory = storageManager.open(signer.did());
 
     // Update memory without notifying main storage

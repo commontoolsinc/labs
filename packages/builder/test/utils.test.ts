@@ -14,6 +14,12 @@ import {
   setValueAtPath,
 } from "../src/utils.ts";
 import { Runtime } from "@commontools/runner";
+import { Identity } from "@commontools/identity";
+import * as Memory from "@commontools/memory";
+import * as Consumer from "@commontools/memory/consumer";
+import { Provider } from "@commontools/runner/storage/cache";
+
+const signer = await Identity.fromPassphrase("test operator");
 
 describe("value type", () => {
   it("can destructure a value without TS errors", () => {
@@ -138,15 +144,42 @@ describe("Path operations", () => {
 
 describe("createJsonSchema", () => {
   let runtime: Runtime;
+  let provider: Memory.Provider.Provider<Memory.Protocol>;
+  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Create memory service for testing
+    const open = await Memory.Provider.open({
+      store: new URL("memory://db/"),
+      serviceDid: signer.did(),
+    });
+
+    if (open.error) {
+      throw open.error;
+    }
+
+    provider = open.ok;
+
+    consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
+
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      blobbyServerUrl: import.meta.url,
+      storageManager: {
+        open: (space: Consumer.MemorySpace) =>
+          Provider.open({
+            space,
+            session: consumer,
+          }),
+      },
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
+    await provider?.close();
   });
   it("should create schema for primitive types", () => {
     expect(createJsonSchema("test")).toEqual({ type: "string" });

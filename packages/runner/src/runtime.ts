@@ -18,6 +18,8 @@ import type {
 } from "@commontools/builder";
 import { setRecipeEnvironment } from "@commontools/builder";
 
+export type { MemorySpace } from "./storage.ts";
+
 export type ErrorWithContext = Error & {
   action: Action;
   charmId: string;

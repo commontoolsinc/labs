@@ -3,12 +3,12 @@
   "exports": "./src/index.ts",
   "tasks": {
     // JSDOM dependencies require env.
-    "test": "deno test --allow-env"
+    "test": "deno test --allow-env --allow-ffi --allow-read",
   },
   "imports": {},
   "compilerOptions": {
     "jsx": "react",
     "jsxFactory": "h",
-    "jsxFragmentFactory": "h.fragment"
-  }
+    "jsxFragmentFactory": "h.fragment",
+  },
 }

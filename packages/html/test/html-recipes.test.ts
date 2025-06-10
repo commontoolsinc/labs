@@ -4,13 +4,21 @@ import { lift, recipe, str, UI } from "@commontools/builder";
 import { Runtime } from "@commontools/runner";
 import * as assert from "./assert.ts";
 import { JSDOM } from "jsdom";
+import { Identity } from "@commontools/identity";
+import * as Memory from "@commontools/memory";
+import * as Consumer from "@commontools/memory/consumer";
+import { Provider } from "@commontools/runner/storage/cache";
+
+const signer = await Identity.fromPassphrase("test operator");
 
 describe("recipes with HTML", () => {
   let dom: JSDOM;
   let document: Document;
   let runtime: Runtime;
+  let provider: Memory.Provider.Provider<Memory.Protocol>;
+  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Set up a fresh JSDOM instance for each test
     dom = new JSDOM(`<!DOCTYPE html><html><body></body></html>`);
     document = dom.window.document;
@@ -21,14 +29,39 @@ describe("recipes with HTML", () => {
     globalThis.Node = dom.window.Node;
     globalThis.Text = dom.window.Text;
 
+    // Create memory service for testing
+    const open = await Memory.Provider.open({
+      store: new URL("memory://db/"),
+      serviceDid: signer.did(),
+    });
+
+    if (open.error) {
+      throw open.error;
+    }
+
+    provider = open.ok;
+
+    consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
+
     // Set up runtime
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      blobbyServerUrl: import.meta.url,
+      storageManager: {
+        open: (space: Consumer.MemorySpace) =>
+          Provider.open({
+            space,
+            session: consumer,
+          }),
+      },
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
+    await provider?.close();
   });
   it("should render a simple UI", async () => {
     const simpleRecipe = recipe<{ value: number }>(
