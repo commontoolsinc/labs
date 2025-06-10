@@ -1,41 +1,66 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Runtime } from "../src/runtime.ts";
-import { StorageProvider } from "../src/storage/base.ts";
+import { Storage } from "../src/storage.ts";
 import { type CellLink } from "../src/cell.ts";
 import { type DocImpl } from "../src/doc.ts";
-import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 import { Identity } from "@commontools/identity";
+import * as Memory from "@commontools/memory";
+import * as Consumer from "@commontools/memory/consumer";
+import { Provider } from "../src/storage/cache.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
 describe("Storage", () => {
   let runtime: Runtime;
-  let storage2: StorageProvider;
+
+  let provider: Memory.Provider.Provider<Memory.Protocol>;
+  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
   let testDoc: DocImpl<any>;
   let n = 0;
+  let storage2: any;
 
-  beforeEach(() => {
-    // Create shared storage provider for testing
-    storage2 = new VolatileStorageProvider("test");
+  beforeEach(async () => {
+    // Create memory service for testing
+    const open = await Memory.Provider.open({
+      store: new URL("memory://db/"),
+      serviceDid: signer.did(),
+    });
+
+    if (open.error) {
+      throw open.error;
+    }
+
+    provider = open.ok;
+
+    consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
 
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://",
-      signer: signer,
+      blobbyServerUrl: import.meta.url,
+      storageManager: {
+        open: (space: Consumer.MemorySpace) =>
+          Provider.open({
+            space,
+            session: consumer,
+          }),
+      },
     });
 
     testDoc = runtime.documentMap.getDoc<string>(
       undefined as unknown as string,
       `storage test cell ${n++}`,
-      "test",
+      signer.did(),
     );
   });
 
   afterEach(async () => {
     await runtime?.storage.cancelAll();
-    await storage2?.destroy();
+    await provider?.close();
   });
 
   describe("persistDoc", () => {
@@ -45,9 +70,19 @@ describe("Storage", () => {
 
       await runtime.storage.syncCell(testDoc);
 
-      await storage2.sync(testDoc.entityId!);
-      const value = storage2.get(testDoc.entityId!);
-      expect(value?.value).toEqual(testValue);
+      const query = consumer
+        .mount(signer.did())
+        .query({
+          select: { _: { "application/json": {} } },
+        });
+
+      await query;
+
+      const [fact] = query.facts;
+
+      console.log(fact);
+
+      expect(fact.is).toEqual({ value: testValue });
     });
 
     it("should persist a cells and referenced cell references within it", async () => {

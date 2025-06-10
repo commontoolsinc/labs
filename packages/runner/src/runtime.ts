@@ -41,11 +41,10 @@ export interface CharmMetadata {
 }
 
 export interface RuntimeOptions {
-  storageUrl: string;
-  signer?: Signer;
+  storageManager: IStorageManager;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
-  blobbyServerUrl?: string;
+  blobbyServerUrl: string;
   recipeEnvironment?: RecipeEnvironment;
   debug?: boolean;
 }
@@ -226,6 +225,7 @@ import { ModuleRegistry } from "./module.ts";
 import { DocumentMap } from "./doc-map.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
+import { IStorageManager } from "./storage/interface.ts";
 
 /**
  * Main Runtime class that orchestrates all services in the runner package.
@@ -272,14 +272,11 @@ export class Runtime implements IRuntime {
       options.errorHandlers,
     );
 
-    if (!options.storageUrl) {
-      throw new Error("storageUrl is required");
+    if (!options.blobbyServerUrl) {
+      throw new Error("blobbyServerUrl is required");
     }
 
-    this.storage = new Storage(this, {
-      remoteStorageUrl: new URL(options.storageUrl),
-      signer: options.signer,
-    });
+    this.storage = new Storage(this, options.storageManager);
 
     this.documentMap = new DocumentMap(this);
     this.moduleRegistry = new ModuleRegistry(this);
@@ -295,7 +292,7 @@ export class Runtime implements IRuntime {
     // The blobby server URL would be used by recipe manager for publishing
     this.blobbyServerUrl = new URL(
       "/api/storage/blobby",
-      options.blobbyServerUrl ?? options.storageUrl,
+      options.blobbyServerUrl,
     ).toString();
 
     // Handle recipe environment configuration

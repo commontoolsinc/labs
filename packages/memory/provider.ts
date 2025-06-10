@@ -14,7 +14,7 @@ import type {
   MemorySession,
   MemorySpace,
   Proto,
-  Protocol as Protocol,
+  Protocol,
   ProviderCommand,
   ProviderCommandFor,
   ProviderSession,
@@ -45,9 +45,10 @@ import { redactCommit } from "./space.ts";
 
 // Convenient shorthand so I don't need this long type for this string
 type JobId = InvocationURL<Reference<ConsumerCommandInvocation<Protocol>>>;
+export type Options = Memory.Options;
 
 export const open = async (
-  options: Memory.Options,
+  options: Options,
 ): AsyncResult<Provider<Protocol>, ConnectionError> => {
   const result = await Memory.open(options);
   if (result.error) {

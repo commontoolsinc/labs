@@ -23,11 +23,8 @@ import {
   ContextualFlowControl,
   type EntityId,
 } from "@commontools/runner";
-import {
-  BaseStorageProvider,
-  type StorageProvider,
-  type StorageValue,
-} from "./base.ts";
+import { type IStorageProvider, type StorageValue } from "./interface.ts";
+import { BaseStorageProvider } from "./base.ts";
 import type { MemorySpaceSession } from "@commontools/memory/consumer";
 import { assert, retract, unclaimed } from "@commontools/memory/fact";
 import { fromString, refer } from "merkle-reference";
@@ -739,7 +736,7 @@ export interface RemoteStorageProviderSettings {
 }
 
 export interface RemoteStorageProviderOptions {
-  as: Memory.Signer;
+  session: Memory.MemoryConsumer<MemorySpace>;
   space: MemorySpace;
   the?: string;
   settings?: RemoteStorageProviderSettings;
@@ -765,7 +762,7 @@ export interface ProviderConnectionOptions extends ConnectionOptions {
   provider: Provider;
 }
 
-class ProviderConnection implements StorageProvider {
+class ProviderConnection implements IStorageProvider {
   address: URL;
   connection: WebSocket | null = null;
   connectionCount = 0;
@@ -790,7 +787,6 @@ class ProviderConnection implements StorageProvider {
     this.address = address;
     this.provider = provider;
     this.handleEvent = this.handleEvent.bind(this);
-    this.provider = provider;
     // Do not use a default inspector when in Deno:
     // Requires `--unstable-broadcast-channel` flags and it is not used
     // in that environment.
@@ -1053,7 +1049,7 @@ class ProviderConnection implements StorageProvider {
   }
 }
 
-export class Provider implements StorageProvider {
+export class Provider implements IStorageProvider {
   workspace: Replica;
   the: string;
   session: Memory.MemoryConsumer<MemorySpace>;
@@ -1072,16 +1068,13 @@ export class Provider implements StorageProvider {
   }
 
   constructor({
-    as,
+    session,
     space,
     the = "application/json",
     settings = defaultSettings,
   }: RemoteStorageProviderOptions) {
     this.the = the;
     this.settings = settings;
-
-    const session = Memory.create({ as });
-
     this.session = session;
     this.spaces = new Map();
     this.workspace = this.mount(space);
@@ -1219,6 +1212,58 @@ export class Provider implements StorageProvider {
   }
 
   async destroy(): Promise<void> {
+  }
+}
+
+export interface Options {
+  /**
+   * Singning authority.
+   */
+  as: Memory.Signer;
+  /**
+   * Host runtime identifier.
+   */
+  id: string;
+  /**
+   * Address of the storage provider.
+   */
+  address: URL;
+  /**
+   * Various settings to configure storage provider.
+   */
+  settings?: RemoteStorageProviderSettings;
+}
+
+export interface IStorageManager {
+  open(space: string): IStorageProvider;
+}
+
+export class StorageManager implements IStorageManager {
+  address: URL;
+  as: Memory.Signer;
+  id: string;
+  settings: RemoteStorageProviderSettings;
+  constructor({ address, id, as, settings = defaultSettings }: Options) {
+    this.address = address;
+    this.settings = settings;
+    this.as = as;
+    this.id = id;
+  }
+
+  /**
+   * Opens a new storage provider session for the given space. Currently this
+   * creates a new web socket connection to `${this.address}?space=${space}`
+   * in order to cluster connections for the space in the same group.
+   */
+  open(space: MemorySpace): IStorageProvider {
+    const { id, address, as, settings } = this;
+    return Provider.connect({
+      id,
+      space,
+      address,
+      settings,
+      session: Memory.create({ as }),
+    });
   }
 }
 

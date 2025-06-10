@@ -1,11 +1,7 @@
 import type { EntityId } from "../doc-map.ts";
 import { log } from "../log.ts";
-import {
-  BaseStorageProvider,
-  type Result,
-  type StorageValue,
-  type Unit,
-} from "./base.ts";
+import { BaseStorageProvider } from "./base.ts";
+import type { Result, StorageValue, Unit } from "./interface.ts";
 import { SchemaContext } from "@commontools/memory/interface";
 
 /**

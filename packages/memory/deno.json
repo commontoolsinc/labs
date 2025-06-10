@@ -26,6 +26,7 @@
   },
   "exports": {
     ".": "./lib.ts",
+    "./deno": "./deno.ts",
     "./interface": "./interface.ts",
     "./fact": "./fact.ts",
     "./changes": "./changes.ts",

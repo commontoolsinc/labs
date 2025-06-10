@@ -122,7 +122,7 @@ class MemoryConsumerSession<
 > extends TransformStream<
   ProviderCommand<Protocol>,
   UCAN<ConsumerCommandInvocation<Protocol>>
-> implements MemorySession<Space> {
+> implements MemoryConsumer<Space> {
   controller:
     | TransformStreamDefaultController<
       UCAN<ConsumerCommandInvocation<MemoryProtocol>>
@@ -256,6 +256,15 @@ class MemoryConsumerSession<
 
 export interface MemorySession<Space extends MemorySpace> {
   mount<Subject extends Space>(space: Subject): MemorySpaceSession<Subject>;
+}
+
+export interface MemoryConsumer<Space extends MemorySpace>
+  extends
+    MemorySession<Space>,
+    TransformStream<
+      ProviderCommand<Protocol>,
+      UCAN<ConsumerCommandInvocation<Protocol>>
+    > {
 }
 
 export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {

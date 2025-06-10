@@ -12,12 +12,13 @@ import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
-import {
-  BaseStorageProvider,
-  type Labels,
-  StorageProvider,
+import type {
+  IStorageManager,
+  IStorageProvider,
+  Labels,
   StorageValue,
-} from "./storage/base.ts";
+} from "./storage/interface.ts";
+import { BaseStorageProvider } from "./storage/base.ts";
 import { log } from "./log.ts";
 import { Provider as CachedStorageProvider } from "./storage/cache.ts";
 import { VolatileStorageProvider } from "./storage/volatile.ts";
@@ -69,7 +70,7 @@ type Job = {
 export class Storage implements IStorage {
   // Map from space to storage provider. TODO(seefeld): Push spaces to storage
   // providers.
-  private storageProviders = new Map<string, StorageProvider>();
+  private storageProviders = new Map<string, IStorageProvider>();
   private remoteStorageUrl: URL | undefined;
   private signer: Signer | undefined;
 
@@ -117,19 +118,11 @@ export class Storage implements IStorage {
 
   constructor(
     readonly runtime: IRuntime,
-    options: {
-      remoteStorageUrl: URL;
-      signer?: Signer;
-    },
+    private readonly storageManager: IStorageManager,
   ) {
     const [cancel, addCancel] = useCancelGroup();
     this.cancel = cancel;
     this.addCancel = addCancel;
-
-    // Set configuration from constructor options
-    this.remoteStorageUrl = options.remoteStorageUrl;
-
-    if (options.signer) this.signer = options.signer;
   }
 
   setSigner(signer: Signer): void {
@@ -187,42 +180,45 @@ export class Storage implements IStorage {
     this.cancel();
   }
 
-  private _getStorageProviderForSpace(space: string): StorageProvider {
+  private _getStorageProviderForSpace(space: string): IStorageProvider {
     if (!space) throw new Error("No space set");
 
     let provider = this.storageProviders.get(space);
 
     if (!provider) {
-      // Default to "schema", but let either custom URL (used in tests) or
-      // environment variable override this.
-      const type = this.remoteStorageUrl?.protocol === "volatile:"
-        ? "volatile"
-        : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "schema");
+      provider = this.storageManager.open(
+        space as `did:${string}:${string}`,
+      );
+      // // Default to "schema", but let either custom URL (used in tests) or
+      // // environment variable override this.
+      // const type = this.remoteStorageUrl?.protocol === "volatile:"
+      //   ? "volatile"
+      //   : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "schema");
 
-      if (type === "volatile") {
-        provider = new VolatileStorageProvider(space);
-      } else if (type === "schema" || type === "cached") {
-        if (!this.remoteStorageUrl) {
-          throw new Error("No remote storage URL set");
-        }
-        if (!this.signer) {
-          throw new Error("No signer set for schema storage");
-        }
-        const settings = {
-          maxSubscriptionsPerSpace: 50_000,
-          connectionTimeout: 30_000,
-          useSchemaQueries: type === "schema",
-        };
-        provider = CachedStorageProvider.connect({
-          id: this.runtime.id,
-          address: new URL("/api/storage/memory", this.remoteStorageUrl!),
-          space: space as `did:${string}:${string}`,
-          as: this.signer,
-          settings: settings,
-        });
-      } else {
-        throw new Error(`Unknown storage type: ${type}`);
-      }
+      // if (type === "volatile") {
+      //   provider = new VolatileStorageProvider(space);
+      // } else if (type === "schema" || type === "cached") {
+      //   if (!this.remoteStorageUrl) {
+      //     throw new Error("No remote storage URL set");
+      //   }
+      //   if (!this.signer) {
+      //     throw new Error("No signer set for schema storage");
+      //   }
+      //   const settings = {
+      //     maxSubscriptionsPerSpace: 50_000,
+      //     connectionTimeout: 30_000,
+      //     useSchemaQueries: type === "schema",
+      //   };
+      //   provider = CachedStorageProvider.connect({
+      //     id: this.runtime.id,
+      //     address: new URL("/api/storage/memory", this.remoteStorageUrl!),
+      //     space: space as `did:${string}:${string}`,
+      //     as: this.signer,
+      //     settings: settings,
+      //   });
+      // } else {
+      //   throw new Error(`Unknown storage type: ${type}`);
+      // }
       this.storageProviders.set(space, provider);
     }
     return provider;
