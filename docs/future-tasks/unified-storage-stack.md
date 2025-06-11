@@ -200,8 +200,8 @@ So when a new query is issued, we
   versions for this reason)
 
 The server builds state of what documents the client already has at what version
-by running the queries locally and assuming that the client already has all the
-documents for the sent `since`. It is hence advantageous to send queries that
+by running the queries server side _at that sent `since`_ and assuming that the client already has all the
+documents for that `since`. It is hence advantageous to send queries that
 are in the cache before any non-cached queries, to the degree that is in our
 control. Maybe batch them for a microtick?
 
