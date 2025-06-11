@@ -28,6 +28,5 @@ export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export { Storage } from "./storage.ts";
 export { type ConsoleEvent, ConsoleMethod } from "./harness/console.ts";
 export { addCommonIDfromObjectID } from "./data-updating.ts";
-export { followAliases } from "./link-resolution.ts";
-export { maybeGetCellLink } from "./link-resolution.ts";
+export { followAliases, maybeGetCellLink } from "./link-resolution.ts";
 export * from "./recipe-manager.ts";
