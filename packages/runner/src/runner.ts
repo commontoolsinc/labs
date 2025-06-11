@@ -30,8 +30,7 @@ import {
   unsafe_noteParentOnRecipes,
   unwrapOneLevelAndBindtoDoc,
 } from "./recipe-binding.ts";
-import { followAliases } from "./link-resolution.ts";
-import { maybeGetCellLink } from "./link-resolution.ts";
+import { followAliases, maybeGetCellLink } from "./link-resolution.ts";
 import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
