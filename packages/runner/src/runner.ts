@@ -4,11 +4,9 @@ import {
   isAlias,
   isModule,
   isRecipe,
-  isStatic,
   isStreamAlias,
   type JSONSchema,
   type JSONValue,
-  markAsStatic,
   type Module,
   type NodeFactory,
   popFrame,
@@ -813,8 +811,7 @@ export function mergeObjects<T>(
       isAlias(obj) ||
       isCellLink(obj) ||
       isDoc(obj) ||
-      isCell(obj) ||
-      isStatic(obj)
+      isCell(obj)
     ) {
       return obj as T;
     }

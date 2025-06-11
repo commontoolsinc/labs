@@ -253,22 +253,6 @@ export type Frame = {
   unsafe_binding?: UnsafeBinding;
 };
 
-const isStaticMarker = Symbol("isStatic");
-
-export type Static = {
-  [isStaticMarker]: true;
-};
-
-export function isStatic(value: unknown): value is Static {
-  return typeof value === "object" && value !== null &&
-    (value as any)[isStaticMarker] === true;
-}
-
-export function markAsStatic<T>(value: T): T {
-  (value as any)[isStaticMarker] = true;
-  return value;
-}
-
 // Builder functions interface
 export interface BuilderFunctionsAndConstants {
   // Recipe creation

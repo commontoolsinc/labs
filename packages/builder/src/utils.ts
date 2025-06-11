@@ -8,12 +8,10 @@ import {
   isOpaqueRef,
   isRecipe,
   isShadowRef,
-  isStatic,
   type JSONSchema,
   type JSONSchemaMutable,
   type JSONValue,
   makeOpaqueRef,
-  markAsStatic,
   type Module,
   type NodeRef,
   type Opaque,
@@ -35,15 +33,13 @@ export function traverseValue(
   value: Opaque<any>,
   fn: (value: any) => any,
 ): any {
-  const staticWrap = isStatic(value) ? markAsStatic : (v: any) => v;
-
   // Perform operation, replaces value if non-undefined is returned
   const result = fn(value);
   if (result !== undefined) value = result;
 
   // Traverse value
   if (Array.isArray(value)) {
-    return staticWrap(value.map((v) => traverseValue(v, fn)));
+    return value.map((v) => traverseValue(v, fn));
   } else if (
     (!isOpaqueRef(value) &&
       !canBeOpaqueRef(value) &&
@@ -51,12 +47,10 @@ export function traverseValue(
       isRecord(value)) ||
     isRecipe(value)
   ) {
-    return staticWrap(
-      Object.fromEntries(
-        Object.entries(value).map(([key, v]) => [key, traverseValue(v, fn)]),
-      ),
+    return Object.fromEntries(
+      Object.entries(value).map(([key, v]) => [key, traverseValue(v, fn)]),
     );
-  } else return staticWrap(value);
+  } else return value;
 }
 
 export function setValueAtPath(
@@ -129,14 +123,9 @@ export function toJSONWithAliases(
   paths: Map<OpaqueRef<any>, PropertyKey[]>,
   ignoreSelfAliases: boolean = false,
   path: PropertyKey[] = [],
-  processStatic = false,
 ): JSONValue | undefined {
-  if (isStatic(value) && !processStatic) {
-    return markAsStatic(
-      toJSONWithAliases(value, paths, ignoreSelfAliases, path, true) as any,
-    ) as JSONValue;
-  } // Convert regular cells to opaque refs
-  else if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
+  // Convert regular cells to opaque refs
+  if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
   // Convert parent opaque refs to shadow refs
   else if (isOpaqueRef(value) && value.export().frame !== getTopFrame()) {
     value = createShadowRef(value);
