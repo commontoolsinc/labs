@@ -40,7 +40,10 @@ Specifically we have:
   supports CAS semantics for transactions. It's used by storage.ts only and
   while it has stronger guarantees, those either don't apply or sometimes
   backfire because they are not aligned with the top. It has a cache but we
-  underuse it.
+  underuse it. Key implementation details:
+  - Heap (cache) and nursery (pending changes) separation
+  - WebSocket sync with `merge()` for server updates
+  - Schema query support exists but incomplete (see pull() at line 1082)
 
 ## Desired state
 
@@ -72,16 +75,30 @@ Specifically we have:
 
 ## Steps to get there
 
+This plan should be entirely incremental and can be rolled out step by step.
+
 - [ ] Ephemeral storage provider + Get rid of `VolatileStorageProvider` CT-420
 - [ ] Schema queries for everything + Source support CT-174 CT-428
-- [ ] Turn off "crawler" more in storage.ts, make sure things still work
+  - Currently in `storage/cache.ts:pull()` schema queries are partially
+    implemented but don't use the cache effectively.
+  - Need to implement cache storage for queries with `since` tracking (see
+    cache.ts:1108 and see design note below)
+- [ ] Turn off "crawler" mode in storage.ts, make sure things still work
+  - The crawler is in `storage.ts:_processCurrentBatch()` (lines 478-577) which
+    recursively loads dependencies
+  - Key areas: loading promises map (line 84), dependency tracking, and batch
+    processing
+  - Watch for the FIXME at line 84 about keying by doc+schema combination
 - [ ] Replace all direct use of `DocImpl` with `Cell` (only `DocImpl` use inside
-      `Cell` should remain)
+      `Cell`, scheduler (just `.updates()`) and storage.ts should remain for
+      now)
   - [ ] Includes changing all places that expect `{ cell: DocImpl, … }` to just
         use the JSON representation. At the same time, let's support the new
         syntax for links (@irakli has these in a RFC, should be extracted)
 - [ ] Capture all cell writes in a pending list (this is also needed for a
       future recipe refactoring)
+  - [ ] Currently Cell.push() has retry logic (cell.ts:366-381) that needs to
+        move to transaction level
   - [ ] For reads after writes do return pending writes, so maybe we just apply
         writes anyway on a copy. then after flushing the pending writes (i.e.
         they get written to the nursery), we reset that until the next get. make
@@ -93,14 +110,22 @@ Specifically we have:
 - [ ] Directly read & write to memory layer
   - [ ] Expose the API below current StorageProvider to `Cell`. That includes
         `Cell` setting the to application/json, etc., probably a subset of
-        `Replica`.
+        `Replica`. Key APIs in cache.ts: `push()` (line 878), `pull()` (line
+        1082), `merge()` (line 1287)
   - [ ] Add an `await runtime.idle()` equivalent before processing data from web
         socket (see design note below)
   - [ ] Read: `Cell` bypasses DocImpl and just reads from memory
   - [ ] Scheduler: when listening to changes on entities, directly talk to
-        memory
+        memory (currently goes through storage.ts listeners)
   - [ ] Writes: Commit writes after each handler or lift is run as transaction
+        (and so updates nursery)
+    - Scheduler already tracks action completion (scheduler.ts:554-598)
+    - Need to hook transaction commit after `runAction()` completes
 - [ ] Remove `storage.ts` and `DocImpl`, they are now skipped
+  - storage.ts has 1000+ lines of complex batching logic to remove
+  - DocImpl in doc.ts is ~300 lines
+  - Also removed Cell.push conflict logic (line 922) since the corresponding
+    parts are also being removed.
 - [ ] For events, remember event and corresponding write transaction. Clear on
       success and retry N times on conflict. Retry means running the event
       handler again on the newest state (for lifted functions this happens
@@ -110,6 +135,19 @@ Specifically we have:
   - [ ] Memory layer with pending changes after a conflicted write: rollback to
         heap and notify that as changes where it changed things
 - [ ] Sanitize React at least a bit by implement CT-320
+  - Current iframe transport has TODO at
+    iframe-sandbox/common-iframe-sandbox.ts:212
+  - No version tracking causes overwrites with stale React state
+
+## Open questions
+
+- [ ] Debug tools we should build to support this future state
+- [ ] Behavior for clients that are offline for a while and then come back
+      online while there were changes. By default we'd just drop all of those,
+      but we would notice that explicitly. Unlike rejections that happen quickly
+      and users can react to in real-time, this might need something more
+      sophisticated.
+- [ ] Recovery flows for e.g. corrupted
 
 ## Design notes
 
