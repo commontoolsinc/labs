@@ -58,7 +58,7 @@ Specifically we have:
   have a concept of "cause" and depending on the order of operations we
   currently issue updated with the latest cause, but actually based on older
   data. It has a cache but we underuse it. Key implementation details:
-  - Heap (source of truth) and nursery (pending changes) separation
+  - Heap (partial replica of the remote state) and nursery (pending changes) separation
   - WebSocket sync with `merge()` for server updates
   - Schema query support exists but incomplete (see pull() at line 1082)
 
