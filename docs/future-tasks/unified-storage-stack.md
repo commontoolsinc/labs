@@ -151,6 +151,9 @@ This plan should be entirely incremental and can be rolled out step by step.
     - [ ] The heap shall not change while this function is running, i.e. the
           function can read from memory and gets the state as of the beginning
           of the function call and what it updated itself.
+    - [ ] For change sets that only write (e.g. only push or set), we could just
+          reapply it without re-running. But this could also be a future
+          optimization.
   - [ ] Currently Cell.push() has retry logic (cell.ts:366-381) that can be
         removed. It's subsumed by the previous point.
   - [ ] Read: `Cell` bypasses DocImpl and just reads from memory.
@@ -178,16 +181,8 @@ This plan should be entirely incremental and can be rolled out step by step.
   - DocImpl in doc.ts is ~300 lines
   - Also removed Cell.push conflict logic (line 922) since the corresponding
     parts are also being removed.
-- [ ] For events, remember event and corresponding write transaction. Clear on
-      success and retry N times on conflict. Retry means running the event
-      handler again on the newest state (for lifted functions this happens
-      automatically as they get marked dirty)
-
-      TODO: This should be done by that transact function above. Pass it #retries and maybe a callback on last failure. Pass 0 and none for reactive functions. Use callback to notify user if applicable.
-  - [ ] For change sets that only write (e.g. only push or set), we could just
-        reapply it without re-running. But that's a future optimization.
-  - [x] Memory layer with pending changes after a conflicted write: rollback to
-        heap and notify that as changes where it changed things
+- [x] Memory layer with pending changes after a conflicted write: rollback to
+      heap and notify that as changes where it changed things
 - [ ] Sanitize React at least a bit by implement CT-320
   - Current iframe transport has TODO at
     iframe-sandbox/common-iframe-sandbox.ts:212
