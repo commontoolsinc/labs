@@ -312,7 +312,6 @@ export class Storage implements IStorage {
     const traverse = (
       value: Readonly<any>,
       path: PropertyKey[],
-      processStatic: boolean = false,
     ): any => {
       // If it's a doc, make it a doc link
       if (isDoc(value)) value = { cell: value, path: [] } satisfies CellLink;
