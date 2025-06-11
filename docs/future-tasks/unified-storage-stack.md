@@ -58,7 +58,8 @@ Specifically we have:
   have a concept of "cause" and depending on the order of operations we
   currently issue updated with the latest cause, but actually based on older
   data. It has a cache but we underuse it. Key implementation details:
-  - Heap (partial replica of the remote state) and nursery (pending changes) separation
+  - Heap (partial replica of the remote state) and nursery (pending changes)
+    separation
   - WebSocket sync with `merge()` for server updates
   - Schema query support exists but incomplete (see pull() at line 1082)
 
@@ -109,6 +110,8 @@ This plan should be entirely incremental and can be rolled out step by step.
   - Key areas: loading promises map (line 84), dependency tracking, and batch
     processing
   - Watch for the FIXME at line 84 about keying by doc+schema combination
+- [ ] When connection is dropped, re-establish all schema queries again
+  - [ ] Show UI if reading / re-establishing takes surprisingly long
 - [ ] Replace all direct use of `DocImpl` with `Cell` (only `DocImpl` use inside
       `Cell`, scheduler (just `.updates()`) and storage.ts should remain for
       now)
@@ -116,35 +119,60 @@ This plan should be entirely incremental and can be rolled out step by step.
         creation methods on `Runtime` and then almost all used of `DocImpl` can
         be replaced by cells and using `.[set|get]Raw` instead of
         `.[set|send|get]`
-  - [ ] Includes changing all places that expect `{ cell: DocImpl, … }` to just
-        use the JSON representation. At the same time, let's support the new
-        syntax for links (@irakli has these in a RFC, should be extracted)
-- [ ] Capture all cell writes in a pending list (this is also needed for a
-      future recipe refactoring)
-  - [ ] Currently Cell.push() has retry logic (cell.ts:366-381) that needs to
-        move to transaction level
-  - [ ] For reads after writes do return pending writes, so maybe we just apply
-        writes anyway on a copy. then after flushing the pending writes (i.e.
-        they get written to the nursery), we reset that until the next get. make
-        sure this still works with `QueryResultProxy` (might have to retarget to
-        changed objects). TBD: when to make copies, and can we work directly on
-        the copy in the nursery?
-  - [ ] Note that pending writes might contain `Cell` objects. Those would be
-        converted to links in JSON
-- [ ] Directly read & write to memory layer
-  - [ ] Expose the API below current StorageProvider to `Cell`. That includes
-        `Cell` setting the to application/json, etc., probably a subset of
-        `Replica`. Key APIs in cache.ts: `push()` (line 878), `pull()` (line
-        1082), `merge()` (line 1287)
-  - [ ] Add an `await runtime.idle()` equivalent before processing data from web
-        socket (see design note below)
-  - [ ] Read: `Cell` bypasses DocImpl and just reads from memory
-  - [ ] Scheduler: when listening to changes on entities, directly talk to
-        memory (currently goes through storage.ts listeners)
-  - [ ] Writes: Commit writes after each handler or lift is run as transaction
-        (and so updates nursery)
-    - Scheduler already tracks action completion (scheduler.ts:554-598)
-    - Need to hook transaction commit after `runAction()` completes
+- [ ] Change all places that expect `{ cell: DocImpl, … }` to just use the JSON
+      representation. At the same time, let's support the new syntax for links
+      (@irakli has these in a RFC, should be extracted, effectively
+      `{ "@": { "link": { ... }}}`). This is because today `storage.ts`
+      translates any `{ "/": string }` it finds to `{ "/": DocImpl }`, but we
+      don't want to carry this logic over to this new state. See `isCellLink`,
+      which might not be universally used, but should be. Maybe add a
+      `readCellLink` function to parse these.
+  - [ ] Also change schema queries on the serverside
+  - [ ] Remove that translation in storage.ts and make sure everything still
+        works.
+- [ ] Directly read & write to memory layer & wrap action calls in a transaction
+  - [ ] Expose the API below current StorageProvider to `Cell` and `Scheduler`.
+        That includes `Cell` setting the to application/json, compute the right
+        DID based ids, etc. -- all stuff that currently happens in
+        `StorageProvider` instances.
+  - [ ] Expose a "run this function that returns a transaction" from memory,
+        which scheduler calls with something that wraps the action and returns a
+        transaction. Be sure to handle errors correctly (maybe the function can
+        return that it error'ed and that aborts the transaction). This function
+        can be async, so you have to await it.
+    - [ ] Part of the transaction is what is being read. Likely, we just want to
+          change `ReactivityLog` to be a new transaction object that is being
+          passed through.
+    - [ ] Takes a #retry and callback-on-out-of-retries parameters and retries
+          that many times after conflicts with updated data. Scheduler uses
+          those for events (including a hook for a user-visible callback for
+          user created events). Not needed for reactive functions, those will be
+          scheduled again anyway based on data changes.
+    - [ ] The heap shall not change while this function is running, i.e. the
+          function can read from memory and gets the state as of the beginning
+          of the function call and what it updated itself.
+  - [ ] Currently Cell.push() has retry logic (cell.ts:366-381) that can be
+        removed. It's subsumed by the previous point.
+  - [ ] Read: `Cell` bypasses DocImpl and just reads from memory.
+        `QueryResultProxy` will also have to keep re-reading from memory, so it
+        gets the latest state from the nursery.
+  - [ ] Writes: `Cell` and `QueryResultProxy` directly write to memory, building
+        up the current transaction (probably via what replaces
+        `log: ReactivityLog`). This mostly boils down to changing
+        `applyChangeSet`.
+  - [ ] Scheduler: When listening to changes on entities, directly talk to
+        memory (currently goes through storage.ts listeners). This happens just
+        before returning the transaction, so maybe we instead make this
+        listening part of the transaction API?
+  - [ ] TODO: Figure this out: Pending writes might contain `Cell` objects.
+        Those would be converted to links in JSON, but the ids for those might
+        not be known when writing (this has to do with the upcoming recipe
+        refactoring). Probably this will have to look like another queued up set
+        of writes.
+- [ ] More selectively purge the nursery on conflicts by observing conflicted
+      reads.
+- [ ] On conflicts add data that changed unless it was already sent to the
+      client by a query.
 - [ ] Remove `storage.ts` and `DocImpl`, they are now skipped
   - storage.ts has 1000+ lines of complex batching logic to remove
   - DocImpl in doc.ts is ~300 lines
@@ -154,9 +182,11 @@ This plan should be entirely incremental and can be rolled out step by step.
       success and retry N times on conflict. Retry means running the event
       handler again on the newest state (for lifted functions this happens
       automatically as they get marked dirty)
+
+      TODO: This should be done by that transact function above. Pass it #retries and maybe a callback on last failure. Pass 0 and none for reactive functions. Use callback to notify user if applicable.
   - [ ] For change sets that only write (e.g. only push or set), we could just
         reapply it without re-running. But that's a future optimization.
-  - [ ] Memory layer with pending changes after a conflicted write: rollback to
+  - [x] Memory layer with pending changes after a conflicted write: rollback to
         heap and notify that as changes where it changed things
 - [ ] Sanitize React at least a bit by implement CT-320
   - Current iframe transport has TODO at
@@ -196,6 +226,8 @@ This plan should be entirely incremental and can be rolled out step by step.
       data. Clever ordering of queries, treating some as pending, etc. could
       improve this a lot, but is non-trivial. Fine for now, but something to
       observe.
+- [ ] Anything we can do to make it easier to run handlers or functions in
+      parallel if they have no shared dependencies?
 
 ## Design notes
 
