@@ -3,7 +3,8 @@ import { getTopFrame, toOpaqueRef } from "@commontools/builder";
 import { type DocImpl, makeOpaqueRef } from "./doc.ts";
 import { type CellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { diffAndUpdate, resolveLinkToValue, setNestedValue } from "./utils.ts";
+import { diffAndUpdate, setNestedValue } from "./data-updating.ts";
+import { resolveLinkToValue } from "./link-resolution.ts";
 
 // Array.prototype's entries, and whether they modify the array
 enum ArrayMethodType {

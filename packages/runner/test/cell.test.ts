@@ -6,7 +6,7 @@ import { isQueryResult } from "../src/query-result-proxy.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { ID, JSONSchema, popFrame, pushFrame } from "@commontools/builder";
 import { Runtime } from "../src/runtime.ts";
-import { addCommonIDfromObjectID } from "../src/utils.ts";
+import { addCommonIDfromObjectID } from "../src/data-updating.ts";
 
 describe("Cell", () => {
   let runtime: Runtime;

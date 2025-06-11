@@ -8,7 +8,7 @@ import {
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { isCell } from "../src/cell.ts";
-import { resolveLinks } from "../src/utils.ts";
+import { resolveLinks } from "../src/link-resolution.ts";
 
 describe("Recipe Runner", () => {
   let runtime: Runtime;
