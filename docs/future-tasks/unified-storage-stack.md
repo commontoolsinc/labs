@@ -79,10 +79,7 @@ This plan should be entirely incremental and can be rolled out step by step.
 
 - [ ] Ephemeral storage provider + Get rid of `VolatileStorageProvider` CT-420
 - [ ] Schema queries for everything + Source support CT-174 CT-428
-  - Currently in `storage/cache.ts:pull()` schema queries are partially
-    implemented but don't use the cache effectively.
-  - Need to implement cache storage for queries with `since` tracking (see
-    cache.ts:1108 and see design note below)
+  - See design note on cache, but that's not blocking progress on the rest
 - [ ] Turn off "crawler" mode in storage.ts, make sure things still work
   - The crawler is in `storage.ts:_processCurrentBatch()` (lines 478-577) which
     recursively loads dependencies
@@ -92,6 +89,7 @@ This plan should be entirely incremental and can be rolled out step by step.
 - [ ] Replace all direct use of `DocImpl` with `Cell` (only `DocImpl` use inside
       `Cell`, scheduler (just `.updates()`) and storage.ts should remain for
       now)
+  - [ ] Add .setRaw and .getRaw to internal `Cell` interface and use the cell creation methods on `Runtime` and then almost all used of `DocImpl` can be replaced by cells and using `.[set|get]Raw` instead of `.[set|send|get]`
   - [ ] Includes changing all places that expect `{ cell: DocImpl, … }` to just
         use the JSON representation. At the same time, let's support the new
         syntax for links (@irakli has these in a RFC, should be extracted)
