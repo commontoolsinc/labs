@@ -1,4 +1,4 @@
-import { fromString, refer } from "merkle-reference";
+import { fromString } from "merkle-reference";
 import { isBrowser } from "@commontools/utils/env";
 import { isObject } from "@commontools/utils/types";
 import {
@@ -8,7 +8,6 @@ import {
   JSONValue,
   SchemaContext,
 } from "@commontools/builder";
-import { MapSet } from "@commontools/builder/traverse";
 import type {
   AuthorizationError,
   Commit,
@@ -21,7 +20,6 @@ import type {
   QueryError,
   Result,
   Revision,
-  SchemaPathSelector,
   State,
   The,
   TransactionError,
@@ -42,6 +40,7 @@ import {
 } from "./base.ts";
 import * as IDB from "./idb.ts";
 import { Channel, RawCommand } from "./inspector.ts";
+import { SelectorTracker } from "../selector-tracker.ts";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -289,41 +288,6 @@ class PullQueue {
   }
 }
 
-// This class helps us maintain a client model of our server side subscriptions
-class SelectorTracker {
-  private refTracker = new MapSet<string, string>();
-  private selectors = new Map<string, SchemaPathSelector>();
-
-  add(doc: FactAddress, selector: SchemaPathSelector | undefined) {
-    if (selector === undefined) {
-      return;
-    }
-    const selectorRef = refer(JSON.stringify(selector)).toString();
-    this.refTracker.add(toKey(doc), selectorRef);
-    this.selectors.set(selectorRef, selector);
-  }
-
-  has(doc: FactAddress): boolean {
-    return this.refTracker.has(toKey(doc));
-  }
-
-  hasSelector(doc: FactAddress, selector: SchemaPathSelector): boolean {
-    const selectorRefs = this.refTracker.get(toKey(doc));
-    if (selectorRefs !== undefined) {
-      const selectorRef = refer(JSON.stringify(selector)).toString();
-      return selectorRefs.has(selectorRef);
-    }
-    return false;
-  }
-
-  get(doc: FactAddress): IteratorObject<SchemaPathSelector> {
-    const selectorRefs = this.refTracker.get(toKey(doc)) ?? [];
-    return selectorRefs.values().map((selectorRef) =>
-      this.selectors.get(selectorRef)!
-    );
-  }
-}
-
 export class Replica {
   static put(
     local: Revision<State> | undefined,
@@ -393,7 +357,9 @@ export class Replica {
     public pullRetryLimit: number = 100,
     public useSchemaQueries: boolean = false,
     // Track the selectors used for top level docs
-    private selectorTracker: SelectorTracker = new SelectorTracker(),
+    private selectorTracker: SelectorTracker<FactAddress> = new SelectorTracker<
+      FactAddress
+    >(toKey),
     private cfc: ContextualFlowControl = new ContextualFlowControl(),
   ) {
     this.pull = this.pull.bind(this);

@@ -7,6 +7,7 @@ import {
   markAsStatic,
   type SchemaContext,
 } from "@commontools/builder";
+import { MinimalSchemaSelector } from "@commontools/builder/traverse";
 import { TransactionResult } from "@commontools/memory";
 import { refer } from "@commontools/memory/reference";
 import { SchemaNone } from "@commontools/memory/interface";
@@ -28,6 +29,7 @@ import { log } from "./log.ts";
 import { Provider as CachedStorageProvider } from "./storage/cache.ts";
 import { VolatileStorageProvider } from "./storage/volatile.ts";
 import type { IRuntime, IStorage } from "./runtime.ts";
+import { SelectorTracker } from "./selector-tracker.ts";
 
 export type { Labels };
 
@@ -79,12 +81,9 @@ export class Storage implements IStorage {
   // Any doc here is being synced or in the process of spinning up syncing. See
   // also docIsLoading, which is a promise while the document is loading, and is
   // deleted after it is loaded.
-  //
-  // FIXME(@ubik2) All four of these should probably be keyed by a combination
-  // of a doc and a schema If we load the same entity with different schemas, we
-  // want to track their resolution differently. If we only use one schema per
-  // doc, this will work ok.
-  private docIsSyncing = new Set<DocImpl<any>>();
+  private docIsSyncing = new SelectorTracker<DocImpl<any>>((doc) => {
+    return `${doc.entityId["/"]}`;
+  });
 
   // Map from doc to promise of loading doc, set at stage 2. Resolves when
   // doc and all it's dependencies are loaded.
@@ -261,12 +260,17 @@ export class Storage implements IStorage {
     if (doc.ephemeral) return doc;
 
     // If the doc is already loaded or loading, return immediately.
-    if (this.docIsSyncing.has(doc)) return doc;
+    const selector = schemaContext !== undefined
+      ? { path: [], schemaContext: schemaContext }
+      : MinimalSchemaSelector;
+    if (this.docIsSyncing.hasSelector(doc, selector)) {
+      return doc;
+    }
 
     // Important that we set this _before_ the doc is loaded, as we can already
     // populate the doc when loading dependencies and thus avoid circular
     // references.
-    this.docIsSyncing.add(doc);
+    this.docIsSyncing.add(doc, selector);
 
     // Start loading the doc and safe the promise for processBatch to await for
     const loadingPromise = this._getStorageProviderForSpace(doc.space)

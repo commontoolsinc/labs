@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Runtime } from "../src/runtime.ts";
 import { StorageProvider } from "../src/storage/base.ts";
-import { type CellLink } from "../src/cell.ts";
 import { type DocImpl } from "../src/doc.ts";
 import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 import { Identity } from "@commontools/identity";

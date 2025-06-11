@@ -1,3 +1,4 @@
+import { type Immutable, isObject } from "@commontools/utils/types";
 import type { JSONObject, JSONValue } from "@commontools/builder";
 import {
   BaseObjectManager,
@@ -10,7 +11,6 @@ import {
   SchemaObjectTraverser,
   type ValueEntry,
 } from "@commontools/builder/traverse";
-import { type Immutable, isObject } from "@commontools/utils/types";
 import { the as COMMIT_THE } from "./commit.ts";
 import type { CommitData, SchemaPathSelector } from "./consumer.ts";
 import { TheAuthorizationError } from "./error.ts";
