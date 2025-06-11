@@ -11,7 +11,15 @@ Specifically we have:
 
 - I/O over iframe boundaries, typically with the iframes running React, which in
   turn assumes synchronous state. So data can roundtrip through iframe/React and
-  overwrite newer data that came in in the meantime.
+  overwrite newer data that came in in the meantime. E.g. a user event happens,
+  state X is updated in React, while new data is waiting in the iframe's message
+  queue: Now an update based on older data is sent to the container, but since
+  there is no versioning at this layer, it is treated as updating the current
+  data. Meanwhile the iframe processes the queued up update, and now is out of
+  sync with the container. Note that this is a pretty tight race condition: Some
+  event processing coincides exactly with receiving data updates. It's rare, but
+  we've seen this happen when tabs get woken up again and a lot of pent up work
+  happens all at once.
 - Scheduler executing event handlers and reactive functions, which would form a
   natural transaction boundary -- especially for event handlers to re-run on
   newer data to rebase changes -- but those boundaries don't mean anything to
@@ -25,23 +33,32 @@ Specifically we have:
 - storage.ts which connects the lower storage layer with DocImpl. It wants to
   make sure that the upper layers see a consistent view, so when a new document
   contains a link to another document, it'll fetch that before updating the doc,
-  recursively. It also fetches all source docs. This also means that changes
-  from the upper layer can accumulate, and then altogether become one
-  transaction. If there is one conflict anywhere, the entire transaction is
-  rejected. And while the actual conflict source gets eventually updated (since
-  the server will send these, and document that is read is also being subscribed
-  to) the other documents that were locally changed are not reverted. The
-  clients get out of sync.
-  - We now also have schema queries, which will immediately fetch all documents
-    that are needed per a given schema, and will keep those up to date, even if
-    links change. That could already replace a lot of the logic above, but we
-    haven't turned that off. It also currently doesn't use the cache.
+  recursively. It also fetches all source docs (i.e. `doc.sourceCell`), also
+  recursively.
+  - This also means that changes from the upper layer can accumulate while all
+    this loading happens, and then altogether become one transaction: And if
+    there is one conflict anywhere, the entire transaction is rejected. And
+    while the actual conflict source gets eventually updated (since the server
+    will send these, and document that is read is also being subscribed to) the
+    other documents that were locally changed are not reverted. The clients get
+    out of sync.
+  - Also, if new data arrives from the server that overwrites local data that
+    was just changed, that is effectively a silently handled conflict, with the
+    same issues as above!
+  - Progress: We now also have schema queries, which will immediately fetch all
+    documents that are needed per a given schema, and will keep those up to
+    date, even if links change (meaning the subscription adds newly needed
+    documents and no longer subscribes to no longer used documents). That could
+    already replace a lot of the logic above, but we haven't turned that off. It
+    also currently doesn't use the cache.
 - storage/cache.ts, the memory layer, which operates at the unit of documents,
   supports CAS semantics for transactions. It's used by storage.ts only and
   while it has stronger guarantees, those either don't apply or sometimes
-  backfire because they are not aligned with the top. It has a cache but we
-  underuse it. Key implementation details:
-  - Heap (cache) and nursery (pending changes) separation
+  backfire because they are not aligned with the top: The upper layers don't
+  have a concept of "cause" and depending on the order of operations we
+  currently issue updated with the latest cause, but actually based on older
+  data. It has a cache but we underuse it. Key implementation details:
+  - Heap (source of truth) and nursery (pending changes) separation
   - WebSocket sync with `merge()` for server updates
   - Schema query support exists but incomplete (see pull() at line 1082)
 
@@ -49,11 +66,16 @@ Specifically we have:
 
 - Iframe transport layer sends incrementing versions and ignores changes that
   are based on too old changes. It's then up to the inside of the iframe to use
-  that correctly. In fact `useDoc()` where `setX()` takes a callback instead of
-  just the new value would already work much better. Probably sufficiently well
-  for most cases. But we could go even further (maybe some popular game toolkits
-  are worth investing here at some point in the future, since that's a good
-  usecase for iframes)
+  that correctly. In fact `useDoc()` where `setX()` takes a callback (e.g.
+  `setX(x => x + 1)`) instead of just the new value would already work much
+  better, since we can rerun it on the newest state if new state arrives that
+  invalidates previously sent updates. Probably sufficiently well for most cases
+  (the remaining problem would be that if other changes based on `X` changing
+  aren't purely reactive, i.e. only based on the last state, that those are not
+  being undone by rerunning the setter. This is rare, even in React). But we
+  could go even further (maybe some popular game toolkits are worth
+  investigating here at some point in the future, since that's a good usecase
+  for iframes)
 - Cells –- constructed typically by the runner when bringing up a recipe, within
   handlers or reactive functions and in some cases by parts of the shell to
   bootstrap things -- directly read from memory via schema query. They
@@ -61,14 +83,15 @@ Specifically we have:
   Interim reads see the new version.
 - Scheduler runs handlers and reactive functions and then issues a transaction
   with pending writes directly to the underlying memory layer (we already log
-  reads and writes, so this can be an extension of that). It registers with the
-  underlying memory layer for changes on individual documents, marking the
-  corresponding reactive functions as needing to run (semantically we want to
-  subscribe to the corresponding schema queries, but at least with the current
-  queries, listening to the actually read docs is the same). For events it will
-  keep track of the transaction and if it fails, and after we're sure to have
-  caught up enough with the server to reflect the new current state, retry up to
-  N times.
+  reads and writes via `ReactivityLog`, so we can extend that to log the exact
+  writes, not just which documents were affected). It registers with the
+  underlying memory layer (instead of with `DocImpl` as before) for changes on
+  individual documents, marking –– as is already the case –– the corresponding
+  reactive functions as needing to run (semantically we want to subscribe to the
+  corresponding schema queries, but at least with the current queries, listening
+  to the actually read docs is the same). For events it will keep track of the
+  transaction and if it fails, and after we're sure to have caught up enough
+  with the server to reflect the new current state, retry up to N times.
 - Memory -- more or less like now, except that its lower level API is directly
   exposed to cells, including `the` and the document ids as DIDs (so the Cell
   will have to translate the ids an prepend `of:`)
@@ -89,7 +112,10 @@ This plan should be entirely incremental and can be rolled out step by step.
 - [ ] Replace all direct use of `DocImpl` with `Cell` (only `DocImpl` use inside
       `Cell`, scheduler (just `.updates()`) and storage.ts should remain for
       now)
-  - [ ] Add .setRaw and .getRaw to internal `Cell` interface and use the cell creation methods on `Runtime` and then almost all used of `DocImpl` can be replaced by cells and using `.[set|get]Raw` instead of `.[set|send|get]`
+  - [ ] Add .setRaw and .getRaw to internal `Cell` interface and use the cell
+        creation methods on `Runtime` and then almost all used of `DocImpl` can
+        be replaced by cells and using `.[set|get]Raw` instead of
+        `.[set|send|get]`
   - [ ] Includes changing all places that expect `{ cell: DocImpl, … }` to just
         use the JSON representation. At the same time, let's support the new
         syntax for links (@irakli has these in a RFC, should be extracted)
@@ -100,7 +126,7 @@ This plan should be entirely incremental and can be rolled out step by step.
   - [ ] For reads after writes do return pending writes, so maybe we just apply
         writes anyway on a copy. then after flushing the pending writes (i.e.
         they get written to the nursery), we reset that until the next get. make
-        sure this still work with `QueryResultProxy` (might have to retarget to
+        sure this still works with `QueryResultProxy` (might have to retarget to
         changed objects). TBD: when to make copies, and can we work directly on
         the copy in the nursery?
   - [ ] Note that pending writes might contain `Cell` objects. Those would be
@@ -145,7 +171,24 @@ This plan should be entirely incremental and can be rolled out step by step.
       but we would notice that explicitly. Unlike rejections that happen quickly
       and users can react to in real-time, this might need something more
       sophisticated.
-- [ ] Recovery flows for e.g. corrupted
+- [ ] Recovery flows for e.g. corrupted caches (interrupted in the middle of an
+      update)
+- [ ] Extending transaction boundaries beyond single event handlers: As
+      described above, each handler's execution and retry is independent of each
+      other and it's possible that one of them is rejected while others pass,
+      even for the same event. We could change this to broaden the transaction:
+  - A fairly simple change would be to treat all handlers of the same event as
+    one transaction. Currently scheduler executes them one-by-one and settles
+    the state (i.e. run all the reactive functions) in between, and it wouldn't
+    be difficult to change that to running all handlers for one event, then
+    settle the state. That way, at least the event is either accepted or
+    rejected as a whole. That said, I don't think we have any examples yet of
+    running multiple handlers in parallel.
+  - The more complex case would be a cascade of events, i.e. event handlers that
+    issue more events, and then accepting/rejecting the entire cascade. That's
+    significantly more complicated, and even more so if we allow async steps
+    inbetween (like a fetch). We haven't seen concrete examples of this yet, and
+    we should generally avoid this pattern in favor of reactive functions.
 
 ## Design notes
 
@@ -173,8 +216,10 @@ we need to return the state from the point when it was called? Considerations:
 ### Schema queries
 
 Schema queries is how we maintain the invariant that a `.get()` on a cell should
-return a consistent view _across_ several documents. This replaces the current
-"crawler" mode in storage.ts, which what most of the batch logic actually does.
+return a consistent view _across_ several documents by fetching and updating
+documents atomically. The schema lets us understand how to group these
+documents. This replaces the current "crawler" mode in storage.ts, which what
+most of the batch logic actually does.
 
 Specifically we rely on the server observing a change in any of the documents
 that were returned last time, rerun the query and send updates to the client
@@ -183,27 +228,33 @@ about all documents that are now returned by the query.
 #### Schema queries & cache
 
 We have to store queries in the cache as well, noting for which `since` we're
-sure it is uptodate. In fact we want to point to a session id from each query,
-and the session id notes the last `since`. That's because once a subscription is
-up, all we need are new versions of documents, we don't need to association of
-which query they belonged to. And so all currently active queries are always
-current to the last update.
+sure it is uptodate (`since` is monotonically increasing at the space level, so
+representing time: A document has a value _since_ that time). In fact we want to
+point to a session id (representing the current socket connection, since that
+represents the time the client and server share state (IOW: For each new
+connection the active queries have to be re-established, and then present the
+next set of shared state again). It is just a local concept, so any random or
+even monotonically increasing number will do) from each query, and the session
+id notes the last `since`. That's because once a subscription is up, all we need
+are new versions of documents, we don't need the association of which query they
+belonged to. And so all currently active queries are always current to the last
+update. (Once we also unsubscribe from queries this gets a little more complex)
 
 So when a new query is issued, we
 
 - issue the query to server with a `since` from the cache or `-1` (to be
   confirmed) indicating that it never ran.
 - if it is in the cache run the query against the cache, and see whether any
-  documents are newer than the `since` for the query. If not, we can server the
+  documents are newer than the `since` for the query. If not, we can serve the
   current cached version immediately. If yes, the state might be inconsistent
   and we have to wait for the server (in the future we might want to keep older
   versions for this reason)
 
 The server builds state of what documents the client already has at what version
-by running the queries server side _at that sent `since`_ and assuming that the client already has all the
-documents for that `since`. It is hence advantageous to send queries that
-are in the cache before any non-cached queries, to the degree that is in our
-control. Maybe batch them for a microtick?
+by running the queries server side _at that sent `since`_ and assuming that the
+client already has all the documents for that `since`. It is hence advantageous
+to send queries that are in the cache before any non-cached queries, to the
+degree that is in our control. Maybe batch them for a microtick?
 
 #### What happens if new data is needed
 
