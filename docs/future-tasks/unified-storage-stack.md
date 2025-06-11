@@ -290,6 +290,58 @@ cause errors. We shouldn't block building the above on resolving this though.
 
 ## Future work that is related
 
+### Changes to schema
+
+- flip default interpretation of no `additionalProperties` to be `false` instead
+  of `true` (which is what "ignore additional properties" means in a query
+  context vs validation context)
+- change `{}` schema to mean `false` (matching nothing) instead of `true` (any).
+- use schema in cell links when resolving queries, at first only if schema is
+  `true` otherwise.
+- add `allOf` support and use it for schemas in cell links, so that it's now the
+  intersection of schemas.
+
+### Transition all links/etc to @-notation
+
+- Blobs: See upcoming doc, noting here as it's building on moving to the
+  `{ "@": { <type>: { ... }}}` notation of links/etc
+- Charms: Add `{ "@": { process: { ... }}}` for charms, and make result just
+  data within that (as it's always a few static aliases anyway). System code
+  that deals with charms should probably directly operate on cells of processes
+  like this. And code where charms are just pointers to results (most current
+  code and all userland code) inherit the behavior from the now clear
+  containment.
+- Streams: Currently `{ $stream: true }` should also transition. I don't think
+  any extra data is needed, though we might want to discuss moving the schema of
+  the events into this vs storing it in the usual meta data for schemas.
+
+### Save scheduling information in storage as meta data, remove extra `value`
+
+Currently data in storage is actually
+`{ value?: <the actual value>, source?: <id of process charm, if any> }`. It
+should just be the value.
+
+We also don't store any information that the scheduler generates about
+dependencies, and so when loading a charm we have to recompute all reactive
+functions just to regenerate that.
+
+Instead we could save scheduling information as meta data, i.e. as a separate
+document with a different `the`, but the same `of`.
+
+For reactive functions we should store
+
+- What data was read to compute this output and at what `since`
+- Link to process cell that explains how to recompute this
+
+For data last manipulated by an event we might just - if the event actually did
+read the prior state - write itself as dependent data. This makes it so that the
+rule to allow overwriting is "can't use any sources that are older than the
+sources used to compute this value". The underlying CAS based on cause is then
+just there to make sure this reasoning is based on the current last state.
+
+For streams we want to write out all the processing cells that define handlers
+for this stream, so that they can be reloaded.
+
 ### Changing recipe creation to just use `Cell` and get rid of `OpaqueRef`
 
 The accumulation of writes when running a reactive function / handler allows us
