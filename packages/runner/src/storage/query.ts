@@ -4,6 +4,7 @@ import {
   type CellTarget,
   CycleTracker,
   getAtPath,
+  loadSource,
   MapSet,
   MinimalSchemaSelector,
   SchemaObjectTraverser,
@@ -34,12 +35,13 @@ export class ClientObjectManager extends BaseObjectManager<
     return `${doc.of}/${doc.the}`;
   }
 
+  override toAddress(str: string): FactAddress {
+    return { of: `of:${str}`, the: "application/json" };
+  }
+
   // get the fact address for the doc pointed to by the cell target
   override getTarget(target: CellTarget): FactAddress {
-    return {
-      the: "application/json",
-      of: `of:${target.cellTarget}`,
-    } as FactAddress;
+    return this.toAddress(target.cellTarget!);
   }
 
   // Returns null if there is no matching fact
@@ -103,6 +105,14 @@ export function querySchemaHeap(
     return { missing: [], loaded: rv, selected: schemaTracker };
   }
   schemaTracker.add(manager.toKey(factAddress), selector);
+  // Also load any source links
+  loadSource(
+    manager,
+    factAddress,
+    valueEntry,
+    new Set<string>(),
+    schemaTracker,
+  );
   // We store the actual doc in the value field of the object
   const factValue = (valueEntry.value as JSONObject).value;
   const [newDoc, _] = getAtPath<

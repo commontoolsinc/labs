@@ -5,6 +5,7 @@ import {
   CycleTracker,
   DefaultSchemaSelector,
   getAtPath,
+  loadSource,
   MapSet,
   type PointerCycleTracker,
   SchemaObjectTraverser,
@@ -74,11 +75,13 @@ export class ServerObjectManager extends BaseObjectManager<
     return `${doc.of}/${doc.the}`;
   }
 
+  override toAddress(str: string): FactAddress {
+    const entity: Entity = `of:${str}`;
+    return { of: entity, the: "application/json" };
+  }
+
   override getTarget(target: CellTarget): FactAddress {
-    return {
-      the: "application/json",
-      of: `of:${target.cellTarget}`,
-    } as FactAddress;
+    return this.toAddress(target.cellTarget!);
   }
 
   /**
@@ -269,10 +272,14 @@ function loadFactsForDoc(
       // We don't actually use the return value here, but we've built up
       // a list of all the documents we need to watch.
       traverser.traverse(newDoc);
+
+      // Also load any source links
+      loadSource(manager, factAddress, fact, new Set<string>(), schemaTracker);
     } else {
       // If we didn't provide a schema context, we still want the selected
       // object in our manager, so load it directly.
       manager.load(factAddress);
+      loadSource(manager, factAddress, fact, new Set<string>(), schemaTracker);
     }
   }
 }

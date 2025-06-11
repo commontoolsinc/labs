@@ -141,6 +141,7 @@ export abstract class BaseObjectManager<K, S, V>
   abstract load(doc: K): ValueEntry<S, V | undefined> | null;
   // get a string version of a key
   abstract toKey(doc: K): string;
+  abstract toAddress(str: string): K;
 }
 
 export type OptJSONValue =
@@ -381,8 +382,18 @@ function followPointer<K, S>(
       // an assertion fact.is will be an object with a value property, and
       // that's what our schema is relative to.
       targetDoc = target;
-      targetDocRoot = (valueEntry.value as Immutable<JSONObject>)["value"];
+      const targetObj = valueEntry.value as Immutable<JSONObject>;
+      targetDocRoot = targetObj["value"];
+      // Load any sources (recursively) if they exist
+      loadSource(
+        manager,
+        doc.doc,
+        valueEntry,
+        new Set<string>(),
+        schemaTracker,
+      );
     }
+
     // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
     // then the provided path from the arguments.
     return getAtPath(
@@ -401,6 +412,44 @@ function followPointer<K, S>(
   } finally {
     tracker.exit(doc.value!);
   }
+}
+
+// Recursively load the source from the doc ()
+export function loadSource<K, S>(
+  manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
+  doc: K,
+  valueEntry: ValueEntry<S, Immutable<JSONValue> | undefined>,
+  cycleCheck: Set<string> = new Set<string>(),
+  schemaTracker?: MapSet<string, SchemaPathSelector>,
+) {
+  if (!isObject(valueEntry.value)) {
+    return;
+  }
+  const targetObj = valueEntry.value as Immutable<JSONObject>;
+  if (!(isObject(targetObj) || !("source" in targetObj))) {
+    return;
+  }
+  // We also want to include the source cells
+  const source = targetObj["source"];
+  if (!isObject(source) || !("/" in source) || !isString(source["/"])) {
+    return;
+  }
+  const of: string = source["/"];
+  if (cycleCheck.has(of)) {
+    return;
+  }
+  cycleCheck.add(of);
+  const entryDoc = manager.toAddress(of);
+  const entry = manager.load(entryDoc);
+  console.log("Including source cell", entry?.source);
+  if (entry === null || entry.value === undefined || !entry.source) {
+    return;
+  }
+  manager.addRead(doc, entry.value, entry.source);
+  if (schemaTracker !== undefined) {
+    schemaTracker.add(manager.toKey(entryDoc), MinimalSchemaSelector);
+  }
+  loadSource(manager, entryDoc, entry, cycleCheck, schemaTracker);
 }
 
 // docPath is where we found the pointer and are doing this work
