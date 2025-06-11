@@ -2,8 +2,6 @@ import { isRecord } from "@commontools/utils/types";
 import {
   type Alias,
   isAlias,
-  isStatic,
-  markAsStatic,
   type Recipe,
   unsafe_materializeFactory,
   unsafe_originalRecipe,
@@ -84,10 +82,8 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
   binding: T,
   doc: DocImpl<U>,
 ): T {
-  function convert(binding: unknown, processStatic = false): unknown {
-    if (isStatic(binding) && !processStatic) {
-      return markAsStatic(convert(binding, true));
-    } else if (isAlias(binding)) {
+  function convert(binding: unknown): unknown {
+    if (isAlias(binding)) {
       const alias = { ...binding.$alias };
       if (typeof alias.cell === "number") {
         if (alias.cell === 1) {
