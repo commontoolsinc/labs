@@ -6,9 +6,10 @@ import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";
-import { Provider } from "../src/storage/cache.ts";
+import { StorageManager } from "../src/storage/cache.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("refer", () => {
   it("should create a reference that is equal to another reference with the same source", () => {
@@ -19,43 +20,22 @@ describe("refer", () => {
 });
 
 describe("cell-map", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let provider: Memory.Provider.Provider<Memory.Protocol>;
-  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
   beforeEach(async () => {
     // Create memory service for testing
-    const open = await Memory.Provider.open({
-      store: new URL("memory://db/"),
-      serviceDid: signer.did(),
-    });
-
-    if (open.error) {
-      throw open.error;
-    }
-
-    provider = open.ok;
-
-    consumer = Consumer.open({
-      as: signer,
-      session: provider.session(),
-    });
+    storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
-      storageManager: {
-        open: (space: Consumer.MemorySpace) =>
-          Provider.open({
-            space,
-            session: consumer,
-          }),
-      },
+      storageManager,
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
-    await provider?.close();
+    await storageManager?.close();
   });
 
   describe("createRef", () => {
@@ -76,7 +56,7 @@ describe("cell-map", () => {
     });
 
     it("should return the entity ID for a cell", () => {
-      const c = runtime.documentMap.getDoc({}, undefined, "test");
+      const c = runtime.documentMap.getDoc({}, undefined, space);
       const id = getEntityId(c);
 
       expect(getEntityId(c)).toEqual(id);
@@ -89,7 +69,7 @@ describe("cell-map", () => {
       const c = runtime.documentMap.getDoc(
         { foo: { bar: 42 } },
         undefined,
-        "test",
+        space,
       );
       const id = getEntityId(c);
 
@@ -109,7 +89,7 @@ describe("cell-map", () => {
 
   describe("getCellByEntityId and setCellByEntityId", () => {
     it("should set and get a cell by entity ID", () => {
-      const c = runtime.documentMap.getDoc({ value: 42 }, undefined, "test");
+      const c = runtime.documentMap.getDoc({ value: 42 }, undefined, space);
 
       const retrievedCell = runtime.documentMap.getDocByEntityId(
         c.space,
@@ -128,7 +108,7 @@ describe("cell-map", () => {
 
   describe("cells as JSON", () => {
     it("should serialize the entity ID", () => {
-      const c = runtime.documentMap.getDoc({ value: 42 }, "cause", "test");
+      const c = runtime.documentMap.getDoc({ value: 42 }, "cause", space);
       expect(JSON.stringify(c)).toEqual(JSON.stringify(c.entityId));
     });
   });

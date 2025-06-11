@@ -30,7 +30,8 @@ import { assert, retract, unclaimed } from "@commontools/memory/fact";
 import { fromString, refer } from "merkle-reference";
 import { the, toChanges, toRevision } from "@commontools/memory/commit";
 import * as IDB from "./idb.ts";
-import * as Memory from "@commontools/memory/consumer";
+import * as Consumer from "@commontools/memory/consumer";
+import * as Memory from "@commontools/memory";
 export * from "@commontools/memory/interface";
 import * as Codec from "@commontools/memory/codec";
 import { Channel, RawCommand } from "./inspector.ts";
@@ -666,6 +667,12 @@ export class Replica {
       // transactions that already were built upon our facts they will also fail.
       if (result.error) {
         this.nursery.merge(facts, Nursery.delete);
+        const fact = result.error.name === "ConflictError" &&
+          result.error.conflict.actual;
+        // We also update heap so it holds latest record
+        if (fact) {
+          this.heap.merge([fact], Replica.update);
+        }
       } //
       // If transaction succeeded we promote facts from nursery into a heap.
       else {
@@ -736,7 +743,7 @@ export interface RemoteStorageProviderSettings {
 }
 
 export interface RemoteStorageProviderOptions {
-  session: Memory.MemoryConsumer<MemorySpace>;
+  session: Consumer.MemoryConsumer<MemorySpace>;
   space: MemorySpace;
   the?: string;
   settings?: RemoteStorageProviderSettings;
@@ -1052,7 +1059,7 @@ class ProviderConnection implements IStorageProvider {
 export class Provider implements IStorageProvider {
   workspace: Replica;
   the: string;
-  session: Memory.MemoryConsumer<MemorySpace>;
+  session: Consumer.MemoryConsumer<MemorySpace>;
   spaces: Map<string, Replica>;
   settings: RemoteStorageProviderSettings;
 
@@ -1220,14 +1227,17 @@ export interface Options {
    * Singning authority.
    */
   as: Memory.Signer;
-  /**
-   * Host runtime identifier.
-   */
-  id: string;
+
   /**
    * Address of the storage provider.
    */
   address: URL;
+
+  /**
+   * Unique identifier used for inspection.
+   */
+  id?: string;
+
   /**
    * Various settings to configure storage provider.
    */
@@ -1238,12 +1248,38 @@ export interface IStorageManager {
   open(space: string): IStorageProvider;
 }
 
+export interface LocalStorageOptions {
+  as: Memory.Signer;
+  id?: string;
+  settings?: RemoteStorageProviderSettings;
+}
+
 export class StorageManager implements IStorageManager {
   address: URL;
   as: Memory.Signer;
   id: string;
   settings: RemoteStorageProviderSettings;
-  constructor({ address, id, as, settings = defaultSettings }: Options) {
+  #providers: Map<string, IStorageProvider> = new Map();
+
+  static open(options: Options) {
+    if (options.address.protocol === "memory:") {
+      return new StorageManagerEmulator(options);
+    } else {
+      return new this(options);
+    }
+  }
+  static emulate(
+    options: Omit<Options, "address">,
+  ) {
+    return new StorageManagerEmulator({
+      ...options,
+      address: new URL("memory://"),
+    });
+  }
+  protected constructor(
+    { address, as, id = crypto.randomUUID(), settings = defaultSettings }:
+      Options,
+  ) {
     this.address = address;
     this.settings = settings;
     this.as = as;
@@ -1255,15 +1291,60 @@ export class StorageManager implements IStorageManager {
    * creates a new web socket connection to `${this.address}?space=${space}`
    * in order to cluster connections for the space in the same group.
    */
-  open(space: MemorySpace): IStorageProvider {
+  open(space: MemorySpace) {
+    const provider = this.#providers.get(space);
+    if (!provider) {
+      const provider = this.connect(space);
+      this.#providers.set(space, provider);
+      return provider;
+    }
+    return provider;
+  }
+
+  protected connect(space: MemorySpace): IStorageProvider {
     const { id, address, as, settings } = this;
     return Provider.connect({
       id,
       space,
       address,
       settings,
-      session: Memory.create({ as }),
+      session: Consumer.create({ as }),
     });
+  }
+
+  async close() {
+    const promises = [];
+    for (const provider of this.#providers.values()) {
+      promises.push(provider.destroy());
+    }
+
+    await Promise.all(promises);
+  }
+}
+
+class StorageManagerEmulator extends StorageManager {
+  #session?: Memory.Consumer.MemoryConsumer<MemorySpace>;
+
+  #providers: Map<string, Provider> = new Map();
+  session() {
+    if (!this.#session) {
+      const provider = Memory.Provider.emulate({ serviceDid: this.as.did() });
+      this.#session = Memory.Consumer.open({
+        as: this.as,
+        session: provider.session(),
+      });
+    }
+    return this.#session;
+  }
+  override connect(space: MemorySpace) {
+    return Provider.open({
+      space,
+      session: this.session(),
+    });
+  }
+
+  mount(space: MemorySpace) {
+    return this.session().mount(space);
   }
 }
 

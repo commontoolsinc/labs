@@ -27,12 +27,14 @@ testability, isolation, and control over service configuration.
 All services are now accessed through a `Runtime` instance:
 
 ```typescript
-import { Runtime } from "@commontools/runner";
+import { Runtime, StorageManager } from "@commontools/runner";
 
 // Create a runtime instance with configuration
 const runtime = new Runtime({
-  storageUrl: "https://example.com/storage", // Required
-  signer: myIdentitySigner, // Optional, for remote storage
+  storageManager: new StorageManager({
+    address: "https://example.com/storage",
+    signer: myIdentitySigner
+  }),
   consoleHandler: myConsoleHandler, // Optional
   errorHandlers: [myErrorHandler], // Optional
   blobbyServerUrl: "https://example.com/blobby", // Optional
@@ -162,9 +164,33 @@ Cells are now created through the Runtime instance rather than global functions:
 ```typescript
 import { Runtime } from "@commontools/runner";
 
+import { Identity } from "@commontools/identity";
+import * as Memory from "@commontools/memory";
+import * as Consumer from "@commontools/memory/consumer";
+import { Provider } from "@commontools/runner/storage/cache";
+
+// Set up memory provider
+const signer = await Identity.fromPassphrase("example-passphrase");
+const open = await Memory.Provider.open({
+  store: new URL("memory://db/"),
+  serviceDid: signer.did(),
+});
+const provider = open.ok;
+const consumer = Consumer.open({
+  as: signer,
+  session: provider.session(),
+});
+
 // Create a runtime instance first
 const runtime = new Runtime({
-  storageUrl: "volatile://", // Use volatile storage for this example
+  blobbyServerUrl: import.meta.url,
+  storageManager: {
+    open: (space: Consumer.MemorySpace) =>
+      Provider.open({
+        space,
+        session: consumer,
+      }),
+  },
 });
 
 // Create a cell with schema and default values
@@ -234,9 +260,34 @@ Builder package provides TypeScript type inference.
 ```typescript
 import { Runtime } from "@commontools/runner";
 import type { JSONSchema } from "@commontools/builder";
+import { Identity } from "@commontools/identity";
+import * as Memory from "@commontools/memory";
+import * as Consumer from "@commontools/memory/consumer";
+import { Provider } from "@commontools/runner/storage/cache";
+
+// Set up memory provider
+const signer = await Identity.fromPassphrase("example-passphrase");
+const open = await Memory.Provider.open({
+  store: new URL("memory://db/"),
+  serviceDid: signer.did(),
+});
+const provider = open.ok;
+const consumer = Consumer.open({
+  as: signer,
+  session: provider.session(),
+});
 
 // Create runtime instance
-const runtime = new Runtime({ storageUrl: "volatile://" });
+const runtime = new Runtime({
+  blobbyServerUrl: import.meta.url,
+  storageManager: {
+    open: (space: Consumer.MemorySpace) =>
+      Provider.open({
+        space,
+        session: consumer,
+      }),
+  },
+});
 
 // Define a schema with type assertions for TypeScript inference
 const userSchema = {
@@ -301,9 +352,34 @@ updates results automatically.
 ```typescript
 import { Runtime } from "@commontools/runner";
 import { derive, recipe } from "@commontools/builder";
+import { Identity } from "@commontools/identity";
+import * as Memory from "@commontools/memory";
+import * as Consumer from "@commontools/memory/consumer";
+import { Provider } from "@commontools/runner/storage/cache";
+
+// Set up memory provider
+const signer = await Identity.fromPassphrase("example-passphrase");
+const open = await Memory.Provider.open({
+  store: new URL("memory://db/"),
+  serviceDid: signer.did(),
+});
+const provider = open.ok;
+const consumer = Consumer.open({
+  as: signer,
+  session: provider.session(),
+});
 
 // Create runtime instance
-const runtime = new Runtime({ storageUrl: "volatile://" });
+const runtime = new Runtime({
+  blobbyServerUrl: import.meta.url,
+  storageManager: {
+    open: (space: Consumer.MemorySpace) =>
+      Provider.open({
+        space,
+        session: consumer,
+      }),
+  },
+});
 
 // Define a recipe with input and output schemas
 const doubleNumberRecipe = recipe(
@@ -363,15 +439,39 @@ clients.
 ```typescript
 import { Runtime } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
+import * as Memory from "@commontools/memory";
+import * as Consumer from "@commontools/memory/consumer";
+import { Provider } from "@commontools/runner/storage/cache";
 
 // Create signer for authentication
 const signer = await Identity.fromPassphrase("my-passphrase");
 
-// Configure runtime with remote storage
+// Set up memory provider
+const open = await Memory.Provider.open({
+  store: new URL("memory://db/"),
+  serviceDid: signer.did(),
+});
+
+if (open.error) {
+  throw open.error;
+}
+
+const provider = open.ok;
+const consumer = Consumer.open({
+  as: signer,
+  session: provider.session(),
+});
+
+// Configure runtime with memory storage
 const runtime = new Runtime({
-  storageUrl: "https://example.com/api",
-  signer: signer,
-  enableCache: true,
+  blobbyServerUrl: import.meta.url,
+  storageManager: {
+    open: (space: Consumer.MemorySpace) =>
+      Provider.open({
+        space,
+        session: consumer,
+      }),
+  },
 });
 
 // Sync a cell with storage
@@ -396,9 +496,34 @@ You can map and transform data using cells with schemas:
 ```typescript
 import { Runtime } from "@commontools/runner";
 import type { JSONSchema } from "@commontools/builder";
+import { Identity } from "@commontools/identity";
+import * as Memory from "@commontools/memory";
+import * as Consumer from "@commontools/memory/consumer";
+import { Provider } from "@commontools/runner/storage/cache";
+
+// Set up memory provider
+const signer = await Identity.fromPassphrase("example-passphrase");
+const open = await Memory.Provider.open({
+  store: new URL("memory://db/"),
+  serviceDid: signer.did(),
+});
+const provider = open.ok;
+const consumer = Consumer.open({
+  as: signer,
+  session: provider.session(),
+});
 
 // Create runtime instance
-const runtime = new Runtime({ storageUrl: "volatile://" });
+const runtime = new Runtime({
+  blobbyServerUrl: import.meta.url,
+  storageManager: {
+    open: (space: Consumer.MemorySpace) =>
+      Provider.open({
+        space,
+        session: consumer,
+      }),
+  },
+});
 
 // Original data source cell
 const sourceCell = runtime.getCell(
@@ -476,9 +601,34 @@ Cells can react to changes in deeply nested structures:
 
 ```typescript
 import { Runtime } from "@commontools/runner";
+import { Identity } from "@commontools/identity";
+import * as Memory from "@commontools/memory";
+import * as Consumer from "@commontools/memory/consumer";
+import { Provider } from "@commontools/runner/storage/cache";
+
+// Set up memory provider
+const signer = await Identity.fromPassphrase("example-passphrase");
+const open = await Memory.Provider.open({
+  store: new URL("memory://db/"),
+  serviceDid: signer.did(),
+});
+const provider = open.ok;
+const consumer = Consumer.open({
+  as: signer,
+  session: provider.session(),
+});
 
 // Create runtime instance
-const runtime = new Runtime({ storageUrl: "volatile://" });
+const runtime = new Runtime({
+  blobbyServerUrl: import.meta.url,
+  storageManager: {
+    open: (space: Consumer.MemorySpace) =>
+      Provider.open({
+        space,
+        session: consumer,
+      }),
+  },
+});
 
 const rootCell = runtime.getCell(
   "my-space",
@@ -553,7 +703,32 @@ await idle();
 
 // NEW (current):
 import { Runtime } from "@commontools/runner";
-const runtime = new Runtime({ storageUrl: "volatile://" });
+import { Identity } from "@commontools/identity";
+import * as Memory from "@commontools/memory";
+import * as Consumer from "@commontools/memory/consumer";
+import { Provider } from "@commontools/runner/storage/cache";
+
+const signer = await Identity.fromPassphrase("my-passphrase");
+const open = await Memory.Provider.open({
+  store: new URL("memory://db/"),
+  serviceDid: signer.did(),
+});
+const provider = open.ok;
+const consumer = Consumer.open({
+  as: signer,
+  session: provider.session(),
+});
+
+const runtime = new Runtime({
+  blobbyServerUrl: import.meta.url,
+  storageManager: {
+    open: (space: Consumer.MemorySpace) =>
+      Provider.open({
+        space,
+        session: consumer,
+      }),
+  },
+});
 const cell = runtime.getCell(space, cause, schema);
 await runtime.storage.syncCell(cell);
 await runtime.idle();
@@ -575,9 +750,7 @@ The Runtime constructor accepts a configuration object:
 
 ```typescript
 interface RuntimeOptions {
-  storageUrl: string; // Required: storage backend URL
-  signer?: Signer; // Optional: for remote storage auth
-  enableCache?: boolean; // Optional: enable local caching
+  storageManager: IStorageManager; // Required: storage manager implementation
   consoleHandler?: ConsoleHandler; // Optional: custom console handling
   errorHandlers?: ErrorHandler[]; // Optional: error handling
   blobbyServerUrl?: string; // Optional: blob storage URL
@@ -586,7 +759,45 @@ interface RuntimeOptions {
 }
 ```
 
-### Storage URL Patterns
+### Storage Manager
+
+Storage manager is used by runtime to open storage providers when reading or writing documents into a corresponding space.
+
+```ts
+export interface IStorageManager {
+  open(space: MemorySpace): IStorageProvider;
+}
+```
+
+The storage manager opens storage providers for different memory spaces. A typical implementation using the memory provider:
+
+```ts
+import { Identity } from "@commontools/identity";
+import * as Memory from "@commontools/memory";
+import * as Consumer from "@commontools/memory/consumer";
+import { Provider } from "@commontools/runner/storage/cache";
+
+const signer = await Identity.fromPassphrase("my-passphrase");
+const open = await Memory.Provider.open({
+  store: new URL("memory://db/"),
+  serviceDid: signer.did(),
+});
+const provider = open.ok;
+const consumer = Consumer.open({
+  as: signer,
+  session: provider.session(),
+});
+
+const storageManager = {
+  open: (space: Consumer.MemorySpace) =>
+    Provider.open({
+      space,
+      session: consumer,
+    }),
+};
+
+
+The `@commontools/storage/cache` provides  a default implementation of the `IStorageManager` interface.
 
 - `"volatile://"` - In-memory storage (for testing)
 - `"https://example.com/storage"` - Remote storage with schema queries

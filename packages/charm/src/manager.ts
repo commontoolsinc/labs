@@ -20,6 +20,7 @@ import {
   isCellLink,
   isDoc,
   maybeGetCellLink,
+  type MemorySpace,
   Runtime,
 } from "@commontools/runner";
 import { type Session } from "@commontools/identity";
@@ -116,7 +117,7 @@ function filterOutEntity(
 }
 
 export class CharmManager {
-  private space: string;
+  private space: MemorySpace;
 
   private charms: Cell<Cell<Charm>[]>;
   private pinnedCharms: Cell<Cell<Charm>[]>;

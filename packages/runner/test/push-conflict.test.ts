@@ -10,8 +10,10 @@ import { Provider } from "../src/storage/cache.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
-describe.skip("Push conflict", () => {
+describe("Push conflict", () => {
   let runtime: Runtime;
+  let session: Memory.Memory.Memory;
+  let memory: Provider;
   let storage: IStorage;
   let provider: Memory.Provider.Provider<Memory.Protocol>;
   let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
@@ -24,17 +26,10 @@ describe.skip("Push conflict", () => {
   };
 
   beforeEach(async () => {
+    session = Memory.Memory.emulate({ serviceDid: signer.did() });
+
     // Create memory service for testing
-    const open = await Memory.Provider.open({
-      store: new URL("memory://db/"),
-      serviceDid: signer.did(),
-    });
-
-    if (open.error) {
-      throw open.error;
-    }
-
-    provider = open.ok;
+    provider = Memory.Provider.create(session);
 
     consumer = Consumer.open({
       as: signer,
@@ -51,6 +46,7 @@ describe.skip("Push conflict", () => {
   afterEach(async () => {
     await runtime?.dispose();
     await provider?.close();
+    await session.close();
   });
 
   it("should resolve push conflicts", async () => {
@@ -62,7 +58,17 @@ describe.skip("Push conflict", () => {
     const list = listDoc.asCell();
     await storage.syncCell(list);
 
-    const memory = storageManager.open(signer.did());
+    const source = session.clone();
+    source.subscribers.clear();
+    const provider = Memory.Provider.create(source);
+    const consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
+    memory = Provider.open({
+      space: signer.did(),
+      session: consumer,
+    });
 
     // Update memory without notifying main storage
     await memory.sync(listDoc.entityId, true); // Get current value
@@ -90,8 +96,8 @@ describe.skip("Push conflict", () => {
     await storage.synced();
 
     // We successfully replayed the change on top of the db:
-    expect(list.get()).toEqual([1, 2, 3, 4]);
     expect(retryCalled).toEqual(true);
+    expect(list.get()).toEqual([1, 2, 3, 4]);
 
     // Retry list should be empty now, since the change was applied.
     expect(!!listDoc.retry?.length).toBe(false);
@@ -115,7 +121,17 @@ describe.skip("Push conflict", () => {
     await storage.syncCell(name);
     await storage.syncCell(list);
 
-    const memory = storageManager.open(signer.did());
+    const source = session.clone();
+    source.subscribers.clear();
+    const provider = Memory.Provider.create(source);
+    const consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
+    memory = Provider.open({
+      space: signer.did(),
+      session: consumer,
+    });
 
     // Update memory without notifying main storage
     await memory.sync(nameDoc.entityId, true); // Get current value
@@ -171,7 +187,17 @@ describe.skip("Push conflict", () => {
     await storage.syncCell(name);
     await storage.syncCell(list);
 
-    const memory = storageManager.open(signer.did());
+    const source = session.clone();
+    source.subscribers.clear();
+    const provider = Memory.Provider.create(source);
+    const consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
+    memory = Provider.open({
+      space: signer.did(),
+      session: consumer,
+    });
 
     // Update memory without notifying main storage
     await memory.sync(nameDoc.entityId, true); // Get current value

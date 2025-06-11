@@ -73,7 +73,6 @@ export class Storage implements IStorage {
   // Map from space to storage provider. TODO(seefeld): Push spaces to storage
   // providers.
   private storageProviders = new Map<string, IStorageProvider>();
-  private remoteStorageUrl: URL | undefined;
   private signer: Signer | undefined;
 
   // Any doc here is being synced or in the process of spinning up syncing. See

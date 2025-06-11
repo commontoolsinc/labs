@@ -16,50 +16,33 @@ import { createCellFactory } from "../src/harness/create-cell.ts";
 import { Identity } from "@commontools/identity";
 import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";
-import { Provider } from "../src/storage/cache.ts";
+import { StorageManager } from "../src/storage/cache.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("Recipe Runner", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let createCell: ReturnType<typeof createCellFactory>;
   let provider: Memory.Provider.Provider<Memory.Protocol>;
   let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
   beforeEach(async () => {
-    // Create memory service for testing
-    const open = await Memory.Provider.open({
-      store: new URL("memory://db/"),
-      serviceDid: signer.did(),
-    });
-
-    if (open.error) {
-      throw open.error;
-    }
-
-    provider = open.ok;
-
-    consumer = Consumer.open({
-      as: signer,
-      session: provider.session(),
-    });
-
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
-      storageManager: {
-        open: (space: Consumer.MemorySpace) =>
-          Provider.open({
-            space,
-            session: consumer,
-          }),
-      },
+      storageManager,
     });
+
     createCell = createCellFactory(runtime);
   });
 
   afterEach(async () => {
     await runtime?.dispose();
-    await provider?.close();
+    await storageManager?.close();
   });
 
   it("should run a simple recipe", async () => {
@@ -77,7 +60,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should run a simple recipe",
-        "test",
+        space,
       ),
     );
 
@@ -111,7 +94,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle nested recipes",
-        "test",
+        space,
       ),
     );
 
@@ -137,7 +120,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle recipes with defaults",
-        "test",
+        space,
       ),
     );
 
@@ -151,7 +134,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle recipes with defaults (2)",
-        "test",
+        space,
       ),
     );
 
@@ -180,7 +163,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle recipes with map nodes",
-        "test",
+        space,
       ),
     );
 
@@ -213,7 +196,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle recipes with map nodes with closures",
-        "test",
+        space,
       ),
     );
 
@@ -241,7 +224,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle map nodes with undefined input",
-        "test",
+        space,
       ),
     );
 
@@ -270,7 +253,7 @@ describe("Recipe Runner", () => {
     const result = runtime.run(
       incRecipe,
       { counter: { value: 0 } },
-      runtime.documentMap.getDoc(undefined, "should execute handlers", "test"),
+      runtime.documentMap.getDoc(undefined, "should execute handlers", space),
     );
 
     await runtime.idle();
@@ -309,7 +292,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should execute handlers that use bind and this",
-        "test",
+        space,
       ),
     );
 
@@ -345,7 +328,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should execute handlers that use bind and this (no types)",
-        "test",
+        space,
       ),
     );
 
@@ -364,12 +347,12 @@ describe("Recipe Runner", () => {
     const counter = runtime.documentMap.getDoc(
       { value: 0 },
       "should execute recipes returned by handlers 1",
-      "test",
+      space,
     );
     const nested = runtime.documentMap.getDoc(
       { a: { b: { c: 0 } } },
       "should execute recipes returned by handlers 2",
-      "test",
+      space,
     );
 
     const values: [number, number, number][] = [];
@@ -404,7 +387,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should execute recipes returned by handlers",
-        "test",
+        space,
       ),
     );
 
@@ -429,12 +412,12 @@ describe("Recipe Runner", () => {
     const x = runtime.documentMap.getDoc(
       2,
       "should handle recipes returned by lifted functions 1",
-      "test",
+      space,
     );
     const y = runtime.documentMap.getDoc(
       3,
       "should handle recipes returned by lifted functions 2",
-      "test",
+      space,
     );
 
     const runCounts = {
@@ -476,7 +459,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle recipes returned by lifted functions",
-        "test",
+        space,
       ),
     );
 
@@ -530,7 +513,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should support referenced modules",
-        "test",
+        space,
       ),
     );
 
@@ -570,7 +553,7 @@ describe("Recipe Runner", () => {
     const settingsCell = runtime.documentMap.getDoc(
       { value: 5 },
       "should handle schema with cell references 1",
-      "test",
+      space,
     );
     const result = runtime.run(
       multiplyRecipe,
@@ -581,7 +564,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle schema with cell references",
-        "test",
+        space,
       ),
     );
 
@@ -640,12 +623,12 @@ describe("Recipe Runner", () => {
     const item1 = runtime.documentMap.getDoc(
       { value: 1 },
       "should handle nested cell references in schema 1",
-      "test",
+      space,
     );
     const item2 = runtime.documentMap.getDoc(
       { value: 2 },
       "should handle nested cell references in schema 2",
-      "test",
+      space,
     );
     const result = runtime.run(
       sumRecipe,
@@ -653,7 +636,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle nested cell references in schema",
-        "test",
+        space,
       ),
     );
 
@@ -695,12 +678,12 @@ describe("Recipe Runner", () => {
     const value1 = runtime.documentMap.getDoc(
       5,
       "should handle dynamic cell references with schema 1",
-      "test",
+      space,
     );
     const value2 = runtime.documentMap.getDoc(
       7,
       "should handle dynamic cell references with schema 2",
-      "test",
+      space,
     );
     const result = runtime.run(
       dynamicRecipe,
@@ -713,7 +696,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle dynamic cell references with schema",
-        "test",
+        space,
       ),
     );
 
@@ -753,7 +736,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should execute handlers with schemas",
-        "test",
+        space,
       ),
     );
 
@@ -802,7 +785,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "failed handlers should be ignored",
-        "test",
+        space,
       ),
     );
 
@@ -822,7 +805,7 @@ describe("Recipe Runner", () => {
     const recipeId = charm.sourceCell?.get()?.[TYPE];
     expect(recipeId).toBeDefined();
     expect(lastError?.recipeId).toBe(recipeId);
-    expect(lastError?.space).toBe("test");
+    expect(lastError?.space).toBe(space);
     expect(lastError?.charmId).toBe(
       JSON.parse(JSON.stringify(charm.entityId))["/"],
     );
@@ -865,7 +848,7 @@ describe("Recipe Runner", () => {
     const dividend = runtime.documentMap.getDoc(
       1,
       "failed lifted functions should be ignored 1",
-      "test",
+      space,
     );
 
     const charm = runtime.run(
@@ -874,7 +857,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "failed lifted handlers should be ignored",
-        "test",
+        space,
       ),
     );
 
@@ -891,7 +874,7 @@ describe("Recipe Runner", () => {
     const recipeId = charm.sourceCell?.get()?.[TYPE];
     expect(recipeId).toBeDefined();
     expect(lastError?.recipeId).toBe(recipeId);
-    expect(lastError?.space).toBe("test");
+    expect(lastError?.space).toBe(space);
     expect(lastError?.charmId).toBe(
       JSON.parse(JSON.stringify(charm.entityId))["/"],
     );
@@ -932,7 +915,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "idle should wait for slow async lifted functions",
-        "test",
+        space,
       ),
     );
 
@@ -976,7 +959,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "idle should wait for slow async handlers",
-        "test",
+        space,
       ),
     );
 
@@ -1028,7 +1011,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "idle should wait for slow async handlers",
-        "test",
+        space,
       ),
     );
 
@@ -1062,7 +1045,7 @@ describe("Recipe Runner", () => {
     );
 
     const input = runtime.getCell(
-      "test",
+      space,
       "should create and use a named cell inside a lift input",
       { type: "number" },
     );
@@ -1074,7 +1057,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should create and use a named cell inside a lift",
-        "test",
+        space,
       ),
     );
 

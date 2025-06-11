@@ -8,6 +8,7 @@ import type {
   ConsumerCommandInvocation,
   ConsumerInvocationFor,
   ConsumerResultFor,
+  DID,
   Fact,
   Invocation,
   InvocationURL,
@@ -57,6 +58,16 @@ export const open = async (
 
   return { ok: new MemoryProvider(result.ok) };
 };
+
+/**
+ * Creates an ephemeral memory provider. It does not persist anything
+ * and it's primary use is in testing.
+ */
+export const emulate = (options: Memory.ServiceOptions): Provider<Protocol> =>
+  new MemoryProvider(Memory.emulate(options));
+
+export const create = (memory: MemorySession): Provider<Protocol> =>
+  new MemoryProvider(memory);
 
 export interface Provider<Protocol extends Proto> {
   fetch(request: Request): Promise<Response>;

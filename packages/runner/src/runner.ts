@@ -39,6 +39,8 @@ import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import { getCellLinkOrThrow } from "./query-result-proxy.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
 
+export { StorageManager } from "./storage/cache.ts";
+
 const moduleWrappers = {
   handler: (fn: (event: any, ...props: any[]) => any) => (props: any) =>
     fn.bind(props)(props.$event, props),

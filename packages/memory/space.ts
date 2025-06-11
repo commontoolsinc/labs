@@ -386,24 +386,25 @@ type StateRow = {
 const recall = <Space extends MemorySpace>(
   { store }: Session<Space>,
   { the, of }: { the: The; of: Entity },
-): { fact: Fact | null; since?: number; id?: string } => {
+): Revision<Fact> | { since?: void } => {
   const row = store.prepare(EXPORT).get({ the, of }) as StateRow | undefined;
   if (row) {
-    const fact: Fact = {
+    const revision: Revision<Fact> = {
       the,
       of,
       cause: row.cause
         ? (fromString(row.cause) as Reference<Assertion>)
         : refer(unclaimed(row)),
+      since: row.since,
     };
 
     if (row.is) {
-      fact.is = JSON.parse(row.is);
+      revision.is = JSON.parse(row.is);
     }
 
-    return { fact, id: row.fact, since: row.since };
+    return revision;
   } else {
-    return { fact: null };
+    return {};
   }
 };
 
@@ -595,7 +596,8 @@ const swap = <Space extends MemorySpace>(
   // is different from the one being asserted. We will asses this by pulling
   // the record and comparing it to desired state.
   if (updated === 0) {
-    const { fact: actual } = recall(session, { the, of });
+    const revision = recall(session, { the, of });
+    const { since, ...actual } = revision;
 
     // If actual state matches desired state it either was inserted by the
     // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
@@ -606,7 +608,7 @@ const swap = <Space extends MemorySpace>(
         the,
         of,
         expected,
-        actual,
+        actual: revision as Revision<Fact>,
       });
     }
   }

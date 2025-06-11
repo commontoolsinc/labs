@@ -1,12 +1,13 @@
 import type { EntityId } from "../doc-map.ts";
 import type { Cancel } from "../cancel.ts";
 import type {
+  MemorySpace,
   Result,
   SchemaContext,
   Unit,
 } from "@commontools/memory/interface";
 
-export type { Result, SchemaContext, Unit };
+export type { MemorySpace, Result, SchemaContext, Unit };
 
 // This type is used to tag a document with any important metadata.
 // Currently, the only supported type is the classification.
@@ -23,7 +24,7 @@ export interface StorageValue<T = any> {
 }
 
 export interface IStorageManager {
-  open(space: string): IStorageProvider;
+  open(space: MemorySpace): IStorageProvider;
 }
 
 export interface IStorageProvider {

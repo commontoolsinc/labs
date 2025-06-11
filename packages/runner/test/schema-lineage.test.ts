@@ -6,48 +6,28 @@ import { type JSONSchema, recipe, UI } from "@commontools/builder";
 import { Identity } from "@commontools/identity";
 import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";
-import { Provider } from "../src/storage/cache.ts";
+import { StorageManager } from "../src/storage/cache.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("Schema Lineage", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let provider: Memory.Provider.Provider<Memory.Protocol>;
-  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
   beforeEach(async () => {
-    // Create memory service for testing
-    const open = await Memory.Provider.open({
-      store: new URL("memory://db/"),
-      serviceDid: signer.did(),
-    });
-
-    if (open.error) {
-      throw open.error;
-    }
-
-    provider = open.ok;
-
-    consumer = Consumer.open({
-      as: signer,
-      session: provider.session(),
-    });
-
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
-      storageManager: {
-        open: (space: Consumer.MemorySpace) =>
-          Provider.open({
-            space,
-            session: consumer,
-          }),
-      },
+      storageManager,
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
-    await provider?.close();
+    await storageManager?.close();
   });
 
   describe("Schema Propagation through Aliases", () => {
@@ -56,7 +36,7 @@ describe("Schema Lineage", () => {
       const targetDoc = runtime.documentMap.getDoc(
         { count: 42, label: "test" },
         "schema-lineage-target",
-        "test",
+        space,
       );
 
       // Create a schema for our alias
@@ -79,7 +59,7 @@ describe("Schema Lineage", () => {
           },
         },
         "schema-lineage-source",
-        "test",
+        space,
       );
 
       // Access the doc without providing a schema
@@ -101,7 +81,7 @@ describe("Schema Lineage", () => {
       const targetDoc = runtime.documentMap.getDoc(
         { count: 42, label: "test" },
         "schema-lineage-target-explicit",
-        "test",
+        space,
       );
 
       // Create schemas with different types
@@ -132,7 +112,7 @@ describe("Schema Lineage", () => {
           },
         },
         "schema-lineage-source-explicit",
-        "test",
+        space,
       );
 
       // Access the doc with explicit schema
@@ -155,7 +135,7 @@ describe("Schema Lineage", () => {
       const valueDoc = runtime.documentMap.getDoc(
         { count: 5, name: "test" },
         "deep-alias-value",
-        "test",
+        space,
       );
 
       // Create a schema for our first level alias
@@ -172,7 +152,7 @@ describe("Schema Lineage", () => {
           },
         },
         "count-alias",
-        "test",
+        space,
       );
 
       // Create a third level of aliasing
@@ -184,7 +164,7 @@ describe("Schema Lineage", () => {
           },
         },
         "final-alias",
-        "test",
+        space,
       );
 
       // Access the doc without providing a schema
@@ -206,7 +186,7 @@ describe("Schema Lineage", () => {
           ],
         },
         "nested-doc-with-alias",
-        "test",
+        space,
       );
 
       // Define schemas for the nested objects
@@ -231,7 +211,7 @@ describe("Schema Lineage", () => {
           },
         },
         "items-alias",
-        "test",
+        space,
       );
 
       // Access the items with a schema that specifies array items should be cells
@@ -257,43 +237,22 @@ describe("Schema Lineage", () => {
 });
 
 describe("Schema propagation end-to-end example", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let provider: Memory.Provider.Provider<Memory.Protocol>;
-  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
   beforeEach(async () => {
-    // Create memory service for testing
-    const open = await Memory.Provider.open({
-      store: new URL("memory://db/"),
-      serviceDid: signer.did(),
-    });
-
-    if (open.error) {
-      throw open.error;
-    }
-
-    provider = open.ok;
-
-    consumer = Consumer.open({
-      as: signer,
-      session: provider.session(),
-    });
-
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
-      storageManager: {
-        open: (space: Consumer.MemorySpace) =>
-          Provider.open({
-            space,
-            session: consumer,
-          }),
-      },
+      storageManager,
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
-    await provider?.close();
+    await storageManager?.close();
   });
 
   it("should propagate schema through a recipe", () => {
@@ -325,7 +284,7 @@ describe("Schema propagation end-to-end example", () => {
     const result = runtime.documentMap.getDoc(
       undefined,
       "should propagate schema through a recipe",
-      "test",
+      space,
     );
     runtime.run(
       testRecipe,

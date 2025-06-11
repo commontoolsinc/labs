@@ -904,7 +904,7 @@ export type Conflict = {
   /**
    * Actual memory state in the replica repository.
    */
-  actual: Fact | null;
+  actual: Revision<Fact> | null;
 };
 
 export type ToJSON<T> = T & {

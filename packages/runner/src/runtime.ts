@@ -18,7 +18,13 @@ import type {
 } from "@commontools/builder";
 import { setRecipeEnvironment } from "@commontools/builder";
 
-export type { MemorySpace } from "./storage.ts";
+import type {
+  IStorageManager,
+  IStorageProvider,
+  MemorySpace,
+} from "./storage/interface.ts";
+
+export type { IStorageManager, IStorageProvider, MemorySpace };
 
 export type ErrorWithContext = Error & {
   action: Action;
@@ -52,7 +58,6 @@ export interface RuntimeOptions {
 }
 
 export interface IRuntime {
-  readonly id: string;
   readonly scheduler: IScheduler;
   readonly storage: IStorage;
   readonly recipeManager: IRecipeManager;
@@ -193,7 +198,7 @@ export interface IDocumentMap {
     sourceIfCreated?: DocImpl<any>,
   ): DocImpl<T> | undefined;
   registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: string): void;
-  getDoc<T>(value: T, cause: any, space: string): DocImpl<T>;
+  getDoc<T>(value: T, cause: any, space: MemorySpace): DocImpl<T>;
   cleanup(): void;
 }
 
@@ -227,7 +232,6 @@ import { ModuleRegistry } from "./module.ts";
 import { DocumentMap } from "./doc-map.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
-import { IStorageManager } from "./storage/interface.ts";
 
 /**
  * Main Runtime class that orchestrates all services in the runner package.
@@ -250,7 +254,6 @@ import { IStorageManager } from "./storage/interface.ts";
  * ```
  */
 export class Runtime implements IRuntime {
-  readonly id: string;
   readonly scheduler: IScheduler;
   readonly storage: IStorage;
   readonly recipeManager: IRecipeManager;
@@ -261,9 +264,6 @@ export class Runtime implements IRuntime {
   readonly blobbyServerUrl: string;
 
   constructor(options: RuntimeOptions) {
-    // Generate unique ID for this runtime instance
-    this.id = crypto.randomUUID();
-
     // Create harness first (no dependencies on other services)
     this.harness = new UnsafeEvalHarness(this);
 
@@ -348,19 +348,19 @@ export class Runtime implements IRuntime {
 
   // Cell factory methods
   getCell<T>(
-    space: string,
+    space: MemorySpace,
     cause: any,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getCell<S extends JSONSchema = JSONSchema>(
-    space: string,
+    space: MemorySpace,
     cause: any,
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCell(
-    space: string,
+    space: MemorySpace,
     cause: any,
     schema?: JSONSchema,
     log?: ReactivityLog,
@@ -443,7 +443,7 @@ export class Runtime implements IRuntime {
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getImmutableCell(
-    space: string,
+    space: MemorySpace,
     data: any,
     schema?: JSONSchema,
     log?: ReactivityLog,
