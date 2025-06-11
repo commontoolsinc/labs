@@ -189,6 +189,13 @@ This plan should be entirely incremental and can be rolled out step by step.
     significantly more complicated, and even more so if we allow async steps
     inbetween (like a fetch). We haven't seen concrete examples of this yet, and
     we should generally avoid this pattern in favor of reactive functions.
+- [ ] Incremental loading: As currently stated all pending schema queries are
+      expected to be resolved together. At least that is the easiest to model if
+      the goal is to represent consistent state. But it also means that the
+      initial load can take longer than needed, because it needs to load all the
+      data. Clever ordering of queries, treating some as pending, etc. could
+      improve this a lot, but is non-trivial. Fine for now, but something to
+      observe.
 
 ## Design notes
 
