@@ -167,11 +167,6 @@ This plan should be entirely incremental and can be rolled out step by step.
         memory (currently goes through storage.ts listeners). This happens just
         before returning the transaction, so maybe we instead make this
         listening part of the transaction API?
-  - [ ] TODO: Figure this out: Pending writes might contain `Cell` objects.
-        Those would be converted to links in JSON, but the ids for those might
-        not be known when writing (this has to do with the upcoming recipe
-        refactoring). Probably this will have to look like another queued up set
-        of writes.
 - [ ] More selectively purge the nursery on conflicts by observing conflicted
       reads.
 - [ ] On conflicts add data that changed unless it was already sent to the
@@ -371,10 +366,32 @@ for this stream, so that they can be reloaded.
 
 ### Changing recipe creation to just use `Cell` and get rid of `OpaqueRef`
 
-The accumulation of writes when running a reactive function / handler allows us
-to create a graph of pending cells in them and treat those as a recipe. With the
-addition of marking cells as opaque we then have all the functionality of
-`OpaqueRef` and can replace all of that code.
+`OpaqueRef` are just opaque `Cell`s. So we can vastly simplify recipe
+generaetion by combining those.
+
+Essentially `lift` & co return cells instead. And the opaque cell passed in to
+the recipe function is already bound to the actual inputs (without revealing
+that to the recipe function).
+
+The tricky bit is generating good causal ids for these cells, which isn't good
+right now either.
+
+This could work like this:
+
+- Build up a graph of cells, just like opaque refs now, via builder functions.
+  Don't assign ids yet, so id-less cells is a new thing.
+- Eventually they are either assigned to a pre-existing cell or they are
+  returned (which is assigned to the result cell). Use this to derive ids, that
+  are causal to invocation and where they write to (entity id + path).
+- Do that recursively as ids are being set.
+- For all remaining cells in the graph, i.e. those that are never read, we can
+  assign them causal to the invocation and a sequence number or something else.
+  As nothing can read them it matters less. FWIW, the only use-case so far is a
+  `lift` that calls console.log, so strictly for debugging.
+
+Note that with the change above of writing transactions this also implies
+delayed writes. This is then also how the transaction object gets known to the
+cell: When it connects to the rest of the graph and gets its id.
 
 ### Single event sourcing model + server-side query prediction
 
