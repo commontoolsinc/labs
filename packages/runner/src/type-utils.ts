@@ -1,6 +1,6 @@
 import { isRecord, type Mutable } from "@commontools/utils/types";
 import { isOpaqueRef } from "@commontools/builder";
-import { type DocImpl, isDoc } from "./doc.ts";
+import { isDoc } from "./doc.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import {
   getCellLinkOrThrow,

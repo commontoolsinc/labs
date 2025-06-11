@@ -247,10 +247,16 @@ export function maybeGetCellLink<T>(
 ): CellLink | undefined {
   if (isQueryResultForDereferencing(value)) return getCellLinkOrThrow(value);
   else if (isCellLink(value)) return value;
-  else if (isAlias(value)) return { cell: parent, ...value.$alias } as CellLink;
   else if (isDoc(value)) return { cell: value, path: [] } satisfies CellLink;
   else if (isCell(value)) return value.getAsCellLink();
-  else return undefined;
+  else if (isAlias(value)) {
+    if (!parent && !value.$alias.cell) {
+      throw new Error(
+        `Alias without cell and no parent provided: ${JSON.stringify(value)}`,
+      );
+    }
+    return { cell: parent, ...value.$alias } as CellLink;
+  } else return undefined;
 }
 
 // Follows aliases and returns cell reference describing the last alias.
