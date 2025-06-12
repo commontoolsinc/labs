@@ -129,44 +129,89 @@ This plan should be entirely incremental and can be rolled out step by step.
   - [ ] Also change schema queries on the serverside
   - [ ] Remove that translation in storage.ts and make sure everything still
         works.
+- [ ] Expose a "run this function with a transaction object to be populated"
+      from memory, which scheduler calls with something that wraps the action
+      and returns a transaction, and which all other reading and writes contexts
+      will use as well. CT-449
+  - [ ] The callback function can be async, so you have to await it. But if the
+        function isn't async, the entire transaction building flow should be
+        synchronous (i.e. not yield to the event loop), just return a Promise
+        for when the transaction settles.
+  - [ ] Be sure to handle errors correctly, i.e. abort transaction on re-throw
+        the error (or return an aborted transaction, including the caught error?
+        or reject promise with aborted transaction that includes the caught
+        exception?).
+  - [ ] The heap shall not change while this function is running, i.e. the
+        function can read from memory and gets the state as of the beginning of
+        the function call and what it updated itself.
+  - [ ] If the transaction is aborted, the nursery is reverted to what it was
+        before the transaction (that is likely we'll create another layer on top
+        of the nursery?).
+  - [ ] Part of the transaction is what is being read. Likely, we just want to
+        change `ReactivityLog` to be a new transaction object that is being
+        passed through. In fact all reads and writes could now go through such
+        an `tx` object. We log not just the entity read or written, but also the
+        path (see next item)
+  - [ ] Add path-dependent listeners to memory: During a transaction reads are
+        logged with path. And there is a `tx.updates(callback)` or so function
+        that registers a listener to any writes to any of the read paths (and
+        only changes to these paths). Make it canceallable (the scheduler will
+        e.g. cancel this before executing the action again). Current need would
+        be satisfied if this is called once on the first change and then not
+        again. If reads and writes are overlapping, i.e. the function wrote to
+        what it reads, then notifications start after applying those writes.
+    - [ ] The current reads and writes can also be read out, which scheduler
+          will use to update the dependency graph. In fact scheduler will inside
+          the callback do both this and adding the callback just before
+          returning. It does so to not miss any updates.
+  - [ ] The callback can `tx.abort(reason extends Error)` a transaction.
+        Listeners per above should still be installed, even if the transaction
+        is aborted. Scheduler will use this if the action (which is called from
+        the callback) throws, so it can still update scheduling information.
+  - [ ] Support nested read transactions. Write isn't needed. Nesting just means
+        that the read logs are partitioned, i.e. reads are only added to the
+        innermost transaction and thus the listeners from the previous point
+        only apply to those. This is concretely used in the renderer, which
+        creates nested `Cell.sink` calls that follow this logic. Throw when
+        nesting with writes or with async callbacks (the latter makes sure we
+        can't interleave transactions, just strictly nest them).
+- [ ] Memory schedules a task with the scheduler to update heap. Scheduler will
+      run this as soon as possible, but outside running network of reactive
+      functions. (TBD: There are alternative approaches. Either way, per above,
+      memory needs the ability to queue up changes, so this seems like the
+      simplest way)
 - [ ] Directly read & write to memory layer & wrap action calls in a transaction
       CT-450
-  - [ ] Expose the API below current StorageProvider to `Cell` and `Scheduler`.
-        That includes `Cell` setting the to application/json, compute the right
-        DID based ids, etc. -- all stuff that currently happens in
-        `StorageProvider` instances.
-  - [ ] Expose a "run this function that returns a transaction" from memory,
-        which scheduler calls with something that wraps the action and returns a
-        transaction. Be sure to handle errors correctly (maybe the function can
-        return that it error'ed and that aborts the transaction). This function
-        can be async, so you have to await it. CT-449
-    - [ ] Part of the transaction is what is being read. Likely, we just want to
-          change `ReactivityLog` to be a new transaction object that is being
-          passed through.
-    - [ ] Takes a #retry and callback-on-out-of-retries parameters and retries
-          that many times after conflicts with updated data. Scheduler uses
-          those for events (including a hook for a user-visible callback for
-          user created events). Not needed for reactive functions, those will be
-          scheduled again anyway based on data changes.
-    - [ ] The heap shall not change while this function is running, i.e. the
-          function can read from memory and gets the state as of the beginning
-          of the function call and what it updated itself.
-    - [ ] For change sets that only write (e.g. only push or set), we could just
-          reapply it without re-running. But this could also be a future
-          optimization.
+  - [ ] Use the new transaction API above to do all reads and writes.
   - [ ] Currently Cell.push() has retry logic (cell.ts:366-381) that can be
-        removed. It's subsumed by the previous point.
-  - [ ] Read: `Cell` bypasses DocImpl and just reads from memory.
-        `QueryResultProxy` will also have to keep re-reading from memory, so it
-        gets the latest state from the nursery.
+        removed. It's subsumed by the next point.
+  - [ ] Scheduler creates a transaction that wraps calling an action. See above.
+  - [ ] `Cell.sink()` creates a (read-only) transaction, which might be nested
+        (see above).
+  - [ ] When cells are being created, active transactions are being passed in,
+        just like `log` now. Change `withLog()` to `withTX()` or so. When there
+        is no TX associated on a read, create one. Don't allow writes without a
+        TX.
+  - [ ] In Runner, use TX associated with passed in result cell to create
+        process cell if needed.
+  - [ ] `QueryResultProxy` will have to keep re-reading from memory, so it gets
+        the latest state from the nursery.
   - [ ] Writes: `Cell` and `QueryResultProxy` directly write to memory, building
-        up the current transaction (probably via what replaces
-        `log: ReactivityLog`). This mostly boils down to changing
+        up the current transaction. This mostly boils down to changing
         `applyChangeSet`.
   - [ ] Scheduler: When listening to changes on entities, directly talk to
         memory (currently goes through storage.ts listeners). This happens just
-        before returning the transaction, so maybe we instead make this
-        listening part of the transaction API?
+        before returning the transaction. See above.
+- [ ] Scheduler retries events whose transaction failed. It does so up to N
+      times and calls a callback after the last retry (both configurable via
+      `Runtime` constructor). Events are retried after all reactive functions
+      that are queued up are settled, so it's guaranteed to be a stable state
+      (Future optimization: Dynamically insert into the queue after any reactive
+      function that might update the handlers inputs, but before any that read
+      its outputs)
+  - [ ] For change sets that only write (e.g. only push or set), we could just
+        reapply those without re-runnin the handler. But this could also be a
+        future optimization.
 - [ ] More selectively purge the nursery on conflicts by observing conflicted
       reads. CT-451
 - [ ] On conflicts add data that changed unless it was already sent to the
