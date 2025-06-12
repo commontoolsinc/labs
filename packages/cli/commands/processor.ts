@@ -5,7 +5,7 @@ import {
   Source,
   TypeScriptCompiler,
   UnsafeEvalRuntime,
-} from "../../mod.ts";
+} from "@commontools/js-runtime";
 import { basename, dirname, join } from "@std/path";
 import { cache } from "@commontools/static";
 

@@ -1,3 +1,4 @@
+#!/usr/bin/env -S deno run
 import { Identity } from "@commontools/identity";
 
 /**
