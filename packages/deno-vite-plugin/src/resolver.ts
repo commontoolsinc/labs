@@ -169,6 +169,17 @@ export async function resolveViteSpecifier(
     }
   }
 
+  // Check if import.meta.resolve gave us a local file path
+  if (id.startsWith("file://")) {
+    const filePath = fileURLToPath(id);
+    // If this is a local workspace package, return it directly
+    // This avoids expensive deno info calls on workspace packages
+    if (filePath.startsWith(path.resolve(root, "../"))) {
+      console.log("[resolver] Local workspace package, returning directly:", filePath);
+      return filePath;
+    }
+  }
+
   if (importer && isDenoSpecifier(importer)) {
     const { resolved: parent } = parseDenoSpecifier(importer);
 

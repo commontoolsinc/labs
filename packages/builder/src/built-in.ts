@@ -1,7 +1,12 @@
 import { createNodeFactory, lift } from "./module.ts";
-import { type Cell } from "@commontools/runner";
-import type { JSONSchema, NodeFactory, Opaque, OpaqueRef } from "./types.ts";
-import type { Schema } from "./schema-to-ts.ts";
+import type {
+  Cell,
+  JSONSchema,
+  NodeFactory,
+  Opaque,
+  OpaqueRef,
+  Schema,
+} from "./types.ts";
 
 export interface BuiltInLLMParams {
   messages?: string[];
@@ -17,11 +22,30 @@ export interface BuiltInLLMParams {
   mode?: "json";
 }
 
+export interface BuiltInCompileAndRunParams<T> {
+  files: Record<string, string>;
+  main: string;
+  input?: T;
+}
+
+export interface BuiltInCompileAndRunState<T> {
+  pending: boolean;
+  result?: T;
+  error?: any;
+}
+
+export const compileAndRun = createNodeFactory({
+  type: "ref",
+  implementation: "compileAndRun",
+}) as <T = any, S = any>(
+  params: Opaque<BuiltInCompileAndRunParams<T>>,
+) => OpaqueRef<BuiltInCompileAndRunState<S>>;
+
 export interface BuiltInLLMState<T> {
   pending: boolean;
   result?: T;
   partial?: string;
-  error: any;
+  error: unknown;
 }
 
 export const llm = createNodeFactory({
@@ -41,7 +65,7 @@ export const fetchData = createNodeFactory({
     options?: RequestInit;
     result?: T;
   }>,
-) => Opaque<{ pending: boolean; result: T; error: any }>;
+) => Opaque<{ pending: boolean; result: T; error: unknown }>;
 
 export const streamData = createNodeFactory({
   type: "ref",
@@ -52,9 +76,9 @@ export const streamData = createNodeFactory({
     options?: RequestInit;
     result?: T;
   }>,
-) => Opaque<{ pending: boolean; result: T; error: any }>;
+) => Opaque<{ pending: boolean; result: T; error: unknown }>;
 
-export function ifElse<T = any, U = any, V = any>(
+export function ifElse<T = unknown, U = unknown, V = unknown>(
   condition: Opaque<T>,
   ifTrue: Opaque<U>,
   ifFalse: Opaque<V>,
@@ -63,15 +87,15 @@ export function ifElse<T = any, U = any, V = any>(
     type: "ref",
     implementation: "ifElse",
   });
-  return ifElseFactory([condition, ifTrue, ifFalse]);
+  return ifElseFactory([condition, ifTrue, ifFalse]) as OpaqueRef<U | V>;
 }
 
-let ifElseFactory: NodeFactory<[any, any, any], any> | undefined;
+let ifElseFactory: NodeFactory<[unknown, unknown, unknown], any> | undefined;
 
 export const navigateTo = createNodeFactory({
   type: "ref",
   implementation: "navigateTo",
-}) as (cell: OpaqueRef<any>) => OpaqueRef<string>;
+}) as (cell: OpaqueRef<unknown>) => OpaqueRef<string>;
 
 // Example:
 // str`Hello, ${name}!`
@@ -79,14 +103,14 @@ export const navigateTo = createNodeFactory({
 // TODO(seefeld): This should be a built-in module
 export function str(
   strings: TemplateStringsArray,
-  ...values: any[]
+  ...values: unknown[]
 ): OpaqueRef<string> {
   const interpolatedString = ({
     strings,
     values,
   }: {
     strings: TemplateStringsArray;
-    values: any[];
+    values: unknown[];
   }) =>
     strings.reduce(
       (result, str, i) => result + str + (i < values.length ? values[i] : ""),

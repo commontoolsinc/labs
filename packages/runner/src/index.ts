@@ -28,10 +28,6 @@ export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export { type MemorySpace, Storage } from "./storage.ts";
 export { type ConsoleEvent, ConsoleMethod } from "./harness/console.ts";
-export {
-  addCommonIDfromObjectID,
-  followAliases,
-  maybeGetCellLink,
-} from "./utils.ts";
-export { Classification, ContextualFlowControl } from "./cfc.ts";
+export { addCommonIDfromObjectID } from "./data-updating.ts";
+export { followAliases, maybeGetCellLink } from "./link-resolution.ts";
 export * from "./recipe-manager.ts";

@@ -1,3 +1,4 @@
+@import url("commands.css");
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 

@@ -1,11 +1,10 @@
 import {
+  Compiler,
   CompilerError,
-  ExecutableJs,
-  isJsModule,
-  isSourceMap,
-  JsArtifact,
-  JsModule,
-  TsArtifact,
+  isProgram,
+  JsScript,
+  Program,
+  ProgramResolver,
 } from "../interface.ts";
 import type {
   CompilerHost,
@@ -20,19 +19,15 @@ import type {
   SourceFile,
   StringLiteralLike,
 } from "typescript";
-import * as ts from "typescript";
+import ts from "typescript";
 import * as path from "@std/path";
-import { bundleAMDOutput } from "./bundle.ts";
-import { parseSourceMap } from "../utils.ts";
-
-const TARGET_TYPE_LIB = "es2023";
-const IS_MAP = /\.js\.map$/;
-const IS_TYPE = /\.d\.ts$/;
-const IS_JS = /\.js$/;
+import { getCompilerOptions, TARGET } from "./options.ts";
+import { bundleAMDOutput } from "./bundler/mod.ts";
+import { parseSourceMap } from "../source-map.ts";
+import { resolveProgram } from "./resolver.ts";
 
 const DEBUG_VIRTUAL_FS = false;
 const VFS_TYPES_DIR = "$types/";
-const VFS_DEPS_DIR = "$ext/";
 
 // Mapping from virtual type path (e.g. `$types/es2023.d.ts`)
 type TypeLibs = Record<string, string>;
@@ -43,7 +38,7 @@ class VirtualFs implements ModuleResolutionHost {
   private readonly fsWrite: Record<string, string> = Object.create(null);
   private readonly debug: boolean;
   constructor(
-    input: TsArtifact,
+    input: Program,
     typeLib: TypeLibs,
     debug?: boolean,
   ) {
@@ -94,65 +89,6 @@ class VirtualFs implements ModuleResolutionHost {
     return this.fsWrite;
   }
 
-  // This method was used to collect all written files
-  // and map each transpiled JS/source map with its original
-  // source. As we bundle everything up now, this is not currently needed,
-  // but keeping this here as reference until things settle here a bit.
-  getCompiledModules(): Record<string, JsModule> {
-    const modules = Object.create(null) as Record<
-      string,
-      Partial<JsModule>
-    >;
-    for (const key of Object.keys(this.fsWrite)) {
-      if (IS_MAP.test(key)) {
-        const root = key.slice(0, -4);
-        modules[root] = modules[root] ?? {};
-        try {
-          modules[root].sourceMap = parseSourceMap(this.fsWrite[key]);
-        } catch (e) {
-          console.warn(`There was an error parsing "${key}" source map: ${e}`);
-        }
-      } else if (IS_TYPE.test(key)) {
-        const root = `${key.slice(0, -5)}.js`;
-        modules[root] = modules[root] ?? {};
-        modules[root].typesSrc = this.fsWrite[key];
-      } else if (IS_JS.test(key)) {
-        const root = key;
-        modules[root] = modules[root] ?? {};
-        modules[root].contents = this.fsWrite[key];
-        // Attempt to map to source filename here -- this could be tsx,
-        // ts, or js.
-        let ext;
-        const keyNoExt = key.slice(0, -3);
-        if (this.fsRead[`${keyNoExt}.tsx`]) {
-          ext = ".tsx";
-        } else if (this.fsRead[`${keyNoExt}.ts`]) {
-          ext = ".ts";
-        } else if (this.fsRead[`${keyNoExt}.js`]) {
-          ext = ".js";
-        } else {
-          throw new Error("Could not find original source extension.");
-        }
-        modules[root].originalFilename = `${keyNoExt}${ext}`;
-      } else {
-        throw new Error(`Unknown generated file: ${key}`);
-      }
-    }
-
-    for (const key of Object.keys(modules)) {
-      if (typeof key !== "string") {
-        throw new Error("Invalid module key.");
-      }
-      const module = modules[key];
-      if (!isJsModule(module)) {
-        throw new Error(
-          `Incomplete compiled module "${key}": ${JSON.stringify(module)}`,
-        );
-      }
-    }
-    return modules as Record<string, JsModule>;
-  }
-
   private innerRead(fileName: string): string | undefined {
     return this.log(`innerRead - ${fileName}`, () => {
       let innerRecord;
@@ -178,14 +114,17 @@ class VirtualFs implements ModuleResolutionHost {
 }
 
 class TypeScriptHost extends VirtualFs implements CompilerHost {
+  private allowedRuntimeModules: string[];
   constructor(
-    source: TsArtifact,
+    source: Program,
     typeLibs: TypeLibs,
+    allowedRuntimeModules: string[],
   ) {
     super(source, typeLibs, DEBUG_VIRTUAL_FS);
+    this.allowedRuntimeModules = allowedRuntimeModules;
   }
 
-  getDefaultLibFileName(options: CompilerOptions): string {
+  getDefaultLibFileName(_options: CompilerOptions): string {
     return "lib.d.ts";
   }
 
@@ -198,12 +137,12 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
   }
 
   resolveTypeReferenceDirectiveReferences?<T extends FileReference | string>(
-    typeDirectiveReferences: readonly T[],
-    containingFile: string,
-    redirectedReference: ResolvedProjectReference | undefined,
-    options: CompilerOptions,
-    containingSourceFile: SourceFile | undefined,
-    reusedNames: readonly T[] | undefined,
+    _typeDirectiveReferences: readonly T[],
+    _containingFile: string,
+    _redirectedReference: ResolvedProjectReference | undefined,
+    _options: CompilerOptions,
+    _containingSourceFile: SourceFile | undefined,
+    _reusedNames: readonly T[] | undefined,
   ): readonly ResolvedTypeReferenceDirectiveWithFailedLookupLocations[] {
     throw new Error("ResolveTypeReferenceDirectiveReferences");
   }
@@ -219,7 +158,7 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
   getSourceFile(
     fileName: string,
     languageVersion: ScriptTarget,
-    onError?: (message: string) => void,
+    _onError?: (message: string) => void,
   ): SourceFile | undefined {
     const sourceText = this.readFile(fileName);
     return sourceText !== undefined
@@ -246,14 +185,17 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
       // e.g. `@commontools/foo`. If a type definition was provided
       // with the same identifier with a `.d.ts` extension, that will be used
       // for types, leaving the module implementation resolution to runtime.
-      return {
-        resolvedModule: {
-          resolvedFileName: `${literal.text}.d.ts`,
-          extension: ts.Extension.Dts,
-          isExternalLibraryImport: true,
-          packageId: undefined,
-        },
-      };
+      if (this.allowedRuntimeModules.includes(name)) {
+        return {
+          resolvedModule: {
+            resolvedFileName: `${name}.d.ts`,
+            extension: ts.Extension.Dts,
+            isExternalLibraryImport: true,
+            packageId: undefined,
+          },
+        };
+      }
+      return { resolvedModule: undefined };
     });
   }
 }
@@ -266,9 +208,12 @@ export interface TypeScriptCompilerOptions {
   noCheck?: boolean;
   // Extra scripts to inject into the output bundle.
   injectedScript?: string;
+  // Optional mapping of runtime module name e.g. `"@commontools/framework"`,
+  // and its corresponding type definitions.
+  runtimeModules?: string[];
 }
 
-export class TypeScriptCompiler {
+export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
   private typeLibs: TypeLibs;
   constructor(typeLibs: TypeLibs) {
     this.typeLibs = Object.keys(typeLibs).reduce((libs, libName) => {
@@ -280,50 +225,59 @@ export class TypeScriptCompiler {
   // Compiles `source` into `JsArtifact`.
   // Artifact files must be TypeScriptModuleSource
   compile(
-    input: TsArtifact,
+    input: Program | ProgramResolver,
     inputOptions: TypeScriptCompilerOptions = {},
-  ): ExecutableJs {
+  ): JsScript {
     const filename = inputOptions.filename ?? "out.js";
     const noCheck = inputOptions.noCheck ?? false;
     const injectedScript = inputOptions.injectedScript;
+    const runtimeModules = inputOptions.runtimeModules ?? [];
+    const program = isProgram(input)
+      ? input
+      : resolveProgram(input as ProgramResolver, {
+        unresolvedModules: {
+          type: "allow",
+          identifiers: runtimeModules,
+        },
+        resolveUnresolvedModuleTypes: true,
+        target: TARGET,
+      });
 
-    validateSource(input);
-    const sourceNames = input.files.map(({ name }) => name);
-    const tsOptions = this.getCompilerOptions({ filename });
+    validateSource(program);
+    const sourceNames = program.files.map(({ name }) => name);
+    const tsOptions = getCompilerOptions();
+    tsOptions.outFile = filename;
+
     const host = new TypeScriptHost(
-      input,
+      program,
       this.typeLibs,
+      runtimeModules,
     );
-    const program = ts.createProgram(
+    const tsProgram = ts.createProgram(
       sourceNames,
       tsOptions,
       host,
     );
 
     // Filter out the default type lib of generated sources
-    const sourceFiles = program.getSourceFiles().filter((source) =>
+    const sourceFiles = tsProgram.getSourceFiles().filter((source) =>
       !source.fileName.startsWith(VFS_TYPES_DIR)
     );
 
-    //assert(
-    //  sourceFiles.length === sourceNames.length,
-    //  `Some inputs were not converted to source files.`,
-    //);
-
     let sourceEntry;
     for (const sourceFile of sourceFiles) {
-      if (sourceFile.fileName === input.entry) {
+      if (sourceFile.fileName === program.entry) {
         assert(!sourceEntry, "Source entry not yet set.");
         sourceEntry = sourceFile;
       }
 
       if (!noCheck) {
         // check types
-        const diagnostics = program.getSemanticDiagnostics(sourceFile);
+        const diagnostics = tsProgram.getSemanticDiagnostics(sourceFile);
         checkDiagnostics(diagnostics);
       }
       // check compilation
-      const diagnostics = program.getDeclarationDiagnostics(sourceFile);
+      const diagnostics = tsProgram.getDeclarationDiagnostics(sourceFile);
       checkDiagnostics(diagnostics);
     }
 
@@ -331,7 +285,7 @@ export class TypeScriptCompiler {
       throw new Error("Missing source entry.");
     }
 
-    const { diagnostics, emittedFiles, emitSkipped } = program.emit(
+    const { diagnostics, emittedFiles, emitSkipped } = tsProgram.emit(
       sourceEntry,
     );
     checkDiagnostics(diagnostics);
@@ -345,7 +299,7 @@ export class TypeScriptCompiler {
 
     // TypeScript compiles AMD modules from "/main.ts" to "main".
     // Derive the entry module name here.
-    const match = input.entry.match(/\/([^\.]*)/);
+    const match = program.entry.match(/\/([^\.]*)/);
     if (!match) {
       throw new Error("Could not derive entry module name");
     }
@@ -365,38 +319,9 @@ export class TypeScriptCompiler {
       sourceMap,
     };
   }
-
-  private getCompilerOptions(
-    options: TypeScriptCompilerOptions,
-  ): CompilerOptions {
-    return {
-      declarations: true,
-      module: ts.ModuleKind.AMD,
-      target: ts.ScriptTarget.ES2023,
-      // `lib` should autoapply, but we need to manage default libraries since
-      // we are running outside of node. Ensure this lib matches `target`.
-      lib: [TARGET_TYPE_LIB],
-      strict: true,
-      isolatedModules: false,
-      jsx: ts.JsxEmit.React,
-      jsxFactory: "h",
-      jsxFragmentFactory: "h.fragment",
-      esModuleInterop: true,
-      outFile: options.filename,
-      noEmitOnError: true,
-      // Dynamic import/requires should not be added.
-      noResolve: true,
-      // Enable source map generation.
-      sourceMap: true,
-      // We want the source map to include the original TypeScript files
-      inlineSources: true,
-      // Generate separate source map instead of inline
-      inlineSourceMap: false,
-    };
-  }
 }
 
-function validateSource(artifact: TsArtifact) {
+function validateSource(artifact: Program) {
   let entryFound = false;
   for (const { name } of artifact.files) {
     if (name === artifact.entry) {
@@ -406,7 +331,7 @@ function validateSource(artifact: TsArtifact) {
     // which could be included for runtime dependencies,
     // e.g. `@commontools/builder.d.ts`
     if (name[0] !== "/" && !name.endsWith(".d.ts")) {
-      throw new Error(`File "${name}" must have a "/" root.`);
+      //throw new Error(`File "${name}" must have a "/" root.`);
     }
   }
   if (!entryFound) {

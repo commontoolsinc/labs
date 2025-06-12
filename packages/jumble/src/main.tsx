@@ -1,6 +1,6 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-
+import { Runtime } from "@commontools/runner";
 import {
   BrowserRouter as Router,
   createRoutesFromChildren,
@@ -12,7 +12,6 @@ import {
 } from "react-router-dom";
 import * as Sentry from "@sentry/react";
 import { ErrorBoundary } from "@sentry/react";
-import "./styles/index.css";
 import Shell from "./views/Shell.tsx";
 import { CharmsProvider } from "@/contexts/CharmsContext.tsx";
 import CharmList from "@/views/CharmList.tsx";
@@ -59,7 +58,7 @@ if (envConfig) {
   Sentry.init({
     dsn: envConfig.dsn,
     environment: envConfig.environment,
-    release: import.meta.env.VITE_COMMIT_SHA || "development",
+    release: (import.meta as any).env.VITE_COMMIT_SHA || "development",
     tracesSampleRate: 1.0,
     integrations: [
       Sentry.reactRouterV7BrowserTracingIntegration({

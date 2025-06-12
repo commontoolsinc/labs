@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { h, render, VNode } from "../src/index.ts";
-import { lift, recipe, str, UI } from "@commontools/builder";
+import { createBuilder } from "@commontools/builder";
 import { Runtime, StorageManager } from "@commontools/runner";
 import * as assert from "./assert.ts";
 import { JSDOM } from "jsdom";
@@ -17,6 +17,10 @@ describe("recipes with HTML", () => {
   let document: Document;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let lift: ReturnType<typeof createBuilder>["lift"];
+  let recipe: ReturnType<typeof createBuilder>["recipe"];
+  let str: ReturnType<typeof createBuilder>["str"];
+  let UI: ReturnType<typeof createBuilder>["UI"];
 
   beforeEach(async () => {
     // Set up a fresh JSDOM instance for each test
@@ -36,6 +40,9 @@ describe("recipes with HTML", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+
+    const builder = createBuilder(runtime);
+    ({ lift, recipe, str, UI } = builder);
   });
 
   afterEach(async () => {
@@ -51,12 +58,11 @@ describe("recipes with HTML", () => {
       },
     );
 
-    const resultCell = runtime.documentMap.getDoc(
-      undefined,
-      "simple-ui-result",
-      space,
+    const result = runtime.run(
+      simpleRecipe,
+      { value: 5 },
+      runtime.documentMap.getDoc(undefined, "simple-ui-result", "test"),
     );
-    const result = runtime.runner.run(simpleRecipe, { value: 5 }, resultCell);
 
     await runtime.idle();
     const resultValue = result.get();
@@ -96,18 +102,17 @@ describe("recipes with HTML", () => {
       };
     });
 
-    const resultCell = runtime.documentMap.getDoc(
-      undefined,
-      "todo-list-result",
-      space,
+    const result = runtime.run(
+      todoList,
+      {
+        title: "test",
+        items: [
+          { title: "item 1", done: false },
+          { title: "item 2", done: true },
+        ],
+      },
+      runtime.documentMap.getDoc(undefined, "todo-list-result", space),
     );
-    const result = runtime.runner.run(todoList, {
-      title: "test",
-      items: [
-        { title: "item 1", done: false },
-        { title: "item 2", done: true },
-      ],
-    }, resultCell);
 
     await runtime.idle();
 
@@ -139,18 +144,17 @@ describe("recipes with HTML", () => {
       return { [UI]: h("div", null, summaryUI as any) };
     });
 
-    const resultCell = runtime.documentMap.getDoc(
-      undefined,
-      "nested-todo-result",
-      space,
+    const result = runtime.run(
+      todoList,
+      {
+        title: { name: "test" },
+        items: [
+          { title: "item 1", done: false },
+          { title: "item 2", done: true },
+        ],
+      },
+      runtime.documentMap.getDoc(undefined, "nested-todo-result", space),
     );
-    const result = runtime.runner.run(todoList, {
-      title: { name: "test" },
-      items: [
-        { title: "item 1", done: false },
-        { title: "item 2", done: true },
-      ],
-    }, resultCell);
 
     await runtime.idle();
 
@@ -167,6 +171,7 @@ describe("recipes with HTML", () => {
       return { [UI]: h("div", null, str`Hello, ${name}!`) };
     });
 
+    const space = "test";
     const resultCell = runtime.documentMap.getDoc(
       undefined,
       "str-recipe-result",
@@ -209,6 +214,7 @@ describe("recipes with HTML", () => {
       ),
     }));
 
+    const space = "test";
     const resultCell = runtime.documentMap.getDoc(
       undefined,
       "nested-map-result",

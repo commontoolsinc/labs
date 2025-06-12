@@ -1,9 +1,11 @@
+import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import {
   type Alias,
   isAlias,
   isModule,
   isRecipe,
   isStreamAlias,
+  type JSONSchema,
   type JSONValue,
   type Module,
   type NodeFactory,
@@ -19,19 +21,15 @@ import {
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell } from "./cell.ts";
 import { type Action, type ReactivityLog } from "./scheduler.ts";
+import { containsOpaqueRef, deepCopy } from "./type-utils.ts";
+import { diffAndUpdate } from "./data-updating.ts";
 import {
-  containsOpaqueRef,
-  deepCopy,
-  diffAndUpdate,
-  extractDefaultValues,
   findAllAliasedCells,
-  followAliases,
-  maybeGetCellLink,
-  mergeObjects,
-  sendValueToBinding,
   unsafe_noteParentOnRecipes,
   unwrapOneLevelAndBindtoDoc,
-} from "./utils.ts";
+} from "./recipe-binding.ts";
+import { followAliases, maybeGetCellLink } from "./link-resolution.ts";
+import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
@@ -40,11 +38,6 @@ import { getCellLinkOrThrow } from "./query-result-proxy.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
 
 export { StorageManager } from "./storage/cache.ts";
-
-const moduleWrappers = {
-  handler: (fn: (event: any, ...props: any[]) => any) => (props: any) =>
-    fn.bind(props)(props.$event, props),
-};
 
 export class Runner implements IRunner {
   readonly cancels = new WeakMap<DocImpl<any>, Cancel>();
@@ -91,7 +84,7 @@ export class Runner implements IRunner {
     let processCell: DocImpl<{
       [TYPE]: string;
       argument?: T;
-      internal?: { [key: string]: any };
+      internal?: JSONValue;
       resultRef: { cell: DocImpl<R>; path: PropertyKey[] };
     }>;
 
@@ -183,18 +176,25 @@ export class Runner implements IRunner {
     }
 
     // Walk the recipe's schema and extract all default values
-    const defaults = extractDefaultValues(recipe.argumentSchema);
+    const defaults = extractDefaultValues(recipe.argumentSchema) as Partial<T>;
 
-    const internal = {
-      ...deepCopy((defaults as { internal: any })?.internal),
-      ...deepCopy((recipe.initial as { internal: any })?.internal),
-      ...processCell.get()?.internal,
-    };
+    // Important to use DeepCopy here, as the resulting object will be modified!
+    const previousInternal = processCell.get()?.internal;
+    const internal: JSONValue = Object.assign(
+      {},
+      deepCopy((defaults as unknown as { internal: JSONValue })?.internal),
+      deepCopy(
+        isRecord(recipe.initial) && isRecord(recipe.initial.internal)
+          ? recipe.initial.internal
+          : {},
+      ),
+      isRecord(previousInternal) ? previousInternal : {},
+    );
 
     // Still necessary until we consistently use schema for defaults.
     // Only do it on first load.
     if (!processCell.get()?.argument) {
-      argument = mergeObjects(argument, defaults);
+      argument = mergeObjects<T>(argument as any, defaults);
     }
 
     const recipeChanged = recipeId !== processCell.get()?.[TYPE];
@@ -220,7 +220,7 @@ export class Runner implements IRunner {
       // TODO(seefeld): Be smarter about merging in case result changed. But since
       // we don't yet update recipes, this isn't urgent yet.
       resultCell.send(
-        unwrapOneLevelAndBindtoDoc<R>(recipe.result as R, processCell),
+        unwrapOneLevelAndBindtoDoc<R, any>(recipe.result as R, processCell),
       );
     }
 
@@ -291,7 +291,7 @@ export class Runner implements IRunner {
       if (link && link.cell) {
         const maybePromise = this.runtime.storage.syncCell(link.cell);
         if (maybePromise instanceof Promise) promises.add(maybePromise);
-      } else if (typeof value === "object" && value !== null) {
+      } else if (isRecord(value)) {
         for (const key in value) syncAllMentionedCells(value[key]);
       }
     };
@@ -755,3 +755,86 @@ export class Runner implements IRunner {
     addCancel(this.cancels.get(resultCell.sourceCell!));
   }
 }
+
+/**
+ * Extracts default values from a JSON schema object.
+ * @param schema - The JSON schema to extract defaults from
+ * @returns An object containing the default values, or undefined if none found
+ */
+export function extractDefaultValues(
+  schema: JSONSchema,
+): JSONValue | undefined {
+  if (typeof schema !== "object" || schema === null) return undefined;
+
+  if (
+    schema.type === "object" && schema.properties && isObject(schema.properties)
+  ) {
+    // Ignore the schema.default if it's not an object, since it's not a valid
+    // default value for an object.
+    const obj = deepCopy(isRecord(schema.default) ? schema.default : {});
+    for (const [propKey, propSchema] of Object.entries(schema.properties)) {
+      const value = extractDefaultValues(propSchema);
+      if (value !== undefined) {
+        (obj as Record<string, unknown>)[propKey] = value;
+      }
+    }
+
+    return Object.entries(obj).length > 0 ? obj : undefined;
+  }
+
+  return schema.default;
+}
+
+/**
+ * Merges objects into a single object, preferring values from later objects.
+ * Recursively calls itself for nested objects, passing on any objects that
+ * matching properties.
+ * @param objects - Objects to merge
+ * @returns A merged object, or undefined if no objects provided
+ */
+export function mergeObjects<T>(
+  ...objects: (Partial<T> | undefined)[]
+): T {
+  objects = objects.filter((obj) => obj !== undefined);
+  if (objects.length === 0) return {} as T;
+  if (objects.length === 1) return objects[0] as T;
+
+  const seen = new Set<PropertyKey>();
+  const result: Record<string, unknown> = {};
+
+  for (const obj of objects) {
+    // If we have a literal value, return it. Same for arrays, since we wouldn't
+    // know how to merge them. Note that earlier objects take precedence, so if
+    // an earlier was e.g. an object, we'll return that instead of the literal.
+    if (
+      typeof obj !== "object" ||
+      obj === null ||
+      Array.isArray(obj) ||
+      isAlias(obj) ||
+      isCellLink(obj) ||
+      isDoc(obj) ||
+      isCell(obj)
+    ) {
+      return obj as T;
+    }
+
+    // Then merge objects, only passing those on that have any values.
+    for (const key of Object.keys(obj)) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const merged = mergeObjects<T[keyof T]>(
+        ...objects.map((obj) =>
+          (obj as Record<string, unknown>)?.[key] as T[keyof T]
+        ),
+      );
+      if (merged !== undefined) result[key] = merged;
+    }
+  }
+
+  return result as T;
+}
+
+const moduleWrappers = {
+  handler: (fn: (event: any, ...props: any[]) => any) => (props: any) =>
+    fn.bind(props)(props.$event, props),
+};

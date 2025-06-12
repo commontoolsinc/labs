@@ -1,7 +1,7 @@
+import { getTopFrame, TYPE } from "@commontools/builder";
 import type { DocImpl } from "./doc.ts";
 import type { Cancel } from "./cancel.ts";
 import { type CellLink } from "./cell.ts";
-import { getTopFrame, TYPE } from "@commontools/builder";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,

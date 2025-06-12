@@ -1,15 +1,14 @@
-import { h } from "@commontools/html";
 import {
-  cell,
+  h,
   derive,
   handler,
-  JSONSchema,
+  type JSONSchema,
   NAME,
   recipe,
   schema,
   str,
   UI,
-} from "@commontools/builder";
+} from "commontools";
 
 const updaterSchema = {
   type: "object",

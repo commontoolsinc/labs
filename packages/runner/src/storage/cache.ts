@@ -1,3 +1,13 @@
+import { fromString, refer } from "merkle-reference";
+import { isBrowser } from "@commontools/utils/env";
+import { isObject } from "@commontools/utils/types";
+import {
+  deepEqual,
+  JSONSchema,
+  JSONValue,
+  type SchemaContext,
+} from "@commontools/builder";
+import { MapSet } from "@commontools/builder/traverse";
 import type {
   AuthorizationError,
   Commit,
@@ -5,19 +15,26 @@ import type {
   ConnectionError,
   Entity,
   Fact,
+  FactAddress,
   MemorySpace,
   Protocol,
   ProviderSession,
   QueryError,
   Result,
   Revision,
-  SchemaContext,
+  SchemaPathSelector,
   State,
   The,
   TransactionError,
   UCAN,
   Unit,
 } from "@commontools/memory/interface";
+import { set, setSelector } from "@commontools/memory/selection";
+import type { MemorySpaceSession } from "@commontools/memory/consumer";
+import { assert, retract, unclaimed } from "@commontools/memory/fact";
+import { the, toChanges, toRevision } from "@commontools/memory/commit";
+import * as Memory from "@commontools/memory";
+import * as Codec from "@commontools/memory/codec";
 import {
   type Cancel,
   ContextualFlowControl,
@@ -25,20 +42,9 @@ import {
 } from "@commontools/runner";
 import { type IStorageProvider, type StorageValue } from "./interface.ts";
 import { BaseStorageProvider } from "./base.ts";
-import type { MemorySpaceSession } from "@commontools/memory/consumer";
-import { assert, retract, unclaimed } from "@commontools/memory/fact";
-import { fromString, refer } from "merkle-reference";
-import { the, toChanges, toRevision } from "@commontools/memory/commit";
 import * as IDB from "./idb.ts";
-import * as Consumer from "@commontools/memory/consumer";
-import * as Memory from "@commontools/memory";
 export * from "@commontools/memory/interface";
-import * as Codec from "@commontools/memory/codec";
 import { Channel, RawCommand } from "./inspector.ts";
-import { isBrowser } from "@commontools/utils/env";
-import { deepEqual, JSONSchema, JSONValue } from "@commontools/builder";
-import { set, setSelector } from "@commontools/memory/selection";
-import { isObject } from "@commontools/utils/types";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -116,11 +122,6 @@ export interface Retract {
   the: The;
   of: Entity;
   is?: void;
-}
-
-export interface FactAddress {
-  the: The;
-  of: Entity;
 }
 
 const toKey = ({ the, of }: FactAddress) => `${of}/${the}`;
@@ -743,7 +744,7 @@ export interface RemoteStorageProviderSettings {
 }
 
 export interface RemoteStorageProviderOptions {
-  session: Consumer.MemoryConsumer<MemorySpace>;
+  session: Memory.Consumer.MemoryConsumer<MemorySpace>;
   space: MemorySpace;
   the?: string;
   settings?: RemoteStorageProviderSettings;
@@ -1059,7 +1060,7 @@ class ProviderConnection implements IStorageProvider {
 export class Provider implements IStorageProvider {
   workspace: Replica;
   the: string;
-  session: Consumer.MemoryConsumer<MemorySpace>;
+  session: Memory.Consumer.MemoryConsumer<MemorySpace>;
   spaces: Map<string, Replica>;
   settings: RemoteStorageProviderSettings;
 
@@ -1309,7 +1310,7 @@ export class StorageManager implements IStorageManager {
       space,
       address,
       settings,
-      session: Consumer.create({ as }),
+      session: Memory.Consumer.create({ as }),
     });
   }
 

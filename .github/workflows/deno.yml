@@ -11,7 +11,7 @@ on:
 # Define the list of binaries we're building
 # This makes it easy to add more binaries in the future
 env:
-  BINARIES: "toolshed bg-charm-service"
+  BINARIES: "toolshed bg-charm-service ct"
 
 jobs:
   workspace-checks-and-tests:
@@ -21,18 +21,8 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🦕 Setup Deno 2.2.2
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: "2.2.2"
-
-      - name: 📦 Cache Deno dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.deno
-            ~/.cache/deno
-          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
 
       # Errors if `deno.lock` file was not committed with the current change
       - name: 🔍 Verify lock file & install dependencies
@@ -73,18 +63,8 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🦕 Setup Deno 2.2.2
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: "2.2.2"
-
-      - name: 📦 Cache Deno dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.deno
-            ~/.cache/deno
-          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
 
       - name: 📝 Verify code formatting
         working-directory: packages/toolshed
@@ -113,18 +93,8 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🦕 Setup Deno 2.2.2
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: "2.2.2"
-
-      - name: 📦 Cache Deno dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.deno
-            ~/.cache/deno
-          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
 
       - name: 🏗️ Build application binaries
         run: deno task build-binaries
@@ -198,6 +168,20 @@ jobs:
           # Copy to signed directory
           cp ./dist/bg-charm-service ./signed/
           cp ./dist/bg-charm-service.sig ./signed/
+          
+          # Process ct binary
+          echo "Processing binary: ct"
+          sha256sum ./dist/ct > ./dist/ct.hash.txt
+          CT_HASH=$(cat ./dist/ct.hash.txt | awk '{print $1}')
+          echo "ct hash: $CT_HASH"
+          echo "ct_hash=$CT_HASH" >> $GITHUB_OUTPUT
+
+          # Sign the ct binary
+          openssl dgst -sha256 -sign <(echo "${{ secrets.ARTIFACT_SIGNING_KEY }}") -out ./dist/ct.sig ./dist/ct
+
+          # Copy to signed directory
+          cp ./dist/ct ./signed/
+          cp ./dist/ct.sig ./signed/
 
           # Create a single tarball with all binaries and signatures
           tar -czf release/labs-${{ github.sha }}.tar.gz -C signed .
@@ -224,6 +208,14 @@ jobs:
         with:
           subject-name: ./dist/bg-charm-service
           subject-digest: sha256:${{ steps.binary_processing.outputs.bg_charm_service_hash }}
+      
+      - name: 📝 Generate attestation for ct binary
+        if: github.ref == 'refs/heads/main'
+        id: attest_ct
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ./dist/ct
+          subject-digest: sha256:${{ steps.binary_processing.outputs.ct_hash }}
 
       - name: 📝 Generate attestation for tarball
         if: github.ref == 'refs/heads/main'
@@ -242,6 +234,7 @@ jobs:
           path: |
             ${{ steps.attest_toolshed.outputs.bundle-path }}
             ${{ steps.attest_bg_charm_service.outputs.bundle-path }}
+            ${{ steps.attest_ct.outputs.bundle-path }}
             ${{ steps.attest_tarball.outputs.bundle-path }}
 
       - name: 🔍 Verify binary attestations
@@ -281,6 +274,17 @@ jobs:
             echo -e "\033[31m✗ bg-charm-service attestation verification failed\033[0m"
             exit 1
           fi
+          
+          # Verify ct binary attestation
+          echo "::group::ct attestation details"
+          gh attestation verify ./dist/ct -R ${{ github.repository }} --format json | jq
+          echo "::endgroup::"
+          if [ $? -eq 0 ]; then
+            echo -e "\033[32m✓ ct attestation verified successfully\033[0m"
+          else
+            echo -e "\033[31m✗ ct attestation verification failed\033[0m"
+            exit 1
+          fi
 
       - name: 🔑 Authenticate to Google Cloud
         if: github.ref == 'refs/heads/main'
@@ -312,6 +316,7 @@ jobs:
           path: |
             ./dist/toolshed
             ./dist/bg-charm-service
+            ./dist/ct
 
   integration-test:
     name: "Integration Tests"
@@ -332,18 +337,8 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🦕 Setup Deno 2.2.2
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: "2.2.2"
-
-      - name: 📦 Cache Deno dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.deno
-            ~/.cache/deno
-          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v4
@@ -386,18 +381,8 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🦕 Setup Deno 2.2.2
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: "2.2.2"
-
-      - name: 📦 Cache Deno dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.deno
-            ~/.cache/deno
-          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
 
       - name: 📥 Download built binaries
         uses: actions/download-artifact@v4
@@ -431,11 +416,10 @@ jobs:
         with:
           name: jumble-artifacts
           path: ./jumble-artifacts
-
-      - name: 🦕 Setup Deno 2.2.2
-        uses: denoland/setup-deno@v2
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
         with:
-          deno-version: "2.2.2"
+          cache: false
 
       - name: 🔽 Pre-download Sentry CLI
         run: |

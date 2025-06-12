@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { type Cell, isCell } from "../src/cell.ts";
+import {
+  type Cell,
+  createBuilder,
+  type JSONSchema,
+} from "@commontools/builder";
+import { isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
-import { type JSONSchema, recipe, UI } from "@commontools/builder";
 import { Identity } from "@commontools/identity";
-import * as Memory from "@commontools/memory";
-import * as Consumer from "@commontools/memory/consumer";
 import { StorageManager } from "../src/storage/cache.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -14,6 +16,8 @@ const space = signer.did();
 describe("Schema Lineage", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let recipe: ReturnType<typeof createBuilder>["recipe"];
+  let UI: ReturnType<typeof createBuilder>["UI"];
 
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -23,6 +27,8 @@ describe("Schema Lineage", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    const builder = createBuilder(runtime);
+    ({ recipe, UI } = builder);
   });
 
   afterEach(async () => {
@@ -239,6 +245,8 @@ describe("Schema Lineage", () => {
 describe("Schema propagation end-to-end example", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let recipe: ReturnType<typeof createBuilder>["recipe"];
+  let UI: ReturnType<typeof createBuilder>["UI"];
 
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -248,6 +256,8 @@ describe("Schema propagation end-to-end example", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    const builder = createBuilder(runtime);
+    ({ recipe, UI } = builder);
   });
 
   afterEach(async () => {

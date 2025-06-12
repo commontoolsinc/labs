@@ -1,4 +1,4 @@
-import { Plugin } from "vite";
+import { type Plugin, type ResolvedConfig } from "vite";
 import {
   DenoResolveResult,
   resolveDeno,
@@ -14,10 +14,10 @@ export default function denoPrefixPlugin(
   return {
     name: "deno:prefix",
     enforce: "pre",
-    configResolved(config) {
+    configResolved(config: ResolvedConfig) {
       root = config.root;
     },
-    async resolveId(id, importer) {
+    async resolveId(id: string, importer: string | undefined) {
       if (id.startsWith("npm:")) {
         const resolved = await resolveDeno(id, root);
         if (resolved === null) return;

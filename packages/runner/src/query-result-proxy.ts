@@ -1,8 +1,10 @@
+import { isRecord } from "@commontools/utils/types";
 import { getTopFrame, toOpaqueRef } from "@commontools/builder";
 import { type DocImpl, makeOpaqueRef } from "./doc.ts";
 import { type CellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { diffAndUpdate, resolveLinkToValue, setNestedValue } from "./utils.ts";
+import { diffAndUpdate, setNestedValue } from "./data-updating.ts";
+import { resolveLinkToValue } from "./link-resolution.ts";
 
 // Array.prototype's entries, and whether they modify the array
 enum ArrayMethodType {
@@ -60,7 +62,7 @@ export function createQueryResultProxy<T>(
   log?.reads.push({ cell: valueCell, path: valuePath });
   const target = valueCell.getAtPath(valuePath) as any;
 
-  if (typeof target !== "object" || target === null) return target;
+  if (!isRecord(target)) return target;
 
   return new Proxy(target as object, {
     get: (target, prop, receiver) => {
@@ -199,7 +201,10 @@ export function createQueryResultProxy<T>(
           ) {
             log?.writes.push({ cell: valueCell, path: [...valuePath, i] });
             if (valueCell.runtime) {
-              valueCell.runtime.scheduler.queueEvent({ cell: valueCell, path: [...valuePath, i] }, undefined);
+              valueCell.runtime.scheduler.queueEvent({
+                cell: valueCell,
+                path: [...valuePath, i],
+              }, undefined);
             }
           }
         }
@@ -247,7 +252,7 @@ const createProxyForArrayValue = (
 };
 
 function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
-  return typeof value === "object" && value !== null && originalIndex in value;
+  return isRecord(value) && originalIndex in value;
 }
 
 /**
@@ -280,8 +285,7 @@ export function getCellLinkOrThrow(value: any): CellLink {
  * @returns {boolean}
  */
 export function isQueryResult(value: any): value is QueryResult<any> {
-  return typeof value === "object" && value !== null &&
-    value[getCellLink] !== undefined;
+  return isRecord(value) && value[getCellLink] !== undefined;
 }
 
 const getCellLink = Symbol("isQueryResultProxy");

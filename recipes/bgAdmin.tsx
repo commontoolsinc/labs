@@ -1,5 +1,5 @@
-import { h } from "@commontools/html";
 import {
+  h,
   derive,
   handler,
   JSONSchema,
@@ -9,7 +9,7 @@ import {
   recipe,
   Schema,
   UI,
-} from "@commontools/builder";
+} from "commontools";
 
 const DISABLED_VIA_UI = "Disabled via UI";
 

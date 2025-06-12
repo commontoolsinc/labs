@@ -6,7 +6,7 @@ import { isQueryResult } from "../src/query-result-proxy.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { ID, JSONSchema, popFrame, pushFrame } from "@commontools/builder";
 import { Runtime } from "../src/runtime.ts";
-import { addCommonIDfromObjectID } from "../src/utils.ts";
+import { addCommonIDfromObjectID } from "../src/data-updating.ts";
 import { Identity } from "@commontools/identity";
 import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";

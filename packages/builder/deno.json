@@ -1,6 +1,9 @@
 {
   "name": "@commontools/builder",
-  "exports": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./traverse": "./src/traverse.ts"
+  },
   "tasks": {
     "test": "deno test --allow-env --allow-ffi --allow-read"
   }

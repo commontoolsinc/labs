@@ -7,9 +7,11 @@ import type {
   NodeRef,
   Opaque,
   OpaqueRef,
+  Schema,
+  SchemaWithoutCell,
   toJSON,
 } from "./types.ts";
-import { isModule, isOpaqueRef } from "./types.ts";
+import { isModule } from "./types.ts";
 import { opaqueRef } from "./opaque-ref.ts";
 import {
   applyArgumentIfcToResult,
@@ -18,7 +20,6 @@ import {
   traverseValue,
 } from "./utils.ts";
 import { getTopFrame } from "./recipe.ts";
-import { Schema, SchemaWithoutCell } from "./schema-to-ts.ts";
 
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,

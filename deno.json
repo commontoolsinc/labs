@@ -1,5 +1,6 @@
 {
   "workspace": [
+    "./packages/api",
     "./packages/background-charm-service",
     "./packages/builder",
     "./packages/charm",
@@ -81,6 +82,7 @@
     ]
   },
   "imports": {
+    "commontools": "./packages/api/index.ts",
     "@astral/astral": "jsr:@astral/astral",
     "@cfworker/json-schema": "npm:@cfworker/json-schema@^4.1.0",
     "@cmd-johnson/oauth2-client": "jsr:@cmd-johnson/oauth2-client@^2.0.0",
@@ -107,7 +109,7 @@
     "esbuild": "npm:esbuild",
     "jsdom": "npm:jsdom",
     "lit": "npm:lit@^3.2.1",
-    "merkle-reference": "npm:merkle-reference@^2.0.1",
+    "merkle-reference": "npm:merkle-reference@^2.2.0",
     "multiformats": "npm:multiformats@^13.3.2",
     "react": "npm:react@^18.3.1",
     "react-dom": "npm:react-dom@^18.3.1",

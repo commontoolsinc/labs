@@ -6,16 +6,19 @@ import * as path from "@std/path";
 interface BuildConfigInitializer {
   root: string;
   toolshedFlags: string[];
+  cliOnly?: boolean;
 }
 
 class BuildConfig {
   readonly root: string;
   readonly toolshedFlags: string[];
+  readonly cliOnly: boolean;
   private _manifest: object;
 
   constructor(options: BuildConfigInitializer) {
     this.root = options.root;
     this.toolshedFlags = options.toolshedFlags;
+    this.cliOnly = !!options.cliOnly;
     this._manifest = JSON.parse(
       Deno.readTextFileSync(this.workspaceManifestPath()),
     );
@@ -66,7 +69,12 @@ class BuildConfig {
   }
 
   bgCharmServiceWorkerPath() {
-    return this.path("packages", "background-charm-service", "src", "worker.ts");
+    return this.path(
+      "packages",
+      "background-charm-service",
+      "src",
+      "worker.ts",
+    );
   }
 
   staticBundleFilePath(filename: string): string[] {
@@ -79,6 +87,14 @@ class BuildConfig {
 
   staticAssetsPath() {
     return this.path("packages", "static", "assets");
+  }
+
+  staticTypesPath() {
+    return this.path("packages", "static", "assets", "types");
+  }
+
+  cliEntryPath() {
+    return this.path("packages", "cli", "mod.ts");
   }
 
   distDir() {
@@ -98,10 +114,11 @@ async function build(config: BuildConfig): Promise<void> {
 
     // Build jumble first, do not remove deno.lock
     // until after this.
-    await buildJumble(config);
+    if (!config.cliOnly) await buildJumble(config);
     await prepareWorkspace(config);
-    await buildToolshed(config);
-    await buildBgCharmService(config);
+    if (!config.cliOnly) await buildToolshed(config);
+    if (!config.cliOnly) await buildBgCharmService(config);
+    await buildCli(config);
   } catch (e: unknown) {
     buildError = e as Error;
   }
@@ -212,6 +229,55 @@ async function buildBgCharmService(config: BuildConfig): Promise<void> {
   console.log("Background charm service binary built successfully");
 }
 
+async function buildCli(config: BuildConfig): Promise<void> {
+  console.log("Building CLI binary...");
+  const envs = [
+    "TOOLSHED_API_URL",
+    "TSC_WATCHFILE",
+    "TSC_NONPOLLING_WATCHER",
+    "TSC_WATCHDIRECTORY",
+    "TSC_WATCH_POLLINGINTERVAL_LOW",
+    "TSC_WATCH_POLLINGINTERVAL_MEDIUM",
+    "TSC_WATCH_POLLINGINTERVAL_HIGH",
+    "TSC_WATCH_POLLINGCHUNKSIZE_LOW",
+    "TSC_WATCH_POLLINGCHUNKSIZE_MEDIUM",
+    "TSC_WATCH_POLLINGCHUNKSIZE_HIGH",
+    "TSC_WATCH_UNCHANGEDPOLLTHRESHOLDS_LOW",
+    "TSC_WATCH_UNCHANGEDPOLLTHRESHOLDS_MEDIUM",
+    "TSC_WATCH_UNCHANGEDPOLLTHRESHOLDS_HIGH",
+    "NODE_INSPECTOR_IPC",
+    "VSCODE_INSPECTOR_OPTIONS",
+    "NODE_ENV",
+  ];
+  const { success } = await new Deno.Command(Deno.execPath(), {
+    args: [
+      "compile",
+      "--output",
+      config.distPath("ct"),
+      // Run `--no-check` here, as the `--include`'d
+      // `es2023.d.ts` file will attempt to be checked
+      // as a non-static asset. Checking should be done
+      // prior to building.
+      "--no-check",
+      "--allow-write",
+      "--allow-read",
+      // Globs don't work for compile(?)
+      `--allow-env=${envs.join(",")}`,
+      "--include",
+      config.staticTypesPath(),
+      config.cliEntryPath(),
+    ],
+    cwd: config.root,
+    stdout: "inherit",
+    stderr: "inherit",
+  }).output();
+  if (!success) {
+    console.error("Failed to build background charm service binary");
+    Deno.exit(1);
+  }
+  console.log("CLI binary built successfully");
+}
+
 // `deno compile` appears to bundle *all* workspace
 // dependencies e.g. dev dependencies. We can sidestep
 // this by removing the lock file, and only calling compile
@@ -275,6 +341,7 @@ const config = new BuildConfig({
     "--allow-net",
     "--allow-write",
   ],
+  cliOnly: Deno.args.includes("--cli-only"),
 });
 
 Deno.addSignalListener("SIGINT", async () => {

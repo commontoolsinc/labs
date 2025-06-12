@@ -1,7 +1,8 @@
 import type { Reference } from "merkle-reference";
-import { JSONSchema, JSONValue } from "@commontools/builder";
+import { JSONValue, SchemaContext } from "@commontools/builder";
+import { SchemaPathSelector } from "@commontools/builder/traverse";
 
-export type { Reference };
+export type { Reference, SchemaPathSelector };
 
 export interface Clock {
   now(): UTCUnixTimestampInSeconds;
@@ -519,6 +520,11 @@ export type InvocationURL<T> = `job:${string}` & {
   toString(): InvocationURL<T>;
 };
 
+export interface FactAddress {
+  the: The;
+  of: Entity;
+}
+
 /**
  * Describes not yet claimed memory. It describes a lack of fact about memory.
  */
@@ -781,21 +787,6 @@ export type SchemaSelector = Select<
   Entity,
   Select<The, Select<Cause, SchemaPathSelector>>
 >;
-
-// Note: This could be altered to only pass the rootSchema (as schema), and rely on path
-// to narrow the schema to the appropriate section.
-export type SchemaPathSelector = {
-  path: string[];
-  schemaContext?: SchemaContext;
-  is?: Unit;
-};
-
-// This is a schema, together with its rootSchema for resolving $ref entries
-// In the future, we should include the boolean option in the JSONSchema type itself
-export type SchemaContext = {
-  schema: JSONSchema | boolean;
-  rootSchema: JSONSchema | boolean;
-};
 
 export type Operation =
   | Transaction

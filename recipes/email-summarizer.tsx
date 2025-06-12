@@ -1,5 +1,5 @@
-import { h } from "@commontools/html";
 import {
+  h,
   derive,
   handler,
   JSONSchema,
@@ -10,7 +10,7 @@ import {
   Schema,
   str,
   UI,
-} from "@commontools/builder";
+} from "commontools";
 
 // Email schema based on Gmail recipe
 const EmailProperties = {
@@ -294,7 +294,7 @@ export default recipe(
       // Call LLM to generate summary
       const summaryResult = llm({
         system: systemPrompt,
-        prompt: userPrompt,
+        messages: [userPrompt],
       });
 
       // Return a simple object that references the original email

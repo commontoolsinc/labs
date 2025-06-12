@@ -1,19 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { ID, ID_FIELD } from "@commontools/builder";
-import {
-  addCommonIDfromObjectID,
-  applyChangeSet,
-  diffAndUpdate,
-  extractDefaultValues,
-  followAliases,
-  isEqualCellLink,
-  mergeObjects,
-  normalizeAndDiff,
-  sendValueToBinding,
-  setNestedValue,
-  unwrapOneLevelAndBindtoDoc,
-} from "../src/utils.ts";
+import { addCommonIDfromObjectID, applyChangeSet, diffAndUpdate, normalizeAndDiff, setNestedValue } from "../src/data-updating.ts";
+import { unwrapOneLevelAndBindtoDoc, sendValueToBinding } from "../src/recipe-binding.ts";
+import { followAliases } from "../src/link-resolution.ts";
+import { isEqualCellLink } from "../src/type-utils.ts";
+import { extractDefaultValues, mergeObjects } from "../src/runner.ts";
 import { Runtime } from "../src/runtime.ts";
 import { CellLink, isCellLink } from "../src/cell.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
@@ -45,15 +37,15 @@ describe("Utils", () => {
   describe("extractDefaultValues", () => {
     it("should extract default values from a schema", () => {
       const schema = {
-        type: "object",
+        type: "object" as const,
         properties: {
-          name: { type: "string", default: "John" },
-          age: { type: "number", default: 30 },
+          name: { type: "string" as const, default: "John" },
+          age: { type: "number" as const, default: 30 },
           address: {
-            type: "object",
+            type: "object" as const,
             properties: {
-              street: { type: "string", default: "Main St" },
-              city: { type: "string", default: "New York" },
+              street: { type: "string" as const, default: "Main St" },
+              city: { type: "string" as const, default: "New York" },
             },
           },
         },
@@ -77,7 +69,7 @@ describe("Utils", () => {
       const obj2 = { b: { y: 20 }, c: 3 };
       const obj3 = { a: 4, d: 5 };
 
-      const result = mergeObjects(obj1, obj2, obj3);
+      const result = mergeObjects<unknown>(obj1, obj2, obj3);
       expect(result).toEqual({
         a: 1,
         b: { x: 10, y: 20 },
@@ -91,7 +83,7 @@ describe("Utils", () => {
       const obj2 = undefined;
       const obj3 = { b: 2 };
 
-      const result = mergeObjects(obj1, obj2, obj3);
+      const result = mergeObjects<unknown>(obj1, obj2, obj3);
       expect(result).toEqual({ a: 1, b: 2 });
     });
 
@@ -117,7 +109,7 @@ describe("Utils", () => {
         b: { c: 4 },
       };
 
-      const result = mergeObjects(obj1, obj2, obj3);
+      const result = mergeObjects<unknown>(obj1, obj2, obj3);
       expect(result).toEqual({
         a: { $alias: { path: [] } },
         b: { c: { cell: testCell, path: [] } },

@@ -1,12 +1,12 @@
-import { h } from "@commontools/html";
 import {
+  h,
   derive,
   JSONSchema,
   NAME,
   recipe,
   Schema,
   UI,
-} from "@commontools/builder";
+} from "commontools";
 
 const IntegrationSpaceCharmSchema = {
   type: "object",
