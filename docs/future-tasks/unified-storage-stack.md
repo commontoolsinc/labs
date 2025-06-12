@@ -11,15 +11,15 @@ Specifically we have:
 
 - I/O over iframe boundaries, typically with the iframes running React, which in
   turn assumes synchronous state. So data can roundtrip through iframe/React and
-  overwrite newer data that came in in the meantime. E.g. a user event happens,
-  state X is updated in React, while new data is waiting in the iframe's message
-  queue: Now an update based on older data is sent to the container, but since
-  there is no versioning at this layer, it is treated as updating the current
-  data. Meanwhile the iframe processes the queued up update, and now is out of
-  sync with the container. Note that this is a pretty tight race condition: Some
-  event processing coincides exactly with receiving data updates. It's rare, but
-  we've seen this happen when tabs get woken up again and a lot of pent up work
-  happens all at once.
+  overwrite newer data that came in in the meantime based on outdated
+  assumptions. E.g. a user event happens, state X is updated in React, while new
+  data is waiting in the iframe's message queue: Now an update based on older
+  data is sent to the container, but since there is no versioning at this layer,
+  it is treated as updating the current data. Meanwhile the iframe processes the
+  queued up update, and now is out of sync with the container. Note that this is
+  a pretty tight race condition: Some event processing coincides exactly with
+  receiving data updates. It's rare, but we've seen this happen when tabs get
+  woken up again and a lot of pent up work happens all at once.
 - Scheduler executing event handlers and reactive functions, which would form a
   natural transaction boundary -- especially for event handlers to re-run on
   newer data to rebase changes -- but those boundaries don't mean anything to
