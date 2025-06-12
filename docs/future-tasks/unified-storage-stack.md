@@ -208,11 +208,11 @@ This plan should be entirely incremental and can be rolled out step by step.
         before returning the transaction. See above.
 - [ ] Scheduler retries events whose transaction failed. It does so up to N
       times and calls a callback after the last retry (both configurable via
-      `Runtime` constructor). Events are retried after all reactive functions
-      that are queued up are settled, so it's guaranteed to be a stable state
-      (Future optimization: Dynamically insert into the queue after any reactive
-      function that might update the handlers inputs, but before any that read
-      its outputs)
+      `Runtime` constructor). Events are retried after all read cells are fully
+      synced and reactive functions that are queued up are settled, so it's
+      guaranteed to be a stable state (Future optimization: Dynamically insert
+      into the queue after any reactive function that might update the handlers
+      inputs, but before any that read its outputs)
   - [ ] For change sets that only write (e.g. only push or set), we could just
         reapply those without re-runnin the handler. But this could also be a
         future optimization.
