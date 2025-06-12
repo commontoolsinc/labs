@@ -18,7 +18,7 @@ import { type EntityId, getEntityId } from "./doc-map.ts";
 import type { Cancel } from "./cancel.ts";
 import type { Action, EventHandler, ReactivityLog } from "./scheduler.ts";
 import type { Harness } from "./harness/harness.ts";
-import { UnsafeEvalHarness } from "./harness/index.ts";
+import { Engine } from "./harness/index.ts";
 import { ConsoleMethod } from "./harness/console.ts";
 
 export type ErrorWithContext = Error & {
@@ -267,7 +267,7 @@ export class Runtime implements IRuntime {
     this.id = crypto.randomUUID();
 
     // Create harness first (no dependencies on other services)
-    this.harness = new UnsafeEvalHarness(this);
+    this.harness = new Engine(this);
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(

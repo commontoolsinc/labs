@@ -1,6 +1,5 @@
 import {
   Compiler,
-  CompilerError,
   isProgram,
   JsScript,
   Program,
@@ -9,7 +8,6 @@ import {
 import type {
   CompilerHost,
   CompilerOptions,
-  Diagnostic,
   FileReference,
   ModuleResolutionHost,
   ResolvedModuleWithFailedLookupLocations,
@@ -25,6 +23,7 @@ import { getCompilerOptions, TARGET } from "./options.ts";
 import { bundleAMDOutput } from "./bundler/mod.ts";
 import { parseSourceMap } from "../source-map.ts";
 import { resolveProgram } from "./resolver.ts";
+import { CompilerError } from "./error.ts";
 
 const DEBUG_VIRTUAL_FS = false;
 const VFS_TYPES_DIR = "$types/";
@@ -222,26 +221,38 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     }, {} as TypeLibs);
   }
 
+  resolveProgram(
+    resolver: ProgramResolver,
+    options: Pick<TypeScriptCompilerOptions, "runtimeModules"> = {},
+  ): Promise<Program> {
+    return resolveProgram(resolver, {
+      unresolvedModules: {
+        type: "allow",
+        identifiers: options.runtimeModules ?? [],
+      },
+      resolveUnresolvedModuleTypes: true,
+      target: TARGET,
+    });
+  }
+
+  async resolveAndCompile(
+    resolver: ProgramResolver,
+    options: TypeScriptCompilerOptions = {},
+  ): Promise<JsScript> {
+    const program = await this.resolveProgram(resolver, options);
+    return await this.compile(program, options);
+  }
+
   // Compiles `source` into `JsArtifact`.
   // Artifact files must be TypeScriptModuleSource
   compile(
-    input: Program | ProgramResolver,
+    program: Program,
     inputOptions: TypeScriptCompilerOptions = {},
   ): JsScript {
     const filename = inputOptions.filename ?? "out.js";
     const noCheck = inputOptions.noCheck ?? false;
     const injectedScript = inputOptions.injectedScript;
     const runtimeModules = inputOptions.runtimeModules ?? [];
-    const program = isProgram(input)
-      ? input
-      : resolveProgram(input as ProgramResolver, {
-        unresolvedModules: {
-          type: "allow",
-          identifiers: runtimeModules,
-        },
-        resolveUnresolvedModuleTypes: true,
-        target: TARGET,
-      });
 
     validateSource(program);
     const sourceNames = program.files.map(({ name }) => name);
@@ -274,11 +285,11 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       if (!noCheck) {
         // check types
         const diagnostics = tsProgram.getSemanticDiagnostics(sourceFile);
-        checkDiagnostics(diagnostics);
+        CompilerError.check(diagnostics);
       }
       // check compilation
       const diagnostics = tsProgram.getDeclarationDiagnostics(sourceFile);
-      checkDiagnostics(diagnostics);
+      CompilerError.check(diagnostics);
     }
 
     if (!sourceEntry) {
@@ -288,7 +299,7 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     const { diagnostics, emittedFiles, emitSkipped } = tsProgram.emit(
       sourceEntry,
     );
-    checkDiagnostics(diagnostics);
+    CompilerError.check(diagnostics);
 
     if (emitSkipped) {
       throw new Error("Emit skipped. Check diagnostics.");
@@ -337,35 +348,6 @@ function validateSource(artifact: Program) {
   if (!entryFound) {
     throw new Error(`No entry module "${artifact.entry}" in source.`);
   }
-}
-
-// Generates and throws an error if any diagnostics found in the input.
-function checkDiagnostics(
-  diagnostics: readonly Diagnostic[] | undefined,
-) {
-  if (!diagnostics || diagnostics.length === 0) {
-    return;
-  }
-  const message = diagnostics
-    .map((diagnostic) => {
-      const message = ts.flattenDiagnosticMessageText(
-        diagnostic.messageText,
-        "\n",
-      );
-      let locationInfo = "";
-
-      if (diagnostic.file && diagnostic.start !== undefined) {
-        const { line, character } = diagnostic.file
-          .getLineAndCharacterOfPosition(
-            diagnostic.start,
-          );
-        locationInfo = `[${line + 1}:${character + 1}] `; // +1 because TypeScript uses 0-based positions
-      }
-
-      return `Compilation Error: ${locationInfo}${message}`;
-    })
-    .join("\n");
-  throw new CompilerError(message);
 }
 
 function assert(expr: boolean, message: string) {

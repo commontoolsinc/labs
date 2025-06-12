@@ -13,7 +13,9 @@ deno check \
   packages/background-charm-service \
   packages/builder \
   packages/charm \
-  packages/cli \
+  packages/cli/*.ts \
+  packages/cli/test \
+  packages/cli/commands \
   packages/deno-web-test \
   packages/html \
   packages/identity \

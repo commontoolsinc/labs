@@ -7,7 +7,7 @@ export type HarnessedFunction = (input: any) => void;
 export interface Harness extends EventTarget {
   // Compiles and executes `source`, returning the default export
   // of that module.
-  run(source: Program): Promise<Recipe>;
+  //run(source: Program): Promise<Recipe>;
   // Compiles and executes a single tsx string, returning the default
   // export of that module.
   runSingle(source: string): Promise<Recipe>;

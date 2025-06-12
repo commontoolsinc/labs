@@ -1,7 +1,7 @@
 {
   "name": "@commontools/runner",
   "tasks": {
-    "test": "deno test --allow-env"
+    "test": "deno test --allow-env --allow-read=../static/assets/types/"
   },
   "exports": {
     ".": "./src/index.ts",
