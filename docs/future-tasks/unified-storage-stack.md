@@ -111,26 +111,26 @@ This plan should be entirely incremental and can be rolled out step by step.
     processing
   - Watch for the FIXME at line 84 about keying by doc+schema combination
 - [ ] When connection is dropped, re-establish all schema queries again
-  - [ ] Show UI if reading / re-establishing takes surprisingly long
 - [ ] Replace all direct use of `DocImpl` with `Cell` (only `DocImpl` use inside
       `Cell`, scheduler (just `.updates()`) and storage.ts should remain for
-      now)
+      now) CT-446
   - [ ] Add .setRaw and .getRaw to internal `Cell` interface and use the cell
         creation methods on `Runtime` and then almost all used of `DocImpl` can
         be replaced by cells and using `.[set|get]Raw` instead of
         `.[set|send|get]`
 - [ ] Change all places that expect `{ cell: DocImpl, … }` to just use the JSON
       representation. At the same time, let's support the new syntax for links
-      (@irakli has these in a RFC, should be extracted, effectively
+      (@irakli has these in a RFC (CT-448), should be extracted, effectively
       `{ "@": { "link": { ... }}}`). This is because today `storage.ts`
       translates any `{ "/": string }` it finds to `{ "/": DocImpl }`, but we
       don't want to carry this logic over to this new state. See `isCellLink`,
       which might not be universally used, but should be. Maybe add a
-      `readCellLink` function to parse these.
+      `readCellLink` function to parse these. CT-447
   - [ ] Also change schema queries on the serverside
   - [ ] Remove that translation in storage.ts and make sure everything still
         works.
 - [ ] Directly read & write to memory layer & wrap action calls in a transaction
+      CT-450
   - [ ] Expose the API below current StorageProvider to `Cell` and `Scheduler`.
         That includes `Cell` setting the to application/json, compute the right
         DID based ids, etc. -- all stuff that currently happens in
@@ -139,7 +139,7 @@ This plan should be entirely incremental and can be rolled out step by step.
         which scheduler calls with something that wraps the action and returns a
         transaction. Be sure to handle errors correctly (maybe the function can
         return that it error'ed and that aborts the transaction). This function
-        can be async, so you have to await it.
+        can be async, so you have to await it. CT-449
     - [ ] Part of the transaction is what is being read. Likely, we just want to
           change `ReactivityLog` to be a new transaction object that is being
           passed through.
@@ -168,10 +168,10 @@ This plan should be entirely incremental and can be rolled out step by step.
         before returning the transaction, so maybe we instead make this
         listening part of the transaction API?
 - [ ] More selectively purge the nursery on conflicts by observing conflicted
-      reads.
+      reads. CT-451
 - [ ] On conflicts add data that changed unless it was already sent to the
-      client by a query.
-- [ ] Remove `storage.ts` and `DocImpl`, they are now skipped
+      client by a query. CT-452
+- [ ] Remove `storage.ts` and `DocImpl`, they are now skipped CT-453
   - storage.ts has 1000+ lines of complex batching logic to remove
   - DocImpl in doc.ts is ~300 lines
   - Also removed Cell.push conflict logic (line 922) since the corresponding
@@ -191,6 +191,7 @@ This plan should be entirely incremental and can be rolled out step by step.
       but we would notice that explicitly. Unlike rejections that happen quickly
       and users can react to in real-time, this might need something more
       sophisticated.
+  - [ ] At the very least show a UI that we're offline. CT-445 tracks that.
 - [ ] Recovery flows for e.g. corrupted caches (interrupted in the middle of an
       update)
 - [ ] Extending transaction boundaries beyond single event handlers: As
