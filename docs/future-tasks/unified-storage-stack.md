@@ -129,10 +129,10 @@ This plan should be entirely incremental and can be rolled out step by step.
   - [ ] Also change schema queries on the serverside
   - [ ] Remove that translation in storage.ts and make sure everything still
         works.
-- [ ] Expose a "run this function with a transaction object to be populated"
-      from memory, which scheduler calls with something that wraps the action
-      and returns a transaction, and which all other reading and writes contexts
-      will use as well. CT-449
+- [ ] Create a new transaction API: Get a `tx` object from memory, which exposes
+      `tx.read(entity, path)`, `tx.write(entity, path, value)`, etc., and
+      `tx.commit()`, `tx.abort(reason?: Error)` and a few more (see below).
+      CT-449
   - [ ] The callback function can be async, so you have to await it. But if the
         function isn't async, the entire transaction building flow should be
         synchronous (i.e. not yield to the event loop), just return a Promise
@@ -147,11 +147,6 @@ This plan should be entirely incremental and can be rolled out step by step.
   - [ ] If the transaction is aborted, the nursery is reverted to what it was
         before the transaction (that is likely we'll create another layer on top
         of the nursery?).
-  - [ ] Part of the transaction is what is being read. Likely, we just want to
-        change `ReactivityLog` to be a new transaction object that is being
-        passed through. In fact all reads and writes could now go through such
-        an `tx` object. We log not just the entity read or written, but also the
-        path (see next item)
   - [ ] Add path-dependent listeners to memory: During a transaction reads are
         logged with path. And there is a `tx.updates(callback)` or so function
         that registers a listener to any writes to any of the read paths (and
@@ -168,30 +163,44 @@ This plan should be entirely incremental and can be rolled out step by step.
           will use to update the dependency graph. In fact scheduler will inside
           the callback do both this and adding the callback just before
           returning. It does so to not miss any updates.
-  - [ ] The callback can `tx.abort(reason extends Error)` a transaction.
-        Listeners per above should still be installed, even if the transaction
-        is aborted. Scheduler will use this if the action (which is called from
-        the callback) throws, so it can still update scheduling information.
-  - [ ] Support nested read transactions. Write isn't needed. Nesting just means
-        that the read logs are partitioned, i.e. reads are only added to the
-        innermost transaction and thus the listeners from the previous point
-        only apply to those. This is concretely used in the renderer, which
-        creates nested `Cell.sink` calls that follow this logic. Throw when
-        nesting with writes or with async callbacks (the latter makes sure we
-        can't interleave transactions, just strictly nest them).
+  - [ ] `tx.abort(reason extends Error)` aborts a transaction. Listeners per
+        above should still be installed, even if the transaction is aborted.
+        Scheduler will use this if the action throws, so it can still update
+        scheduling information.
 - [ ] Memory schedules a task with the scheduler to update heap. Scheduler will
       run this as soon as possible, but outside running network of reactive
-      functions. (TBD: There are alternative approaches. Either way, per above,
-      memory needs the ability to queue up changes, so this seems like the
-      simplest way)
+      functions. For example memory could get a `nextWriteWindow` callback on
+      construction that creates a promise that is resolved when it is safe to
+      write. Then we can queue up messages from the socket and process them all
+      at once. E.g.
+
+      ```typescript
+      const eventQueue = [];
+
+      function queueEvent(event) {
+        if (eventQueue.length === 0)
+          nextWriteWindow().then(() => processEvents());
+        eventQueue.push(event);
+      }
+
+      function processEvents() {
+        // synchronously process events and update heap
+        ...
+        eventQueue.length = 0;
+      }
+      ```
 - [ ] Directly read & write to memory layer & wrap action calls in a transaction
       CT-450
   - [ ] Use the new transaction API above to do all reads and writes.
   - [ ] Currently Cell.push() has retry logic (cell.ts:366-381) that can be
         removed. It's subsumed by the next point.
-  - [ ] Scheduler creates a transaction that wraps calling an action. See above.
-  - [ ] `Cell.sink()` creates a (read-only) transaction, which might be nested
-        (see above).
+  - [ ] Scheduler creates a transaction that wraps calling an action. Before
+        calling `.commit()` or `.abort()` it'll subscribe to all changes to read
+        values (see above) and it'll update the dependencies based on the reads
+        and writes retrieved from the `tx` object. This replaces `ReactivityLog`
+        and `.updates()` calls on `DocImpl`.
+  - [ ] `Cell.sink()` creates a (read-only) transaction, which might be nested.
+        Very similar to the current `ReactivityLog`.
   - [ ] When cells are being created, active transactions are being passed in,
         just like `log` now. Change `withLog()` to `withTX()` or so. When there
         is no TX associated on a read, create one. Don't allow writes without a
