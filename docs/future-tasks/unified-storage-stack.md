@@ -160,6 +160,9 @@ This plan should be entirely incremental and can be rolled out step by step.
         be satisfied if this is called once on the first change and then not
         again. If reads and writes are overlapping, i.e. the function wrote to
         what it reads, then notifications start after applying those writes.
+    - [ ] Path-depenent means that we diff updates and compute what paths have
+          changed. Callback gets called if any paths overlap, i.e. one is a
+          subset of the other.
     - [ ] The current reads and writes can also be read out, which scheduler
           will use to update the dependency graph. In fact scheduler will inside
           the callback do both this and adding the callback just before
