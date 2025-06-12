@@ -28,6 +28,9 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         run: deno install --frozen=true
 
+      - name: 📥 Download Deno dependency binaries
+        run: deno task initialize-db
+
       - name: 🔎 Type check codebase
         run: deno task check
 

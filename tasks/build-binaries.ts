@@ -231,6 +231,8 @@ async function buildBgCharmService(config: BuildConfig): Promise<void> {
 
 async function buildCli(config: BuildConfig): Promise<void> {
   console.log("Building CLI binary...");
+  // Figure out the full list requested by typescript and
+  // friends
   const envs = [
     "TOOLSHED_API_URL",
     "TSC_WATCHFILE",
@@ -268,7 +270,7 @@ async function buildCli(config: BuildConfig): Promise<void> {
       "--allow-write",
       "--allow-read",
       // Globs don't work for compile(?)
-      `--allow-env=${envs.join(",")}`,
+      "--allow-env",
       "--include",
       config.staticTypesPath(),
       config.cliEntryPath(),
