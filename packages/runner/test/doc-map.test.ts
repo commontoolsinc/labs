@@ -101,7 +101,7 @@ describe("cell-map", () => {
 
     it("should return undefined for non-existent entity ID", () => {
       const nonExistentId = createRef() as EntityId;
-      expect(runtime.documentMap.getDocByEntityId("test", nonExistentId, false))
+      expect(runtime.documentMap.getDocByEntityId(space, nonExistentId, false))
         .toBeUndefined();
     });
   });

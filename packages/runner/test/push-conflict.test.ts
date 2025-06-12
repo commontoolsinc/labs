@@ -18,6 +18,7 @@ describe("Push conflict", () => {
   let provider: Memory.Provider.Provider<Memory.Protocol>;
   let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
   const storageManager = {
+    id: "some id",
     open: (space: Consumer.MemorySpace) =>
       Provider.open({
         space,

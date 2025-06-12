@@ -6,14 +6,14 @@ import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { ConsoleEvent, ConsoleMethod } from "./harness/console.ts";
+import { ConsoleEvent } from "./harness/console.ts";
 import type {
-  CharmMetadata,
   ConsoleHandler,
   ErrorHandler,
   ErrorWithContext,
   IRuntime,
   IScheduler,
+  MemorySpace,
 } from "./runtime.ts";
 
 // Re-export types that tests expect from scheduler
@@ -234,7 +234,7 @@ export class Scheduler implements IScheduler {
     errorWithContext.action = action;
     if (charmId) errorWithContext.charmId = charmId;
     if (recipeId) errorWithContext.recipeId = recipeId;
-    if (space) errorWithContext.space = space;
+    if (space) errorWithContext.space = space as MemorySpace;
 
     for (const handler of this.errorHandlers) {
       try {

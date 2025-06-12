@@ -1,7 +1,7 @@
-import { beforeEach, describe, it, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { h, render, VNode } from "../src/index.ts";
 import { lift, recipe, str, UI } from "@commontools/builder";
-import { Runtime } from "@commontools/runner";
+import { Runtime, StorageManager } from "@commontools/runner";
 import * as assert from "./assert.ts";
 import { JSDOM } from "jsdom";
 import { Identity } from "@commontools/identity";
@@ -10,13 +10,13 @@ import * as Consumer from "@commontools/memory/consumer";
 import { Provider } from "@commontools/runner/storage/cache";
 
 const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("recipes with HTML", () => {
   let dom: JSDOM;
   let document: Document;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let provider: Memory.Provider.Provider<Memory.Protocol>;
-  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
   beforeEach(async () => {
     // Set up a fresh JSDOM instance for each test
@@ -29,39 +29,18 @@ describe("recipes with HTML", () => {
     globalThis.Node = dom.window.Node;
     globalThis.Text = dom.window.Text;
 
-    // Create memory service for testing
-    const open = await Memory.Provider.open({
-      store: new URL("memory://db/"),
-      serviceDid: signer.did(),
-    });
-
-    if (open.error) {
-      throw open.error;
-    }
-
-    provider = open.ok;
-
-    consumer = Consumer.open({
-      as: signer,
-      session: provider.session(),
-    });
-
-    // Set up runtime
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
-      storageManager: {
-        open: (space: Consumer.MemorySpace) =>
-          Provider.open({
-            space,
-            session: consumer,
-          }),
-      },
+      storageManager,
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
-    await provider?.close();
+    await storageManager?.close();
   });
   it("should render a simple UI", async () => {
     const simpleRecipe = recipe<{ value: number }>(
@@ -72,8 +51,11 @@ describe("recipes with HTML", () => {
       },
     );
 
-    const space = "test";
-    const resultCell = runtime.documentMap.getDoc(undefined, "simple-ui-result", space);
+    const resultCell = runtime.documentMap.getDoc(
+      undefined,
+      "simple-ui-result",
+      space,
+    );
     const result = runtime.runner.run(simpleRecipe, { value: 5 }, resultCell);
 
     await runtime.idle();
@@ -114,8 +96,11 @@ describe("recipes with HTML", () => {
       };
     });
 
-    const space = "test";
-    const resultCell = runtime.documentMap.getDoc(undefined, "todo-list-result", space);
+    const resultCell = runtime.documentMap.getDoc(
+      undefined,
+      "todo-list-result",
+      space,
+    );
     const result = runtime.runner.run(todoList, {
       title: "test",
       items: [
@@ -154,8 +139,11 @@ describe("recipes with HTML", () => {
       return { [UI]: h("div", null, summaryUI as any) };
     });
 
-    const space = "test";
-    const resultCell = runtime.documentMap.getDoc(undefined, "nested-todo-result", space);
+    const resultCell = runtime.documentMap.getDoc(
+      undefined,
+      "nested-todo-result",
+      space,
+    );
     const result = runtime.runner.run(todoList, {
       title: { name: "test" },
       items: [
@@ -179,8 +167,11 @@ describe("recipes with HTML", () => {
       return { [UI]: h("div", null, str`Hello, ${name}!`) };
     });
 
-    const space = "test";
-    const resultCell = runtime.documentMap.getDoc(undefined, "str-recipe-result", space);
+    const resultCell = runtime.documentMap.getDoc(
+      undefined,
+      "str-recipe-result",
+      space,
+    );
     const result = runtime.runner.run(strRecipe, { name: "world" }, resultCell);
 
     await runtime.idle();
@@ -218,8 +209,11 @@ describe("recipes with HTML", () => {
       ),
     }));
 
-    const space = "test";
-    const resultCell = runtime.documentMap.getDoc(undefined, "nested-map-result", space);
+    const resultCell = runtime.documentMap.getDoc(
+      undefined,
+      "nested-map-result",
+      space,
+    );
     const result = runtime.runner.run(nestedMapRecipe, data, resultCell);
 
     await runtime.idle();

@@ -25,6 +25,7 @@ import {
 } from "@commontools/runner";
 import { type Session } from "@commontools/identity";
 import { isObject } from "@commontools/utils/types";
+import { Memory } from "../../memory/provider.ts";
 
 /**
  * Extracts the ID from a charm.
@@ -159,7 +160,7 @@ export class CharmManager {
     ]);
   }
 
-  getSpace(): string {
+  getSpace(): MemorySpace {
     return this.space;
   }
 

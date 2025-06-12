@@ -1,5 +1,5 @@
 import { Identity } from "@commontools/identity";
-import { type Cell, type Runtime } from "@commontools/runner";
+import { type Cell, type MemorySpace, type Runtime } from "@commontools/runner";
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,
@@ -13,7 +13,7 @@ export interface BackgroundCharmServiceOptions {
   identity: Identity;
   toolshedUrl: string;
   runtime: Runtime;
-  bgSpace?: string;
+  bgSpace?: MemorySpace;
   bgCause?: string;
   workerTimeoutMs?: number;
 }
@@ -25,7 +25,7 @@ export class BackgroundCharmService {
   private identity: Identity;
   private toolshedUrl: string;
   private runtime: Runtime;
-  private bgSpace: string;
+  private bgSpace: MemorySpace;
   private bgCause: string;
   private workerTimeoutMs?: number;
 

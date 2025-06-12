@@ -2,7 +2,7 @@ import app from "@/app.ts";
 import env from "@/env.ts";
 import * as Sentry from "@sentry/deno";
 import { identity } from "@/lib/identity.ts";
-import { Runtime } from "@commontools/runner";
+import { Runtime, StorageManager } from "@commontools/runner";
 import { memory } from "@/routes/storage/memory.ts";
 
 // Create a global runtime instance for the server
@@ -14,8 +14,11 @@ const initializeRuntime = () => {
   try {
     console.log(`Initializing runtime with signer ${identity.did()}...`);
     runtime = new Runtime({
-      storageUrl: env.MEMORY_URL,
-      signer: identity,
+      storageManager: StorageManager.open({
+        address: new URL(env.MEMORY_URL),
+        as: identity,
+      }),
+      blobbyServerUrl: env.MEMORY_URL,
     });
     console.log("Runtime initialized successfully");
     console.log("Configured to remote storage:", env.MEMORY_URL);

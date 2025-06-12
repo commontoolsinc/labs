@@ -194,7 +194,7 @@ export class Storage implements IStorage {
   }
 
   private _ensureIsSyncedById<T>(
-    space: string,
+    space: MemorySpace,
     id: EntityId | string,
     expectedInStorage: boolean = false,
     schemaContext?: SchemaContext,

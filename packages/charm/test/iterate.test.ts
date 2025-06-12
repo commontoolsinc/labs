@@ -1,53 +1,30 @@
 import { assertEquals } from "@std/assert";
-import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { scrub } from "../src/iterate.ts";
-import { Runtime } from "@commontools/runner";
+import { Runtime, StorageManager } from "@commontools/runner";
 import { JSONSchema } from "@commontools/builder";
 import { Identity } from "@commontools/identity";
-import * as Memory from "@commontools/memory";
-import * as Consumer from "@commontools/memory/consumer";
-import { Provider } from "@commontools/runner/storage/cache";
 
 const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("scrub function", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let provider: Memory.Provider.Provider<Memory.Protocol>;
-  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
   beforeEach(async () => {
-    // Create memory service for testing
-    const open = await Memory.Provider.open({
-      store: new URL("memory://db/"),
-      serviceDid: signer.did(),
-    });
-
-    if (open.error) {
-      throw open.error;
-    }
-
-    provider = open.ok;
-
-    consumer = Consumer.open({
-      as: signer,
-      session: provider.session(),
-    });
-
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
-      storageManager: {
-        open: (space: Consumer.MemorySpace) =>
-          Provider.open({
-            space,
-            session: consumer,
-          }),
-      },
+      storageManager,
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
-    await provider?.close();
+    await storageManager?.close();
   });
 
   it("should return primitive values unchanged", () => {
@@ -60,7 +37,7 @@ describe("scrub function", () => {
 
   it("should scrub arrays recursively", () => {
     const cellValue = { test: 123, $UI: "hidden" };
-    const testCell = runtime.getImmutableCell("test", cellValue);
+    const testCell = runtime.getImmutableCell(space, cellValue);
 
     const input = [1, "test", testCell, { a: 1 }];
     const result = scrub(input);
@@ -83,7 +60,7 @@ describe("scrub function", () => {
     };
 
     const cellValue = { name: "test", age: 30, $UI: {}, streamProp: {} };
-    const cellWithSchema = runtime.getImmutableCell("test", cellValue, schema);
+    const cellWithSchema = runtime.getImmutableCell(space, cellValue, schema);
 
     const result = scrub(cellWithSchema);
 
@@ -106,7 +83,7 @@ describe("scrub function", () => {
       type: "object",
     };
 
-    const cellWithEmptySchema = runtime.getImmutableCell("test", {
+    const cellWithEmptySchema = runtime.getImmutableCell(space, {
       name: "test",
       $UI: {},
     }, schema);
@@ -122,7 +99,11 @@ describe("scrub function", () => {
       type: "string",
     };
 
-    const cellWithStringSchema = runtime.getImmutableCell("test", "test value", schema);
+    const cellWithStringSchema = runtime.getImmutableCell(
+      space,
+      "test value",
+      schema,
+    );
 
     const result = scrub(cellWithStringSchema);
 

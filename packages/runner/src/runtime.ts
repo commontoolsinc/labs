@@ -29,7 +29,7 @@ export type { IStorageManager, IStorageProvider, MemorySpace };
 export type ErrorWithContext = Error & {
   action: Action;
   charmId: string;
-  space: string;
+  space: MemorySpace;
   recipeId: string;
 };
 
@@ -72,26 +72,26 @@ export interface IRuntime {
 
   // Cell factory methods
   getCell<T>(
-    space: string,
+    space: MemorySpace,
     cause: any,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getCell<S extends JSONSchema = JSONSchema>(
-    space: string,
+    space: MemorySpace,
     cause: any,
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCellFromEntityId<T>(
-    space: string,
+    space: MemorySpace,
     entityId: EntityId,
     path?: PropertyKey[],
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getCellFromEntityId<S extends JSONSchema = JSONSchema>(
-    space: string,
+    space: MemorySpace,
     entityId: EntityId,
     path: PropertyKey[],
     schema: S,
@@ -108,13 +108,13 @@ export interface IRuntime {
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getImmutableCell<T>(
-    space: string,
+    space: MemorySpace,
     data: T,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getImmutableCell<S extends JSONSchema = JSONSchema>(
-    space: string,
+    space: MemorySpace,
     data: any,
     schema: S,
     log?: ReactivityLog,
@@ -174,7 +174,7 @@ export interface IRecipeManager {
   registerRecipe(
     params: {
       recipeId: string;
-      space: string;
+      space: MemorySpace;
       recipe: Recipe | Module;
       recipeMeta: any;
     },
@@ -192,12 +192,12 @@ export interface IModuleRegistry {
 export interface IDocumentMap {
   readonly runtime: IRuntime;
   getDocByEntityId<T = any>(
-    space: string,
+    space: MemorySpace,
     entityId: EntityId | string,
     createIfNotFound?: boolean,
     sourceIfCreated?: DocImpl<any>,
   ): DocImpl<T> | undefined;
-  registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: string): void;
+  registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: MemorySpace): void;
   getDoc<T>(value: T, cause: any, space: MemorySpace): DocImpl<T>;
   cleanup(): void;
 }
@@ -262,10 +262,12 @@ export class Runtime implements IRuntime {
   readonly harness: Harness;
   readonly runner: IRunner;
   readonly blobbyServerUrl: string;
+  readonly id: string;
 
   constructor(options: RuntimeOptions) {
     // Create harness first (no dependencies on other services)
     this.harness = new UnsafeEvalHarness(this);
+    this.id = options.storageManager.id;
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(
@@ -371,21 +373,21 @@ export class Runtime implements IRuntime {
   }
 
   getCellFromEntityId<T>(
-    space: string,
+    space: MemorySpace,
     entityId: EntityId | string,
     path?: PropertyKey[],
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getCellFromEntityId<S extends JSONSchema = JSONSchema>(
-    space: string,
+    space: MemorySpace,
     entityId: EntityId | string,
     path: PropertyKey[],
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCellFromEntityId(
-    space: string,
+    space: MemorySpace,
     entityId: EntityId | string,
     path: PropertyKey[] = [],
     schema?: JSONSchema,
@@ -416,7 +418,7 @@ export class Runtime implements IRuntime {
       doc = cellLink.cell;
     } else if (cellLink.space) {
       doc = this.documentMap.getDocByEntityId(
-        cellLink.space,
+        cellLink.space as MemorySpace,
         getEntityId(cellLink.cell)!,
         true,
       )!;
@@ -431,13 +433,13 @@ export class Runtime implements IRuntime {
   }
 
   getImmutableCell<T>(
-    space: string,
+    space: MemorySpace,
     data: T,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getImmutableCell<S extends JSONSchema = JSONSchema>(
-    space: string,
+    space: MemorySpace,
     data: any,
     schema: S,
     log?: ReactivityLog,

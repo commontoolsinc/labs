@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   isAlias,
@@ -13,13 +13,11 @@ import {
   hasValueAtPath,
   setValueAtPath,
 } from "../src/utils.ts";
-import { Runtime } from "@commontools/runner";
+import { Runtime, StorageManager } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
-import * as Memory from "@commontools/memory";
-import * as Consumer from "@commontools/memory/consumer";
-import { Provider } from "@commontools/runner/storage/cache";
 
 const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("value type", () => {
   it("can destructure a value without TS errors", () => {
@@ -143,43 +141,22 @@ describe("Path operations", () => {
 });
 
 describe("createJsonSchema", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let provider: Memory.Provider.Provider<Memory.Protocol>;
-  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
   beforeEach(async () => {
-    // Create memory service for testing
-    const open = await Memory.Provider.open({
-      store: new URL("memory://db/"),
-      serviceDid: signer.did(),
-    });
-
-    if (open.error) {
-      throw open.error;
-    }
-
-    provider = open.ok;
-
-    consumer = Consumer.open({
-      as: signer,
-      session: provider.session(),
-    });
-
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
-      storageManager: {
-        open: (space: Consumer.MemorySpace) =>
-          Provider.open({
-            space,
-            session: consumer,
-          }),
-      },
+      storageManager,
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
-    await provider?.close();
+    await storageManager?.close();
   });
   it("should create schema for primitive types", () => {
     expect(createJsonSchema("test")).toEqual({ type: "string" });
@@ -310,7 +287,7 @@ describe("createJsonSchema", () => {
 
   it("should use cell schema when available", () => {
     const cellWithSchema = runtime.getImmutableCell(
-      "test-space",
+      space,
       "cell@value.com",
       { type: "string", format: "email" },
     );
@@ -321,7 +298,7 @@ describe("createJsonSchema", () => {
 
   it("should analyze cell value when no schema is provided", () => {
     const cellWithoutSchema = runtime.getImmutableCell(
-      "test-space",
+      space,
       {
         name: "John",
         age: 30,
@@ -342,7 +319,7 @@ describe("createJsonSchema", () => {
 
   it("should handle array cell without schema", () => {
     const arrayCell = runtime.getImmutableCell(
-      "test-space",
+      space,
       [1, 2, 3, 4],
     );
 
@@ -358,7 +335,7 @@ describe("createJsonSchema", () => {
 
   it("should handle nested cells with and without schema", () => {
     const userCell = runtime.getImmutableCell(
-      "test-space",
+      space,
       { id: 1, name: "Alice" },
     );
 
@@ -371,7 +348,7 @@ describe("createJsonSchema", () => {
     } as const satisfies JSONSchema;
 
     const prefsCell = runtime.getImmutableCell(
-      "test-space",
+      space,
       { darkMode: true, fontSize: 14 },
       prefsSchema,
     );

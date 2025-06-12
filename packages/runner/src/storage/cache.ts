@@ -1245,6 +1245,7 @@ export interface Options {
 }
 
 export interface IStorageManager {
+  id: string;
   open(space: string): IStorageProvider;
 }
 

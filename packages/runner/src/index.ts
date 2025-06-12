@@ -6,6 +6,7 @@ export type {
   ErrorWithContext as RuntimeErrorWithContext,
   RuntimeOptions,
 } from "./runtime.ts";
+export { StorageManager } from "./storage/cache.ts";
 export { raw } from "./module.ts";
 export { getRecipeEnvironment, setRecipeEnvironment } from "./env.ts";
 export type { DocImpl } from "./doc.ts";

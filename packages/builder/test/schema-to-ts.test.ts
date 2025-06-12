@@ -7,11 +7,10 @@ import { type Frame, type JSONSchema, type OpaqueRef } from "../src/types.ts";
 import { popFrame, pushFrame, recipe } from "../src/recipe.ts";
 import { Cell, Runtime } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
-import * as Memory from "@commontools/memory";
-import * as Consumer from "@commontools/memory/consumer";
-import { Provider } from "@commontools/runner/storage/cache";
+import { StorageManager } from "@commontools/runner/storage/cache";
 
 const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 // Helper function to check type compatibility at compile time
 // This doesn't run any actual tests, but ensures types are correct
@@ -19,44 +18,23 @@ function expectType<T, _U extends T>() {}
 
 describe("Schema-to-TS Type Conversion", () => {
   let frame: Frame;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let provider: Memory.Provider.Provider<Memory.Protocol>;
-  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
   beforeEach(async () => {
-    // Create memory service for testing
-    const open = await Memory.Provider.open({
-      store: new URL("memory://db/"),
-      serviceDid: signer.did(),
-    });
-
-    if (open.error) {
-      throw open.error;
-    }
-
-    provider = open.ok;
-
-    consumer = Consumer.open({
-      as: signer,
-      session: provider.session(),
-    });
-
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
-      storageManager: {
-        open: (space: Consumer.MemorySpace) =>
-          Provider.open({
-            space,
-            session: consumer,
-          }),
-      },
+      storageManager,
     });
     frame = pushFrame();
   });
 
   afterEach(async () => {
     await runtime?.dispose();
-    await provider?.close();
+    await storageManager?.close();
   });
 
   afterEach(() => {
@@ -537,7 +515,7 @@ describe("Schema-to-TS Type Conversion", () => {
     const settingsCell = runtime.documentMap.getDoc(
       { theme: "dark", notifications: true },
       "settings-cell",
-      "test",
+      space,
     ).asCell();
 
     // This is just to verify the type works at runtime
@@ -549,7 +527,11 @@ describe("Schema-to-TS Type Conversion", () => {
       settings: settingsCell,
     };
 
-    const userCell = runtime.getImmutableCell("test", userData, schema);
+    const userCell = runtime.getImmutableCell(
+      space,
+      userData,
+      schema,
+    );
     const user = userCell.get();
 
     expect(user.name).toBe("John");

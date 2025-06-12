@@ -373,7 +373,7 @@ test("create memory fails if already exists", DB, async (session) => {
     the,
     of: doc,
     expected: null,
-    actual: v1,
+    actual: { ...v1, since: 0 },
   });
 });
 
@@ -464,7 +464,7 @@ test("concurrent update fails", DB, async (session) => {
     the,
     of: doc,
     expected: refer(v1),
-    actual: v2,
+    actual: { ...v2, since: 1 },
   });
 });
 
@@ -736,7 +736,7 @@ test(
       the,
       of: doc,
       expected: refer(v2),
-      actual: v3,
+      actual: { ...v3, since: 2 },
     });
 
     assertMatch(
@@ -807,7 +807,7 @@ test(
       the,
       of: doc,
       expected: null,
-      actual: v2,
+      actual: { ...v2, since: 1 },
     });
   },
 );
@@ -978,7 +978,7 @@ test("batch updates", DB, async (session) => {
     the,
     of: hi,
     expected: refer(hi1),
-    actual: hi2,
+    actual: { ...hi2, since: 1 },
   });
 
   assertEquals(

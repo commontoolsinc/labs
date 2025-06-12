@@ -7,6 +7,7 @@ import {
   type ErrorWithContext,
   isStream,
   Runtime,
+  StorageManager,
 } from "@commontools/runner";
 import { createAdminSession, type DID, Identity } from "@commontools/identity";
 import {
@@ -93,9 +94,11 @@ async function initialize(
 
   // Initialize runtime and charm manager
   runtime = new Runtime({
-    storageUrl: toolshedUrl,
+    storageManager: StorageManager.open({
+      as: identity,
+      address: new URL(toolshedUrl),
+    }),
     blobbyServerUrl: toolshedUrl,
-    signer: identity,
     recipeEnvironment: { apiUrl },
     consoleHandler: consoleHandler,
     errorHandlers: [errorHandler],

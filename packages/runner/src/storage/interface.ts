@@ -24,6 +24,7 @@ export interface StorageValue<T = any> {
 }
 
 export interface IStorageManager {
+  id: string;
   open(space: MemorySpace): IStorageProvider;
 }
 

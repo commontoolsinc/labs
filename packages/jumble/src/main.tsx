@@ -1,9 +1,8 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { ConsoleMethod, Runtime } from "@commontools/runner";
+
 import {
   BrowserRouter as Router,
-  createBrowserRouter,
   createRoutesFromChildren,
   matchRoutes,
   Route,
@@ -20,7 +19,6 @@ import CharmList from "@/views/CharmList.tsx";
 import CharmShowView from "@/views/CharmShowView.tsx";
 import CharmDetailView from "@/views/CharmDetailView.tsx";
 import { AuthenticationProvider } from "@/contexts/AuthenticationContext.tsx";
-import { setupIframe } from "@/iframe-ctx.ts";
 import GenerateJSONView from "@/views/utility/GenerateJSONView.tsx";
 import SpellbookIndexView from "@/views/spellbook/SpellbookIndexView.tsx";
 import SpellbookDetailView from "@/views/spellbook/SpellbookDetailView.tsx";
@@ -85,36 +83,11 @@ const ReplicaRedirect = () => {
   return <div>redirecting...</div>;
 };
 
-// Create runtime with error and console handlers
-let errorCount = 0;
-const runtime = new Runtime({
-  storageUrl: location.origin,
-  errorHandlers: [(error) => {
-    !errorCount++ &&
-      globalThis.alert(
-        "Uncaught error in recipe: " + error.message + "\n" + error.stack,
-      );
-    // Also send to Sentry
-    Sentry.captureException(error);
-  }],
-  consoleHandler: (metadata, method, args) => {
-    // Handle console messages depending on charm context.
-    // This is essentially the same as the default handling currently,
-    // but adding this here for future use.
-    if (metadata?.charmId) {
-      return [`Charm(${metadata.charmId}) [${method}]:`, ...args];
-    }
-    return [`Console [${method}]:`, ...args];
-  },
-});
-
-setupIframe(runtime);
-
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary fallback={<div>An error has occurred</div>}>
-      <RuntimeProvider runtime={runtime}>
-        <AuthenticationProvider>
+      <AuthenticationProvider>
+        <RuntimeProvider>
           <CharmsProvider>
             <ActionManagerProvider>
               <ActivityProvider>
@@ -172,8 +145,8 @@ createRoot(document.getElementById("root")!).render(
               </ActivityProvider>
             </ActionManagerProvider>
           </CharmsProvider>
-        </AuthenticationProvider>
-      </RuntimeProvider>
+        </RuntimeProvider>
+      </AuthenticationProvider>
     </ErrorBoundary>
   </StrictMode>,
 );

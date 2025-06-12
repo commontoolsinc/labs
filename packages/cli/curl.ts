@@ -1,7 +1,7 @@
 // Load .env file
 import { parseArgs } from "@std/cli/parse-args";
 import { type DID, Identity } from "@commontools/identity";
-import { Provider as CachedStorageProvider } from "../runner/src/storage/cache.ts";
+import { StorageManager } from "../runner/src/storage/cache.ts";
 // Some examples of how you can use this to play with the classification labels
 // Store the empty list
 // > deno task curl --spaceName robin --data '[]' ct://did:key:z6MkjMowGqCog2ZfvNBNrx32p2Fa2bKR1nT7pUWiPQFWzVAg/baedreih5ute2slgsylwtbszccarx6ky2ca3mtticxug6sfj3nwamacefmn/application/json
@@ -93,18 +93,16 @@ async function main() {
   const putData = flags.data ? JSON.parse(flags.data) : undefined;
 
   const storageId = crypto.randomUUID();
-  const provider = new CachedStorageProvider({
+  const provider = StorageManager.open({
     id: storageId,
     address: new URL("/api/storage/memory", remoteStorageUrl),
-    space: spaceDID,
     as: identity,
-    the: the,
     settings: {
       maxSubscriptionsPerSpace: 50_000,
       connectionTimeout: 30_000,
       useSchemaQueries: true,
     },
-  });
+  }).open(spaceDID);
   // Before writing data, we need to read it to check if it's changed.
   // Since we need to read in either case, just do that here
   const syncResult = await provider.sync(entityId, true, {
@@ -134,16 +132,12 @@ async function main() {
     if (result.ok) {
       if (flags.delete) {
         console.log(
-          `Deleted (retracted) at ct://${spaceDID}/${
-            entityId["/"]
-          }/${provider.the}`,
+          `Deleted (retracted) at ct://${spaceDID}/${entityId["/"]}/${the}`,
         );
       }
       const putDataJSON = JSON.stringify(putData);
       console.log(
-        `Stored ${putDataJSON} at ct://${spaceDID}/${
-          entityId["/"]
-        }/${provider.the}`,
+        `Stored ${putDataJSON} at ct://${spaceDID}/${entityId["/"]}/${the}`,
       );
     } else {
       console.error("Failed to put data:", result.error);
