@@ -20,7 +20,7 @@ const FRONTEND_URL = Deno.env.get("FRONTEND_URL") ?? "http://localhost:5173/";
 const HEADLESS = true;
 const ASTRAL_TIMEOUT = 60_000;
 const RECIPE_PATH = "../../recipes/simpleValue.tsx";
-const COMMON_CLI_PATH = path.join(import.meta.dirname!, "../../cli");
+const COMMON_CLI_PATH = path.join(import.meta.dirname!, "../../../scripts/main.ts");
 const SNAPSHOTS_DIR = join(Deno.cwd(), "test_snapshots");
 
 console.log(`TOOLSHED_API_URL=${TOOLSHED_API_URL}`);
@@ -284,8 +284,9 @@ async function addCharm(toolshedUrl: string, recipePath: string) {
   }`;
   const { success, stdout, stderr } = await (new Deno.Command(Deno.execPath(), {
     args: [
-      "task",
-      "start",
+      "run",
+      "-A",
+      COMMON_CLI_PATH,
       "--spaceName",
       name,
       "--recipeFile",
@@ -299,7 +300,6 @@ async function addCharm(toolshedUrl: string, recipePath: string) {
       "TOOLSHED_API_URL": toolshedUrl,
       "OPERATOR_PASS": "common user",
     },
-    cwd: COMMON_CLI_PATH,
   })).output();
 
   if (!success) {
@@ -322,7 +322,9 @@ async function inspectCharm(
 ) {
   const { success, stdout, stderr } = await (new Deno.Command(Deno.execPath(), {
     args: [
-      "task",
+      "run",
+      "-A",
+      COMMON_CLI_PATH,
       "start",
       "--spaceName",
       name,
@@ -335,7 +337,6 @@ async function inspectCharm(
       "TOOLSHED_API_URL": toolshedUrl,
       "OPERATOR_PASS": "common user",
     },
-    cwd: COMMON_CLI_PATH,
   })).output();
 
   if (!success) {

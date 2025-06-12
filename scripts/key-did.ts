@@ -1,9 +1,11 @@
+#!/usr/bin/env -S deno run --allow-read
+
 import { Identity } from "@commontools/identity";
 import { encode } from "@commontools/utils/encoding";
 
 /**
  * Usage:
- * `deno task key-did KEY_PATH`
+ * `./key-did.ts KEY_PATH`
  */
 
 async function main() {

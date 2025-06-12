@@ -1,5 +1,5 @@
-import { h } from "@commontools/html";
 import {
+  h,
   derive,
   JSONSchema,
   llm,
@@ -7,7 +7,7 @@ import {
   recipe,
   str,
   UI,
-} from "@commontools/builder/interface";
+} from "commontools";
 
 // Email properties matching the email-summarizer output
 const EmailProperties = {

@@ -94,7 +94,7 @@ class BuildConfig {
   }
 
   cliEntryPath() {
-    return this.path("packages", "js-runtime", "cli", "mod.ts");
+    return this.path("packages", "cli", "mod.ts");
   }
 
   distDir() {

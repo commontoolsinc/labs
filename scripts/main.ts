@@ -1,3 +1,4 @@
+#!/usr/bin/env -S deno run --allow-read --allow-net --allow-env
 // Load .env file
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
