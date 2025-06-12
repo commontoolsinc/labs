@@ -130,23 +130,13 @@ This plan should be entirely incremental and can be rolled out step by step.
   - [ ] Remove that translation in storage.ts and make sure everything still
         works.
 - [ ] Create a new transaction API: Get a `tx` object from memory, which exposes
-      `tx.read(entity, path)`, `tx.write(entity, path, value)`, etc., and
-      `tx.commit()`, `tx.abort(reason?: Error)` and a few more (see below).
-      CT-449
-  - [ ] The callback function can be async, so you have to await it. But if the
-        function isn't async, the entire transaction building flow should be
-        synchronous (i.e. not yield to the event loop), just return a Promise
-        for when the transaction settles.
-  - [ ] Be sure to handle errors correctly, i.e. abort transaction on re-throw
-        the error (or return an aborted transaction, including the caught error?
-        or reject promise with aborted transaction that includes the caught
-        exception?).
-  - [ ] The heap shall not change while this function is running, i.e. the
-        function can read from memory and gets the state as of the beginning of
-        the function call and what it updated itself.
-  - [ ] If the transaction is aborted, the nursery is reverted to what it was
-        before the transaction (that is likely we'll create another layer on top
-        of the nursery?).
+      `tx.read(entity, path)`, `tx.write(entity, path, value)` (and/or other
+      mutation functions), etc., and `tx.commit()`, `tx.abort(reason?: Error)`
+      and a few more (see below). CT-449
+  - [ ] The heap and nursery shall not change while this function is running,
+        i.e. the function can read from memory and gets the state as of the
+        beginning of the function call and what it updated itself. Only once the
+        transaction is committed do we update the nursery.
   - [ ] Add path-dependent listeners to memory: During a transaction reads are
         logged with path. And there is a `tx.updates(callback)` or so function
         that registers a listener to any writes to any of the read paths (and
@@ -189,6 +179,9 @@ This plan should be entirely incremental and can be rolled out step by step.
         eventQueue.length = 0;
       }
       ```
+
+      This is I think functionally equivalent to processing events right away
+      and building up a changelist.
 - [ ] Directly read & write to memory layer & wrap action calls in a transaction
       CT-450
   - [ ] Use the new transaction API above to do all reads and writes.
