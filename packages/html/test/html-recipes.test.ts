@@ -61,7 +61,7 @@ describe("recipes with HTML", () => {
     const result = runtime.run(
       simpleRecipe,
       { value: 5 },
-      runtime.documentMap.getDoc(undefined, "simple-ui-result", "test"),
+      runtime.documentMap.getDoc(undefined, "simple-ui-result", space),
     );
 
     await runtime.idle();
@@ -171,7 +171,6 @@ describe("recipes with HTML", () => {
       return { [UI]: h("div", null, str`Hello, ${name}!`) };
     });
 
-    const space = "test";
     const resultCell = runtime.documentMap.getDoc(
       undefined,
       "str-recipe-result",
@@ -214,7 +213,6 @@ describe("recipes with HTML", () => {
       ),
     }));
 
-    const space = "test";
     const resultCell = runtime.documentMap.getDoc(
       undefined,
       "nested-map-result",
