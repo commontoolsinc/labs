@@ -8,7 +8,7 @@ import {
 import { type DocImpl } from "./doc.ts";
 import { type CellLink, createCell, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { resolveLinks, resolveLinkToAlias } from "./utils.ts";
+import { resolveLinks, resolveLinkToAlias } from "./link-resolution.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.

@@ -2,11 +2,7 @@ import { isRecord } from "@commontools/utils/types";
 import { defer } from "@commontools/utils/defer";
 import { sleep } from "@commontools/utils/sleep";
 import { Signer } from "@commontools/identity";
-import {
-  isStatic,
-  markAsStatic,
-  type SchemaContext,
-} from "@commontools/builder";
+import { type SchemaContext } from "@commontools/builder";
 import { TransactionResult } from "@commontools/memory";
 import { refer } from "@commontools/memory/reference";
 import { SchemaNone } from "@commontools/memory/interface";
@@ -316,7 +312,6 @@ export class Storage implements IStorage {
     const traverse = (
       value: Readonly<any>,
       path: PropertyKey[],
-      processStatic: boolean = false,
     ): any => {
       // If it's a doc, make it a doc link
       if (isDoc(value)) value = { cell: value, path: [] } satisfies CellLink;
@@ -330,8 +325,6 @@ export class Storage implements IStorage {
       if (isCellLink(value)) {
         dependencies.add(this._ensureIsSynced(value.cell));
         return { ...value, cell: value.cell.toJSON() /* = the id */ };
-      } else if (isStatic(value) && !processStatic) {
-        return { $static: traverse(value, path, true) };
       } else if (isRecord(value)) {
         if (Array.isArray(value)) {
           return value.map((value, index) => traverse(value, [...path, index]));
@@ -421,8 +414,6 @@ export class Storage implements IStorage {
           console.warn("unexpected doc link", value);
           return value;
         }
-      } else if ("$static" in value) {
-        return markAsStatic(traverse(value.$static));
       } else if (Array.isArray(value)) {
         return value.map(traverse);
       } else {

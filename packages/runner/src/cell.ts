@@ -14,11 +14,8 @@ import {
   createQueryResultProxy,
   type QueryResult,
 } from "./query-result-proxy.ts";
-import {
-  diffAndUpdate,
-  resolveLinkToAlias,
-  resolveLinkToValue,
-} from "./utils.ts";
+import { diffAndUpdate } from "./data-updating.ts";
+import { resolveLinkToAlias, resolveLinkToValue } from "./link-resolution.ts";
 import type { ReactivityLog } from "./scheduler.ts";
 import { type EntityId } from "./doc-map.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
