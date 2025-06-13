@@ -18,7 +18,7 @@ import {
   connectInputAndOutputs,
 } from "./node-utils.ts";
 import { moduleToJSON } from "./json-utils.ts";
-import { traverseValue } from "./traverse-utils.ts";
+import { traverseValue } from "../traverse-utils.ts";
 import { getTopFrame } from "./recipe.ts";
 
 export function createNodeFactory<T = any, R = any>(
@@ -177,7 +177,7 @@ export const compute: <T>(fn: () => T) => OpaqueRef<T> = (fn: () => any) =>
 // unsafe closures: like compute, but also convert all functions to handlers
 export const render = <T>(fn: () => T): OpaqueRef<T> =>
   compute(() =>
-    traverseValue(fn(), (v) => {
+    traverseValue(fn(), (v: (event: unknown, props: unknown) => any) => {
       // Modules are functions, so we need to exclude them
       if (!isModule(v) && typeof v === "function") return handler(v)({});
       else return v;
