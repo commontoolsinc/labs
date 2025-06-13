@@ -23,7 +23,7 @@ cd ./toolshed
 deno task dev
 ```
 
-By default the backend will run at http://localhost:8000
+By default the backend will run at <http://localhost:8000>
 
 ## Running the frontend
 
@@ -34,8 +34,8 @@ cd ./jumble
 deno task dev
 ```
 
-By default, the frontend will run at http://localhost:5173, and it will point to
-a local backend running at http://localhost:8000.
+By default, the frontend will run at <http://localhost:5173>, and it will point
+to a local backend running at <http://localhost:8000>.
 
 If you are not actively making updates to the backend, you can also point to the
 backend running in the cloud, by running the following command:

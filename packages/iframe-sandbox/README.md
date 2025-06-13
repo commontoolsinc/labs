@@ -75,7 +75,7 @@ product decisisons during experimentation.
   other vector of exfiltration could occur.
 - Exposing iframe status to outer content could be considered leaky, though all
   content is inlined, not HTTP URLs.
-  https://developer.mozilla.org/en-US/docs/Web/HTML/Element/iframe#error_and_load_event_behavior
+  <https://developer.mozilla.org/en-US/docs/Web/HTML/Element/iframe#error_and_load_event_behavior>
 
 [Lit]: https://lit.dev/
 [CSP]: https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP

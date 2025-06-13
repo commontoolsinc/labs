@@ -102,7 +102,7 @@ import { isOpaqueRef, OpaqueRef } from "./spell.js";
 
 The codebase correctly follows the guideline for module-specific dependencies:
 
-### Good Examples:
+### Good Examples
 
 - `packages/llm/deno.json` - Correctly declares `json5` dependency
 - `packages/ui/deno.json` - Correctly declares `@shoelace-style/shoelace`
