@@ -1,6 +1,6 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
-import { getEntityId, Runtime } from "@commontools/runner";
+import { getEntityId, Runtime, StorageManager } from "@commontools/runner";
 import { type DID } from "@commontools/identity";
 import { createAdminSession } from "@commontools/identity";
 import {
@@ -54,8 +54,11 @@ async function castRecipe() {
 
   // Create runtime with proper configuration
   const runtime = new Runtime({
-    storageUrl: toolshedUrl,
-    signer: identity,
+    storageManager: StorageManager.open({
+      as: identity,
+      address: new URL(toolshedUrl),
+    }),
+    blobbyServerUrl: toolshedUrl,
   });
 
   try {

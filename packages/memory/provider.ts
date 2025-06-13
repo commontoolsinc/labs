@@ -1,4 +1,3 @@
-import { MapSet } from "@commontools/builder/traverse";
 import * as Access from "./access.ts";
 import type {
   AsyncResult,
@@ -9,6 +8,7 @@ import type {
   ConsumerCommandInvocation,
   ConsumerInvocationFor,
   ConsumerResultFor,
+  DID,
   Fact,
   FactAddress,
   Invocation,
@@ -33,11 +33,13 @@ import type {
   Transaction,
   UCAN,
 } from "./interface.ts";
-import { Fact as FactModule, SelectionBuilder } from "./lib.ts";
+import * as SelectionBuilder from "./selection.ts";
 import * as Memory from "./memory.ts";
 import { refer } from "./reference.ts";
 import { redactCommit } from "./space.ts";
+import { MapSet } from "./util.ts";
 import * as Subscription from "./subscription.ts";
+import * as FactModule from "./fact.ts";
 
 export * as Error from "./error.ts";
 export * from "./interface.ts";
@@ -48,9 +50,10 @@ export * from "./util.ts";
 
 // Convenient shorthand so I don't need this long type for this string
 type JobId = InvocationURL<Reference<ConsumerCommandInvocation<Protocol>>>;
+export type Options = Memory.Options;
 
 export const open = async (
-  options: Memory.Options,
+  options: Options,
 ): AsyncResult<Provider<Protocol>, ConnectionError> => {
   const result = await Memory.open(options);
   if (result.error) {
@@ -59,6 +62,16 @@ export const open = async (
 
   return { ok: new MemoryProvider(result.ok) };
 };
+
+/**
+ * Creates an ephemeral memory provider. It does not persist anything
+ * and it's primary use is in testing.
+ */
+export const emulate = (options: Memory.ServiceOptions): Provider<Protocol> =>
+  new MemoryProvider(Memory.emulate(options));
+
+export const create = (memory: MemorySession): Provider<Protocol> =>
+  new MemoryProvider(memory);
 
 export interface Provider<Protocol extends Proto> {
   fetch(request: Request): Promise<Response>;

@@ -21,8 +21,8 @@ import {
   type FactSelection,
   type MemorySpace,
   type SchemaQuery,
-  SelectAllString,
 } from "./interface.ts";
+import { SelectAllString } from "./schema.ts";
 import {
   getChange,
   getRevision,

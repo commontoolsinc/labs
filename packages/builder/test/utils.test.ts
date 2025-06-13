@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   isAlias,
@@ -13,7 +13,11 @@ import {
   hasValueAtPath,
   setValueAtPath,
 } from "../src/utils.ts";
-import { Runtime } from "@commontools/runner";
+import { Runtime, StorageManager } from "@commontools/runner";
+import { Identity } from "@commontools/identity";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("value type", () => {
   it("can destructure a value without TS errors", () => {
@@ -137,16 +141,22 @@ describe("Path operations", () => {
 });
 
 describe("createJsonSchema", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
   beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://"
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
+    await storageManager?.close();
   });
   it("should create schema for primitive types", () => {
     expect(createJsonSchema("test")).toEqual({ type: "string" });
@@ -277,7 +287,7 @@ describe("createJsonSchema", () => {
 
   it("should use cell schema when available", () => {
     const cellWithSchema = runtime.getImmutableCell(
-      "test-space",
+      space,
       "cell@value.com",
       { type: "string", format: "email" },
     );
@@ -288,7 +298,7 @@ describe("createJsonSchema", () => {
 
   it("should analyze cell value when no schema is provided", () => {
     const cellWithoutSchema = runtime.getImmutableCell(
-      "test-space",
+      space,
       {
         name: "John",
         age: 30,
@@ -309,7 +319,7 @@ describe("createJsonSchema", () => {
 
   it("should handle array cell without schema", () => {
     const arrayCell = runtime.getImmutableCell(
-      "test-space",
+      space,
       [1, 2, 3, 4],
     );
 
@@ -325,7 +335,7 @@ describe("createJsonSchema", () => {
 
   it("should handle nested cells with and without schema", () => {
     const userCell = runtime.getImmutableCell(
-      "test-space",
+      space,
       { id: 1, name: "Alice" },
     );
 
@@ -338,7 +348,7 @@ describe("createJsonSchema", () => {
     } as const satisfies JSONSchema;
 
     const prefsCell = runtime.getImmutableCell(
-      "test-space",
+      space,
       { darkMode: true, fontSize: 14 },
       prefsSchema,
     );

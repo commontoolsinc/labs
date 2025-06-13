@@ -1,4 +1,4 @@
-import type { JSONValue, SchemaContext } from "@commontools/builder";
+import type { JSONValue, SchemaContext } from "./interface.ts";
 import {
   Abilities,
   AuthorizationError,
@@ -32,7 +32,6 @@ import {
   Reference,
   Result,
   Revision,
-  SchemaNone,
   SchemaPathSelector,
   SchemaQuery,
   SchemaQueryArgs,
@@ -64,6 +63,7 @@ import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
 export * from "./interface.ts";
 import { toRevision } from "./commit.ts";
+import { SchemaNone } from "./schema.ts";
 
 export const connect = ({
   address,
@@ -121,7 +121,7 @@ class MemoryConsumerSession<
 > extends TransformStream<
   ProviderCommand<Protocol>,
   UCAN<ConsumerCommandInvocation<Protocol>>
-> implements MemorySession<Space> {
+> implements MemoryConsumer<Space> {
   controller:
     | TransformStreamDefaultController<
       UCAN<ConsumerCommandInvocation<MemoryProtocol>>
@@ -255,6 +255,15 @@ class MemoryConsumerSession<
 
 export interface MemorySession<Space extends MemorySpace> {
   mount<Subject extends Space>(space: Subject): MemorySpaceSession<Subject>;
+}
+
+export interface MemoryConsumer<Space extends MemorySpace>
+  extends
+    MemorySession<Space>,
+    TransformStream<
+      ProviderCommand<Protocol>,
+      UCAN<ConsumerCommandInvocation<Protocol>>
+    > {
 }
 
 export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {

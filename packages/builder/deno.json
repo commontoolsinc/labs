@@ -5,6 +5,6 @@
     "./traverse": "./src/traverse.ts"
   },
   "tasks": {
-    "test": "deno test --allow-env"
+    "test": "deno test --allow-env --allow-ffi --allow-read"
   }
 }

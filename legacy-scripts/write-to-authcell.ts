@@ -1,30 +1,42 @@
 // Load .env file
-import { type CellLink, Runtime } from "@commontools/runner";
+import { type MemorySpace, Runtime, StorageManager } from "@commontools/runner";
 import { parseArgs } from "@std/cli/parse-args";
 import { AuthSchema } from "@commontools/builder";
+import { Identity } from "@commontools/identity";
 
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ||
   "https://toolshed.saga-castor.ts.net";
+const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "common user";
 
 async function main(
   recipeSrc: string,
-  replica: string = "common-knowledge",
+  replica?: MemorySpace,
   cause?: string,
   jsonData?: any,
 ) {
+  const identity = await Identity.fromPassphrase(OPERATOR_PASS);
   // Create runtime with proper configuration
   const runtime = new Runtime({
-    storageUrl: TOOLSHED_API_URL,
+    storageManager: StorageManager.open({
+      as: identity,
+      address: new URL(TOOLSHED_API_URL),
+    }),
+    blobbyServerUrl: TOOLSHED_API_URL,
   });
 
   const cellId = {
     "/": "baedreiajxdvqjxmgpfzjix4h6vd4pl77unvet2k3acfvhb6ottafl7gpua",
   };
 
-  const authCell = runtime.getCellFromEntityId(replica, cellId, [
-    "argument",
-    "auth",
-  ], AuthSchema);
+  const authCell = runtime.getCellFromEntityId(
+    replica ?? identity.did(),
+    cellId,
+    [
+      "argument",
+      "auth",
+    ],
+    AuthSchema,
+  );
   await runtime.storage.syncCell(authCell);
   await runtime.storage.synced();
 
@@ -80,7 +92,7 @@ const flags = parseArgs(Deno.args, {
 });
 
 const filename = flags._[0];
-const replica = flags.replica;
+const replica = flags.replica as MemorySpace;
 const cause = flags.cause;
 const data = flags.data;
 let recipeSrc: string;

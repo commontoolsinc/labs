@@ -6,6 +6,7 @@ export type {
   ErrorWithContext as RuntimeErrorWithContext,
   RuntimeOptions,
 } from "./runtime.ts";
+export { StorageManager } from "./storage/cache.ts";
 export { raw } from "./module.ts";
 export { getRecipeEnvironment, setRecipeEnvironment } from "./env.ts";
 export type { DocImpl } from "./doc.ts";
@@ -25,7 +26,7 @@ export {
 } from "./query-result-proxy.ts";
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
-export { Storage } from "./storage.ts";
+export { type MemorySpace, Storage } from "./storage.ts";
 export { type ConsoleEvent, ConsoleMethod } from "./harness/console.ts";
 export { addCommonIDfromObjectID } from "./data-updating.ts";
 export { followAliases, maybeGetCellLink } from "./link-resolution.ts";

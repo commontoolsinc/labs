@@ -27,12 +27,14 @@ testability, isolation, and control over service configuration.
 All services are now accessed through a `Runtime` instance:
 
 ```typescript
-import { Runtime } from "@commontools/runner";
+import { Runtime, StorageManager } from "@commontools/runner";
 
 // Create a runtime instance with configuration
 const runtime = new Runtime({
-  storageUrl: "https://example.com/storage", // Required
-  signer: myIdentitySigner, // Optional, for remote storage
+  storageManager: new StorageManager({
+    address: "https://example.com/storage",
+    signer: myIdentitySigner
+  }),
   consoleHandler: myConsoleHandler, // Optional
   errorHandlers: [myErrorHandler], // Optional
   blobbyServerUrl: "https://example.com/blobby", // Optional
@@ -160,12 +162,19 @@ structures.
 Cells are now created through the Runtime instance rather than global functions:
 
 ```typescript
-import { Runtime } from "@commontools/runner";
+import { Runtime, StorageManager } from "@commontools/runner";
+import { Identity } from "@commontools/identity";
+
+// Set up storage manager
+const signer = await Identity.fromPassphrase("example-passphrase");
+const storageManager = StorageManager.emulate({ as: signer });
 
 // Create a runtime instance first
 const runtime = new Runtime({
-  storageUrl: "volatile://", // Use volatile storage for this example
+  storageManager,
+  blobbyServerUrl: loaction.origin,
 });
+```
 
 // Create a cell with schema and default values
 const settingsCell = runtime.getCell(
@@ -232,11 +241,20 @@ validation, and automatic transformation of data. The `Schema<>` helper from the
 Builder package provides TypeScript type inference.
 
 ```typescript
-import { Runtime } from "@commontools/runner";
+import { Runtime, StorageManager } from "@commontools/runner";
 import type { JSONSchema } from "@commontools/builder";
+import { Identity } from "@commontools/identity";
+
+// Set up storage manager
+const signer = await Identity.fromPassphrase("example-passphrase");
+const storageManager = StorageManager.emulate({ as: signer });
 
 // Create runtime instance
-const runtime = new Runtime({ storageUrl: "volatile://" });
+const runtime = new Runtime({
+  storageManager,
+  blobbyServerUrl: location.origin,
+});
+```
 
 // Define a schema with type assertions for TypeScript inference
 const userSchema = {
@@ -299,11 +317,20 @@ the Builder package and executed by the Runner, which manages dependencies and
 updates results automatically.
 
 ```typescript
-import { Runtime } from "@commontools/runner";
+import { Runtime, StorageManager } from "@commontools/runner";
 import { derive, recipe } from "@commontools/builder";
+import { Identity } from "@commontools/identity";
+
+// Set up storage manager
+const signer = await Identity.fromPassphrase("example-passphrase");
+const storageManager = StorageManager.emulate({ as: signer });
 
 // Create runtime instance
-const runtime = new Runtime({ storageUrl: "volatile://" });
+const runtime = new Runtime({
+  storageManager,
+  blobbyServerUrl: import.meta.url,
+});
+```
 
 // Define a recipe with input and output schemas
 const doubleNumberRecipe = recipe(
@@ -361,18 +388,28 @@ The storage system provides persistence for cells and synchronization across
 clients.
 
 ```typescript
-import { Runtime } from "@commontools/runner";
+import { Runtime, StorageManager } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 
-// Create signer for authentication
+// Create identity for authentication
 const signer = await Identity.fromPassphrase("my-passphrase");
 
-// Configure runtime with remote storage
-const runtime = new Runtime({
-  storageUrl: "https://example.com/api",
-  signer: signer,
-  enableCache: true,
+// Create storage manager (for production, use StorageManager.open() with remote storage)
+const storageManager = StorageManager.open({
+  as: signer,
+  address: new URL("https://example.com/api")
 });
+
+// Create a runtime instance with configuration
+const runtime = new Runtime({
+  storageManager,
+  blobbyServerUrl: "https://example.com/blobby", // Optional
+  consoleHandler: myConsoleHandler, // Optional
+  errorHandlers: [myErrorHandler], // Optional
+  recipeEnvironment: { apiUrl: "https://api.example.com" }, // Optional
+  debug: false, // Optional
+});
+```
 
 // Sync a cell with storage
 await runtime.storage.syncCell(userCell);
@@ -394,11 +431,20 @@ await runtime.storage.synced();
 You can map and transform data using cells with schemas:
 
 ```typescript
-import { Runtime } from "@commontools/runner";
+import { Runtime, StorageManager } from "@commontools/runner";
 import type { JSONSchema } from "@commontools/builder";
+import { Identity } from "@commontools/identity";
+
+// Set up storage manager
+const signer = await Identity.fromPassphrase("example-passphrase");
+const storageManager = StorageManager.emulate({ as: signer });
 
 // Create runtime instance
-const runtime = new Runtime({ storageUrl: "volatile://" });
+const runtime = new Runtime({
+  storageManager,
+  blobbyServerUrl: import.meta.url,
+});
+```
 
 // Original data source cell
 const sourceCell = runtime.getCell(
@@ -475,10 +521,19 @@ console.log(result);
 Cells can react to changes in deeply nested structures:
 
 ```typescript
-import { Runtime } from "@commontools/runner";
+import { Runtime, StorageManager } from "@commontools/runner";
+import { Identity } from "@commontools/identity";
+
+// Set up storage manager
+const signer = await Identity.fromPassphrase("example-passphrase");
+const storageManager = StorageManager.emulate({ as: signer });
 
 // Create runtime instance
-const runtime = new Runtime({ storageUrl: "volatile://" });
+const runtime = new Runtime({
+  storageManager,
+  blobbyServerUrl: import.meta.url,
+});
+```
 
 const rootCell = runtime.getCell(
   "my-space",
@@ -552,8 +607,16 @@ await storage.syncCell(cell);
 await idle();
 
 // NEW (current):
-import { Runtime } from "@commontools/runner";
-const runtime = new Runtime({ storageUrl: "volatile://" });
+import { Runtime, StorageManager } from "@commontools/runner";
+import { Identity } from "@commontools/identity";
+
+const signer = await Identity.fromPassphrase("my-passphrase");
+const storageManager = StorageManager.emulate({ as: signer });
+
+const runtime = new Runtime({
+  storageManager,
+  blobbyServerUrl: import.meta.url,
+});
 const cell = runtime.getCell(space, cause, schema);
 await runtime.storage.syncCell(cell);
 await runtime.idle();
@@ -575,9 +638,7 @@ The Runtime constructor accepts a configuration object:
 
 ```typescript
 interface RuntimeOptions {
-  storageUrl: string; // Required: storage backend URL
-  signer?: Signer; // Optional: for remote storage auth
-  enableCache?: boolean; // Optional: enable local caching
+  storageManager: IStorageManager; // Required: storage manager implementation
   consoleHandler?: ConsoleHandler; // Optional: custom console handling
   errorHandlers?: ErrorHandler[]; // Optional: error handling
   blobbyServerUrl?: string; // Optional: blob storage URL
@@ -586,7 +647,36 @@ interface RuntimeOptions {
 }
 ```
 
-### Storage URL Patterns
+### Storage Manager
+
+Storage manager is used by runtime to open storage providers when reading or writing documents into a corresponding space.
+
+```ts
+export interface IStorageManager {
+  open(space: MemorySpace): IStorageProvider;
+}
+```
+
+The storage manager opens storage providers for different memory spaces. The StorageManager provides convenient factory methods:
+
+```ts
+import { StorageManager } from "@commontools/runner";
+import { Identity } from "@commontools/identity";
+
+const signer = await Identity.fromPassphrase("my-passphrase");
+
+// For development and testing - emulated storage
+const storageManager = StorageManager.emulate({ as: signer });
+
+// For production - remote storage
+const storageManager = StorageManager.open({
+  address: "https://example.com/storage",
+  as: signer,
+});
+```
+
+
+The `@commontools/storage/cache` provides  a default implementation of the `IStorageManager` interface.
 
 - `"volatile://"` - In-memory storage (for testing)
 - `"https://example.com/storage"` - Remote storage with schema queries

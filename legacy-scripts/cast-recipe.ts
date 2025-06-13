@@ -1,6 +1,11 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
-import { getEntityId, isStream, Runtime } from "@commontools/runner";
+import {
+  getEntityId,
+  isStream,
+  Runtime,
+  StorageManager,
+} from "@commontools/runner";
 import { createAdminSession, type DID, Identity } from "@commontools/identity";
 
 const { spaceId, targetCellCause, recipePath, cause, name, quit } = parseArgs(
@@ -58,12 +63,20 @@ async function castRecipe() {
 
     // Create charm manager for the specified space
     runtime = new Runtime({
-      storageUrl: toolshedUrl,
-      signer: signer,
+      storageManager: StorageManager.open({
+        as: signer,
+        address: new URL(toolshedUrl),
+      }),
+      blobbyServerUrl: toolshedUrl,
     });
     const charmManager = new CharmManager(session, runtime);
     await charmManager.ready;
-    const recipe = await compileRecipe(recipeSrc, "recipe", runtime, spaceId!);
+    const recipe = await compileRecipe(
+      recipeSrc,
+      "recipe",
+      runtime,
+      spaceId as DID,
+    );
 
     const charm = await charmManager.runPersistent(
       recipe,

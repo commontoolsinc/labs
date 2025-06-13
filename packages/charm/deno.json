@@ -1,7 +1,7 @@
 {
   "name": "@commontools/charm",
   "tasks": {
-    "test": "deno test --allow-env"
+    "test": "deno test --allow-env --allow-ffi --allow-read"
   },
   "exports": "./src/index.ts"
 }

@@ -1,20 +1,20 @@
 import { useEffect, useState } from "react";
 import { JSONSchema, Schema } from "@commontools/builder";
-import { Cell, effect } from "@commontools/runner";
+import { Cell, effect, type MemorySpace } from "@commontools/runner";
 import { useRuntime } from "@/contexts/RuntimeContext.tsx";
 
 export function useNamedCell<S extends JSONSchema>(
-  space: string,
+  space: MemorySpace,
   cause: any,
   schema: S,
 ): [Schema<S>, (newValue: Schema<S>) => void];
 export function useNamedCell<T>(
-  space: string,
+  space: MemorySpace,
   cause: any,
   schema: JSONSchema,
 ): [T, (newValue: T) => void];
 export function useNamedCell<T>(
-  space: string,
+  space: MemorySpace,
   cause: any,
   schema: JSONSchema,
 ) {

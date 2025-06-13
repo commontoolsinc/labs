@@ -3,10 +3,15 @@ import { expect } from "@std/expect";
 import { createBuilder } from "../src/index.ts";
 import { popFrame, pushFrame } from "../src/recipe.ts";
 import type { Frame, JSONSchema } from "../src/types.ts";
-import { Runtime } from "@commontools/runner";
+import { Runtime, StorageManager } from "@commontools/runner";
+import { Identity } from "@commontools/identity";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("OpaqueRef Schema Support", () => {
   let frame: Frame;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let recipe: ReturnType<typeof createBuilder>["recipe"];
   let cell: ReturnType<typeof createBuilder>["cell"];
@@ -14,10 +19,13 @@ describe("OpaqueRef Schema Support", () => {
   beforeEach(() => {
     // Setup frame for the test
     frame = pushFrame();
-    
-    // Set up runtime and builder
+
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
     const builder = createBuilder(runtime);
     ({ recipe, cell } = builder);

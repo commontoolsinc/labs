@@ -147,7 +147,7 @@ test("create memory fails if already exists", memory, async (session) => {
     the,
     of: doc,
     expected: null,
-    actual: v1,
+    actual: { ...v1, since: 0 },
   });
 });
 

@@ -19,7 +19,7 @@ written with React.
 For a more detailed guide, see [./toolshed/README.md](./toolshed/README.md).
 
 ```bash
-cd ./toolshed
+cd ./packages/toolshed
 deno task dev
 ```
 

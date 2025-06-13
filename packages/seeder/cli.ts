@@ -1,5 +1,5 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { Runtime } from "@commontools/runner";
+import { Runtime, StorageManager } from "@commontools/runner";
 import { setLLMUrl } from "@commontools/llm";
 import { createSession, Identity } from "@commontools/identity";
 import { CharmManager } from "@commontools/charm";
@@ -42,12 +42,18 @@ if (!name) {
 // Storage and blobby server URL are now configured in Runtime constructor
 setLLMUrl(apiUrl);
 
+const identity = await Identity.fromPassphrase("common user");
+
 const runtime = new Runtime({
-  storageUrl: apiUrl,
+  storageManager: StorageManager.open({
+    address: new URL(apiUrl),
+    as: identity,
+  }),
+  blobbyServerUrl: apiUrl,
 });
 
 const session = await createSession({
-  identity: await Identity.fromPassphrase("common user"),
+  identity,
   name,
 });
 const charmManager = new CharmManager(session, runtime);
