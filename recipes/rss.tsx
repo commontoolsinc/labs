@@ -12,6 +12,7 @@ import {
   str,
   UI,
 } from "commontools";
+import { DOMParser, type Element } from "dom-parser";
 
 const FeedItemProperties = {
   id: { type: "string" },

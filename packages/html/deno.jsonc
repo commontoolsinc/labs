@@ -3,7 +3,7 @@
   "exports": "./src/index.ts",
   "tasks": {
     // JSDOM dependencies require env.
-    "test": "deno test --allow-env"
+    "test": "deno test --allow-env --allow-read=../static/assets/types/"
   },
   "imports": {},
   "compilerOptions": {

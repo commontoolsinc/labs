@@ -1,12 +1,5 @@
 import { type RawSourceMap } from "source-map-js";
 
-export class CompilerError extends Error {
-  override name = "CompilerError";
-  constructor(message: string) {
-    super(message);
-  }
-}
-
 // A reference to a runtime value from a `JsIsolate`.
 export interface JsValue {
   invoke(...args: unknown[]): JsValue;
@@ -56,7 +49,7 @@ export interface Compiler<T> {
 // resolve other sources used in the program.
 export interface ProgramResolver {
   entry(): Source;
-  resolveSource(identifier: string): Source | undefined;
+  resolveSource(identifier: string): Promise<Source | undefined>;
 }
 
 // An entry point and its sources for a program.

@@ -148,6 +148,7 @@ export type JSONSchema = {
   readonly title?: string;
   readonly example?: Readonly<JSONValue>;
   readonly required?: readonly string[];
+  readonly minimum?: Readonly<number>;
   readonly enum?: readonly string[];
   readonly items?: Readonly<JSONSchema>;
   readonly $ref?: string;

@@ -1,5 +1,5 @@
-import { JsIsolate, JsRuntime, JsScript, SourceMap } from "./interface.ts";
-import { SourceMapParser } from "./source-map.ts";
+import { JsIsolate, JsRuntime, JsScript, SourceMap } from "../interface.ts";
+import { SourceMapParser } from "../source-map.ts";
 
 export class UnsafeEvalJsValue {
   private internals: IsolateInternals;
