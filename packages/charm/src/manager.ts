@@ -12,7 +12,6 @@ import {
 import {
   type Cell,
   createRef,
-  DocImpl,
   EntityId,
   followAliases,
   getEntityId,
@@ -835,7 +834,7 @@ export class CharmManager {
     // Helper to check if a document refers to our target charm
     const checkRefersToTarget = (
       value: any,
-      parent: DocImpl<any>,
+      parent: Cell<any>,
       visited = new Set<any>(), // Track objects directly, not string representations
       depth = 0,
     ): boolean => {
@@ -922,7 +921,7 @@ export class CharmManager {
         if (isAlias(value)) {
           try {
             // Follow all aliases to their source
-            const cellLink = followAliases(value, parent);
+            const cellLink = followAliases(value, parent.getDoc());
             if (cellLink && cellLink.cell) {
               // Check if the aliased doc is our target
               const cellId = getEntityId(cellLink.cell);
@@ -950,7 +949,7 @@ export class CharmManager {
         }
 
         // Use maybeGetCellLink to handle various reference types
-        const cellLink = maybeGetCellLink(value, parent);
+        const cellLink = maybeGetCellLink(value, parent.getDoc());
         if (cellLink) {
           try {
             // Check if the linked doc is our target
@@ -1128,7 +1127,7 @@ export class CharmManager {
         // Check if the charm document references our target
         if (charmValue && typeof charmValue === "object") {
           if (
-            checkRefersToTarget(charmValue, otherCellLink.cell, new Set(), 0)
+            checkRefersToTarget(charmValue, otherCellLink.cell.asCell(), new Set(), 0)
           ) {
             addReadingCharm(otherCharm);
             continue; // Skip additional checks for this charm
@@ -1153,7 +1152,7 @@ export class CharmManager {
               if (
                 checkRefersToTarget(
                   argumentValue,
-                  argumentLink.cell,
+                  argumentLink.cell.asCell(),
                   new Set(),
                   0,
                 )
