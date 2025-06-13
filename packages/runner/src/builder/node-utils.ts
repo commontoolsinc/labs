@@ -10,7 +10,7 @@ import {
   type OpaqueRef,
 } from "./types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import { traverseValue } from "./traverse-utils.ts";
+import { traverseValue } from "../traverse-utils.ts";
 
 export function connectInputAndOutputs(node: NodeRef) {
   function connect(value: any): any {
@@ -53,7 +53,7 @@ export function applyInputIfcToOutput<T, R>(
 ) {
   const collectedClassifications = new Set<string>();
   const cfc = new ContextualFlowControl();
-  traverseValue(inputs, (item) => {
+  traverseValue(inputs, (item: unknown) => {
     if (isOpaqueRef(item)) {
       const { schema: inputSchema } = (item as OpaqueRef<T>).export();
       if (inputSchema !== undefined) {
