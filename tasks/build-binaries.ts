@@ -253,6 +253,7 @@ async function buildCli(config: BuildConfig): Promise<void> {
     "DENO_SQLITE_LOCAL",
     "DENO_DIR",
     "HOME",
+    "XDG_CACHE_HOME"
   ];
   const { success } = await new Deno.Command(Deno.execPath(), {
     args: [
