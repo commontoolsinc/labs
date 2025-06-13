@@ -550,7 +550,7 @@ export class CharmManager {
                 if (cellId) addMatchingCharm(cellId);
 
                 const sourceRefId = followSourceToResultRef(
-                  cellLink.cell.asCell(),
+                  this.runtime.getCellFromLink(cellLink),
                   new Set(),
                   0,
                 );
@@ -581,7 +581,7 @@ export class CharmManager {
               if (cellId) addMatchingCharm(cellId);
 
               const sourceRefId = followSourceToResultRef(
-                value.cell.asCell(),
+                this.runtime.getCellFromLink(value),
                 new Set(),
                 0,
               );
@@ -602,7 +602,7 @@ export class CharmManager {
                 if (cellId) addMatchingCharm(cellId);
 
                 const sourceRefId = followSourceToResultRef(
-                  cellLink.cell.asCell(),
+                  this.runtime.getCellFromLink(cellLink),
                   new Set(),
                   0,
                 );
@@ -622,7 +622,7 @@ export class CharmManager {
               if (cellId) addMatchingCharm(cellId);
 
               const sourceRefId = followSourceToResultRef(
-                cellLink.cell.asCell(),
+                this.runtime.getCellFromLink(cellLink),
                 new Set(),
                 0,
               );
@@ -746,7 +746,7 @@ export class CharmManager {
 
       // Start processing from the argument value
       if (argumentValue && typeof argumentValue === "object") {
-        processValue(argumentValue, argumentLink.cell.asCell(), new Set(), 0);
+        processValue(argumentValue, this.runtime.getCellFromLink(argumentLink), new Set(), 0);
       }
     } catch (error) {
       console.debug("Error finding references in charm arguments:", error);
@@ -857,7 +857,7 @@ export class CharmManager {
 
               // Check if this cell's source chain leads to our target
               const sourceRefId = followSourceToResultRef(
-                cellLink.cell.asCell(),
+                this.runtime.getCellFromLink(cellLink),
                 new Set(),
                 0,
               );
@@ -930,7 +930,7 @@ export class CharmManager {
 
               // Check if source chain leads to our target
               const sourceRefId = followSourceToResultRef(
-                cellLink.cell.asCell(),
+                this.runtime.getCellFromLink(cellLink),
                 new Set(),
                 0,
               );
@@ -959,7 +959,7 @@ export class CharmManager {
 
             // Check if source chain leads to our target
             const sourceRefId = followSourceToResultRef(
-              cellLink.cell.asCell(),
+              this.runtime.getCellFromLink(cellLink),
               new Set(),
               0,
             );
@@ -1126,7 +1126,7 @@ export class CharmManager {
         // Check if the charm document references our target
         if (charmValue && typeof charmValue === "object") {
           if (
-            checkRefersToTarget(charmValue, otherCellLink.cell.asCell(), new Set(), 0)
+            checkRefersToTarget(charmValue, this.runtime.getCellFromLink(otherCellLink), new Set(), 0)
           ) {
             addReadingCharm(otherCharm);
             continue; // Skip additional checks for this charm
@@ -1151,7 +1151,7 @@ export class CharmManager {
               if (
                 checkRefersToTarget(
                   argumentValue,
-                  argumentLink.cell.asCell(),
+                  this.runtime.getCellFromLink(argumentLink),
                   new Set(),
                   0,
                 )
