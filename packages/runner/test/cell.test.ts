@@ -107,6 +107,58 @@ describe("Cell", () => {
     c.send(4);
     expect(values).toEqual([1, 2, 3]);
   });
+
+  it("should get raw value using getRaw", () => {
+    const c = runtime.documentMap.getDoc(
+      { x: 1, y: 2 },
+      "should get raw value using getRaw",
+      "test",
+    );
+    const cell = c.asCell();
+    expect(cell.getRaw()).toEqual({ x: 1, y: 2 });
+  });
+
+  it("should set raw value using setRaw", () => {
+    const c = runtime.documentMap.getDoc(
+      { x: 1, y: 2 },
+      "should set raw value using setRaw",
+      "test",
+    );
+    const cell = c.asCell();
+    const result = cell.setRaw({ x: 10, y: 20 });
+    expect(result).toBe(true); // setRaw returns boolean from doc.send()
+    expect(cell.getRaw()).toEqual({ x: 10, y: 20 });
+  });
+
+  it("should work with primitive values in getRaw/setRaw", () => {
+    const c = runtime.documentMap.getDoc(
+      42,
+      "should work with primitive values in getRaw/setRaw",
+      "test",
+    );
+    const cell = c.asCell();
+    
+    expect(cell.getRaw()).toBe(42);
+    
+    const result = cell.setRaw(100);
+    expect(result).toBe(true);
+    expect(cell.getRaw()).toBe(100);
+  });
+
+  it("should work with arrays in getRaw/setRaw", () => {
+    const c = runtime.documentMap.getDoc(
+      [1, 2, 3],
+      "should work with arrays in getRaw/setRaw",
+      "test",
+    );
+    const cell = c.asCell();
+    
+    expect(cell.getRaw()).toEqual([1, 2, 3]);
+    
+    const result = cell.setRaw([4, 5, 6]);
+    expect(result).toBe(true);
+    expect(cell.getRaw()).toEqual([4, 5, 6]);
+  });
 });
 
 describe("Cell utility functions", () => {
