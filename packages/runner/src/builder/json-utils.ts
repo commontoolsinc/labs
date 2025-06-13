@@ -1,5 +1,6 @@
 import { isObject, isRecord } from "@commontools/utils/types";
 import { type CellLink, isCell, isCellLink, isDoc } from "../index.ts";
+import { type CellLink, isCell, isCellLink, isDoc } from "../index.ts";
 import { createShadowRef } from "./opaque-ref.ts";
 import {
   type Alias,
