@@ -365,7 +365,7 @@ function followPointer<K, S>(
         valueEntry !== null && valueEntry.value !== undefined &&
         valueEntry.source && valueEntry.value !== doc.docRoot
       ) {
-        manager.addRead(doc.doc, valueEntry.value, valueEntry.source);
+        manager.addRead(target, valueEntry.value, valueEntry.source);
       }
       if (schemaTracker !== undefined && selector !== undefined) {
         schemaTracker.add(manager.toKey(target), selector);
@@ -441,11 +441,10 @@ export function loadSource<K, S>(
   cycleCheck.add(of);
   const entryDoc = manager.toAddress(of);
   const entry = manager.load(entryDoc);
-  console.log("Including source cell", entry?.source);
   if (entry === null || entry.value === undefined || !entry.source) {
     return;
   }
-  manager.addRead(doc, entry.value, entry.source);
+  manager.addRead(entryDoc, entry.value, entry.source);
   if (schemaTracker !== undefined) {
     schemaTracker.add(manager.toKey(entryDoc), MinimalSchemaSelector);
   }
