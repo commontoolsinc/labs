@@ -2,7 +2,8 @@
 
 ## Core Philosophy
 
-We are a small team optimizing for rapid development and product-market fit while maintaining security and privacy guarantees.
+We are a small team optimizing for rapid development and product-market fit
+while maintaining security and privacy guarantees.
 
 ## Key Principles
 
@@ -16,7 +17,8 @@ We are a small team optimizing for rapid development and product-market fit whil
 
 - Embrace essential complexity, eliminate accidental complexity
 - Keep implementations simple and shallow
-- Prefer DAMP (Descriptive And Meaningful Phrases) over DRY (Don't Repeat Yourself)
+- Prefer DAMP (Descriptive And Meaningful Phrases) over DRY (Don't Repeat
+  Yourself)
 - Duplicate code is great, especially if it reduces dependencies
 - Shared code should be limited to general-purpose utilities
 
@@ -40,6 +42,7 @@ We are a small team optimizing for rapid development and product-market fit whil
 
 - Keep shared code limited to utilities
 - Use HTTP for service communication
-- When calling inter-service APIs, make use of the hono stack, and RPC style calls
+- When calling inter-service APIs, make use of the hono stack, and RPC style
+  calls
 - Maintain service independence
 - Enable easy refactoring and replacement

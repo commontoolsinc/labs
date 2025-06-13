@@ -46,8 +46,8 @@ Deriving a `PersonaKey` from a `RootKey` performs the following algorithm:
 - `i` = SHA-256 hash `i`
 - Use `i` as raw ed25519 private key material
 
-```
-hash(sign(encode(name)))
+```ts
+hash(sign(encode(name)));
 ```
 
 ## Browser Support
