@@ -1,6 +1,6 @@
 import React, { useMemo, useRef } from "react";
 import { render, type VNode } from "@commontools/html";
-import { UI } from "@commontools/builder";
+import { UI } from "@commontools/runner";
 import { charmId, charmSchema, fixItCharm } from "@commontools/charm";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { useNavigate } from "react-router-dom";

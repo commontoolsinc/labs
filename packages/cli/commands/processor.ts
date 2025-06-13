@@ -19,8 +19,7 @@ const RUNTIME_TYPES: Record<RUNTIME_IDENTIFIER, string> = {
 async function createRuntimeDependencies(): Promise<
   Record<RUNTIME_IDENTIFIER, any>
 > {
-  const { Runtime } = await import("@commontools/runner");
-  const { createBuilder } = await import("@commontools/builder");
+  const { Runtime, createBuilder } = await import("@commontools/runner");
   const builder = createBuilder(new Runtime({ storageUrl: "volatile://" }));
   return {
     "commontools": builder,

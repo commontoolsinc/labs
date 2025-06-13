@@ -1,4 +1,4 @@
-import { JSONSchema } from "@commontools/builder";
+import { JSONSchema } from "@commontools/runner";
 import { Cell, getEntityId, type Runtime } from "@commontools/runner";
 import { Charm, getRecipeIdFromCharm } from "../manager.ts";
 
@@ -18,8 +18,8 @@ export const buildFullRecipe = (iframe: IFrameRecipe) => {
   ).join("\n");
 
   return `import { h } from "@commontools/html";
-  import { recipe, UI, NAME } from "@commontools/builder";
-  import type { JSONSchema } from "@commontools/builder";
+  import { recipe, UI, NAME } from "@commontools/runner";
+  import type { JSONSchema } from "@commontools/runner";
 
   type IFrameRecipe = {
     src: string,

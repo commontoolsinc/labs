@@ -1,4 +1,4 @@
-import { type Recipe } from "@commontools/builder";
+import { type Recipe } from "../builder/types.ts";
 import { type Program } from "@commontools/js-runtime";
 
 export type HarnessedFunction = (input: any) => void;

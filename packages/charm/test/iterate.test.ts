@@ -2,7 +2,7 @@ import { assertEquals } from "@std/assert";
 import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
 import { scrub } from "../src/iterate.ts";
 import { Runtime } from "@commontools/runner";
-import { JSONSchema } from "@commontools/builder";
+import { JSONSchema } from "@commontools/runner";
 
 describe("scrub function", () => {
   let runtime: Runtime;

@@ -6,10 +6,10 @@ import {
   type JSONSchema,
   type Module,
   type Recipe,
-} from "../src/types.ts";
-import { lift } from "../src/module.ts";
-import { recipe } from "../src/recipe.ts";
-import { opaqueRef } from "../src/opaque-ref.ts";
+} from "../src/builder/types.ts";
+import { lift } from "../src/builder/module.ts";
+import { recipe } from "../src/builder/recipe.ts";
+import { opaqueRef } from "../src/builder/opaque-ref.ts";
 
 describe("recipe function", () => {
   it("creates a recipe", () => {

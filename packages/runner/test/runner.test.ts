@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { Recipe } from "@commontools/builder";
+import type { Recipe } from "../src/index.ts";
 import { Runtime } from "../src/runtime.ts";
 
 describe("runRecipe", () => {

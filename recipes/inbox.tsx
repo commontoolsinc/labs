@@ -1,13 +1,4 @@
-import {
-  h,
-  derive,
-  JSONSchema,
-  llm,
-  NAME,
-  recipe,
-  str,
-  UI,
-} from "commontools";
+import { derive, h, JSONSchema, llm, NAME, recipe, str, UI } from "commontools";
 
 // Email properties matching the email-summarizer output
 const EmailProperties = {
@@ -163,7 +154,8 @@ export default recipe(
     );
 
     // System prompt for email analysis
-    const systemPrompt = str`You are an intelligent email assistant. Analyze the provided email summaries and create a 2-3 sentence heads up about the most important or urgent items that need attention. Focus on deadlines, urgent requests, and important senders.`;
+    const systemPrompt =
+      str`You are an intelligent email assistant. Analyze the provided email summaries and create a 2-3 sentence heads up about the most important or urgent items that need attention. Focus on deadlines, urgent requests, and important senders.`;
 
     // Generate email data for analysis
     const emailData = derive(
@@ -174,7 +166,9 @@ export default recipe(
         }
 
         return emails.map((item, index) =>
-          `${index + 1}. From: ${item.email.from}, Subject: ${item.email.subject}, Summary: ${item.summary}`
+          `${
+            index + 1
+          }. From: ${item.email.from}, Subject: ${item.email.subject}, Summary: ${item.summary}`
         ).join("\n");
       },
     );

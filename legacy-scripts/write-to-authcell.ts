@@ -1,7 +1,7 @@
 // Load .env file
 import { type CellLink, Runtime } from "@commontools/runner";
 import { parseArgs } from "@std/cli/parse-args";
-import { AuthSchema } from "@commontools/builder";
+import { AuthSchema } from "@commontools/runner";
 
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ||
   "https://toolshed.saga-castor.ts.net";

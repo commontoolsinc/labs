@@ -1,4 +1,4 @@
-import type { JSONValue, SchemaContext } from "@commontools/builder";
+import type { JSONValue, SchemaContext } from "@commontools/runner";
 import {
   Abilities,
   AuthorizationError,

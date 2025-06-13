@@ -7,7 +7,7 @@ import {
   unsafe_originalRecipe,
   unsafe_parentRecipe,
   type UnsafeBinding,
-} from "@commontools/builder";
+} from "./builder/types.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";

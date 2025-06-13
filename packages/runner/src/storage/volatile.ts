@@ -1,4 +1,4 @@
-import { SchemaContext } from "@commontools/builder";
+import { SchemaContext } from "../builder/types.ts";
 import type { EntityId } from "../doc-map.ts";
 import { log } from "../log.ts";
 import {

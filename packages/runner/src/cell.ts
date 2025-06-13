@@ -1,13 +1,13 @@
 import { isObject, isRecord } from "@commontools/utils/types";
+import { getTopFrame } from "./builder/recipe.ts";
 import {
   type Cell,
-  getTopFrame,
   ID,
   ID_FIELD,
   isStreamAlias,
   type JSONSchema,
   type Schema,
-} from "@commontools/builder";
+} from "./builder/types.ts";
 import { type DeepKeyLookup, type DocImpl, isDoc } from "./doc.ts";
 import { getEntityId } from "./doc-map.ts";
 import {

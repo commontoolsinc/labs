@@ -1,5 +1,6 @@
 import { isRecord } from "@commontools/utils/types";
-import { getTopFrame, toOpaqueRef } from "@commontools/builder";
+import { getTopFrame } from "./builder/recipe.ts";
+import { toOpaqueRef } from "./builder/types.ts";
 import { type DocImpl, makeOpaqueRef } from "./doc.ts";
 import { type CellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";

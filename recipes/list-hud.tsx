@@ -1,13 +1,4 @@
-import {
-  h,
-  derive,
-  JSONSchema,
-  llm,
-  NAME,
-  recipe,
-  str,
-  UI,
-} from "commontools";
+import { derive, h, JSONSchema, llm, NAME, recipe, str, UI } from "commontools";
 
 const TodoItemSchema = {
   type: "object",

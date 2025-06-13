@@ -16,9 +16,9 @@ import { opaqueRef } from "./opaque-ref.ts";
 import {
   applyArgumentIfcToResult,
   connectInputAndOutputs,
-  moduleToJSON,
-  traverseValue,
-} from "./utils.ts";
+} from "./node-utils.ts";
+import { moduleToJSON } from "./json-utils.ts";
+import { traverseValue } from "./traverse-utils.ts";
 import { getTopFrame } from "./recipe.ts";
 
 export function createNodeFactory<T = any, R = any>(

@@ -8,7 +8,7 @@ import {
   getEntityId,
   maybeGetCellLink,
 } from "@commontools/runner";
-import { NAME } from "@commontools/builder";
+import { NAME } from "@commontools/runner";
 
 // Create a mock environment for testing reference detection
 describe("Charm reference detection", () => {
