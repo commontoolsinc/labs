@@ -12,7 +12,7 @@ import {
   getValueAtPath,
   hasValueAtPath,
   setValueAtPath,
-} from "../src/builder/path-utils.ts";
+} from "../src/path-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 
 describe("value type", () => {

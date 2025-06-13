@@ -1,8 +1,7 @@
 import { isRecord } from "@commontools/utils/types";
 import { opaqueRef } from "./builder/opaque-ref.ts";
-import { deepEqual } from "./builder/traverse-utils.ts";
 import { getTopFrame } from "./builder/recipe.ts";
-import { getValueAtPath, setValueAtPath } from "./builder/path-utils.ts";
+import { deepEqual, getValueAtPath, setValueAtPath } from "./path-utils.ts";
 import {
   type Frame,
   type JSONSchema,

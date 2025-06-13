@@ -4,6 +4,7 @@ import { isObject } from "@commontools/utils/types";
 import { type JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "../path-utils.ts";
+import { deepEqual } from "../path-utils.ts";
 import { MapSet } from "../traverse.ts";
 import type {
   AuthorizationError,
