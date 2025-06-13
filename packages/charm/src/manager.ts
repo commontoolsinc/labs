@@ -256,10 +256,6 @@ export class CharmManager {
     // Start syncing if not already syncing. Will trigger a change to the list
     // once loaded.
     this.syncCharms(this.charms);
-    console.log(this.charms);
-    console.log(this.charms.get());
-    console.log(JSON.stringify(this.charms.value, undefined, 2));
-    console.log(this.charms.get().map((charmCell) => getEntityId(charmCell)));
     return this.charms;
   }
 

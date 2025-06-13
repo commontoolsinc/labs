@@ -3,9 +3,9 @@ import { defer } from "@commontools/utils/defer";
 import { sleep } from "@commontools/utils/sleep";
 import { Signer } from "@commontools/identity";
 import { type SchemaContext } from "@commontools/builder";
-import { TransactionResult } from "@commontools/memory";
+import { type TransactionResult } from "@commontools/memory";
 import { refer } from "@commontools/memory/reference";
-import { SchemaNone } from "@commontools/memory/interface";
+import { MemorySpace, SchemaNone } from "@commontools/memory/interface";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { Cell, type CellLink, isCell, isCellLink, isStream } from "./cell.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
@@ -458,7 +458,10 @@ export class Storage implements IStorage {
     }
   }
 
-  private getDocFromRuntimeOrStorage(space: string, entityId: { "/": string }) {
+  private getDocFromRuntimeOrStorage(
+    space: MemorySpace,
+    entityId: { "/": string },
+  ) {
     // Any dependent docs that we expected should already be loaded,
     // so we can just grab them from the runtime's document map.
     // If they aren't available, then leave the link in its raw form.
@@ -468,6 +471,10 @@ export class Storage implements IStorage {
       false,
     );
     if (dependency !== undefined) {
+      // FIXME: I still need to traverse, swapping links as I go, because I
+      // may have and old record which did not include some links, and now
+      // I have a new record which includes those links. I want to swap in
+      // those links.
       return dependency;
     }
 
@@ -513,6 +520,10 @@ export class Storage implements IStorage {
     ]);
 
     do {
+      console.log(
+        "loading keys",
+        loading.keys().map((doc) => JSON.stringify(doc.entityId)),
+      );
       // Load everything in loading
       const loaded = await Promise.all(
         Array.from(loading.keys()).map((doc) => this.loadingPromises.get(doc)!),
