@@ -1,4 +1,4 @@
-import { JSONSchema } from "@commontools/builder";
+import { JSONSchema } from "@commontools/runner";
 import {
   applyDefaults,
   type GenerationOptions,

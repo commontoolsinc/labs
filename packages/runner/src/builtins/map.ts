@@ -1,4 +1,4 @@
-import { type Recipe } from "@commontools/builder";
+import { type Recipe } from "../builder/types.ts";
 import { type DocImpl } from "../doc.ts";
 import { getCellLinkOrThrow } from "../query-result-proxy.ts";
 import { type ReactivityLog } from "../scheduler.ts";

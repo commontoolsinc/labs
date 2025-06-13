@@ -4,7 +4,7 @@ import {
   type Cell,
   createBuilder,
   type JSONSchema,
-} from "@commontools/builder";
+} from "../src/index.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { isCell } from "../src/cell.ts";

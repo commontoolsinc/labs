@@ -4,7 +4,7 @@ import { type DocImpl, isDoc } from "../src/doc.ts";
 import { isCell, isCellLink } from "../src/cell.ts";
 import { isQueryResult } from "../src/query-result-proxy.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
-import { ID, JSONSchema, popFrame, pushFrame } from "@commontools/builder";
+import { ID, JSONSchema, popFrame, pushFrame } from "../src/index.ts";
 import { Runtime } from "../src/runtime.ts";
 import { addCommonIDfromObjectID } from "../src/data-updating.ts";
 import { Identity } from "@commontools/identity";

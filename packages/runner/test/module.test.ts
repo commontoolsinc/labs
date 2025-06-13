@@ -7,10 +7,10 @@ import {
   type JSONSchema,
   type Module,
   type OpaqueRef,
-} from "../src/types.ts";
-import { handler, lift } from "../src/module.ts";
-import { opaqueRef } from "../src/opaque-ref.ts";
-import { popFrame, pushFrame } from "../src/recipe.ts";
+} from "../src/builder/types.ts";
+import { handler, lift } from "../src/builder/module.ts";
+import { opaqueRef } from "../src/builder/opaque-ref.ts";
+import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 
 type MouseEvent = {
   clientX: number;

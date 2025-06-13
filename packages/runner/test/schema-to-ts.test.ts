@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { handler, lift } from "../src/module.ts";
-import { str } from "../src/built-in.ts";
+import { handler, lift } from "../src/builder/module.ts";
+import { str } from "../src/builder/built-in.ts";
 import {
   type Frame,
   type JSONSchema,
   type OpaqueRef,
   Schema,
-} from "../src/types.ts";
-import { popFrame, pushFrame, recipe } from "../src/recipe.ts";
+} from "../src/builder/types.ts";
+import { popFrame, pushFrame, recipe } from "../src/builder/recipe.ts";
 import { Cell, Runtime } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";

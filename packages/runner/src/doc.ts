@@ -1,16 +1,15 @@
 import { isRecord } from "@commontools/utils/types";
+import { opaqueRef } from "./builder/opaque-ref.ts";
+import { deepEqual } from "./builder/traverse-utils.ts";
+import { getTopFrame } from "./builder/recipe.ts";
+import { getValueAtPath, setValueAtPath } from "./builder/path-utils.ts";
 import {
-  cell as opaqueRef,
-  deepEqual,
   type Frame,
-  getTopFrame,
-  getValueAtPath,
   type JSONSchema,
   type OpaqueRef,
   type Schema,
-  setValueAtPath,
   toOpaqueRef,
-} from "@commontools/builder";
+} from "./builder/types.ts";
 import { type Cell, createCell } from "./cell.ts";
 import {
   createQueryResultProxy,

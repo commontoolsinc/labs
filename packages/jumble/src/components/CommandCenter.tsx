@@ -21,7 +21,7 @@ import { WorkflowForm } from "@commontools/charm";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { getMentionableCharms } from "@/utils/charms.ts";
-import { NAME } from "@commontools/builder";
+import { NAME } from "@commontools/runner";
 import { Cell } from "@commontools/runner";
 import { Charm, charmId } from "@commontools/charm";
 import { useLiveSpecPreview } from "@/hooks/use-live-spec-preview.ts";

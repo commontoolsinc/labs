@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { NavLink, useParams } from "react-router-dom";
-import { NAME } from "@commontools/builder";
+import { NAME } from "@commontools/runner";
 import { Cell } from "@commontools/runner";
 import { Charm } from "@commontools/charm";
 import { charmId } from "@commontools/charm";

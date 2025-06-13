@@ -4,7 +4,7 @@ import {
   CharmManager,
   DEFAULT_MODEL,
 } from "@commontools/charm";
-import { NAME, Recipe } from "@commontools/builder";
+import { NAME, Recipe } from "@commontools/runner";
 import { LLMClient } from "@commontools/llm";
 import { Cell } from "@commontools/runner";
 

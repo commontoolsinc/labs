@@ -1,4 +1,4 @@
-import { Module, NAME, Recipe } from "@commontools/builder";
+import { Module, NAME, Recipe } from "@commontools/runner";
 import { Charm, CharmManager, charmSchema } from "./index.ts";
 import { Cell, getEntityId, isCell, isStream } from "@commontools/runner";
 

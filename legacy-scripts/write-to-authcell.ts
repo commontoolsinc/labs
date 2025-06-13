@@ -1,8 +1,7 @@
 // Load .env file
-import { type MemorySpace, Runtime } from "@commontools/runner";
+import { AuthSchema, type MemorySpace, Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { parseArgs } from "@std/cli/parse-args";
-import { AuthSchema } from "@commontools/builder";
 import { Identity } from "@commontools/identity";
 
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ||

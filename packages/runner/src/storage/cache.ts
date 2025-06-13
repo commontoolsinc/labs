@@ -1,12 +1,10 @@
 import { fromString, refer } from "merkle-reference";
 import { isBrowser } from "@commontools/utils/env";
 import { isObject } from "@commontools/utils/types";
-import {
-  ContextualFlowControl,
-  deepEqual,
-  JSONSchema,
-} from "@commontools/builder";
-import { MapSet } from "@commontools/builder/traverse";
+import { JSONSchema } from "../builder/types.ts";
+import { ContextualFlowControl } from "../cfc.ts";
+import { deepEqual } from "../builder/traverse-utils.ts";
+import { MapSet } from "../traverse.ts";
 import type {
   AuthorizationError,
   Changes,
