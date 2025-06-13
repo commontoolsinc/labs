@@ -9,6 +9,7 @@ import {
   SchemaObjectTraverser,
   type ValueEntry,
 } from "../traverse.ts";
+} from "../traverse.ts";
 import type {
   FactAddress,
   Revision,
