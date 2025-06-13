@@ -9,7 +9,7 @@ import { SchemaNone } from "@commontools/memory/interface";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { Cell, type CellLink, isCell, isCellLink, isStream } from "./cell.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
-import { type EntityId } from "./doc-map.ts";
+import { type EntityId, getEntityId } from "./doc-map.ts";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
@@ -264,14 +264,20 @@ export class Storage implements IStorage {
     // references.
     this.docIsSyncing.add(doc);
 
+    console.log("Called _ensureIsSynced for", JSON.stringify(doc.entityId));
     // Start loading the doc and safe the promise for processBatch to await for
     const loadingPromise = this._getStorageProviderForSpace(doc.space)
       .sync(doc.entityId!, expectedInStorage, schemaContext)
       .then((result) => {
         if (result.error) {
+          console.log("got result error", result.error);
           // This will be a decoupled doc that is not persisted and cannot be edited
           doc.ephemeral = true;
           doc.freeze();
+        } else {
+          console.log("Sync of", JSON.stringify(doc.entityId), "completed");
+          // at ths point, the storage provider has the right value, but it hasn't been set in doc
+          console.log(result.ok as any);
         }
         return doc;
       });
@@ -382,34 +388,38 @@ export class Storage implements IStorage {
 
     const dependencies = new Set<DocImpl<any>>();
 
+    // This will replace any cell links with a DocImpl if we have that
+    // doc available. We should already have any docs we need available.
     const traverse = (value: any): any => {
       if (typeof value !== "object" || value === null) {
         return value;
       } else if ("cell" in value && "path" in value) {
         // If we see a doc link with just an id, then we replace it with
         // the actual doc:
+        console.log(JSON.stringify(value));
         if (
           isRecord(value.cell) &&
           "/" in value.cell &&
           Array.isArray(value.path)
         ) {
-          // If we had a classification earlier, carry it to the dependent object
-          const valueSchema = (label !== undefined)
-            ? this.runtime.cfc.schemaWithLub(value.schema ?? {}, label)
-            : value.schema;
-          // If the doc is not yet loaded, load it. As it's referenced in
-          // something that came from storage, the id is known in storage and so
-          // we have to wait for it to load. Hence true as second parameter.
-          const dependency = this._ensureIsSyncedById(
+          const entityId = getEntityId(value.cell)!;
+          // Any dependent docs that we expected should already be loaded,
+          // so we can just grab them from the runtime's document map.
+          // If they aren't available, then leave the link in its raw form.
+          const dependency = this.getDocFromRuntimeOrStorage(
             doc.space,
-            value.cell,
-            true,
-            valueSchema
-              ? { schema: valueSchema, rootSchema: valueSchema }
-              : undefined,
+            entityId,
           );
-          dependencies.add(dependency);
-          return { ...value, cell: dependency };
+          if (dependency !== undefined) {
+            dependencies.add(dependency);
+            return { ...value, cell: dependency };
+          }
+          // Previously, we would also call _ensureIsSyncedById to recursively
+          // load the docs linked to by this dependency, but now we expect to
+          // already have all the docs we need in our Provider. We still need
+          // to do the subscription to changes through the Provider, and we
+          // still need to connect the dependent docs to the Provider's data.
+          return value;
         } else {
           console.warn("unexpected doc link", value);
           return value;
@@ -429,7 +439,11 @@ export class Storage implements IStorage {
     };
 
     if (source) {
-      const sourceDoc = this._ensureIsSyncedById(doc.space, source, true);
+      const sourceDoc = this.runtime.documentMap.getDocByEntityId(
+        doc.space,
+        source,
+        false,
+      )!;
       dependencies.add(sourceDoc);
       newValue.source = sourceDoc;
     }
@@ -441,6 +455,35 @@ export class Storage implements IStorage {
       this.readValues.set(doc, newValue);
 
       this._addToBatch([{ doc, type: "doc" }]);
+    }
+  }
+
+  private getDocFromRuntimeOrStorage(space: string, entityId: { "/": string }) {
+    // Any dependent docs that we expected should already be loaded,
+    // so we can just grab them from the runtime's document map.
+    // If they aren't available, then leave the link in its raw form.
+    const dependency = this.runtime.documentMap.getDocByEntityId(
+      space,
+      entityId,
+      false,
+    );
+    if (dependency !== undefined) {
+      return dependency;
+    }
+
+    // Check in storage - we may have fetched the doc, but not set it up
+    // in our runtime's document map.
+    const storageValue = this._getStorageProviderForSpace(space).get(entityId);
+    if (storageValue !== undefined) {
+      const depDoc = this.runtime.documentMap.getDocByEntityId(
+        space,
+        entityId,
+        true,
+      )!;
+      // If we hadn't set it up in our document map, we probably need to
+      // evaluate this doc's links as well.
+      this._batchForDoc(depDoc, storageValue.value, storageValue.source);
+      return depDoc;
     }
   }
 

@@ -90,7 +90,7 @@ export const CharmLink: React.FC<CharmLinkProps> = ({
     if (children) return children;
 
     const text = charmName || "Unnamed Charm";
-
+    console.log(id);
     if (showId) {
       return text + ` (${id})`;
     }

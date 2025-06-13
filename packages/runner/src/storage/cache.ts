@@ -598,7 +598,9 @@ export class Replica {
     const schemaless = need
       .filter(([_addr, schema]) => schema === undefined)
       .map(([addr, _schema]) => addr);
+    console.log("Schemaless", schemaless);
     const { ok: pulled, error } = await this.cache.pull(schemaless);
+    console.log("pulled1:", pulled);
 
     if (error) {
       return { error };
@@ -611,7 +613,9 @@ export class Replica {
       // have to wait until fetch is complete.
       // TODO(@ubik2) still need to add since field
       if (pulled.size < need.length) {
-        return await this.pull(need);
+        const pullResult = await this.pull(need);
+        console.log("pulled2:", pullResult);
+        return pullResult;
       } //
       // Otherwise we are able to complete checkout and we schedule a pull in
       // the background so we can get latest entries if there are some available.
@@ -804,6 +808,9 @@ export class Provider implements StorageProvider {
 
   subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
     new Map();
+  // TODO(@ubik2): Keep track of our server subs, so we can re-establish them
+  // after we lose and re-establish a connection.
+  //serverSubscriptions: Map<string, Set<SchemaPathSelector>>
 
   inspector?: Channel;
 
@@ -856,7 +863,8 @@ export class Provider implements StorageProvider {
       return replica;
     } else {
       const session = this.session.mount(space);
-      const replica = new Replica(space, session);
+      // FIXME: Temporarily disabling the cache while I ensure things work correctly
+      const replica = new Replica(space, session, new NoCache());
       replica.useSchemaQueries = this.settings.useSchemaQueries;
       replica.poll();
       this.spaces.set(space, replica);
@@ -872,6 +880,7 @@ export class Provider implements StorageProvider {
     const of = BaseStorageProvider.toEntity(entityId);
     const { workspace } = this;
     const address = { the, of };
+    console.log("Called sink for", of);
     const subscriber = (revision?: Revision<State>) => {
       if (revision) {
         // ⚠️ We may not have a value because fact was retracted or
@@ -901,7 +910,9 @@ export class Provider implements StorageProvider {
   > {
     const { the } = this;
     const of = BaseStorageProvider.toEntity(entityId);
-    return this.workspace.load([[{ the, of }, schemaContext]]);
+    const maybePromise = this.workspace.load([[{ the, of }, schemaContext]]);
+    console.log("mp", maybePromise);
+    return maybePromise;
   }
 
   get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
@@ -1024,6 +1035,9 @@ export class Provider implements StorageProvider {
     socket.addEventListener("open", this);
     socket.addEventListener("close", this);
     socket.addEventListener("error", this);
+
+    // FIXME: Re-establish our subscriptions
+    //for (const [doc, selectorSet] of this.serverSubscriptions)
 
     this.connectionCount += 1;
   }

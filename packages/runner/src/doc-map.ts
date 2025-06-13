@@ -189,6 +189,8 @@ export class DocumentMap implements IDocumentMap {
     if (typeof entityId === "string") {
       entityId = JSON.parse(entityId) as EntityId;
     }
+    console.log("Creating new doc for", entityId);
+    console.trace();
     doc = createDoc<T>(undefined as T, entityId, space, this.runtime);
     doc.sourceCell = sourceIfCreated;
     return doc;
