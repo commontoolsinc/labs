@@ -22,63 +22,45 @@ describe("Cell", () => {
   });
 
   it("should create a cell with initial value", () => {
-    const c = runtime.documentMap.getDoc(
-      10,
-      "should create a cell with initial value",
-      "test",
-    );
+    const c = runtime.getCell<number>("test", "should create a cell with initial value");
+    c.setRaw(10);
     expect(c.get()).toBe(10);
   });
 
   it("should update cell value using send", () => {
-    const c = runtime.documentMap.getDoc(
-      10,
-      "should update cell value using send",
-      "test",
-    );
+    const c = runtime.getCell<number>("test", "should update cell value using send");
+    c.setRaw(10);
     c.send(20);
     expect(c.get()).toBe(20);
   });
 
   it("should create a proxy for the cell", () => {
-    const c = runtime.documentMap.getDoc(
-      { x: 1, y: 2 },
-      "should create a proxy for the cell",
-      "test",
-    );
+    const c = runtime.getCell<{x: number, y: number}>("test", "should create a proxy for the cell");
+    c.setRaw({ x: 1, y: 2 });
     const proxy = c.getAsQueryResult();
     expect(proxy.x).toBe(1);
     expect(proxy.y).toBe(2);
   });
 
   it("should update cell value through proxy", () => {
-    const c = runtime.documentMap.getDoc(
-      { x: 1, y: 2 },
-      "should update cell value through proxy",
-      "test",
-    );
+    const c = runtime.getCell<{x: number, y: number}>("test", "should update cell value through proxy");
+    c.setRaw({ x: 1, y: 2 });
     const proxy = c.getAsQueryResult();
     proxy.x = 10;
     expect(c.get()).toEqual({ x: 10, y: 2 });
   });
 
   it("should get value at path", () => {
-    const c = runtime.documentMap.getDoc(
-      { a: { b: { c: 42 } } },
-      "should get value at path",
-      "test",
-    );
-    expect(c.getAtPath(["a", "b", "c"])).toBe(42);
+    const c = runtime.getCell<{a: {b: {c: number}}}>("test", "should get value at path");
+    c.setRaw({ a: { b: { c: 42 } } });
+    expect(c.getAsQueryResult(["a", "b", "c"])).toBe(42);
   });
 
   it("should set value at path", () => {
-    const c = runtime.documentMap.getDoc(
-      { a: { b: { c: 42 } } },
-      "should set value at path",
-      "test",
-    );
-    c.setAtPath(["a", "b", "c"], 100);
-    expect(c.get()).toEqual({ a: { b: { c: 100 } } });
+    const c = runtime.getCell<{a: {b: {c: number}}}>("test", "should set value at path");
+    c.setRaw({ a: { b: { c: 42 } } });
+    c.getAsQueryResult().a.b.c = 100;
+    expect(c.getAsQueryResult(["a", "b", "c"])).toBe(100);
   });
 
   it("should call updates callback when value changes", () => {
