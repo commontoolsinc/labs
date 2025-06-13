@@ -347,11 +347,14 @@ export class Runner implements IRunner {
    * A better strategy would be to schedule based on effects and unregister the
    * effects driving execution, e.g. the UI.
    *
-   * @param resultCell - The result doc to stop.
+   * @param resultCell - The result doc or cell to stop.
    */
-  stop<T>(resultCell: DocImpl<T>): void {
-    this.cancels.get(resultCell)?.();
-    this.cancels.delete(resultCell);
+  stop<T>(resultCell: DocImpl<T>): void;
+  stop<T>(resultCell: Cell<T>): void;
+  stop<T>(resultCell: DocImpl<T> | Cell<T>): void {
+    const doc = isDoc(resultCell) ? resultCell : (resultCell as Cell<T>).getDoc();
+    this.cancels.get(doc)?.();
+    this.cancels.delete(doc);
   }
 
   stopAll(): void {

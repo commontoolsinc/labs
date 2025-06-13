@@ -221,6 +221,7 @@ export interface IRunner {
     inputs?: any,
   ): any;
   stop<T>(resultCell: DocImpl<T>): void;
+  stop<T>(resultCell: Cell<T>): void;
   stopAll(): void;
 }
 
