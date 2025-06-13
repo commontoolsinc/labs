@@ -128,34 +128,87 @@ export interface IDFields {
   [ID_FIELD]?: unknown;
 }
 
+// Valid values for the "type" property of a JSONSchema
+export type JSONSchemaTypes =
+  | "object"
+  | "array"
+  | "string"
+  | "integer"
+  | "number"
+  | "boolean"
+  | "null";
+
+// See https://json-schema.org/draft/2020-12/json-schema-core
+// See https://json-schema.org/draft/2020-12/json-schema-validation
+// There is a lot of potential validation that is not handled, but this object
+// is defined to support them, so that generated schemas will still be usable.
 // TODO(@ubik2) When specifying a JSONSchema, you can often use a boolean
 // This is particularly useful for specifying the schema of a property.
 // That will require reworking some things, so for now, I'm not doing it
 export type JSONSchema = {
-  readonly [ID]?: unknown;
-  readonly [ID_FIELD]?: unknown;
-  readonly type?:
-    | "object"
-    | "array"
-    | "string"
-    | "integer"
-    | "number"
-    | "boolean"
-    | "null";
-  readonly properties?: Readonly<Record<string, JSONSchema>>;
-  readonly description?: string;
-  readonly default?: Readonly<JSONValue>;
-  readonly title?: string;
-  readonly example?: Readonly<JSONValue>;
-  readonly required?: readonly string[];
-  readonly enum?: readonly string[];
-  readonly items?: Readonly<JSONSchema>;
   readonly $ref?: string;
   readonly $defs?: Readonly<Record<string, JSONSchema>>;
+  // TODO(@ubik2): I think this should be removed (use "examples")
+  readonly example?: Readonly<JSONValue>;
+
+  // Subschema logic
+  readonly allOf?: readonly (JSONSchema | boolean)[]; // not validated
+  readonly anyOf?: readonly JSONSchema[]; // not always validated
+  readonly oneOf?: readonly (JSONSchema | boolean)[]; // not validated
+  readonly not?: JSONSchema | boolean;
+  // Subschema conditionally - none applied
+  readonly if?: JSONSchema | boolean;
+  readonly then?: JSONSchema | boolean;
+  readonly else?: JSONSchema | boolean;
+  readonly dependentSchemas?: Readonly<Record<string, JSONSchema>>;
+  // Subschema for array
+  readonly prefixItems?: (JSONSchema | boolean)[]; // not validated
+  readonly items?: Readonly<JSONSchema>;
+  readonly contains?: JSONSchema | boolean; // not validated
+  // Subschema for object
+  readonly properties?: Readonly<Record<string, JSONSchema>>;
+  readonly patternProperties?: Readonly<Record<string, JSONSchema | boolean>>; // not validated
+  readonly additionalProperties?: JSONSchema | boolean;
+  readonly propertyNames?: JSONSchema | boolean; // not validated
+
+  // Validation for any
+  readonly type?: JSONSchemaTypes | readonly JSONSchemaTypes[];
+  readonly enum?: readonly Readonly<JSONValue>[]; // not validated
+  readonly const?: Readonly<JSONValue>; // not validated
+  // Validation for numeric - none applied
+  readonly multipleOf?: number;
+  readonly maximum?: number;
+  readonly exclusiveMaximum?: number;
+  readonly minimum?: number;
+  readonly exclusiveMinimum?: number;
+  // Validation for string - none applied
+  readonly maxLength?: number;
+  readonly minLength?: number;
+  readonly pattern?: string;
+  // Validation for array  - none applied
+  readonly maxItems?: number;
+  readonly minItems?: number;
+  readonly uniqueItems?: boolean;
+  readonly maxContains?: number;
+  readonly minContains?: number;
+  // Validation for object
+  readonly maxProperties?: number; // not validated
+  readonly minProperties?: number; // not validated
+  readonly required?: readonly string[];
+  readonly dependentRequired?: Readonly<Record<string, readonly string[]>>; // not validated
+  // Meta-Data
+  readonly title?: string;
+  readonly description?: string;
+  readonly default?: Readonly<JSONValue>;
+  readonly readOnly?: boolean;
+  readonly writeOnly?: boolean;
+  readonly examples?: readonly Readonly<JSONValue>[];
+
+  // Common Tools extensions
+  readonly [ID]?: unknown;
+  readonly [ID_FIELD]?: unknown;
   readonly asCell?: boolean;
   readonly asStream?: boolean;
-  readonly anyOf?: readonly JSONSchema[];
-  readonly additionalProperties?: Readonly<JSONSchema> | boolean;
   readonly ifc?: { classification?: string[]; integrity?: string[] }; // temporarily used to assign labels like "confidential"
 };
 

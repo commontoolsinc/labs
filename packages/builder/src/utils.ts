@@ -10,6 +10,7 @@ import {
   isShadowRef,
   type JSONSchema,
   type JSONSchemaMutable,
+  type JSONSchemaTypes,
   type JSONValue,
   makeOpaqueRef,
   type Module,
@@ -302,7 +303,7 @@ export function createJsonSchema(
       case "undefined":
         break;
       default:
-        schema.type = type as JSONSchema["type"];
+        schema.type = type as JSONSchemaTypes;
         break;
     }
 

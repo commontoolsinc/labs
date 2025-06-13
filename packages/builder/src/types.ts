@@ -50,6 +50,7 @@ export type {
   HandlerFactory,
   JSONObject,
   JSONSchema,
+  JSONSchemaTypes,
   JSONValue,
   Module,
   ModuleFactory,
