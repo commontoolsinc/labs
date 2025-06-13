@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(deno check:*)",
+      "Bash(deno lint:*)",
+      "Bash(deno fmt:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(grep:*)"
+    ],
+    "deny": []
+  }
+}
