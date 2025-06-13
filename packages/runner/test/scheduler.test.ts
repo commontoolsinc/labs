@@ -6,8 +6,6 @@ import { Runtime } from "../src/runtime.ts";
 import { type Action, type EventHandler } from "../src/scheduler.ts";
 import { compactifyPaths } from "../src/scheduler.ts";
 import { Identity } from "@commontools/identity";
-import * as Memory from "@commontools/memory";
-import * as Consumer from "@commontools/memory/consumer";
 import { StorageManager } from "../src/storage/cache.ts";
 
 const signer = await Identity.fromPassphrase("test operator");

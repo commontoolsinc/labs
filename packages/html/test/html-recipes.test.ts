@@ -171,12 +171,11 @@ describe("recipes with HTML", () => {
       return { [UI]: h("div", null, str`Hello, ${name}!`) };
     });
 
-    const resultCell = runtime.documentMap.getDoc(
-      undefined,
-      "str-recipe-result",
-      space,
+    const result = runtime.run(
+      strRecipe,
+      { name: "world" },
+      runtime.documentMap.getDoc(undefined, "str-recipe-result", space),
     );
-    const result = runtime.runner.run(strRecipe, { name: "world" }, resultCell);
 
     await runtime.idle();
 
@@ -213,12 +212,11 @@ describe("recipes with HTML", () => {
       ),
     }));
 
-    const resultCell = runtime.documentMap.getDoc(
-      undefined,
-      "nested-map-result",
-      space,
+    const result = runtime.run(
+      nestedMapRecipe,
+      data,
+      runtime.documentMap.getDoc(undefined, "nested-map-result", space),
     );
-    const result = runtime.runner.run(nestedMapRecipe, data, resultCell);
 
     await runtime.idle();
 

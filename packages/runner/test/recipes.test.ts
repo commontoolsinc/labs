@@ -10,8 +10,6 @@ import { type ErrorWithContext } from "../src/scheduler.ts";
 import { isCell } from "../src/cell.ts";
 import { resolveLinks } from "../src/link-resolution.ts";
 import { Identity } from "@commontools/identity";
-import * as Memory from "@commontools/memory";
-import * as Consumer from "@commontools/memory/consumer";
 import { StorageManager } from "../src/storage/cache.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -26,8 +24,6 @@ describe("Recipe Runner", () => {
   let handler: ReturnType<typeof createBuilder>["handler"];
   let byRef: ReturnType<typeof createBuilder>["byRef"];
   let TYPE: ReturnType<typeof createBuilder>["TYPE"];
-  let provider: Memory.Provider.Provider<Memory.Protocol>;
-  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
 
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });

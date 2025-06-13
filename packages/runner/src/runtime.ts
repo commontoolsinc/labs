@@ -60,6 +60,7 @@ export interface RuntimeOptions {
 }
 
 export interface IRuntime {
+  readonly id: string;
   readonly scheduler: IScheduler;
   readonly storage: IStorage;
   readonly recipeManager: IRecipeManager;

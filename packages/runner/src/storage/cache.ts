@@ -2,6 +2,7 @@ import { fromString, refer } from "merkle-reference";
 import { isBrowser } from "@commontools/utils/env";
 import { isObject } from "@commontools/utils/types";
 import {
+  ContextualFlowControl,
   deepEqual,
   JSONSchema,
   JSONValue,
@@ -35,11 +36,7 @@ import { assert, retract, unclaimed } from "@commontools/memory/fact";
 import { the, toChanges, toRevision } from "@commontools/memory/commit";
 import * as Memory from "@commontools/memory";
 import * as Codec from "@commontools/memory/codec";
-import {
-  type Cancel,
-  ContextualFlowControl,
-  type EntityId,
-} from "@commontools/runner";
+import { type Cancel, type EntityId } from "@commontools/runner";
 import { type IStorageProvider, type StorageValue } from "./interface.ts";
 import { BaseStorageProvider } from "./base.ts";
 import * as IDB from "./idb.ts";

@@ -2,7 +2,7 @@ import type { Reference } from "merkle-reference";
 import { JSONValue, SchemaContext } from "@commontools/builder";
 import { SchemaPathSelector } from "@commontools/builder/traverse";
 
-export type { Reference, SchemaPathSelector };
+export type { JSONValue, Reference, SchemaContext, SchemaPathSelector };
 
 export interface Clock {
   now(): UTCUnixTimestampInSeconds;
