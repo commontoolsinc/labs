@@ -5,9 +5,6 @@ import { Runtime, StorageManager } from "@commontools/runner";
 import * as assert from "./assert.ts";
 import { JSDOM } from "jsdom";
 import { Identity } from "@commontools/identity";
-import * as Memory from "@commontools/memory";
-import * as Consumer from "@commontools/memory/consumer";
-import { Provider } from "@commontools/runner/storage/cache";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
