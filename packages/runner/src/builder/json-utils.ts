@@ -6,6 +6,7 @@ import {
   canBeOpaqueRef,
   isAlias,
   isOpaqueRef,
+  isRecipe,
   isShadowRef,
   type JSONSchema,
   type JSONSchemaMutable,
@@ -16,12 +17,10 @@ import {
   type Opaque,
   type OpaqueRef,
   type Recipe,
-  isRecipe,
   unsafe_originalRecipe,
 } from "./types.ts";
 import { getTopFrame } from "./recipe.ts";
-import { deepEqual } from "./traverse-utils.ts";
-import { getValueAtPath } from "./path-utils.ts";
+import { deepEqual, getValueAtPath } from "../path-utils.ts";
 
 export function toJSONWithAliases(
   value: Opaque<any>,

@@ -110,13 +110,5 @@ export { Classification, ContextualFlowControl } from "./cfc.ts";
 export type { Mutable } from "@commontools/utils/types";
 
 // Utility functions (split from utils.ts)
-export {
-  createJsonSchema,
-} from "./builder/json-utils.ts";
-export {
-  deepEqual,
-} from "./builder/traverse-utils.ts";
-export {
-  getValueAtPath,
-  setValueAtPath,
-} from "./builder/path-utils.ts";
+export { createJsonSchema } from "./builder/json-utils.ts";
+export { deepEqual, getValueAtPath, setValueAtPath } from "./path-utils.ts";

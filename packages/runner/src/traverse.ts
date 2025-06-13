@@ -15,7 +15,7 @@ import type {
   SchemaContext,
 } from "./builder/types.ts";
 import { isAlias } from "./builder/types.ts";
-import { deepEqual } from "./builder/traverse-utils.ts";
+import { deepEqual } from "./path-utils.ts";
 
 export type SchemaPathSelector = {
   path: readonly string[];
