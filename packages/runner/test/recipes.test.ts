@@ -1093,4 +1093,69 @@ describe("Recipe Runner", () => {
     // That same value was updated, which shows that the id was stable
     expect(ref.cell.get()).toBe(10);
   });
+
+  it("should handle pushing objects that reference their containing array", async () => {
+    const addItemHandler = handler<
+      { detail: { message: string } },
+      { items: Array<{ title: string; items: any[] }> }
+    >((event, { items }) => {
+      const title = event.detail?.message?.trim();
+      if (title) {
+        items.push({ title, items });
+      }
+    });
+
+    const itemsRecipe = recipe<
+      { items: Array<{ title: string; items: any[] }> }
+    >(
+      "Items with self-reference",
+      ({ items }) => {
+        return { items, stream: addItemHandler({ items }) };
+      },
+    );
+
+    const result = runtime.run(
+      itemsRecipe,
+      { items: [] },
+      runtime.documentMap.getDoc(
+        undefined,
+        "should handle pushing objects that reference their containing array",
+        "test",
+      ),
+    );
+
+    await runtime.idle();
+
+    // Add first item
+    result.asCell(["stream"]).send({ detail: { message: "First Item" } });
+    await runtime.idle();
+
+    const firstState = result.getAsQueryResult();
+    expect(firstState.items).toHaveLength(1);
+    expect(firstState.items[0].title).toBe("First Item");
+
+    // Test reuse of proxy for array items
+    expect(firstState.items[0].items).toBe(firstState.items);
+
+    // Add second item
+    result.asCell(["stream"]).send({ detail: { message: "Second Item" } });
+    await runtime.idle();
+
+    const secondState = result.getAsQueryResult();
+    expect(secondState.items).toHaveLength(2);
+    expect(secondState.items[1].title).toBe("Second Item");
+
+    // All three should point to the same array
+    expect(secondState.items[0].items).toBe(secondState.items);
+    expect(secondState.items[1].items).toBe(secondState.items);
+
+    // And triple check that it actually refers to the same underlying array
+    expect(firstState.items[0].items[1].title).toBe("Second Item");
+
+    const recurse = ({ items }: { items: { items: any[] }[] }): any =>
+      items.map((item) => recurse(item));
+
+    // Now test that we catch infinite recursion
+    expect(() => recurse(firstState)).toThrow();
+  });
 });

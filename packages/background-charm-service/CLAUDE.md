@@ -18,9 +18,9 @@
 
 ### Adding a New Integration
 
-1. Create a new file in `src/integrations/` named after your integration (e.g.,
-   `myservice.ts`)
-2. Implement the `Integration` interface:
+- Create a new file in `src/integrations/` named after your integration (e.g.,
+  `myservice.ts`)
+- Implement the `Integration` interface:
 
 ```typescript
 import { Charm } from "@commontools/charm";
@@ -66,9 +66,9 @@ export class MyServiceIntegration implements Integration {
 export default new MyServiceIntegration();
 ```
 
-3. The integration will be automatically discovered and registered
-4. Update deno.json to add shortcut task:
-   `"myservice": "deno run -A src/cli.ts --integration=myservice"`
+- The integration will be automatically discovered and registered
+- Update deno.json to add shortcut task:
+  `"myservice": "deno run -A src/cli.ts --integration=myservice"`
 
 ## Code Style Guidelines
 

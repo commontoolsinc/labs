@@ -3,9 +3,9 @@
 "42 charms" project runs a collection of workflows/prompts to create and verify
 charms.
 
-## Setup requirements:
+## Setup requirements
 
-1. get an openai api key from https://platform.openai.com/api-keys
+1. get an openai api key from <https://platform.openai.com/api-keys>
 2. set it in your environment / toolshed
 
    export OPENAI_API_KEY=sk-proj-...
@@ -47,5 +47,5 @@ You can add new flows to `scenarios.ts`.
 
 ## Reading the report
 
-A report will be generated in the `results` directory named `results/blue42.html`.
-You can open this in your browser to see the results.
+A report will be generated in the `results` directory named
+`results/blue42.html`. You can open this in your browser to see the results.
