@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { Recipe } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import { extractDefaultValues, mergeObjects } from "../src/runner.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
@@ -666,5 +667,102 @@ describe("runRecipe", () => {
     // Verify second instance is unaffected
     expect(internal2.nested.value).toBe("initial");
     expect(result2.getAsQueryResult().nested.value).toBe("initial");
+  });
+});
+
+describe("runner utils", () => {
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    runtime = new Runtime({
+      storageUrl: "volatile://",
+    });
+  });
+
+  afterEach(() => {
+    return runtime.dispose();
+  });
+
+  describe("extractDefaultValues", () => {
+    it("should extract default values from a schema", () => {
+      const schema = {
+        type: "object" as const,
+        properties: {
+          name: { type: "string" as const, default: "John" },
+          age: { type: "number" as const, default: 30 },
+          address: {
+            type: "object" as const,
+            properties: {
+              street: { type: "string" as const, default: "Main St" },
+              city: { type: "string" as const, default: "New York" },
+            },
+          },
+        },
+      };
+
+      const result = extractDefaultValues(schema);
+      expect(result).toEqual({
+        name: "John",
+        age: 30,
+        address: {
+          street: "Main St",
+          city: "New York",
+        },
+      });
+    });
+  });
+
+  describe("mergeObjects", () => {
+    it("should merge multiple objects", () => {
+      const obj1 = { a: 1, b: { x: 10 } };
+      const obj2 = { b: { y: 20 }, c: 3 };
+      const obj3 = { a: 4, d: 5 };
+
+      const result = mergeObjects<unknown>(obj1, obj2, obj3);
+      expect(result).toEqual({
+        a: 1,
+        b: { x: 10, y: 20 },
+        c: 3,
+        d: 5,
+      });
+    });
+
+    it("should handle undefined values", () => {
+      const obj1 = { a: 1 };
+      const obj2 = undefined;
+      const obj3 = { b: 2 };
+
+      const result = mergeObjects<unknown>(obj1, obj2, obj3);
+      expect(result).toEqual({ a: 1, b: 2 });
+    });
+
+    it("should give precedence to earlier objects in the case of a conflict", () => {
+      const obj1 = { a: 1 };
+      const obj2 = { a: 2, b: { c: 3 } };
+      const obj3 = { a: 3, b: { c: 4 } };
+
+      const result = mergeObjects(obj1, obj2, obj3);
+      expect(result).toEqual({ a: 1, b: { c: 3 } });
+    });
+
+    it("should treat cell aliases and references as values", () => {
+      const testCell = runtime.documentMap.getDoc(
+        undefined,
+        "should treat cell aliases and references as values 1",
+        "test",
+      );
+      const obj1 = { a: { $alias: { path: [] } } };
+      const obj2 = { a: 2, b: { c: { cell: testCell, path: [] } } };
+      const obj3 = {
+        a: { $alias: { cell: testCell, path: ["a"] } },
+        b: { c: 4 },
+      };
+
+      const result = mergeObjects<unknown>(obj1, obj2, obj3);
+      expect(result).toEqual({
+        a: { $alias: { path: [] } },
+        b: { c: { cell: testCell, path: [] } },
+      });
+    });
   });
 });
