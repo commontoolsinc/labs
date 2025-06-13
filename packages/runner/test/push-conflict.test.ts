@@ -26,7 +26,7 @@ describe("Push conflict", () => {
       }),
   };
 
-  beforeEach(async () => {
+  beforeEach(() => {
     session = Memory.Memory.emulate({ serviceDid: signer.did() });
 
     // Create memory service for testing

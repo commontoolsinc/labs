@@ -19,7 +19,7 @@ describe("Schema Lineage", () => {
   let recipe: ReturnType<typeof createBuilder>["recipe"];
   let UI: ReturnType<typeof createBuilder>["UI"];
 
-  beforeEach(async () => {
+  beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
@@ -248,7 +248,7 @@ describe("Schema propagation end-to-end example", () => {
   let recipe: ReturnType<typeof createBuilder>["recipe"];
   let UI: ReturnType<typeof createBuilder>["UI"];
 
-  beforeEach(async () => {
+  beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test

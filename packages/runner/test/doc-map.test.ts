@@ -23,7 +23,7 @@ describe("cell-map", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     // Create memory service for testing
     storageManager = StorageManager.emulate({ as: signer });
 

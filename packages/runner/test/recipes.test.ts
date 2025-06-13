@@ -25,7 +25,7 @@ describe("Recipe Runner", () => {
   let byRef: ReturnType<typeof createBuilder>["byRef"];
   let TYPE: ReturnType<typeof createBuilder>["TYPE"];
 
-  beforeEach(async () => {
+  beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test

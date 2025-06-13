@@ -19,7 +19,7 @@ describe("recipes with HTML", () => {
   let str: ReturnType<typeof createBuilder>["str"];
   let UI: ReturnType<typeof createBuilder>["UI"];
 
-  beforeEach(async () => {
+  beforeEach(() => {
     // Set up a fresh JSDOM instance for each test
     dom = new JSDOM(`<!DOCTYPE html><html><body></body></html>`);
     document = dom.window.document;

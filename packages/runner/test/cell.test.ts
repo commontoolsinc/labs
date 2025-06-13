@@ -17,7 +17,7 @@ describe("Cell", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
@@ -112,7 +112,7 @@ describe("Cell utility functions", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
@@ -163,7 +163,7 @@ describe("createProxy", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
@@ -487,7 +487,7 @@ describe("asCell", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
@@ -608,7 +608,7 @@ describe("asCell with schema", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
@@ -1495,7 +1495,7 @@ describe("JSON.stringify bug", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({

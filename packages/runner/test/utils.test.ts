@@ -1,8 +1,17 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { ID, ID_FIELD } from "@commontools/builder";
-import { addCommonIDfromObjectID, applyChangeSet, diffAndUpdate, normalizeAndDiff, setNestedValue } from "../src/data-updating.ts";
-import { unwrapOneLevelAndBindtoDoc, sendValueToBinding } from "../src/recipe-binding.ts";
+import {
+  addCommonIDfromObjectID,
+  applyChangeSet,
+  diffAndUpdate,
+  normalizeAndDiff,
+  setNestedValue,
+} from "../src/data-updating.ts";
+import {
+  sendValueToBinding,
+  unwrapOneLevelAndBindtoDoc,
+} from "../src/recipe-binding.ts";
 import { followAliases } from "../src/link-resolution.ts";
 import { isEqualCellLink } from "../src/type-utils.ts";
 import { extractDefaultValues, mergeObjects } from "../src/runner.ts";
@@ -19,7 +28,7 @@ describe("Utils", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test

@@ -15,7 +15,7 @@ describe("scheduler", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
@@ -335,7 +335,7 @@ describe("event handling", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
@@ -523,7 +523,7 @@ describe("compactifyPaths", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
