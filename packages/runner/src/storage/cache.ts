@@ -457,7 +457,6 @@ export class Replica {
     const querySelector = {};
     // We'll assert that we need all the classifications we expect to need.
     // If we don't actually have those, the server will reject our request.
-    const cfc = new ContextualFlowControl();
     const classifications = new Set<string>();
     for (const [{ the, of }, context] of entries) {
       if (this.useSchemaQueries) {
@@ -475,6 +474,8 @@ export class Replica {
       }
     }
 
+    // We provided schema for the top level fact that we selected, but we
+    // will have undefined schema for the entries included as links.
     let fetchedEntries: [Revision<State>, SchemaContext | undefined][] = [];
     // Run all our schema queries first
     if (Object.entries(schemaSelector).length > 0) {
@@ -567,6 +568,9 @@ export class Replica {
         need.push([address, schema]);
       } else if (schema !== undefined) {
         const selector = { path: [], schemaContext: schema };
+        // Even though we have our root doc in local store, we may need
+        // to re-issue our query, since our cached copy may have been run with a
+        // different schema, and thus have different linked documents.
         if (!this.selectorTracker.hasSelector(address, selector)) {
           // If we already have a subscription for the query running on the
           // server for this selector, we don't need to send a new one
