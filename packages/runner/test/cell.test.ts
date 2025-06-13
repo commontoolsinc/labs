@@ -33,61 +33,61 @@ describe("Cell", () => {
   });
 
   it("should create a cell with initial value", () => {
-    const c = runtime.documentMap.getDoc(
-      10,
-      "should create a cell with initial value",
+    const c = runtime.getCell<number>(
       space,
+      "should create a cell with initial value",
     );
+    c.setRaw(10);
     expect(c.get()).toBe(10);
   });
 
   it("should update cell value using send", () => {
-    const c = runtime.documentMap.getDoc(
-      10,
-      "should update cell value using send",
+    const c = runtime.getCell<number>(
       space,
+      "should update cell value using send",
     );
+    c.setRaw(10);
     c.send(20);
     expect(c.get()).toBe(20);
   });
 
   it("should create a proxy for the cell", () => {
-    const c = runtime.documentMap.getDoc(
-      { x: 1, y: 2 },
-      "should create a proxy for the cell",
+    const c = runtime.getCell<{ x: number; y: number }>(
       space,
+      "should create a proxy for the cell",
     );
+    c.setRaw({ x: 1, y: 2 });
     const proxy = c.getAsQueryResult();
     expect(proxy.x).toBe(1);
     expect(proxy.y).toBe(2);
   });
 
   it("should update cell value through proxy", () => {
-    const c = runtime.documentMap.getDoc(
-      { x: 1, y: 2 },
-      "should update cell value through proxy",
+    const c = runtime.getCell<{ x: number; y: number }>(
       space,
+      "should update cell value through proxy",
     );
+    c.setRaw({ x: 1, y: 2 });
     const proxy = c.getAsQueryResult();
     proxy.x = 10;
     expect(c.get()).toEqual({ x: 10, y: 2 });
   });
 
   it("should get value at path", () => {
-    const c = runtime.documentMap.getDoc(
-      { a: { b: { c: 42 } } },
-      "should get value at path",
+    const c = runtime.getCell<{ a: { b: { c: number } } }>(
       space,
+      "should get value at path",
     );
+    c.setRaw({ a: { b: { c: 42 } } });
     expect(c.getAtPath(["a", "b", "c"])).toBe(42);
   });
 
   it("should set value at path", () => {
-    const c = runtime.documentMap.getDoc(
-      { a: { b: { c: 42 } } },
-      "should set value at path",
+    const c = runtime.getCell<{ a: { b: { c: number } } }>(
       space,
+      "should set value at path",
     );
+    c.setRaw({ a: { b: { c: 42 } } });
     c.setAtPath(["a", "b", "c"], 100);
     expect(c.get()).toEqual({ a: { b: { c: 100 } } });
   });
@@ -137,9 +137,9 @@ describe("Cell", () => {
       "test",
     );
     const cell = c.asCell();
-    
+
     expect(cell.getRaw()).toBe(42);
-    
+
     const result = cell.setRaw(100);
     expect(result).toBe(true);
     expect(cell.getRaw()).toBe(100);
@@ -152,9 +152,9 @@ describe("Cell", () => {
       "test",
     );
     const cell = c.asCell();
-    
+
     expect(cell.getRaw()).toEqual([1, 2, 3]);
-    
+
     const result = cell.setRaw([4, 5, 6]);
     expect(result).toBe(true);
     expect(cell.getRaw()).toEqual([4, 5, 6]);
@@ -170,12 +170,12 @@ describe("Cell", () => {
 
     // getRaw should return only the nested value
     expect(nestedCell.getRaw()).toBe(42);
-    
+
     // same for setRaw, should update only the nested value
     nestedCell.setRaw(100);
     expect(nestedCell.getRaw()).toBe(100);
-    
-    // Verify the document structure is preserved 
+
+    // Verify the document structure is preserved
     expect(c.get()).toEqual({ nested: { value: 100 } });
   });
 });
