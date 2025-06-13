@@ -1,4 +1,4 @@
-import type { JSONObject, JSONValue } from "../index.ts";
+import type { JSONObject, JSONValue } from "../builder/types.ts";
 import {
   BaseObjectManager,
   type CellTarget,
