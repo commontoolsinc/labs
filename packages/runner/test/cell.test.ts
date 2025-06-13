@@ -159,6 +159,25 @@ describe("Cell", () => {
     expect(result).toBe(true);
     expect(cell.getRaw()).toEqual([4, 5, 6]);
   });
+
+  it("should respect path in getRaw/setRaw for nested properties", () => {
+    const c = runtime.documentMap.getDoc(
+      { nested: { value: 42 } },
+      "should respect path in getRaw/setRaw for nested properties",
+      "test",
+    );
+    const nestedCell = c.asCell(["nested", "value"]);
+
+    // getRaw should return only the nested value
+    expect(nestedCell.getRaw()).toBe(42);
+    
+    // same for setRaw, should update only the nested value
+    nestedCell.setRaw(100);
+    expect(nestedCell.getRaw()).toBe(100);
+    
+    // Verify the document structure is preserved 
+    expect(c.get()).toEqual({ nested: { value: 100 } });
+  });
 });
 
 describe("Cell utility functions", () => {

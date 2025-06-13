@@ -442,8 +442,8 @@ function createRegularCell<T>(
     getAsCellLink: () => // Add space here, so that JSON.stringify() of this retains the space.
     ({ space: doc.space, cell: doc, path, schema, rootSchema }),
     getDoc: () => doc,
-    getRaw: () => doc.get(),
-    setRaw: (value: any) => doc.send(value),
+    getRaw: () => doc.getAtPath(path),
+    setRaw: (value: any) => doc.setAtPath(path, value),
     getSourceCell: (newSchema?: JSONSchema) =>
       doc.sourceCell?.asCell([], log, newSchema, newSchema) as Cell<any>,
     toJSON: () =>
