@@ -248,6 +248,11 @@ async function buildCli(config: BuildConfig): Promise<void> {
     "NODE_INSPECTOR_IPC",
     "VSCODE_INSPECTOR_OPTIONS",
     "NODE_ENV",
+    // sqlite3 library requires these
+    "DENO_SQLITE_PATH",
+    "DENO_SQLITE_LOCAL",
+    "DENO_DIR",
+    "HOME",
   ];
   const { success } = await new Deno.Command(Deno.execPath(), {
     args: [
