@@ -67,12 +67,7 @@ export class ServerObjectManager extends BaseObjectManager<
     private session: Session<MemorySpace>,
     private providedClassifications: Set<string>,
   ) {
-    super(
-      new Map(), // readValues
-      new Map(), // writeValues  
-      new Map(), // readDependentDocs
-      new Map()  // writeDependentDocs
-    );
+    super();
   }
 
   override toKey(doc: FactAddress): string {
