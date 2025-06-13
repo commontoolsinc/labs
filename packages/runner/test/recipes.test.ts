@@ -1120,7 +1120,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle pushing objects that reference their containing array",
-        "test",
+        space,
       ),
     );
 
