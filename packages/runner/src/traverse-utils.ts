@@ -5,7 +5,7 @@ import {
   isRecipe,
   isShadowRef,
   type Opaque,
-} from "./types.ts";
+} from "./builder/types.ts";
 
 /**
  * Traverse a value, _not_ entering cells
@@ -37,19 +37,3 @@ export function traverseValue(
     );
   } else return value;
 }
-
-export const deepEqual = (a: any, b: any): boolean => {
-  if (a === b) return true;
-  if (isRecord(a) && isRecord(b)) {
-    if (a.constructor !== b.constructor) return false;
-    const keysA = Object.keys(a);
-    const keysB = Object.keys(b);
-    if (keysA.length !== keysB.length) return false;
-    for (const key of keysA) {
-      if (!keysB.includes(key)) return false;
-      if (!deepEqual(a[key], b[key])) return false;
-    }
-    return true;
-  }
-  return a !== a && b !== b; // NaN check
-};
