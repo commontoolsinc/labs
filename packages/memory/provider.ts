@@ -1,4 +1,3 @@
-import { MapSet } from "@commontools/builder/traverse";
 import * as Access from "./access.ts";
 import type {
   AsyncResult,
@@ -34,11 +33,13 @@ import type {
   Transaction,
   UCAN,
 } from "./interface.ts";
-import { Fact as FactModule, SelectionBuilder } from "./lib.ts";
+import * as SelectionBuilder from "./selection.ts";
 import * as Memory from "./memory.ts";
 import { refer } from "./reference.ts";
 import { redactCommit } from "./space.ts";
+import { MapSet } from "./util.ts";
 import * as Subscription from "./subscription.ts";
+import * as FactModule from "./fact.ts";
 
 export * as Error from "./error.ts";
 export * from "./interface.ts";

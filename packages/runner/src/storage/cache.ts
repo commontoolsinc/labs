@@ -5,26 +5,32 @@ import {
   ContextualFlowControl,
   deepEqual,
   JSONSchema,
-  JSONValue,
-  type SchemaContext,
 } from "@commontools/builder";
 import { MapSet } from "@commontools/builder/traverse";
 import type {
   AuthorizationError,
+  Changes,
   Commit,
   ConflictError,
   ConnectionError,
+  ConsumerCommandInvocation,
   Entity,
   Fact,
   FactAddress,
+  JSONValue,
   MemorySpace,
   Protocol,
+  ProviderCommand,
   ProviderSession,
   QueryError,
   Result,
   Revision,
+  SchemaContext,
   SchemaPathSelector,
+  SchemaQueryArgs,
+  Signer,
   State,
+  Statement,
   The,
   TransactionError,
   UCAN,
@@ -34,7 +40,8 @@ import { set, setSelector } from "@commontools/memory/selection";
 import type { MemorySpaceSession } from "@commontools/memory/consumer";
 import { assert, retract, unclaimed } from "@commontools/memory/fact";
 import { the, toChanges, toRevision } from "@commontools/memory/commit";
-import * as Memory from "@commontools/memory";
+import * as Consumer from "@commontools/memory/consumer";
+import * as MemoryProvider from "@commontools/memory/provider";
 import * as Codec from "@commontools/memory/codec";
 import { type Cancel, type EntityId } from "@commontools/runner";
 import { type IStorageProvider, type StorageValue } from "./interface.ts";
@@ -42,6 +49,7 @@ import { BaseStorageProvider } from "./base.ts";
 import * as IDB from "./idb.ts";
 export * from "@commontools/memory/interface";
 import { Channel, RawCommand } from "./inspector.ts";
+import { SchemaNone } from "@commontools/memory/schema";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -461,7 +469,7 @@ export class Replica {
     for (const [{ the, of }, context] of entries) {
       if (this.useSchemaQueries) {
         // If we don't have a schema, use SchemaNone, which will only fetch the specified object
-        const schemaContext = context ?? Memory.SchemaNone;
+        const schemaContext = context ?? SchemaNone;
         setSelector(schemaSelector, of, the, "_", {
           path: [],
           schemaContext: schemaContext,
@@ -479,7 +487,7 @@ export class Replica {
     let fetchedEntries: [Revision<State>, SchemaContext | undefined][] = [];
     // Run all our schema queries first
     if (Object.entries(schemaSelector).length > 0) {
-      const queryArgs: Memory.SchemaQueryArgs = {
+      const queryArgs: SchemaQueryArgs = {
         selectSchema: schemaSelector,
         subscribe: true,
       };
@@ -778,7 +786,7 @@ export interface RemoteStorageProviderSettings {
 }
 
 export interface RemoteStorageProviderOptions {
-  session: Memory.Consumer.MemoryConsumer<MemorySpace>;
+  session: Consumer.MemoryConsumer<MemorySpace>;
   space: MemorySpace;
   the?: string;
   settings?: RemoteStorageProviderSettings;
@@ -812,16 +820,15 @@ class ProviderConnection implements IStorageProvider {
   inspector?: Channel;
   provider: Provider;
   reader: ReadableStreamDefaultReader<
-    UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>
+    UCAN<ConsumerCommandInvocation<Protocol>>
   >;
-  writer: WritableStreamDefaultWriter<Memory.ProviderCommand<Memory.Protocol>>;
+  writer: WritableStreamDefaultWriter<ProviderCommand<Protocol>>;
 
   /**
    * queue that holds commands that we read from the session, but could not
    * send because connection was down.
    */
-  queue: Set<UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>> =
-    new Set();
+  queue: Set<UCAN<ConsumerCommandInvocation<Protocol>>> = new Set();
 
   constructor(
     { id, address, provider, inspector }: ProviderConnectionOptions,
@@ -869,7 +876,7 @@ class ProviderConnection implements IStorageProvider {
     this.connectionCount += 1;
   }
   post(
-    invocation: Memory.UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>,
+    invocation: UCAN<ConsumerCommandInvocation<Protocol>>,
   ) {
     this.inspect({
       send: invocation,
@@ -914,7 +921,7 @@ class ProviderConnection implements IStorageProvider {
     }
   }
 
-  parse(source: string): Memory.ProviderCommand<Memory.Protocol> {
+  parse(source: string): ProviderCommand<Protocol> {
     return Codec.Receipt.fromString(source);
   }
   onReceive(data: string) {
@@ -1094,7 +1101,7 @@ class ProviderConnection implements IStorageProvider {
 export class Provider implements IStorageProvider {
   workspace: Replica;
   the: string;
-  session: Memory.Consumer.MemoryConsumer<MemorySpace>;
+  session: Consumer.MemoryConsumer<MemorySpace>;
   spaces: Map<string, Replica>;
   settings: RemoteStorageProviderSettings;
 
@@ -1261,7 +1268,7 @@ export interface Options {
   /**
    * Singning authority.
    */
-  as: Memory.Signer;
+  as: Signer;
 
   /**
    * Address of the storage provider.
@@ -1285,14 +1292,14 @@ export interface IStorageManager {
 }
 
 export interface LocalStorageOptions {
-  as: Memory.Signer;
+  as: Signer;
   id?: string;
   settings?: RemoteStorageProviderSettings;
 }
 
 export class StorageManager implements IStorageManager {
   address: URL;
-  as: Memory.Signer;
+  as: Signer;
   id: string;
   settings: RemoteStorageProviderSettings;
   #providers: Map<string, IStorageProvider> = new Map();
@@ -1344,7 +1351,7 @@ export class StorageManager implements IStorageManager {
       space,
       address,
       settings,
-      session: Memory.Consumer.create({ as }),
+      session: Consumer.create({ as }),
     });
   }
 
@@ -1359,13 +1366,13 @@ export class StorageManager implements IStorageManager {
 }
 
 class StorageManagerEmulator extends StorageManager {
-  #session?: Memory.Consumer.MemoryConsumer<MemorySpace>;
+  #session?: Consumer.MemoryConsumer<MemorySpace>;
 
   #providers: Map<string, Provider> = new Map();
   session() {
     if (!this.#session) {
-      const provider = Memory.Provider.emulate({ serviceDid: this.as.did() });
-      this.#session = Memory.Consumer.open({
+      const provider = MemoryProvider.emulate({ serviceDid: this.as.did() });
+      this.#session = Consumer.open({
         as: this.as,
         session: provider.session(),
       });
@@ -1389,9 +1396,9 @@ export const getChanges = <
   Of extends Entity,
   Is extends JSONValue,
 >(
-  statements: Iterable<Memory.Statement>,
+  statements: Iterable<Statement>,
 ) => {
-  const changes = {} as Memory.Changes<T, Of, Is>;
+  const changes = {} as Changes<T, Of, Is>;
   for (const statement of statements) {
     if (statement.cause) {
       const cause = statement.cause.toString();

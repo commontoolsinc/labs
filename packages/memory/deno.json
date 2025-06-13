@@ -32,9 +32,11 @@
     "./changes": "./changes.ts",
     "./selection": "./selection.ts",
     "./consumer": "./consumer.ts",
+    "./provider": "./provider.ts",
     "./commit": "./commit.ts",
     "./codec": "./codec.ts",
-    "./reference": "./reference.ts"
+    "./reference": "./reference.ts",
+    "./schema": "./schema.ts"
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",

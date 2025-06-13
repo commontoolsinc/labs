@@ -51,7 +51,7 @@ import {
   setEmptyObj,
   setRevision,
 } from "./selection.ts";
-import { SelectAllString } from "./interface.ts";
+import { SelectAllString } from "./schema.ts";
 import * as Error from "./error.ts";
 import { selectSchema } from "./space-schema.ts";
 import { JSONValue } from "@commontools/builder";
