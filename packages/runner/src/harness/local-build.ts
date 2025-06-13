@@ -3,7 +3,7 @@ import { RawSourceMap, SourceMapConsumer } from "source-map-js";
 import * as commonHtml from "@commontools/html";
 import * as merkleReference from "merkle-reference";
 import turndown from "turndown";
-import { createBuilder } from "../index.ts";
+import { createBuilder } from "../builder/factory.ts";
 import { h } from "@commontools/api";
 import { type IRuntime } from "../runtime.ts";
 

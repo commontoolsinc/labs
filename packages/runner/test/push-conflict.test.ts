@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { ID } from "../src/index.ts";
+import { ID } from "../src/builder/types.ts";
 import { Identity } from "@commontools/identity";
 import { type IStorage, Runtime } from "../src/runtime.ts";
 import { isCellLink } from "../src/cell.ts";
