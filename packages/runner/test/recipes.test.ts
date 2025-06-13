@@ -1122,10 +1122,8 @@ describe("Recipe Runner", () => {
     expect(firstState.items).toHaveLength(1);
     expect(firstState.items[0].title).toBe("First Item");
 
-    // Have to manually compare as otherwise `expect` gets into an infinite loop
-    // when comparing the arrays.
-    expect(firstState.items[0].items.length).toEqual(firstState.items.length);
-    expect(firstState.items[0].items[0].title).toBe(firstState.items[0].title);
+    // Test reuse of proxy for array items
+    expect(firstState.items[0].items).toBe(firstState.items);
 
     // Add second item
     result.asCell(["stream"]).send({ detail: { message: "Second Item" } });
@@ -1135,21 +1133,17 @@ describe("Recipe Runner", () => {
     expect(secondState.items).toHaveLength(2);
     expect(secondState.items[1].title).toBe("Second Item");
 
-    // Have to manually compare as otherwise `expect` gets into an infinite loop
-    // when comparing the arrays.
-    expect(secondState.items[1].items.length).toEqual(secondState.items.length);
-    expect(secondState.items[1].items[0].title).toBe(
-      secondState.items[0].title,
-    );
-    expect(secondState.items[1].items[1].title).toBe(
-      secondState.items[1].title,
-    );
-    expect(secondState.items[0].items.length).toEqual(secondState.items.length);
-    expect(secondState.items[0].items[0].title).toBe(
-      secondState.items[0].title,
-    );
-    expect(secondState.items[0].items[1].title).toBe(
-      secondState.items[1].title,
-    );
+    // All three should point to the same array
+    expect(secondState.items[0].items).toBe(secondState.items);
+    expect(secondState.items[1].items).toBe(secondState.items);
+
+    // And triple check that it actually refers to the same underlying array
+    expect(firstState.items[0].items[1].title).toBe("Second Item");
+
+    const recurse = ({ items }: { items: { items: any[] }[] }): any =>
+      items.map((item) => recurse(item));
+
+    // Now test that we catch infinite recursion
+    expect(() => recurse(firstState)).toThrow();
   });
 });
