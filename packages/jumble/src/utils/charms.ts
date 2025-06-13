@@ -1,6 +1,6 @@
 import { type Charm, charmId, CharmManager } from "@commontools/charm";
 import { Cell, getEntityId } from "@commontools/runner";
-import { NAME } from "@commontools/builder";
+import { NAME } from "@commontools/runner";
 
 export type { Cell, Charm };
 

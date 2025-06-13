@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { JSONSchema, Schema } from "@commontools/builder";
+import { JSONSchema, Schema } from "@commontools/runner";
 import { Cell, effect } from "@commontools/runner";
 import { useRuntime } from "@/contexts/RuntimeContext.tsx";
 

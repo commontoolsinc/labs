@@ -2,7 +2,7 @@
  * Factory function to create builder functions with runtime dependency injection
  */
 
-import { getCellLinkOrThrow, type Runtime } from "@commontools/runner";
+import { getCellLinkOrThrow, type Runtime } from "../index.ts";
 import type {
   BuilderFunctionsAndConstants,
   Cell,

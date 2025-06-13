@@ -1,4 +1,4 @@
-import { Recipe } from "@commontools/builder";
+import { Recipe } from "../builder/types.ts";
 import { Harness, HarnessedFunction } from "./harness.ts";
 import { type Program } from "@commontools/js-runtime";
 import { mapSourceMapsOnStacktrace, tsToExports } from "./local-build.ts";

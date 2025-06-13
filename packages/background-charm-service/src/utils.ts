@@ -1,7 +1,7 @@
 import { Charm } from "@commontools/charm";
 import { type Cell, getEntityId, type Runtime } from "@commontools/runner";
 import { Identity, type IdentityCreateConfig } from "@commontools/identity";
-import { ID, type JSONSchema } from "@commontools/builder";
+import { ID, type JSONSchema } from "@commontools/runner";
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,

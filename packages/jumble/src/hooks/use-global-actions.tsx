@@ -12,7 +12,7 @@ import {
 import { useAction } from "@/contexts/ActionManagerContext.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
-import { NAME } from "@commontools/builder";
+import { NAME } from "@commontools/runner";
 
 export function useGlobalActions() {
   const { charmId, replicaName } = useParams<CharmRouteParams>();

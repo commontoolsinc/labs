@@ -4,13 +4,11 @@ import type {
   Module,
   NodeFactory,
   Recipe,
-  RecipeEnvironment,
   Schema,
-} from "@commontools/builder";
-import {
-  ContextualFlowControl,
-  setRecipeEnvironment,
-} from "@commontools/builder";
+} from "./builder/types.ts";
+import type { RecipeEnvironment } from "./builder/env.ts";
+import { ContextualFlowControl } from "./cfc.ts";
+import { setRecipeEnvironment } from "./builder/env.ts";
 import type { Cell, CellLink } from "./cell.ts";
 import type { DocImpl } from "./doc.ts";
 import { isDoc } from "./doc.ts";

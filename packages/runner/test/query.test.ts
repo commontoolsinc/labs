@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { refer } from "merkle-reference/json";
-import type { JSONSchema, JSONValue } from "@commontools/builder";
+import type { JSONSchema, JSONValue } from "../src/index.ts";
 import {
   CycleTracker,
   MapSet,
   SchemaObjectTraverser,
-} from "@commontools/builder/traverse";
+} from "../src/traverse.ts";
 import type {
   Revision,
   SchemaPathSelector,

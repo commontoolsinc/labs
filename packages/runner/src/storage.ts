@@ -2,7 +2,7 @@ import { isRecord } from "@commontools/utils/types";
 import { defer } from "@commontools/utils/defer";
 import { sleep } from "@commontools/utils/sleep";
 import { Signer } from "@commontools/identity";
-import { type SchemaContext } from "@commontools/builder";
+import { type SchemaContext } from "./builder/types.ts";
 import { TransactionResult } from "@commontools/memory";
 import { refer } from "@commontools/memory/reference";
 import { SchemaNone } from "@commontools/memory/interface";

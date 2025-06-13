@@ -2,7 +2,6 @@
   "workspace": [
     "./packages/api",
     "./packages/background-charm-service",
-    "./packages/builder",
     "./packages/charm",
     "./packages/cli",
     "./packages/deno-vite-plugin",

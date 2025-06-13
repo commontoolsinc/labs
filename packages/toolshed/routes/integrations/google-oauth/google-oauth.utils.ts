@@ -3,7 +3,7 @@ import env from "@/env.ts";
 import { type CellLink } from "@commontools/runner";
 import { runtime } from "@/index.ts";
 import { Context } from "@hono/hono";
-import { AuthSchema, Mutable, Schema } from "@commontools/builder";
+import { AuthSchema, Mutable, Schema } from "@commontools/runner";
 // Types
 
 export interface OAuth2Tokens {
