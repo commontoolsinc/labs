@@ -1397,8 +1397,8 @@ describe("asCell with schema", () => {
 
     // Let's make sure we got a different doc with the different context
     expect(testDoc.get()[0].cell).not.toBe(docFromContext1);
-    expect(testDoc.get()[0].cell.entityId.toString()).not.toBe(
-      docFromContext1.entityId.toString(),
+    expect(JSON.stringify(testDoc.get()[0].cell.entityId)).not.toBe(
+      JSON.stringify(docFromContext1.entityId),
     );
 
     expect(testCell.get()).toEqual(initialData);
