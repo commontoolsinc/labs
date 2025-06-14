@@ -1,4 +1,4 @@
-import { createJsonSchema, NAME, type JSONSchema } from "@commontools/builder";
+import { createJsonSchema, NAME, type JSONSchema } from "@commontools/runner";
 import { DEFAULT_MODEL_NAME, fixRecipePrompt } from "@commontools/llm";
 import { Cell } from "@commontools/runner";
 
@@ -45,7 +45,7 @@ export const createDataCharm = (
   ).join("\n");
 
   const dataRecipeSrc = `import { h } from "@commontools/html";
-  import { recipe, UI, NAME, derive, type JSONSchema } from "@commontools/builder";
+  import { recipe, UI, NAME, derive, type JSONSchema } from "@commontools/runner";
 
   const schema = ${schemaString};
 

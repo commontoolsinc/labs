@@ -1,6 +1,6 @@
-import { type VNode } from "@commontools/builder";
-export { h } from "@commontools/builder";
-export type { Child, Props } from "@commontools/builder";
+import { type VNode } from "@commontools/runner";
+export { h } from "@commontools/runner";
+export type { Child, Props } from "@commontools/runner";
 export { type VNode };
 
 /**

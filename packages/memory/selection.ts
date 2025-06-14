@@ -1,4 +1,4 @@
-import type { JSONValue } from "@commontools/builder";
+import type { JSONValue } from "@commontools/runner";
 import type {
   Cause,
   Changes,

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type Cell, CellLink, isCell, isStream } from "../src/cell.ts";
-import type { JSONSchema } from "@commontools/builder";
+import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 
 describe("Schema Support", () => {

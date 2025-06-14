@@ -1,6 +1,6 @@
 import { useCell } from "@/hooks/use-cell.ts";
 import { NavLink } from "react-router-dom";
-import { NAME, UI } from "@commontools/builder";
+import { NAME, UI } from "@commontools/runner";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { Charm, charmId } from "@commontools/charm";
 import { useEffect, useRef, useState } from "react";

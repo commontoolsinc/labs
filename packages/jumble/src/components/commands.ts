@@ -12,7 +12,7 @@ import {
 } from "@commontools/charm";
 import { charmId } from "@commontools/charm";
 import type { NavigateFunction } from "react-router-dom";
-import { NAME } from "@commontools/builder";
+import { NAME } from "@commontools/runner";
 import { isStream } from "@commontools/runner";
 import { createPath, createPathWithHash, ROUTES } from "@/routes.ts";
 import { LanguageModelId } from "@/components/common/ModelSelector.tsx";

@@ -5,7 +5,7 @@ import * as zod from "zod";
 import * as zodToJsonSchema from "zod-to-json-schema";
 import * as merkleReference from "merkle-reference";
 import turndown from "turndown";
-import { createBuilder } from "@commontools/builder";
+import { createBuilder } from "../builder/factory.ts";
 import { type IRuntime } from "../runtime.ts";
 
 let DOMParser: any;

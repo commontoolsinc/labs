@@ -54,7 +54,7 @@ import {
 import { SelectAllString } from "./interface.ts";
 import * as Error from "./error.ts";
 import { selectSchema } from "./space-schema.ts";
-import { JSONValue } from "@commontools/builder";
+import { JSONValue } from "@commontools/runner";
 import { isObject } from "../utils/src/types.ts";
 export type * from "./interface.ts";
 

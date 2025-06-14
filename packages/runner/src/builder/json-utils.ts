@@ -1,5 +1,5 @@
 import { isObject, isRecord } from "@commontools/utils/types";
-import { type CellLink, isCell, isCellLink, isDoc } from "@commontools/runner";
+import { type CellLink, isCell, isCellLink, isDoc } from "../index.ts";
 import { createShadowRef } from "./opaque-ref.ts";
 import {
   type Alias,
@@ -14,110 +14,13 @@ import {
   type JSONValue,
   makeOpaqueRef,
   type Module,
-  type NodeRef,
   type Opaque,
   type OpaqueRef,
   type Recipe,
   unsafe_originalRecipe,
 } from "./types.ts";
 import { getTopFrame } from "./recipe.ts";
-import { ContextualFlowControl } from "./cfc.ts";
-
-/**
- * Traverse a value, _not_ entering cells
- *
- * @param value - The value to traverse
- * @param fn - The function to apply to each value, which can return a new value
- * @returns Transformed value
- */
-export function traverseValue(
-  value: Opaque<any>,
-  fn: (value: any) => any,
-): any {
-  // Perform operation, replaces value if non-undefined is returned
-  const result = fn(value);
-  if (result !== undefined) value = result;
-
-  // Traverse value
-  if (Array.isArray(value)) {
-    return value.map((v) => traverseValue(v, fn));
-  } else if (
-    (!isOpaqueRef(value) &&
-      !canBeOpaqueRef(value) &&
-      !isShadowRef(value) &&
-      isRecord(value)) ||
-    isRecipe(value)
-  ) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, v]) => [key, traverseValue(v, fn)]),
-    );
-  } else return value;
-}
-
-export function setValueAtPath(
-  obj: any,
-  path: PropertyKey[],
-  value: any,
-): boolean {
-  let parent = obj;
-  for (let i = 0; i < path.length - 1; i++) {
-    const key = path[i];
-    if (typeof parent[key] !== "object") {
-      parent[key] = typeof path[i + 1] === "number" ? [] : {};
-    }
-    parent = parent[key];
-  }
-
-  if (deepEqual(parent[path[path.length - 1]], value)) return false;
-
-  if (value === undefined) {
-    delete parent[path[path.length - 1]];
-    // Truncate array from the end for undefined values
-    if (Array.isArray(parent)) {
-      while (parent.length > 0 && parent[parent.length - 1] === undefined) {
-        parent.pop();
-      }
-    }
-  } else parent[path[path.length - 1]] = value;
-
-  return true;
-}
-
-export function getValueAtPath(obj: any, path: PropertyKey[]): any {
-  let current = obj;
-  for (const key of path) {
-    if (current === undefined || current === null) return undefined;
-    current = current[key];
-  }
-  return current;
-}
-
-export function hasValueAtPath(obj: any, path: PropertyKey[]): boolean {
-  let current = obj;
-  for (const key of path) {
-    if (!isRecord(current) || !(key in current)) {
-      return false;
-    }
-    current = current[key];
-  }
-  return current !== undefined;
-}
-
-export const deepEqual = (a: any, b: any): boolean => {
-  if (a === b) return true;
-  if (isRecord(a) && isRecord(b)) {
-    if (a.constructor !== b.constructor) return false;
-    const keysA = Object.keys(a);
-    const keysB = Object.keys(b);
-    if (keysA.length !== keysB.length) return false;
-    for (const key of keysA) {
-      if (!keysB.includes(key)) return false;
-      if (!deepEqual(a[key], b[key])) return false;
-    }
-    return true;
-  }
-  return a !== a && b !== b; // NaN check
-};
+import { deepEqual, getValueAtPath } from "../path-utils.ts";
 
 export function toJSONWithAliases(
   value: Opaque<any>,
@@ -335,84 +238,4 @@ export function recipeToJSON(recipe: Recipe) {
     result: recipe.result,
     nodes: recipe.nodes,
   };
-}
-
-export function connectInputAndOutputs(node: NodeRef) {
-  function connect(value: any): any {
-    if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
-    if (isOpaqueRef(value)) {
-      // Return shadow ref it this is a parent opaque ref. Note: No need to
-      // connect to the cell. The connection is there to traverse the graph to
-      // find all other nodes, but this points to the parent graph instead.
-      if (value.export().frame !== node.frame) return createShadowRef(value);
-      value.connect(node);
-    }
-    return undefined;
-  }
-
-  node.inputs = traverseValue(node.inputs, connect);
-  node.outputs = traverseValue(node.outputs, connect);
-
-  // We will also apply ifc tags from inputs to outputs
-  applyInputIfcToOutput(node.inputs, node.outputs);
-}
-
-export function applyArgumentIfcToResult(
-  argumentSchema?: JSONSchema,
-  resultSchema?: JSONSchema,
-): JSONSchema | undefined {
-  if (argumentSchema !== undefined) {
-    const cfc = new ContextualFlowControl();
-    const joined = cfc.joinSchema(new Set(), argumentSchema);
-    return (joined.size !== 0)
-      ? cfc.schemaWithLub(resultSchema ?? {}, cfc.lub(joined))
-      : resultSchema;
-  }
-  return resultSchema;
-}
-
-// If our inputs had any ifc tags, carry them through to our outputs
-export function applyInputIfcToOutput<T, R>(
-  inputs: Opaque<T>,
-  outputs: Opaque<R>,
-) {
-  const collectedClassifications = new Set<string>();
-  const cfc = new ContextualFlowControl();
-  traverseValue(inputs, (item) => {
-    if (isOpaqueRef(item)) {
-      const { schema: inputSchema } = (item as OpaqueRef<T>).export();
-      if (inputSchema !== undefined) {
-        cfc.joinSchema(collectedClassifications, inputSchema);
-      }
-    }
-  });
-  if (collectedClassifications.size !== 0) {
-    attachCfcToOutputs(outputs, cfc, cfc.lub(collectedClassifications));
-  }
-}
-
-// Attach ifc classification to OpaqueRef objects reachable
-// from the outputs without descending into OpaqueRef objects
-// TODO(@ubik2) Investigate: can we have cycles here?
-function attachCfcToOutputs<T, R>(
-  outputs: Opaque<R>,
-  cfc: ContextualFlowControl,
-  lubClassification: string,
-) {
-  if (isOpaqueRef(outputs)) {
-    const exported = (outputs as OpaqueRef<T>).export();
-    const outputSchema = exported.schema ?? {};
-    // we may have fields in the output schema, so incorporate those
-    const joined = cfc.joinSchema(new Set([lubClassification]), outputSchema);
-    const ifc = (outputSchema.ifc !== undefined) ? { ...outputSchema.ifc } : {};
-    ifc.classification = [cfc.lub(joined)];
-    const cfcSchema: JSONSchema = { ...outputSchema, ifc };
-    (outputs as OpaqueRef<T>).setSchema(cfcSchema);
-    return;
-  } else if (isRecord(outputs)) {
-    // Descend into objects and arrays
-    for (const [key, value] of Object.entries(outputs)) {
-      attachCfcToOutputs(value, cfc, lubClassification);
-    }
-  }
 }

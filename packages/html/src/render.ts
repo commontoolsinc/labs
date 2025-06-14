@@ -7,7 +7,7 @@ import {
   isStream,
   useCancelGroup,
 } from "@commontools/runner";
-import { JSONSchema } from "@commontools/builder";
+import { JSONSchema } from "@commontools/runner";
 import { isObject } from "@commontools/utils/types";
 import * as logger from "./logger.ts";
 

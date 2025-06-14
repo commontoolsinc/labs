@@ -1,4 +1,4 @@
-import { Recipe } from "@commontools/builder";
+import { Recipe } from "../builder/types.ts";
 import { Console } from "./console.ts";
 import { Harness, HarnessedFunction } from "./harness.ts";
 import {
@@ -9,7 +9,7 @@ import {
   UnsafeEvalRuntime,
 } from "@commontools/js-runtime";
 import * as commonHtml from "@commontools/html";
-import * as commonBuilder from "@commontools/builder";
+import * as commonBuilder from "../index.ts";
 import * as zod from "zod";
 import * as zodToJsonSchema from "zod-to-json-schema";
 import * as merkleReference from "merkle-reference";

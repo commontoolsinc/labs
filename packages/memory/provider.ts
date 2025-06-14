@@ -1,4 +1,4 @@
-import { MapSet } from "@commontools/builder/traverse";
+import { MapSet } from "@commontools/runner/traverse";
 import * as Access from "./access.ts";
 import type {
   AsyncResult,

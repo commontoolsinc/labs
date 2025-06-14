@@ -12,9 +12,9 @@ import type {
   JSONSchema,
   JSONValue,
   SchemaContext,
-} from "./types.ts";
-import { isAlias } from "./types.ts";
-import { deepEqual } from "./utils.ts";
+} from "./builder/types.ts";
+import { isAlias } from "./builder/types.ts";
+import { deepEqual } from "./path-utils.ts";
 
 export type SchemaPathSelector = {
   path: readonly string[];

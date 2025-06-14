@@ -1,5 +1,5 @@
 import { Cell } from "@commontools/runner";
-import { Module, NAME, Recipe } from "@commontools/builder";
+import { Module, NAME, Recipe } from "@commontools/runner";
 
 export function formatCell(
   cell: Cell<any & { argument: any; resultRef?: any }>,
