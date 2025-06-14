@@ -39,25 +39,18 @@ describe("runRecipe", () => {
       ],
     } as Recipe;
 
-    const result = runtime.run(
-      recipe,
-      { input: 1 },
-      runtime.documentMap.getDoc(
-        undefined,
-        "should work with passthrough",
-        "test",
-      ),
-    );
+    const resultCell = runtime.getCell("test", "should work with passthrough");
+    const result = await runtime.runSynced(resultCell, recipe, { input: 1 });
     await runtime.idle();
 
-    expect(result.sourceCell?.getAsQueryResult()).toMatchObject({
+    expect(result.getSourceCell()?.getAsQueryResult()).toMatchObject({
       argument: { input: 1 },
       internal: { output: 1 },
     });
-    expect(result.sourceCell?.get().internal.output).toBe(1);
-    expect(result.get()).toEqual({
+    expect(result.getSourceCell()?.getRaw().internal.output).toBe(1);
+    expect(result.getRaw()).toEqual({
       output: {
-        $alias: { path: ["internal", "output"], cell: result.sourceCell },
+        $alias: { path: ["internal", "output"], cell: result.getSourceCell()?.getDoc() },
       },
     });
     expect(result.getAsQueryResult()).toEqual({ output: 1 });
@@ -108,15 +101,8 @@ describe("runRecipe", () => {
       ],
     } as Recipe;
 
-    const result = runtime.run(
-      outerRecipe,
-      { value: 5 },
-      runtime.documentMap.getDoc(
-        undefined,
-        "should work with nested recipes",
-        "test",
-      ),
-    );
+    const resultCell = runtime.getCell("test", "should work with nested recipes");
+    const result = await runtime.runSynced(resultCell, outerRecipe, { value: 5 });
     await runtime.idle();
 
     expect(result.getAsQueryResult()).toEqual({ result: 5 });
@@ -139,15 +125,8 @@ describe("runRecipe", () => {
       ],
     };
 
-    const result = runtime.run(
-      mockRecipe,
-      { value: 1 },
-      runtime.documentMap.getDoc(
-        undefined,
-        "should run a simple module",
-        "test",
-      ),
-    );
+    const resultCell = runtime.getCell("test", "should run a simple module");
+    const result = await runtime.runSynced(resultCell, mockRecipe, { value: 1 });
     await runtime.idle();
     expect(result.getAsQueryResult()).toEqual({ result: 2 });
   });
@@ -173,15 +152,8 @@ describe("runRecipe", () => {
       ],
     };
 
-    const result = runtime.run(
-      mockRecipe,
-      { value: 1 },
-      runtime.documentMap.getDoc(
-        undefined,
-        "should run a simple module with no outputs",
-        "test",
-      ),
-    );
+    const resultCell = runtime.getCell("test", "should run a simple module with no outputs");
+    const result = await runtime.runSynced(resultCell, mockRecipe, { value: 1 });
     await runtime.idle();
     expect(result.getAsQueryResult()).toEqual({ result: undefined });
     expect(ran).toBe(true);
@@ -208,15 +180,8 @@ describe("runRecipe", () => {
       ],
     };
 
-    const result = runtime.run(
-      mockRecipe,
-      { value: 1 },
-      runtime.documentMap.getDoc(
-        undefined,
-        "should handle incorrect inputs gracefully",
-        "test",
-      ),
-    );
+    const resultCell = runtime.getCell("test", "should handle incorrect inputs gracefully");
+    const result = await runtime.runSynced(resultCell, mockRecipe, { value: 1 });
     await runtime.idle();
     expect(result.getAsQueryResult()).toEqual({ result: undefined });
     expect(ran).toBe(true);
@@ -252,15 +217,8 @@ describe("runRecipe", () => {
       ],
     };
 
-    const result = runtime.run(
-      mockRecipe,
-      { value: 1 },
-      runtime.documentMap.getDoc(
-        undefined,
-        "should handle nested recipes",
-        "test",
-      ),
-    );
+    const resultCell = runtime.getCell("test", "should handle nested recipes");
+    const result = await runtime.runSynced(resultCell, mockRecipe, { value: 1 });
     await runtime.idle();
     expect(result.getAsQueryResult()).toEqual({ result: 2 });
   });
@@ -282,20 +240,10 @@ describe("runRecipe", () => {
       ],
     };
 
-    const inputCell = runtime.documentMap.getDoc(
-      { input: 10, output: 0 },
-      "should allow passing a cell as a binding: input cell",
-      "test",
-    );
-    const result = runtime.run(
-      recipe,
-      inputCell,
-      runtime.documentMap.getDoc(
-        undefined,
-        "should allow passing a cell as a binding",
-        "test",
-      ),
-    );
+    const inputCell = runtime.getCell<{input: number, output: number}>("test", "should allow passing a cell as a binding: input cell");
+    inputCell.setRaw({ input: 10, output: 0 });
+    const resultCell = runtime.getCell("test", "should allow passing a cell as a binding");
+    const result = await runtime.runSynced(resultCell, recipe, inputCell);
 
     await runtime.idle();
 
@@ -327,20 +275,10 @@ describe("runRecipe", () => {
       ],
     };
 
-    const inputCell = runtime.documentMap.getDoc(
-      { input: 10, output: 0 },
-      "should allow stopping a recipe: input cell",
-      "test",
-    );
-    const result = runtime.run(
-      recipe,
-      inputCell,
-      runtime.documentMap.getDoc(
-        undefined,
-        "should allow stopping a recipe",
-        "test",
-      ),
-    );
+    const inputCell = runtime.getCell<{input: number, output: number}>("test", "should allow stopping a recipe: input cell");
+    inputCell.setRaw({ input: 10, output: 0 });
+    const resultCell = runtime.getCell("test", "should allow stopping a recipe");
+    const result = await runtime.runSynced(resultCell, recipe, inputCell);
 
     await runtime.idle();
     expect(inputCell.get()).toMatchObject({ input: 10, output: 20 });
@@ -357,7 +295,7 @@ describe("runRecipe", () => {
     expect(inputCell.get()).toMatchObject({ input: 40, output: 40 });
 
     // Restart the recipe
-    runtime.run(recipe, undefined, result);
+    await runtime.runSynced(result, recipe, undefined);
 
     await runtime.idle();
     expect(inputCell.get()).toMatchObject({ input: 40, output: 80 });
@@ -389,28 +327,14 @@ describe("runRecipe", () => {
     };
 
     // Test with partial arguments (should use default for multiplier)
-    const resultWithPartial = runtime.run(
-      recipe,
-      { input: 10 },
-      runtime.documentMap.getDoc(
-        undefined,
-        "default values test - partial",
-        "test",
-      ),
-    );
+    const resultWithPartialCell = runtime.getCell("test", "default values test - partial");
+    const resultWithPartial = await runtime.runSynced(resultWithPartialCell, recipe, { input: 10 });
     await runtime.idle();
     expect(resultWithPartial.getAsQueryResult()).toEqual({ result: 20 });
 
     // Test with no arguments (should use default for input)
-    const resultWithDefaults = runtime.run(
-      recipe,
-      {},
-      runtime.documentMap.getDoc(
-        undefined,
-        "default values test - all defaults",
-        "test",
-      ),
-    );
+    const resultWithDefaultsCell = runtime.getCell("test", "default values test - all defaults");
+    const resultWithDefaults = await runtime.runSynced(resultWithDefaultsCell, recipe, {});
     await runtime.idle();
     expect(resultWithDefaults.getAsQueryResult()).toEqual({ result: 84 }); // 42 * 2
   });
@@ -464,20 +388,13 @@ describe("runRecipe", () => {
       ],
     };
 
-    const result = runtime.run(
-      recipe,
-      { config: { values: [10, 20, 30, 40], operation: "avg" } },
-      runtime.documentMap.getDoc(undefined, "complex schema test", "test"),
-    );
+    const resultCell = runtime.getCell("test", "complex schema test");
+    const result = await runtime.runSynced(resultCell, recipe, { config: { values: [10, 20, 30, 40], operation: "avg" } });
     await runtime.idle();
     expect(result.getAsQueryResult()).toEqual({ result: 25 });
 
     // Test with a different operation
-    const result2 = runtime.run(
-      recipe,
-      { config: { values: [10, 20, 30, 40], operation: "max" } },
-      result,
-    );
+    const result2 = await runtime.runSynced(result, recipe, { config: { values: [10, 20, 30, 40], operation: "max" } });
     await runtime.idle();
     expect(result2.getAsQueryResult()).toEqual({ result: 40 });
   });
@@ -518,15 +435,8 @@ describe("runRecipe", () => {
     };
 
     // Provide partial options - should merge with defaults
-    const result = runtime.run(
-      recipe,
-      { options: { value: 10 }, input: 5 },
-      runtime.documentMap.getDoc(
-        undefined,
-        "merge defaults test",
-        "test",
-      ),
-    );
+    const resultCell = runtime.getCell("test", "merge defaults test");
+    const result = await runtime.runSynced(resultCell, recipe, { options: { value: 10 }, input: 5 });
     await runtime.idle();
 
     expect(result.getAsQueryResult().options).toEqual({
@@ -560,23 +470,19 @@ describe("runRecipe", () => {
       ],
     };
 
-    const resultCell = runtime.documentMap.getDoc<any>(
-      undefined,
-      "state preservation test",
-      "test",
-    );
+    const resultCell = runtime.getCell<any>("test", "state preservation test");
 
     // First run
-    runtime.run(recipe, { value: 1 }, resultCell);
+    await runtime.runSynced(resultCell, recipe, { value: 1 });
     await runtime.idle();
     expect(resultCell.get()?.name).toEqual("counter");
     expect(resultCell.getAsQueryResult()?.counter).toEqual(1);
 
     // Now change the name
-    resultCell.setAtPath(["name"], "my counter");
+    resultCell.getAsQueryResult().name = "my counter";
 
     // Second run with same recipe but different argument
-    runtime.run(recipe, { value: 2 }, resultCell);
+    await runtime.runSynced(resultCell, recipe, { value: 2 });
     await runtime.idle();
     expect(resultCell.get()?.name).toEqual("my counter");
     expect(resultCell.getAsQueryResult()?.counter).toEqual(2);
@@ -618,32 +524,18 @@ describe("runRecipe", () => {
     };
 
     // Create first instance
-    const result1 = runtime.run(
-      recipe,
-      { input: 5 },
-      runtime.documentMap.getDoc(
-        undefined,
-        "should create separate copies of initial values 1",
-        "test",
-      ),
-    );
+    const result1Cell = runtime.getCell("test", "should create separate copies of initial values 1");
+    const result1 = await runtime.runSynced(result1Cell, recipe, { input: 5 });
     await runtime.idle();
 
     // Create second instance
-    const result2 = runtime.run(
-      recipe,
-      { input: 10 },
-      runtime.documentMap.getDoc(
-        undefined,
-        "should create separate copies of initial values 2",
-        "test",
-      ),
-    );
+    const result2Cell = runtime.getCell("test", "should create separate copies of initial values 2");
+    const result2 = await runtime.runSynced(result2Cell, recipe, { input: 10 });
     await runtime.idle();
 
     // Get the internal state objects
-    const internal1 = result1.sourceCell?.get().internal;
-    const internal2 = result2.sourceCell?.get().internal;
+    const internal1 = result1.getSourceCell()?.getRaw().internal;
+    const internal2 = result2.getSourceCell()?.getRaw().internal;
 
     // Verify they are different objects
     expect(internal1).not.toBe(internal2);
