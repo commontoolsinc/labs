@@ -78,10 +78,15 @@ export function createRef(
  */
 export function getEntityId(value: any): { "/": string } | undefined {
   if (typeof value === "string") {
-    return value.startsWith("{") ? JSON.parse(value) : { "/": value };
+    // Handle URI format with "of:" prefix
+    const normalizedId = fromURI(value);
+    return value.startsWith("{") ? JSON.parse(value) : { "/": normalizedId };
   }
   if (isRecord(value) && "/" in value) {
-    return JSON.parse(JSON.stringify(value));
+    // Normalize the ID to remove "of:" prefix if present
+    const id = value["/"];
+    const normalizedId = typeof id === "string" ? fromURI(id) : id;
+    return { "/": normalizedId as string };
   }
 
   let ref: CellLink | undefined = undefined;
@@ -179,17 +184,24 @@ export class DocumentMap implements IDocumentMap {
     createIfNotFound = true,
     sourceIfCreated?: DocImpl<any>,
   ): DocImpl<T> | undefined {
+    // Normalize entity ID for consistent key generation
+    const normalizedId = typeof entityId === "string"
+      ? fromURI(entityId)
+      : normalizeEntityId(entityId);
+
     const id = typeof entityId === "string"
-      ? entityId
-      : JSON.stringify(entityId);
+      ? JSON.stringify({ "/": normalizedId })
+      : JSON.stringify({ "/": normalizedId });
+
     let doc = this.entityIdToDocMap.get(space, id);
     if (doc) return doc;
     if (!createIfNotFound) return undefined;
 
-    if (typeof entityId === "string") {
-      entityId = JSON.parse(entityId) as EntityId;
-    }
-    doc = createDoc<T>(undefined as T, entityId, space, this.runtime);
+    const finalEntityId = typeof entityId === "string"
+      ? ({ "/": normalizedId } as EntityId)
+      : ({ "/": normalizedId } as EntityId);
+
+    doc = createDoc<T>(undefined as T, finalEntityId, space, this.runtime);
     doc.sourceCell = sourceIfCreated;
     return doc;
   }
@@ -199,16 +211,23 @@ export class DocumentMap implements IDocumentMap {
     entityId: EntityId,
     doc: DocImpl<any>,
   ): void {
+    // Normalize entity ID for consistent key generation
+    const normalizedId = normalizeEntityId(entityId);
+    const id = JSON.stringify({ "/": normalizedId });
+
     // throw if doc already exists
-    if (this.entityIdToDocMap.get(space, JSON.stringify(entityId))) {
+    if (this.entityIdToDocMap.get(space, id)) {
       throw new Error("Doc already exists");
     }
 
-    this.entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
+    this.entityIdToDocMap.set(space, id, doc);
   }
 
   registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: string): void {
-    this.entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
+    // Normalize entity ID for consistent key generation
+    const normalizedId = normalizeEntityId(entityId);
+    const id = JSON.stringify({ "/": normalizedId });
+    this.entityIdToDocMap.set(space, id, doc);
   }
 
   cleanup(): void {

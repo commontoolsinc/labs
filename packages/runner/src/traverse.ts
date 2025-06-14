@@ -16,6 +16,7 @@ import type {
 } from "./builder/types.ts";
 import { isAlias } from "./builder/types.ts";
 import { deepEqual } from "./path-utils.ts";
+import { isSigilValue, type SigilLink, type SigilAlias } from "./cell.ts";
 
 export type SchemaPathSelector = {
   path: readonly string[];
@@ -83,6 +84,28 @@ export type PointerCycleTracker = CycleTracker<
 >;
 
 type JSONCellLink = { cell: { "/": string }; path: string[] };
+
+/**
+ * Check if value is a sigil link
+ */
+function isSigilLink(value: unknown): value is SigilLink {
+  return (
+    isSigilValue(value) &&
+    "link-v0.1" in value["@"] &&
+    isObject(value["@"]["link-v0.1"])
+  );
+}
+
+/**
+ * Check if value is a sigil alias
+ */
+function isSigilAlias(value: unknown): value is SigilAlias {
+  return (
+    isSigilValue(value) &&
+    "alias-v0.1" in value["@"] &&
+    isObject(value["@"]["alias-v0.1"])
+  );
+}
 export type CellTarget = { path: string[]; cellTarget: string | undefined };
 
 export interface ObjectStorageManager<K, S, V> {
@@ -448,7 +471,7 @@ function narrowSchema(
 }
 
 /**
- * Extract the path and cellTarget from an Alias or JSONCellLink
+ * Extract the path and cellTarget from an Alias, JSONCellLink, or sigil value
  *
  * @param value - The JSON object that might contain pointer information
  * @returns A CellTarget object containing:
@@ -456,6 +479,7 @@ function narrowSchema(
  *   - cellTarget: The target cell identifier as a string, or undefined if it refers to the current document
  */
 export function getPointerInfo(value: Immutable<JSONObject>): CellTarget {
+  // Handle legacy $alias format
   if (isAlias(value)) {
     if (isObject(value.$alias.cell) && "/" in value.$alias.cell) {
       return {
@@ -467,15 +491,36 @@ export function getPointerInfo(value: Immutable<JSONObject>): CellTarget {
       path: value.$alias.path.map((p) => p.toString()),
       cellTarget: undefined,
     };
-  } else if (isJSONCellLink(value)) {
-    //console.error("cell: ", obj.cell, "; path: ", obj.path);
+  }
+  
+  // Handle legacy JSON cell link format
+  else if (isJSONCellLink(value)) {
     return { path: value.path, cellTarget: value.cell["/"] as string };
   }
+  
+  // Handle new sigil link format
+  else if (isSigilLink(value)) {
+    const link = value["@"]["link-v0.1"];
+    const path = link.path ? link.path.map((p) => p.toString()) : [];
+    // Remove "of:" prefix if present for storage compatibility
+    const cellTarget = link.id ? link.id.replace(/^of:/, "") : undefined;
+    return { path, cellTarget };
+  }
+  
+  // Handle new sigil alias format
+  else if (isSigilAlias(value)) {
+    const alias = value["@"]["alias-v0.1"];
+    const path = alias.path ? alias.path.map((p) => p.toString()) : [];
+    // Remove "of:" prefix if present for storage compatibility
+    const cellTarget = alias.id ? alias.id.replace(/^of:/, "") : undefined;
+    return { path, cellTarget };
+  }
+  
   return { path: [], cellTarget: undefined };
 }
 
 export function isPointer(value: unknown): boolean {
-  return (isAlias(value) || isJSONCellLink(value));
+  return (isAlias(value) || isJSONCellLink(value) || isSigilLink(value) || isSigilAlias(value));
 }
 
 /**
