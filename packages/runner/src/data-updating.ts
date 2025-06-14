@@ -14,6 +14,7 @@ import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followAliases } from "./link-resolution.ts";
 import { maybeUnwrapProxy, arrayEqual } from "./type-utils.ts";
+import { areLinksSame, isLink } from "./link-utils.ts";
 
 // Sets a value at a path, following aliases and recursing into objects. Returns
 // success, meaning no frozen docs were in the way. That is, also returns true
@@ -62,10 +63,9 @@ export function setNestedValue<T>(
     }
 
     return success;
-  } else if (isCellLink(value) && isCellLink(destValue)) {
-    if (
-      value.cell !== destValue.cell || !arrayEqual(value.path, destValue.path)
-    ) {
+  } else if (isLink(value) && isLink(destValue)) {
+    // Use the new link comparison function that supports all formats
+    if (!areLinksSame(value, destValue, { cell: doc, path: [] }, doc.space)) {
       doc.setAtPath(path, value, log);
     }
     return true;
