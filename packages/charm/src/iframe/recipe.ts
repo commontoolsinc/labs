@@ -17,9 +17,7 @@ export const buildFullRecipe = (iframe: IFrameRecipe) => {
     `    ${key}: data.${key},\n`
   ).join("\n");
 
-  return `import { h } from "@commontools/html";
-  import { recipe, UI, NAME } from "@commontools/runner";
-  import type { JSONSchema } from "@commontools/runner";
+  return `import { h, recipe, type JSONSchema, UI, NAME } from "commontools";
 
   type IFrameRecipe = {
     src: string,
