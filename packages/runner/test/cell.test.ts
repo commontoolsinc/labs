@@ -37,7 +37,7 @@ describe("Cell", () => {
       space,
       "should create a cell with initial value",
     );
-    c.setRaw(10);
+    c.set(10);
     expect(c.get()).toBe(10);
   });
 
@@ -46,7 +46,7 @@ describe("Cell", () => {
       space,
       "should update cell value using send",
     );
-    c.setRaw(10);
+    c.set(10);
     c.send(20);
     expect(c.get()).toBe(20);
   });
@@ -56,7 +56,7 @@ describe("Cell", () => {
       space,
       "should create a proxy for the cell",
     );
-    c.setRaw({ x: 1, y: 2 });
+    c.set({ x: 1, y: 2 });
     const proxy = c.getAsQueryResult();
     expect(proxy.x).toBe(1);
     expect(proxy.y).toBe(2);
@@ -67,7 +67,7 @@ describe("Cell", () => {
       space,
       "should update cell value through proxy",
     );
-    c.setRaw({ x: 1, y: 2 });
+    c.set({ x: 1, y: 2 });
     const proxy = c.getAsQueryResult();
     proxy.x = 10;
     expect(c.get()).toEqual({ x: 10, y: 2 });
@@ -78,8 +78,8 @@ describe("Cell", () => {
       space,
       "should get value at path",
     );
-    c.setRaw({ a: { b: { c: 42 } } });
-    expect(c.getAtPath(["a", "b", "c"])).toBe(42);
+    c.set({ a: { b: { c: 42 } } });
+    expect(c.getAsQueryResult(["a", "b", "c"])).toBe(42);
   });
 
   it("should set value at path", () => {
@@ -87,9 +87,9 @@ describe("Cell", () => {
       space,
       "should set value at path",
     );
-    c.setRaw({ a: { b: { c: 42 } } });
-    c.setAtPath(["a", "b", "c"], 100);
-    expect(c.get()).toEqual({ a: { b: { c: 100 } } });
+    c.set({ a: { b: { c: 42 } } });
+    c.getAsQueryResult().a.b.c = 100;
+    expect(c.getAsQueryResult(["a", "b", "c"])).toBe(100);
   });
 
   it("should call updates callback when value changes", () => {
