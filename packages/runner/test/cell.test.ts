@@ -649,7 +649,7 @@ describe("asCell", () => {
   });
 
   it("should call sink only when the cell changes on the subpath", async () => {
-    const c = runtime.getCell<{ a: { b: number, c: number }, d: number }>(
+    const c = runtime.getCell<{ a: { b: number; c: number }; d: number }>(
       space,
       "should call sink only when the cell changes on the subpath",
     );
@@ -1223,16 +1223,16 @@ describe("asCell with schema", () => {
       "should handle nested references: inner",
     );
     innerCell.set({ value: 42 });
-    
+
     const ref1 = innerCell.getAsCellLink();
-    
+
     const ref2Cell = runtime.getCell<{ ref: any }>(
       space,
       "should handle nested references: ref2",
     );
     ref2Cell.set({ ref: ref1 });
     const ref2 = ref2Cell.key("ref").getAsCellLink();
-    
+
     const ref3Cell = runtime.getCell<{ ref: any }>(
       space,
       "should handle nested references: ref3",
@@ -1608,8 +1608,8 @@ describe("asCell with schema", () => {
 
     // Let's make sure we got a different doc with the different context
     expect(testDoc.getRaw()[0].cell).not.toBe(docFromContext1);
-    expect(testDoc.getRaw()[0].cell.entityId.toString()).not.toBe(
-      docFromContext1.entityId.toString(),
+    expect(JSON.stringify(testDoc.getRaw()[0].cell.entityId)).not.toBe(
+      JSON.stringify(docFromContext1.entityId),
     );
 
     expect(testCell.get()).toEqual(initialData);

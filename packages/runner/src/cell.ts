@@ -131,7 +131,7 @@ declare module "@commontools/api" {
         | CellLink
       >
     ): void;
-    equals(other: Cell<any>): boolean;
+    equals(other: any): boolean;
     key<K extends T extends Cell<infer S> ? keyof S : keyof T>(
       valueKey: K,
     ): Cell<
@@ -459,8 +459,30 @@ function createRegularCell<T>(
         return [...(newBaseValue as unknown[]), ...newValues];
       });
     },
-    equals: (other: Cell<any>) =>
-      JSON.stringify(self) === JSON.stringify(other),
+    equals: (other: any) => {
+      // Handle different object types that might be passed to equals
+      if (!other || typeof other !== 'object') return false;
+      
+      // If it's a Cell, compare properly
+      if (isCell(other)) {
+        const otherDoc = other.getDoc();
+        return (
+          doc === otherDoc &&
+          JSON.stringify(path) === JSON.stringify(other.cellLink.path)
+        );
+      }
+      
+      // If it's a CellLink, compare with our CellLink representation
+      if (isCellLink(other)) {
+        return (
+          doc === other.cell &&
+          JSON.stringify(path) === JSON.stringify(other.path)
+        );
+      }
+      
+      // For other types, fall back to JSON comparison (old behavior)
+      return JSON.stringify(self) === JSON.stringify(other);
+    },
     key: <K extends T extends Cell<infer S> ? keyof S : keyof T>(
       valueKey: K,
     ): T extends Cell<infer S> ? Cell<S[K & keyof S]> : Cell<T[K]> => {
