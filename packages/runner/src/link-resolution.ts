@@ -12,6 +12,8 @@ import {
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { arrayEqual } from "./type-utils.ts";
+import { isLink, parseLink, type NormalizedLink } from "./link-utils.ts";
+import { toURI } from "./uri-utils.ts";
 
 /**
  * Track visited cell links and memoize results during path resolution
@@ -256,7 +258,32 @@ export function maybeGetCellLink<T>(
       );
     }
     return { cell: parent, ...value.$alias } as CellLink;
-  } else return undefined;
+  }
+  
+  // Handle other link formats using the parser
+  else if (isLink(value)) {
+    try {
+      const baseCellLink = parent ? { cell: parent, path: [] } as CellLink : undefined;
+      const parsed = parseLink(value, baseCellLink, parent?.space);
+      if (parsed && parent?.runtime) {
+        // Convert back to CellLink format for compatibility
+        const entityId = { "/": parsed.id.replace(/^of:/, "") };
+        const doc = parent.runtime.documentMap.getDocByEntityId(parsed.space || parent.space, entityId);
+        if (doc) {
+          return {
+            cell: doc,
+            path: parsed.path,
+            space: parsed.space,
+            schema: parsed.schema,
+          } as CellLink;
+        }
+      }
+    } catch (e) {
+      // Fall through to return undefined
+    }
+  }
+  
+  return undefined;
 }
 
 // Follows aliases and returns cell reference describing the last alias.
