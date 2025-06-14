@@ -349,8 +349,6 @@ export class Runner implements IRunner {
    *
    * @param resultCell - The result doc or cell to stop.
    */
-  stop<T>(resultCell: DocImpl<T>): void;
-  stop<T>(resultCell: Cell<T>): void;
   stop<T>(resultCell: DocImpl<T> | Cell<T>): void {
     const doc = isDoc(resultCell) ? resultCell : (resultCell as Cell<T>).getDoc();
     this.cancels.get(doc)?.();

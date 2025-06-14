@@ -220,8 +220,7 @@ export interface IRunner {
     recipe: Recipe | Module,
     inputs?: any,
   ): any;
-  stop<T>(resultCell: DocImpl<T>): void;
-  stop<T>(resultCell: Cell<T>): void;
+  stop<T>(resultCell: DocImpl<T> | Cell<T>): void;
   stopAll(): void;
 }
 
