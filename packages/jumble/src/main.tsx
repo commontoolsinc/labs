@@ -26,8 +26,10 @@ import SpellbookLaunchView from "@/views/spellbook/SpellbookLaunchView.tsx";
 import FullscreenInspectorView from "@/views/FullscreenInspectorView.tsx";
 import { ActionManagerProvider } from "@/contexts/ActionManagerContext.tsx";
 import { ActivityProvider } from "@/contexts/ActivityContext.tsx";
+import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
 import { RuntimeProvider } from "@/contexts/RuntimeContext.tsx";
 import { ROUTES } from "@/routes.ts";
+import { AuthenticationView } from "@/views/AuthenticationView.tsx";
 
 // Determine environment based on hostname
 const determineEnvironment = () => {
@@ -82,70 +84,93 @@ const ReplicaRedirect = () => {
   return <div>redirecting...</div>;
 };
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <ErrorBoundary fallback={<div>An error has occurred</div>}>
-      <AuthenticationProvider>
-        <RuntimeProvider>
-          <CharmsProvider>
-            <ActionManagerProvider>
-              <ActivityProvider>
-                <Router>
-                  <SentryRoutes>
-                    {/* Redirect root to saved replica or default */}
-                    <Route
-                      path={ROUTES.root}
-                      element={<ReplicaRedirect />}
-                    />
-                    <Route
-                      path={ROUTES.inspector}
-                      element={<FullscreenInspectorView />}
-                    />
-                    <Route
-                      path={ROUTES.replicaRoot}
-                      element={<Shell />}
-                    >
-                      <Route index element={<CharmList />} />
-                      <Route
-                        path={ROUTES.charmShow}
-                        element={<CharmShowView />}
-                      />
-                      <Route
-                        path={ROUTES.charmDetail}
-                        element={<CharmDetailView />}
-                      />
-                      <Route
-                        path={ROUTES.stackedCharms}
-                        element={<StackedCharmsView />}
-                      />
-                    </Route>
+export const MainView = () => {
+  const auth = useAuthentication();
 
-                    {/* Spellbook routes */}
-                    <Route
-                      path={ROUTES.spellbookIndex}
-                      element={<SpellbookIndexView />}
-                    />
-                    <Route
-                      path={ROUTES.spellbookDetail}
-                      element={<SpellbookDetailView />}
-                    />
-                    <Route
-                      path={ROUTES.spellbookLaunch}
-                      element={<SpellbookLaunchView />}
-                    />
+  console.log(auth);
+  return auth?.session ? <AuthenticatedView /> : <AuthenticationView />;
+};
 
-                    {/* internal tools / experimental routes */}
-                    <Route
-                      path={ROUTES.utilityJsonGen}
-                      element={<GenerateJSONView />}
-                    />
-                  </SentryRoutes>
-                </Router>
-              </ActivityProvider>
-            </ActionManagerProvider>
-          </CharmsProvider>
-        </RuntimeProvider>
-      </AuthenticationProvider>
-    </ErrorBoundary>
-  </StrictMode>,
+export const AuthenticatedView = () => (
+  <RuntimeProvider>
+    <CharmsProvider>
+      <ActionManagerProvider>
+        <ActivityProvider>
+          <Router>
+            <SentryRoutes>
+              {/* Redirect root to saved replica or default */}
+              <Route
+                path={ROUTES.root}
+                element={<ReplicaRedirect />}
+              />
+              <Route
+                path={ROUTES.inspector}
+                element={<FullscreenInspectorView />}
+              />
+              <Route
+                path={ROUTES.replicaRoot}
+                element={<Shell />}
+              >
+                <Route index element={<CharmList />} />
+                <Route
+                  path={ROUTES.charmShow}
+                  element={<CharmShowView />}
+                />
+                <Route
+                  path={ROUTES.charmDetail}
+                  element={<CharmDetailView />}
+                />
+                <Route
+                  path={ROUTES.stackedCharms}
+                  element={<StackedCharmsView />}
+                />
+              </Route>
+
+              {/* Spellbook routes */}
+              <Route
+                path={ROUTES.spellbookIndex}
+                element={<SpellbookIndexView />}
+              />
+              <Route
+                path={ROUTES.spellbookDetail}
+                element={<SpellbookDetailView />}
+              />
+              <Route
+                path={ROUTES.spellbookLaunch}
+                element={<SpellbookLaunchView />}
+              />
+
+              {/* internal tools / experimental routes */}
+              <Route
+                path={ROUTES.utilityJsonGen}
+                element={<GenerateJSONView />}
+              />
+            </SentryRoutes>
+          </Router>
+        </ActivityProvider>
+      </ActionManagerProvider>
+    </CharmsProvider>
+  </RuntimeProvider>
 );
+
+export const main = () => {
+  const url = new URL(document.URL);
+  // If we are in the root path we push state
+  if (url.pathname === "/") {
+    const space = localStorage.getItem("lastReplica");
+    const path = space ? `/${space}` : ROUTES.defaultReplica;
+    history.replaceState(null, "", path);
+  }
+
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <ErrorBoundary fallback={<div>An error has occurred</div>}>
+        <AuthenticationProvider>
+          <MainView />
+        </AuthenticationProvider>
+      </ErrorBoundary>
+    </StrictMode>,
+  );
+};
+
+main();

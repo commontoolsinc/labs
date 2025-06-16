@@ -32,7 +32,7 @@ export function RuntimeProvider({
     const runtime = new Runtime({
       storageManager: StorageManager.open({
         as: session.as,
-        address: new URL(location.origin),
+        address: new URL("/api/storage/memory", location.origin),
       }),
       blobbyServerUrl: location.origin,
       errorHandlers: [(error) => {
@@ -58,6 +58,8 @@ export function RuntimeProvider({
     setRuntime(runtime);
     return () => setRuntime(undefined);
   }, [session]);
+
+  console.log({ runtime });
 
   // Only render children if we have a runtime
   return (
