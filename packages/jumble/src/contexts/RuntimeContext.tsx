@@ -6,7 +6,10 @@ import {
   useState,
 } from "react";
 import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache";
+import {
+  defaultSettings,
+  StorageManager,
+} from "@commontools/runner/storage/cache";
 import { useAuthentication } from "./AuthenticationContext.tsx";
 import { setupIframe } from "@/iframe-ctx.ts";
 import * as Sentry from "@sentry/react";
@@ -29,10 +32,19 @@ export function RuntimeProvider({
     if (!session) return;
     // Create runtime with error and console handlers
     let errorCount = 0;
+    const queryMode = (import.meta as any).env?.VITE_STORAGE_TYPE ?? "schema";
+    // Default to "schema", but let either custom URL (used in tests) or
+    // environment variable override this.
     const runtime = new Runtime({
       storageManager: StorageManager.open({
         as: session.as,
         address: new URL("/api/storage/memory", location.origin),
+        settings: {
+          ...defaultSettings,
+          // Default to "schema", but let either custom URL (used in tests) or
+          // environment variable override this.
+          useSchemaQueries: queryMode === "schema" ? true : false,
+        },
       }),
       blobbyServerUrl: location.origin,
       errorHandlers: [(error) => {
@@ -58,7 +70,6 @@ export function RuntimeProvider({
     setRuntime(runtime);
     return () => setRuntime(undefined);
   }, [session]);
-
 
   // Only render children if we have a runtime
   return (

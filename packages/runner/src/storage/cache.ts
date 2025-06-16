@@ -791,7 +791,7 @@ export interface RemoteStorageProviderOptions {
   settings?: RemoteStorageProviderSettings;
 }
 
-const defaultSettings: RemoteStorageProviderSettings = {
+export const defaultSettings: RemoteStorageProviderSettings = {
   maxSubscriptionsPerSpace: 50_000,
   connectionTimeout: 30_000,
   useSchemaQueries: false,

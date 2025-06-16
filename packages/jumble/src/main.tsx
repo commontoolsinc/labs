@@ -87,7 +87,6 @@ const ReplicaRedirect = () => {
 export const MainView = () => {
   const auth = useAuthentication();
 
-  console.log(auth);
   return auth?.session ? <AuthenticatedView /> : <AuthenticationView />;
 };
 
