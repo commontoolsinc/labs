@@ -1,11 +1,7 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
-import {
-  getEntityId,
-  isStream,
-  Runtime,
-  StorageManager,
-} from "@commontools/runner";
+import { getEntityId, isStream, Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { createAdminSession, type DID, Identity } from "@commontools/identity";
 
 const { spaceId, targetCellCause, recipePath, cause, name, quit } = parseArgs(

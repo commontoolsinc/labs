@@ -6,8 +6,8 @@ import {
   isStream,
   type MemorySpace,
   Runtime,
-  StorageManager,
 } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import {
   createAdminSession,
   type DID,
