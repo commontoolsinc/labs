@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { h, render, VNode } from "../src/index.ts";
+import { render, VNode } from "../src/index.ts";
 import { createBuilder } from "@commontools/builder";
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import * as assert from "./assert.ts";
 import { JSDOM } from "jsdom";
 import { Identity } from "@commontools/identity";
+import { h } from "@commontools/api";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

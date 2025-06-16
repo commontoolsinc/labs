@@ -1,5 +1,4 @@
 import { type VNode } from "@commontools/builder";
-export { h } from "@commontools/builder";
 export type { Child, Props } from "@commontools/builder";
 export { type VNode };
 
