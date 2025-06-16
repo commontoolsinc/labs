@@ -3,6 +3,7 @@ import {
   compileAndRun,
   derive,
   handler,
+  str,
   JSONSchema,
   NAME,
   navigateTo,
@@ -69,28 +70,34 @@ const PageResultSchema = {
 const PageInputSchema = {
   type: "object",
   properties: {
-    title: {
-      type: "string",
-      default: "untitled page",
-    },
-    body: {
-      type: "string",
-      default: "",
-    },
-    lists: {
-      type: "array",
-      items: ListSchema,
-      default: [],
-    },
-    pages: {
-      type: "array",
-      items: PageResultSchema,
-      default: [],
-    },
-    tags: {
-      type: "array",
-      items: { type: "string" },
-      default: [],
+    page: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          default: "untitled page",
+        },
+        body: {
+          type: "string",
+          default: "",
+        },
+        lists: {
+          type: "array",
+          items: ListSchema,
+          default: [],
+        },
+        pages: {
+          type: "array",
+          items: PageResultSchema,
+          default: [],
+        },
+        tags: {
+          type: "array",
+          items: { type: "string" },
+          default: [],
+        },
+      },
+      required: ["lists", "pages"],
     },
     referenceablePages: {
       type: "array",
@@ -98,7 +105,6 @@ const PageInputSchema = {
       default: [],
     },
   },
-  required: ["lists", "pages"],
 } as const satisfies JSONSchema;
 
 const AnySchema = {} as const satisfies JSONSchema;
@@ -248,11 +254,13 @@ const Dropdown = recipe(DropdownInputSchema, DropdownOutputSchema, ({ pages, sel
   return {
     [UI]: <common-vstack style="max-width: 192px;">
       <label style="border: 1px solid black; display: inline-block; padding: 5px;" onClick={openDropdown({ open })}>{selectionLabel} {dropdownArrow}</label>
-      {ifElse(open, pages.map((page) => (
-        <div style="background-color: grey;" onClick={onSelect({ page, selectedPage, open })}>
-          {page.title}
-        </div>
-      )), <div></div>)}
+      <div style="position: relative;">
+        {ifElse(open, <div style="position: absolute;">{pages.map((page) => (
+          <div style="background-color: grey;" onClick={onSelect({ page, selectedPage, open })}>
+            {page.title}
+          </div>
+        ))}</div>, <div style="display: none">&nbsp;</div>)}
+      </div>
     </common-vstack>
   }
 })
@@ -263,7 +271,7 @@ const Dropdown = recipe(DropdownInputSchema, DropdownOutputSchema, ({ pages, sel
  * -----------------------------------------------------------------------------
  */
 export const Page = recipe(PageInputSchema, PageResultSchema, (
-  { title, lists, pages, body, tags, referenceablePages },
+  { page: { title, lists, pages, body, tags, referenceablePages } },
 ) => {
   const tagString = derive(tags, (tags: string[]) => tags.join(", "));
 
@@ -413,11 +421,6 @@ const PageManagerInputSchema = {
       items: PageInputSchema,
       default: [],
     },
-    focus: {
-      type: "array",
-      items: { type: "number" },
-      default: [],
-    },
   },
   required: ["pages"],
 } as const satisfies JSONSchema;
@@ -454,48 +457,26 @@ const addTopLevelPage = handler(AddPageEventSchema, AddPageStateSchema, (event, 
   if (title) pages.push({ title, body: "", lists: [], pages: [], tags: [], referenceablePages: pages });
 });
 
-const focusPage = handler<{  }, { focus: number[], idx: number }>(
-  ({ }, state) => {
-    const pos = state.focus.indexOf(state.idx);
-    if (pos === -1) state.focus.push(state.idx);           // add if not present
-    else state.focus.splice(pos, 1);                 // toggle off if present
-  },
-);
-
-export default recipe(PageManagerInputSchema, AnySchema, ({ pages, focus }) => {
-  const focusedPages = derive([pages, focus], ([ps, f]) =>
-    ps.filter((p, i) => f.indexOf(i) !== -1)
-  );
+export default recipe(PageManagerInputSchema, AnySchema, ({ pages }) => {
+  const selectedPage = cell(null);
 
   return {
     [NAME]: "Page Manager",
     [UI]: (
       <common-vstack gap="lg">
-        {/* Sidebar */}
-          <common-hstack gap="sm">
-            {pages.map((p, idx) => (
-              <common-button
-                onClick={focusPage({ idx, focus })}
-              >
-                {p.title || `Untitled Page`}
-              </common-button>
-            ))}
-            <common-send-message
-              name="Add page"
-              placeholder="New page"
-              onmessagesend={addTopLevelPage({ pages })}
-            />
+          <common-hstack>
+          {Dropdown({ pages, selectedPage })[UI]}
+          <common-send-message
+            name="Add page"
+            placeholder="New page"
+            onmessagesend={addTopLevelPage({ pages })}
+          />
           </common-hstack>
-          {Dropdown({ pages })[UI]}
-        <common-hstack gap="sm" style='background: grey;'>
-          {focusedPages.map(p => <label>{p.title}</label>)}
-        </common-hstack>
-        <common-hstack gap="sm">
-          {focusedPages.map(p => Page(p)[UI])}
-        </common-hstack>
+          <div style="border: 1px solid red;">
+            {ifElse(selectedPage, Page({ page: selectedPage, referenceablePages: pages })[UI], <div>&nbsp;</div>)}
+          </div>
       </common-vstack>
     ),
     pages,
-    focus,
   };
 });
