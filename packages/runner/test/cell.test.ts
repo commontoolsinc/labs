@@ -1285,7 +1285,7 @@ describe("asCell with schema", () => {
     >(
       undefined,
       "should handle update when there is no previous value",
-      "test",
+      space,
     );
     const cell = c.asCell();
 
