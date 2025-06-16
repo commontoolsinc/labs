@@ -315,7 +315,7 @@ function createRegularCell<T>(
       if (currentValue === undefined) {
         if (schema) {
           // Check if schema allows objects
-          const allowsObject = schema.type === "object" ||
+          const allowsObject = schema.type === "object" || (Array.isArray(schema.type) && schema.type.includes("object")) ||
             (schema.anyOf &&
               schema.anyOf.some((s) =>
                 typeof s === "object" && s.type === "object"
