@@ -155,8 +155,19 @@ declare module "@commontools/api" {
     ): QueryResult<DeepKeyLookup<T, Path>>;
     getAsCellLink(): CellLink;
     getAsLink(
-      options?: { base?: Cell<any>; includeSchema?: boolean },
+      options?: {
+        base?: Cell<any>;
+        baseSpace?: string;
+        includeSchema?: boolean;
+      },
     ): SigilLink;
+    getAsAlias(
+      options?: {
+        base?: Cell<any>;
+        baseSpace?: string;
+        includeSchema?: boolean;
+      },
+    ): SigilAlias;
     getDoc(): DocImpl<any>;
     getRaw(): any;
     setRaw(value: any): boolean;
@@ -280,6 +291,65 @@ export type JSONCellLink = {
   cell: { "/": string };
   path: (string | number)[];
 };
+
+/**
+ * Creates a sigil reference (link or alias) with shared logic
+ */
+function createSigilReference(
+  sigilType: "link-v0.1" | "alias-v0.1",
+  doc: DocImpl<any>,
+  path: PropertyKey[],
+  schema?: JSONSchema,
+  options?: { base?: Cell<any>; baseSpace?: string; includeSchema?: boolean },
+): SigilLink | SigilAlias {
+  // Create the base structure
+  const reference: any = {
+    "@": {
+      [sigilType]: {
+        path: path.map((p) => p.toString()),
+      },
+    },
+  };
+
+  // Handle base cell for relative references
+  if (options?.base) {
+    const baseDoc = options.base.getDoc();
+
+    // Only include id if it's different from base
+    const docEntityId = getEntityId(doc);
+    const baseEntityId = getEntityId(baseDoc);
+    const sameEntity = docEntityId && baseEntityId &&
+      docEntityId["/"] === baseEntityId["/"];
+
+    if (!sameEntity) {
+      reference["@"][sigilType].id = toURI(doc.entityId);
+    }
+
+    // Only include space if it's different from base
+    if (doc.space && doc.space !== baseDoc.space) {
+      reference["@"][sigilType].space = doc.space;
+    }
+  } else if (options?.baseSpace) {
+    // Handle baseSpace option - only include space if different from baseSpace
+    reference["@"][sigilType].id = toURI(doc.entityId);
+    if (doc.space && doc.space !== options.baseSpace) {
+      reference["@"][sigilType].space = doc.space;
+    }
+  } else {
+    // Include id and space when no base is provided
+    reference["@"][sigilType].id = toURI(doc.entityId);
+    if (doc.space) {
+      reference["@"][sigilType].space = doc.space;
+    }
+  }
+
+  // Include schema if requested
+  if (options?.includeSchema && schema) {
+    reference["@"][sigilType].schema = schema;
+  }
+
+  return reference;
+}
 
 export function createCell<T>(
   doc: DocImpl<any>,
@@ -526,49 +596,34 @@ function createRegularCell<T>(
       return { space: doc.space, cell: doc, path, schema, rootSchema };
     },
     getAsLink: (
-      options?: { base?: Cell<any>; includeSchema?: boolean },
+      options?: {
+        base?: Cell<any>;
+        baseSpace?: string;
+        includeSchema?: boolean;
+      },
     ): SigilLink => {
-      // Return new sigil format
-      const link: SigilLink = {
-        "@": {
-          "link-v0.1": {
-            path: path.map((p) => p.toString()),
-          },
-        },
-      };
-
-      // Handle base cell for relative links
-      if (options?.base) {
-        const baseDoc = options.base.getDoc();
-
-        // Only include id if it's different from base
-        const docEntityId = getEntityId(doc);
-        const baseEntityId = getEntityId(baseDoc);
-        const sameEntity = docEntityId && baseEntityId &&
-          docEntityId["/"] === baseEntityId["/"];
-
-        if (!sameEntity) {
-          link["@"]["link-v0.1"].id = toURI(doc.entityId);
-        }
-
-        // Only include space if it's different from base
-        if (doc.space && doc.space !== baseDoc.space) {
-          link["@"]["link-v0.1"].space = doc.space;
-        }
-      } else {
-        // Include id and space when no base is provided
-        link["@"]["link-v0.1"].id = toURI(doc.entityId);
-        if (doc.space) {
-          link["@"]["link-v0.1"].space = doc.space;
-        }
-      }
-
-      // Include schema if requested
-      if (options?.includeSchema && schema) {
-        link["@"]["link-v0.1"].schema = schema;
-      }
-
-      return link;
+      return createSigilReference(
+        "link-v0.1",
+        doc,
+        path,
+        schema,
+        options,
+      ) as SigilLink;
+    },
+    getAsAlias: (
+      options?: {
+        base?: Cell<any>;
+        baseSpace?: string;
+        includeSchema?: boolean;
+      },
+    ): SigilAlias => {
+      return createSigilReference(
+        "alias-v0.1",
+        doc,
+        path,
+        schema,
+        options,
+      ) as SigilAlias;
     },
     getDoc: () => doc,
     getRaw: () => doc.getAtPath(path),

@@ -1900,6 +1900,130 @@ describe("getAsLink method", () => {
   });
 });
 
+describe("getAsAlias method", () => {
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    runtime = new Runtime({
+      storageUrl: "volatile://",
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+  });
+
+  it("should return new sigil alias format", () => {
+    const c = runtime.documentMap.getDoc(
+      { value: 42 },
+      "getAsAlias-test",
+      "test",
+    );
+    const cell = c.asCell();
+    
+    // Get the new sigil alias format
+    const alias = cell.getAsAlias();
+    
+    // Verify structure
+    expect(alias["@"]).toBeDefined();
+    expect(alias["@"]["alias-v0.1"]).toBeDefined();
+    expect(alias["@"]["alias-v0.1"].id).toBeDefined();
+    expect(alias["@"]["alias-v0.1"].path).toBeDefined();
+    
+    // Verify id has of: prefix
+    expect(alias["@"]["alias-v0.1"].id).toMatch(/^of:/);
+    
+    // Verify path is empty array
+    expect(alias["@"]["alias-v0.1"].path).toEqual([]);
+    
+    // Verify space is included if present
+    expect(alias["@"]["alias-v0.1"].space).toBe("test");
+  });
+
+  it("should return correct path for nested cells", () => {
+    const c = runtime.documentMap.getDoc(
+      { nested: { value: 42 } },
+      "getAsAlias-nested-test", 
+      "test",
+    );
+    const nestedCell = c.asCell(["nested", "value"]);
+    
+    const alias = nestedCell.getAsAlias();
+    
+    expect(alias["@"]["alias-v0.1"].path).toEqual(["nested", "value"]);
+  });
+
+  it("should omit space when baseSpace matches", () => {
+    const c = runtime.documentMap.getDoc(
+      { value: 42 },
+      "getAsAlias-baseSpace-test",
+      "test",
+    );
+    const cell = c.asCell();
+    
+    // Alias with same baseSpace should omit space
+    const alias = cell.getAsAlias({ baseSpace: "test" });
+    
+    expect(alias["@"]["alias-v0.1"].id).toBeDefined();
+    expect(alias["@"]["alias-v0.1"].space).toBeUndefined();
+    expect(alias["@"]["alias-v0.1"].path).toEqual([]);
+  });
+
+  it("should include space when baseSpace differs", () => {
+    const c = runtime.documentMap.getDoc(
+      { value: 42 },
+      "getAsAlias-different-baseSpace-test",
+      "different-space",
+    );
+    const cell = c.asCell();
+    
+    // Alias with different baseSpace should include space
+    const alias = cell.getAsAlias({ baseSpace: "test" });
+    
+    expect(alias["@"]["alias-v0.1"].id).toBeDefined();
+    expect(alias["@"]["alias-v0.1"].space).toBe("different-space");
+    expect(alias["@"]["alias-v0.1"].path).toEqual([]);
+  });
+
+  it("should include schema when includeSchema is true", () => {
+    const c = runtime.documentMap.getDoc(
+      { value: 42 },
+      "getAsAlias-schema-test",
+      "test",
+    );
+    const schema = { type: "number", minimum: 0 } as const;
+    const cell = c.asCell(["value"], undefined, schema);
+    
+    // Alias with includeSchema option
+    const alias = cell.getAsAlias({ includeSchema: true });
+    
+    expect(alias["@"]["alias-v0.1"].schema).toEqual(schema);
+  });
+
+  it("should handle base cell for relative aliases", () => {
+    const c1 = runtime.documentMap.getDoc(
+      { value: 42 },
+      "getAsAlias-base-test-1",
+      "test",
+    );
+    const c2 = runtime.documentMap.getDoc(
+      { other: "test" },
+      "getAsAlias-base-test-2",
+      "test",
+    );
+    const cell = c1.asCell(["value"]);
+    const baseCell = c2.asCell();
+    
+    // Alias relative to base cell (different document, same space)
+    const alias = cell.getAsAlias({ base: baseCell });
+    
+    // Should include id (different docs) but not space (same space)
+    expect(alias["@"]["alias-v0.1"].id).toBeDefined();
+    expect(alias["@"]["alias-v0.1"].space).toBeUndefined();
+    expect(alias["@"]["alias-v0.1"].path).toEqual(["value"]);
+  });
+});
+
 describe("JSON.stringify bug", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
