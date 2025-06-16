@@ -1,5 +1,13 @@
 import { SchemaContext } from "@commontools/builder";
-import type { Entity, Result, Unit } from "@commontools/memory/interface";
+import type {
+  Entity,
+  FactAddress,
+  Result,
+  Revision,
+  State,
+  Unit,
+} from "@commontools/memory/interface";
+import type { Selection } from "./cache.ts";
 import type { Cancel } from "../cancel.ts";
 import type { EntityId } from "../doc-map.ts";
 import { log } from "../log.ts";
@@ -45,6 +53,8 @@ export interface StorageProvider {
     expectedInStorage?: boolean,
     schemaContext?: SchemaContext,
   ): Promise<Result<Unit, Error>>;
+  // TODO(@ubik2)
+  //): Promise<Result<Selection<FactAddress, Revision<State>>, Error>>;
 
   /**
    * Get a value from the local cache reflecting storage. Call `sync()` first.
@@ -97,6 +107,8 @@ export abstract class BaseStorageProvider implements StorageProvider {
     expectedInStorage: boolean,
     schemaContext?: SchemaContext,
   ): Promise<Result<Unit, Error>>;
+  // TODO(@ubik2)
+  //): Promise<Result<Selection<FactAddress, Revision<State>>, Error>>;
 
   abstract get<T = any>(entityId: EntityId): StorageValue<T> | undefined;
 

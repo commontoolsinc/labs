@@ -2,14 +2,20 @@ import { isRecord } from "@commontools/utils/types";
 import { defer } from "@commontools/utils/defer";
 import { sleep } from "@commontools/utils/sleep";
 import { Signer } from "@commontools/identity";
-import { type SchemaContext } from "@commontools/builder";
-import { type TransactionResult } from "@commontools/memory";
+import { JSONObject, type SchemaContext } from "@commontools/builder";
+import { TransactionResult } from "@commontools/memory";
 import { refer } from "@commontools/memory/reference";
-import { MemorySpace, SchemaNone } from "@commontools/memory/interface";
+import {
+  FactAddress,
+  MemorySpace,
+  Revision,
+  SchemaNone,
+  State,
+} from "@commontools/memory/interface";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { Cell, type CellLink, isCell, isCellLink, isStream } from "./cell.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
-import { type EntityId, getEntityId } from "./doc-map.ts";
+import { type EntityId } from "./doc-map.ts";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
@@ -21,7 +27,10 @@ import {
   StorageValue,
 } from "./storage/base.ts";
 import { log } from "./log.ts";
-import { Provider as CachedStorageProvider } from "./storage/cache.ts";
+import {
+  Provider as CachedStorageProvider,
+  Selection,
+} from "./storage/cache.ts";
 import { VolatileStorageProvider } from "./storage/volatile.ts";
 import type { IRuntime, IStorage } from "./runtime.ts";
 
@@ -160,12 +169,7 @@ export class Storage implements IStorage {
       };
     }
 
-    const entityDoc = this._ensureIsSynced(
-      cell,
-      expectedInStorage,
-      schemaContext,
-    );
-
+    const entityDoc = this._syncCellHelper(cell, schemaContext);
     // If doc is loading, return the promise. Otherwise return immediately.
     return this.docIsLoading.get(entityDoc) ?? entityDoc;
   }
@@ -223,6 +227,196 @@ export class Storage implements IStorage {
       this.storageProviders.set(space, provider);
     }
     return provider;
+  }
+
+  // Replacement for _ensureIsSynced
+  private _syncCellHelper<T>(
+    cell: DocImpl<T> | Cell<any>,
+    schemaContext?: SchemaContext,
+  ) {
+    const doc = (isCell(cell) || isStream(cell)) ? cell.getDoc() : cell;
+    // If the doc is ephemeral, we don't need to load it from storage. We still
+    // add it to the map of known docs, so that we don't try to keep loading
+    // it.
+    if (doc.ephemeral) return doc;
+
+    // If the doc is already loaded or loading, return immediately.
+    if (this.docIsSyncing.has(doc)) return doc;
+
+    // Important that we set this _before_ the doc is loaded, as we can already
+    // populate the doc when loading dependencies and thus avoid circular
+    // references.
+    this.docIsSyncing.add(doc);
+
+    // Start loading the doc and safe the promise for processBatch to await for
+    const loadingPromise = this._getStorageProviderForSpace(doc.space)
+      .sync(doc.entityId!, false, schemaContext)
+      .then((result) => {
+        if (result.error) {
+          // This will be a decoupled doc that is not persisted and cannot be edited
+          doc.ephemeral = true;
+          doc.freeze();
+        } else {
+          // There's a few different ways we could do this.
+          // We could run a schema traverse on the resulting doc as retrieved
+          // from storage, and from that, we would have a list of relevant
+          // documents.
+          // Instead, here I'm using the list of returned documents in the
+          // server's response, allowing me to avoid duplicating that work.
+          // If we want to decouple these more, though, we can.
+          this._integrateResults(
+            doc,
+            result.ok as Selection<FactAddress, Revision<State>>,
+          );
+        }
+        this._resolvePromises(doc);
+        return doc;
+      });
+    this.loadingPromises.set(doc, loadingPromise);
+
+    // Create a promise that gets resolved once the doc and all its
+    // dependencies are loaded. It'll return the doc when done.
+    const { promise, resolve } = defer<void, Error>();
+    this.loadingResolves.set(doc, resolve);
+    this.docIsLoading.set(doc, promise.then(() => doc));
+
+    // Return the doc, to make calls chainable.
+    return doc;
+  }
+
+  private _integrateResults<T>(
+    doc: DocImpl<T>,
+    selection: Selection<FactAddress, Revision<State>>,
+  ) {
+    // Ignore any entries that aren't the json. We typically have the
+    // per-space transaction entry, and may have labels.
+    // We'll also ensure we're only dealing with the entity ids that will
+    // be managed in our document map.
+    const filtered = [...selection].filter(([docAddr, _value]) =>
+      docAddr.the === "application/json" && docAddr.of.startsWith("of:")
+    );
+    // First, make sure we have all these docs in the runtime document map
+    for (const [docAddr, _value] of filtered) {
+      const entityId = { "/": docAddr.of.slice(3) };
+      console.log(entityId);
+      this.runtime.documentMap.getDocByEntityId(
+        doc.space,
+        entityId,
+        true,
+      )!;
+    }
+
+    // Now make another pass. At this point, we can leave any docs that aren't
+    // in the DocumentMap alone, but set the cell to the DocImpl for the ones
+    // that are present.
+    // This does not preserve any dependency order like the topological sort
+    // does, but I don't think we need to do this anymore.
+    for (const [docAddr, value] of filtered) {
+      const entityId = { "/": docAddr.of.slice(3) };
+      const isValue = value.is as JSONObject | undefined;
+      const newDoc = this.runtime.documentMap.getDocByEntityId(
+        doc.space,
+        entityId,
+        false,
+      )!;
+      // NOTE(@ubik2): I can't recall if a retraction will come over as a missing isValue.
+      // We may still be doing the "value" wrapping in the network protocol, even though
+      // that's not what they look like on the server. Not urgent, since we don't do
+      // retractions right now.
+      if (isValue !== undefined) {
+        console.log("value", isValue);
+        const newValue = this._setupCellLinks(
+          newDoc,
+          isValue.value,
+          isValue?.source as { "/": string } | undefined,
+        );
+        console.log("newvalue", newValue);
+        // TODO(@ubik2): We may have newer changes than "since" in the nursery
+        // (our local copy). If so, we probably don't want to do this swap.
+        newDoc.send(newValue);
+      }
+    }
+  }
+
+  // Previously, this was handled by _processCurrentBatch, but now we're handling this
+  // directly from our sync promise resolution.
+  private _resolvePromises<T>(doc: DocImpl<T>) {
+    // We aren't using _processCurrentBatch for these,
+    this.loadingPromises.delete(doc);
+    this.docIsLoading.delete(doc);
+    this.loadingResolves.get(doc)?.();
+  }
+
+  // Walk through the object, replacing any links to cells that were expressed
+  // with a JSON string with the actual object from the DocumentMap.
+  private _setupCellLinks<T>(
+    doc: DocImpl<T>,
+    value: any,
+    source?: EntityId,
+  ) {
+    // Helper function that converts a JSONValue into an object where the
+    // cell links have been replaced with DocImpl objects.
+    const traverse = (value: any): any => {
+      if (typeof value !== "object" || value === null) {
+        return value;
+      } else if ("cell" in value && "path" in value) {
+        // If we see a doc link with just an id, then we replace it with
+        // the actual doc:
+        if (
+          isRecord(value.cell) &&
+          "/" in value.cell &&
+          Array.isArray(value.path)
+        ) {
+          // Any dependent docs that we expected should already be loaded,
+          // so we can just grab them from the runtime's document map.
+          // If they aren't available, then leave the link in its raw form.
+          const dependency = this.runtime.documentMap.getDocByEntityId(
+            doc.space,
+            value.cell,
+            false,
+          );
+          if (dependency === undefined) {
+            console.log(
+              "No match found for",
+              value.cell,
+              "; leaving cell unchanged",
+            );
+            return value;
+          }
+          // Previously, we would also call _ensureIsSyncedById to recursively
+          // load the docs linked to by this dependency, but now we expect to
+          // already have all the docs we need in our Provider. We still need
+          // to do the subscription to changes through the Provider, and we
+          // still need to connect the dependent docs to the Provider's data.
+          // return value;
+          return { ...value, cell: dependency };
+        } else {
+          console.warn("unexpected doc link", value);
+          return value;
+        }
+      } else if (Array.isArray(value)) {
+        return value.map(traverse);
+      } else {
+        return Object.fromEntries(
+          Object.entries(value).map(([k, v]): any => [k, traverse(v)]),
+        );
+      }
+    };
+
+    // Make sure the source doc is loaded, and add it as a dependency
+    const newValue: { value: any; source?: DocImpl<any> } = {
+      value: traverse(value),
+    };
+
+    if (source) {
+      const sourceDoc = this.runtime.documentMap.getDocByEntityId(
+        doc.space,
+        source,
+        true,
+      );
+      newValue.source = sourceDoc;
+    }
+    return newValue;
   }
 
   private _ensureIsSyncedById<T>(
@@ -402,24 +596,23 @@ export class Storage implements IStorage {
           "/" in value.cell &&
           Array.isArray(value.path)
         ) {
-          const entityId = getEntityId(value.cell)!;
-          // Any dependent docs that we expected should already be loaded,
-          // so we can just grab them from the runtime's document map.
-          // If they aren't available, then leave the link in its raw form.
-          const dependency = this.getDocFromRuntimeOrStorage(
+          // If we had a classification earlier, carry it to the dependent object
+          const valueSchema = (label !== undefined)
+            ? this.runtime.cfc.schemaWithLub(value.schema ?? {}, label)
+            : value.schema;
+          // If the doc is not yet loaded, load it. As it's referenced in
+          // something that came from storage, the id is known in storage and so
+          // we have to wait for it to load. Hence true as second parameter.
+          const dependency = this._ensureIsSyncedById(
             doc.space,
-            entityId,
+            value.cell,
+            true,
+            valueSchema
+              ? { schema: valueSchema, rootSchema: valueSchema }
+              : undefined,
           );
-          if (dependency !== undefined) {
-            dependencies.add(dependency);
-            return { ...value, cell: dependency };
-          }
-          // Previously, we would also call _ensureIsSyncedById to recursively
-          // load the docs linked to by this dependency, but now we expect to
-          // already have all the docs we need in our Provider. We still need
-          // to do the subscription to changes through the Provider, and we
-          // still need to connect the dependent docs to the Provider's data.
-          return value;
+          dependencies.add(dependency);
+          return { ...value, cell: dependency };
         } else {
           console.warn("unexpected doc link", value);
           return value;
