@@ -1746,6 +1746,158 @@ describe("getAsLink method", () => {
     
     expect(link).toEqual(json);
   });
+
+  it("should create relative links with base parameter - same document", () => {
+    const c = runtime.documentMap.getDoc(
+      { value: 42, other: "test" },
+      "getAsLink-base-test",
+      "test",
+    );
+    const cell = c.asCell(["value"]);
+    const baseCell = c.asCell();
+    
+    // Link relative to base cell (same document)
+    const link = cell.getAsLink({ base: baseCell });
+    
+    // Should omit id and space since they're the same
+    expect(link["@"]["link-v0.1"].id).toBeUndefined();
+    expect(link["@"]["link-v0.1"].space).toBeUndefined();
+    expect(link["@"]["link-v0.1"].path).toEqual(["value"]);
+  });
+
+  it("should create relative links with base parameter - different document", () => {
+    const c1 = runtime.documentMap.getDoc(
+      { value: 42 },
+      "getAsLink-base-test-1",
+      "test",
+    );
+    const c2 = runtime.documentMap.getDoc(
+      { other: "test" },
+      "getAsLink-base-test-2",
+      "test",
+    );
+    const cell = c1.asCell(["value"]);
+    const baseCell = c2.asCell();
+    
+    // Link relative to base cell (different document, same space)
+    const link = cell.getAsLink({ base: baseCell });
+    
+    // Should include id but not space since space is the same
+    expect(link["@"]["link-v0.1"].id).toBeDefined();
+    expect(link["@"]["link-v0.1"].id).toMatch(/^of:/);
+    expect(link["@"]["link-v0.1"].space).toBeUndefined();
+    expect(link["@"]["link-v0.1"].path).toEqual(["value"]);
+  });
+
+  it("should create relative links with base parameter - different space", () => {
+    const c1 = runtime.documentMap.getDoc(
+      { value: 42 },
+      "getAsLink-base-test-1",
+      "space1",
+    );
+    const c2 = runtime.documentMap.getDoc(
+      { other: "test" },
+      "getAsLink-base-test-2",
+      "space2",
+    );
+    const cell = c1.asCell(["value"]);
+    const baseCell = c2.asCell();
+    
+    // Link relative to base cell (different space)
+    const link = cell.getAsLink({ base: baseCell });
+    
+    // Should include both id and space since they're different
+    expect(link["@"]["link-v0.1"].id).toBeDefined();
+    expect(link["@"]["link-v0.1"].id).toMatch(/^of:/);
+    expect(link["@"]["link-v0.1"].space).toBe("space1");
+    expect(link["@"]["link-v0.1"].path).toEqual(["value"]);
+  });
+
+  it("should include schema when includeSchema is true", () => {
+    const c = runtime.documentMap.getDoc(
+      { value: 42 },
+      "getAsLink-schema-test",
+      "test",
+    );
+    const schema = { type: "number", minimum: 0 } as const;
+    const cell = c.asCell(["value"], undefined, schema);
+    
+    // Link with schema included
+    const link = cell.getAsLink({ includeSchema: true });
+    
+    expect(link["@"]["link-v0.1"].schema).toEqual(schema);
+    expect(link["@"]["link-v0.1"].id).toBeDefined();
+    expect(link["@"]["link-v0.1"].path).toEqual(["value"]);
+  });
+
+  it("should not include schema when includeSchema is false", () => {
+    const c = runtime.documentMap.getDoc(
+      { value: 42 },
+      "getAsLink-no-schema-test",
+      "test",
+    );
+    const schema = { type: "number", minimum: 0 } as const;
+    const cell = c.asCell(["value"], undefined, schema);
+    
+    // Link without schema
+    const link = cell.getAsLink({ includeSchema: false });
+    
+    expect(link["@"]["link-v0.1"].schema).toBeUndefined();
+  });
+
+  it("should not include schema when includeSchema is undefined", () => {
+    const c = runtime.documentMap.getDoc(
+      { value: 42 },
+      "getAsLink-default-schema-test",
+      "test",
+    );
+    const schema = { type: "number", minimum: 0 } as const;
+    const cell = c.asCell(["value"], undefined, schema);
+    
+    // Link with default options (no schema)
+    const link = cell.getAsLink();
+    
+    expect(link["@"]["link-v0.1"].schema).toBeUndefined();
+  });
+
+  it("should handle both base and includeSchema options together", () => {
+    const c1 = runtime.documentMap.getDoc(
+      { value: 42 },
+      "getAsLink-combined-test-1",
+      "test",
+    );
+    const c2 = runtime.documentMap.getDoc(
+      { other: "test" },
+      "getAsLink-combined-test-2",
+      "test",
+    );
+    const schema = { type: "number", minimum: 0 } as const;
+    const cell = c1.asCell(["value"], undefined, schema);
+    const baseCell = c2.asCell();
+    
+    // Link with both base and schema options
+    const link = cell.getAsLink({ base: baseCell, includeSchema: true });
+    
+    // Should include id (different docs) but not space (same space)
+    expect(link["@"]["link-v0.1"].id).toBeDefined();
+    expect(link["@"]["link-v0.1"].space).toBeUndefined();
+    expect(link["@"]["link-v0.1"].path).toEqual(["value"]);
+    expect(link["@"]["link-v0.1"].schema).toEqual(schema);
+  });
+
+  it("should handle cell without schema when includeSchema is true", () => {
+    const c = runtime.documentMap.getDoc(
+      { value: 42 },
+      "getAsLink-no-cell-schema-test",
+      "test",
+    );
+    const cell = c.asCell(["value"]); // No schema provided
+    
+    // Link with includeSchema but cell has no schema
+    const link = cell.getAsLink({ includeSchema: true });
+    
+    expect(link["@"]["link-v0.1"].schema).toBeUndefined();
+  });
 });
 
 describe("JSON.stringify bug", () => {

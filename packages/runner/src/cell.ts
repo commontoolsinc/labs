@@ -154,7 +154,9 @@ declare module "@commontools/api" {
       log?: ReactivityLog,
     ): QueryResult<DeepKeyLookup<T, Path>>;
     getAsCellLink(): CellLink;
-    getAsLink(): SigilLink;
+    getAsLink(
+      options?: { base?: Cell<any>; includeSchema?: boolean },
+    ): SigilLink;
     getDoc(): DocImpl<any>;
     getRaw(): any;
     setRaw(value: any): boolean;
@@ -245,6 +247,7 @@ export type LinkV01 = {
     id?: string;
     path?: (string | number)[];
     space?: string;
+    schema?: JSONSchema;
   };
 };
 
@@ -522,19 +525,49 @@ function createRegularCell<T>(
       );
       return { space: doc.space, cell: doc, path, schema, rootSchema };
     },
-    getAsLink: (): SigilLink => {
+    getAsLink: (
+      options?: { base?: Cell<any>; includeSchema?: boolean },
+    ): SigilLink => {
       // Return new sigil format
       const link: SigilLink = {
         "@": {
           "link-v0.1": {
-            id: toURI(doc.entityId),
             path: path.map((p) => p.toString()),
           },
         },
       };
-      if (doc.space) {
-        link["@"]["link-v0.1"].space = doc.space;
+
+      // Handle base cell for relative links
+      if (options?.base) {
+        const baseDoc = options.base.getDoc();
+
+        // Only include id if it's different from base
+        const docEntityId = getEntityId(doc);
+        const baseEntityId = getEntityId(baseDoc);
+        const sameEntity = docEntityId && baseEntityId &&
+          docEntityId["/"] === baseEntityId["/"];
+
+        if (!sameEntity) {
+          link["@"]["link-v0.1"].id = toURI(doc.entityId);
+        }
+
+        // Only include space if it's different from base
+        if (doc.space && doc.space !== baseDoc.space) {
+          link["@"]["link-v0.1"].space = doc.space;
+        }
+      } else {
+        // Include id and space when no base is provided
+        link["@"]["link-v0.1"].id = toURI(doc.entityId);
+        if (doc.space) {
+          link["@"]["link-v0.1"].space = doc.space;
+        }
       }
+
+      // Include schema if requested
+      if (options?.includeSchema && schema) {
+        link["@"]["link-v0.1"].schema = schema;
+      }
+
       return link;
     },
     getDoc: () => doc,
