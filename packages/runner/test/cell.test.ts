@@ -1680,6 +1680,74 @@ describe("asCell with schema", () => {
   });
 });
 
+describe("getAsLink method", () => {
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    runtime = new Runtime({
+      storageUrl: "volatile://",
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+  });
+
+  it("should return new sigil format", () => {
+    const c = runtime.documentMap.getDoc(
+      { value: 42 },
+      "getAsLink-test",
+      "test",
+    );
+    const cell = c.asCell();
+    
+    // Get the new sigil format
+    const link = cell.getAsLink();
+    
+    // Verify structure
+    expect(link["@"]).toBeDefined();
+    expect(link["@"]["link-v0.1"]).toBeDefined();
+    expect(link["@"]["link-v0.1"].id).toBeDefined();
+    expect(link["@"]["link-v0.1"].path).toBeDefined();
+    
+    // Verify id has of: prefix
+    expect(link["@"]["link-v0.1"].id).toMatch(/^of:/);
+    
+    // Verify path is empty array
+    expect(link["@"]["link-v0.1"].path).toEqual([]);
+    
+    // Verify space is included if present
+    expect(link["@"]["link-v0.1"].space).toBe("test");
+  });
+
+  it("should return correct path for nested cells", () => {
+    const c = runtime.documentMap.getDoc(
+      { nested: { value: 42 } },
+      "getAsLink-nested-test", 
+      "test",
+    );
+    const nestedCell = c.asCell(["nested", "value"]);
+    
+    const link = nestedCell.getAsLink();
+    
+    expect(link["@"]["link-v0.1"].path).toEqual(["nested", "value"]);
+  });
+
+  it("should match toJSON output", () => {
+    const c = runtime.documentMap.getDoc(
+      { value: 42 },
+      "getAsLink-json-test",
+      "test",
+    );
+    const cell = c.asCell();
+    
+    const link = cell.getAsLink();
+    const json = cell.toJSON();
+    
+    expect(link).toEqual(json);
+  });
+});
+
 describe("JSON.stringify bug", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;

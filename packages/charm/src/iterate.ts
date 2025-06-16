@@ -269,7 +269,7 @@ export function scrub(data: any): any {
  */
 function turnCellsIntoAliases(data: any): any {
   if (isCell(data)) {
-    return { $alias: data.getAsCellLink() };
+    return { $alias: data.getAsLink() };
   } else if (Array.isArray(data)) {
     return data.map((value) => turnCellsIntoAliases(value));
   } else if (isObject(data)) {

@@ -31,6 +31,7 @@ import {
   unwrapOneLevelAndBindtoDoc,
 } from "./recipe-binding.ts";
 import { followAliases, maybeGetCellLink } from "./link-resolution.ts";
+import { areLinksSame, parseLink } from "./link-utils.ts";
 import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
@@ -186,7 +187,7 @@ export class Runner implements IRunner {
       const ref = isCellLink(argument)
         ? argument
         : isCell(argument)
-        ? argument.getAsCellLink()
+        ? argument.getAsLink()
         : isQueryResultForDereferencing(argument)
         ? getCellLinkOrThrow(argument)
         : ({ cell: argument, path: [] } satisfies CellLink);
@@ -517,17 +518,15 @@ export class Runner implements IRunner {
         const eventInputs = { ...(inputs as Record<string, any>) };
         const cause = { ...(inputs as Record<string, any>) };
         for (const key in eventInputs) {
-          if (
-            isAlias(eventInputs[key]) &&
-            eventInputs[key].$alias.cell === stream.cell &&
-            eventInputs[key].$alias.path.length === stream.path.length &&
-            eventInputs[key].$alias.path.every(
-              (value: PropertyKey, index: number) =>
-                value === stream.path[index],
-            )
-          ) {
-            eventInputs[key] = event;
-            cause[key] = crypto.randomUUID();
+          if (isAlias(eventInputs[key])) {
+            // Use format-agnostic comparison for aliases
+            const alias = eventInputs[key];
+            const streamLink = { cell: stream.cell, path: stream.path };
+            
+            if (areLinksSame(alias.$alias, streamLink, streamLink, stream.cell.space)) {
+              eventInputs[key] = event;
+              cause[key] = crypto.randomUUID();
+            }
           }
         }
 

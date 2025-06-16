@@ -148,9 +148,11 @@ export function createJsonSchema(
     }
 
     if (isAlias(value)) {
-      if (isDoc(value.$alias.cell)) {
-        value = value.$alias.cell.getAtPath(value.$alias.path);
-      } else {
+      // Use maybeGetCellLink to handle all alias formats
+      const aliasLink = maybeGetCellLink(value.$alias);
+      if (aliasLink && isDoc(aliasLink.cell)) {
+        value = aliasLink.cell.getAtPath(aliasLink.path);
+      } else if (value.$alias && Array.isArray(value.$alias.path)) {
         value = getValueAtPath(example, value.$alias.path);
       }
       return analyzeType(value);

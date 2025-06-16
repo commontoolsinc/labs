@@ -74,16 +74,19 @@ import { toURI } from "./uri-utils.ts";
  * @param {ReactivityLog} log - Optional reactivity log.
  * @returns {QueryResult<DeepKeyLookup<T, Path>>}
  *
- * @method getAsCellLink Returns a cell link for the cell.
+ * @method getAsCellLink Returns a cell link for the cell (legacy format).
  * @returns {CellLink}
  *
- * @method getRaw Raw access method, without following aliases (which would 
- * write to the destination instead of the cell itself). 
+ * @method getAsLink Returns a cell link for the cell (new sigil format).
+ * @returns {SigilLink}
+ *
+ * @method getRaw Raw access method, without following aliases (which would
+ * write to the destination instead of the cell itself).
  * @returns {any} - Raw document data
  *
- * @method setRaw Raw write method that bypasses Cell validation, 
- * transformation, and alias resolution. Writes directly to the cell without 
- * following aliases. 
+ * @method setRaw Raw write method that bypasses Cell validation,
+ * transformation, and alias resolution. Writes directly to the cell without
+ * following aliases.
  * @param {any} value - Raw value to write directly to document
  * @returns {boolean} - Result from underlying doc.send()
  *
@@ -151,6 +154,7 @@ declare module "@commontools/api" {
       log?: ReactivityLog,
     ): QueryResult<DeepKeyLookup<T, Path>>;
     getAsCellLink(): CellLink;
+    getAsLink(): SigilLink;
     getDoc(): DocImpl<any>;
     getRaw(): any;
     setRaw(value: any): boolean;
@@ -374,7 +378,8 @@ function createRegularCell<T>(
       if (currentValue === undefined) {
         if (schema) {
           // Check if schema allows objects
-          const allowsObject = schema.type === "object" || (Array.isArray(schema.type) && schema.type.includes("object")) ||
+          const allowsObject = schema.type === "object" ||
+            (Array.isArray(schema.type) && schema.type.includes("object")) ||
             (schema.anyOf &&
               schema.anyOf.some((s) =>
                 typeof s === "object" && s.type === "object"
@@ -461,8 +466,8 @@ function createRegularCell<T>(
     },
     equals: (other: any) => {
       // Handle different object types that might be passed to equals
-      if (!other || typeof other !== 'object') return false;
-      
+      if (!other || typeof other !== "object") return false;
+
       // If it's a Cell, compare properly
       if (isCell(other)) {
         const otherDoc = other.getDoc();
@@ -471,7 +476,7 @@ function createRegularCell<T>(
           JSON.stringify(path) === JSON.stringify(other.cellLink.path)
         );
       }
-      
+
       // If it's a CellLink, compare with our CellLink representation
       if (isCellLink(other)) {
         return (
@@ -479,7 +484,7 @@ function createRegularCell<T>(
           JSON.stringify(path) === JSON.stringify(other.path)
         );
       }
-      
+
       // For other types, fall back to JSON comparison (old behavior)
       return JSON.stringify(self) === JSON.stringify(other);
     },
@@ -509,8 +514,28 @@ function createRegularCell<T>(
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
     getAsCellLink: (): CellLink => {
-      // Keep backward compatibility for now
+      // Deprecation warning for old format
+      console.warn(
+        "DEPRECATED: getAsCellLink() is deprecated. Use getAsLink() for the new sigil format. " +
+          "The old CellLink format will be removed in a future version. " +
+          "See migration guide for details.",
+      );
       return { space: doc.space, cell: doc, path, schema, rootSchema };
+    },
+    getAsLink: (): SigilLink => {
+      // Return new sigil format
+      const link: SigilLink = {
+        "@": {
+          "link-v0.1": {
+            id: toURI(doc.entityId),
+            path: path.map((p) => p.toString()),
+          },
+        },
+      };
+      if (doc.space) {
+        link["@"]["link-v0.1"].space = doc.space;
+      }
+      return link;
     },
     getDoc: () => doc,
     getRaw: () => doc.getAtPath(path),
@@ -523,7 +548,7 @@ function createRegularCell<T>(
         "@": {
           "link-v0.1": {
             id: toURI(doc.entityId),
-            path: path.map(p => p.toString()),
+            path: path.map((p) => p.toString()),
           },
         },
       };
@@ -682,6 +707,8 @@ export function isSigilLink(value: any): value is SigilLink {
 /**
  * Check if value is any kind of cell link format.
  */
-export function isAnyCellLink(value: any): value is CellLink | SigilLink | JSONCellLink {
+export function isAnyCellLink(
+  value: any,
+): value is CellLink | SigilLink | JSONCellLink {
   return isCellLink(value) || isJSONCellLink(value) || isSigilLink(value);
 }
