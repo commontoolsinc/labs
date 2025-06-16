@@ -298,24 +298,6 @@ export function validateAndTransform(
   }
 
   // Check if we've seen this exact cell/path/schema combination before
-  console.log(
-    "seen",
-    JSON.stringify(doc),
-    path,
-    JSON.stringify(resolvedSchema),
-    JSON.stringify(rootSchema),
-    seen.map((entry) => ({
-      cell: JSON.stringify(entry.cell),
-      path: entry.path,
-      schema: entry.schema,
-      rootSchema: entry.rootSchema,
-      value: entry.value,
-    })),
-  );
-  if (seen.length > 30) {
-    debugger;
-    throw new Error("stop infinite loop");
-  }
   const seenEntry = seen.find(
     (entry) =>
       JSON.stringify(entry.cell) === JSON.stringify(doc) &&
