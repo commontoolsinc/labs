@@ -271,7 +271,7 @@ export class Storage implements IStorage {
         if (result.error) {
           // This will be a decoupled doc that is not persisted and cannot be edited
           doc.ephemeral = true;
-          doc.freeze();
+          doc.freeze("loading error");
         }
         return doc;
       });

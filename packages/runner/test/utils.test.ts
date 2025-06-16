@@ -236,7 +236,7 @@ describe("Utils", () => {
         "should fail when setting a nested value on a frozen cell 1",
         "test",
       );
-      testCell.freeze();
+      testCell.freeze("test");
       const log: ReactivityLog = { reads: [], writes: [] };
       const success = setNestedValue(testCell, [], { a: 1, b: { c: 3 } }, log);
       expect(success).toBe(false);

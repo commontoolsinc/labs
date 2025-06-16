@@ -95,7 +95,7 @@ function processDefaultValue(
 
   // If schema indicates this should be a cell
   if (schema.asCell) {
-    // If the cell itself has a default value, make it it's own (immutablle)
+    // If the cell itself has a default value, make it it's own (immutable)
     // doc, to emulate the behavior of .get() returning a different underlying
     // document when the value is changed. A classic example is
     // `currentlySelected` with a default of `null`.
@@ -103,7 +103,7 @@ function processDefaultValue(
       const newDoc = doc.runtime.documentMap.getDoc(resolvedSchema.default, {
         immutable: resolvedSchema.default,
       }, doc.space);
-      newDoc.freeze();
+      newDoc.freeze("schema asCell immutable");
       return createCell(
         newDoc,
         [],

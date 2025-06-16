@@ -510,7 +510,7 @@ export class Runner implements IRunner {
           cause,
           processCell.space,
         );
-        inputsCell.freeze();
+        inputsCell.freeze("event handler");
 
         const frame = pushFrameFromCause(cause, {
           recipe,
@@ -558,7 +558,7 @@ export class Runner implements IRunner {
       const inputsCell = processCell.runtime!.documentMap.getDoc(inputs, {
         immutable: inputs,
       }, processCell.space);
-      inputsCell.freeze();
+      inputsCell.freeze("javascript node");
 
       let previousResultDoc: DocImpl<any> | undefined;
       let previousResultRecipeAsString: string | undefined;

@@ -455,7 +455,7 @@ export class Runtime implements IRuntime {
     log?: ReactivityLog,
   ): Cell<any> {
     const doc = this.documentMap.getDoc<any>(data, { immutable: data }, space);
-    doc.freeze();
+    doc.freeze("immutable cell");
     return doc.asCell([], log, schema);
   }
 
