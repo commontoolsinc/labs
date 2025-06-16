@@ -59,7 +59,6 @@ export function RuntimeProvider({
     return () => setRuntime(undefined);
   }, [session]);
 
-  console.log({ runtime });
 
   // Only render children if we have a runtime
   return (

@@ -20,7 +20,7 @@ async function main(
   const runtime = new Runtime({
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL(TOOLSHED_API_URL),
+      address: new URL("/api/storage/memory", TOOLSHED_API_URL),
     }),
     blobbyServerUrl: TOOLSHED_API_URL,
   });
