@@ -60,10 +60,12 @@ export function isWorkerIPCRequest(value: any): value is WorkerIPCRequest {
 export type WorkerIPCResponse = {
   msgId: number;
   error?: string;
+  type?: string;
 };
 
 export function isWorkerIPCResponse(value: any): value is WorkerIPCResponse {
   return !!(value && typeof value === "object" &&
     typeof value.msgId === "number" &&
-    ("error" in value ? typeof value.error === "string" : true));
+    ("error" in value ? typeof value.error === "string" : true) &&
+    ("type" in value ? typeof value.type === "string" : true));
 }

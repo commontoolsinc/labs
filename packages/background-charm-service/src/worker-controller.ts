@@ -56,6 +56,9 @@ export class WorkerController extends EventTarget {
     number,
     Task
   >();
+  // Promise that resolves when the worker is fully initialized
+  private initializeDeferred = defer();
+  public initializeResolve = this.initializeDeferred.promise;
   private state = WorkerState.Uninitialized;
 
   constructor(options: WorkerOptions) {
@@ -78,7 +81,7 @@ export class WorkerController extends EventTarget {
     this.worker.addEventListener("error", this.onWorkerError);
   }
 
-  async initialize() {
+  async startInitialize() {
     if (this.state !== WorkerState.Uninitialized) {
       throw new Error("Worker is not uninitialized.");
     }
@@ -181,6 +184,11 @@ export class WorkerController extends EventTarget {
       console.error(
         `${this.did}: Received malformed WorkerIPCResponse: ${response}`,
       );
+      return;
+    }
+
+    if (response.type === "ready") {
+      this.startInitialize().then(() => this.initializeDeferred.resolve());
       return;
     }
     const pending = this.pending.get(response.msgId);
